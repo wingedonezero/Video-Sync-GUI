@@ -204,6 +204,9 @@ def run_command(cmd: List[str], logger) -> Optional[str]:
             from collections import deque
             tail = deque(maxlen=max(tail_ok, err_tail, 1))
         for line in iter(proc.stdout.readline, ''):
+            if silent_capture:
+                out_buf += line
+                continue
             out_buf += line
             if compact:
                 if line.startswith('Progress: '):
@@ -1462,3 +1465,92 @@ def build_ui():
     dpg.destroy_context()
 if __name__ == '__main__':
     build_ui()
+
+# --- BEGIN_INJECT_MERGE_SUMMARY ---
+# Merge Summary helpers (logging-only utilities)
+def _vsg_tokenize_opts_json(path: str) -> list[str]:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, list) and all(isinstance(x, str) for x in data):
+            return data
+    except Exception:
+        pass
+    return []
+
+def _vsg_parse_mkvmerge_tokens(tokens: list[str]) -> dict:
+    res = {"inputs": [], "track_order": "", "chapters": ""}
+    cur_opts = []
+    i = 0
+    n = len(tokens)
+    def add_input(pth: str, opts: list[str]):
+        d = {}
+        it = iter(opts)
+        for t in it:
+            if t in ("--language","--track-name","--default-track-flag","--forced-track-flag","--sync","--compression"):
+                try:
+                    d[t] = next(it)
+                except StopIteration:
+                    d[t] = ""
+        res["inputs"].append({"path": pth, "opts": d})
+    while i < n:
+        t = tokens[i]
+        if t == "(":
+            p = tokens[i+1] if (i + 1) < n else ""
+            j = i + 2
+            while j < n and tokens[j] != ")":
+                j += 1
+            add_input(p, cur_opts)
+            cur_opts = []
+            i = j + 1
+            continue
+        elif t == "--track-order" and (i + 1) < n:
+            res["track_order"] = tokens[i+1]
+            i += 2; continue
+        elif t == "--chapters" and (i + 1) < n:
+            res["chapters"] = tokens[i+1]
+            i += 2; continue
+        else:
+            cur_opts.append(t)
+            i += 1
+    return res
+
+def _vsg_ms_from_sync(sync_val: str) -> str:
+    try:
+        _, v = sync_val.split(":", 1)
+        v = int(float(v))
+        return f"{v} ms"
+    except Exception:
+        return "0 ms"
+
+def _vsg_log_merge_summary_from_opts(logger, opts_path: str):
+    tokens = _vsg_tokenize_opts_json(opts_path)
+    if not tokens:
+        return
+    parsed = _vsg_parse_mkvmerge_tokens(tokens)
+    _log(logger, "=== Merge Summary ===")
+    if parsed.get("track_order"):
+        _log(logger, f"Track order: {parsed['track_order']}")
+    if parsed.get("chapters"):
+        _log(logger, f"Chapters   : {parsed['chapters']}")
+    for idx, item in enumerate(parsed.get("inputs", [])):
+        p = item.get("path", "")
+        o = item.get("opts", {})
+        lang = o.get("--language", "")
+        name = o.get("--track-name", "")
+        dflt = o.get("--default-track-flag", "")
+        forc = o.get("--forced-track-flag", "")
+        sync = o.get("--sync", "")
+        sync_ms = _vsg_ms_from_sync(sync) if sync else "0 ms"
+        details = []
+        if lang: details.append(f"lang={lang}")
+        if name: details.append(f"name={name}")
+        if dflt: details.append(f"default={dflt}")
+        if forc: details.append(f"forced={forc}")
+        if sync: details.append(f"sync={sync_ms}")
+        det = "; ".join(details) if details else "no per-file flags"
+        _log(logger, f"{idx:02d}) {p}  [{det}]")
+    _log(logger, f"Options file: {opts_path}")
+    _log(logger, "====================")
+# --- END_INJECT_MERGE_SUMMARY ---
+
