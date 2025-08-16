@@ -175,6 +175,7 @@ def find_required_tools():
         ABS[tool] = path
 
 def run_command(cmd: List[str], logger) -> Optional[str]:
+    silent_capture = False  # default; set to True for noisy ffprobe JSON
     """
     Settings-driven compact logger:
       - If CONFIG['log_compact'] is True (default), prints one $ line and throttled "Progress: N%".
