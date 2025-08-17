@@ -8,16 +8,20 @@ on:
 jobs:
   update-file:
     runs-on: ubuntu-latest
+    # Add this permissions block
+    permissions:
+      contents: write
     steps:
       - name: Check out repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Update .chatpin with latest commit SHA
         run: |
           echo ${{ github.sha }} > .chatpin
 
       - name: Commit and push changes
-        uses: stefanzweifel/git-auto-commit-action@v4
+        uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "docs: update .chatpin to latest commit"
+          # Add [skip ci] to the commit message to prevent workflow loops
+          commit_message: "docs: update .chatpin to latest commit [skip ci]"
           file_pattern: .chatpin
