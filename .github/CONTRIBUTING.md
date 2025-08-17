@@ -1,81 +1,47 @@
 # Contributing
 
-This document defines how we contribute, track changes, and keep everything in sync.
-It serves as both a workflow guide and a set of standards for commits, patches, and
-collaboration between humans and AI.
+This document describes how we contribute and keep Chat + Git in sync. It is a step‑by‑step guide.
+For full design rationale and feature details, see the README in this same folder.
 
----
+## Source of Truth: `.chatpin`
 
-## 🔑 Always in Sync with `.chatpin`
+- `.chatpin` contains the exact commit SHA that patches and full‑file replacements must be based on.
+- A GitHub Action in this repo already updates `.chatpin` on every push to `main`.
+- Never generate or apply a patch without syncing to `.chatpin` first.
 
-- The `.chatpin` file is automatically updated on every commit to `main` by a GitHub Actions workflow.
-- `.chatpin` contains exactly one commit SHA (the latest on `main`) followed by a trailing newline.
-- This guarantees that ChatGPT, Git, and contributors are always referencing the same version.
-- When generating patches or full-file replacements, always reference the SHA in `.chatpin`.
-- If a new chat is started, `.chatpin` is the single source of truth for the repo state.
+## Patch Standards
 
-Rule: Never generate or apply a patch without syncing to `.chatpin`.
+- Use **Git unified diffs** (compatible with `git apply` and GitKraken).
+- ASCII + LF only (no BOM, no NBSP). If needed, normalize before applying.
+- Patches must only include files that **exist at the `.chatpin` SHA**.
+- Do **not** re‑add files already added in prior commits—regenerate against the latest `.chatpin` instead.
+- Keep patches atomic and focused.
 
----
+### Troubleshooting
+```bash
+# strip BOM, NBSP, CRLF if needed
+perl -CSDA -pe 's/\x{FEFF}//g; s/\x{00A0}/ /g; s/\r//g' file.patch > /tmp/clean.patch
+git apply --check /tmp/clean.patch && git apply /tmp/clean.patch
+```
 
-## 📜 Patch Standards
+## Commit Messages
 
-- All patches must use standard Git unified diff format (the same format used by GitKraken export and `git apply`).
-- Each patch must be accompanied by:
-  - Commit Title (short, imperative, semantic style, e.g., `fix: handle silent logging crash`).
-  - Commit Message (multi-line if needed, explains why and what).
-- Keep patches focused and atomic. Do not mix unrelated fixes and features.
+- **Title**: imperative, semantic (`feat:`, `fix:`, `docs:`, `refactor:`, `chore:`, `logs:`, `ui:`), ≤72 chars.
+- **Body**: explain **why** and **what**; reference behavior/README updates.
+- Update the README in the same commit when features change (add/remove/behavior shift).
 
-Source of truth for "before" bytes
-- Always base patches on the exact tree at the `.chatpin` SHA.
-- Only include diffs for files that exist in that tree.
-- If a file was already added in a prior commit, do not re-add it in later patches—regenerate the patch against the new `.chatpin` instead.
-- This avoids "already exists in working directory" and hunk offset errors in GitKraken and `git apply`.
-- When applying older patches locally, you may use:
-  - `git apply --exclude=<path> ...` to skip hunks for files already present, or
-  - regenerate the patch after updating `.chatpin` so it matches byte-for-byte.
+## Code Standards
 
----
+- Python 3.10+, formatted with **Black** (see `pyproject.toml`).
+- Imports sorted with **isort** (Black profile).
+- Editor/CI line endings: **LF** only; UTF‑8; final newline; trim trailing whitespace.
+- Avoid breaking behavior when refactoring; prefer small, reviewable changes.
 
-## 🧹 Code Standards
+## Development Workflow
 
-- Python code must be formatted with Black (enforced).
-- Follow PEP8 and maintain readability (comments, docstrings for complex logic).
-- When cleaning/refactoring, do not change behavior unless fixing a clear bug.
-- Modularize carefully — aim for maintainability, not unnecessary complexity.
-
----
-
-## 📝 Logging & Output
-
-- Logs should be compact but detailed enough for debugging.
-- Avoid spam — summarize progress but include error context.
-- Include:
-  - Command executed (with `$` prefix).
-  - Errors and stderr (trimmed to relevant lines).
-  - Delay information (always applied, never subtracted).
-  - Track order and merge options.
-  - Final merge JSON/options so behavior is transparent.
-
----
-
-## 🔄 Workflow
-
-1. Sync: Ensure `.chatpin` is up to date.
-2. Change: Make edits locally (or generate patch/full-file via ChatGPT based on `.chatpin`).
-3. Test: Run locally before committing (do not break existing features).
-4. Commit: Use semantic commit style + clear message.
-5. Push: CI will update `.chatpin` automatically.
-
----
-
-## ✅ Semantic Commit Types
-
-- feat: New feature
-- fix: Bug fix
-- docs: Documentation only changes
-- style: Code style/formatting only (no logic)
-- refactor: Code change that neither fixes a bug nor adds a feature
-- perf: Performance improvement
-- test: Adding or updating tests
-- chore: Tooling, CI, build, or maintenance
+1. Sync to `.chatpin` (pull, ensure you’re on the pinned tree).
+2. Make changes locally (or apply a patch built against `.chatpin`).
+3. `make format` (Black + isort) or run pre‑commit.
+4. Test locally.
+5. Commit with semantic title and clear message.
+6. Push; CI updates `.chatpin` automatically.
