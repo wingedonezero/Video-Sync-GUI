@@ -99,6 +99,7 @@ CONFIG = {
     "log_show_options_pretty": False,
     "log_show_options_json": False,
     "log_autoscroll": True,
+    "log_merge_summary": False,
 }
 SIGNS_KEYS = ("sign", "signs", "song", "songs", "ops", "eds", "karaoke", "titles")
 LOG_Q: "queue.Queue[str]" = queue.Queue()
@@ -1440,6 +1441,13 @@ def merge_job(
             plan, out_file, chapters_xml, ter_atts, track_order_str=track_order_str
         )
         json_opts = write_mkvmerge_json_options(tokens, job_temp / "opts.json", logger)
+        # Optional human-friendly summary of the final mkvmerge plan
+        if CONFIG.get("log_merge_summary", False):
+            try:
+                from vsg.logging import log_merge_summary_from_tokens
+                log_merge_summary_from_tokens(tokens, str(json_opts), logger)
+            except Exception as e:
+                _log(logger, f"[WARN] Merge Summary failed: {e}")
         set_status("Merging…")
         set_progress(0.5)
         merge_ok = run_mkvmerge_with_json(json_opts, logger)
