@@ -1,83 +1,74 @@
-Move to modular approach split project into modules so its easier to work on and know whats being broke or fixed
+# Contributing
 
-use https://github.com/psf/black for coder formatting so we have a specic code format and smaller unified diff patches.
-So explicit black formatiing from now on.
+This document defines how we contribute, track changes, and keep everything in sync.
+It serves as both a workflow guide and a set of standards for commits, patches, and
+collaboration between humans and AI.
 
-update changelog.md with every commit
+---
 
-Patch scope
+## 🔑 Always in Sync with `.chatpin`
 
-Updates should include:
-Unified diff patch
-Commit title
-Commit messages
+- The `.chatpin` file is **automatically updated** on every commit to `main` by a GitHub Actions workflow.
+- `.chatpin` contains exactly one commit SHA (the latest on `main`) followed by a trailing newline.
+- This guarantees that ChatGPT, Git, and contributors are always referencing the same version.
+- When generating patches, we always reference the SHA in `.chatpin`.
+- If a new chat is started, `.chatpin` is the single source of truth for the repo state.
 
-Conventional commits:
+📌 **Rule:** *Never* generate or apply a patch without syncing to `.chatpin`.
 
-feat: …, fix: …, refactor: …, chore: …, docs: …, logs: …, ui: …
+---
 
-Title ≤ 72 chars; body says what & why, not “how”. Include risk/rollback note.
+## 📜 Patch Standards
 
+- Patches must use **standard Git unified diff** format (compatible with GitKraken *Apply Patch* and `git apply`):
+  - starts with `--- a/path` and `+++ b/path`, followed by `@@ … @@` hunk headers,
+  - `-` removed lines, `+` added lines, and space-prefixed context.
+- Each patch must include:
+  - **Commit Title** (short, imperative, semantic style, e.g., `fix: handle silent logging crash`).
+  - **Commit Message** (multi-line if needed, explains *why* and *what*).
+- Keep patches focused and atomic. Don’t mix unrelated fixes and features.
 
-Review gates (PR checklist)
+---
 
-✅ Covers: purpose, scope, risks.
+## 🧹 Code Standards
 
-✅ Touches allowed areas only (e.g., not run_command or UI unless stated).
+- Python code must be formatted with **Black** (enforced).
+- Follow PEP8 and maintain readability (comments, docstrings for complex logic).
+- When cleaning/refactoring, **don’t change behavior unless fixing a clear bug**.
+- Modularize carefully — aim for maintainability, not unnecessary complexity.
 
-✅ Logs: human-readable, not spammy; machine JSON captured, not streamed.
+---
 
-✅ Tests run locally (Analyze-only + Normal Merge on fixtures).
+## 📝 Logging & Output
 
-✅ Revert path: single-commit revert possible.
+- Logs should be compact but detailed enough for debugging.
+- Avoid spam — summarize progress but include error context.
+- Include:
+  - Command executed (with `$` prefix).
+  - Errors and stderr (trimmed to relevant lines).
+  - Delay information (always applied, never subtracted).
+  - Track order and merge options.
+  - Final merge JSON/options so behavior is transparent.
 
-Updates and patches should be done from the current version of the main branch and work to fix or add from there.
+---
 
+## 🔄 Workflow
 
-Source-of-truth + diff rules
+1. **Sync**: Ensure `.chatpin` is up to date.
+2. **Change**: Make edits locally (or generate patch via ChatGPT).
+3. **Test**: Run locally before committing (don’t break existing features).
+4. **Commit**: Use semantic commit style + clear message.
+5. **Push**: CI will update `.chatpin` automatically.
 
-.chatpin = baseline commit
+---
 
-Put a file at repo root named .chatpin containing exactly the commit SHA I should treat as “before”.
+## ✅ Semantic Commit Types
 
-Example: 5252151820330c3aa55253f943910b7405456ccc
-
-When you push new work, you can either leave .chatpin alone (so I diff new → .chatpin) or update .chatpin to advance the baseline.
-
-Diff scope (relevance filter)
-
-By default I’ll consider all tracked files but only include files relevant to the change:
-
-Python: *.py
-
-Config: *.json, pyproject.toml, .pre-commit-config.yaml
-
-Docs: README.md, CONTRIBUTING.md, CHANGELOG.md
-
-CI scripts / entry points if needed for the change
-
-I won’t touch unrelated assets (images, large samples) unless you ask.
-
-Patch packaging
-
-I’ll deliver one unified diff touching multiple files when appropriate, plus:
-
-a short commit title
-
-a commit message body (purpose, what/why, rollback note)
-
-If you prefer mailbox (git am) patches later, I can switch.
-
-Branching: feat/..., fix/..., refactor/..., logs/..., ui/...
-
-Protected areas: don’t modify run_command or DPG pump in mixed PRs; dedicate a PR and label risk:high if needed.
-
-Feature flags: new behavior is behind a flag, default off.
-
-Commit style: Conventional Commits, ≤72-char title; body explains what/why and includes rollback note.
-
-PR checklist: purpose, scope, risks & rollback, test notes (Analyze-only + Dry-run merge on fixtures).
-
-Logging rules: deterministic points only; big JSON captured silently; progress throttled; error tails limited.
-
-Reverts: each PR must be revertible by a single git revert <sha>.
+- **feat:** New feature
+- **fix:** Bug fix
+- **docs:** Documentation only changes
+- **style:** Code style/formatting only (no logic)
+- **refactor:** Code change that neither fixes a bug nor adds a feature
+- **perf:** Performance improvement
+- **test:** Adding or updating tests
+- **chore:** Tooling, CI, build, or maintenance
