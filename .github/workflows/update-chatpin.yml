@@ -2,26 +2,47 @@ name: Update .chatpin on commit
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   update-file:
+    # Don't run again on our own "[skip ci]" commit
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
     runs-on: ubuntu-latest
-    # Add this permissions block
     permissions:
       contents: write
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          # depth 1 is fine; we only need the current SHA
+          fetch-depth: 1
 
-      - name: Update .chatpin with latest commit SHA
+      - name: Update .chatpin if needed
+        id: write_chatpin
+        shell: bash
         run: |
-          echo ${{ github.sha }} > .chatpin
+          NEW_SHA="${{ github.sha }}"
+          OLD_SHA="$(cat .chatpin 2>/dev/null || true)"
+
+          if [ "$OLD_SHA" = "$NEW_SHA" ]; then
+            echo "No change to .chatpin (already $NEW_SHA)"
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Write exact SHA with a trailing newline
+          printf '%s\n' "$NEW_SHA" > .chatpin
+          echo "updated=true" >> "$GITHUB_OUTPUT"
+          echo "Wrote .chatpin -> $NEW_SHA"
 
       - name: Commit and push changes
+        if: steps.write_chatpin.outputs.updated == 'true'
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          # Add [skip ci] to the commit message to prevent workflow loops
           commit_message: "docs: update .chatpin to latest commit [skip ci]"
+          commit_user_name: "github-actions[bot]"
+          commit_user_email: "41898282+github-actions[bot]@users.noreply.github.com"
           file_pattern: .chatpin
