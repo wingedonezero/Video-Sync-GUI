@@ -1,5 +1,6 @@
 # Moved from video_sync_gui.py (Phase A, move-only)
 from __future__ import annotations
+from vsg.logbus import LOG_Q, _log
 import json
 from pathlib import Path
 from datetime import datetime
@@ -32,9 +33,9 @@ def load_settings():
     if changed:
         try:
             SETTINGS_PATH.write_text(json.dumps(CONFIG, indent=2), encoding='utf-8')
-            LOG_Q.put('Settings initialized/updated with defaults.')
+            _log('Settings initialized/updated with defaults.')
         except Exception as e:
-            LOG_Q.put(f'Failed to save settings: {e}')
+            _log(f'Failed to save settings: {e}')
 try:
     load_settings()
 except Exception:
@@ -45,9 +46,9 @@ except Exception:
 def save_settings():
     try:
         SETTINGS_PATH.write_text(json.dumps(CONFIG, indent=2), encoding='utf-8')
-        LOG_Q.put('Settings saved.')
+        _log('Settings saved.')
     except Exception as e:
-        LOG_Q.put(f'Failed to save settings: {e}')
+        _log(f'Failed to save settings: {e}')
 _UI_BIND = {'temp_root': 'temp_input', 'output_folder': 'out_input', 'videodiff_path': 'vdiff_input', 'workflow': 'workflow_combo', 'analysis_mode': 'mode_combo', 'swap_subtitle_order': 'swapsec_chk', 'rename_chapters': 'chaprename_chk', 'match_jpn_secondary': 'jpnsec_chk', 'match_jpn_tertiary': 'jpnter_chk', 'apply_dialog_norm_gain': 'dialnorm_chk', 'first_sub_default': 'firstsubdef_chk', 'snap_chapters': 'snap_chapters_chk', 'snap_mode': 'snap_mode_opt', 'snap_starts_only': 'snap_starts_only_chk', 'log_compact': 'log_compact_chk', 'log_autoscroll': 'log_autoscroll_chk'}
 
 
@@ -63,9 +64,9 @@ def apply_settings_to_ui():
                     dpg.set_value(tag, val)
                 except Exception:
                     pass
-        LOG_Q.put('Settings applied to UI.')
+        _log('Settings applied to UI.')
     except Exception as e:
-        LOG_Q.put(f'[WARN] apply_settings_to_ui failed: {e}')
+        _log(f'[WARN] apply_settings_to_ui failed: {e}')
 
 
 
@@ -75,9 +76,9 @@ def pull_ui_to_settings():
             if dpg.does_item_exist(tag):
                 CONFIG[key] = dpg.get_value(tag)
         save_settings()
-        LOG_Q.put('Settings saved from UI.')
+        _log('Settings saved from UI.')
     except Exception as e:
-        LOG_Q.put(f'[ERROR] pull_ui_to_settings failed: {e}')
+        _log(f'[ERROR] pull_ui_to_settings failed: {e}')
 
 
 

@@ -1,81 +1,83 @@
-# External tool runners (moved)
-from __future__ import annotations
-import subprocess, logging, re, time
-from .logbus import _log
+    # External tool runners (robust) — consolidated bundle
+    from __future__ import annotations
+    import os, shutil, subprocess, logging, re, time
+    from typing import Dict, List, Optional
+    from vsg.logbus import _log
 
-def find_required_tools():
-    for tool in ['ffmpeg', 'ffprobe', 'mkvmerge', 'mkvextract']:
-        path = shutil.which(tool)
-        if not path:
-            raise RuntimeError(f"Required tool '{tool}' not found in PATH.")
-        ABS[tool] = path
+    ABS: Dict[str, str] = {}
 
+    REQUIRED = ["ffmpeg", "ffprobe", "mkvmerge", "mkvextract"]
+    OPTIONAL = ["videodiff"]  # needed only in VideoDiff mode
 
-def run_command(cmd: List[str], logger) -> Optional[str]:
-    silent_capture = False  # default; set to True for noisy ffprobe JSON
-    """
-    Settings-driven compact logger:
-      - If CONFIG['log_compact'] is True (default), prints one $ line and throttled "Progress: N%".
-      - On failure prints a short stderr tail (CONFIG['log_error_tail']).
-      - On success (compact mode) optionally prints last N stdout lines (CONFIG['log_tail_lines']).
-      - If compact is False, streams all output like the original.
-    """
-    if not cmd:
+    def _resolve_tool(name: str) -> Optional[str]:
+        # 1) PATH
+        p = shutil.which(name)
+        if p:
+            return p
+        # 2) current working dir
+        cwd_path = os.path.join(os.getcwd(), name)
+        if os.path.isfile(cwd_path) and os.access(cwd_path, os.X_OK):
+            return os.path.abspath(cwd_path)
+        # 3) settings override
+        try:
+            from vsg.settings import CONFIG
+            override_key = f"{name}_path"
+            if isinstance(CONFIG, dict):
+                ov = CONFIG.get(override_key)
+                if ov and os.path.isfile(ov) and os.access(ov, os.X_OK):
+                    return os.path.abspath(ov)
+        except Exception:
+            pass
         return None
-    tool = cmd[0]
-    cmd = [ABS.get(tool, tool)] + list(map(str, cmd[1:]))
-    compact = bool(CONFIG.get('log_compact', True))
-    tail_ok = int(CONFIG.get('log_tail_lines', 0))
-    err_tail = int(CONFIG.get('log_error_tail', 20))
-    prog_step = max(1, int(CONFIG.get('log_progress_step', 100)))
-    try:
-        import shlex
-        pretty = ' '.join((shlex.quote(str(c)) for c in cmd))
-    except Exception:
-        pretty = ' '.join(map(str, cmd))
-    _log(logger, '$ ' + pretty)
-    try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
-        out_buf = ''
-        last_prog = -1
-        if compact:
-            from collections import deque
-            tail = deque(maxlen=max(tail_ok, err_tail, 1))
-        for line in iter(proc.stdout.readline, ''):
-            if silent_capture:
-                out_buf += line
-                continue
-            out_buf += line
-            if compact:
-                if line.startswith('Progress: '):
-                    try:
-                        pct = int(line.strip().split()[-1].rstrip('%'))
-                    except Exception:
-                        pct = None
-                    if pct is not None and (last_prog < 0 or pct >= last_prog + prog_step or pct == 100):
-                        _log(logger, f'Progress: {pct}%')
-                        last_prog = pct
-                else:
-                    tail.append(line)
+
+    def find_required_tools() -> bool:
+        """
+        Populate ABS[...] with absolute paths. Returns True if all REQUIRED are found.
+        """
+        ok = True
+        for nm in REQUIRED + OPTIONAL:
+            path = _resolve_tool(nm)
+            if path:
+                ABS[nm] = path
             else:
-                _log(logger, line.rstrip('\n'))
-        proc.wait()
-        rc = proc.returncode or 0
-        if rc and rc > 1:
-            _log(logger, f'[!] Command failed with exit code {rc}')
-            if compact and err_tail > 0:
-                from itertools import islice
-                t = list(tail)[-err_tail:] if 'tail' in locals() else []
-                if t:
-                    _log(logger, '[stderr/tail]\n' + ''.join(t).rstrip())
-            return None
-        if compact and tail_ok > 0 and ('tail' in locals()):
-            t = list(tail)[-tail_ok:]
-            if t:
-                _log(logger, '[stdout/tail]\n' + ''.join(t).rstrip())
-        return out_buf
-    except Exception as e:
-        _log(logger, f'[!] Failed to execute: {e}')
-        return None
+                if nm in REQUIRED:
+                    ok = False
+        missing_req = [n for n in REQUIRED if n not in ABS]
+        if missing_req:
+            _log(f"Missing tools: {', '.join(missing_req)}")
+        else:
+            _log("All required tools found.")
+        # Optional notice
+        if "videodiff" not in ABS:
+            _log("Optional tool not found: videodiff (only needed in VideoDiff mode)")
+        return ok
 
-
+    def run_command(args: List[str], log_cmd: Optional[str] = None) -> int:
+        """
+        Run a command, compact logging similar to the monolith.
+        - args: full argv (use ABS[...] for known tools)
+        - log_cmd: if provided, displayed instead of args
+        """
+        display = log_cmd or " ".join(args)
+        _log(f"$ {display}")
+        try:
+            proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True)
+        except FileNotFoundError:
+            _log("Command not found.")
+            return 127
+        last_progress = 0.0
+        prog_re = re.compile(r"(?:frame|size|time|speed|Progress)")
+        if proc.stdout:
+            for line in proc.stdout:
+                line = line.rstrip("
+")
+                # Throttle very noisy progress lines
+                if prog_re.search(line):
+                    now = time.time()
+                    if now - last_progress < 0.25:
+                        continue
+                    last_progress = now
+                _log(line)
+        rc = proc.wait()
+        _log(f"[exit {rc}]")
+        return rc
