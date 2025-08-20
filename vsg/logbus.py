@@ -1,38 +1,31 @@
-# Logging queue & helpers (Phase A — clean, defensive implementation)
+# Logging queue & helpers (Phase A — robust, no-nonsense)
 from __future__ import annotations
 from datetime import datetime
 import logging
 import queue
-import typing
 
 import dearpygui.dearpygui as dpg
 
-# Global log queue
+# Public queue used by the GUI
 LOG_Q: "queue.Queue[str]" = queue.Queue()
 
 def _log(msg: str) -> None:
-    """
-    Enqueue a log line with a timestamp. GUI drains this with pump_logs().
-    """
+    """Enqueue a log line with a timestamp; never raise."""
+    ts = datetime.now().strftime("%H:%M:%S")
+    line = f"[{ts}] {msg}"
     try:
-        ts = datetime.now().strftime("%H:%M:%S")
-        LOG_Q.put(f"[{ts}] {msg}")
-    except Exception as e:
-        # Last-resort fallback to avoid crashing the app on logging
+        LOG_Q.put(line)
+    except Exception:
+        # Last resort: avoid crashing if queue is borked
         try:
-            LOG_Q.put(str(msg))
+            logging.debug("LOG_Q.put failed; line=%r", line)
         except Exception:
             pass
-        logging.debug("log enqueue failed: %r", e)
 
-def _get_autoscroll_default_true() -> bool:
-    """
-    Read autoscroll preference from settings if available.
-    Falls back to True if CONFIG isn't ready yet.
-    """
+def _autoscroll_pref() -> bool:
+    """Return autoscroll preference; defaults True if CONFIG not ready."""
     try:
-        # Lazy import to avoid circulars during early startup
-        from vsg import settings as _settings  # type: ignore
+        from vsg import settings as _settings  # lazy to avoid circulars
         cfg = getattr(_settings, "CONFIG", {})
         if isinstance(cfg, dict):
             return bool(cfg.get("log_autoscroll", True))
@@ -40,45 +33,39 @@ def _get_autoscroll_default_true() -> bool:
         pass
     return True
 
+def _dpg_exists(item_id: str) -> bool:
+    try:
+        return bool(dpg.does_item_exist(item_id))
+    except Exception:
+        return False
+
 def pump_logs() -> None:
     """
-    Drain LOG_Q and render into the DearPyGui log region.
-    Safe to call even before CONFIG exists.
+    Drain LOG_Q and render into DPG widgets if present.
+    Safe to call before CONFIG/UI are initialized.
     """
-    autoscroll = _get_autoscroll_default_true()
-
-    # If the widgets don't exist yet, just drain/queue silently.
-    has_child = False
-    try:
-        has_child = dpg.does_item_exist("log_child")
-    except Exception:
-        has_child = False
-
-    # Drain and render
+    autoscroll = _autoscroll_pref()
+    has_child = _dpg_exists("log_child")
     rendered_any = False
-    while not LOG_Q.empty():
+
+    while True:
         try:
             line = LOG_Q.get_nowait()
         except Exception:
             break
+
         if has_child:
             try:
                 dpg.add_text(line, parent="log_child", wrap=0)
                 rendered_any = True
             except Exception:
-                # If UI not ready, swallow (we've removed from queue)
+                # UI not ready or parent missing; swallow
                 pass
 
-    # Best-effort autoscroll
-    if rendered_any and autoscroll:
+    if rendered_any and autoscroll and _dpg_exists("log_scroller"):
+        # Best-effort scroll to bottom (ignore API differences)
         try:
-            if dpg.does_item_exist("log_scroller"):
-                # Try to push to bottom
-                try:
-                    max_scroll = dpg.get_y_scroll_max("log_scroller")
-                    dpg.set_y_scroll("log_scroller", max_scroll)
-                except Exception:
-                    # Older DPG versions may have different API; ignore
-                    pass
+            max_scroll = dpg.get_y_scroll_max("log_scroller")
+            dpg.set_y_scroll("log_scroller", max_scroll)
         except Exception:
             pass
