@@ -1,13 +1,56 @@
-# Auto-generated wrapper: delegates to video_sync_gui
+"""Settings with defaults + merge."""
 from __future__ import annotations
+import json
+from pathlib import Path
+from vsg.logbus import _log
 
-from importlib import import_module
-_mono = import_module('video_sync_gui')
+DEFAULT_CONFIG = {
+    "workflow": "Analyze & Merge",
+    "analysis_mode": "videodiff",
+    "log_autoscroll": True,
+    "log_compact": True,
+    "log_error_tail": True,
+    "log_tail_lines": 200,
+    "scan_chunk_count": 8,
+    "scan_chunk_duration": 6.0,
+    "min_match_pct": 0.8,
+    "rename_chapters": False,
+    "swap_subtitle_order": False,
+    "match_jpn_secondary": False,
+    "match_jpn_tertiary": False,
+    "temp_root": "./temp",
+    "output_folder": "./output",
+    "ffmpeg_path": "",
+    "ffprobe_path": "",
+    "mkvmerge_path": "",
+    "mkvextract_path": "",
+    "videodiff_path": "",
+        "apply_dialog_norm_gain": "",
+}
 
-CONFIG = _mono.CONFIG
-SETTINGS_PATH = _mono.SETTINGS_PATH
-load_settings = _mono.load_settings
-save_settings = _mono.save_settings
-apply_settings_to_ui = _mono.apply_settings_to_ui
-pull_ui_to_settings = _mono.pull_ui_to_settings
-sync_config_from_ui = _mono.sync_config_from_ui
+CONFIG: dict = DEFAULT_CONFIG.copy()
+SETTINGS_PATH = Path("settings_gui.json")
+
+def load_settings() -> None:
+    global CONFIG
+    if SETTINGS_PATH.exists():
+        try:
+            loaded = json.loads(SETTINGS_PATH.read_text())
+            merged = DEFAULT_CONFIG.copy()
+            if isinstance(loaded, dict):
+                merged.update(loaded)
+            CONFIG = merged
+            _log("Settings loaded (merged with defaults).")
+        except Exception as e:
+            CONFIG = DEFAULT_CONFIG.copy()
+            _log(f"Failed to load settings, using defaults: {e}")
+    else:
+        CONFIG = DEFAULT_CONFIG.copy()
+        _log("Settings file not found; using defaults.")
+
+def save_settings() -> None:
+    try:
+        SETTINGS_PATH.write_text(json.dumps(CONFIG, indent=2))
+        _log("Settings saved.")
+    except Exception as e:
+        _log(f"Failed to save settings: {e}")

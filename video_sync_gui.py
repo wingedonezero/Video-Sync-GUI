@@ -1,3 +1,16 @@
+# === vsg direct imports (modularized) ===
+from vsg.settings import CONFIG, SETTINGS_PATH, load_settings, save_settings
+from vsg.logbus import LOG_Q, _log, pump_logs
+from vsg.tools import find_required_tools, run_command
+from vsg.analysis.videodiff import run_videodiff, format_delay_ms
+from vsg.analysis.audio_xcorr import run_audio_correlation_workflow
+from vsg.plan.build import build_plan, summarize_plan
+from vsg.mux.tokens import build_mkvmerge_tokens
+from vsg.mux.run import write_mkvmerge_json_options, run_mkvmerge_with_json
+from vsg.jobs.discover import discover_jobs
+from vsg.jobs.merge_job import merge_job
+# === end vsg direct imports ===
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
