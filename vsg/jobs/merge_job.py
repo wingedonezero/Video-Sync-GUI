@@ -9,11 +9,4 @@ from __future__ import annotations
 # Import from the current monolith
 import importlib
 _monolith = importlib.import_module("video_sync_gui")
-# Re-export config & settings helpers
-CONFIG = _monolith.CONFIG
-SETTINGS_PATH = _monolith.SETTINGS_PATH
-load_settings = _monolith.load_settings
-save_settings = _monolith.save_settings
-apply_settings_to_ui = _monolith.apply_settings_to_ui
-pull_ui_to_settings = _monolith.pull_ui_to_settings
-sync_config_from_ui = _monolith.sync_config_from_ui
+merge_job = _monolith.merge_job

@@ -1,1 +1,0 @@
-# vsg/logging.py

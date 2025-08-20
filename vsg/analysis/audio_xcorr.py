@@ -9,11 +9,9 @@ from __future__ import annotations
 # Import from the current monolith
 import importlib
 _monolith = importlib.import_module("video_sync_gui")
-# Re-export config & settings helpers
-CONFIG = _monolith.CONFIG
-SETTINGS_PATH = _monolith.SETTINGS_PATH
-load_settings = _monolith.load_settings
-save_settings = _monolith.save_settings
-apply_settings_to_ui = _monolith.apply_settings_to_ui
-pull_ui_to_settings = _monolith.pull_ui_to_settings
-sync_config_from_ui = _monolith.sync_config_from_ui
+# These may not exist in some snapshots; getattr for safety.
+get_audio_stream_index = getattr(_monolith, "get_audio_stream_index", None)
+extract_audio_chunk = getattr(_monolith, "extract_audio_chunk", None)
+find_audio_delay = getattr(_monolith, "find_audio_delay", None)
+run_audio_correlation_workflow = getattr(_monolith, "run_audio_correlation_workflow", None)
+best_from_results = getattr(_monolith, "best_from_results", None)

@@ -9,11 +9,9 @@ from __future__ import annotations
 # Import from the current monolith
 import importlib
 _monolith = importlib.import_module("video_sync_gui")
-# Re-export config & settings helpers
-CONFIG = _monolith.CONFIG
-SETTINGS_PATH = _monolith.SETTINGS_PATH
-load_settings = _monolith.load_settings
-save_settings = _monolith.save_settings
-apply_settings_to_ui = _monolith.apply_settings_to_ui
-pull_ui_to_settings = _monolith.pull_ui_to_settings
-sync_config_from_ui = _monolith.sync_config_from_ui
+find_required_tools = _monolith.find_required_tools
+run_command = _monolith.run_command
+get_stream_info = getattr(_monolith, "get_stream_info", None)
+extract_tracks = getattr(_monolith, "extract_tracks", None)
+extract_attachments = getattr(_monolith, "extract_attachments", None)
+ffprobe_duration = getattr(_monolith, "ffprobe_duration", None)
