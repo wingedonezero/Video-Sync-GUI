@@ -4,6 +4,9 @@ from datetime import datetime
 import logging, queue
 import dearpygui.dearpygui as dpg
 
+
+# Explicit queue for GUI logs (hotfix)
+LOG_Q = queue.Queue()
 LOG_Q: "queue.Queue[str]" = queue.Queue()
 
 def _log(*args) -> None:

@@ -1,3 +1,16 @@
+# === Thin GUI: import all non-UI logic from vsg.* ===
+from vsg.settings import CONFIG, SETTINGS_PATH, load_settings, save_settings
+from vsg.logbus import LOG_Q, _log, pump_logs
+from vsg.tools import find_required_tools, run_command
+from vsg.analysis.videodiff import run_videodiff, format_delay_ms
+from vsg.analysis.audio_xcorr import run_audio_correlation_workflow
+from vsg.plan.build import build_plan, summarize_plan
+from vsg.mux.tokens import build_mkvmerge_tokens
+from vsg.mux.run import write_mkvmerge_json_options, run_mkvmerge_with_json
+from vsg.jobs.discover import discover_jobs
+from vsg.jobs.merge_job import merge_job
+# === end Thin GUI import block ===
+
 # === vsg direct imports (modularized) ===
 from vsg.settings import CONFIG, SETTINGS_PATH, load_settings, save_settings
 from vsg.logbus import LOG_Q, _log, pump_logs
@@ -180,80 +193,6 @@ def sync_config_from_ui():
     Path(CONFIG['output_folder']).mkdir(parents=True, exist_ok=True)
     Path(CONFIG['temp_root']).mkdir(parents=True, exist_ok=True)
 
-def find_required_tools():
-    for tool in ['ffmpeg', 'ffprobe', 'mkvmerge', 'mkvextract']:
-        path = shutil.which(tool)
-        if not path:
-            raise RuntimeError(f"Required tool '{tool}' not found in PATH.")
-        ABS[tool] = path
-
-def run_command(cmd: List[str], logger) -> Optional[str]:
-    silent_capture = False  # default; set to True for noisy ffprobe JSON
-    """
-    Settings-driven compact logger:
-      - If CONFIG['log_compact'] is True (default), prints one $ line and throttled "Progress: N%".
-      - On failure prints a short stderr tail (CONFIG['log_error_tail']).
-      - On success (compact mode) optionally prints last N stdout lines (CONFIG['log_tail_lines']).
-      - If compact is False, streams all output like the original.
-    """
-    if not cmd:
-        return None
-    tool = cmd[0]
-    cmd = [ABS.get(tool, tool)] + list(map(str, cmd[1:]))
-    compact = bool(CONFIG.get('log_compact', True))
-    tail_ok = int(CONFIG.get('log_tail_lines', 0))
-    err_tail = int(CONFIG.get('log_error_tail', 20))
-    prog_step = max(1, int(CONFIG.get('log_progress_step', 100)))
-    try:
-        import shlex
-        pretty = ' '.join((shlex.quote(str(c)) for c in cmd))
-    except Exception:
-        pretty = ' '.join(map(str, cmd))
-    _log(logger, '$ ' + pretty)
-    try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace')
-        out_buf = ''
-        last_prog = -1
-        if compact:
-            from collections import deque
-            tail = deque(maxlen=max(tail_ok, err_tail, 1))
-        for line in iter(proc.stdout.readline, ''):
-            if silent_capture:
-                out_buf += line
-                continue
-            out_buf += line
-            if compact:
-                if line.startswith('Progress: '):
-                    try:
-                        pct = int(line.strip().split()[-1].rstrip('%'))
-                    except Exception:
-                        pct = None
-                    if pct is not None and (last_prog < 0 or pct >= last_prog + prog_step or pct == 100):
-                        _log(logger, f'Progress: {pct}%')
-                        last_prog = pct
-                else:
-                    tail.append(line)
-            else:
-                _log(logger, line.rstrip('\n'))
-        proc.wait()
-        rc = proc.returncode or 0
-        if rc and rc > 1:
-            _log(logger, f'[!] Command failed with exit code {rc}')
-            if compact and err_tail > 0:
-                from itertools import islice
-                t = list(tail)[-err_tail:] if 'tail' in locals() else []
-                if t:
-                    _log(logger, '[stderr/tail]\n' + ''.join(t).rstrip())
-            return None
-        if compact and tail_ok > 0 and ('tail' in locals()):
-            t = list(tail)[-tail_ok:]
-            if t:
-                _log(logger, '[stdout/tail]\n' + ''.join(t).rstrip())
-        return out_buf
-    except Exception as e:
-        _log(logger, f'[!] Failed to execute: {e}')
-        return None
-
 def get_stream_info(mkv_path: str, logger) -> Optional[Dict[str, Any]]:
     out = run_command(['mkvmerge', '-J', str(mkv_path)], logger)
     if not out:
@@ -309,28 +248,6 @@ def _ext_for_track(ttype: str, codec_id: str) -> str:
             return 'sub'
         return 'sub'
     return 'bin'
-
-def extract_tracks(mkv: str, temp_dir: str, logger, role: str, audio=True, subs=True, all_tracks=False) -> List[Dict[str, Any]]:
-    info = get_stream_info(mkv, logger)
-    if not info:
-        raise ValueError('Could not get stream info for extraction.')
-    tracks, specs = ([], [])
-    for tr in info.get('tracks', []):
-        tid = tr['id']
-        ttype = tr['type']
-        lang = tr.get('properties', {}).get('language', 'und')
-        name = tr.get('properties', {}).get('track_name', '')
-        want = all_tracks or (audio and ttype == 'audio') or (subs and ttype == 'subtitles') or (ttype == 'video' and all_tracks)
-        if not want:
-            continue
-        codec = tr.get('properties', {}).get('codec_id', '')
-        ext = _ext_for_track(ttype, codec)
-        out = Path(temp_dir) / f'{role}_track_{Path(mkv).stem}_{tid}.{ext}'
-        tracks.append({'id': tid, 'type': ttype, 'lang': lang, 'name': name, 'path': str(out), 'codec_id': codec})
-        specs.append(f'{tid}:{out}')
-    if specs:
-        run_command(['mkvextract', str(mkv), 'tracks'] + specs, logger)
-    return tracks
 
 def extract_attachments(mkv: str, temp_dir: str, logger, role: str) -> List[str]:
     info = get_stream_info(mkv, logger)
@@ -403,190 +320,6 @@ def _normalize_chapter_end_times(root, logger=None):
         _log(logger, f'[Chapters] Normalized chapter ends: {fixed} updated')
     return (fixed, touched)
 
-def rename_chapters_xml(ref_mkv: str, temp_dir: str, logger, shift_ms: int=0) -> Optional[str]:
-    out = run_command(['mkvextract', str(ref_mkv), 'chapters', '-'], logger)
-    if not out or not out.strip():
-        _log(logger, 'No chapters found to rename.')
-        return None
-    try:
-        if out.startswith('\ufeff'):
-            out = out[1:]
-        root = ET.fromstring(out)
-        for i, atom in enumerate(root.findall('.//ChapterAtom'), 1):
-            disp = atom.find('ChapterDisplay')
-            if disp is not None:
-                atom.remove(disp)
-            nd = ET.SubElement(atom, 'ChapterDisplay')
-            ET.SubElement(nd, 'ChapterString').text = f'Chapter {i:02d}'
-            ET.SubElement(nd, 'ChapterLanguage').text = 'und'
-        path = Path(temp_dir) / f'{Path(ref_mkv).stem}_chapters_mod.xml'
-        try:
-            shift_ns = int(shift_ms) * 1000000
-
-            def _parse_hhmmss_ns(t: str):
-                t = t.strip()
-                hh, mm, rest = t.split(':')
-                if '.' in rest:
-                    ss, frac = rest.split('.')
-                    frac = (frac + '000000000')[:9]
-                else:
-                    ss, frac = (rest, '000000000')
-                total_ns = (int(hh) * 3600 + int(mm) * 60 + int(ss)) * 1000000000 + int(frac)
-                return total_ns
-
-            def _fmt_ns(total_ns: int):
-                if total_ns < 0:
-                    total_ns = 0
-                ns = total_ns % 1000000000
-                total_s = total_ns // 1000000000
-                hh2 = total_s // 3600
-                mm2 = total_s % 3600 // 60
-                ss2 = total_s % 60
-                return f'{hh2:02d}:{mm2:02d}:{ss2:02d}.{ns:09d}'
-            for atom in root.findall('.//ChapterAtom'):
-                for tag in ('ChapterTimeStart', 'ChapterTimeEnd'):
-                    node = atom.find(tag)
-                    if node is not None and node.text:
-                        total_ns = _parse_hhmmss_ns(node.text)
-                        total_ns += shift_ns
-                        node.text = _fmt_ns(total_ns)
-        except Exception as _e:
-            _log(logger, f'[WARN] Chapter time shift failed: {_e}')
-        if CONFIG.get('chapter_snap_verbose', False):
-            _log(logger, '[Chapters] Pre-snap audit: verbose enabled')
-        try:
-            _log(logger, '[Chapters] Snap: enabled=%s mode=%s thr=%sms starts_only=%s' % (CONFIG.get('snap_chapters'), CONFIG.get('snap_mode'), CONFIG.get('snap_threshold_ms'), CONFIG.get('snap_starts_only')))
-            if CONFIG.get('snap_chapters', False):
-                kfs = _probe_keyframes_ns(ref_mkv, shift_ms, logger)
-                if not kfs:
-                    _log(logger, '[Chapters] Snap skipped: no keyframes found')
-                sidecar = str(Path(temp_dir) / 'chapters_snapmap.json')
-                _snap_chapter_times_inplace(root, kfs, bool(CONFIG.get('snap_starts_only', True)), str(CONFIG.get('snap_mode', 'previous')), int(CONFIG.get('snap_threshold_ms', 250)), logger, sidecar, int(shift_ms))
-                _log(logger, f'[Chapters] Snap sidecar path: {sidecar}') if CONFIG.get('chapter_snap_verbose', False) else None
-                try:
-                    import json as _json, bisect as _bis
-                    thr_ns = int(CONFIG.get('snap_threshold_ms', 250)) * 1000000
-                    mode_ = str(CONFIG.get('snap_mode', 'previous'))
-                    with open(sidecar, 'r', encoding='utf-8') as _f:
-                        _data = _json.load(_f)
-                    recs = _data.get('chapters', [])
-                    moved = 0
-                    on_kf = 0
-                    near_nochange = 0
-                    too_far = 0
-                    deltas_ms = []
-
-                    def _pick_candidate(ts_ns: int) -> int:
-                        if not kfs:
-                            return ts_ns
-                        i = _bis.bisect_right(kfs, ts_ns)
-                        prev_kf = kfs[i - 1] if i > 0 else kfs[0]
-                        if mode_ == 'nearest':
-                            next_kf = kfs[i] if i < len(kfs) else kfs[-1]
-                            if abs(next_kf - ts_ns) <= abs(prev_kf - ts_ns):
-                                return next_kf
-                        return prev_kf
-                    for r in recs:
-                        d = int(r.get('delta_start_ns', 0) or 0)
-                        if d != 0:
-                            moved += 1
-                            deltas_ms.append(int(round(d / 1000000)))
-                        else:
-                            orig_ns = int(r.get('shifted_start_ns', 0) or 0)
-                            cand = _pick_candidate(orig_ns)
-                            dist = abs(cand - orig_ns)
-                            if dist == 0:
-                                on_kf += 1
-                            elif dist <= thr_ns:
-                                near_nochange += 1
-                            else:
-                                too_far += 1
-                    parts = [f'moved={moved}', f'on_kf={on_kf}', f'too_far={too_far}']
-                    if near_nochange:
-                        parts.append(f'near={near_nochange}')
-                    if deltas_ms:
-                        parts.append(f'min={min(deltas_ms)}ms max={max(deltas_ms)}ms')
-                    _log(logger, '[Chapters] Snap result: ' + ', '.join(parts) + f" (kfs={len(kfs)}, mode={mode_}, thr={int(CONFIG.get('snap_threshold_ms', 250))}ms)")
-                    if moved == 0:
-                        _log(logger, '[Chapters] Snap note: no chapter starts changed')
-                except Exception as _e:
-                    _log(logger, f'[ERROR] Snap classification failed: {_e}')
-                try:
-                    import json as _json
-                    thr_ns = int(CONFIG.get('snap_threshold_ms', 250)) * 1000000
-                    mode_ = str(CONFIG.get('snap_mode', 'previous'))
-                    with open(sidecar, 'r', encoding='utf-8') as _f:
-                        _data = _json.load(_f)
-                    recs = _data.get('chapters', [])
-                    moved = 0
-                    on_kf = 0
-                    near_nochange = 0
-                    too_far = 0
-                    deltas_ms = []
-                    import bisect as _bis
-
-                    def _pick_candidate(ts_ns: int) -> int:
-                        if not kfs:
-                            return ts_ns
-                        i = _bis.bisect_right(kfs, ts_ns)
-                        prev_kf = kfs[i - 1] if i > 0 else kfs[0]
-                        if mode_ == 'nearest':
-                            next_kf = kfs[i] if i < len(kfs) else kfs[-1]
-                            if abs(next_kf - ts_ns) <= abs(prev_kf - ts_ns):
-                                return next_kf
-                        return prev_kf
-                    for r in recs:
-                        d = int(r.get('delta_start_ns', 0) or 0)
-                        if d != 0:
-                            moved += 1
-                            deltas_ms.append(int(round(d / 1000000)))
-                        else:
-                            orig_ns = int(r.get('shifted_start_ns', 0) or 0)
-                            cand = _pick_candidate(orig_ns)
-                            dist = abs(cand - orig_ns)
-                            if dist == 0:
-                                on_kf += 1
-                            elif dist <= thr_ns:
-                                near_nochange += 1
-                            else:
-                                too_far += 1
-                    parts = [f'moved={moved}', f'on_kf={on_kf}', f'too_far={too_far}']
-                    if near_nochange:
-                        parts.append(f'near_nochange={near_nochange}')
-                    if deltas_ms:
-                        parts.append(f'min={min(deltas_ms)}ms max={max(deltas_ms)}ms')
-                    _log(logger, '[Chapters] Snap classify: ' + ', '.join(parts) + f" (mode={mode_}, thr={int(CONFIG.get('snap_threshold_ms', 250))}ms)")
-                    if CONFIG.get('chapter_snap_verbose', False) and near_nochange:
-                        _log(logger, '[Chapters] note: near_nochange > 0 means start was inside threshold but unchanged (edge case).')
-                except Exception as _e:
-                    _log(logger, f'[WARN] Snap classification failed: {_e}')
-                try:
-                    import json as _json
-                    with open(sidecar, 'r', encoding='utf-8') as _f:
-                        _data = _json.load(_f)
-                    _moved = []
-                    for _rec in _data.get('chapters', []):
-                        d = _rec.get('delta_start_ns', 0)
-                        if d:
-                            _moved.append(int(round(d / 1000000)))
-                    if _moved:
-                        _log(logger, f'[Chapters] Snap summary: moved {len(_moved)} starts; min={min(_moved)}ms max={max(_moved)}ms')
-                    else:
-                        _log(logger, '[Chapters] Snap summary: no starts moved')
-                except Exception as _e:
-                    _log(logger, f'[Chapters] Snap summary unavailable: {_e}')
-            else:
-                _log(logger, '[Chapters] Snap: disabled')
-        except Exception as _e:
-            _log(logger, f'[WARN] Chapter keyframe snapping skipped: {_e}')
-        _normalize_chapter_end_times(root, logger)
-        ET.ElementTree(root).write(path, encoding='UTF-8', xml_declaration=True)
-        _log(logger, f'Chapters XML written: {path}')
-        return str(path)
-    except Exception as e:
-        _log(logger, f'Chapter XML rewrite failed: {e}')
-        return None
-
 def ffprobe_duration(path: str, logger) -> float:
     out = run_command(['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', str(path)], logger)
     try:
@@ -630,40 +363,6 @@ def find_audio_delay(ref_wav: str, sec_wav: str, logger):
     except Exception as e:
         _log(logger, f'find_audio_delay error: {e}')
         return (None, 0.0, None)
-
-def run_audio_correlation_workflow(file1: str, file2: str, logger, chunks: int, chunk_dur: int, match_lang: Optional[str], role_tag: str):
-    _log(logger, f'Analyzing (Audio): {file1} vs {file2}')
-    idx1 = get_audio_stream_index(file1, logger, language=None)
-    idx2 = get_audio_stream_index(file2, logger, language=match_lang)
-    _log(logger, f"Chosen streams -> ref a:{idx1}, target a:{idx2} (prefer='{match_lang or 'first'}')")
-    if idx1 is None or idx2 is None:
-        raise ValueError('Could not locate audio streams for correlation.')
-    dur = ffprobe_duration(file1, logger)
-    scan_range = max(0.0, dur * 0.8)
-    start_offset = dur * 0.1
-    starts = [start_offset + scan_range / max(1, chunks - 1) * i for i in range(chunks)]
-    results = []
-    for i, st in enumerate(starts, 1):
-        set_status(f'Correlating chunk {i}/{chunks}…')
-        set_progress(i / max(1, chunks))
-        tmp1 = Path(CONFIG['temp_root']) / f'wav_ref_{Path(file1).stem}_{int(st)}_{i}.wav'
-        tmp2 = Path(CONFIG['temp_root']) / f'wav_{role_tag}_{Path(file2).stem}_{int(st)}_{i}.wav'
-        try:
-            ok1 = extract_audio_chunk(file1, str(tmp1), st, chunk_dur, logger, idx1)
-            ok2 = extract_audio_chunk(file2, str(tmp2), st, chunk_dur, logger, idx2)
-            if ok1 and ok2:
-                delay, match, raw = find_audio_delay(str(tmp1), str(tmp2), logger)
-                if delay is not None:
-                    results.append({'delay': delay, 'match': match, 'raw_delay': raw, 'start': st})
-                    _log(logger, f'Chunk @{int(st)}s -> Delay {delay:+} ms (Match {match:.2f}%) Raw {raw:.6f}s')
-        finally:
-            for p in (tmp1, tmp2):
-                try:
-                    if Path(p).exists():
-                        Path(p).unlink()
-                except Exception:
-                    pass
-    return results
 
 def best_from_results(results: List[Dict[str, Any]], min_pct=5.0):
     if not results:
@@ -759,84 +458,6 @@ def _tokens_for_track(track: Dict[str, Any], group: str, delays_ms: Dict[str, in
         toks += ['--default-track-flag', f"0:{('yes' if default_flag else 'no')}"]
     return toks
 
-def build_mkvmerge_tokens(plan_json, output_file, chapters_xml_path, attachments, track_order_str=None):
-    """Return JSON array-of-strings for mkvmerge @opts.json; each input wrapped in parentheses;
-       add --compression 0:none for each input; optional dialnorm removal; explicit --track-order.
-       Set languages for all tracks; compute default flags:
-         - Video: first/only video = yes
-         - Audio: first audio = yes; others = no
-         - Subtitles: Signs/Songs = yes; else if NO English audio -> first subtitle = yes; others = no
-    """
-    tokens: List[str] = ['--output', str(output_file)]
-    if chapters_xml_path:
-        tokens += ['--chapters', str(chapters_xml_path)]
-    delays = plan_json.get('delays', {})
-    plan = list(plan_json.get('plan', []))
-    audio_langs = [(t.get('lang') or '').lower() for t in plan if t.get('type') == 'audio']
-    has_english_audio = any((l in ('en', 'eng') for l in audio_langs))
-    video_indices = [i for i, t in enumerate(plan) if t.get('type') == 'video']
-    audio_indices = [i for i, t in enumerate(plan) if t.get('type') == 'audio']
-    sub_indices = [i for i, t in enumerate(plan) if t.get('type') == 'subtitles']
-    first_video_idx = video_indices[0] if video_indices else None
-    first_audio_idx = audio_indices[0] if audio_indices else None
-    default_sub_idx = None
-    if CONFIG.get('first_sub_default', True):
-
-        def is_signs_name(name: str) -> bool:
-            low = (name or '').lower()
-            return any((k in low for k in SIGNS_KEYS))
-        for i in sub_indices:
-            if is_signs_name(plan[i].get('name', '')):
-                default_sub_idx = i
-                break
-        if default_sub_idx is None and (not has_english_audio) and sub_indices:
-            default_sub_idx = sub_indices[0]
-    track_order_indices: List[str] = []
-    input_idx = 0
-    for idx, trk in enumerate(plan):
-        default_flag = None
-        if trk.get('type') == 'video':
-            default_flag = idx == first_video_idx
-        elif trk.get('type') == 'audio':
-            default_flag = idx == first_audio_idx
-        elif trk.get('type') == 'subtitles':
-            default_flag = idx == default_sub_idx
-        perfile = []
-        perfile += _tokens_for_track(trk, trk.get('from_group'), delays, default_flag=default_flag)
-        perfile += ['--compression', '0:none']
-        if CONFIG.get('apply_dialog_norm_gain') and trk.get('type') == 'audio':
-            codec = (trk.get('codec_id') or '').upper()
-            if 'AC-3' in codec or 'E-AC-3' in codec or 'A_AC3' in codec or ('A_EAC3' in codec):
-                perfile += ['--remove-dialog-normalization-gain', '0']
-        tokens += perfile + ['(', str(trk['src']), ')']
-        track_order_indices.append(f'{input_idx}:0')
-        input_idx += 1
-    for a in attachments or []:
-        tokens += ['--attach-file', str(a)]
-    final_track_order = track_order_str or ','.join(track_order_indices)
-    if final_track_order:
-        tokens += ['--track-order', final_track_order]
-    return tokens
-
-def write_mkvmerge_json_options(tokens: List[str], json_path: Path, logger) -> str:
-    json_path = Path(json_path)
-    json_path.parent.mkdir(parents=True, exist_ok=True)
-    raw_json = json.dumps(tokens, ensure_ascii=False)
-    json_path.write_text(raw_json, encoding='utf-8')
-    pretty_path = json_path.parent / 'opts.pretty.txt'
-    pretty_txt = ' \\n  '.join(tokens)
-    pretty_path.write_text(pretty_txt, encoding='utf-8')
-    _log(logger, f'@JSON options written: {json_path}')
-    if CONFIG.get('log_show_options_pretty', False):
-        _log(logger, '[OPTIONS] mkvmerge tokens (pretty):')
-        for line in pretty_txt.splitlines():
-            _log(logger, '  ' + line)
-    if CONFIG.get('log_show_options_json', False):
-        _log(logger, '[OPTIONS] mkvmerge tokens (raw JSON array):')
-        for i in range(0, len(raw_json), 512):
-            _log(logger, raw_json[i:i + 512])
-    return str(json_path)
-
 def run_mkvmerge_with_json(json_path: str, logger) -> bool:
     out = run_command(['mkvmerge', f'@{json_path}'], logger)
     return out is not None
@@ -847,137 +468,6 @@ def format_delay_ms(ms):
     ms = int(ms)
     sign = '-' if ms < 0 else ''
     return f'{sign}{abs(ms)} ms'
-
-def run_videodiff(ref: str, target: str, logger, videodiff_path: Path | str) -> Tuple[int, float]:
-    """Run videodiff once and parse ONLY the final '[Result] - (itsoffset|ss): X.XXXXXs, ... error: YYY' line.
-       Returns (delay_ms, error_value).  Mapping: itsoffset -> +ms, ss -> -ms.
-    """
-    vp = str(videodiff_path) if videodiff_path else ''
-    if not vp:
-        vp = shutil.which('videodiff') or str(SCRIPT_DIR / 'videodiff')
-    vp_path = Path(vp)
-    if not vp_path.exists():
-        raise FileNotFoundError(f'videodiff not found at {vp_path}')
-    _log(logger, f'videodiff path: {vp_path}')
-    out = run_command([str(vp_path), str(ref), str(target)], logger)
-    if not out:
-        raise RuntimeError('videodiff produced no output')
-    lines = [ln.strip() for ln in out.splitlines() if ln.strip()]
-    last_line = ''
-    for ln in reversed(lines):
-        if '[Result]' in ln and ('ss:' in ln or 'itsoffset:' in ln):
-            last_line = ln
-            break
-    if not last_line:
-        last_line = lines[-1] if lines else ''
-    m = re.search('(itsoffset|ss)\\s*:\\s*(-?\\d+(?:\\.\\d+)?)s.*?error:\\s*([0-9.]+)', last_line, flags=re.IGNORECASE)
-    if not m:
-        raise RuntimeError(f"videodiff: could not parse final line: '{last_line}'")
-    kind, sval, err = m.groups()
-    seconds = float(sval)
-    delay_ms = int(round(seconds * 1000))
-    if kind.lower() == 'ss':
-        delay_ms = -delay_ms
-    err_val = float(err)
-    _log(logger, f'[VideoDiff] final -> {kind.lower()} {seconds:.5f}s, error {err_val:.2f}  =>  delay {delay_ms:+} ms')
-    return (delay_ms, err_val)
-
-def merge_job(ref_file: str, sec_file: Optional[str], ter_file: Optional[str], out_dir: str, logger, videodiff_path: Path):
-    Path(CONFIG['temp_root']).mkdir(parents=True, exist_ok=True)
-    Path(out_dir).mkdir(parents=True, exist_ok=True)
-    delays = {'secondary_ms': 0, 'tertiary_ms': 0}
-    set_status('Analyzing…')
-    set_progress(0.0)
-    delay_sec = None
-    delay_ter = None
-    if sec_file:
-        if CONFIG['analysis_mode'] == 'VideoDiff':
-            delay_sec, err_sec = run_videodiff(ref_file, sec_file, logger, videodiff_path)
-            if err_sec < float(CONFIG.get('videodiff_error_min', 0.0)) or err_sec > float(CONFIG.get('videodiff_error_max', 100.0)):
-                raise RuntimeError(f"VideoDiff confidence out of bounds: error={err_sec:.2f} (allowed {CONFIG.get('videodiff_error_min')}..{CONFIG.get('videodiff_error_max')})")
-        else:
-            lang = 'jpn' if CONFIG['match_jpn_secondary'] else None
-            results = run_audio_correlation_workflow(ref_file, sec_file, logger, CONFIG['scan_chunk_count'], CONFIG['scan_chunk_duration'], lang, role_tag='sec')
-            best = best_from_results(results, CONFIG['min_match_pct'])
-            if not best:
-                raise RuntimeError('Audio analysis for Secondary yielded no valid result.')
-            delay_sec = best['delay']
-        _log(logger, f'Secondary delay: {delay_sec} ms')
-    if ter_file:
-        if CONFIG['analysis_mode'] == 'VideoDiff':
-            delay_ter, err_ter = run_videodiff(ref_file, ter_file, logger, videodiff_path)
-            if err_ter < float(CONFIG.get('videodiff_error_min', 0.0)) or err_ter > float(CONFIG.get('videodiff_error_max', 100.0)):
-                raise RuntimeError(f"VideoDiff confidence out of bounds: error={err_ter:.2f} (allowed {CONFIG.get('videodiff_error_min')}..{CONFIG.get('videodiff_error_max')})")
-        else:
-            lang = 'jpn' if CONFIG['match_jpn_tertiary'] else None
-            results = run_audio_correlation_workflow(ref_file, ter_file, logger, CONFIG['scan_chunk_count'], CONFIG['scan_chunk_duration'], lang, role_tag='ter')
-            best = best_from_results(results, CONFIG['min_match_pct'])
-            if not best:
-                raise RuntimeError('Audio analysis for Tertiary yielded no valid result.')
-            delay_ter = best['delay']
-        _log(logger, f'Tertiary delay: {delay_ter} ms')
-    if dpg.does_item_exist('sec_delay_val'):
-        dpg.set_value('sec_delay_val', format_delay_ms(delay_sec))
-    if dpg.does_item_exist('ter_delay_val'):
-        dpg.set_value('ter_delay_val', format_delay_ms(delay_ter))
-    if CONFIG['workflow'] == 'Analyze Only':
-        set_status('Analysis complete (no merge).')
-        set_progress(1.0)
-        return {'status': 'Analyzed', 'delay_sec': delay_sec, 'delay_ter': delay_ter}
-    delays['secondary_ms'] = int(delay_sec or 0)
-    delays['tertiary_ms'] = int(delay_ter or 0)
-    present = [0]
-    if sec_file is not None and delay_sec is not None:
-        present.append(int(delay_sec))
-    if ter_file is not None and delay_ter is not None:
-        present.append(int(delay_ter))
-    min_delay = min(present) if present else 0
-    global_shift = -min_delay if min_delay < 0 else 0
-    delays['_global_shift'] = int(global_shift)
-    _log(logger, f'[Delay] Raw group delays (ms): ref=0, sec={int(delay_sec or 0)}, ter={int(delay_ter or 0)}')
-    _log(logger, f'[Delay] Lossless global shift: +{int(global_shift)} ms')
-    job_temp = Path(CONFIG['temp_root']) / f'job_{Path(ref_file).stem}_{int(time.time())}'
-    job_temp.mkdir(parents=True, exist_ok=True)
-    merge_ok = False
-    try:
-        set_status('Preparing merge…')
-        set_progress(0.05)
-        chapters_xml = None
-        if CONFIG['rename_chapters']:
-            chapters_xml = rename_chapters_xml(ref_file, str(job_temp), logger, shift_ms=int(delays.get('_global_shift', 0)))
-        ref_tracks = extract_tracks(ref_file, str(job_temp), logger, role='ref', all_tracks=True)
-        sec_tracks = extract_tracks(sec_file, str(job_temp), logger, role='sec', audio=True, subs=True) if sec_file else []
-        ter_tracks = extract_tracks(ter_file, str(job_temp), logger, role='ter', audio=False, subs=True) if ter_file else []
-        ter_atts = extract_attachments(ter_file, str(job_temp), logger, role='ter') if ter_file else []
-        if CONFIG['swap_subtitle_order'] and sec_tracks:
-            only_subs = [t for t in sec_tracks if t['type'] == 'subtitles']
-            if len(only_subs) >= 2:
-                i0, i1 = (sec_tracks.index(only_subs[0]), sec_tracks.index(only_subs[1]))
-                sec_tracks[i0], sec_tracks[i1] = (sec_tracks[i1], sec_tracks[i0])
-        if not sec_tracks and (not ter_tracks):
-            raise RuntimeError('No tracks to merge from Secondary/Tertiary.')
-        plan = build_plan(ref_tracks, sec_tracks, ter_tracks, delays)
-        out_file = str(Path(out_dir) / Path(ref_file).name)
-        track_order_str, summary_lines = summarize_plan(plan, out_file, chapters_xml, ter_atts)
-        for ln in summary_lines:
-            _log(logger, ln)
-        tokens = build_mkvmerge_tokens(plan, out_file, chapters_xml, ter_atts, track_order_str=track_order_str)
-        json_opts = write_mkvmerge_json_options(tokens, job_temp / 'opts.json', logger)
-        set_status('Merging…')
-        set_progress(0.5)
-        merge_ok = run_mkvmerge_with_json(json_opts, logger)
-        if not merge_ok:
-            raise RuntimeError('mkvmerge failed.')
-        set_status('Merge complete.')
-        set_progress(1.0)
-        _log(logger, f'[OK] Output: {out_file}')
-        return {'status': 'Merged', 'output': out_file, 'delay_sec': delay_sec, 'delay_ter': delay_ter}
-    finally:
-        if merge_ok or CONFIG['workflow'] == 'Analyze Only':
-            try:
-                shutil.rmtree(job_temp, ignore_errors=True)
-            except Exception:
-                pass
 
 def _probe_keyframes_ns(ref_video_path: str, shift_ms: int, logger) -> list[int]:
     """Return sorted keyframe timestamps in nanoseconds, already shifted by shift_ms."""
@@ -1008,91 +498,6 @@ def _probe_keyframes_ns(ref_video_path: str, shift_ms: int, logger) -> list[int]
     kfs_ns.sort()
     _log(logger, f'[Chapters] Keyframes loaded: {len(kfs_ns)}')
     return kfs_ns
-
-def _snap_chapter_times_inplace(root, keyframes_ns: list[int], starts_only: bool, mode: str, threshold_ms: int, logger, sidecar_path: str | None, global_shift_ms: int):
-    """Modify ChapterTimeStart/End in-place to keyframes per options. Write a sidecar JSON for revert."""
-
-    def _parse_ns(t: str) -> int:
-        t = t.strip()
-        hh, mm, rest = t.split(':')
-        if '.' in rest:
-            ss, frac = rest.split('.')
-            frac = (frac + '000000000')[:9]
-        else:
-            ss, frac = (rest, '000000000')
-        return (int(hh) * 3600 + int(mm) * 60 + int(ss)) * 1000000000 + int(frac)
-
-    def _fmt_ns(total_ns: int) -> str:
-        if total_ns < 0:
-            total_ns = 0
-        ns = total_ns % 1000000000
-        total_s = total_ns // 1000000000
-        hh2 = total_s // 3600
-        mm2 = total_s % 3600 // 60
-        ss2 = total_s % 60
-        return f'{hh2:02d}:{mm2:02d}:{ss2:02d}.{ns:09d}'
-    threshold_ns = max(0, int(threshold_ms)) * 1000000
-    changed = 0
-    records = []
-
-    def _pick(ts_ns: int) -> tuple[int, int]:
-        """Return (snapped_ns, delta_ns)."""
-        if not keyframes_ns:
-            return (ts_ns, 0)
-        i = bisect.bisect_right(keyframes_ns, ts_ns)
-        prev_kf = keyframes_ns[i - 1] if i > 0 else keyframes_ns[0]
-        if mode == 'previous':
-            snap = prev_kf if prev_kf <= ts_ns else keyframes_ns[0]
-        else:
-            next_kf = keyframes_ns[i] if i < len(keyframes_ns) else keyframes_ns[-1]
-            snap = prev_kf if abs(prev_kf - ts_ns) <= abs(next_kf - ts_ns) else next_kf
-        if abs(snap - ts_ns) > threshold_ns:
-            return (ts_ns, 0)
-        return (snap, snap - ts_ns)
-    atoms = list(root.findall('.//ChapterAtom'))
-    for idx, atom in enumerate(atoms, start=1):
-        st = atom.find('ChapterTimeStart')
-        en = atom.find('ChapterTimeEnd')
-        rec = {'index': idx}
-        if st is not None and st.text:
-            orig = _parse_ns(st.text)
-            snap = orig
-            if keyframes_ns:
-                snap, delta = _pick(orig)
-            else:
-                delta = 0
-            rec['shifted_start_ns'] = orig
-            rec['snapped_start_ns'] = snap
-            rec['delta_start_ns'] = delta
-            if delta != 0:
-                st.text = _fmt_ns(snap)
-                changed += 1
-            if not starts_only and en is not None and en.text:
-                e_orig = _parse_ns(en.text)
-                e_snap, e_delta = _pick(e_orig)
-                rec['shifted_end_ns'] = e_orig
-                rec['snapped_end_ns'] = e_snap
-                rec['delta_end_ns'] = e_delta
-                if e_delta != 0:
-                    en.text = _fmt_ns(e_snap)
-                    changed += 1
-            if en is not None and en.text:
-                try:
-                    e_now = _parse_ns(en.text)
-                    s_now = _parse_ns(st.text)
-                    if e_now <= s_now:
-                        en.text = _fmt_ns(s_now + 1000000)
-                except Exception:
-                    pass
-        records.append(rec)
-    _log(logger, f'[Chapters] Snapped chapters: {changed}/{len(atoms)} (mode={mode}, threshold={threshold_ms} ms, starts_only={starts_only})')
-    if sidecar_path:
-        try:
-            with open(sidecar_path, 'w', encoding='utf-8') as f:
-                json.dump({'global_shift_ms': int(global_shift_ms), 'mode': mode, 'threshold_ms': int(threshold_ms), 'starts_only': bool(starts_only), 'chapters': records}, f, indent=2)
-            _log(logger, f'[Chapters] Sidecar written: {sidecar_path}')
-        except Exception as e:
-            _log(logger, f'[WARN] Sidecar write failed: {e}')
 
 def set_status(msg):
     if dpg.does_item_exist('status_text'):
@@ -1567,4 +972,3 @@ def _vsg_log_merge_summary_from_opts(logger, opts_path: str):
     _log(logger, f"Options file: {opts_path}")
     _log(logger, "====================")
 # --- END_INJECT_MERGE_SUMMARY ---
-
