@@ -1,13 +1,32 @@
-"""
-This module is a *thin wrapper* around the existing monolith `video_sync_gui.py`.
-It simply re-exports functions/objects 1:1 so behavior is identical.
-In the next step, we'll *move* the implementations here and update imports in the GUI.
-
-Do NOT edit logic here yet—this is a move-only scaffolding for safe modularization.
-"""
+# Moved from video_sync_gui.py — mux.run (Phase C, move-only)
 from __future__ import annotations
-# Import from the current monolith
-import importlib
-_monolith = importlib.import_module("video_sync_gui")
-write_mkvmerge_json_options = _monolith.write_mkvmerge_json_options
-run_mkvmerge_with_json = _monolith.run_mkvmerge_with_json
+from typing import Any, Dict, List, Tuple
+import json, os, subprocess, logging
+from vsg.logbus import _log
+
+def write_mkvmerge_json_options(tokens: List[str], json_path: Path, logger) -> str:
+    json_path = Path(json_path)
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    raw_json = json.dumps(tokens, ensure_ascii=False)
+    json_path.write_text(raw_json, encoding='utf-8')
+    pretty_path = json_path.parent / 'opts.pretty.txt'
+    pretty_txt = ' \\n  '.join(tokens)
+    pretty_path.write_text(pretty_txt, encoding='utf-8')
+    _log(logger, f'@JSON options written: {json_path}')
+    if CONFIG.get('log_show_options_pretty', False):
+        _log(logger, '[OPTIONS] mkvmerge tokens (pretty):')
+        for line in pretty_txt.splitlines():
+            _log(logger, '  ' + line)
+    if CONFIG.get('log_show_options_json', False):
+        _log(logger, '[OPTIONS] mkvmerge tokens (raw JSON array):')
+        for i in range(0, len(raw_json), 512):
+            _log(logger, raw_json[i:i + 512])
+    return str(json_path)
+
+
+
+def run_mkvmerge_with_json(json_path: str, logger) -> bool:
+    out = run_command(['mkvmerge', f'@{json_path}'], logger)
+    return out is not None
+
+

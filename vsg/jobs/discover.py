@@ -1,12 +1,28 @@
-"""
-This module is a *thin wrapper* around the existing monolith `video_sync_gui.py`.
-It simply re-exports functions/objects 1:1 so behavior is identical.
-In the next step, we'll *move* the implementations here and update imports in the GUI.
-
-Do NOT edit logic here yet—this is a move-only scaffolding for safe modularization.
-"""
+# Moved from video_sync_gui.py — jobs.discover (Phase C, move-only)
 from __future__ import annotations
-# Import from the current monolith
-import importlib
-_monolith = importlib.import_module("video_sync_gui")
-discover_jobs = _monolith.discover_jobs
+from typing import Any, Dict, List, Tuple
+import os, re, json
+from vsg.logbus import _log
+
+def discover_jobs(ref_path, sec_path, ter_path):
+    ref = Path(ref_path) if ref_path else None
+    sec = Path(sec_path) if sec_path else None
+    ter = Path(ter_path) if ter_path else None
+    if not ref or not ref.exists():
+        raise RuntimeError('Reference path must exist.')
+    if ref.is_file():
+        return [(str(ref), str(sec) if sec and sec.is_file() else None, str(ter) if ter and ter.is_file() else None)]
+    if sec and sec.is_file() or (ter and ter.is_file()):
+        raise RuntimeError('If Reference is a folder, Secondary/Tertiary must be folders too.')
+    jobs = []
+    for f in sorted(ref.iterdir()):
+        if f.is_file():
+            s = sec / f.name if sec else None
+            t = ter / f.name if ter else None
+            s_ok = str(s) if s and s.exists() and s.is_file() else None
+            t_ok = str(t) if t and t.exists() and t.is_file() else None
+            if s_ok or t_ok:
+                jobs.append((str(f), s_ok, t_ok))
+    return jobs
+
+
