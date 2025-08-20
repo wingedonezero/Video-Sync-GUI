@@ -2,6 +2,7 @@
 from __future__ import annotations
 from datetime import datetime
 import logging, queue
+import dearpygui.dearpygui as dpg
 LOG_Q: "queue.Queue[str]" = queue.Queue()
 
 def _log(logger, message: str):
