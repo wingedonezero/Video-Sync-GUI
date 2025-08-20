@@ -1,9 +1,11 @@
 # Logging queue & helpers (moved)
 from __future__ import annotations
+from vsg.settings import CONFIG
 from datetime import datetime
 import logging, queue
 import dearpygui.dearpygui as dpg
 LOG_Q: "queue.Queue[str]" = queue.Queue()
+from .settings import CONFIG
 
 def _log(logger, message: str):
     ts = datetime.now().strftime('%H:%M:%S')
