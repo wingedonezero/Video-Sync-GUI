@@ -23,7 +23,8 @@ def pump_logs():
             ln = LOG_Q.get_nowait()
             if dpg.does_item_exist('log_scroller'):
                 dpg.add_text(ln, parent='log_scroller')
-                if dpg.does_item_exist('log_child') and CONFIG.get('log_autoscroll', True):
+                autoscroll = bool(globals().get('CONFIG', {})).__class__ is bool and globals().get('CONFIG', {}).get('log_autoscroll', True) if isinstance(globals().get('CONFIG', {}), dict) else True
+    if dpg.does_item_exist('log_child') and autoscroll:
                     try:
                         maxy = dpg.get_y_scroll_max('log_child')
                         dpg.set_y_scroll('log_child', maxy)
