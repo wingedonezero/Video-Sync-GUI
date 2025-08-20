@@ -1,5 +1,6 @@
-# Logging queue & helpers (Phase A — robust, accepts old/new _log signatures)
+# Logging queue & helpers (robust, black-formatted)
 from __future__ import annotations
+
 from datetime import datetime
 import logging
 import queue
@@ -10,13 +11,20 @@ import dearpygui.dearpygui as dpg
 LOG_Q: "queue.Queue[str]" = queue.Queue()
 
 def _log(*args) -> None:
-    """Accepts (_msg) or (logger, _msg) for compatibility."""
-    if len(args) == 1:
-        msg = args[0]
-    else:
-        msg = args[1]
+    """
+    Enqueue a log line with a timestamp; never raise.
+    Accepts either _log("msg") or _log(logger, "msg") for legacy calls.
+    """
+    if not args:
+        return
+    # Support legacy (logger, msg) signature
+    msg = args[-1]
+    try:
+        text = str(msg)
+    except Exception:
+        text = "<unprintable log message>"
     ts = datetime.now().strftime("%H:%M:%S")
-    line = f"[{ts}] {msg}"
+    line = f"[{ts}] {text}"
     try:
         LOG_Q.put(line)
     except Exception:
@@ -43,7 +51,10 @@ def _dpg_exists(item_id: str) -> bool:
         return False
 
 def pump_logs() -> None:
-    """Drain LOG_Q and render into DPG widgets if present."""
+    """
+    Drain LOG_Q and render into DPG widgets if present.
+    Safe to call before CONFIG/UI are initialized.
+    """
     autoscroll = _autoscroll_pref()
     has_child = _dpg_exists("log_child")
     rendered_any = False

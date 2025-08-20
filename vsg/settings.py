@@ -1,11 +1,11 @@
 # Moved from video_sync_gui.py (Phase A, move-only)
 from __future__ import annotations
-from vsg.logbus import LOG_Q, _log
 import json
 from pathlib import Path
 from datetime import datetime
 import dearpygui.dearpygui as dpg
 import logging, queue, re, os, shutil, subprocess, sys
+from vsg.logbus import LOG_Q, _log
 from typing import Any, Dict
 SCRIPT_DIR = Path(__file__).resolve().parent.parent
 SETTINGS_PATH = SCRIPT_DIR / 'settings_gui.json'

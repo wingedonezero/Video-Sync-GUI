@@ -1,83 +1,140 @@
-    # External tool runners (robust) — consolidated bundle
+    # External tool runners (modularized, robust, black-formatted)
     from __future__ import annotations
-    import os, shutil, subprocess, logging, re, time
-    from typing import Dict, List, Optional
+
+    import logging
+    import os
+    import re
+    import shutil
+    import subprocess
+    import time
+    from pathlib import Path
+    from typing import Dict, Optional
+
     from vsg.logbus import _log
 
+    # Absolute paths to resolved tools after find_required_tools()
     ABS: Dict[str, str] = {}
 
     REQUIRED = ["ffmpeg", "ffprobe", "mkvmerge", "mkvextract"]
-    OPTIONAL = ["videodiff"]  # needed only in VideoDiff mode
+    OPTIONAL = ["videodiff"]  # optional when running Audio Correlation mode
+
+    def _resolve_in_cwd(name: str) -> Optional[str]:
+        exe = Path(os.getcwd()) / name
+        if exe.exists() and os.access(exe, os.X_OK):
+            return str(exe.resolve())
+        # Try with common Windows extension names just in case
+        for ext in (".exe", ".bat", ".cmd"):
+            exe2 = Path(os.getcwd()) / f"{name}{ext}"
+            if exe2.exists() and os.access(exe2, os.X_OK):
+                return str(exe2.resolve())
+        return None
+
+    def _resolve_with_overrides(name: str) -> Optional[str]:
+        # Allow config-driven override like videodiff_path, ffmpeg_path, etc.
+        try:
+            from vsg.settings import CONFIG  # lazy import to avoid circulars
+        except Exception:
+            CONFIG = {}
+
+        override_key = f"{name}_path"
+        override = CONFIG.get(override_key) if isinstance(CONFIG, dict) else None
+        if override:
+            p = Path(override)
+            if p.exists() and os.access(p, os.X_OK):
+                return str(p.resolve())
+        return None
 
     def _resolve_tool(name: str) -> Optional[str]:
         # 1) PATH
-        p = shutil.which(name)
-        if p:
-            return p
-        # 2) current working dir
-        cwd_path = os.path.join(os.getcwd(), name)
-        if os.path.isfile(cwd_path) and os.access(cwd_path, os.X_OK):
-            return os.path.abspath(cwd_path)
-        # 3) settings override
-        try:
-            from vsg.settings import CONFIG
-            override_key = f"{name}_path"
-            if isinstance(CONFIG, dict):
-                ov = CONFIG.get(override_key)
-                if ov and os.path.isfile(ov) and os.access(ov, os.X_OK):
-                    return os.path.abspath(ov)
-        except Exception:
-            pass
+        path = shutil.which(name)
+        if path:
+            return str(Path(path).resolve())
+        # 2) Current working directory (drop a local binary like ./videodiff)
+        path = _resolve_in_cwd(name)
+        if path:
+            return path
+        # 3) Settings override
+        path = _resolve_with_overrides(name)
+        if path:
+            return path
         return None
 
     def find_required_tools() -> bool:
         """
-        Populate ABS[...] with absolute paths. Returns True if all REQUIRED are found.
+        Resolve tool absolute paths and populate ABS.
+        Returns True if all REQUIRED are found, else False.
         """
-        ok = True
-        for nm in REQUIRED + OPTIONAL:
-            path = _resolve_tool(nm)
-            if path:
-                ABS[nm] = path
-            else:
-                if nm in REQUIRED:
-                    ok = False
-        missing_req = [n for n in REQUIRED if n not in ABS]
-        if missing_req:
-            _log(f"Missing tools: {', '.join(missing_req)}")
-        else:
-            _log("All required tools found.")
-        # Optional notice
-        if "videodiff" not in ABS:
-            _log("Optional tool not found: videodiff (only needed in VideoDiff mode)")
-        return ok
+        missing = []
+        for name in REQUIRED:
+            path = _resolve_tool(name)
+            if not path:
+                missing.append(name)
+                continue
+            ABS[name] = path
 
-    def run_command(args: List[str], log_cmd: Optional[str] = None) -> int:
+        # Optional tools
+        for name in OPTIONAL:
+            path = _resolve_tool(name)
+            if path:
+                ABS[name] = path
+
+        if missing:
+            _log(f"Missing tools: {', '.join(missing)}")
+            return False
+
+        # Nice summary
+        for k, v in ABS.items():
+            _log(f"Tool resolved: {k} -> {v}")
+        return True
+
+    def run_command(cmd: list[str], log_prefix: str = "$ ", progress_pattern: str = r"Progress:\s*(\d+)%") -> int:
         """
-        Run a command, compact logging similar to the monolith.
-        - args: full argv (use ABS[...] for known tools)
-        - log_cmd: if provided, displayed instead of args
+        Run a subprocess with compact logging.
+        - Logs the command once, prefixed with `$ `.
+        - Throttles repeated progress lines (e.g., 'Progress: 12%').
+        - Streams stderr and stdout to the GUI log.
+        Returns the process return code.
         """
-        display = log_cmd or " ".join(args)
-        _log(f"$ {display}")
         try:
-            proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True)
-        except FileNotFoundError:
-            _log("Command not found.")
-            return 127
-        last_progress = 0.0
-        prog_re = re.compile(r"(?:frame|size|time|speed|Progress)")
-        if proc.stdout:
-            for line in proc.stdout:
-                line = line.rstrip("
+            printable = " ".join(cmd)
+            _log(f"{log_prefix}{printable}")
+        except Exception:
+            pass
+
+        prog_re = re.compile(progress_pattern)
+        last_prog = None
+        rc = 0
+
+        try:
+            with subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                bufsize=1,
+                universal_newlines=True,
+            ) as proc:
+                assert proc.stdout is not None
+                for line in proc.stdout:
+                    line = line.rstrip("
 ")
-                # Throttle very noisy progress lines
-                if prog_re.search(line):
-                    now = time.time()
-                    if now - last_progress < 0.25:
+                    m = prog_re.search(line)
+                    if m:
+                        prog = m.group(1)
+                        if prog != last_prog:
+                            _log(f"Progress: {prog}%")
+                            last_prog = prog
                         continue
-                    last_progress = now
-                _log(line)
-        rc = proc.wait()
-        _log(f"[exit {rc}]")
+                    if line:
+                        _log(line)
+                proc.wait()
+                rc = int(proc.returncode or 0)
+        except FileNotFoundError as e:
+            _log(f"Command not found: {e}")
+            return 127
+        except Exception as e:
+            _log(f"Command failed to start: {e}")
+            return 1
+
+        if rc != 0:
+            _log(f"Process exited with code {rc}")
         return rc

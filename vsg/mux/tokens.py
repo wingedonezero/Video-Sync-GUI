@@ -1,8 +1,12 @@
 """
-vsg.mux.tokens — wrapper delegating to monolith to ensure parity.
+vsg.mux.tokens — FIXED WRAPPER
+Use the implementations from the monolith to avoid extraction/indent issues,
+while keeping the vsg import surface stable.
 """
 from __future__ import annotations
 from importlib import import_module
+from vsg.logbus import _log
+
 _monolith = import_module("video_sync_gui")
 
 def _tokens_for_track(*args, **kwargs):
