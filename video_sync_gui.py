@@ -35,6 +35,23 @@ from typing import Any, Dict, List, Optional
 import librosa
 import numpy as np
 import scipy.signal
+# --- purge inline settings row created by older builds ---
+def _remove_inline_settings_row():
+    try:
+        # These were the tags used for the old header controls
+        for tag in ('mode_combo', 'workflow_combo', 'chunks_input', 'chunkdur_input', 'thresh_input',
+                    'vd_err_min', 'vd_err_max', 'out_input', 'temp_input'):
+            if dpg.does_item_exist(tag):
+                try: dpg.delete_item(tag)
+                except Exception: pass
+    except Exception:
+        pass
+try:
+    dpg.set_frame_callback(20, _remove_inline_settings_row)
+except Exception:
+    pass
+# --- end purge ---
+
 import dearpygui.dearpygui as dpg
 
 UI_FONT_ID = None
@@ -206,47 +223,19 @@ def on_click_load_settings():
 
 
 def sync_config_from_ui():
-    """Pull current values from UI into CONFIG; ensure folders exist."""
-    if not dpg.does_item_exist('out_input'):
-        return
-    CONFIG.update(
-        {'output_folder': dpg.get_value('out_input') or CONFIG.get('output_folder', str(SCRIPT_DIR / 'sync_output')),
-         'temp_root': dpg.get_value('temp_input') or CONFIG.get('temp_root', str(SCRIPT_DIR / 'temp_work')),
-         'analysis_mode': dpg.get_value('mode_combo') or CONFIG.get('analysis_mode', 'Audio Correlation'),
-         'workflow': dpg.get_value('workflow_combo') or CONFIG.get('workflow', 'Analyze & Merge'),
-         'scan_chunk_count': int(dpg.get_value('chunks_input')) if dpg.does_item_exist('chunks_input') else CONFIG.get(
-             'scan_chunk_count', 10),
-         'scan_chunk_duration': int(dpg.get_value('chunkdur_input')) if dpg.does_item_exist(
-             'chunkdur_input') else CONFIG.get('scan_chunk_duration', 15),
-         'min_match_pct': float(dpg.get_value('thresh_input')) if dpg.does_item_exist('thresh_input') else CONFIG.get(
-             'min_match_pct', 5.0),
-         'videodiff_error_min': float(dpg.get_value('vd_err_min')) if dpg.does_item_exist('vd_err_min') else CONFIG.get(
-             'videodiff_error_min', 0.0),
-         'videodiff_error_max': float(dpg.get_value('vd_err_max')) if dpg.does_item_exist('vd_err_max') else CONFIG.get(
-             'videodiff_error_max', 100.0),
-         'swap_subtitle_order': bool(dpg.get_value('swapsec_chk')) if dpg.does_item_exist(
-             'swapsec_chk') else CONFIG.get('swap_subtitle_order', False),
-         'rename_chapters': bool(dpg.get_value('chaprename_chk')) if dpg.does_item_exist(
-             'chaprename_chk') else CONFIG.get('rename_chapters', False),
-         'match_jpn_secondary': bool(dpg.get_value('jpnsec_chk')) if dpg.does_item_exist('jpnsec_chk') else CONFIG.get(
-             'match_jpn_secondary', True),
-         'match_jpn_tertiary': bool(dpg.get_value('jpnter_chk')) if dpg.does_item_exist('jpnter_chk') else CONFIG.get(
-             'match_jpn_tertiary', True),
-         'apply_dialog_norm_gain': bool(dpg.get_value('dialnorm_chk')) if dpg.does_item_exist(
-             'dialnorm_chk') else CONFIG.get('apply_dialog_norm_gain', False),
-         'first_sub_default': bool(dpg.get_value('firstsubdef_chk')) if dpg.does_item_exist(
-             'firstsubdef_chk') else CONFIG.get('first_sub_default', True),
-         'videodiff_path': dpg.get_value('vdiff_input') if dpg.does_item_exist('vdiff_input') else CONFIG.get(
-             'videodiff_path', ''), 'snap_chapters': bool(dpg.get_value('snap_chapters_chk')) if dpg.does_item_exist(
-            'snap_chapters_chk') else CONFIG.get('snap_chapters', False),
-         'snap_mode': dpg.get_value('snap_mode_opt') if dpg.does_item_exist('snap_mode_opt') else CONFIG.get(
-             'snap_mode', 'previous'),
-         'snap_threshold_ms': int(dpg.get_value('snap_threshold_ms')) if dpg.does_item_exist(
-             'snap_threshold_ms') else CONFIG.get('snap_threshold_ms', 250),
-         'snap_starts_only': bool(dpg.get_value('snap_starts_only_chk')) if dpg.does_item_exist(
-             'snap_starts_only_chk') else CONFIG.get('snap_starts_only', True)})
-    Path(CONFIG['output_folder']).mkdir(parents=True, exist_ok=True)
-    Path(CONFIG['temp_root']).mkdir(parents=True, exist_ok=True)
+    """Pull only file path inputs into CONFIG; all other options come from Preferences (CONFIG)."""
+    # Reference / Secondary / Tertiary paths from the main inputs
+    try:
+        if dpg.does_item_exist('ref_input'):
+            CONFIG['ref_path'] = dpg.get_value('ref_input') or CONFIG.get('ref_path', '')
+        if dpg.does_item_exist('sec_input'):
+            CONFIG['sec_path'] = dpg.get_value('sec_input') or CONFIG.get('sec_path', '')
+        if dpg.does_item_exist('ter_input'):
+            CONFIG['ter_path'] = dpg.get_value('ter_input') or CONFIG.get('ter_path', '')
+    except Exception:
+        pass
+    # Do NOT overwrite options managed by Preferences modal (storage, analysis, logging, etc.).
+    # Directories are ensured by settings_core when loading/saving.
 
 
 def get_stream_info(mkv_path: str, logger) -> Optional[Dict[str, Any]]:
