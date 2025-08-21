@@ -114,22 +114,19 @@ def build_options_modal():
 
             # Analysis
             with dpg.tab(label="Analysis"):
-                _row_combo("Workflow", "op_workflow", "workflow",
-                           ["Analyze & Merge", "Analyze Only"],
+                _row_combo("Workflow", "op_workflow", "workflow", ["Analyze & Merge", "Analyze Only"],
                            tip="Analyze only vs analyze+merge.")
-                _row_combo("Mode", "op_mode", "analysis_mode",
-                           ["audio_xcorr", "videodiff"],
-                           tip="Audio cross-correlation estimates offsets from waveforms; VideoDiff compares frames.")
+                _row_combo("Mode", "op_mode", "analysis_mode", ["Audio Correlation", "VideoDiff"],
+                           tip="Audio vs Video analysis mode.")
                 _row_int("Scan chunk count", "op_scan_count", "scan_chunk_count", 1, 128, 1,
                          tip="Number of evenly spaced samples across the timeline.")
-                _row_float("Chunk duration (s)", "op_scan_dur", "scan_chunk_duration", 0.1,
-                           tip="Seconds per sampled segment.")
-                _row_float("Minimum match (0–1)", "op_min_match", "min_match_pct", 0.01,
-                           tip="Reject matches below this similarity threshold.")
-
-            # Global
+                _row_int("Chunk duration (s)", "op_scan_dur", "scan_chunk_duration", 1,
+                         tip="Seconds per sampled segment.")
+                _row_float("Minimum match %", "op_min_match", "min_match_pct", 0.1,
+                           tip="Reject matches below this percentage (e.g., 5 = 5%).")
 
             with dpg.tab(label="Global"):
+
                 _row_check("Rename chapters", "op_ren_chap", "rename_chapters",
                            tip="Normalize chapter titles based on language preference.")
                 _row_check("Prefer JPN audio on Secondary", "op_pref_jpn_sec", "prefer_jpn_secondary",
@@ -159,6 +156,7 @@ def build_options_modal():
                     dpg.add_button(label="Export…", callback=lambda *_: _export_settings_dialog())
 
 def show_options_modal():
+    load_settings()
     if not dpg.does_item_exist("options_modal"):
         build_options_modal()
     dpg.configure_item("options_modal", show=True)
