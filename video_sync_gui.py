@@ -700,193 +700,193 @@ def build_ui():
         except Exception:
             pass
     with dpg.window(tag='main_window', label=APP_NAME, width=1180, height=780):
-    with dpg.group(tag='header_options_row'):
-        dpg.add_button(tag='options_btn_main', label='Options…', callback=lambda *_: show_options_modal())
-            dpg.add_separator()
-            dpg.add_text('Inputs')
-            with dpg.group(horizontal=True):
-                dpg.add_button(label='Storage…', callback=lambda: dpg.configure_item('storage_modal', show=True))
-                dpg.add_button(label='Analysis Settings…', callback=lambda: dpg.configure_item('analysis_modal', show=True))
-                dpg.add_button(label='Global Options…', callback=lambda: dpg.configure_item('global_modal', show=True))
-            with dpg.group(horizontal=True):
-                dpg.add_text('Reference')
-                dpg.add_input_text(tag='ref_input', label='', width=900, multiline=False, height=40)
-                if INPUT_FONT_ID:
-                    dpg.bind_item_font('ref_input', INPUT_FONT_ID)
-                _safe_bind_input_enhancements('ref_input')
-                dpg.add_button(label='Browse…', callback=lambda: dpg.show_item('file_dialog_ref'))
-            with dpg.group(horizontal=True):
-                dpg.add_text('Secondary')
-                dpg.add_input_text(tag='sec_input', label='', width=900, multiline=False, height=40)
-                if INPUT_FONT_ID:
-                    dpg.bind_item_font('sec_input', INPUT_FONT_ID)
-                _safe_bind_input_enhancements('sec_input')
-                dpg.add_button(label='Browse…', callback=lambda: dpg.show_item('file_dialog_sec'))
-            with dpg.group(horizontal=True):
-                dpg.add_text('Tertiary')
-                dpg.add_input_text(tag='ter_input', label='', width=900, multiline=False, height=40)
-                if INPUT_FONT_ID:
-                    dpg.bind_item_font('ter_input', INPUT_FONT_ID)
-                _safe_bind_input_enhancements('ter_input')
-                dpg.add_button(label='Browse…', callback=lambda: dpg.show_item('file_dialog_ter'))
-            dpg.add_separator()
-            dpg.add_text('Settings')
-            with dpg.group(horizontal=True):
-                dpg.add_text('Workflow')
-                dpg.add_combo(tag='workflow_combo', items=['Analyze & Merge', 'Analyze Only'], default_value=CONFIG['workflow'], width=260)
-                _bind_control_theme('workflow_combo')
-                dpg.add_spacer(width=12)
-                dpg.add_text('Mode')
-                dpg.add_combo(tag='mode_combo', items=['Audio Correlation', 'VideoDiff'], default_value=CONFIG['analysis_mode'], width=260)
-                _bind_control_theme('mode_combo')
-            dpg.add_separator()
-            dpg.add_text('Actions')
-            with dpg.group(horizontal=True):
-                dpg.add_button(tag='btn_analyze_only', label='Analyze Only', callback=do_analyze_only, width=150, height=36)
-                _bind_control_theme('btn_analyze_only')
-                dpg.add_button(tag='btn_analyze_merge', label='Analyze & Merge', callback=do_analyze_and_merge, width=170, height=36)
-                _bind_control_theme('btn_analyze_merge')
-                dpg.add_progress_bar(tag='progress_bar', overlay='Progress', default_value=0.0, width=420, height=26)
-                _bind_control_theme('progress_bar')
-                dpg.add_text('Status:')
-                dpg.add_text(tag='status_text', default_value='')
-            dpg.add_separator()
-            dpg.add_text('Results (latest job)')
-            with dpg.group(horizontal=True):
-                dpg.add_text('Secondary delay:')
-                dpg.add_text(tag='sec_delay_val', default_value='—')
-                dpg.add_text('   |   ')
-                dpg.add_text('Tertiary delay:')
-                dpg.add_text(tag='ter_delay_val', default_value='—')
-            dpg.add_separator()
-            dpg.add_text('Log')
-            with dpg.child_window(tag='log_child', width=-1, height=320, horizontal_scrollbar=True):
-                dpg.add_child_window(tag='log_scroller', width=-1, height=-1)
-            with dpg.file_dialog(tag='file_dialog_ref', label='Pick Reference', callback=on_pick_file, user_data='ref_input', width=700, height=400, directory_selector=False, show=False):
-                dpg.add_file_extension('.*', color=(150, 255, 150, 255))
-            with dpg.file_dialog(tag='file_dialog_sec', label='Pick Secondary', callback=on_pick_file, user_data='sec_input', width=700, height=400, directory_selector=False, show=False):
-                dpg.add_file_extension('.*', color=(150, 255, 150, 255))
-            with dpg.file_dialog(tag='file_dialog_ter', label='Pick Tertiary', callback=on_pick_file, user_data='ter_input', width=700, height=400, directory_selector=False, show=False):
-                dpg.add_file_extension('.*', color=(150, 255, 150, 255))
-            with dpg.file_dialog(tag='dir_dialog_out', label='Pick Output Directory', callback=on_pick_dir, user_data='out_input', width=700, height=400, directory_selector=True, show=False):
-                pass
-            with dpg.file_dialog(tag='dir_dialog_temp', label='Pick Temp Directory', callback=on_pick_dir, user_data='temp_input', width=700, height=400, directory_selector=True, show=False):
-                pass
-            with dpg.file_dialog(tag='file_dialog_vdiff', label='Pick videodiff binary', callback=on_pick_file, user_data='vdiff_input', width=700, height=400, directory_selector=False, show=False):
-                dpg.add_file_extension('.*', color=(150, 255, 150, 255))
-            with dpg.window(tag='storage_modal', label='Storage Settings', modal=True, show=False, no_resize=False, width=800, height=300):
-                dpg.add_text('Set directories for temporary work and final outputs; optionally set videodiff path')
+        with dpg.group(tag='header_options_row'):
+            dpg.add_button(tag='options_btn_main', label='Options…', callback=lambda *_: show_options_modal())
                 dpg.add_separator()
+                dpg.add_text('Inputs')
                 with dpg.group(horizontal=True):
-                    dpg.add_text('Temp Directory')
-                    dpg.add_input_text(tag='temp_input', label='', default_value=CONFIG['temp_root'], width=600, multiline=False, height=40)
+                    dpg.add_button(label='Storage…', callback=lambda: dpg.configure_item('storage_modal', show=True))
+                    dpg.add_button(label='Analysis Settings…', callback=lambda: dpg.configure_item('analysis_modal', show=True))
+                    dpg.add_button(label='Global Options…', callback=lambda: dpg.configure_item('global_modal', show=True))
+                with dpg.group(horizontal=True):
+                    dpg.add_text('Reference')
+                    dpg.add_input_text(tag='ref_input', label='', width=900, multiline=False, height=40)
                     if INPUT_FONT_ID:
-                        dpg.bind_item_font('temp_input', INPUT_FONT_ID)
-                    _safe_bind_input_enhancements('temp_input')
-                    dpg.add_button(label='Browse…', callback=lambda: dpg.show_item('dir_dialog_temp'))
+                        dpg.bind_item_font('ref_input', INPUT_FONT_ID)
+                    _safe_bind_input_enhancements('ref_input')
+                    dpg.add_button(label='Browse…', callback=lambda: dpg.show_item('file_dialog_ref'))
                 with dpg.group(horizontal=True):
-                    dpg.add_text('Output Directory')
-                    dpg.add_input_text(tag='out_input', label='', default_value=CONFIG['output_folder'], width=600, multiline=False, height=40)
+                    dpg.add_text('Secondary')
+                    dpg.add_input_text(tag='sec_input', label='', width=900, multiline=False, height=40)
                     if INPUT_FONT_ID:
-                        dpg.bind_item_font('out_input', INPUT_FONT_ID)
-                    _safe_bind_input_enhancements('out_input')
-                    dpg.add_button(label='Browse…', callback=lambda: dpg.show_item('dir_dialog_out'))
+                        dpg.bind_item_font('sec_input', INPUT_FONT_ID)
+                    _safe_bind_input_enhancements('sec_input')
+                    dpg.add_button(label='Browse…', callback=lambda: dpg.show_item('file_dialog_sec'))
                 with dpg.group(horizontal=True):
-                    dpg.add_text('videodiff Path')
-                    dpg.add_input_text(tag='vdiff_input', label='', default_value=CONFIG.get('videodiff_path', ''), width=600, multiline=False, height=40)
+                    dpg.add_text('Tertiary')
+                    dpg.add_input_text(tag='ter_input', label='', width=900, multiline=False, height=40)
                     if INPUT_FONT_ID:
-                        dpg.bind_item_font('vdiff_input', INPUT_FONT_ID)
-                    _safe_bind_input_enhancements('vdiff_input')
-                    dpg.add_button(label='Browse…', callback=lambda: dpg.show_item('file_dialog_vdiff'))
+                        dpg.bind_item_font('ter_input', INPUT_FONT_ID)
+                    _safe_bind_input_enhancements('ter_input')
+                    dpg.add_button(label='Browse…', callback=lambda: dpg.show_item('file_dialog_ter'))
                 dpg.add_separator()
+                dpg.add_text('Settings')
                 with dpg.group(horizontal=True):
-                    dpg.add_button(label='Save', callback=lambda s, a, u: (ui_save_settings(), dpg.configure_item('storage_modal', show=False)))
-                    dpg.add_button(label='Cancel', callback=lambda: dpg.configure_item('storage_modal', show=False))
-            with dpg.window(tag='global_modal', label='Global Options', modal=True, show=False, no_resize=False, width=720, height=280):
-                dpg.add_text('Toggle global behaviors that affect extraction and merge')
-                dpg.add_separator()
-                with dpg.group(horizontal=True):
-                    dpg.add_text('Swap first 2 subtitles (Secondary only)')
-                    dpg.add_checkbox(tag='swapsec_chk', label='', default_value=bool(CONFIG['swap_subtitle_order']))
-                with dpg.group(horizontal=True):
-                    dpg.add_text('Rename chapters (Reference)')
-                    dpg.add_checkbox(tag='chaprename_chk', label='', default_value=bool(CONFIG['rename_chapters']))
-                with dpg.group(horizontal=True):
-                    dpg.add_text('Prefer JPN audio on Secondary')
-                    dpg.add_checkbox(tag='jpnsec_chk', label='', default_value=bool(CONFIG['match_jpn_secondary']))
-                with dpg.group(horizontal=True):
-                    dpg.add_text('Prefer JPN audio on Tertiary')
-                    dpg.add_checkbox(tag='jpnter_chk', label='', default_value=bool(CONFIG['match_jpn_tertiary']))
-                with dpg.group(horizontal=True):
-                    dpg.add_text('Remove dialog normalization (AC-3/E-AC-3)')
-                    dpg.add_checkbox(tag='dialnorm_chk', label='', default_value=bool(CONFIG['apply_dialog_norm_gain']))
-                with dpg.group(horizontal=True):
-                    dpg.add_text('Make first subtitle in final order the DEFAULT')
-                    dpg.add_checkbox(tag='firstsubdef_chk', label='', default_value=bool(CONFIG.get('first_sub_default', True)))
-                dpg.add_separator()
-                with dpg.group(horizontal=True):
-                    dpg.add_button(label='Save', callback=lambda s, a, u: (ui_save_settings(), dpg.configure_item('global_modal', show=False)))
-                    dpg.add_button(label='Cancel', callback=lambda: dpg.configure_item('global_modal', show=False))
-                dpg.add_separator()
-                dpg.add_text('Chapters / Keyframe snapping')
-                with dpg.group(horizontal=True):
-                    dpg.add_text('Snap chapters to keyframes')
-                    dpg.add_checkbox(tag='snap_chapters_chk', label='', default_value=bool(CONFIG.get('snap_chapters', False)))
-                with dpg.group(horizontal=True):
-                    dpg.add_text('Snap mode')
-                    dpg.add_combo(tag='snap_mode_opt', items=['previous', 'nearest'], default_value=CONFIG.get('snap_mode', 'previous'), width=140)
-                with dpg.group(horizontal=True):
-                    dpg.add_text('Max snap distance (ms)')
-                    dpg.add_input_int(tag='snap_threshold_ms', default_value=int(CONFIG.get('snap_threshold_ms', 250)), min_value=0, width=120)
-                with dpg.group(horizontal=True):
-                    dpg.add_text('Starts only')
-                    dpg.add_checkbox(tag='snap_starts_only_chk', label='', default_value=bool(CONFIG.get('snap_starts_only', True)))
-            with dpg.window(tag='analysis_modal', label='Analysis Settings', modal=True, show=False, no_resize=False, width=800, height=320):
-                dpg.add_text('Configure analysis parameters')
-                dpg.add_separator()
-                dpg.add_text('Audio Cross-Correlation')
-                with dpg.group(horizontal=True):
-                    dpg.add_text('Chunks')
-                    dpg.add_input_int(tag='chunks_input', label='', default_value=int(CONFIG['scan_chunk_count']), min_value=1, max_value=50, width=100)
+                    dpg.add_text('Workflow')
+                    dpg.add_combo(tag='workflow_combo', items=['Analyze & Merge', 'Analyze Only'], default_value=CONFIG['workflow'], width=260)
+                    _bind_control_theme('workflow_combo')
                     dpg.add_spacer(width=12)
-                    dpg.add_text('Chunk Dur (s)')
-                    dpg.add_input_int(tag='chunkdur_input', label='', default_value=int(CONFIG['scan_chunk_duration']), min_value=2, max_value=120, width=120)
-                    dpg.add_spacer(width=12)
-                    dpg.add_text('Min Match %')
-                    dpg.add_input_float(tag='thresh_input', label='', default_value=float(CONFIG['min_match_pct']), width=120)
-                dpg.add_text('VideoDiff')
-                with dpg.group(horizontal=True):
-                    dpg.add_text('Min error')
-                    dpg.add_input_float(tag='vd_err_min', label='', default_value=float(CONFIG.get('videodiff_error_min', 0.0)), width=100, format='%.2f')
-                    dpg.add_spacer(width=12)
-                    dpg.add_text('Max error')
-                    dpg.add_input_float(tag='vd_err_max', label='', default_value=float(CONFIG.get('videodiff_error_max', 100.0)), width=100, format='%.2f')
+                    dpg.add_text('Mode')
+                    dpg.add_combo(tag='mode_combo', items=['Audio Correlation', 'VideoDiff'], default_value=CONFIG['analysis_mode'], width=260)
+                    _bind_control_theme('mode_combo')
                 dpg.add_separator()
+                dpg.add_text('Actions')
                 with dpg.group(horizontal=True):
-                    dpg.add_button(label='Save', callback=lambda s, a, u: (ui_save_settings(), dpg.configure_item('analysis_modal', show=False)))
-                    dpg.add_button(label='Cancel', callback=lambda: dpg.configure_item('analysis_modal', show=False))
-        Path(CONFIG['output_folder']).mkdir(parents=True, exist_ok=True)
-        Path(CONFIG['temp_root']).mkdir(parents=True, exist_ok=True)
-        try:
-            apply_settings_to_ui()
-        except Exception as _e:
-            LOG_Q.put(f'[WARN] apply_settings_to_ui at build: {_e}')
-        dpg.create_viewport(title=APP_NAME, width=1200, height=820)
-        dpg.setup_dearpygui()
-        dpg.show_viewport()
-        dpg.set_primary_window('main_window', True)
-        last = time.time()
-        while dpg.is_dearpygui_running():
-            now = time.time()
-            if now - last > 0.1:
-                pump_logs()
-                last = now
-            dpg.render_dearpygui_frame()
-        dpg.destroy_context()
-    if __name__ == '__main__':
-        build_ui()
-    
-    # --- BEGIN_INJECT_MERGE_SUMMARY ---
+                    dpg.add_button(tag='btn_analyze_only', label='Analyze Only', callback=do_analyze_only, width=150, height=36)
+                    _bind_control_theme('btn_analyze_only')
+                    dpg.add_button(tag='btn_analyze_merge', label='Analyze & Merge', callback=do_analyze_and_merge, width=170, height=36)
+                    _bind_control_theme('btn_analyze_merge')
+                    dpg.add_progress_bar(tag='progress_bar', overlay='Progress', default_value=0.0, width=420, height=26)
+                    _bind_control_theme('progress_bar')
+                    dpg.add_text('Status:')
+                    dpg.add_text(tag='status_text', default_value='')
+                dpg.add_separator()
+                dpg.add_text('Results (latest job)')
+                with dpg.group(horizontal=True):
+                    dpg.add_text('Secondary delay:')
+                    dpg.add_text(tag='sec_delay_val', default_value='—')
+                    dpg.add_text('   |   ')
+                    dpg.add_text('Tertiary delay:')
+                    dpg.add_text(tag='ter_delay_val', default_value='—')
+                dpg.add_separator()
+                dpg.add_text('Log')
+                with dpg.child_window(tag='log_child', width=-1, height=320, horizontal_scrollbar=True):
+                    dpg.add_child_window(tag='log_scroller', width=-1, height=-1)
+                with dpg.file_dialog(tag='file_dialog_ref', label='Pick Reference', callback=on_pick_file, user_data='ref_input', width=700, height=400, directory_selector=False, show=False):
+                    dpg.add_file_extension('.*', color=(150, 255, 150, 255))
+                with dpg.file_dialog(tag='file_dialog_sec', label='Pick Secondary', callback=on_pick_file, user_data='sec_input', width=700, height=400, directory_selector=False, show=False):
+                    dpg.add_file_extension('.*', color=(150, 255, 150, 255))
+                with dpg.file_dialog(tag='file_dialog_ter', label='Pick Tertiary', callback=on_pick_file, user_data='ter_input', width=700, height=400, directory_selector=False, show=False):
+                    dpg.add_file_extension('.*', color=(150, 255, 150, 255))
+                with dpg.file_dialog(tag='dir_dialog_out', label='Pick Output Directory', callback=on_pick_dir, user_data='out_input', width=700, height=400, directory_selector=True, show=False):
+                    pass
+                with dpg.file_dialog(tag='dir_dialog_temp', label='Pick Temp Directory', callback=on_pick_dir, user_data='temp_input', width=700, height=400, directory_selector=True, show=False):
+                    pass
+                with dpg.file_dialog(tag='file_dialog_vdiff', label='Pick videodiff binary', callback=on_pick_file, user_data='vdiff_input', width=700, height=400, directory_selector=False, show=False):
+                    dpg.add_file_extension('.*', color=(150, 255, 150, 255))
+                with dpg.window(tag='storage_modal', label='Storage Settings', modal=True, show=False, no_resize=False, width=800, height=300):
+                    dpg.add_text('Set directories for temporary work and final outputs; optionally set videodiff path')
+                    dpg.add_separator()
+                    with dpg.group(horizontal=True):
+                        dpg.add_text('Temp Directory')
+                        dpg.add_input_text(tag='temp_input', label='', default_value=CONFIG['temp_root'], width=600, multiline=False, height=40)
+                        if INPUT_FONT_ID:
+                            dpg.bind_item_font('temp_input', INPUT_FONT_ID)
+                        _safe_bind_input_enhancements('temp_input')
+                        dpg.add_button(label='Browse…', callback=lambda: dpg.show_item('dir_dialog_temp'))
+                    with dpg.group(horizontal=True):
+                        dpg.add_text('Output Directory')
+                        dpg.add_input_text(tag='out_input', label='', default_value=CONFIG['output_folder'], width=600, multiline=False, height=40)
+                        if INPUT_FONT_ID:
+                            dpg.bind_item_font('out_input', INPUT_FONT_ID)
+                        _safe_bind_input_enhancements('out_input')
+                        dpg.add_button(label='Browse…', callback=lambda: dpg.show_item('dir_dialog_out'))
+                    with dpg.group(horizontal=True):
+                        dpg.add_text('videodiff Path')
+                        dpg.add_input_text(tag='vdiff_input', label='', default_value=CONFIG.get('videodiff_path', ''), width=600, multiline=False, height=40)
+                        if INPUT_FONT_ID:
+                            dpg.bind_item_font('vdiff_input', INPUT_FONT_ID)
+                        _safe_bind_input_enhancements('vdiff_input')
+                        dpg.add_button(label='Browse…', callback=lambda: dpg.show_item('file_dialog_vdiff'))
+                    dpg.add_separator()
+                    with dpg.group(horizontal=True):
+                        dpg.add_button(label='Save', callback=lambda s, a, u: (ui_save_settings(), dpg.configure_item('storage_modal', show=False)))
+                        dpg.add_button(label='Cancel', callback=lambda: dpg.configure_item('storage_modal', show=False))
+                with dpg.window(tag='global_modal', label='Global Options', modal=True, show=False, no_resize=False, width=720, height=280):
+                    dpg.add_text('Toggle global behaviors that affect extraction and merge')
+                    dpg.add_separator()
+                    with dpg.group(horizontal=True):
+                        dpg.add_text('Swap first 2 subtitles (Secondary only)')
+                        dpg.add_checkbox(tag='swapsec_chk', label='', default_value=bool(CONFIG['swap_subtitle_order']))
+                    with dpg.group(horizontal=True):
+                        dpg.add_text('Rename chapters (Reference)')
+                        dpg.add_checkbox(tag='chaprename_chk', label='', default_value=bool(CONFIG['rename_chapters']))
+                    with dpg.group(horizontal=True):
+                        dpg.add_text('Prefer JPN audio on Secondary')
+                        dpg.add_checkbox(tag='jpnsec_chk', label='', default_value=bool(CONFIG['match_jpn_secondary']))
+                    with dpg.group(horizontal=True):
+                        dpg.add_text('Prefer JPN audio on Tertiary')
+                        dpg.add_checkbox(tag='jpnter_chk', label='', default_value=bool(CONFIG['match_jpn_tertiary']))
+                    with dpg.group(horizontal=True):
+                        dpg.add_text('Remove dialog normalization (AC-3/E-AC-3)')
+                        dpg.add_checkbox(tag='dialnorm_chk', label='', default_value=bool(CONFIG['apply_dialog_norm_gain']))
+                    with dpg.group(horizontal=True):
+                        dpg.add_text('Make first subtitle in final order the DEFAULT')
+                        dpg.add_checkbox(tag='firstsubdef_chk', label='', default_value=bool(CONFIG.get('first_sub_default', True)))
+                    dpg.add_separator()
+                    with dpg.group(horizontal=True):
+                        dpg.add_button(label='Save', callback=lambda s, a, u: (ui_save_settings(), dpg.configure_item('global_modal', show=False)))
+                        dpg.add_button(label='Cancel', callback=lambda: dpg.configure_item('global_modal', show=False))
+                    dpg.add_separator()
+                    dpg.add_text('Chapters / Keyframe snapping')
+                    with dpg.group(horizontal=True):
+                        dpg.add_text('Snap chapters to keyframes')
+                        dpg.add_checkbox(tag='snap_chapters_chk', label='', default_value=bool(CONFIG.get('snap_chapters', False)))
+                    with dpg.group(horizontal=True):
+                        dpg.add_text('Snap mode')
+                        dpg.add_combo(tag='snap_mode_opt', items=['previous', 'nearest'], default_value=CONFIG.get('snap_mode', 'previous'), width=140)
+                    with dpg.group(horizontal=True):
+                        dpg.add_text('Max snap distance (ms)')
+                        dpg.add_input_int(tag='snap_threshold_ms', default_value=int(CONFIG.get('snap_threshold_ms', 250)), min_value=0, width=120)
+                    with dpg.group(horizontal=True):
+                        dpg.add_text('Starts only')
+                        dpg.add_checkbox(tag='snap_starts_only_chk', label='', default_value=bool(CONFIG.get('snap_starts_only', True)))
+                with dpg.window(tag='analysis_modal', label='Analysis Settings', modal=True, show=False, no_resize=False, width=800, height=320):
+                    dpg.add_text('Configure analysis parameters')
+                    dpg.add_separator()
+                    dpg.add_text('Audio Cross-Correlation')
+                    with dpg.group(horizontal=True):
+                        dpg.add_text('Chunks')
+                        dpg.add_input_int(tag='chunks_input', label='', default_value=int(CONFIG['scan_chunk_count']), min_value=1, max_value=50, width=100)
+                        dpg.add_spacer(width=12)
+                        dpg.add_text('Chunk Dur (s)')
+                        dpg.add_input_int(tag='chunkdur_input', label='', default_value=int(CONFIG['scan_chunk_duration']), min_value=2, max_value=120, width=120)
+                        dpg.add_spacer(width=12)
+                        dpg.add_text('Min Match %')
+                        dpg.add_input_float(tag='thresh_input', label='', default_value=float(CONFIG['min_match_pct']), width=120)
+                    dpg.add_text('VideoDiff')
+                    with dpg.group(horizontal=True):
+                        dpg.add_text('Min error')
+                        dpg.add_input_float(tag='vd_err_min', label='', default_value=float(CONFIG.get('videodiff_error_min', 0.0)), width=100, format='%.2f')
+                        dpg.add_spacer(width=12)
+                        dpg.add_text('Max error')
+                        dpg.add_input_float(tag='vd_err_max', label='', default_value=float(CONFIG.get('videodiff_error_max', 100.0)), width=100, format='%.2f')
+                    dpg.add_separator()
+                    with dpg.group(horizontal=True):
+                        dpg.add_button(label='Save', callback=lambda s, a, u: (ui_save_settings(), dpg.configure_item('analysis_modal', show=False)))
+                        dpg.add_button(label='Cancel', callback=lambda: dpg.configure_item('analysis_modal', show=False))
+            Path(CONFIG['output_folder']).mkdir(parents=True, exist_ok=True)
+            Path(CONFIG['temp_root']).mkdir(parents=True, exist_ok=True)
+            try:
+                apply_settings_to_ui()
+            except Exception as _e:
+                LOG_Q.put(f'[WARN] apply_settings_to_ui at build: {_e}')
+            dpg.create_viewport(title=APP_NAME, width=1200, height=820)
+            dpg.setup_dearpygui()
+            dpg.show_viewport()
+            dpg.set_primary_window('main_window', True)
+            last = time.time()
+            while dpg.is_dearpygui_running():
+                now = time.time()
+                if now - last > 0.1:
+                    pump_logs()
+                    last = now
+                dpg.render_dearpygui_frame()
+            dpg.destroy_context()
+        if __name__ == '__main__':
+            build_ui()
+        
+        # --- BEGIN_INJECT_MERGE_SUMMARY ---
 # Merge Summary helpers (logging-only utilities)
 def _vsg_tokenize_opts_json(path: str) -> list[str]:
     try:
