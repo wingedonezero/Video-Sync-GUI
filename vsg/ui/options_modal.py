@@ -3,37 +3,36 @@ from __future__ import annotations
 import dearpygui.dearpygui as dpg
 from vsg.settings_core import CONFIG, load_settings, save_settings, on_change, adopt_into_app, SETTINGS_PATH
 
-# Prefix all our tags to avoid collisions with any legacy widgets
+# All tags in this modal get a unique prefix to avoid any collisions
 PFX = "prefs_"
-WIN  = PFX + "options_modal"
+WIN = PFX + "options_modal"
 
-# -------- Legacy cleanup (no edit to video_sync_gui.py required)
+# -------------------- Safe legacy cleanup (no DPG calls at import) --------------------
 LEGACY_BUTTON_LABELS = {"Storage?", "Analysis Settings?", "Global Options?"}
 LEGACY_WINDOW_LABELS = {"Storage Settings", "Analysis Settings", "Global Options"}
+_purged_once = False
 
 def _purge_legacy_settings_ui():
+    global _purged_once
+    if _purged_once:
+        return
+    _purged_once = True
     try:
-        for item in dpg.get_all_items():
-            try:
-                lbl = dpg.get_item_label(item)
-            except Exception:
-                continue
-            if lbl in LEGACY_BUTTON_LABELS | LEGACY_WINDOW_LABELS:
-                try:
-                    dpg.delete_item(item)
-                except Exception:
-                    pass
+        items = dpg.get_all_items()
     except Exception:
-        # best effort only
-        pass
+        return  # context might not be ready; bail
+    for item in items:
+        try:
+            lbl = dpg.get_item_label(item)
+        except Exception:
+            continue
+        if lbl in LEGACY_BUTTON_LABELS or lbl in LEGACY_WINDOW_LABELS:
+            try:
+                dpg.delete_item(item)
+            except Exception:
+                pass
 
-# Schedule one-time cleanup a little after startup
-try:
-    dpg.set_frame_callback(30, _purge_legacy_settings_ui)
-except Exception:
-    pass
-
-# -------- Binder
+# -------------------- Binder --------------------
 class Binder:
     def __init__(self):
         self.map: dict[str, str] = {}
@@ -50,7 +49,6 @@ class Binder:
             _apply_mode_visibility()
 
     def refresh(self):
-        # Push CONFIG -> UI for all bound items
         for tag, key in self.map.items():
             if dpg.does_item_exist(tag):
                 try:
@@ -117,17 +115,15 @@ def _add_debug_group():
     with dpg.group(horizontal=True):
         dpg.add_button(label="Show Path", callback=lambda *_: dpg.log_info(str(SETTINGS_PATH)))
         dpg.add_button(label="Dump CONFIG", callback=lambda *_: dpg.log_info(str(CONFIG)))
-        dpg.add_button(label="Force Refresh", callback=lambda *_: (_purge_legacy_settings_ui(), B.refresh()))
+        dpg.add_button(label="Force Refresh", callback=lambda *_: (B.refresh()))
 
 def build_options_modal():
-    # Rebuild clean each time
     if dpg.does_item_exist(WIN):
         dpg.delete_item(WIN)
 
     with dpg.window(tag=WIN, label="Preferences", modal=True, show=False, width=980, height=660):
         with dpg.tab_bar():
 
-            # Storage
             with dpg.tab(label="Storage"):
                 _row_text("Output folder", PFX + "op_out", "output_folder",
                           hint="Where final MKVs are written.",
@@ -142,7 +138,6 @@ def build_options_modal():
                 _row_text("mkvextract path", PFX + "op_mkvextract", "mkvextract_path")
                 _row_text("VideoDiff path", PFX + "op_videodiff", "videodiff_path")
 
-            # Analysis
             with dpg.tab(label="Analysis"):
                 _row_combo("Workflow", PFX + "op_workflow", "workflow",
                            ["Analyze & Merge", "Analyze Only"],
@@ -163,7 +158,6 @@ def build_options_modal():
                     _row_float("Max error (VideoDiff)", PFX + "vd_err_max", "videodiff_error_max", 0.01,
                                tip="Stop if above this error.")
 
-            # Global
             with dpg.tab(label="Global"):
                 _row_check("Rename chapters", PFX + "op_rename_chapters", "rename_chapters",
                            tip="Rename chapters in the output.")
@@ -188,7 +182,6 @@ def build_options_modal():
                 _row_check("Starts only", PFX + "op_snap_starts", "snap_starts_only",
                            tip="Only snap chapter starts (not ends).")
 
-            # Logging
             with dpg.tab(label="Logging"):
                 _row_check("Compact subprocess log", PFX + "op_log_compact", "log_compact",
                            tip="Shorten repeated stdout/stderr lines from tools.")
@@ -205,7 +198,6 @@ def build_options_modal():
                 _row_check("Log autoscroll", PFX + "op_log_autoscroll", "log_autoscroll",
                            tip="Keep the log view pinned to the bottom while running.")
 
-            # Save / Load
             with dpg.tab(label="Save / Load"):
                 dpg.add_text("Persist, reload, or export all preferences.")
                 with dpg.group(horizontal=True):
@@ -225,7 +217,9 @@ def _export_settings_dialog():
         pass
 
 def show_options_modal():
+    # Ensure context exists and UI is built before we touch DPG
     load_settings(); adopt_into_app()
+    _purge_legacy_settings_ui()
     if not dpg.does_item_exist(WIN):
         build_options_modal()
     B.refresh()
