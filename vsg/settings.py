@@ -5,6 +5,15 @@ from pathlib import Path
 from vsg.logbus import _log
 
 DEFAULT_CONFIG = {
+    "log_autoscroll": True,
+    "log_show_options_json": False,
+    "log_show_options_pretty": False,
+    "log_progress_step": 20,
+    "log_error_tail": 20,
+    "log_tail_lines": 0,
+    "log_compact": True,
+    "chapter_snap_compact": True,
+    "chapter_snap_verbose": False,
     "output_folder": "/home/chaoz/Downloads/sync_output",
     "temp_root": "/home/chaoz/Downloads/temp_work",
     "analysis_mode": "Audio Correlation",

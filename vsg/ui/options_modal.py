@@ -6,6 +6,16 @@ from vsg.settings import CONFIG,DEFAULT_CONFIG,load_settings,save_settings
 from vsg.logbus import _log
 
 class Binder:
+    def refresh(self):
+        # push current CONFIG values into bound widgets
+        for tag, key in getattr(self, 'map', {}).items():
+            try:
+                import dearpygui.dearpygui as dpg
+                if dpg.does_item_exist(tag):
+                    dpg.set_value(tag, CONFIG.get(key, dpg.get_value(tag)))
+            except Exception:
+                pass
+
     def __init__(self): self.map = {}
     def bind(self, tag, key):
         self.map[tag] = key
@@ -148,12 +158,29 @@ def build_options_modal():
                 _row_check("Starts only", "op_snap_starts", "snap_starts_only",
                            tip="Only snap chapter starts (not ends).")
 
-            # Save / Load
+            # Logging
+            with dpg.tab(label="Logging"):
+                _row_check("Compact subprocess log", "op_log_compact", "log_compact",
+                           tip="Shorten repeated stdout/stderr lines from tools.")
+                _row_int("Tail lines (0=all)", "op_log_tail", "log_tail_lines", 0, 5000, 10,
+                         tip="How many lines to keep in memory.")
+                _row_int("Error tail lines", "op_log_err_tail", "log_error_tail", 0, 1000, 1,
+                         tip="When a command fails, how many trailing lines to display.")
+                _row_int("Progress step (%)", "op_log_prog_step", "log_progress_step", 1, 100, 1,
+                         tip="Emit a log update every N percent of work done.")
+                _row_check("Show Options (pretty)", "op_log_show_pretty", "log_show_options_pretty",
+                           tip="Print human-readable options blocks to the log.")
+                _row_check("Show Options (JSON)", "op_log_show_json", "log_show_options_json",
+                           tip="Print raw JSON options blocks to the log.")
+                _row_check("Log autoscroll", "op_log_autoscroll", "log_autoscroll",
+                           tip="Keep the log view pinned to the bottom while running.")
+
+# Save / Load
             with dpg.tab(label="Save / Load"):
                 dpg.add_text("Persist or import/export all preferences.")
                 dpg.add_spacer(height=6)
                 with dpg.group(horizontal=True):
-                    dpg.add_button(label="Save", callback=lambda *_: save_settings())
+                    dpg.add_button(label="Save", callback=lambda *_: (save_settings()), width=120)
                     dpg.add_button(label="Load…", callback=lambda *_: _load_settings_dialog())
                     dpg.add_button(label="Export…", callback=lambda *_: _export_settings_dialog())
 
