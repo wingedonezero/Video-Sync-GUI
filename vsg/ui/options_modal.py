@@ -19,41 +19,41 @@ class Binder:
 
 B = Binder()
 
-def _tip(tag: str, text: str):
-    with dpg.tooltip(tag):
-        dpg.add_text(text, wrap=480)
+def _tip(for_tag: str, text: str):
+    with dpg.tooltip(for_tag):
+        dpg.add_text(text, wrap=520)
 
 def _row_text(label, tag, key, hint="", width=520, tip=""):
     with dpg.group(horizontal=True):
-        dpg.add_text(label, width=200)
+        dpg.add_text(label, width=220)
         dpg.add_input_text(tag=tag, width=width, hint=hint, callback=B.on_changed)
         B.bind(tag, key)
         if tip: _tip(tag, tip)
 
 def _row_check(label, tag, key, tip=""):
     dpg.add_checkbox(tag=tag, label=label, callback=B.on_changed)
-    B.bind(tag, key); 
+    B.bind(tag, key)
     if tip: _tip(tag, tip)
 
 def _row_int(label, tag, key, minv=0, maxv=1_000_000, step=1, tip=""):
     with dpg.group(horizontal=True):
-        dpg.add_text(label, width=200)
+        dpg.add_text(label, width=220)
         dpg.add_input_int(tag=tag, min_value=minv, max_value=maxv, step=step, callback=B.on_changed)
-        B.bind(tag, key); 
+        B.bind(tag, key)
         if tip: _tip(tag, tip)
 
 def _row_float(label, tag, key, step=0.1, tip=""):
     with dpg.group(horizontal=True):
-        dpg.add_text(label, width=200)
+        dpg.add_text(label, width=220)
         dpg.add_input_float(tag=tag, step=step, callback=B.on_changed)
-        B.bind(tag, key); 
+        B.bind(tag, key)
         if tip: _tip(tag, tip)
 
 def _row_combo(label, tag, key, items, tip=""):
     with dpg.group(horizontal=True):
-        dpg.add_text(label, width=200)
-        dpg.add_combo(tag=tag, items=items, width=250, callback=B.on_changed)
-        B.bind(tag, key); 
+        dpg.add_text(label, width=220)
+        dpg.add_combo(tag=tag, items=items, width=260, callback=B.on_changed)
+        B.bind(tag, key)
         if tip: _tip(tag, tip)
 
 def _load_settings_dialog():
@@ -68,7 +68,7 @@ def _load_settings_dialog():
                 if dpg.does_item_exist(tag):
                     try: dpg.set_value(tag, CONFIG.get(key))
                     except Exception: pass
-            _log(f"[options] Loaded {p}")
+            _log(f"[options] Loaded settings from {p}")
         except Exception as e:
             _log(f"[options] Load failed: {e}")
     if not dpg.does_item_exist("opt_load_fd"):
@@ -82,7 +82,7 @@ def _export_settings_dialog():
         if not p: return
         try:
             Path(p).write_text(json.dumps(CONFIG, indent=2))
-            _log(f"[options] Exported {p}")
+            _log(f"[options] Exported settings to {p}")
         except Exception as e:
             _log(f"[options] Export failed: {e}")
     if not dpg.does_item_exist("opt_save_fd"):
@@ -92,62 +92,70 @@ def _export_settings_dialog():
 
 def build_options_modal():
     if dpg.does_item_exist("options_modal"): return
-    with dpg.window(tag="options_modal", label="Preferences", width=820, height=560, modal=True, show=False, pos=(120,80)):
+    with dpg.window(tag="options_modal", label="Preferences", width=860, height=600, modal=True, show=False, pos=(120,80)):
         with dpg.tab_bar():
-            with dpg.tab(label="General"):
-                _row_combo("Workflow","op_workflow","workflow",["Analyze & Merge","Analyze Only"],
-                           tip="Analyze only vs analyze and merge.")
-                _row_combo("Mode","op_mode","analysis_mode",["audio_xcorr","videodiff"],
-                           tip="Audio cross-correlation vs VideoDiff.")
-                _row_text("Output folder","op_out","output_folder",hint="Where final MKVs are written.")
-                _row_text("Temp folder","op_tmp","temp_root",hint="Working scratch directory.")
+            # Storage
+            with dpg.tab(label="Storage"):
+                _row_text("Output folder", "op_out", "output_folder",
+                          hint="Where final MKVs are written.",
+                          tip="Final muxed files are written here.")
+                _row_text("Temp folder", "op_tmp", "temp_root",
+                          hint="Working scratch directory.",
+                          tip="Temporary files are created here during analysis/merge.")
+                dpg.add_separator()
+                for key, label, tip in [
+                    ("ffmpeg_path","FFmpeg path","Path to ffmpeg."),
+                    ("ffprobe_path","FFprobe path","Path to ffprobe."),
+                    ("mkvmerge_path","mkvmerge path","Path to mkvmerge."),
+                    ("mkvextract_path","mkvextract path","Path to mkvextract."),
+                    ("videodiff_path","VideoDiff path","Optional: VideoDiff binary for video-mode analysis."),
+                ]:
+                    _row_text(label, f"op_{key}", key, tip=tip)
+
+            # Analysis
+            with dpg.tab(label="Analysis"):
+                _row_combo("Workflow", "op_workflow", "workflow",
+                           ["Analyze & Merge","Analyze Only"],
+                           tip="Analyze only vs analyze+merge.")
+                _row_combo("Mode", "op_mode", "analysis_mode",
+                           ["audio_xcorr","videodiff"],
+                           tip="Audio cross-correlation estimates offsets from waveforms; VideoDiff compares frames.")
+                _row_int("Scan chunk count", "op_scan_count", "scan_chunk_count", 1, 128, 1,
+                         tip="Number of evenly spaced samples across the timeline.")
+                _row_float("Chunk duration (s)", "op_scan_dur", "scan_chunk_duration", 0.1,
+                           tip="Seconds per sampled segment.")
+                _row_float("Minimum match (0–1)", "op_min_match", "min_match_pct", 0.01,
+                           tip="Reject matches below this similarity threshold.")
+
+            # Global
+            with dpg.tab(label="Global"):
+                _row_check("Rename chapters", "op_ren_chap", "rename_chapters",
+                           tip="Normalize chapter titles based on language preference.")
+                _row_check("Prefer JPN audio on Secondary", "op_pref_jpn_sec", "prefer_jpn_secondary",
+                           tip="Choose Japanese on the Secondary when multiple audio tracks exist.")
+                _row_check("Prefer JPN audio on Tertiary", "op_pref_jpn_ter", "prefer_jpn_tertiary",
+                           tip="Choose Japanese on the Tertiary when multiple audio tracks exist.")
+                _row_check("Remove dialog normalization (AC-3/eAC-3)", "op_dialog_norm", "apply_dialog_norm_gain",
+                           tip="Remove dialnorm so volume-based analysis is comparable.")
+                dpg.add_separator()
+                dpg.add_text("Chapters / Keyframe snapping")
+                _row_check("Snap chapters to keyframes", "op_snap", "snap_chapters",
+                           tip="Adjust chapter times to nearby keyframes for clean seeking.")
+                _row_combo("Snap mode", "op_snap_mode", "snap_mode", ["previous","next","nearest"],
+                           tip="Direction when snapping to keyframes.")
+                _row_int("Max snap distance (ms)", "op_snap_thr", "snap_threshold_ms", 0, 5000, 10,
+                         tip="No snap if the keyframe is farther than this many ms.")
+                _row_check("Starts only", "op_snap_starts", "snap_starts_only",
+                           tip="Only snap chapter starts (not ends).")
+
+            # Save / Load
+            with dpg.tab(label="Save / Load"):
+                dpg.add_text("Persist or import/export all preferences.")
                 dpg.add_spacer(height=6)
                 with dpg.group(horizontal=True):
                     dpg.add_button(label="Save", callback=lambda *_: save_settings())
                     dpg.add_button(label="Load…", callback=lambda *_: _load_settings_dialog())
                     dpg.add_button(label="Export…", callback=lambda *_: _export_settings_dialog())
-
-            with dpg.tab(label="Analysis"):
-                _row_int("Scan chunk count","op_scan_count","scan_chunk_count",1,128,1,
-                         tip="Number of samples across timeline.")
-                _row_float("Chunk duration (s)","op_scan_dur","scan_chunk_duration",0.1,
-                           tip="Seconds per sample.")
-                _row_float("Minimum match (0–1)","op_min_match","min_match_pct",0.01,
-                           tip="Reject matches below this similarity.")
-                _row_check("Apply dialog normalization gain","op_dialog_norm","apply_dialog_norm_gain",
-                           tip="Remove AC-3/eAC-3 dialnorm for fair matching.")
-
-            with dpg.tab(label="Chapters"):
-                _row_check("Rename chapters","op_ren_chap","rename_chapters",
-                           tip="Normalize titles based on language preference.")
-                _row_check("Snap to keyframes","op_snap","snap_chapters",
-                           tip="Snap chapter starts to nearby keyframes.")
-                _row_combo("Snap mode","op_snap_mode","snap_mode",["previous","next","nearest"],
-                           tip="Direction when snapping.")
-                _row_int("Max snap distance (ms)","op_snap_thr","snap_threshold_ms",0,5000,10,
-                         tip="Don't snap beyond this distance.")
-                _row_check("Starts only","op_snap_starts","snap_starts_only",
-                           tip="Only adjust chapter starts.")
-
-            with dpg.tab(label="Tools"):
-                for key, label, tip in [
-                    ("ffmpeg_path","FFmpeg path","Path to ffmpeg"),
-                    ("ffprobe_path","FFprobe path","Path to ffprobe"),
-                    ("mkvmerge_path","mkvmerge path","Path to mkvmerge"),
-                    ("mkvextract_path","mkvextract path","Path to mkvextract"),
-                    ("videodiff_path","VideoDiff path","Optional path to VideoDiff binary"),
-                ]:
-                    _row_text(label, f"op_{key}", key, tip=tip)
-
-            with dpg.tab(label="Logging"):
-                _row_check("Autoscroll log","op_log_auto","log_autoscroll",
-                           tip="Keep log scrolled to bottom during runs.")
-                _row_check("Compact log","op_log_compact","log_compact",
-                           tip="Hide verbose tool lines.")
-                _row_check("Error tail","op_log_tail","log_error_tail",
-                           tip="After a job, show only last N lines.")
-                _row_int("Tail lines","op_log_tail_lines","log_tail_lines",10,5000,10,
-                         tip="Number of lines to keep when tailing.")
 
 def show_options_modal():
     if not dpg.does_item_exist("options_modal"):
