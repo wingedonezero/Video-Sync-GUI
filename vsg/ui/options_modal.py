@@ -2,7 +2,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import dearpygui.dearpygui as dpg
-from vsg.settings import CONFIG,DEFAULT_CONFIG,load_settings,save_settings
+from video_sync_gui import CONFIG, load_settings, save_settings
 from vsg.logbus import _log
 
 class Binder:
