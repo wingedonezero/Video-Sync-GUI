@@ -981,10 +981,10 @@ def _vsg_log_merge_summary_from_opts(logger, opts_path: str):
 def _open_options(sender=None, app_data=None, user_data=None):
     show_options()
 
-# Fallback Options button
-import dearpygui.dearpygui as dpg
-if not dpg.does_item_exist('options_btn'):
+
+def _add_options_button(dpg):
     try:
-        dpg.add_button(tag='options_btn', label='Options…', callback=_open_options)
+        if not dpg.does_item_exist('options_btn'):
+            dpg.add_button(tag='options_btn', label='Options…', callback=_open_options)
     except Exception:
         pass
