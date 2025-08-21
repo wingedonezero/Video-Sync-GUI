@@ -1,15 +1,18 @@
-
 from __future__ import annotations
-import json, os
+
+import json
+import os
 from pathlib import Path
 
 # === Single source of truth for settings ===
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 
+
 def _default_settings_path() -> Path:
     env = os.getenv("VSG_CONFIG")
     return Path(env) if env else (BASE_DIR / "settings_gui.json")
+
 
 SETTINGS_PATH = _default_settings_path()
 
@@ -37,7 +40,7 @@ DEFAULTS = {
     "first_sub_default": True,
     # Chapter snapping
     "snap_chapters": False,
-    "snap_mode": "previous",             # previous | next | nearest
+    "snap_mode": "previous",  # previous | next | nearest
     "snap_threshold_ms": 250,
     "snap_starts_only": True,
     # Logging
@@ -59,6 +62,7 @@ DEFAULTS = {
 SCHEMA_VERSION = DEFAULTS["schema_version"]
 CONFIG: dict = {}
 
+
 # ---------- helpers ----------
 
 def _atomic_write_text(path: Path, text: str) -> None:
@@ -70,6 +74,7 @@ def _atomic_write_text(path: Path, text: str) -> None:
         os.fsync(f.fileno())
     tmp.replace(path)
 
+
 def _ensure_dirs(cfg: dict) -> None:
     for key in ("output_folder", "temp_root"):
         try:
@@ -78,6 +83,7 @@ def _ensure_dirs(cfg: dict) -> None:
                 p.mkdir(parents=True, exist_ok=True)
         except Exception:
             pass
+
 
 def migrate_settings(data: dict) -> dict:
     # Fill missing keys
@@ -107,6 +113,7 @@ def migrate_settings(data: dict) -> dict:
     data["schema_version"] = SCHEMA_VERSION
     return data
 
+
 def validate_settings(data: dict) -> dict:
     def clamp(v, lo, hi, default):
         try:
@@ -117,32 +124,33 @@ def validate_settings(data: dict) -> dict:
         if x > hi: x = hi
         return x
 
-    data["scan_chunk_count"]   = int(clamp(data.get("scan_chunk_count", 10), 1, 128, 10))
-    data["scan_chunk_duration"]= int(clamp(data.get("scan_chunk_duration", 15), 1, 3600, 15))
-    data["min_match_pct"]      = float(clamp(data.get("min_match_pct", 5.0), 0.0, 100.0, 5.0))
+    data["scan_chunk_count"] = int(clamp(data.get("scan_chunk_count", 10), 1, 128, 10))
+    data["scan_chunk_duration"] = int(clamp(data.get("scan_chunk_duration", 15), 1, 3600, 15))
+    data["min_match_pct"] = float(clamp(data.get("min_match_pct", 5.0), 0.0, 100.0, 5.0))
 
-    data["videodiff_error_min"]= float(clamp(data.get("videodiff_error_min", 0.0), 0.0, 1e9, 0.0))
-    data["videodiff_error_max"]= float(clamp(data.get("videodiff_error_max", 100.0), 0.0, 1e9, 100.0))
+    data["videodiff_error_min"] = float(clamp(data.get("videodiff_error_min", 0.0), 0.0, 1e9, 0.0))
+    data["videodiff_error_max"] = float(clamp(data.get("videodiff_error_max", 100.0), 0.0, 1e9, 100.0))
 
-    data["snap_threshold_ms"]  = int(clamp(data.get("snap_threshold_ms", 250), 0, 5000, 250))
-    data["log_tail_lines"]     = int(clamp(data.get("log_tail_lines", 0), 0, 1_000_000, 0))
-    data["log_error_tail"]     = int(clamp(data.get("log_error_tail", 20), 0, 1_000_000, 20))
-    data["log_progress_step"]  = int(clamp(data.get("log_progress_step", 20), 1, 100, 20))
+    data["snap_threshold_ms"] = int(clamp(data.get("snap_threshold_ms", 250), 0, 5000, 250))
+    data["log_tail_lines"] = int(clamp(data.get("log_tail_lines", 0), 0, 1_000_000, 0))
+    data["log_error_tail"] = int(clamp(data.get("log_error_tail", 20), 0, 1_000_000, 20))
+    data["log_progress_step"] = int(clamp(data.get("log_progress_step", 20), 1, 100, 20))
 
     # Booleans
     for k in (
-        "swap_subtitle_order","rename_chapters","match_jpn_secondary","match_jpn_tertiary",
-        "apply_dialog_norm_gain","first_sub_default","snap_chapters","snap_starts_only",
-        "log_compact","log_show_options_pretty","log_show_options_json","log_autoscroll"
+            "swap_subtitle_order", "rename_chapters", "match_jpn_secondary", "match_jpn_tertiary",
+            "apply_dialog_norm_gain", "first_sub_default", "snap_chapters", "snap_starts_only",
+            "log_compact", "log_show_options_pretty", "log_show_options_json", "log_autoscroll"
     ):
         data[k] = bool(data.get(k, DEFAULTS[k]))
 
     # Strings
-    for k in ("workflow","analysis_mode","snap_mode","output_folder","temp_root","videodiff_path",
-              "ffmpeg_path","ffprobe_path","mkvmerge_path","mkvextract_path"):
+    for k in ("workflow", "analysis_mode", "snap_mode", "output_folder", "temp_root", "videodiff_path",
+              "ffmpeg_path", "ffprobe_path", "mkvmerge_path", "mkvextract_path"):
         v = data.get(k, DEFAULTS.get(k, ""))
         data[k] = "" if v is None else str(v)
     return data
+
 
 # ---------- public API ----------
 
@@ -171,12 +179,15 @@ def load_settings() -> dict:
     _ensure_dirs(CONFIG)
     return CONFIG
 
+
 def save_settings(cfg: dict | None = None) -> None:
     state = cfg if cfg is not None else CONFIG
     _atomic_write_text(SETTINGS_PATH, json.dumps(state, indent=2))
 
+
 def on_change(key: str, value) -> None:
     CONFIG[key] = value
+
 
 def adopt_into_app() -> None:
     """Make top-level app use this CONFIG; provide safe set_status if missing."""
@@ -193,9 +204,11 @@ def adopt_into_app() -> None:
                         dpg.set_value("status_text", msg)
                 except Exception:
                     pass
+
             app.set_status = set_status
     except Exception:
         pass
+
 
 # Initialize on import so CONFIG is ready before UI binds
 load_settings()

@@ -1,7 +1,9 @@
 """Settings with defaults + merge."""
 from __future__ import annotations
+
 import json
 from pathlib import Path
+
 from vsg.logbus import _log
 
 DEFAULT_CONFIG = {
@@ -39,6 +41,7 @@ DEFAULT_CONFIG = {
 CONFIG: dict = DEFAULT_CONFIG.copy()
 SETTINGS_PATH = Path("settings_gui.json")
 
+
 def load_settings() -> None:
     global CONFIG
     if SETTINGS_PATH.exists():
@@ -55,6 +58,7 @@ def load_settings() -> None:
     else:
         CONFIG = DEFAULT_CONFIG.copy()
         _log("Settings file not found; using defaults.")
+
 
 def save_settings() -> None:
     try:

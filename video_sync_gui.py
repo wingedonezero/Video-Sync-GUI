@@ -4,10 +4,9 @@
 from vsg.analysis.videodiff import format_delay_ms
 from vsg.jobs.discover import discover_jobs
 from vsg.jobs.merge_job import merge_job
-from vsg.logbus import LOG_Q, _log, pump_logs
+from vsg.logbus import LOG_Q, _log
 # === vsg direct imports (modularized) ===
 from vsg.settings import CONFIG, SETTINGS_PATH, load_settings, save_settings
-from vsg.tools import find_required_tools, run_command
 from vsg.ui.options_modal import show_options_modal
 
 # === end vsg direct imports ===
@@ -26,15 +25,12 @@ Requires: dearpygui (2.1.0), numpy, scipy, librosa, ffmpeg, mkvmerge, mkvextract
 import json
 import queue
 import shutil
-import threading
 import time
-import xml.etree.ElementTree as ET
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-import librosa
-import numpy as np
-import scipy.signal
+from typing import Dict
+
+
 # --- purge inline settings row created by older builds ---
 def _remove_inline_settings_row():
     try:
@@ -42,10 +38,14 @@ def _remove_inline_settings_row():
         for tag in ('mode_combo', 'workflow_combo', 'chunks_input', 'chunkdur_input', 'thresh_input',
                     'vd_err_min', 'vd_err_max', 'out_input', 'temp_input'):
             if dpg.does_item_exist(tag):
-                try: dpg.delete_item(tag)
-                except Exception: pass
+                try:
+                    dpg.delete_item(tag)
+                except Exception:
+                    pass
     except Exception:
         pass
+
+
 try:
     dpg.set_frame_callback(20, _remove_inline_settings_row)
 except Exception:
@@ -226,11 +226,11 @@ def sync_config_from_ui():
     """Only collect file paths from the main inputs. All other options come from Preferences/CONFIG."""
     try:
         if dpg.does_item_exist('ref_input'):
-            CONFIG['ref_path'] = dpg.get_value('ref_input') or CONFIG.get('ref_path','')
+            CONFIG['ref_path'] = dpg.get_value('ref_input') or CONFIG.get('ref_path', '')
         if dpg.does_item_exist('sec_input'):
-            CONFIG['sec_path'] = dpg.get_value('sec_input') or CONFIG.get('sec_path','')
+            CONFIG['sec_path'] = dpg.get_value('sec_input') or CONFIG.get('sec_path', '')
         if dpg.does_item_exist('ter_input'):
-            CONFIG['ter_path'] = dpg.get_value('ter_input') or CONFIG.get('ter_path','')
+            CONFIG['ter_path'] = dpg.get_value('ter_input') or CONFIG.get('ter_path', '')
     except Exception:
         pass
     Path(out_dir).mkdir(parents=True, exist_ok=True)
@@ -404,52 +404,56 @@ def build_ui():
 
     with dpg.window(tag='main_window', label=APP_NAME, width=1180, height=780):
         with dpg.group(tag='header_options_row'):
-            dpg.add_button(tag='options_btn_main', label='Options…', callback=lambda *_: show_options_modal())
+            dpg.add_button(
+                tag='options_btn_main',
+                label='Options…',
+                callback=lambda *_: show_options_modal()
+            ))
             # (old header buttons removed)
             with dpg.group(horizontal=True):
                 dpg.add_button(label='Storage…', callback=lambda: dpg.configure_item('storage_modal', show=True))
-                               callback=lambda: show_options_modal())
+            callback = lambda: show_options_modal())
             with dpg.group(horizontal=True):
                 dpg.add_text('Reference')
-                dpg.add_input_text(tag='ref_input', label='', width=900, multiline=False, height=40)
-                if INPUT_FONT_ID:
-                    dpg.bind_item_font('ref_input', INPUT_FONT_ID)
-                _safe_bind_input_enhancements('ref_input')
-                dpg.add_button(label='Browse…', callback=lambda: dpg.show_item('file_dialog_ref'))
+            dpg.add_input_text(tag='ref_input', label='', width=900, multiline=False, height=40)
+            if INPUT_FONT_ID:
+                dpg.bind_item_font('ref_input', INPUT_FONT_ID)
+            _safe_bind_input_enhancements('ref_input')
+            dpg.add_button(label='Browse…', callback=lambda: dpg.show_item('file_dialog_ref'))
             with dpg.group(horizontal=True):
                 dpg.add_text('Secondary')
-                dpg.add_input_text(tag='sec_input', label='', width=900, multiline=False, height=40)
-                if INPUT_FONT_ID:
-                    dpg.bind_item_font('sec_input', INPUT_FONT_ID)
-                _safe_bind_input_enhancements('sec_input')
-                dpg.add_button(label='Browse…', callback=lambda: dpg.show_item('file_dialog_sec'))
+            dpg.add_input_text(tag='sec_input', label='', width=900, multiline=False, height=40)
+            if INPUT_FONT_ID:
+                dpg.bind_item_font('sec_input', INPUT_FONT_ID)
+            _safe_bind_input_enhancements('sec_input')
+            dpg.add_button(label='Browse…', callback=lambda: dpg.show_item('file_dialog_sec'))
             with dpg.group(horizontal=True):
                 dpg.add_text('Tertiary')
-                dpg.add_input_text(tag='ter_input', label='', width=900, multiline=False, height=40)
-                if INPUT_FONT_ID:
-                    dpg.bind_item_font('ter_input', INPUT_FONT_ID)
-                _safe_bind_input_enhancements('ter_input')
-                dpg.add_button(label='Browse…', callback=lambda: dpg.show_item('file_dialog_ter'))
+            dpg.add_input_text(tag='ter_input', label='', width=900, multiline=False, height=40)
+            if INPUT_FONT_ID:
+                dpg.bind_item_font('ter_input', INPUT_FONT_ID)
+            _safe_bind_input_enhancements('ter_input')
+            dpg.add_button(label='Browse…', callback=lambda: dpg.show_item('file_dialog_ter'))
             dpg.add_text('Actions')
             with dpg.group(horizontal=True):
                 dpg.add_button(tag='btn_analyze_only', label='Analyze Only', callback=do_analyze_only, width=150,
                                height=36)
-                _bind_control_theme('btn_analyze_only')
-                dpg.add_button(tag='btn_analyze_merge', label='Analyze & Merge', callback=do_analyze_and_merge,
-                               width=170, height=36)
-                _bind_control_theme('btn_analyze_merge')
-                dpg.add_progress_bar(tag='progress_bar', overlay='Progress', default_value=0.0, width=420, height=26)
-                _bind_control_theme('progress_bar')
-                dpg.add_text('Status:')
-                dpg.add_text(tag='status_text', default_value='')
+            _bind_control_theme('btn_analyze_only')
+            dpg.add_button(tag='btn_analyze_merge', label='Analyze & Merge', callback=do_analyze_and_merge,
+                           width=170, height=36)
+            _bind_control_theme('btn_analyze_merge')
+            dpg.add_progress_bar(tag='progress_bar', overlay='Progress', default_value=0.0, width=420, height=26)
+            _bind_control_theme('progress_bar')
+            dpg.add_text('Status:')
+            dpg.add_text(tag='status_text', default_value='')
             dpg.add_separator()
             dpg.add_text('Results (latest job)')
             with dpg.group(horizontal=True):
                 dpg.add_text('Secondary delay:')
-                dpg.add_text(tag='sec_delay_val', default_value='—')
-                dpg.add_text('   |   ')
-                dpg.add_text('Tertiary delay:')
-                dpg.add_text(tag='ter_delay_val', default_value='—')
+            dpg.add_text(tag='sec_delay_val', default_value='—')
+            dpg.add_text('   |   ')
+            dpg.add_text('Tertiary delay:')
+            dpg.add_text(tag='ter_delay_val', default_value='—')
             dpg.add_separator()
             dpg.add_text('Log')
             with dpg.child_window(tag='log_child', width=-1, height=320, horizontal_scrollbar=True):

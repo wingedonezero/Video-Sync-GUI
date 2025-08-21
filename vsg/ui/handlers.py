@@ -3,10 +3,11 @@ from __future__ import annotations
 import threading
 import uuid
 
+from vsg.ui.options import SETTINGS_DIRTY, _save_now
+
 from vsg.jobs.merge_job import merge_job
 from vsg.logbus import _log
 from vsg.tools import find_required_tools
-from vsg.ui.options import SETTINGS_DIRTY, _save_now
 
 RUN_LOCK = threading.Lock()
 JOB_RUNNING = False
