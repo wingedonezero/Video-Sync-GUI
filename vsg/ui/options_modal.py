@@ -8,6 +8,7 @@ PFX = "prefs_"
 WIN = PFX + "options_modal"
 
 def _ui_log(msg: str):
+    # Best-effort log into your app's log panel; fallback to DPG logger
     try:
         from vsg.logbus import _log
         _log(msg); return
@@ -16,6 +17,7 @@ def _ui_log(msg: str):
     try: dpg.log_info(msg)
     except Exception: pass
 
+# Remove the legacy popups/buttons so Preferences is the only owner
 LEGACY_BUTTON_LABELS = {"Storage?", "Analysis Settings?", "Global Options?"}
 LEGACY_WINDOW_LABELS = {"Storage Settings", "Analysis Settings", "Global Options"}
 
@@ -41,7 +43,9 @@ class Binder:
     def refresh(self):
         for tag, key in self.map.items():
             if dpg.does_item_exist(tag):
-                try: dpg.set_value(tag, CONFIG.get(key) if CONFIG.get(key) is not None else "")
+                val = CONFIG.get(key)
+                if val is None: val = ""  # text fields want blank not None
+                try: dpg.set_value(tag, val)
                 except Exception: pass
         _apply_mode_visibility()
 
@@ -90,14 +94,11 @@ def _row_combo(label, tag, key, items, tip=""):
         _tip(tip); B.bind(tag, key)
 
 def _apply_mode_visibility():
-    # Read from the widget if it exists; fall back to CONFIG
-    mode = None
+    # Prefer the current UI value; fallback to CONFIG
     if dpg.does_item_exist(PFX + "op_mode"):
-        try:
-            mode = dpg.get_value(PFX + "op_mode")
-        except Exception:
-            mode = None
-    if not mode:
+        try: mode = dpg.get_value(PFX + "op_mode")
+        except Exception: mode = CONFIG.get("analysis_mode", "Audio Correlation")
+    else:
         mode = CONFIG.get("analysis_mode", "Audio Correlation")
     m = str(mode).lower()
     show_audio = ("audio" in m) or (m == "audio correlation") or (m == "audio_xcorr")
@@ -108,6 +109,7 @@ def build_options_modal():
     if dpg.does_item_exist(WIN): dpg.delete_item(WIN)
     with dpg.window(tag=WIN, label="Preferences", modal=True, show=False, width=980, height=660):
         with dpg.tab_bar():
+            # Storage
             with dpg.tab(label="Storage"):
                 _row_text("Output folder", PFX + "op_out", "output_folder",
                           hint="Where final MKVs are written.",
@@ -121,7 +123,7 @@ def build_options_modal():
                 _row_text("mkvmerge path", PFX + "op_mkvmerge", "mkvmerge_path")
                 _row_text("mkvextract path", PFX + "op_mkvextract", "mkvextract_path")
                 _row_text("VideoDiff path", PFX + "op_videodiff", "videodiff_path")
-
+            # Analysis
             with dpg.tab(label="Analysis"):
                 _row_combo("Workflow", PFX + "op_workflow", "workflow",
                            ["Analyze & Merge", "Analyze Only"],
@@ -141,7 +143,7 @@ def build_options_modal():
                                tip="Stop if below this error.")
                     _row_float("Max error (VideoDiff)", PFX + "vd_err_max", "videodiff_error_max", 0.01,
                                tip="Stop if above this error.")
-
+            # Global
             with dpg.tab(label="Global"):
                 _row_check("Rename chapters", PFX + "op_rename_chapters", "rename_chapters",
                            tip="Rename chapters in the output.")
@@ -165,7 +167,7 @@ def build_options_modal():
                          tip="No snap if the keyframe is farther than this many ms.")
                 _row_check("Starts only", PFX + "op_snap_starts", "snap_starts_only",
                            tip="Only snap chapter starts (not ends).")
-
+            # Logging
             with dpg.tab(label="Logging"):
                 _row_check("Compact subprocess log", PFX + "op_log_compact", "log_compact",
                            tip="Shorten repeated stdout/stderr lines from tools.")
@@ -181,7 +183,7 @@ def build_options_modal():
                            tip="Print raw JSON options blocks to the log.")
                 _row_check("Log autoscroll", PFX + "op_log_autoscroll", "log_autoscroll",
                            tip="Keep the log view pinned to the bottom while running.")
-
+            # Save/Load
             with dpg.tab(label="Save / Load"):
                 dpg.add_text("Persist, reload, or export all preferences.")
                 with dpg.group(horizontal=True):
@@ -193,7 +195,6 @@ def build_options_modal():
                     dpg.add_button(label="Show Path", callback=lambda *_: _ui_log(str(SETTINGS_PATH)))
                     dpg.add_button(label="Dump CONFIG", callback=lambda *_: _ui_log(json.dumps(CONFIG, indent=2)))
                     dpg.add_button(label="Force Refresh", callback=lambda *_: (B.refresh(), _apply_mode_visibility()))
-
     _apply_mode_visibility()
 
 def _export_settings_dialog():
