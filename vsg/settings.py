@@ -7,6 +7,11 @@ from pathlib import Path
 from vsg.logbus import _log
 
 DEFAULT_CONFIG = {
+    "snap_starts_only": True,
+    "snap_threshold_ms": 250,
+    "snap_mode": "previous",
+    "snap_chapters": False,
+    "first_sub_default": True,
     "workflow": "Analyze & Merge",
     "analysis_mode": "videodiff",
     "log_autoscroll": True,
@@ -18,16 +23,16 @@ DEFAULT_CONFIG = {
     "min_match_pct": 0.8,
     "rename_chapters": False,
     "swap_subtitle_order": False,
-    "match_jpn_secondary": False,
-    "match_jpn_tertiary": False,
-    "temp_root": "./temp",
-    "output_folder": "./output",
+    "match_jpn_secondary": True,
+    "match_jpn_tertiary": True,
+    "temp_root": "./temp_work",
+    "output_folder": "./sync_output",
     "ffmpeg_path": "",
     "ffprobe_path": "",
     "mkvmerge_path": "",
     "mkvextract_path": "",
     "videodiff_path": "",
-    "apply_dialog_norm_gain": "",
+    "apply_dialog_norm_gain": True,
 }
 
 CONFIG: dict = DEFAULT_CONFIG.copy()

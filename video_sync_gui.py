@@ -806,8 +806,7 @@ def build_ui():
     with dpg.window(tag='main_window', label=APP_NAME, width=1180, height=780):
         with dpg.group(tag='header_options_row'):
             dpg.add_button(tag='options_btn_main', label='Options…', callback=lambda *_: show_options_modal())
-            dpg.add_separator()
-            dpg.add_text('Inputs')
+            # (old header buttons removed)
             with dpg.group(horizontal=True):
                 dpg.add_button(label='Storage…', callback=lambda: dpg.configure_item('storage_modal', show=True))
                 dpg.add_button(label='Analysis Settings…',

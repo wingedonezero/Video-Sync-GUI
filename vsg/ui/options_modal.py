@@ -37,7 +37,7 @@ def _tip(for_tag: str, text: str):
 
 def _row_text(label, tag, key, hint="", width=520, tip=""):
     with dpg.group(horizontal=True):
-        dpg.add_text(label)
+        dpg.add_text(label, width=220)
         dpg.add_input_text(tag=tag, width=width, hint=hint, callback=B.on_changed)
         B.bind(tag, key)
         if tip: _tip(tag, tip)
@@ -51,7 +51,7 @@ def _row_check(label, tag, key, tip=""):
 
 def _row_int(label, tag, key, minv=0, maxv=1_000_000, step=1, tip=""):
     with dpg.group(horizontal=True):
-        dpg.add_text(label)
+        dpg.add_text(label, width=220)
         dpg.add_input_int(tag=tag, min_value=minv, max_value=maxv, step=step, callback=B.on_changed)
         B.bind(tag, key)
         if tip: _tip(tag, tip)
@@ -59,7 +59,7 @@ def _row_int(label, tag, key, minv=0, maxv=1_000_000, step=1, tip=""):
 
 def _row_float(label, tag, key, step=0.1, tip=""):
     with dpg.group(horizontal=True):
-        dpg.add_text(label)
+        dpg.add_text(label, width=220)
         dpg.add_input_float(tag=tag, step=step, callback=B.on_changed)
         B.bind(tag, key)
         if tip: _tip(tag, tip)
@@ -67,7 +67,7 @@ def _row_float(label, tag, key, step=0.1, tip=""):
 
 def _row_combo(label, tag, key, items, tip=""):
     with dpg.group(horizontal=True):
-        dpg.add_text(label)
+        dpg.add_text(label, width=220)
         dpg.add_combo(tag=tag, items=items, width=260, callback=B.on_changed)
         B.bind(tag, key)
         if tip: _tip(tag, tip)
@@ -163,6 +163,8 @@ def build_options_modal():
                            tip="Choose Japanese on the Tertiary when multiple audio tracks exist.")
                 _row_check("Remove dialog normalization (AC-3/eAC-3)", "op_dialog_norm", "apply_dialog_norm_gain",
                            tip="Remove dialnorm so volume-based analysis is comparable.")
+                _row_check("Make first subtitle in final order the DEFAULT", "op_first_sub_def", "first_sub_default",
+                           tip="Mark first subtitle track as default in the merged output.")
                 dpg.add_separator()
                 dpg.add_text("Chapters / Keyframe snapping")
                 _row_check("Snap chapters to keyframes", "op_snap", "snap_chapters",
