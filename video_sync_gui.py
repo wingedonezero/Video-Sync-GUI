@@ -982,9 +982,13 @@ def _open_options(sender=None, app_data=None, user_data=None):
     show_options()
 
 
-def _add_options_button(dpg):
+def _add_viewport_menubar():
+    """Create a top viewport menu bar with Options… item."""
+    import dearpygui.dearpygui as dpg
     try:
-        if not dpg.does_item_exist('options_btn'):
-            dpg.add_button(tag='options_btn', label='Options…', callback=_open_options)
+        with dpg.viewport_menu_bar():
+            with dpg.menu(label="Edit"):
+                dpg.add_menu_item(label="Options…", callback=_open_options)
     except Exception:
+        # Older DPG or already created; ignore
         pass
