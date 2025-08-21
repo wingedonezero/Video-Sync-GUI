@@ -408,7 +408,7 @@ def build_ui():
             # (old header buttons removed)
             with dpg.group(horizontal=True):
                 dpg.add_button(label='Storage…', callback=lambda: dpg.configure_item('storage_modal', show=True))
-                               callback=lambda: dpg.configure_item('analysis_modal', show=True))
+                               callback=lambda: show_options_modal())
             with dpg.group(horizontal=True):
                 dpg.add_text('Reference')
                 dpg.add_input_text(tag='ref_input', label='', width=900, multiline=False, height=40)
