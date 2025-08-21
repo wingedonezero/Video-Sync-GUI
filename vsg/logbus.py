@@ -1,13 +1,16 @@
 """Central logging queue and helpers (robust)."""
 from __future__ import annotations
-from datetime import datetime
-import logging, queue
-import dearpygui.dearpygui as dpg
 
+import logging
+import queue
+from datetime import datetime
+
+import dearpygui.dearpygui as dpg
 
 # Explicit queue for GUI logs (hotfix)
 LOG_Q = queue.Queue()
 LOG_Q: "queue.Queue[str]" = queue.Queue()
+
 
 def _log(*args) -> None:
     try:
@@ -21,6 +24,7 @@ def _log(*args) -> None:
             pass
         logging.debug("log enqueue failed: %r", e)
 
+
 def _autoscroll_pref() -> bool:
     try:
         from vsg import settings as _settings
@@ -30,6 +34,7 @@ def _autoscroll_pref() -> bool:
     except Exception:
         pass
     return True
+
 
 def pump_logs() -> None:
     autoscroll = _autoscroll_pref()

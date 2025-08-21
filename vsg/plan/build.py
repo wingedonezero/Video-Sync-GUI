@@ -1,33 +1,35 @@
 """Moved implementations for plan.build (full-move RC)."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple, Optional
-import os, re, json, math, logging, subprocess, tempfile, pathlib
-from pathlib import Path
 
-from vsg.logbus import _log
-from vsg.settings import CONFIG
-from vsg.tools import run_command, find_required_tools
 def build_plan(ref_tracks, sec_tracks, ter_tracks, delays):
     plan = []
     for t in ref_tracks:
         if t['type'] == 'video':
-            plan.append({'src': t['path'], 'type': 'video', 'lang': t['lang'], 'name': t['name'], 'from_group': 'ref', 'codec_id': t.get('codec_id', '')})
+            plan.append({'src': t['path'], 'type': 'video', 'lang': t['lang'], 'name': t['name'], 'from_group': 'ref',
+                         'codec_id': t.get('codec_id', '')})
     for t in sec_tracks or []:
         if t['type'] == 'audio':
-            plan.append({'src': t['path'], 'type': 'audio', 'lang': t['lang'], 'name': t['name'], 'from_group': 'sec', 'codec_id': t.get('codec_id', '')})
+            plan.append({'src': t['path'], 'type': 'audio', 'lang': t['lang'], 'name': t['name'], 'from_group': 'sec',
+                         'codec_id': t.get('codec_id', '')})
     for t in ref_tracks:
         if t['type'] == 'audio':
-            plan.append({'src': t['path'], 'type': 'audio', 'lang': t['lang'], 'name': t['name'], 'from_group': 'ref', 'codec_id': t.get('codec_id', '')})
+            plan.append({'src': t['path'], 'type': 'audio', 'lang': t['lang'], 'name': t['name'], 'from_group': 'ref',
+                         'codec_id': t.get('codec_id', '')})
     for t in ter_tracks or []:
         if t['type'] == 'subtitles':
-            plan.append({'src': t['path'], 'type': 'subtitles', 'lang': t['lang'], 'name': t['name'], 'from_group': 'ter', 'codec_id': t.get('codec_id', '')})
+            plan.append(
+                {'src': t['path'], 'type': 'subtitles', 'lang': t['lang'], 'name': t['name'], 'from_group': 'ter',
+                 'codec_id': t.get('codec_id', '')})
     for t in sec_tracks or []:
         if t['type'] == 'subtitles':
-            plan.append({'src': t['path'], 'type': 'subtitles', 'lang': t['lang'], 'name': t['name'], 'from_group': 'sec', 'codec_id': t.get('codec_id', '')})
+            plan.append(
+                {'src': t['path'], 'type': 'subtitles', 'lang': t['lang'], 'name': t['name'], 'from_group': 'sec',
+                 'codec_id': t.get('codec_id', '')})
     for t in ref_tracks:
         if t['type'] not in ('video', 'audio'):
-            plan.append({'src': t['path'], 'type': t['type'], 'lang': t['lang'], 'name': t['name'], 'from_group': 'ref', 'codec_id': t.get('codec_id', '')})
+            plan.append({'src': t['path'], 'type': t['type'], 'lang': t['lang'], 'name': t['name'], 'from_group': 'ref',
+                         'codec_id': t.get('codec_id', '')})
     return {'plan': plan, 'delays': delays}
 
 
@@ -59,4 +61,3 @@ def summarize_plan(plan_json, output_file, chapters_xml_path, attachments):
     lines.append(f'Track order: {track_order}')
     lines.append('=====================')
     return (track_order, lines)
-

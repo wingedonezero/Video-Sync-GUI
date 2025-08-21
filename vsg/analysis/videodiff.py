@@ -1,13 +1,14 @@
 """Moved implementations for analysis.videodiff (full-move RC)."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple, Optional
-import os, re, json, math, logging, subprocess, tempfile, pathlib
+import re
 from pathlib import Path
+from typing import Tuple
 
 from vsg.logbus import _log
-from vsg.settings import CONFIG
-from vsg.tools import run_command, find_required_tools
+from vsg.tools import run_command
+
+
 def format_delay_ms(ms):
     if ms is None:
         return '—'
@@ -49,4 +50,3 @@ def run_videodiff(ref: str, target: str, logger, videodiff_path: Path | str) -> 
     err_val = float(err)
     _log(logger, f'[VideoDiff] final -> {kind.lower()} {seconds:.5f}s, error {err_val:.2f}  =>  delay {delay_ms:+} ms')
     return (delay_ms, err_val)
-

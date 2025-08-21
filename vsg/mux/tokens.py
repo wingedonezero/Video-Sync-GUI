@@ -1,14 +1,13 @@
 """Moved implementations for mux.tokens (full-move RC)."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple, Optional
-import os, re, json, math, logging, subprocess, tempfile, pathlib
-from pathlib import Path
+from typing import Any, Dict, List, Optional
 
-from vsg.logbus import _log
 from vsg.settings import CONFIG
-from vsg.tools import run_command, find_required_tools
-def _tokens_for_track(track: Dict[str, Any], group: str, delays_ms: Dict[str, int], default_flag: Optional[bool]=None):
+
+
+def _tokens_for_track(track: Dict[str, Any], group: str, delays_ms: Dict[str, int],
+                      default_flag: Optional[bool] = None):
     toks: List[str] = []
     name = track.get('name', '')
     lang = track.get('lang', '')
@@ -65,6 +64,7 @@ def build_mkvmerge_tokens(plan_json, output_file, chapters_xml_path, attachments
         def is_signs_name(name: str) -> bool:
             low = (name or '').lower()
             return any((k in low for k in SIGNS_KEYS))
+
         for i in sub_indices:
             if is_signs_name(plan[i].get('name', '')):
                 default_sub_idx = i
@@ -97,4 +97,3 @@ def build_mkvmerge_tokens(plan_json, output_file, chapters_xml_path, attachments
     if final_track_order:
         tokens += ['--track-order', final_track_order]
     return tokens
-

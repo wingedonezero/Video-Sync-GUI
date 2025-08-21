@@ -1,18 +1,18 @@
 """Chapter utilities: extract from REF, rename, and snap to keyframes."""
 from __future__ import annotations
 
+import subprocess
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
-
-import subprocess
 
 from vsg.logbus import _log
 from vsg.settings import CONFIG
 from vsg.tools import ABS, _resolve_tool  # ABS may contain ffprobe
 
 NS = "http://mkvtoolnix.matroska.org/chapters/1"
+
 
 @dataclass
 class SnapCfg:
@@ -21,6 +21,7 @@ class SnapCfg:
     threshold_ms: int
     starts_only: bool
     verbose: bool
+
 
 def _extract_chapters_xml(ref_path: Path) -> Optional[str]:
     """Extract chapters XML from a Matroska file using mkvextract (stdout)."""
@@ -35,16 +36,17 @@ def _extract_chapters_xml(ref_path: Path) -> Optional[str]:
         _log(f"[chapters] mkvextract failed: {e}")
         return None
 
+
 def _get_keyframes_ns(video_path: Path) -> List[int]:
     """Return keyframe pts times in nanoseconds using ffprobe (skip non-key)."""
     ffprobe = ABS.get("ffprobe") or _resolve_tool("ffprobe") or "ffprobe"
     cmd = [
         ffprobe,
-        "-v","error",
-        "-select_streams","v:0",
-        "-skip_frame","nokey",
-        "-show_entries","frame=pts_time",
-        "-of","csv=p=0",
+        "-v", "error",
+        "-select_streams", "v:0",
+        "-skip_frame", "nokey",
+        "-show_entries", "frame=pts_time",
+        "-of", "csv=p=0",
         str(video_path),
     ]
     out = ""
@@ -67,16 +69,18 @@ def _get_keyframes_ns(video_path: Path) -> List[int]:
     key_ns.sort()
     return key_ns
 
+
 def _time_str_to_ns(ts: str) -> int:
     # format HH:MM:SS.nnnnnnnnn
     hms, _, frac = ts.partition(".")
     h, m, s = map(int, hms.split(":"))
-    ns = ((h*3600 + m*60 + s) * 1_000_000_000)
+    ns = ((h * 3600 + m * 60 + s) * 1_000_000_000)
     if frac:
         # pad or trim to 9 digits
         if len(frac) > 9: frac = frac[:9]
         ns += int(frac.ljust(9, "0"))
     return ns
+
 
 def _ns_to_time_str(ns: int) -> str:
     if ns < 0: ns = 0
@@ -84,6 +88,7 @@ def _ns_to_time_str(ns: int) -> str:
     h, r = divmod(s, 3600)
     m, s = divmod(r, 60)
     return f"{h:02d}:{m:02d}:{s:02d}.{n:09d}"
+
 
 def _rename_consecutive(root: ET.Element) -> None:
     idx = 1
@@ -97,16 +102,17 @@ def _rename_consecutive(root: ET.Element) -> None:
             disp.text = f"Chapter {idx:02d}"
             idx += 1
 
+
 def _snap_value(ns: int, keys: List[int], mode: str, threshold: int) -> int:
     # simple binary search
     import bisect
     i = bisect.bisect_left(keys, ns)
-    prev_k = keys[i-1] if i > 0 else None
+    prev_k = keys[i - 1] if i > 0 else None
     next_k = keys[i] if i < len(keys) else None
     cand = ns
-    if mode == "previous" and prev_k is not None and ns - prev_k <= threshold*1_000_000:
+    if mode == "previous" and prev_k is not None and ns - prev_k <= threshold * 1_000_000:
         cand = prev_k
-    elif mode == "next" and next_k is not None and next_k - ns <= threshold*1_000_000:
+    elif mode == "next" and next_k is not None and next_k - ns <= threshold * 1_000_000:
         cand = next_k
     elif mode == "nearest":
         best = None
@@ -114,9 +120,10 @@ def _snap_value(ns: int, keys: List[int], mode: str, threshold: int) -> int:
         if next_k is not None:
             d = abs(next_k - ns)
             if best is None or d < best[0]: best = (d, next_k)
-        if best and best[0] <= threshold*1_000_000:
+        if best and best[0] <= threshold * 1_000_000:
             cand = best[1]
     return cand
+
 
 def _snap_chapters(root: ET.Element, keys: List[int], cfg: SnapCfg) -> int:
     """Snap chapter start times in-place. Returns count snapped."""
@@ -139,6 +146,7 @@ def _snap_chapters(root: ET.Element, keys: List[int], cfg: SnapCfg) -> int:
             if new_e != e_ns:
                 e_el.text = _ns_to_time_str(new_e)
     return snapped
+
 
 def prepare_chapters_for_ref(ref_mkv: Path, temp_dir: Path) -> Optional[Path]:
     """If chapters exist and renaming/snap is enabled, produce an XML and return its path."""

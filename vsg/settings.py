@@ -1,7 +1,9 @@
 """Settings with defaults + merge."""
 from __future__ import annotations
+
 import json
 from pathlib import Path
+
 from vsg.logbus import _log
 
 DEFAULT_CONFIG = {
@@ -25,11 +27,12 @@ DEFAULT_CONFIG = {
     "mkvmerge_path": "",
     "mkvextract_path": "",
     "videodiff_path": "",
-        "apply_dialog_norm_gain": "",
+    "apply_dialog_norm_gain": "",
 }
 
 CONFIG: dict = DEFAULT_CONFIG.copy()
 SETTINGS_PATH = Path("settings_gui.json")
+
 
 def load_settings() -> None:
     global CONFIG
@@ -47,6 +50,7 @@ def load_settings() -> None:
     else:
         CONFIG = DEFAULT_CONFIG.copy()
         _log("Settings file not found; using defaults.")
+
 
 def save_settings() -> None:
     try:

@@ -1,13 +1,15 @@
 """Moved implementations for mux.run (full-move RC)."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple, Optional
-import os, re, json, math, logging, subprocess, tempfile, pathlib
+import json
 from pathlib import Path
+from typing import List
 
 from vsg.logbus import _log
 from vsg.settings import CONFIG
-from vsg.tools import run_command, find_required_tools
+from vsg.tools import run_command
+
+
 def write_mkvmerge_json_options(tokens: List[str], json_path: Path, logger) -> str:
     json_path = Path(json_path)
     json_path.parent.mkdir(parents=True, exist_ok=True)
@@ -31,4 +33,3 @@ def write_mkvmerge_json_options(tokens: List[str], json_path: Path, logger) -> s
 def run_mkvmerge_with_json(json_path: str, logger) -> bool:
     out = run_command(['mkvmerge', f'@{json_path}'], logger)
     return out is not None
-

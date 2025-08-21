@@ -1,12 +1,16 @@
 from __future__ import annotations
-import threading, uuid
+
+import threading
+import uuid
+
+from vsg.jobs.merge_job import merge_job
 from vsg.logbus import _log
 from vsg.tools import find_required_tools
-from vsg.jobs.merge_job import merge_job
 from vsg.ui.options import SETTINGS_DIRTY, _save_now
 
 RUN_LOCK = threading.Lock()
 JOB_RUNNING = False
+
 
 def _set_buttons_enabled(dpg, enabled: bool) -> None:
     for tag in ("analyze_btn", "analyze_merge_btn"):
@@ -14,6 +18,7 @@ def _set_buttons_enabled(dpg, enabled: bool) -> None:
             (dpg.enable_item if enabled else dpg.disable_item)(tag)
         except Exception:
             pass
+
 
 def _start_worker(dpg, mode: str) -> None:
     global JOB_RUNNING
@@ -49,13 +54,16 @@ def _start_worker(dpg, mode: str) -> None:
 
     threading.Thread(target=worker, daemon=True).start()
 
+
 def on_click_analyze(sender, app_data, user_data):
     dpg = user_data.get("dpg")
     _start_worker(dpg, mode="analyze")
 
+
 def on_click_analyze_merge(sender, app_data, user_data):
     dpg = user_data.get("dpg")
     _start_worker(dpg, mode="analyze_merge")
+
 
 def wire_handlers(dpg) -> None:
     try:

@@ -1,13 +1,9 @@
 """Moved implementations for jobs.discover (full-move RC)."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple, Optional
-import os, re, json, math, logging, subprocess, tempfile, pathlib
 from pathlib import Path
 
-from vsg.logbus import _log
-from vsg.settings import CONFIG
-from vsg.tools import run_command, find_required_tools
+
 def discover_jobs(ref_path, sec_path, ter_path):
     ref = Path(ref_path) if ref_path else None
     sec = Path(sec_path) if sec_path else None
@@ -28,4 +24,3 @@ def discover_jobs(ref_path, sec_path, ter_path):
             if s_ok or t_ok:
                 jobs.append((str(f), s_ok, t_ok))
     return jobs
-

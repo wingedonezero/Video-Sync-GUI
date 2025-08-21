@@ -1,15 +1,23 @@
 """External tool discovery and command runner."""
 from __future__ import annotations
-import os, re, shutil, subprocess, time
+
+import os
+import re
+import shutil
+import subprocess
+import time
 from pathlib import Path
 from typing import Dict
+
 from vsg.logbus import _log
+
 try:
     from vsg.settings import CONFIG
 except Exception:
     CONFIG = {}
 
 ABS: Dict[str, str] = {}
+
 
 def _resolve_tool(name: str) -> str | None:
     key = f"{name}_path"
@@ -24,6 +32,7 @@ def _resolve_tool(name: str) -> str | None:
     if here.exists() and os.access(here, os.X_OK):
         return str(here.resolve())
     return None
+
 
 def find_required_tools() -> bool:
     required = ["ffmpeg", "ffprobe", "mkvmerge", "mkvextract"]
@@ -40,6 +49,7 @@ def find_required_tools() -> bool:
         return False
     _log("Tools ready:", ", ".join(f"{k}={v}" for k, v in ABS.items()))
     return True
+
 
 def run_command(cmd: list[str]) -> int:
     _log("$", " ".join(cmd))

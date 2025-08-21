@@ -1,17 +1,18 @@
 """Moved implementations for jobs.merge_job (full-move RC)."""
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple, Optional
-import os, re, json, math, logging, subprocess, tempfile, pathlib
 from pathlib import Path
+from typing import Optional
 
 from vsg.logbus import _log
 from vsg.settings import CONFIG
-from vsg.tools import run_command, find_required_tools
-# Hook: chapters
-from vsg.mux.chapters import prepare_chapters_for_ref
 
-def merge_job(ref_file: str, sec_file: Optional[str], ter_file: Optional[str], out_dir: str, logger, videodiff_path: Path):
+
+# Hook: chapters
+
+
+def merge_job(ref_file: str, sec_file: Optional[str], ter_file: Optional[str], out_dir: str, logger,
+              videodiff_path: Path):
     Path(CONFIG['temp_root']).mkdir(parents=True, exist_ok=True)
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     delays = {'secondary_ms': 0, 'tertiary_ms': 0}
@@ -22,11 +23,14 @@ def merge_job(ref_file: str, sec_file: Optional[str], ter_file: Optional[str], o
     if sec_file:
         if CONFIG['analysis_mode'] == 'VideoDiff':
             delay_sec, err_sec = run_videodiff(ref_file, sec_file, logger, videodiff_path)
-            if err_sec < float(CONFIG.get('videodiff_error_min', 0.0)) or err_sec > float(CONFIG.get('videodiff_error_max', 100.0)):
-                raise RuntimeError(f"VideoDiff confidence out of bounds: error={err_sec:.2f} (allowed {CONFIG.get('videodiff_error_min')}..{CONFIG.get('videodiff_error_max')})")
+            if err_sec < float(CONFIG.get('videodiff_error_min', 0.0)) or err_sec > float(
+                    CONFIG.get('videodiff_error_max', 100.0)):
+                raise RuntimeError(
+                    f"VideoDiff confidence out of bounds: error={err_sec:.2f} (allowed {CONFIG.get('videodiff_error_min')}..{CONFIG.get('videodiff_error_max')})")
         else:
             lang = 'jpn' if CONFIG['match_jpn_secondary'] else None
-            results = run_audio_correlation_workflow(ref_file, sec_file, logger, CONFIG['scan_chunk_count'], CONFIG['scan_chunk_duration'], lang, role_tag='sec')
+            results = run_audio_correlation_workflow(ref_file, sec_file, logger, CONFIG['scan_chunk_count'],
+                                                     CONFIG['scan_chunk_duration'], lang, role_tag='sec')
             best = best_from_results(results, CONFIG['min_match_pct'])
             if not best:
                 raise RuntimeError('Audio analysis for Secondary yielded no valid result.')
@@ -35,11 +39,14 @@ def merge_job(ref_file: str, sec_file: Optional[str], ter_file: Optional[str], o
     if ter_file:
         if CONFIG['analysis_mode'] == 'VideoDiff':
             delay_ter, err_ter = run_videodiff(ref_file, ter_file, logger, videodiff_path)
-            if err_ter < float(CONFIG.get('videodiff_error_min', 0.0)) or err_ter > float(CONFIG.get('videodiff_error_max', 100.0)):
-                raise RuntimeError(f"VideoDiff confidence out of bounds: error={err_ter:.2f} (allowed {CONFIG.get('videodiff_error_min')}..{CONFIG.get('videodiff_error_max')})")
+            if err_ter < float(CONFIG.get('videodiff_error_min', 0.0)) or err_ter > float(
+                    CONFIG.get('videodiff_error_max', 100.0)):
+                raise RuntimeError(
+                    f"VideoDiff confidence out of bounds: error={err_ter:.2f} (allowed {CONFIG.get('videodiff_error_min')}..{CONFIG.get('videodiff_error_max')})")
         else:
             lang = 'jpn' if CONFIG['match_jpn_tertiary'] else None
-            results = run_audio_correlation_workflow(ref_file, ter_file, logger, CONFIG['scan_chunk_count'], CONFIG['scan_chunk_duration'], lang, role_tag='ter')
+            results = run_audio_correlation_workflow(ref_file, ter_file, logger, CONFIG['scan_chunk_count'],
+                                                     CONFIG['scan_chunk_duration'], lang, role_tag='ter')
             best = best_from_results(results, CONFIG['min_match_pct'])
             if not best:
                 raise RuntimeError('Audio analysis for Tertiary yielded no valid result.')
@@ -73,10 +80,13 @@ def merge_job(ref_file: str, sec_file: Optional[str], ter_file: Optional[str], o
         set_progress(0.05)
         chapters_xml = None
         if CONFIG['rename_chapters']:
-            chapters_xml = rename_chapters_xml(ref_file, str(job_temp), logger, shift_ms=int(delays.get('_global_shift', 0)))
+            chapters_xml = rename_chapters_xml(ref_file, str(job_temp), logger,
+                                               shift_ms=int(delays.get('_global_shift', 0)))
         ref_tracks = extract_tracks(ref_file, str(job_temp), logger, role='ref', all_tracks=True)
-        sec_tracks = extract_tracks(sec_file, str(job_temp), logger, role='sec', audio=True, subs=True) if sec_file else []
-        ter_tracks = extract_tracks(ter_file, str(job_temp), logger, role='ter', audio=False, subs=True) if ter_file else []
+        sec_tracks = extract_tracks(sec_file, str(job_temp), logger, role='sec', audio=True,
+                                    subs=True) if sec_file else []
+        ter_tracks = extract_tracks(ter_file, str(job_temp), logger, role='ter', audio=False,
+                                    subs=True) if ter_file else []
         ter_atts = extract_attachments(ter_file, str(job_temp), logger, role='ter') if ter_file else []
         if CONFIG['swap_subtitle_order'] and sec_tracks:
             only_subs = [t for t in sec_tracks if t['type'] == 'subtitles']
@@ -107,4 +117,3 @@ def merge_job(ref_file: str, sec_file: Optional[str], ter_file: Optional[str], o
                 shutil.rmtree(job_temp, ignore_errors=True)
             except Exception:
                 pass
-
