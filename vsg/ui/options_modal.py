@@ -29,6 +29,13 @@ class Binder:
 
 B = Binder()
 
+def _cfg_get(key, default=None):
+    try:
+        return CONFIG.get(key, default)
+    except Exception:
+        return default
+
+
 
 def _tip(for_tag: str, text: str):
     with dpg.tooltip(for_tag):
@@ -38,13 +45,13 @@ def _tip(for_tag: str, text: str):
 def _row_text(label, tag, key, hint="", width=520, tip=""):
     with dpg.group(horizontal=True):
         dpg.add_text(label, width=220)
-        dpg.add_input_text(tag=tag, width=width, hint=hint, callback=B.on_changed)
+        dpg.add_input_text(tag=tag, width=width, hint=hint, callback=B.on_changed, default_value=str(_cfg_get(key, '') or ''))
         B.bind(tag, key)
         if tip: _tip(tag, tip)
 
 
 def _row_check(label, tag, key, tip=""):
-    dpg.add_checkbox(tag=tag, label=label, callback=B.on_changed)
+    dpg.add_checkbox(tag=tag, label=label, callback=B.on_changed, default_value=bool(_cfg_get(key, False)))
     B.bind(tag, key)
     if tip: _tip(tag, tip)
 
@@ -52,7 +59,7 @@ def _row_check(label, tag, key, tip=""):
 def _row_int(label, tag, key, minv=0, maxv=1_000_000, step=1, tip=""):
     with dpg.group(horizontal=True):
         dpg.add_text(label, width=220)
-        dpg.add_input_int(tag=tag, min_value=minv, max_value=maxv, step=step, callback=B.on_changed)
+        dpg.add_input_int(tag=tag, min_value=minv, max_value=maxv, step=step, callback=B.on_changed, default_value=int(_cfg_get(key, 0)))
         B.bind(tag, key)
         if tip: _tip(tag, tip)
 
@@ -60,7 +67,7 @@ def _row_int(label, tag, key, minv=0, maxv=1_000_000, step=1, tip=""):
 def _row_float(label, tag, key, step=0.1, tip=""):
     with dpg.group(horizontal=True):
         dpg.add_text(label, width=220)
-        dpg.add_input_float(tag=tag, step=step, callback=B.on_changed)
+        dpg.add_input_float(tag=tag, step=step, callback=B.on_changed, default_value=float(_cfg_get(key, 0.0)))
         B.bind(tag, key)
         if tip: _tip(tag, tip)
 
@@ -68,7 +75,7 @@ def _row_float(label, tag, key, step=0.1, tip=""):
 def _row_combo(label, tag, key, items, tip=""):
     with dpg.group(horizontal=True):
         dpg.add_text(label, width=220)
-        dpg.add_combo(tag=tag, items=items, width=260, callback=B.on_changed)
+        dpg.add_combo(tag=tag, items=items, width=260, callback=B.on_changed, default_value=_cfg_get(key, items[0] if items else ''))
         B.bind(tag, key)
         if tip: _tip(tag, tip)
 
@@ -121,6 +128,7 @@ def build_options_modal():
                     pos=(120, 80)):
         with dpg.tab_bar():
             # Storage
+            try:
             with dpg.tab(label="Storage"):
                 _row_text("Output folder", "op_out", "output_folder",
                           hint="Where final MKVs are written.",
@@ -139,7 +147,10 @@ def build_options_modal():
                     _row_text(label, f"op_{key}", key, tip=tip)
 
             # Analysis
-            with dpg.tab(label="Analysis"):
+            except Exception as e:
+                _log(f"[options] Storage tab failed: {e}")
+            try:
+                with dpg.tab(label="Analysis"):
                 _row_combo("Workflow", "op_workflow", "workflow",
                            ["Analyze & Merge", "Analyze Only"],
                            tip="Analyze only vs analyze+merge.")
@@ -154,7 +165,10 @@ def build_options_modal():
                            tip="Reject matches below this similarity threshold.")
 
             # Global
-            with dpg.tab(label="Global"):
+            except Exception as e:
+                _log(f"[options] Analysis tab failed: {e}")
+            try:
+                with dpg.tab(label="Global"):
                 _row_check("Rename chapters", "op_ren_chap", "rename_chapters",
                            tip="Normalize chapter titles based on language preference.")
                 _row_check("Prefer JPN audio on Secondary", "op_pref_jpn_sec", "prefer_jpn_secondary",
@@ -175,7 +189,10 @@ def build_options_modal():
                            tip="Only snap chapter starts (not ends).")
 
             # Save / Load
-            with dpg.tab(label="Save / Load"):
+            except Exception as e:
+                _log(f"[options] Global tab failed: {e}")
+            try:
+                with dpg.tab(label="Save / Load"):
                 dpg.add_text("Persist or import/export all preferences.")
                 dpg.add_spacer(height=6)
                 with dpg.group(horizontal=True):
@@ -183,6 +200,9 @@ def build_options_modal():
                     dpg.add_button(label="Load…", callback=lambda *_: _load_settings_dialog())
                     dpg.add_button(label="Export…", callback=lambda *_: _export_settings_dialog())
 
+
+except Exception as e:
+                _log(f"[options] Save/Load tab failed: {e}")
 
 def show_options_modal():
     if not dpg.does_item_exist("options_modal"):

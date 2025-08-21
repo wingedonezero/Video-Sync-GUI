@@ -809,10 +809,9 @@ def build_ui():
             dpg.add_separator()
             dpg.add_text('Inputs')
             with dpg.group(horizontal=True):
-                dpg.add_button(label='Storage…', callback=lambda: dpg.configure_item('storage_modal', show=True))
-                dpg.add_button(label='Analysis Settings…',
                                callback=lambda: dpg.configure_item('analysis_modal', show=True))
                 dpg.add_button(label='Global Options…', callback=lambda: dpg.configure_item('global_modal', show=True))
+            with dpg.group(horizontal=True):
             with dpg.group(horizontal=True):
                 dpg.add_text('Reference')
                 dpg.add_input_text(tag='ref_input', label='', width=900, multiline=False, height=40)
