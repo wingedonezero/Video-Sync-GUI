@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 import dearpygui.dearpygui as dpg
+from vsg.appearance_helper import load_fonts_and_themes, apply_line_heights
 
 from vsg.logbus import _log, LOG_Q, pump_logs
 from vsg.settings import CONFIG, SETTINGS_PATH, load_settings, save_settings
@@ -206,3 +207,18 @@ def build_ui():
     dpg.set_primary_window("main_window", True)
     dpg.start_dearpygui()
     dpg.destroy_context()
+
+# -- Appearance: bind fonts/themes and input heights after UI builds --
+try:
+    _orig_build_ui = build_ui
+    def build_ui(*args, **kwargs):
+        result = _orig_build_ui(*args, **kwargs)
+        try:
+            load_fonts_and_themes()
+            apply_line_heights()
+        except Exception:
+            pass
+        return result
+except Exception:
+    # If build_ui isn't defined yet, ignore; app_direct can call helpers instead.
+    pass
