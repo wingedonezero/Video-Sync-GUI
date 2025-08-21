@@ -9,8 +9,7 @@ from vsg.mux.tokens import build_mkvmerge_tokens
 from vsg.mux.run import write_mkvmerge_json_options, run_mkvmerge_with_json
 from vsg.jobs.discover import discover_jobs
 from vsg.jobs.merge_job import merge_job
-from vsg.ui.options import build_options_window, show_options
-from vsg.ui.handlers import wire_handlers
+from vsg.ui.options_modal import build_options_modal, show_options_modal
 # === end Thin GUI import block ===
 
 # === vsg direct imports (modularized) ===
@@ -24,8 +23,7 @@ from vsg.mux.tokens import build_mkvmerge_tokens
 from vsg.mux.run import write_mkvmerge_json_options, run_mkvmerge_with_json
 from vsg.jobs.discover import discover_jobs
 from vsg.jobs.merge_job import merge_job
-from vsg.ui.options import build_options_window, show_options
-from vsg.ui.handlers import wire_handlers
+from vsg.ui.options_modal import build_options_modal, show_options_modal
 # === end vsg direct imports ===
 
 #!/usr/bin/env python3
@@ -702,15 +700,14 @@ def build_ui():
         except Exception:
             pass
     with dpg.window(tag='main_window', label=APP_NAME, width=1180, height=780):
-        dpg.add_text('Make Secondary/Tertiary match Reference — GUI (v20 pipeline)')
+with dpg.group(tag='header_options_row'):
+    dpg.add_button(tag='options_btn_main', label='Options…', callback=lambda *_: show_options_modal())
         dpg.add_separator()
         dpg.add_text('Inputs')
         with dpg.group(horizontal=True):
             dpg.add_button(label='Storage…', callback=lambda: dpg.configure_item('storage_modal', show=True))
             dpg.add_button(label='Analysis Settings…', callback=lambda: dpg.configure_item('analysis_modal', show=True))
             dpg.add_button(label='Global Options…', callback=lambda: dpg.configure_item('global_modal', show=True))
-            dpg.add_button(label='Save Settings', callback=ui_save_settings)
-            dpg.add_button(label='Load Settings', callback=on_click_load_settings)
         with dpg.group(horizontal=True):
             dpg.add_text('Reference')
             dpg.add_input_text(tag='ref_input', label='', width=900, multiline=False, height=40)
@@ -978,28 +975,11 @@ def _vsg_log_merge_summary_from_opts(logger, opts_path: str):
 # --- END_INJECT_MERGE_SUMMARY ---
 
 
-def _open_options(sender=None, app_data=None, user_data=None):
-    show_options()
-
-
 def _register_options_hotkey():
     import dearpygui.dearpygui as dpg
     try:
         if not dpg.does_item_exist('opt_hotkey_reg'):
             with dpg.handler_registry(tag='opt_hotkey_reg'):
-                dpg.add_key_press_handler(key=dpg.mvKey_F9, callback=_open_options)
-            from vsg.logbus import _log
-            _log('Hint: Press F9 to open Options.')
+                dpg.add_key_press_handler(key=dpg.mvKey_F9, callback=lambda *_: show_options_modal())
     except Exception:
         pass
-
-
-def _add_options_button_into_ui():
-    import dearpygui.dearpygui as dpg
-    try:
-        # add near top of main layout without relying on specific tags
-        dpg.add_button(tag='options_btn_main', label='Options…', callback=_open_options)
-    except Exception:
-        pass
-
-# NOTE: could not find dpg.start_dearpygui(); ensure to call build_options_window(), wire_handlers(dpg), _register_options_hotkey(), _add_options_button_into_ui() before starting the loop.
