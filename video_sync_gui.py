@@ -982,13 +982,24 @@ def _open_options(sender=None, app_data=None, user_data=None):
     show_options()
 
 
-def _add_viewport_menubar():
-    """Create a top viewport menu bar with Options… item."""
+def _register_options_hotkey():
     import dearpygui.dearpygui as dpg
     try:
-        with dpg.viewport_menu_bar():
-            with dpg.menu(label="Edit"):
-                dpg.add_menu_item(label="Options…", callback=_open_options)
+        if not dpg.does_item_exist('opt_hotkey_reg'):
+            with dpg.handler_registry(tag='opt_hotkey_reg'):
+                dpg.add_key_press_handler(key=dpg.mvKey_F9, callback=_open_options)
+            from vsg.logbus import _log
+            _log('Hint: Press F9 to open Options.')
     except Exception:
-        # Older DPG or already created; ignore
         pass
+
+
+def _add_options_button_into_ui():
+    import dearpygui.dearpygui as dpg
+    try:
+        # add near top of main layout without relying on specific tags
+        dpg.add_button(tag='options_btn_main', label='Options…', callback=_open_options)
+    except Exception:
+        pass
+
+# NOTE: could not find dpg.start_dearpygui(); ensure to call build_options_window(), wire_handlers(dpg), _register_options_hotkey(), _add_options_button_into_ui() before starting the loop.
