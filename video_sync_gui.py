@@ -9,6 +9,8 @@ from vsg.mux.tokens import build_mkvmerge_tokens
 from vsg.mux.run import write_mkvmerge_json_options, run_mkvmerge_with_json
 from vsg.jobs.discover import discover_jobs
 from vsg.jobs.merge_job import merge_job
+from vsg.ui.options import build_options_window, show_options
+from vsg.ui.handlers import wire_handlers
 # === end Thin GUI import block ===
 
 # === vsg direct imports (modularized) ===
@@ -22,6 +24,8 @@ from vsg.mux.tokens import build_mkvmerge_tokens
 from vsg.mux.run import write_mkvmerge_json_options, run_mkvmerge_with_json
 from vsg.jobs.discover import discover_jobs
 from vsg.jobs.merge_job import merge_job
+from vsg.ui.options import build_options_window, show_options
+from vsg.ui.handlers import wire_handlers
 # === end vsg direct imports ===
 
 #!/usr/bin/env python3
@@ -972,3 +976,15 @@ def _vsg_log_merge_summary_from_opts(logger, opts_path: str):
     _log(logger, f"Options file: {opts_path}")
     _log(logger, "====================")
 # --- END_INJECT_MERGE_SUMMARY ---
+
+
+def _open_options(sender=None, app_data=None, user_data=None):
+    show_options()
+
+# Fallback Options button
+import dearpygui.dearpygui as dpg
+if not dpg.does_item_exist('options_btn'):
+    try:
+        dpg.add_button(tag='options_btn', label='Options…', callback=_open_options)
+    except Exception:
+        pass
