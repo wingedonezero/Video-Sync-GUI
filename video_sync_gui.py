@@ -152,17 +152,17 @@ def build_ui():
             dpg.add_button(tag="options_btn_main", label="Options…", callback=lambda *_: show_options_modal())
         # File inputs
         dpg.add_text("Reference")
-        dpg.add_input_text(tag="ref_input", width=900)
-        dpg.add_same_line(spacing=8)
-        dpg.add_button(label="Browse…", callback=lambda: dpg.show_item("file_dialog_ref"))
+        with dpg.group(horizontal=True):
+            dpg.add_input_text(tag="ref_input", width=900)
+            dpg.add_button(label="Browse…", callback=lambda: dpg.show_item("file_dialog_ref"))
         dpg.add_text("Secondary")
-        dpg.add_input_text(tag="sec_input", width=900)
-        dpg.add_same_line(spacing=8)
-        dpg.add_button(label="Browse…", callback=lambda: dpg.show_item("file_dialog_sec"))
+        with dpg.group(horizontal=True):
+            dpg.add_input_text(tag="sec_input", width=900)
+            dpg.add_button(label="Browse…", callback=lambda: dpg.show_item("file_dialog_sec"))
         dpg.add_text("Tertiary")
-        dpg.add_input_text(tag="ter_input", width=900)
-        dpg.add_same_line(spacing=8)
-        dpg.add_button(label="Browse…", callback=lambda: dpg.show_item("file_dialog_ter"))
+        with dpg.group(horizontal=True):
+            dpg.add_input_text(tag="ter_input", width=900)
+            dpg.add_button(label="Browse…", callback=lambda: dpg.show_item("file_dialog_ter"))
         dpg.add_separator()
         with dpg.group(horizontal=True):
             dpg.add_button(tag="btn_analyze_only", label="Analyze Only", width=150, height=36, callback=lambda *_: do_analyze_only())
