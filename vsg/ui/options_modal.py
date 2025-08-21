@@ -3,36 +3,41 @@ from __future__ import annotations
 import dearpygui.dearpygui as dpg
 from vsg.settings_core import CONFIG, load_settings, save_settings, on_change, adopt_into_app, SETTINGS_PATH
 
-# All tags in this modal get a unique prefix to avoid any collisions
+# Try to log to your existing in-app log if available
+def _ui_log(msg: str):
+    try:
+        from vsg.logbus import _log
+        _log(msg)
+        return
+    except Exception:
+        pass
+    try:
+        dpg.log_info(msg)
+    except Exception:
+        pass
+
 PFX = "prefs_"
 WIN = PFX + "options_modal"
 
-# -------------------- Safe legacy cleanup (no DPG calls at import) --------------------
 LEGACY_BUTTON_LABELS = {"Storage?", "Analysis Settings?", "Global Options?"}
 LEGACY_WINDOW_LABELS = {"Storage Settings", "Analysis Settings", "Global Options"}
-_purged_once = False
 
 def _purge_legacy_settings_ui():
-    global _purged_once
-    if _purged_once:
-        return
-    _purged_once = True
+    # Remove any old settings buttons/windows so only the new modal exists
     try:
-        items = dpg.get_all_items()
-    except Exception:
-        return  # context might not be ready; bail
-    for item in items:
-        try:
-            lbl = dpg.get_item_label(item)
-        except Exception:
-            continue
-        if lbl in LEGACY_BUTTON_LABELS or lbl in LEGACY_WINDOW_LABELS:
+        for item in dpg.get_all_items():
             try:
-                dpg.delete_item(item)
+                lbl = dpg.get_item_label(item)
             except Exception:
-                pass
+                continue
+            if lbl in LEGACY_BUTTON_LABELS or lbl in LEGACY_WINDOW_LABELS:
+                try:
+                    dpg.delete_item(item)
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
-# -------------------- Binder --------------------
 class Binder:
     def __init__(self):
         self.map: dict[str, str] = {}
@@ -52,7 +57,7 @@ class Binder:
         for tag, key in self.map.items():
             if dpg.does_item_exist(tag):
                 try:
-                    dpg.set_value(tag, CONFIG.get(key))
+                    dpg.set_value(tag, CONFIG.get(key) if CONFIG.get(key) is not None else "")
                 except Exception:
                     pass
         _apply_mode_visibility()
@@ -62,14 +67,13 @@ B = Binder()
 def _tip(text: str):
     if not text:
         return
-    dpg.add_tooltip(dpg.last_item())
-    dpg.add_text(text)
+    dpg.add_tooltip(dpg.last_item()); dpg.add_text(text)
 
 def _row_text(label: str, tag: str, key: str, width: int = 520, hint: str = "", tip: str = ""):
     with dpg.group(horizontal=True):
         dpg.add_text(label)
         dpg.add_input_text(tag=tag, width=width, hint=hint,
-                           default_value=str(CONFIG.get(key, "")),
+                           default_value=(CONFIG.get(key) if CONFIG.get(key) is not None else ""),
                            callback=B.on_changed)
         _tip(tip); B.bind(tag, key)
 
@@ -111,16 +115,9 @@ def _apply_mode_visibility():
     if dpg.does_item_exist(PFX + "vd_panel"):
         dpg.configure_item(PFX + "vd_panel", show=not show_audio)
 
-def _add_debug_group():
-    with dpg.group(horizontal=True):
-        dpg.add_button(label="Show Path", callback=lambda *_: dpg.log_info(str(SETTINGS_PATH)))
-        dpg.add_button(label="Dump CONFIG", callback=lambda *_: dpg.log_info(str(CONFIG)))
-        dpg.add_button(label="Force Refresh", callback=lambda *_: (B.refresh()))
-
 def build_options_modal():
     if dpg.does_item_exist(WIN):
         dpg.delete_item(WIN)
-
     with dpg.window(tag=WIN, label="Preferences", modal=True, show=False, width=980, height=660):
         with dpg.tab_bar():
 
@@ -201,11 +198,15 @@ def build_options_modal():
             with dpg.tab(label="Save / Load"):
                 dpg.add_text("Persist, reload, or export all preferences.")
                 with dpg.group(horizontal=True):
-                    dpg.add_button(label="Save", callback=lambda *_: save_settings())
-                    dpg.add_button(label="Load", callback=lambda *_: (load_settings(), adopt_into_app(), B.refresh(), _apply_mode_visibility()))
+                    dpg.add_button(label="Save", callback=lambda *_: (_ui_log(f"Saved settings -> {SETTINGS_PATH}"), save_settings()))
+                    dpg.add_button(label="Load", callback=lambda *_: (_ui_log(f"Loading settings <- {SETTINGS_PATH}"),
+                                                                      load_settings(), adopt_into_app(), B.refresh(), _apply_mode_visibility()))
                     dpg.add_button(label="Export…", callback=lambda *_: _export_settings_dialog())
                 dpg.add_spacer(height=6)
-                _add_debug_group()
+                with dpg.group(horizontal=True):
+                    dpg.add_button(label="Show Path", callback=lambda *_: _ui_log(str(SETTINGS_PATH)))
+                    dpg.add_button(label="Dump CONFIG", callback=lambda *_: _ui_log(json.dumps(CONFIG, indent=2)))
+                    dpg.add_button(label="Force Refresh", callback=lambda *_: (B.refresh(), _apply_mode_visibility()))
 
     _apply_mode_visibility()
 
@@ -217,7 +218,6 @@ def _export_settings_dialog():
         pass
 
 def show_options_modal():
-    # Ensure context exists and UI is built before we touch DPG
     load_settings(); adopt_into_app()
     _purge_legacy_settings_ui()
     if not dpg.does_item_exist(WIN):
