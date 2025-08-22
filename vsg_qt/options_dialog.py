@@ -4,12 +4,35 @@ from PySide6 import QtWidgets, QtCore
 from vsg.settings_io import CONFIG, load_settings, save_settings
 from .appearance import apply_appearance
 
+
+def _normalize_config_for_ui(cfg):
+    # Back-compat: min_match_pct may be 0-1 or 0-100
+    m = float(cfg.get("min_match_pct", 5.0))
+    if m <= 1.0:
+        m *= 100.0
+    cfg["min_match_pct"] = m
+    # Map snap distance naming
+    if "snap_threshold_ms" in cfg:
+        cfg["snap_distance_ms"] = int(cfg.get("snap_threshold_ms") or cfg.get("snap_distance_ms", 250))
+    else:
+        cfg["snap_threshold_ms"] = int(cfg.get("snap_distance_ms", 250))
+    # Snap mode alias
+    mode = (cfg.get("snap_mode") or "previous").lower()
+    if mode == "back":
+        mode = "previous"
+    elif mode not in ("previous", "nearest"):
+        mode = "previous"
+    cfg["snap_mode"] = mode
+    return cfg
+
 class OptionsDialog(QtWidgets.QDialog):
+
     def __init__(self, app, root, parent=None):
         super().__init__(parent)
         self._app = app
         self._root = root
         self.setWindowTitle("Preferences")
+        _normalize_config_for_ui(CONFIG)
         self.resize(920, 560)
 
         self.tabs = QtWidgets.QTabWidget()
@@ -90,7 +113,7 @@ class OptionsDialog(QtWidgets.QDialog):
 
         self.chunks = QtWidgets.QSpinBox(); self.chunks.setRange(1, 50); self.chunks.setValue(int(CONFIG.get("scan_chunk_count",5)))
         self.chunk_dur = QtWidgets.QSpinBox(); self.chunk_dur.setRange(2, 120); self.chunk_dur.setValue(int(CONFIG.get("scan_chunk_duration",10)))
-        self.min_match = QtWidgets.QDoubleSpinBox(); self.min_match.setRange(0.0, 1.0); self.min_match.setSingleStep(0.01); self.min_match.setValue(float(CONFIG.get("min_match_pct",0.45)))
+        self.min_match = QtWidgets.QDoubleSpinBox(); self.min_match.setRange(0.0, 100.0); self.min_match.setSingleStep(0.1); self.min_match.setSuffix(" %"); self.min_match.setValue(float(CONFIG.get("min_match_pct",5.0)))
         self.vd_min = QtWidgets.QDoubleSpinBox(); self.vd_min.setRange(0.0, 1000.0); self.vd_min.setValue(float(CONFIG.get("videodiff_error_min",0.0)))
         self.vd_max = QtWidgets.QDoubleSpinBox(); self.vd_max.setRange(0.0, 1000.0); self.vd_max.setValue(float(CONFIG.get("videodiff_error_max",1.0)))
 
@@ -116,8 +139,10 @@ class OptionsDialog(QtWidgets.QDialog):
 
         self.first_sub = QtWidgets.QCheckBox("Set first subtitle track as default")
         self.first_sub.setChecked(bool(CONFIG.get("first_sub_default", False)))
+        self.swap_sub = QtWidgets.QCheckBox("Swap subtitle order (original option)")
+        self.swap_sub.setChecked(bool(CONFIG.get("swap_subtitle_order", False)))
 
-        for w in (self.prefer_sec, self.prefer_ter, self.rm_norm, self.first_sub):
+        for w in (self.prefer_sec, self.prefer_ter, self.rm_norm, self.first_sub, self.swap_sub):
             v.addWidget(w)
         v.addStretch(1)
 
@@ -132,13 +157,22 @@ class OptionsDialog(QtWidgets.QDialog):
         self.snap = QtWidgets.QCheckBox("Snap chapter start to keyframe")
         self.snap.setChecked(bool(CONFIG.get("snap_chapters", False)))
         self.snap_mode = QtWidgets.QComboBox(); self.snap_mode.addItems(["nearest", "back"]); self.snap_mode.setCurrentText(CONFIG.get("snap_mode","nearest"))
-        self.snap_thresh = QtWidgets.QSpinBox(); self.snap_thresh.setRange(0, 5000); self.snap_thresh.setValue(int(CONFIG.get("snap_distance_ms",400)))
+        self.snap_thresh = QtWidgets.QSpinBox(); self.snap_thresh.setRange(0, 5000); self.snap_thresh.setValue(int(CONFIG.get("snap_distance_ms",CONFIG.get("snap_threshold_ms",250))))
+        self.snap_starts = QtWidgets.QCheckBox("Snap chapter *starts* only")
+        self.snap_starts.setChecked(bool(CONFIG.get("snap_starts_only", True)))
+        self.snap_verbose = QtWidgets.QCheckBox("Chapter snap verbose log")
+        self.snap_verbose.setChecked(bool(CONFIG.get("chapter_snap_verbose", False)))
+        self.snap_compact = QtWidgets.QCheckBox("Chapter snap compact log")
+        self.snap_compact.setChecked(bool(CONFIG.get("chapter_snap_compact", True)))
 
         form.addRow(self.rename)
         form.addRow(self.shift)
         form.addRow(self.snap)
         form.addRow("Snap mode", self.snap_mode)
         form.addRow("Max snap distance (ms)", self.snap_thresh)
+        form.addRow(self.snap_starts)
+        form.addRow(self.snap_verbose)
+        form.addRow(self.snap_compact)
 
     def _build_logging_tab(self):
         page = QtWidgets.QWidget(); self.tabs.addTab(page, "Logging")
@@ -193,7 +227,7 @@ class OptionsDialog(QtWidgets.QDialog):
         CONFIG["analysis_mode"] = self.mode.currentText()
         CONFIG["scan_chunk_count"] = int(self.chunks.value())
         CONFIG["scan_chunk_duration"] = int(self.chunk_dur.value())
-        CONFIG["min_match_pct"] = float(self.min_match.value())
+        CONFIG["min_match_pct"] = float(self.min_match.value())  # stored as percent 0-100 for compatibility
         CONFIG["videodiff_error_min"] = float(self.vd_min.value())
         CONFIG["videodiff_error_max"] = float(self.vd_max.value())
 
@@ -201,12 +235,17 @@ class OptionsDialog(QtWidgets.QDialog):
         CONFIG["match_jpn_tertiary"] = bool(self.prefer_ter.isChecked())
         CONFIG["apply_dialog_norm_gain"] = bool(self.rm_norm.isChecked())
         CONFIG["first_sub_default"] = bool(self.first_sub.isChecked())
+        CONFIG["swap_subtitle_order"] = bool(self.swap_sub.isChecked())
 
         CONFIG["rename_chapters"] = bool(self.rename.isChecked())
         CONFIG["shift_chapters"] = bool(self.shift.isChecked())
         CONFIG["snap_chapters"] = bool(self.snap.isChecked())
         CONFIG["snap_mode"] = self.snap_mode.currentText()
         CONFIG["snap_distance_ms"] = int(self.snap_thresh.value())
+        CONFIG["snap_threshold_ms"] = int(self.snap_thresh.value())
+        CONFIG["snap_starts_only"] = bool(self.snap_starts.isChecked())
+        CONFIG["chapter_snap_verbose"] = bool(self.snap_verbose.isChecked())
+        CONFIG["chapter_snap_compact"] = bool(self.snap_compact.isChecked())
 
         CONFIG["log_compact"] = bool(self.compact.isChecked())
         CONFIG["log_tail_lines"] = int(self.tail.value())

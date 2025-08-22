@@ -7,7 +7,15 @@ from typing import Optional
 from vsg.settings_io import CONFIG, save_settings
 from vsg_qt.appearance import apply_appearance
 from vsg_qt.options_dialog import OptionsDialog
-from vsg.logbus import _log, LOG_Q, STATUS_Q, PROGRESS_Q, set_status, set_progress
+import queue as _q
+try:
+    from vsg.logbus import _log, LOG_Q, STATUS_Q, PROGRESS_Q, set_status, set_progress
+except Exception:
+    from vsg.logbus import _log, LOG_Q
+    STATUS_Q = _q.Queue()
+    PROGRESS_Q = _q.Queue()
+    def set_status(_): pass
+    def set_progress(_): pass
 from vsg.jobs.merge_job import merge_job
 
 class MainWindow(QtWidgets.QMainWindow):
