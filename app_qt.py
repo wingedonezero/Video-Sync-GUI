@@ -1,16 +1,16 @@
-# app_qt.py
+
 from __future__ import annotations
 import sys
-from pathlib import Path
-from PySide6.QtWidgets import QApplication
+from PySide6 import QtWidgets
+from vsg.settings_io import load_settings
 from vsg_qt.main_window import MainWindow
 
-def main() -> int:
-    proj_root = Path(__file__).resolve().parent
-    app = QApplication(sys.argv)
-    win = MainWindow(project_root=proj_root)
+def main():
+    load_settings()  # populate CONFIG and ensure folders
+    app = QtWidgets.QApplication(sys.argv)
+    win = MainWindow(app)
     win.show()
-    return app.exec()
+    sys.exit(app.exec())
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()
