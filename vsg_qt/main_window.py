@@ -7,7 +7,7 @@ from typing import Optional
 from vsg.settings_io import CONFIG, load_settings, save_settings
 from vsg_qt.appearance import apply_appearance
 from vsg_qt.options_dialog import OptionsDialog
-from vsg.logbus import add_sink, remove_sink, add_status_sink, remove_status_sink, add_progress_sink, remove_progress_sink, _log
+from vsg.logbus import _log, LOG_Q, STATUS_Q, PROGRESS_Q, set_status, set_progress
 from vsg.jobs.merge_job import merge_job
 
 class MainWindow(QtWidgets.QMainWindow):
@@ -61,21 +61,16 @@ class MainWindow(QtWidgets.QMainWindow):
         # F9 opens preferences
         QtGui.QShortcut(QtGui.QKeySequence("F9"), self, activated=self.open_options)
 
-        # Hook log/status/progress
-        add_sink(self._on_log)
-        add_status_sink(self._on_status)
-        add_progress_sink(self._on_progress)
+        # Start timers to drain thread-safe queues
+        self._log_timer = QtCore.QTimer(self)
+        self._log_timer.timeout.connect(self._pump_queues)
+        self._log_timer.start(50)
 
         self._log("Settings initialized/updated with defaults.")
         self._log("Settings applied to UI.")
 
     def closeEvent(self, e: QtGui.QCloseEvent) -> None:
-        try:
-            remove_sink(self._on_log)
-            remove_status_sink(self._on_status)
-            remove_progress_sink(self._on_progress)
-        finally:
-            super().closeEvent(e)
+        super().closeEvent(e)
 
     def _path_row(self, vbox, label: str):
         row = QtWidgets.QHBoxLayout()
@@ -142,8 +137,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_merge.setEnabled(False)
         self.progress.setValue(1)
         self.status_lbl.setText("Starting…")
+        set_status("Starting…")
+        set_progress(0.0)
 
         # Use a worker thread to keep UI responsive
+        set_status("Running analysis…")
         self.worker = _JobWorker(ref, sec, ter, out_dir, self)
         self.worker.finished.connect(self._on_job_done)
         self.worker.start()
@@ -152,6 +150,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.btn_analyze.setEnabled(True)
         self.btn_merge.setEnabled(True)
         if ok:
+            set_status("Done")
+            set_progress(1.0)
             QtWidgets.QMessageBox.information(self, "Done", message)
         else:
             QtWidgets.QMessageBox.critical(self, "Failed", message)

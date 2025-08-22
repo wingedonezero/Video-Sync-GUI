@@ -6,6 +6,8 @@ from datetime import datetime
 from typing import Callable, List, Optional
 
 LOG_Q: "queue.Queue[str]" = queue.Queue()
+STATUS_Q: "queue.Queue[str]" = queue.Queue()
+PROGRESS_Q: "queue.Queue[float]" = queue.Queue()
 _LOG_SINKS: List[Callable[[str], None]] = []
 _STATUS_SINKS: List[Callable[[str], None]] = []
 _PROGRESS_SINKS: List[Callable[[float], None]] = []
@@ -66,6 +68,10 @@ def _log(*args) -> None:
     _emit(_fmt(*args))
 
 def set_status(text: str) -> None:
+    try:
+        STATUS_Q.put_nowait(str(text))
+    except Exception:
+        pass
     for s in list(_STATUS_SINKS):
         try:
             s(text)
@@ -73,6 +79,10 @@ def set_status(text: str) -> None:
             pass
 
 def set_progress(fraction: float) -> None:
+    try:
+        PROGRESS_Q.put_nowait(float(fraction))
+    except Exception:
+        pass
     for s in list(_PROGRESS_SINKS):
         try:
             s(float(fraction))
