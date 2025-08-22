@@ -1,8 +1,9 @@
 
 from __future__ import annotations
 
+# Single source of truth for defaults (UI + backend)
 DEFAULTS = {
-    # Storage
+    # Storage / Paths
     "output_folder": "./sync_output",
     "temp_root": "./temp_work",
     "ffmpeg_path": "",
@@ -11,33 +12,32 @@ DEFAULTS = {
     "mkvextract_path": "",
     "videodiff_path": "",
 
-    # Analysis
-    "workflow": "Analyze & Merge",          # "Analyze Only" | "Analyze & Merge"
-    "analysis_mode": "Audio Correlation",   # "Audio Correlation" | "VideoDiff"
-    "scan_chunk_count": 10,
-    "scan_chunk_duration": 15,
-    "min_match_pct": 5.0,
+    # Workflow / Analysis
+    "workflow": "Analyze & Merge",          # or "Analyze Only"
+    "analysis_mode": "Audio Correlation",   # or "VideoDiff"
+    "scan_chunk_count": 5,
+    "scan_chunk_duration": 10,              # seconds per chunk
+    "min_match_pct": 0.45,                  # 0.0 - 1.0
     "videodiff_error_min": 0.0,
-    "videodiff_error_max": 100.0,
+    "videodiff_error_max": 1.0,
 
-    # Global (audio/subtitle behavior + chapter snap)
-    "rename_chapters": False,
-    "match_jpn_secondary": True,
-    "match_jpn_tertiary": True,
+    # Matching / Preferences
+    "match_jpn_secondary": False,
+    "match_jpn_tertiary": False,
     "apply_dialog_norm_gain": False,
-    "first_sub_default": True,
+    "first_sub_default": False,
 
+    # Chapters
+    "rename_chapters": False,
+    "shift_chapters": False,
     "snap_chapters": False,
-    "snap_mode": "previous",   # "previous" | "next" | "nearest" | "none"
-    "snap_threshold_ms": 250,
-    "snap_starts_only": True,
+    "snap_mode": "nearest",                 # "back" | "nearest"
+    "snap_distance_ms": 400,
 
     # Logging
-    "chapter_snap_verbose": False,
-    "chapter_snap_compact": True,
     "log_compact": True,
-    "log_tail_lines": 0,
-    "log_error_tail": 20,
+    "log_tail_lines": 2000,
+    "log_error_tail": 50,
     "log_progress_step": 20,
     "log_show_options_pretty": False,
     "log_show_options_json": False,

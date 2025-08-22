@@ -1,7 +1,7 @@
 
 from __future__ import annotations
 
-import json, os, shutil
+import json, os
 from pathlib import Path
 from typing import Dict, Any
 from .settings_schema import DEFAULTS, SCHEMA_VERSION
@@ -15,46 +15,49 @@ def _repo_root() -> Path:
 def settings_path() -> Path:
     return _repo_root() / "settings_gui.json"
 
-def _merge_defaults(user: Dict[str, Any]) -> Dict[str, Any]:
+def _merge_defaults(existing: Dict[str, Any]) -> Dict[str, Any]:
     merged = dict(DEFAULTS)
-    if user:
-        merged.update({k: v for k, v in user.items() if k in DEFAULTS})
-    merged["schema_version"] = SCHEMA_VERSION
+    for k, v in (existing or {}).items():
+        merged[k] = v  # preserve unknown keys too (we won't drop them on save)
+    merged["_schema_version"] = SCHEMA_VERSION
     return merged
 
 def load_settings() -> Dict[str, Any]:
     global CONFIG
     p = settings_path()
-    data = {}
+    data: Dict[str, Any] = {}
     if p.exists():
         try:
             data = json.loads(p.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                data = {}
         except Exception:
-            # keep data empty; we'll regenerate from defaults
             data = {}
-    CONFIG = _merge_defaults(data)
+    merged = _merge_defaults(data)
 
-    # ensure folders
+    # ensure folders exist
     for key in ("output_folder", "temp_root"):
         try:
-            Path(CONFIG[key]).mkdir(parents=True, exist_ok=True)
+            Path(merged[key]).mkdir(parents=True, exist_ok=True)
         except Exception:
             pass
 
+    CONFIG.clear()
+    CONFIG.update(merged)
     return CONFIG
 
-def save_settings(cfg: Dict[str, Any] | None = None) -> None:
-    cfg = cfg or CONFIG
-    # never drop unknown keys in file; merge file->cfg->defaults
-    on_disk = {}
+def save_settings(new_values: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge + save without wiping unknown keys."""
     p = settings_path()
-    if p.exists():
-        try:
-            on_disk = json.loads(p.read_text(encoding="utf-8"))
-        except Exception:
-            on_disk = {}
-    merged = dict(on_disk)
-    for k, v in cfg.items():
+    try:
+        current = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+        if not isinstance(current, dict):
+            current = {}
+    except Exception:
+        current = {}
+
+    merged = dict(current)
+    for k, v in (new_values or {}).items():
         merged[k] = v
     merged = _merge_defaults(merged)
 
@@ -72,3 +75,4 @@ def save_settings(cfg: Dict[str, Any] | None = None) -> None:
     # sync back to global
     CONFIG.clear()
     CONFIG.update(merged)
+    return merged

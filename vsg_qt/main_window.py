@@ -1,9 +1,14 @@
 
 from __future__ import annotations
 from PySide6 import QtWidgets, QtGui, QtCore
-from vsg.settings_io import CONFIG, load_settings
+from pathlib import Path
+from typing import Optional
+
+from vsg.settings_io import CONFIG, load_settings, save_settings
 from vsg_qt.appearance import apply_appearance
 from vsg_qt.options_dialog import OptionsDialog
+from vsg.logbus import add_sink, remove_sink, add_status_sink, remove_status_sink, add_progress_sink, remove_progress_sink, _log
+from vsg.jobs.merge_job import merge_job
 
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self, app: QtWidgets.QApplication):
@@ -30,12 +35,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         v.addSpacing(6)
 
-        # Actions row (no Workflow/Mode selectors here — moved to Options)
+        # Actions row (workflow in Options)
         actions = QtWidgets.QHBoxLayout()
         self.btn_analyze = QtWidgets.QPushButton("Analyze Only")
-        self.btn_merge = QtWidgets.QPushButton("Analyze  Merge")
+        self.btn_merge = QtWidgets.QPushButton("Analyze  &  Merge")
         self.progress = QtWidgets.QProgressBar(); self.progress.setRange(0, 100); self.progress.setValue(0)
-        self.status_lbl = QtWidgets.QLabel("OK")
+        self.status_lbl = QtWidgets.QLabel("Idle")
 
         self.btn_analyze.clicked.connect(self.analyze_only)
         self.btn_merge.clicked.connect(self.analyze_merge)
@@ -46,9 +51,9 @@ class MainWindow(QtWidgets.QMainWindow):
         actions.addWidget(self.status_lbl)
         v.addLayout(actions)
 
-        v.addWidget(QtWidgets.QLabel("Log"))
+        # Log
         self.log = QtWidgets.QPlainTextEdit(); self.log.setReadOnly(True)
-        self.log.setMaximumBlockCount(max(1000, CONFIG.get("log_tail_lines", 0) or 10000))
+        self.log.setMaximumBlockCount(max(1000, CONFIG.get("log_tail_lines", 2000) or 10000))
         v.addWidget(self.log, 1)
 
         apply_appearance(self._app, self)
@@ -56,8 +61,21 @@ class MainWindow(QtWidgets.QMainWindow):
         # F9 opens preferences
         QtWidgets.QShortcut(QtGui.QKeySequence("F9"), self, activated=self.open_options)
 
+        # Hook log/status/progress
+        add_sink(self._on_log)
+        add_status_sink(self._on_status)
+        add_progress_sink(self._on_progress)
+
         self._log("Settings initialized/updated with defaults.")
         self._log("Settings applied to UI.")
+
+    def closeEvent(self, e: QtGui.QCloseEvent) -> None:
+        try:
+            remove_sink(self._on_log)
+            remove_status_sink(self._on_status)
+            remove_progress_sink(self._on_progress)
+        finally:
+            super().closeEvent(e)
 
     def _path_row(self, vbox, label: str):
         row = QtWidgets.QHBoxLayout()
@@ -74,19 +92,86 @@ class MainWindow(QtWidgets.QMainWindow):
         vbox.addLayout(row)
         return edit, btn
 
-    # --- actions
-    def _log(self, msg: str):
-        self.log.appendPlainText(msg)
+    # --- logs/status ---
+    def _on_log(self, line: str) -> None:
+        self.log.appendPlainText(line)
         if CONFIG.get("log_autoscroll", True):
             self.log.verticalScrollBar().setValue(self.log.verticalScrollBar().maximum())
 
+    def _on_status(self, text: str) -> None:
+        self.status_lbl.setText(text)
+
+    def _on_progress(self, frac: float) -> None:
+        try:
+            self.progress.setValue(int(max(0.0, min(1.0, float(frac))) * 100.0))
+        except Exception:
+            pass
+
+    def _log(self, msg: str):
+        self._on_log(msg)
+
+    # --- actions
     def open_options(self):
         dlg = OptionsDialog(self._app, self, self)
         dlg.exec()
 
     def analyze_only(self):
-        # Wire to your real pipeline
-        self._log("Analyze Only pressed. (Hook up to your pipeline)")
+        CONFIG["workflow"] = "Analyze Only"
+        save_settings(CONFIG)
+        self._run_job()
 
     def analyze_merge(self):
-        self._log("Analyze+Merge pressed. (Hook up to your pipeline)")
+        CONFIG["workflow"] = "Analyze & Merge"
+        save_settings(CONFIG)
+        self._run_job()
+
+    def _run_job(self):
+        ref = self.ref_edit.text().strip()
+        sec = self.sec_edit.text().strip() or None
+        ter = self.ter_edit.text().strip() or None
+        out_dir = CONFIG.get("output_folder") or "."
+
+        if not ref:
+            QtWidgets.QMessageBox.warning(self, "Missing file", "Please choose a Reference file.")
+            return
+        if not Path(ref).exists():
+            QtWidgets.QMessageBox.warning(self, "Not found", f"Reference file not found:\n{ref}")
+            return
+
+        self.btn_analyze.setEnabled(False)
+        self.btn_merge.setEnabled(False)
+        self.progress.setValue(1)
+        self.status_lbl.setText("Starting…")
+
+        # Use a worker thread to keep UI responsive
+        self.worker = _JobWorker(ref, sec, ter, out_dir, self)
+        self.worker.finished.connect(self._on_job_done)
+        self.worker.start()
+
+    def _on_job_done(self, ok: bool, message: str):
+        self.btn_analyze.setEnabled(True)
+        self.btn_merge.setEnabled(True)
+        if ok:
+            QtWidgets.QMessageBox.information(self, "Done", message)
+        else:
+            QtWidgets.QMessageBox.critical(self, "Failed", message)
+
+
+class _JobWorker(QtCore.QThread):
+    finished = QtCore.Signal(bool, str)
+
+    def __init__(self, ref: str, sec: Optional[str], ter: Optional[str], out_dir: str, parent=None):
+        super().__init__(parent)
+        self.ref, self.sec, self.ter, self.out_dir = ref, sec, ter, out_dir
+
+    def run(self):
+        try:
+            # videodiff path comes from CONFIG (options); pass Path or empty
+            vp = Path(CONFIG.get("videodiff_path") or "")
+            res = merge_job(self.ref, self.sec, self.ter, self.out_dir, logger=None, videodiff_path=vp)
+            ok = bool(res and res.get("status"))
+            msg = res.get("status") if isinstance(res, dict) else ("OK" if ok else "Unknown result")
+            self.finished.emit(ok, msg)
+        except Exception as e:
+            _log("Job failed:", repr(e))
+            self.finished.emit(False, str(e))
