@@ -3,6 +3,15 @@ from __future__ import annotations
 import sys
 from PySide6 import QtWidgets
 from vsg.settings_io import load_settings
+from vsg.log_compat import ensure_logbus_compat
+
+def _patch_logging():
+    try:
+        ensure_logbus_compat()
+    except Exception as e:
+        print('logbus compat warning:', e)
+
+_patch_logging()
 from vsg_qt.main_window import MainWindow
 
 def main() -> None:
