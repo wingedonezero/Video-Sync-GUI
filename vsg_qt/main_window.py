@@ -1,215 +1,208 @@
+# -*- coding: utf-8 -*-
 
-from __future__ import annotations
-from PySide6 import QtWidgets, QtGui, QtCore
+"""
+The main window of the PyQt application.
+"""
+
+import sys
 from pathlib import Path
-from typing import Optional
 
-from vsg.settings_io import CONFIG, save_settings
-from vsg_qt.appearance import apply_appearance
-from vsg_qt.options_dialog import OptionsDialog
-import queue as _q
-try:
-    from vsg.logbus import _log, LOG_Q, STATUS_Q, PROGRESS_Q, set_status, set_progress
-except Exception:
-    from vsg.logbus import _log, LOG_Q
-    STATUS_Q = _q.Queue()
-    PROGRESS_Q = _q.Queue()
-    def set_status(_): pass
-    def set_progress(_): pass
-from vsg.jobs.merge_job import merge_job
+from PySide6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
+    QLineEdit, QLabel, QFileDialog, QGroupBox, QTextEdit, QProgressBar,
+    QMessageBox
+)
+from PySide6.QtCore import Qt, QThreadPool
 
-class MainWindow(QtWidgets.QMainWindow):
-    def __init__(self, app: QtWidgets.QApplication):
+from .options_dialog import OptionsDialog
+from .worker import JobWorker
+from vsg_core.config import AppConfig
+
+class MainWindow(QMainWindow):
+    """Main application window."""
+
+    def __init__(self):
         super().__init__()
-        self._app = app
-        self.setWindowTitle("Video/Audio Sync & Merge — Qt")
-        self.resize(1200, 720)
+        self.setWindowTitle('Video/Audio Sync & Merge - PySide6 Edition')
+        self.setGeometry(100, 100, 1000, 600)
 
-        central = QtWidgets.QWidget(); self.setCentralWidget(central)
-        v = QtWidgets.QVBoxLayout(central)
+        self.config = AppConfig()
+        self.thread_pool = QThreadPool()
 
-        # Options row
-        row_opts = QtWidgets.QHBoxLayout()
-        btn_opts = QtWidgets.QPushButton("Options…")
-        btn_opts.clicked.connect(self.open_options)
-        row_opts.addWidget(btn_opts)
-        row_opts.addStretch(1)
-        v.addLayout(row_opts)
+        # --- UI Widgets ---
+        self.ref_input = QLineEdit()
+        self.sec_input = QLineEdit()
+        self.ter_input = QLineEdit()
+        self.log_output = QTextEdit()
+        self.progress_bar = QProgressBar()
+        self.status_label = QLabel('Ready')
+        self.sec_delay_label = QLabel('—')
+        self.ter_delay_label = QLabel('—')
 
-        # Inputs
-        self.ref_edit, _ = self._path_row(v, "Reference")
-        self.sec_edit, _ = self._path_row(v, "Secondary")
-        self.ter_edit, _ = self._path_row(v, "Tertiary")
+        self.setup_ui()
+        self.apply_config_to_ui()
 
-        v.addSpacing(6)
+    def setup_ui(self):
+        """Initializes the layout and widgets of the main window."""
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QVBoxLayout(central_widget)
 
-        # Actions row (workflow in Options)
-        actions = QtWidgets.QHBoxLayout()
-        self.btn_analyze = QtWidgets.QPushButton("Analyze Only")
-        self.btn_merge = QtWidgets.QPushButton("Analyze  &  Merge")
-        self.progress = QtWidgets.QProgressBar(); self.progress.setRange(0, 100); self.progress.setValue(0)
-        self.status_lbl = QtWidgets.QLabel("Idle")
+        # --- Top Buttons ---
+        top_button_layout = QHBoxLayout()
+        options_btn = QPushButton('Settings…')
+        options_btn.clicked.connect(self.open_options_dialog)
+        top_button_layout.addWidget(options_btn)
+        top_button_layout.addStretch()
+        main_layout.addLayout(top_button_layout)
 
-        self.btn_analyze.clicked.connect(self.analyze_only)
-        self.btn_merge.clicked.connect(self.analyze_merge)
+        # --- Input Files Group ---
+        inputs_group = QGroupBox('Input Files (File or Directory)')
+        inputs_layout = QVBoxLayout(inputs_group)
+        inputs_layout.addLayout(self._create_file_input('Reference:', self.ref_input, self._browse_ref))
+        inputs_layout.addLayout(self._create_file_input('Secondary:', self.sec_input, self._browse_sec))
+        inputs_layout.addLayout(self._create_file_input('Tertiary:', self.ter_input, self._browse_ter))
+        main_layout.addWidget(inputs_group)
 
-        actions.addWidget(self.btn_analyze)
-        actions.addWidget(self.btn_merge)
-        actions.addWidget(self.progress, 1)
-        actions.addWidget(self.status_lbl)
-        v.addLayout(actions)
+        # --- Actions Group ---
+        actions_group = QGroupBox('Actions')
+        actions_layout = QHBoxLayout(actions_group)
+        analyze_btn = QPushButton('Analyze Only')
+        analyze_merge_btn = QPushButton('Analyze & Merge')
+        analyze_btn.clicked.connect(lambda: self.start_job(and_merge=False))
+        analyze_merge_btn.clicked.connect(lambda: self.start_job(and_merge=True))
+        actions_layout.addWidget(analyze_btn)
+        actions_layout.addWidget(analyze_merge_btn)
+        actions_layout.addStretch()
+        main_layout.addWidget(actions_group)
 
-        # Log
-        self.log = QtWidgets.QPlainTextEdit(); self.log.setReadOnly(True)
-        self.log.setMaximumBlockCount(max(1000, CONFIG.get("log_tail_lines", 2000) or 10000))
-        v.addWidget(self.log, 1)
+        # --- Status & Progress ---
+        status_layout = QHBoxLayout()
+        status_layout.addWidget(QLabel('Status:'))
+        status_layout.addWidget(self.status_label, 1)
+        status_layout.addWidget(self.progress_bar)
+        self.progress_bar.setRange(0, 100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(False)
+        main_layout.addLayout(status_layout)
 
-        apply_appearance(self._app, self)
+        # --- Results Display ---
+        results_group = QGroupBox('Latest Job Results')
+        results_layout = QHBoxLayout(results_group)
+        results_layout.addWidget(QLabel('Secondary Delay:'))
+        results_layout.addWidget(self.sec_delay_label)
+        results_layout.addSpacing(20)
+        results_layout.addWidget(QLabel('Tertiary Delay:'))
+        results_layout.addWidget(self.ter_delay_label)
+        results_layout.addStretch()
+        main_layout.addWidget(results_group)
 
-        # Shortcut: F9 opens preferences
-        sc = QtGui.QShortcut(QtGui.QKeySequence("F9"), self)
-        sc.activated.connect(self.open_options)
+        # --- Log Output ---
+        log_group = QGroupBox('Log')
+        log_layout = QVBoxLayout(log_group)
+        self.log_output.setReadOnly(True)
+        self.log_output.setFontFamily('monospace')
+        log_layout.addWidget(self.log_output)
+        main_layout.addWidget(log_group)
 
-        # UI-thread queue pump (avoid cross-thread widget access)
-        self._log_timer = QtCore.QTimer(self)
-        self._log_timer.timeout.connect(self._pump_queues)
-        self._log_timer.start(50)
+    def _create_file_input(self, label_text: str, line_edit: QLineEdit, browse_slot):
+        """Helper to create a labeled file input row."""
+        layout = QHBoxLayout()
+        layout.addWidget(QLabel(label_text), 1)
+        layout.addWidget(line_edit, 8)
+        browse_btn = QPushButton('Browse…')
+        browse_btn.clicked.connect(browse_slot)
+        layout.addWidget(browse_btn, 1)
+        return layout
 
-        self._log("Settings applied to UI.")
+    def _browse_ref(self):
+        self._browse_for_path(self.ref_input, "Select Reference File or Directory")
 
-    # ---------- helpers ----------
-    def _path_row(self, vbox, label: str):
-        row = QtWidgets.QHBoxLayout()
-        row.addWidget(QtWidgets.QLabel(label))
-        edit = QtWidgets.QLineEdit()
-        edit.setPlaceholderText("Choose a file…")
-        btn = QtWidgets.QPushButton("…")
-        def pick():
-            f, _ = QtWidgets.QFileDialog.getOpenFileName(self, f"Choose {label} file")
-            if f:
-                edit.setText(f)
-        btn.clicked.connect(pick)
-        row.addWidget(edit, 1); row.addWidget(btn)
-        vbox.addLayout(row)
-        return edit, btn
+    def _browse_sec(self):
+        self._browse_for_path(self.sec_input, "Select Secondary File or Directory")
 
-    def _pump_queues(self):
-        # Called on UI thread to read log/status/progress safely
-        try:
-            import queue
-            while True:
-                try:
-                    line = LOG_Q.get_nowait()
-                    self._on_log(line)
-                except queue.Empty:
-                    break
-            while True:
-                try:
-                    st = STATUS_Q.get_nowait()
-                    self._on_status(st)
-                except queue.Empty:
-                    break
-            while True:
-                try:
-                    frac = PROGRESS_Q.get_nowait()
-                    self._on_progress(frac)
-                except queue.Empty:
-                    break
-        except Exception:
-            pass
+    def _browse_ter(self):
+        self._browse_for_path(self.ter_input, "Select Tertiary File or Directory")
 
-    # --- logs/status ---
-    def _on_log(self, line: str) -> None:
-        self.log.appendPlainText(line)
-        if CONFIG.get("log_autoscroll", True):
-            self.log.verticalScrollBar().setValue(self.log.verticalScrollBar().maximum())
+    def _browse_for_path(self, line_edit: QLineEdit, caption: str):
+        """Opens a file dialog that accepts both files and directories."""
+        dialog = QFileDialog(self, caption)
+        dialog.setFileMode(QFileDialog.FileMode.AnyFile) # Allows selecting files or dirs
+        if dialog.exec():
+            line_edit.setText(dialog.selectedFiles()[0])
 
-    def _on_status(self, text: str) -> None:
-        self.status_lbl.setText(text)
+    def open_options_dialog(self):
+        """Opens the settings dialog."""
+        dialog = OptionsDialog(self.config, self)
+        if dialog.exec():
+            self.config.save()
+            self.append_log('Settings saved.')
 
-    def _on_progress(self, frac: float) -> None:
-        try:
-            self.progress.setValue(int(max(0.0, min(1.0, float(frac))) * 100.0))
-        except Exception:
-            pass
+    def apply_config_to_ui(self):
+        """Applies loaded settings to the UI (e.g., last used paths)."""
+        self.ref_input.setText(self.config.get('last_ref_path', ''))
+        self.sec_input.setText(self.config.get('last_sec_path', ''))
+        self.ter_input.setText(self.config.get('last_ter_path', ''))
 
-    def _log(self, msg: str):
-        self._on_log(msg)
+    def save_ui_to_config(self):
+        """Saves current UI state (e.g., paths) to the config object."""
+        self.config.set('last_ref_path', self.ref_input.text())
+        self.config.set('last_sec_path', self.sec_input.text())
+        self.config.set('last_ter_path', self.ter_input.text())
+        self.config.save()
 
-    # --- actions
-    def open_options(self):
-        dlg = OptionsDialog(self._app, self, self)
-        dlg.exec()
-
-    def analyze_only(self):
-        CONFIG["workflow"] = "Analyze Only"
-        save_settings(CONFIG)
-        self._run_job()
-
-    def analyze_merge(self):
-        CONFIG["workflow"] = "Analyze & Merge"
-        save_settings(CONFIG)
-        self._run_job()
-
-    def _run_job(self):
-        ref = self.ref_edit.text().strip()
-        sec = self.sec_edit.text().strip() or None
-        ter = self.ter_edit.text().strip() or None
-        out_dir = CONFIG.get("output_folder") or "."
-
-        if not ref:
-            QtWidgets.QMessageBox.warning(self, "Missing file", "Please choose a Reference file.")
-            return
-        if not Path(ref).exists():
-            QtWidgets.QMessageBox.warning(self, "Not found", f"Reference file not found:\n{ref}")
+    def start_job(self, and_merge: bool):
+        """Prepares and starts a background worker for the job."""
+        ref_path = self.ref_input.text().strip()
+        if not ref_path or not Path(ref_path).exists():
+            QMessageBox.warning(self, "Input Error", "A valid Reference path is required.")
             return
 
-        self.btn_analyze.setEnabled(False)
-        self.btn_merge.setEnabled(False)
-        self.progress.setValue(1)
-        self.status_lbl.setText("Starting…")
-        set_status("Starting…")
-        set_progress(0.0)
+        self.save_ui_to_config()
+        self.log_output.clear()
+        self.status_label.setText('Starting job…')
+        self.progress_bar.setValue(0)
+        self.sec_delay_label.setText('—')
+        self.ter_delay_label.setText('—')
 
-        # Use a worker thread to keep UI responsive
-        self.worker = _JobWorker(ref, sec, ter, out_dir, self)
-        self.worker.finished.connect(self._on_job_done)
-        set_status("Running analysis…")
-        self.worker.start()
+        worker = JobWorker(
+            self.config.settings,
+            ref_path,
+            self.sec_input.text().strip() or None,
+            self.ter_input.text().strip() or None,
+            and_merge
+        )
 
-    def _on_job_done(self, ok: bool, message: str):
-        self.btn_analyze.setEnabled(True)
-        self.btn_merge.setEnabled(True)
-        if ok:
-            set_status("Done")
-            set_progress(1.0)
-            QtWidgets.QMessageBox.information(self, "Done", message)
+        # Connect worker signals to main thread slots
+        worker.signals.log.connect(self.append_log)
+        worker.signals.progress.connect(self.update_progress)
+        worker.signals.status.connect(self.update_status)
+        worker.signals.finished.connect(self.job_finished)
+
+        self.thread_pool.start(worker)
+
+    # --- Worker Signal Slots ---
+
+    def append_log(self, message: str):
+        self.log_output.append(message)
+        if self.config.get('log_autoscroll', True):
+            self.log_output.verticalScrollBar().setValue(self.log_output.verticalScrollBar().maximum())
+
+    def update_progress(self, value: float): # Value is 0.0 to 1.0
+        self.progress_bar.setValue(int(value * 100))
+
+    def update_status(self, message: str):
+        self.status_label.setText(message)
+
+    def job_finished(self, result: dict):
+        status = result.get('status', 'Unknown')
+        if status == 'Failed':
+            self.update_status(f'Job failed: {result.get("error", "Unknown error")}')
+            QMessageBox.critical(self, "Job Failed", result.get("error", "An unknown error occurred."))
         else:
-            QtWidgets.QMessageBox.critical(self, "Failed", message)
+            self.update_status(f'Job finished with status: {status}')
 
-
-class _JobWorker(QtCore.QThread):
-    finished = QtCore.Signal(bool, str)
-
-    def __init__(self, ref: str, sec: Optional[str], ter: Optional[str], out_dir: str, parent=None):
-        super().__init__(parent)
-        self.ref, self.sec, self.ter, self.out_dir = ref, sec, ter, out_dir
-
-    def run(self):
-        try:
-            # videodiff path comes from CONFIG (options); pass Path or empty
-            vp = Path(CONFIG.get("videodiff_path") or "")
-            res = None
-            try:
-                res = merge_job(self.ref, self.sec, self.ter, self.out_dir, logger=None, videodiff_path=vp)
-            except TypeError:
-                try:
-                    res = merge_job(self.ref, self.sec, self.ter, self.out_dir, videodiff_path=vp)
-                except TypeError:
-                    res = merge_job(self.ref, self.sec, self.ter, self.out_dir)
-            ok = bool(res and isinstance(res, dict) and res.get("status"))
-            msg = res.get("status") if isinstance(res, dict) else ("OK" if ok else "Unknown result")
-            self.finished.emit(ok, msg)
-        except Exception as e:
-            _log("Job failed:", repr(e))
-            self.finished.emit(False, str(e))
+        if 'delay_sec' in result:
+            self.sec_delay_label.setText(f"{result['delay_sec']} ms" if result['delay_sec'] is not None else "—")
+        if 'delay_ter' in result:
+            self.ter_delay_label.setText(f"{result['delay_ter']} ms" if result['delay_ter'] is not None else "—")
