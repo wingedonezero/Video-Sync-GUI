@@ -4,7 +4,7 @@ from PySide6 import QtWidgets, QtGui, QtCore
 from pathlib import Path
 from typing import Optional
 
-from vsg.settings_io import CONFIG, load_settings, save_settings
+from vsg.settings_io import CONFIG, save_settings
 from vsg_qt.appearance import apply_appearance
 from vsg_qt.options_dialog import OptionsDialog
 from vsg.logbus import _log, LOG_Q, STATUS_Q, PROGRESS_Q, set_status, set_progress
@@ -29,9 +29,9 @@ class MainWindow(QtWidgets.QMainWindow):
         v.addLayout(row_opts)
 
         # Inputs
-        self.ref_edit, btn_r = self._path_row(v, "Reference")
-        self.sec_edit, btn_s = self._path_row(v, "Secondary")
-        self.ter_edit, btn_t = self._path_row(v, "Tertiary")
+        self.ref_edit, _ = self._path_row(v, "Reference")
+        self.sec_edit, _ = self._path_row(v, "Secondary")
+        self.ter_edit, _ = self._path_row(v, "Tertiary")
 
         v.addSpacing(6)
 
@@ -58,20 +58,18 @@ class MainWindow(QtWidgets.QMainWindow):
 
         apply_appearance(self._app, self)
 
-        # F9 opens preferences
-        QtGui.QShortcut(QtGui.QKeySequence("F9"), self, activated=self.open_options)
+        # Shortcut: F9 opens preferences
+        sc = QtGui.QShortcut(QtGui.QKeySequence("F9"), self)
+        sc.activated.connect(self.open_options)
 
-        # Start timers to drain thread-safe queues
+        # UI-thread queue pump (avoid cross-thread widget access)
         self._log_timer = QtCore.QTimer(self)
         self._log_timer.timeout.connect(self._pump_queues)
         self._log_timer.start(50)
 
-        self._log("Settings initialized/updated with defaults.")
         self._log("Settings applied to UI.")
 
-    def closeEvent(self, e: QtGui.QCloseEvent) -> None:
-        super().closeEvent(e)
-
+    # ---------- helpers ----------
     def _path_row(self, vbox, label: str):
         row = QtWidgets.QHBoxLayout()
         row.addWidget(QtWidgets.QLabel(label))
@@ -86,6 +84,31 @@ class MainWindow(QtWidgets.QMainWindow):
         row.addWidget(edit, 1); row.addWidget(btn)
         vbox.addLayout(row)
         return edit, btn
+
+    def _pump_queues(self):
+        # Called on UI thread to read log/status/progress safely
+        try:
+            import queue
+            while True:
+                try:
+                    line = LOG_Q.get_nowait()
+                    self._on_log(line)
+                except queue.Empty:
+                    break
+            while True:
+                try:
+                    st = STATUS_Q.get_nowait()
+                    self._on_status(st)
+                except queue.Empty:
+                    break
+            while True:
+                try:
+                    frac = PROGRESS_Q.get_nowait()
+                    self._on_progress(frac)
+                except queue.Empty:
+                    break
+        except Exception:
+            pass
 
     # --- logs/status ---
     def _on_log(self, line: str) -> None:
@@ -141,9 +164,9 @@ class MainWindow(QtWidgets.QMainWindow):
         set_progress(0.0)
 
         # Use a worker thread to keep UI responsive
-        set_status("Running analysis…")
         self.worker = _JobWorker(ref, sec, ter, out_dir, self)
         self.worker.finished.connect(self._on_job_done)
+        set_status("Running analysis…")
         self.worker.start()
 
     def _on_job_done(self, ok: bool, message: str):
@@ -176,7 +199,7 @@ class _JobWorker(QtCore.QThread):
                     res = merge_job(self.ref, self.sec, self.ter, self.out_dir, videodiff_path=vp)
                 except TypeError:
                     res = merge_job(self.ref, self.sec, self.ter, self.out_dir)
-            ok = bool(res and res.get("status"))
+            ok = bool(res and isinstance(res, dict) and res.get("status"))
             msg = res.get("status") if isinstance(res, dict) else ("OK" if ok else "Unknown result")
             self.finished.emit(ok, msg)
         except Exception as e:
