@@ -7,8 +7,6 @@ from typing import Any, Dict, List, Optional
 from vsg.logbus import _log
 from vsg.settings import CONFIG
 from vsg.tools import run_command
-import json
-
 
 def get_stream_info(mkv_path: str, logger) -> Optional[Dict[str, Any]]:
     """Return mkvmerge -J JSON for a file or None."""
@@ -21,11 +19,57 @@ def get_stream_info(mkv_path: str, logger) -> Optional[Dict[str, Any]]:
         _log(logger, 'Failed to parse mkvmerge -J JSON output.')
         return None
 
+import json
+
+
 
 def get_audio_stream_index(file_path: str, logger, language: Optional[str]) -> Optional[int]:
     info = get_stream_info(file_path, logger)
     if not info:
+        _log(logger, "mkvmerge -J returned no info for", file_path)
         return None
+
+    # Build ordered list of audio tracks as they appear; map to 0-based audio index for ffmpeg -map 0:a:{idx}
+    tracks = [t for t in (info.get("tracks") or []) if (t.get("type") == "audio")]
+    if not tracks:
+        _log(logger, "No audio tracks found in", file_path)
+        return None
+
+    def _lang_of(t):
+        # mkvmerge JSON places language under properties.language; sometimes 'und' or missing
+        lang = (t.get("properties") or {}).get("language") or t.get("language") or t.get("lang")
+        if not lang and (t.get("properties") or {}).get("language_ietf"):
+            lang = (t.get("properties") or {}).get("language_ietf")
+        return (lang or "und").lower()
+
+    # Prepare preference list (normalize variants of Japanese)
+    pref = None
+    if language:
+        code = language.lower()
+        if code in ("jp", "ja", "jpn", "japanese"):
+            pref = {"ja", "jp", "jpn", "japanese"}
+        else:
+            pref = {code}
+
+    # Index among audio tracks (not mkvmerge 'id')
+    audio_idx = -1
+    chosen = None
+    chosen_lang = None
+    for i, t in enumerate(tracks):
+        audio_idx = i  # current 0-based audio index
+        lang = _lang_of(t)
+        if pref and lang in pref and chosen is None:
+            chosen = i
+            chosen_lang = lang
+
+    if chosen is None:
+        chosen = 0
+        chosen_lang = _lang_of(tracks[0])
+
+    _log(logger, f"Audio track selection for {file_path}: chosen a:{chosen} (lang={chosen_lang}), "
+                 f"available={[(_lang_of(t), (t.get('id'))) for t in tracks]}")
+    return int(chosen)
+
     idx = -1
     found = None
     for t in info.get('tracks', []):
