@@ -1,10 +1,8 @@
+
 from __future__ import annotations
 import dearpygui.dearpygui as dpg
-from vsg.settings_core import CONFIG, load_settings, save_settings, adopt_into_app, on_change, apply_and_notify
-
-# -----------------------------------------------------------------------------
-# Helpers
-# -----------------------------------------------------------------------------
+from vsg.settings_core import CONFIG, load_settings, adopt_into_app, on_change, apply_and_notify
+from vsg.appearance_helper import load_fonts_and_themes, apply_line_heights
 
 def _row_label(text: str, tip: str | None = None):
     dpg.add_text(text)
@@ -29,6 +27,7 @@ def _refresh_from_config():
     dpg.set_value('op_min_match', float(CONFIG.get('min_match_pct', 5.0)))
     dpg.set_value('vd_err_min', float(CONFIG.get('videodiff_error_min', 0.0)))
     dpg.set_value('vd_err_max', float(CONFIG.get('videodiff_error_max', 100.0)))
+    _toggle_mode_groups(CONFIG.get('analysis_mode', 'Audio Correlation'))
     # Global
     dpg.set_value('op_jpn_sec', bool(CONFIG.get('match_jpn_secondary', True)))
     dpg.set_value('op_jpn_ter', bool(CONFIG.get('match_jpn_tertiary', True)))
@@ -38,31 +37,43 @@ def _refresh_from_config():
     dpg.set_value('op_snap_starts', bool(CONFIG.get('snap_starts_only', True)))
     # Appearance
     dpg.set_value('op_font_file', CONFIG.get('ui_font_path', ''))
-    dpg.set_value('op_font_size', int(CONFIG.get('ui_font_size', 18)))
-    dpg.set_value('op_line_h', int(CONFIG.get('input_line_height', 40)))
+    dpg.set_value('op_font_size', int(CONFIG.get('ui_font_size', 20)))
+    dpg.set_value('op_line_h', int(CONFIG.get('input_line_height', 41)))
     dpg.set_value('op_row_gap', int(CONFIG.get('row_gap', 8)))
     dpg.set_value('op_compact', bool(CONFIG.get('ui_compact_controls', False)))
-    # Toggle panes
-    _toggle_mode_groups(CONFIG.get('analysis_mode', 'Audio Correlation'))
+    # Logging
+    dpg.set_value('log_compact', bool(CONFIG.get('log_compact', True)))
+    dpg.set_value('log_tail_lines', int(CONFIG.get('log_tail_lines', 0)))
+    dpg.set_value('log_error_tail', int(CONFIG.get('log_error_tail', 20)))
+    dpg.set_value('log_progress_step', int(CONFIG.get('log_progress_step', 20)))
+    dpg.set_value('log_pretty', bool(CONFIG.get('log_show_options_pretty', False)))
+    dpg.set_value('log_json', bool(CONFIG.get('log_show_options_json', False)))
+    dpg.set_value('log_autoscroll', bool(CONFIG.get('log_autoscroll', True)))
+    dpg.set_value('snap_verbose', bool(CONFIG.get('chapter_snap_verbose', False)))
+    dpg.set_value('snap_compact', bool(CONFIG.get('chapter_snap_compact', True)))
 
 def _toggle_mode_groups(mode: str):
     dpg.configure_item('ac_group', show=(mode == 'Audio Correlation'))
     dpg.configure_item('vd_group', show=(mode == 'VideoDiff'))
 
+def _apply_appearance_now():
+    try:
+        load_fonts_and_themes()
+        apply_line_heights()
+    except Exception:
+        pass
+
 def _do_live_load():
     conf = load_settings()
     if conf:
-        adopt_into_app(conf)
+        adopt_into_app(conf)  # updates CONFIG + notifies listeners
     _refresh_from_config()
-
-# -----------------------------------------------------------------------------
-# UI
-# -----------------------------------------------------------------------------
+    _apply_appearance_now()
 
 def build_options_modal():
     if dpg.does_item_exist('options_modal'):
         dpg.delete_item('options_modal')
-    with dpg.window(modal=True, label='Preferences', tag='options_modal', width=900, height=600, pos=(120, 60)):
+    with dpg.window(modal=True, label='Preferences', tag='options_modal', width=900, height=640, pos=(120, 60)):
         with dpg.tab_bar():
             # Storage
             with dpg.tab(label='Storage'):
@@ -71,7 +82,7 @@ def build_options_modal():
                 _row_label('Temp folder', 'Temporary workspace and extracted assets.')
                 dpg.add_input_text(tag='op_temp', width=600, callback=lambda s, a: on_change(s, a, 'temp_root'))
                 dpg.add_separator()
-                _row_label('Optional tool paths (leave blank to use PATH)', 'If empty, the app will use tools on your PATH.')
+                _row_label('Optional tool paths (leave blank to use PATH)', 'If empty, tools on your PATH are used.')
                 _row_label('FFmpeg path');     dpg.add_input_text(tag='op_ffmpeg', width=600, callback=lambda s, a: on_change(s, a, 'ffmpeg_path'))
                 _row_label('FFprobe path');    dpg.add_input_text(tag='op_ffprobe', width=600, callback=lambda s, a: on_change(s, a, 'ffprobe_path'))
                 _row_label('mkvmerge path');   dpg.add_input_text(tag='op_mkvmerge', width=600, callback=lambda s, a: on_change(s, a, 'mkvmerge_path'))
@@ -142,11 +153,11 @@ def build_options_modal():
                                    callback=lambda s, a: on_change(s, a, 'ui_font_path'))
                 _row_label('Font size')
                 dpg.add_input_int(tag='op_font_size', step=1, min_value=8, max_value=48,
-                                  default_value=int(CONFIG.get('ui_font_size', 18)),
+                                  default_value=int(CONFIG.get('ui_font_size', 20)),
                                   callback=lambda s, a: on_change(s, a, 'ui_font_size'), width=120)
                 _row_label('Input line height')
                 dpg.add_input_int(tag='op_line_h', step=1, min_value=20, max_value=72,
-                                  default_value=int(CONFIG.get('input_line_height', 40)),
+                                  default_value=int(CONFIG.get('input_line_height', 41)),
                                   callback=lambda s, a: on_change(s, a, 'input_line_height'), width=120)
                 _row_label('Row spacing')
                 dpg.add_input_int(tag='op_row_gap', step=1, min_value=0, max_value=32,
@@ -156,10 +167,45 @@ def build_options_modal():
                                  default_value=bool(CONFIG.get('ui_compact_controls', False)),
                                  callback=lambda s, a: on_change(s, a, 'ui_compact_controls'))
 
+            # Logging
+            with dpg.tab(label='Logging'):
+                _row_label('Output formatting')
+                dpg.add_checkbox(tag='log_compact', label='Compact log format',
+                                 default_value=bool(CONFIG.get('log_compact', True)),
+                                 callback=lambda s, a: on_change(s, a, 'log_compact'))
+                dpg.add_checkbox(tag='log_pretty', label='Show options (pretty)',
+                                 default_value=bool(CONFIG.get('log_show_options_pretty', False)),
+                                 callback=lambda s, a: on_change(s, a, 'log_show_options_pretty'))
+                dpg.add_checkbox(tag='log_json', label='Show options (JSON)',
+                                 default_value=bool(CONFIG.get('log_show_options_json', False)),
+                                 callback=lambda s, a: on_change(s, a, 'log_show_options_json'))
+                dpg.add_checkbox(tag='log_autoscroll', label='Autoscroll',
+                                 default_value=bool(CONFIG.get('log_autoscroll', True)),
+                                 callback=lambda s, a: on_change(s, a, 'log_autoscroll'))
+                dpg.add_separator()
+                _row_label('Tail sizes')
+                dpg.add_input_int(tag='log_tail_lines', default_value=int(CONFIG.get('log_tail_lines', 0)),
+                                  step=1, min_value=0, max_value=10000,
+                                  callback=lambda s, a: on_change(s, a, 'log_tail_lines'), width=200)
+                dpg.add_input_int(tag='log_error_tail', default_value=int(CONFIG.get('log_error_tail', 20)),
+                                  step=1, min_value=0, max_value=10000,
+                                  callback=lambda s, a: on_change(s, a, 'log_error_tail'), width=200)
+                dpg.add_input_int(tag='log_progress_step', default_value=int(CONFIG.get('log_progress_step', 20)),
+                                  step=1, min_value=1, max_value=10000,
+                                  callback=lambda s, a: on_change(s, a, 'log_progress_step'), width=200)
+                dpg.add_separator()
+                _row_label('Chapter snapping logging')
+                dpg.add_checkbox(tag='snap_verbose', label='Verbose',
+                                 default_value=bool(CONFIG.get('chapter_snap_verbose', False)),
+                                 callback=lambda s, a: on_change(s, a, 'chapter_snap_verbose'))
+                dpg.add_checkbox(tag='snap_compact', label='Compact summaries',
+                                 default_value=bool(CONFIG.get('chapter_snap_compact', True)),
+                                 callback=lambda s, a: on_change(s, a, 'chapter_snap_compact'))
+
             # Save / Load
             with dpg.tab(label='Save / Load'):
                 _row_label('Persist or import/export all preferences.')
-                dpg.add_button(label='Save', callback=lambda: apply_and_notify())
+                dpg.add_button(label='Save', callback=lambda: (apply_and_notify(), _apply_appearance_now()))
                 dpg.add_button(label='Load', callback=_do_live_load)
 
     _refresh_from_config()
