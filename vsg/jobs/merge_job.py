@@ -52,10 +52,6 @@ def merge_job(ref_file: str, sec_file: Optional[str], ter_file: Optional[str], o
                 raise RuntimeError('Audio analysis for Tertiary yielded no valid result.')
             delay_ter = best['delay']
         _log(logger, f'Tertiary delay: {delay_ter} ms')
-    if dpg.does_item_exist('sec_delay_val'):
-        dpg.set_value('sec_delay_val', format_delay_ms(delay_sec))
-    if dpg.does_item_exist('ter_delay_val'):
-        dpg.set_value('ter_delay_val', format_delay_ms(delay_ter))
     if CONFIG['workflow'] == 'Analyze Only':
         set_status('Analysis complete (no merge).')
         set_progress(1.0)

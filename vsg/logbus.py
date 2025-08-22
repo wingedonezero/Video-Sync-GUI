@@ -1,59 +1,42 @@
-"""Central logging queue and helpers (robust)."""
+"""Centralized logging queue and helpers (UI-agnostic)."""
 from __future__ import annotations
-
-import logging
 import queue
 from datetime import datetime
+from typing import Callable, List
 
-import dearpygui.dearpygui as dpg
-
-# Explicit queue for GUI logs (hotfix)
-LOG_Q = queue.Queue()
 LOG_Q: "queue.Queue[str]" = queue.Queue()
+_SINKS: List[Callable[[str], None]] = []
 
+def add_sink(fn: Callable[[str], None]) -> None:
+    """Register a sink callback which receives each log line."""
+    if fn not in _SINKS:
+        _SINKS.append(fn)
+
+def remove_sink(fn: Callable[[str], None]) -> None:
+    try:
+        _SINKS.remove(fn)
+    except ValueError:
+        pass
+
+def _emit(line: str) -> None:
+    LOG_Q.put(line)
+    for s in list(_SINKS):
+        try:
+            s(line)
+        except Exception:
+            pass
+
+def _fmt(*args) -> str:
+    ts = datetime.now().strftime("[%H:%M:%S]")
+    try:
+        text = " ".join(str(a) for a in args)
+    except Exception:
+        text = " ".join(repr(a) for a in args)
+    return f"{ts} {text}"
 
 def _log(*args) -> None:
-    try:
-        msg = " ".join(str(a) for a in args)
-        ts = datetime.now().strftime("%H:%M:%S")
-        LOG_Q.put(f"[{ts}] {msg}")
-    except Exception as e:
-        try:
-            LOG_Q.put(str(args))
-        except Exception:
-            pass
-        logging.debug("log enqueue failed: %r", e)
-
-
-def _autoscroll_pref() -> bool:
-    try:
-        from vsg import settings as _settings
-        cfg = getattr(_settings, "CONFIG", {})
-        if isinstance(cfg, dict):
-            return bool(cfg.get("log_autoscroll", True))
-    except Exception:
-        pass
-    return True
-
+    _emit(_fmt(*args))
 
 def pump_logs() -> None:
-    autoscroll = _autoscroll_pref()
-    has_child = dpg.does_item_exist("log_child")
-    rendered_any = False
-    while not LOG_Q.empty():
-        try:
-            line = LOG_Q.get_nowait()
-        except Exception:
-            break
-        if has_child:
-            try:
-                dpg.add_text(line, parent="log_child", wrap=0)
-                rendered_any = True
-            except Exception:
-                pass
-    if rendered_any and autoscroll and dpg.does_item_exist("log_scroller"):
-        try:
-            max_scroll = dpg.get_y_scroll_max("log_scroller")
-            dpg.set_y_scroll("log_scroller", max_scroll)
-        except Exception:
-            pass
+    """No-op for Qt; logs are pushed to sinks as they come in."""
+    pass
