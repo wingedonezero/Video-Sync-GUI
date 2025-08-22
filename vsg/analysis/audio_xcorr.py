@@ -7,6 +7,19 @@ from typing import Any, Dict, List, Optional
 from vsg.logbus import _log
 from vsg.settings import CONFIG
 from vsg.tools import run_command
+import json
+
+
+def get_stream_info(mkv_path: str, logger) -> Optional[Dict[str, Any]]:
+    """Return mkvmerge -J JSON for a file or None."""
+    out = run_command(['mkvmerge', '-J', str(mkv_path)], logger)
+    if not out:
+        return None
+    try:
+        return json.loads(out)
+    except Exception:
+        _log(logger, 'Failed to parse mkvmerge -J JSON output.')
+        return None
 
 
 def get_audio_stream_index(file_path: str, logger, language: Optional[str]) -> Optional[int]:
