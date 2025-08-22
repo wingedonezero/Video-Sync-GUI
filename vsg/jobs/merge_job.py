@@ -6,6 +6,8 @@ from typing import Optional
 
 from vsg.logbus import _log
 from vsg.settings import CONFIG
+from vsg.analysis.audio_xcorr import run_audio_correlation_workflow, best_from_results
+from vsg.analysis.videodiff import run_videodiff
 
 
 # Hook: chapters
