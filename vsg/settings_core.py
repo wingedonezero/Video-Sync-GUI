@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Callable, Dict, Any
 
 # Settings file (next to script by default)
-SCRIPT_DIR = Path(__file__).resolve().parents[2]
+SCRIPT_DIR = Path(__file__).resolve().parents[1]
 SETTINGS_PATH = SCRIPT_DIR / "settings_gui.json"
 
 # ----- defaults (monolith + appearance) -----

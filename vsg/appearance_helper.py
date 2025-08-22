@@ -74,4 +74,11 @@ def apply_line_heights():
 def _on_settings_applied():
     _apply_next_frame(lambda: (load_fonts_and_themes(), apply_line_heights()))
 
-register_listener(_on_settings_applied)
+
+def enable_live_appearance():
+    """Register the settings-applied listener AFTER DPG context exists."""
+    try:
+        from vsg.settings_core import register_listener
+        register_listener(_on_settings_applied)
+    except Exception:
+        pass

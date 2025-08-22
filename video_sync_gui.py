@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 import dearpygui.dearpygui as dpg
-from vsg.appearance_helper import load_fonts_and_themes, apply_line_heights
+from vsg.appearance_helper import load_fonts_and_themes, apply_line_heights, enable_live_appearance
 
 from vsg.logbus import _log, LOG_Q, pump_logs
 from vsg.settings import CONFIG, SETTINGS_PATH, load_settings, save_settings
@@ -225,18 +225,16 @@ except Exception:
 
 # === Appearance Hook: apply fonts/themes and input heights AFTER UI builds ===
 try:
-    from vsg.appearance_helper import load_fonts_and_themes, apply_line_heights
     _VSG__orig_build_ui = build_ui
     def build_ui(*args, **kwargs):
         result = _VSG__orig_build_ui(*args, **kwargs)
         try:
             load_fonts_and_themes()
             apply_line_heights()
+            enable_live_appearance()  # register listener only after UI is alive
         except Exception:
             pass
         return result
 except Exception:
-    # If helper isn't available, keep original build_ui unchanged
     pass
 # === End Appearance Hook ===
-
