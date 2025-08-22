@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 import dearpygui.dearpygui as dpg
 from vsg.settings_core import CONFIG, load_settings, adopt_into_app, on_change, apply_and_notify
@@ -193,6 +192,7 @@ def build_options_modal():
                 dpg.add_input_int(tag='log_progress_step', default_value=int(CONFIG.get('log_progress_step', 20)),
                                   step=1, min_value=1, max_value=10000,
                                   callback=lambda s, a: on_change(s, a, 'log_progress_step'), width=200)
+
                 dpg.add_separator()
                 _row_label('Chapter snapping logging')
                 dpg.add_checkbox(tag='snap_verbose', label='Verbose',

@@ -1,240 +1,172 @@
-
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 from __future__ import annotations
 
-import threading
-from pathlib import Path
-from typing import Optional
+# Ensure settings_gui.json is loaded before building any UI
+import vsg.boot  # side-effect: preload_from_disk()
 
 import dearpygui.dearpygui as dpg
-from vsg.appearance_helper import load_fonts_and_themes, apply_line_heights, enable_live_appearance
 
-from vsg.logbus import _log, LOG_Q, pump_logs
-from vsg.settings import CONFIG, SETTINGS_PATH, load_settings, save_settings
-from vsg.jobs.discover import discover_jobs
-from vsg.jobs.merge_job import merge_job
-from vsg.analysis.videodiff import run_videodiff, format_delay_ms
-from vsg.analysis.audio_xcorr import run_audio_correlation_workflow, best_from_results
+from vsg.settings_core import CONFIG, notify_settings_applied, on_change
 from vsg.ui.options_modal import show_options_modal
+from vsg.appearance_helper import enable_live_appearance, load_fonts_and_themes, apply_line_heights
+
+# --- Optional analysis functions (use existing ones if present) ----------------
+try:
+    from analyze_only import do_analyze_only as _do_analyze_only
+except Exception:  # noqa: BLE001
+    _do_analyze_only = None
+
+try:
+    from analyze_and_merge import do_analyze_and_merge as _do_analyze_and_merge
+except Exception:  # noqa: BLE001
+    _do_analyze_and_merge = None
 
 
-APP_NAME = "Video/Audio Sync & Merge"
+# --- Small helpers -------------------------------------------------------------
 
-# --- UI helpers ---
-def set_status(msg: str) -> None:
-    _log(msg)
+def _log(msg: str) -> None:
+    """Append a line to the log box if it exists."""
     try:
-        if dpg.does_item_exist("status_text"):
-            dpg.set_value("status_text", msg)
+        prev = dpg.get_value("log_multiline")
+        dpg.set_value("log_multiline", (prev + msg + "\n") if prev else (msg + "\n"))
     except Exception:
         pass
 
-def set_progress(val: float) -> None:
+
+def _run_analyze_only() -> None:
+    if _do_analyze_only is None:
+        _log("[FAILED] Analyze Only: function not found (do_analyze_only).")
+        return
+    _log("=== Job start (Analyze Only) ===")
     try:
-        if dpg.does_item_exist("progress_bar"):
-            dpg.set_value("progress_bar", max(0.0, min(1.0, float(val))))
+        _do_analyze_only()
+        _log("=== Job complete ===")
+    except Exception as e:  # noqa: BLE001
+        _log(f"[FAILED] {e!r}")
+        _log("=== Job complete (failed) ===")
+
+
+def _run_analyze_and_merge() -> None:
+    if _do_analyze_and_merge is None:
+        _log("[FAILED] Analyze & Merge: function not found (do_analyze_and_merge).")
+        return
+    _log("=== Job start (Analyze & Merge) ===")
+    try:
+        _do_analyze_and_merge()
+        _log("=== Job complete ===")
+    except Exception as e:  # noqa: BLE001
+        _log(f"[FAILED] {e!r}")
+        _log("=== Job complete (failed) ===")
+
+
+def _sync_header_from_config() -> None:
+    """Reflect CONFIG into the small header controls."""
+    try:
+        if dpg.does_item_exist("wf_combo"):
+            dpg.set_value("wf_combo", CONFIG.get("workflow", "Analyze & Merge"))
+        if dpg.does_item_exist("mode_combo"):
+            dpg.set_value("mode_combo", CONFIG.get("analysis_mode", "Audio Correlation"))
     except Exception:
         pass
 
-def on_pick_file(sender, app_data, user_data):
+
+# Listener: when settings are applied elsewhere (Save/Load), reflect in header
+def _on_settings_applied() -> None:
+    _sync_header_from_config()
+    # Re-apply appearance on-the-fly
     try:
-        tag = str(user_data)
-        sel = app_data["file_path_name"]
-        dpg.set_value(tag, sel)
+        load_fonts_and_themes()
+        apply_line_heights()
+    except Exception:
+        pass
+    _log("Settings applied to UI.")
+
+
+# --- UI construction -----------------------------------------------------------
+
+def build_ui() -> None:
+    """
+    Build the main window controls.
+    Assumes context/viewport are created by your launcher (e.g., app_direct.py).
+    """
+    # Hook live appearance updates
+    enable_live_appearance()
+    # Also listen for settings-changed notifications (Save/Load from Options modal)
+    try:
+        from vsg.settings_core import register_listener
+        register_listener(_on_settings_applied)
     except Exception:
         pass
 
-def on_pick_dir(sender, app_data, user_data):
-    try:
-        tag = str(user_data)
-        sel = app_data["file_path_name"]
-        dpg.set_value(tag, sel)
-    except Exception:
-        pass
+    # Apply appearance once on build
+    load_fonts_and_themes()
+    apply_line_heights()
 
-def sync_config_from_ui():
-    # Only paths; all other options come from Preferences modal / CONFIG json
-    if dpg.does_item_exist("ref_input"):
-        CONFIG["ref_path"] = dpg.get_value("ref_input") or CONFIG.get("ref_path", "")
-    if dpg.does_item_exist("sec_input"):
-        CONFIG["sec_path"] = dpg.get_value("sec_input") or CONFIG.get("sec_path", "")
-    if dpg.does_item_exist("ter_input"):
-        CONFIG["ter_path"] = dpg.get_value("ter_input") or CONFIG.get("ter_path", "")
-    # Derive default folders if missing
-    base = Path(__file__).resolve().parent
-    out_root = CONFIG.get("output_folder") or str(base / "sync_output")
-    temp_root = CONFIG.get("temp_root") or str(base / "temp_work")
-    CONFIG["output_folder"] = out_root
-    CONFIG["temp_root"] = temp_root
-    Path(out_root).mkdir(parents=True, exist_ok=True)
-    Path(temp_root).mkdir(parents=True, exist_ok=True)
+    # Main window (use an existing primary window if you already have one)
+    if not dpg.does_item_exist("main_window"):
+        with dpg.window(tag="main_window", label="Video/Audio Sync & Merge — GUI v2", width=1150, height=700):
+            pass
 
-# --- worker logic ---
-RUNNING = False
-RUN_LOCK = threading.Lock()
+    dpg.focus_item("main_window")
+    with dpg.group(parent="main_window"):
+        # Top row – Options button
+        with dpg.group(horizontal=True):
+            dpg.add_button(tag="options_btn_main", label="Options…",
+                           callback=lambda: show_options_modal())
 
-def _compute_delay_for_pair(ref_file: str, other_file: str, role: str, logger=None):
-    if CONFIG.get("analysis_mode") == "VideoDiff":
-        vdp = CONFIG.get("videodiff_path", "") or ""
-        delay_ms, err = run_videodiff(ref_file, other_file, logger, vdp)
-        emin = float(CONFIG.get("videodiff_error_min", 0.0))
-        emax = float(CONFIG.get("videodiff_error_max", 100.0))
-        _log(f"[{role}] VideoDiff result: delay={format_delay_ms(delay_ms)} error={err:.3f} (bounds {emin}..{emax})")
-        if err < emin or err > emax:
-            raise RuntimeError(f"[{role}] VideoDiff confidence {err:.3f} out of bounds {emin}..{emax}")
-        return delay_ms
-    else:
-        lang = "jpn" if CONFIG.get("match_jpn_secondary") else None
-        chunks = int(CONFIG.get("scan_chunk_count", 4))
-        chunk_dur = int(CONFIG.get("scan_chunk_duration", 8))
-        results = run_audio_correlation_workflow(ref_file, other_file, logger, chunks, chunk_dur, lang, role_tag=role)
-        best = best_from_results(results, float(CONFIG.get("min_match_pct", 5.0)))
-        if not best:
-            raise RuntimeError(f"[{role}] No strong correlation result (min_match_pct={CONFIG.get('min_match_pct', 5.0)})")
-        _log(f"[{role}] Audio correlation best: delay={format_delay_ms(best['delay'])} match={best['match']:.1f}%")
-        return int(best["delay"])
-
-def _run_jobs_impl(merge: bool):
-    global RUNNING
-    with RUN_LOCK:
-        if RUNNING:
-            _log("A job is already running.")
-            return
-        RUNNING = True
-    try:
-        sync_config_from_ui()
-        ref = CONFIG.get("ref_path", "")
-        sec = CONFIG.get("sec_path", "")
-        ter = CONFIG.get("ter_path", "")
-        set_status("Preparing jobs…")
-        jobs = discover_jobs(ref, sec, ter)
-        _log(f"Discovered {len(jobs)} job(s).")
-        out_dir = CONFIG.get("output_folder")
-        vdp = CONFIG.get("videodiff_path", "")
-        for i, (r, s, t) in enumerate(jobs, start=1):
-            set_status(f"Running job {i}/{len(jobs)}…")
-            set_progress((i-1) / max(1, len(jobs)))
-            if merge:
-                merge_job(r, s, t, out_dir, logger=None, videodiff_path=Path(vdp) if vdp else Path(""))
-            else:
-                # analysis only: compute and log delays
-                if s:
-                    try:
-                        _ = _compute_delay_for_pair(r, s, "sec", logger=None)
-                    except Exception as e:
-                        _log(f"[sec] analysis failed: {e}")
-                if t:
-                    try:
-                        _ = _compute_delay_for_pair(r, t, "ter", logger=None)
-                    except Exception as e:
-                        _log(f"[ter] analysis failed: {e}")
-        set_progress(1.0)
-        set_status("All jobs complete.")
-    except Exception as e:
-        _log(f"[FAILED] {e}")
-        set_status("Job failed.")
-    finally:
-        RUNNING = False
-
-def do_analyze_only():
-    threading.Thread(target=_run_jobs_impl, kwargs={"merge": False}, daemon=True).start()
-
-def do_analyze_and_merge():
-    threading.Thread(target=_run_jobs_impl, kwargs={"merge": True}, daemon=True).start()
-
-# --- UI build ---
-def build_ui():
-    load_settings()  # populate CONFIG first
-    dpg.create_context()
-    dpg.create_viewport(title=APP_NAME, width=1180, height=780)
-    with dpg.window(tag="main_window", label=APP_NAME, width=-1, height=-1):
-        with dpg.group(tag="header_options_row"):
-            dpg.add_button(tag="options_btn_main", label="Options…", callback=lambda *_: show_options_modal())
-        # File inputs
+        # Inputs rows
         dpg.add_text("Reference")
-        with dpg.group(horizontal=True):
-            dpg.add_input_text(tag="ref_input", width=900)
-            dpg.add_button(label="Browse…", callback=lambda: dpg.show_item("file_dialog_ref"))
+        dpg.add_input_text(tag="inp_ref", width=900)
         dpg.add_text("Secondary")
-        with dpg.group(horizontal=True):
-            dpg.add_input_text(tag="sec_input", width=900)
-            dpg.add_button(label="Browse…", callback=lambda: dpg.show_item("file_dialog_sec"))
+        dpg.add_input_text(tag="inp_sec", width=900)
         dpg.add_text("Tertiary")
-        with dpg.group(horizontal=True):
-            dpg.add_input_text(tag="ter_input", width=900)
-            dpg.add_button(label="Browse…", callback=lambda: dpg.show_item("file_dialog_ter"))
+        dpg.add_input_text(tag="inp_ter", width=900)
+
+        # Settings header (workflow/mode only; detailed values live in Options)
         dpg.add_separator()
+        dpg.add_text("Settings")
         with dpg.group(horizontal=True):
-            dpg.add_button(tag="btn_analyze_only", label="Analyze Only", width=150, height=36, callback=lambda *_: do_analyze_only())
-            dpg.add_button(tag="btn_analyze_merge", label="Analyze & Merge", width=170, height=36, callback=lambda *_: do_analyze_and_merge())
-            dpg.add_progress_bar(tag="progress_bar", overlay="Progress", default_value=0.0, width=420, height=26)
-        dpg.add_text("Status:")
-        dpg.add_text(tag="status_text", default_value="")
+            dpg.add_text("Workflow")
+            dpg.add_combo(tag="wf_combo",
+                          items=["Analyze Only", "Analyze & Merge"],
+                          default_value=CONFIG.get("workflow", "Analyze & Merge"),
+                          width=200,
+                          callback=lambda s, a: on_change(s, a, "workflow"))
+            dpg.add_text("Mode")
+            dpg.add_combo(tag="mode_combo",
+                          items=["Audio Correlation", "VideoDiff"],
+                          default_value=CONFIG.get("analysis_mode", "Audio Correlation"),
+                          width=220,
+                          callback=lambda s, a: on_change(s, a, "analysis_mode"))
+
+        # Actions row
+        dpg.add_separator()
+        dpg.add_text("Actions")
+        with dpg.group(horizontal=True):
+            dpg.add_button(tag="btn_analyze_only", label="Analyze Only", width=150,
+                           callback=_run_analyze_only)
+            dpg.add_button(tag="btn_analyze_merge", label="Analyze & Merge", width=180,
+                           callback=_run_analyze_and_merge)
+            # Simple progress placeholder and status
+            with dpg.group():
+                dpg.add_progress_bar(tag="progress_bar", default_value=0.0, width=400)
+            dpg.add_text(tag="status_text", default_value="Status:")
+
+        # Results
+        dpg.add_separator()
+        dpg.add_text("Results (latest job)")
+        with dpg.group(horizontal=True):
+            dpg.add_text("Secondary delay:  ?")
+            dpg.add_text("|")
+            dpg.add_text("Tertiary delay:  ?")
+
+        # Log
         dpg.add_separator()
         dpg.add_text("Log")
-        with dpg.child_window(tag="log_child", width=-1, height=320, horizontal_scrollbar=True):
-            dpg.add_child_window(tag="log_scroller", width=-1, height=-1)
-        # dialogs
-        with dpg.file_dialog(tag="file_dialog_ref", label="Pick Reference", callback=on_pick_file,
-                             user_data="ref_input", width=700, height=400, directory_selector=False, show=False):
-            dpg.add_file_extension(".*", color=(150,255,150,255))
-        with dpg.file_dialog(tag="file_dialog_sec", label="Pick Secondary", callback=on_pick_file,
-                             user_data="sec_input", width=700, height=400, directory_selector=False, show=False):
-            dpg.add_file_extension(".*", color=(150,255,150,255))
-        with dpg.file_dialog(tag="file_dialog_ter", label="Pick Tertiary", callback=on_pick_file,
-                             user_data="ter_input", width=700, height=400, directory_selector=False, show=False):
-            dpg.add_file_extension(".*", color=(150,255,150,255))
-    # Prefill inputs from CONFIG
-    dpg.set_value("ref_input", CONFIG.get("ref_path",""))
-    dpg.set_value("sec_input", CONFIG.get("sec_path",""))
-    dpg.set_value("ter_input", CONFIG.get("ter_path",""))
-    # pump log timer
-    try:
-        dpg.add_timer(callback=lambda: pump_logs(), period=0.15, tag="log_timer")
-    except Exception:
-        # fallback: a frame callback every ~10 frames
-        def _pump():
-            pump_logs()
-            try:
-                dpg.set_frame_callback(dpg.get_frame_count()+10, _pump)
-            except Exception:
-                pass
-        dpg.set_frame_callback(10, _pump)
+        dpg.add_input_text(tag="log_multiline", multiline=True, readonly=True, width=1100, height=320)
 
-    dpg.setup_dearpygui()
-    dpg.show_viewport()
-    dpg.set_primary_window("main_window", True)
-    dpg.start_dearpygui()
-    dpg.destroy_context()
-
-# -- Appearance: bind fonts/themes and input heights after UI builds --
-try:
-    _orig_build_ui = build_ui
-    def build_ui(*args, **kwargs):
-        result = _orig_build_ui(*args, **kwargs)
-        try:
-            load_fonts_and_themes()
-            apply_line_heights()
-        except Exception:
-            pass
-        return result
-except Exception:
-    # If build_ui isn't defined yet, ignore; app_direct can call helpers instead.
-    pass
-
-# === Appearance Hook: apply fonts/themes and input heights AFTER UI builds ===
-try:
-    _VSG__orig_build_ui = build_ui
-    def build_ui(*args, **kwargs):
-        result = _VSG__orig_build_ui(*args, **kwargs)
-        try:
-            load_fonts_and_themes()
-            apply_line_heights()
-            enable_live_appearance()  # register listener only after UI is alive
-        except Exception:
-            pass
-        return result
-except Exception:
-    pass
-# === End Appearance Hook ===
+    # Reflect current settings into the small header
+    _sync_header_from_config()
+    # Tell any subscribers that UI is ready to consume settings
+    notify_settings_applied()
+    _log("Settings initialized/updated with defaults.")
+    _log("Settings applied to UI.")

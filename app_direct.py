@@ -1,21 +1,28 @@
-from vsg.settings_core import load_settings, adopt_into_app
-from vsg.appearance_helper import load_fonts_and_themes, apply_line_heights
+# app_direct.py
+from __future__ import annotations
+import dearpygui.dearpygui as dpg
+
+# build_ui() constructs the UI; settings are preloaded by video_sync_gui via `import vsg.boot`
 from video_sync_gui import build_ui
 
-def main():
-    # Ensure CONFIG is loaded and adopted before UI build
-    adopt_into_app(load_settings())
 
-    # Build the UI (your build_ui usually creates the context/viewport and shows it)
+def main() -> None:
+    # 1) Create DPG context + viewport
+    dpg.create_context()
+    dpg.create_viewport(title="Video/Audio Sync & Merge", width=1200, height=800)
+
+    # 2) Build your UI (no context creation inside build_ui)
     build_ui()
 
-    # Apply appearance (font, themes, input heights) immediately after the UI is created
+    # 3) Setup + show + run
+    dpg.setup_dearpygui()
+    dpg.show_viewport()
     try:
-        load_fonts_and_themes()
-        apply_line_heights()
-    except Exception:
-        # Never crash the app over appearance; fall back silently
-        pass
+        dpg.start_dearpygui()
+    finally:
+        # 4) Always destroy context to avoid exit segfaults
+        dpg.destroy_context()
+
 
 if __name__ == "__main__":
     main()
