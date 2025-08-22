@@ -19,7 +19,9 @@ def _set_input_heights(widget: QtWidgets.QWidget, px: int) -> None:
         for w in widget.findChildren(cls):
             w.setMinimumHeight(px)
     # keep text edits readable
-    for w in widget.findChildren((QtWidgets.QPlainTextEdit, QtWidgets.QTextEdit)):
+    for w in widget.findChildren(QtWidgets.QPlainTextEdit):
+        w.setMinimumHeight(max(px + 80, 120))
+    for w in widget.findChildren(QtWidgets.QTextEdit):
         w.setMinimumHeight(max(px + 80, 120))
 
 def apply_appearance(app: QtWidgets.QApplication, root: QtWidgets.QWidget, cfg: Optional[dict]=None) -> None:
