@@ -59,7 +59,7 @@ class MainWindow(QtWidgets.QMainWindow):
         apply_appearance(self._app, self)
 
         # F9 opens preferences
-        QtWidgets.QShortcut(QtGui.QKeySequence("F9"), self, activated=self.open_options)
+        QtGui.QShortcut(QtGui.QKeySequence("F9"), self, activated=self.open_options)
 
         # Hook log/status/progress
         add_sink(self._on_log)
@@ -168,7 +168,14 @@ class _JobWorker(QtCore.QThread):
         try:
             # videodiff path comes from CONFIG (options); pass Path or empty
             vp = Path(CONFIG.get("videodiff_path") or "")
-            res = merge_job(self.ref, self.sec, self.ter, self.out_dir, logger=None, videodiff_path=vp)
+            res = None
+            try:
+                res = merge_job(self.ref, self.sec, self.ter, self.out_dir, logger=None, videodiff_path=vp)
+            except TypeError:
+                try:
+                    res = merge_job(self.ref, self.sec, self.ter, self.out_dir, videodiff_path=vp)
+                except TypeError:
+                    res = merge_job(self.ref, self.sec, self.ter, self.out_dir)
             ok = bool(res and res.get("status"))
             msg = res.get("status") if isinstance(res, dict) else ("OK" if ok else "Unknown result")
             self.finished.emit(ok, msg)

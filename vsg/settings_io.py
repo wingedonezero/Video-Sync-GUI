@@ -9,8 +9,8 @@ from .settings_schema import DEFAULTS, SCHEMA_VERSION
 CONFIG: Dict[str, Any] = {}
 
 def _repo_root() -> Path:
-    # assumes vsg/ sits under project root
-    return Path(__file__).resolve().parents[2]
+    # vsg/ sits directly under project root in this bundle
+    return Path(__file__).resolve().parent.parent
 
 def settings_path() -> Path:
     return _repo_root() / "settings_gui.json"
