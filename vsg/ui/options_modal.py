@@ -2,128 +2,129 @@ from __future__ import annotations
 import dearpygui.dearpygui as dpg
 from vsg.settings_core import CONFIG, save_settings, load_settings, on_change, adopt_into_app, apply_and_notify
 
-# helpers to build rows
-def _row_label(text: str):
-    dpg.add_text(text)
-def _row_spacer(h: int = 8):
-    dpg.add_spacer(height=h)
+def _set(tag, value):
+    if dpg.does_item_exist(tag):
+        try: dpg.set_value(tag, value)
+        except Exception: pass
 
-def _row_text(label: str, tag: str, key: str, hint: str = "", tip: str = "", width: int = 540):
-    _row_label(label)
-    with dpg.group(horizontal=True):
-        dpg.add_input_text(tag=tag, hint=hint, width=width, default_value=str(CONFIG.get(key, "")),
-                           callback=lambda s,a,u=key: on_change(s,a,user_data=u))
-    if tip: dpg.add_text(tip, bullet=True)
+def _refresh_from_config():
+    # Storage
+    _set('op_out', CONFIG.get('output_folder',''))
+    _set('op_temp', CONFIG.get('temp_root',''))
+    _set('op_ffmpeg', CONFIG.get('ffmpeg_path',''))
+    _set('op_ffprobe', CONFIG.get('ffprobe_path',''))
+    _set('op_mkvmerge', CONFIG.get('mkvmerge_path',''))
+    _set('op_mkvextract', CONFIG.get('mkvextract_path',''))
+    _set('op_vdiff', CONFIG.get('videodiff_path',''))
+    # Analysis
+    _set('op_scan_cnt', int(CONFIG.get('scan_chunk_count',10)))
+    _set('op_scan_dur', int(CONFIG.get('scan_chunk_duration',15)))
+    _set('op_min_match', float(CONFIG.get('min_match_pct',5.0)))
+    _set('analysis_mode_combo', CONFIG.get('analysis_mode','Audio Correlation'))
+    _set('workflow_combo_pref', CONFIG.get('workflow','Analyze & Merge'))
+    # VideoDiff
+    _set('vd_err_min', float(CONFIG.get('videodiff_error_min',0.0)))
+    _set('vd_err_max', float(CONFIG.get('videodiff_error_max',100.0)))
+    # Global
+    _set('op_jpn_sec', bool(CONFIG.get('match_jpn_secondary', True)))
+    _set('op_jpn_ter', bool(CONFIG.get('match_jpn_tertiary', True)))
+    _set('op_rm_dn', bool(CONFIG.get('apply_dialog_norm_gain', False)))
+    _set('op_snap', bool(CONFIG.get('snap_chapters', False)))
+    _set('op_snap_ms', int(CONFIG.get('snap_threshold_ms', 250)))
+    _set('op_snap_starts', bool(CONFIG.get('snap_starts_only', True)))
+    # Appearance
+    _set('op_font_file', CONFIG.get('ui_font_path',''))
+    _set('op_font_size', int(CONFIG.get('ui_font_size',18)))
+    _set('op_line_h', int(CONFIG.get('input_line_height',40)))
+    _set('op_row_gap', int(CONFIG.get('row_gap',8)))
+    _set('op_compact', bool(CONFIG.get('ui_compact_controls', False)))
 
-def _row_int(label: str, tag: str, key: str, step: int, minv: int, maxv: int, tip: str = "", width: int = 140):
-    _row_label(label)
-    with dpg.group(horizontal=True):
-        dpg.add_input_int(tag=tag, width=width, min_value=minv, max_value=maxv, step=step,
-                          default_value=int(CONFIG.get(key, 0)),
-                          callback=lambda s,a,u=key: on_change(s,a,user_data=u))
-
-def _row_float(label: str, tag: str, key: str, step: float, minv: float, maxv: float, tip: str = "", width: int = 140):
-    _row_label(label)
-    with dpg.group(horizontal=True):
-        dpg.add_input_float(tag=tag, width=width, min_value=minv, max_value=maxv, step=step,
-                            default_value=float(CONFIG.get(key, 0.0)),
-                            callback=lambda s,a,u=key: on_change(s,a,user_data=u))
-
-def _row_checkbox(label: str, tag: str, key: str, tip: str = ""):
-    with dpg.group(horizontal=True):
-        dpg.add_checkbox(tag=tag, label=label, default_value=bool(CONFIG.get(key, False)),
-                         callback=lambda s,a,u=key: on_change(s,a,user_data=u))
-
-def _show_save_load():
-    with dpg.group():
-        dpg.add_text("Persist or import/export all preferences.")
-        with dpg.group(horizontal=True):
-            dpg.add_button(label="Save", callback=lambda: apply_and_notify())
-            dpg.add_button(label="Load", callback=_do_live_load)
+    # Toggle AC vs VideoDiff groups
+    mode = CONFIG.get('analysis_mode','Audio Correlation')
+    dpg.configure_item('ac_group', show=(mode=='Audio Correlation'))
+    dpg.configure_item('vd_group', show=(mode=='VideoDiff'))
 
 def _do_live_load():
     conf = load_settings()
-    adopt_into_app(conf)  # will notify listeners (fonts/themes rebind, ui refresh)
+    adopt_into_app(conf)     # triggers appearance listener
+    _refresh_from_config()   # update controls immediately
 
 def build_options_modal():
-    if dpg.does_item_exist("options_modal"):
-        dpg.delete_item("options_modal")
-    with dpg.window(modal=True, label="Preferences", tag="options_modal", width=860, height=540, pos=(120, 60)):
+    if dpg.does_item_exist('options_modal'):
+        dpg.delete_item('options_modal')
+    with dpg.window(modal=True, label='Preferences', tag='options_modal', width=880, height=560, pos=(120, 60)):
         with dpg.tab_bar():
-            # Storage
-            with dpg.tab(label="Storage"):
-                _row_text("Output folder", "op_out", "output_folder", hint="Where final MKVs are written.")
-                _row_text("Temp folder", "op_temp", "temp_root", hint="Where intermediate files go.")
+            with dpg.tab(label='Storage'):
+                dpg.add_text('Output folder'); dpg.add_input_text(tag='op_out', width=560, callback=lambda s,a: on_change(s,a,user_data='output_folder'))
+                dpg.add_text('Temp folder'); dpg.add_input_text(tag='op_temp', width=560, callback=lambda s,a: on_change(s,a,user_data='temp_root'))
                 dpg.add_separator()
-                dpg.add_text("Optional tool paths (leave blank to use PATH)")
-                _row_text("FFmpeg path", "op_ffmpeg", "ffmpeg_path")
-                _row_text("FFprobe path", "op_ffprobe", "ffprobe_path")
-                _row_text("mkvmerge path", "op_mkvmerge", "mkvmerge_path")
-                _row_text("mkvextract path", "op_mkvextract", "mkvextract_path")
-                _row_text("VideoDiff path", "op_vdiff", "videodiff_path")
+                dpg.add_text('Tool paths (leave blank to use PATH)')
+                for label, tag, key in [('FFmpeg','op_ffmpeg','ffmpeg_path'),('FFprobe','op_ffprobe','ffprobe_path'),
+                                        ('mkvmerge','op_mkvmerge','mkvmerge_path'),('mkvextract','op_mkvextract','mkvextract_path'),
+                                        ('VideoDiff','op_vdiff','videodiff_path')]:
+                    dpg.add_text(label); dpg.add_input_text(tag=tag, width=560, callback=lambda s,a,u=key: on_change(s,a,user_data=u))
 
-            # Analysis
-            with dpg.tab(label="Analysis"):
-                _row_label("Workflow")
-                with dpg.group(horizontal=True):
-                    dpg.add_combo(items=["Analyze Only", "Analyze & Merge"],
-                                  default_value=str(CONFIG.get("workflow","Analyze & Merge")),
-                                  callback=lambda s,a: on_change(s,a,user_data="workflow"))
-                    dpg.add_text("Analyze only vs analyze+merge.")
-                _row_label("Mode")
-                with dpg.group(horizontal=True):
-                    dpg.add_combo(items=["Audio Correlation","VideoDiff"],
-                                  default_value=str(CONFIG.get("analysis_mode","Audio Correlation")),
-                                  callback=lambda s,a: on_change(s,a,user_data="analysis_mode"))
-                    dpg.add_text("Pick analysis engine.")
-                _row_int("Scan chunk count", "op_scan_cnt", "scan_chunk_count", 1, 1, 200,
-                         tip="Number of evenly spaced samples across the timeline.")
-                _row_int("Chunk duration (s)", "op_scan_dur", "scan_chunk_duration", 1, 1, 3600,
-                         tip="Seconds per sampled segment.")
-                _row_float("Minimum match %", "op_min_match", "min_match_pct", 0.5, 0.0, 100.0,
-                           tip="Reject matches below this percent.")
+            with dpg.tab(label='Analysis'):
+                dpg.add_text('Workflow')
+                dpg.add_combo(tag='workflow_combo_pref', items=['Analyze Only','Analyze & Merge'],
+                              default_value=CONFIG.get('workflow','Analyze & Merge'),
+                              callback=lambda s,a: on_change(s,a,user_data='workflow'))
+                dpg.add_text('Mode')
+                dpg.add_combo(tag='analysis_mode_combo', items=['Audio Correlation','VideoDiff'],
+                              default_value=CONFIG.get('analysis_mode','Audio Correlation'),
+                              callback=lambda s,a: on_change(s,a,user_data='analysis_mode'))
                 dpg.add_separator()
-                _row_float("Min error (VideoDiff)", "vd_err_min", "videodiff_error_min", 0.01, 0.0, 10000.0,
-                           tip="Stop if below this error.")
-                _row_float("Max error (VideoDiff)", "vd_err_max", "videodiff_error_max", 0.01, 0.0, 10000.0,
-                           tip="Stop if above this error.")
+                with dpg.group(tag='ac_group', show=(CONFIG.get('analysis_mode','Audio Correlation')=='Audio Correlation')):
+                    dpg.add_text('Audio correlation parameters')
+                    dpg.add_text('Scan chunk count'); dpg.add_input_int(tag='op_scan_cnt', step=1, min_value=1, max_value=200,
+                        default_value=int(CONFIG.get('scan_chunk_count',10)), callback=lambda s,a: on_change(s,a,user_data='scan_chunk_count'))
+                    dpg.add_text('Chunk duration (s)'); dpg.add_input_int(tag='op_scan_dur', step=1, min_value=1, max_value=3600,
+                        default_value=int(CONFIG.get('scan_chunk_duration',15)), callback=lambda s,a: on_change(s,a,user_data='scan_chunk_duration'))
+                    dpg.add_text('Minimum match %'); dpg.add_input_float(tag='op_min_match', step=0.5, min_value=0.0, max_value=100.0,
+                        default_value=float(CONFIG.get('min_match_pct',5.0)), callback=lambda s,a: on_change(s,a,user_data='min_match_pct'))
+                with dpg.group(tag='vd_group', show=(CONFIG.get('analysis_mode','Audio Correlation')=='VideoDiff')):
+                    dpg.add_text('VideoDiff parameters')
+                    dpg.add_text('Min error'); dpg.add_input_float(tag='vd_err_min', step=0.01, min_value=0.0, max_value=10000.0,
+                        default_value=float(CONFIG.get('videodiff_error_min',0.0)), callback=lambda s,a: on_change(s,a,user_data='videodiff_error_min'))
+                    dpg.add_text('Max error'); dpg.add_input_float(tag='vd_err_max', step=0.01, min_value=0.0, max_value=10000.0,
+                        default_value=float(CONFIG.get('videodiff_error_max',100.0)), callback=lambda s,a: on_change(s,a,user_data='videodiff_error_max'))
 
-            # Global
-            with dpg.tab(label="Global"):
-                dpg.add_text("Rename chapters")
-                _row_checkbox("Prefer JPN audio on Secondary", "op_jpn_sec", "match_jpn_secondary")
-                _row_checkbox("Prefer JPN audio on Tertiary", "op_jpn_ter", "match_jpn_tertiary")
-                _row_checkbox("Remove dialog normalization (AC-3/eAC-3)", "op_rm_dn", "apply_dialog_norm_gain")
+            with dpg.tab(label='Global'):
+                dpg.add_text('Audio/Chapters')
+                dpg.add_checkbox(tag='op_jpn_sec', label='Prefer JPN audio on Secondary', default_value=bool(CONFIG.get('match_jpn_secondary',True)),
+                                 callback=lambda s,a: on_change(s,a,user_data='match_jpn_secondary'))
+                dpg.add_checkbox(tag='op_jpn_ter', label='Prefer JPN audio on Tertiary', default_value=bool(CONFIG.get('match_jpn_tertiary',True)),
+                                 callback=lambda s,a: on_change(s,a,user_data='match_jpn_tertiary'))
+                dpg.add_checkbox(tag='op_rm_dn', label='Remove dialog normalization (AC-3/eAC-3)',
+                                 default_value=bool(CONFIG.get('apply_dialog_norm_gain',False)),
+                                 callback=lambda s,a: on_change(s,a,user_data='apply_dialog_norm_gain'))
                 dpg.add_separator()
-                dpg.add_text("Chapters / Keyframe snapping")
-                _row_checkbox("Snap chapters to keyframes", "op_snap", "snap_chapters")
-                _row_label("Snap mode")
-                with dpg.group(horizontal=True):
-                    dpg.add_combo(items=["previous","next","nearest","None"],
-                                  default_value=str(CONFIG.get("snap_mode","previous")),
-                                  callback=lambda s,a: on_change(s,a,user_data="snap_mode"))
-                _row_int("Max snap distance (ms)", "op_snap_ms", "snap_threshold_ms", 5, 0, 10000)
-                _row_checkbox("Starts only", "op_snap_starts", "snap_starts_only")
+                dpg.add_text('Snapping')
+                dpg.add_checkbox(tag='op_snap', label='Snap chapters to keyframes', default_value=bool(CONFIG.get('snap_chapters',False)),
+                                 callback=lambda s,a: on_change(s,a,user_data='snap_chapters'))
+                dpg.add_input_int(tag='op_snap_ms', default_value=int(CONFIG.get('snap_threshold_ms',250)),
+                                  step=5, min_value=0, max_value=10000, callback=lambda s,a: on_change(s,a,user_data='snap_threshold_ms'))
+                dpg.add_checkbox(tag='op_snap_starts', label='Starts only', default_value=bool(CONFIG.get('snap_starts_only',True)),
+                                 callback=lambda s,a: on_change(s,a,user_data='snap_starts_only'))
                 dpg.add_separator()
-                dpg.add_text("Appearance")
-                _row_text("UI font file", "op_font_file", "ui_font_path", hint="Leave blank to auto-pick a sane font.")
-                _row_int("Font size", "op_font_size", "ui_font_size", 1, 8, 48)
-                _row_int("Input line height", "op_line_h", "input_line_height", 1, 20, 72)
-                _row_int("Row spacing", "op_row_gap", "row_gap", 1, 0, 32)
-                _row_checkbox("Compact controls", "op_compact", "ui_compact_controls")
-                dpg.add_button(label="Apply Appearance", callback=lambda: apply_and_notify())
+                dpg.add_text('Appearance')
+                dpg.add_input_text(tag='op_font_file', width=560, hint='UI font file (leave blank to auto-pick)',
+                                   default_value=CONFIG.get('ui_font_path',''),
+                                   callback=lambda s,a: on_change(s,a,user_data='ui_font_path'))
+                dpg.add_input_int(tag='op_font_size', default_value=int(CONFIG.get('ui_font_size',18)), step=1, min_value=8, max_value=48,
+                                  callback=lambda s,a: on_change(s,a,user_data='ui_font_size'))
+                dpg.add_input_int(tag='op_line_h', default_value=int(CONFIG.get('input_line_height',40)), step=1, min_value=20, max_value=72,
+                                  callback=lambda s,a: on_change(s,a,user_data='input_line_height'))
+                dpg.add_input_int(tag='op_row_gap', default_value=int(CONFIG.get('row_gap',8)), step=1, min_value=0, max_value=32,
+                                  callback=lambda s,a: on_change(s,a,user_data='row_gap'))
+                dpg.add_checkbox(tag='op_compact', label='Compact controls', default_value=bool(CONFIG.get('ui_compact_controls',False)),
+                                 callback=lambda s,a: on_change(s,a,user_data='ui_compact_controls'))
 
-            # Logging
-            with dpg.tab(label="Logging"):
-                _row_checkbox("Compact log view", "op_log_compact", "log_compact")
-                _row_int("Log tail lines", "op_log_tail", "log_tail_lines", 1, 0, 100000)
-                _row_int("Error tail lines", "op_log_err_tail", "log_error_tail", 1, 0, 100000)
-                _row_int("Progress step", "op_log_prog_step", "log_progress_step", 1, 1, 100000)
-                _row_checkbox("Auto scroll log", "op_log_auto", "log_autoscroll")
-
-            with dpg.tab(label="Save / Load"):
-                _show_save_load()
+            with dpg.tab(label='Save / Load'):
+                dpg.add_button(label='Save', callback=lambda: apply_and_notify())
+                dpg.add_button(label='Load', callback=_do_live_load)
 
 def show_options_modal():
     build_options_modal()
-    dpg.configure_item("options_modal", show=True)
+    _refresh_from_config()
+    dpg.configure_item('options_modal', show=True)
