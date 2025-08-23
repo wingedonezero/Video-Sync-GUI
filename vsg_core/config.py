@@ -41,12 +41,13 @@ class AppConfig:
             'log_progress_step': 20,
             'log_show_options_pretty': False,
             'log_show_options_json': False,
+            'exclude_codecs': '',  # New setting for codec exclusion
             'merge_profile': [
                 {"enabled": True, "source": "REF", "type": "Video", "lang": "any", "priority": 10, "is_default": False, "swap_first_two": False},
                 {"enabled": True, "source": "SEC", "type": "Audio", "lang": "any", "priority": 20, "is_default": True, "swap_first_two": False},
                 {"enabled": True, "source": "REF", "type": "Audio", "lang": "any", "priority": 30, "is_default": False, "swap_first_two": False},
                 {"enabled": True, "source": "TER", "type": "Subtitles", "lang": "any", "priority": 40, "is_default": True, "swap_first_two": False},
-                {"enabled": True, "source": "SEC", "type": "Subtitles", "lang": "any", "priority": 50, "is_default": False, "swap_first_two": False},
+                {"enabled": True, "source": "SEC", "type": "Subtitles", "lang": "any", "priority": 50, "is_default": False, "swap_first_two": True},
                 {"enabled": True, "source": "REF", "type": "Subtitles", "lang": "any", "priority": 60, "is_default": False, "swap_first_two": False}
             ]
         }
@@ -61,10 +62,22 @@ class AppConfig:
                 with open(self.settings_path, 'r', encoding='utf-8') as f:
                     loaded_settings = json.load(f)
 
+                # Add any new default keys to an existing settings file
                 for key, default_value in self.defaults.items():
                     if key not in loaded_settings:
                         loaded_settings[key] = default_value
                         changed = True
+
+                # Ensure rules from older versions have the new keys
+                if 'merge_profile' in loaded_settings:
+                    for rule in loaded_settings['merge_profile']:
+                        if 'swap_first_two' not in rule:
+                            rule['swap_first_two'] = False
+                            changed = True
+                        if 'is_default' not in rule:
+                            rule['is_default'] = False
+                            changed = True
+
                 self.settings = loaded_settings
 
             except (json.JSONDecodeError, IOError):
@@ -93,9 +106,3 @@ class AppConfig:
     def ensure_dirs_exist(self):
         Path(self.get('output_folder')).mkdir(parents=True, exist_ok=True)
         Path(self.get('temp_root')).mkdir(parents=True, exist_ok=True)
-
-    def find_tool_path(self, tool_name: str) -> str:
-        path = shutil.which(tool_name)
-        if not path:
-            raise FileNotFoundError(f"Required tool '{tool_name}' not found in system PATH.")
-        return path

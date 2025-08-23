@@ -21,17 +21,6 @@ class JobPipeline:
         self.progress = progress_callback
         self.tool_paths = {}
 
-    
-    def _norm_lang(self, code: str) -> str:
-        try:
-            if not code:
-                return 'und'
-            m = code.lower()
-            # Map 3-letter to 2-letter when common
-            mapping = {'eng': 'en', 'jpn': 'ja', 'jap': 'ja', 'ger': 'de', 'fre': 'fr', 'spa': 'es', 'por': 'pt', 'chi': 'zh', 'zho': 'zh', 'und': 'und'}
-            return mapping.get(m, m)
-        except Exception:
-            return 'und'
     def _find_required_tools(self):
         for tool in ['ffmpeg', 'ffprobe', 'mkvmerge', 'mkvextract']:
             self.tool_paths[tool] = shutil.which(tool)
@@ -107,10 +96,7 @@ class JobPipeline:
             self.progress(0.6)
             plan = self._build_plan_from_profile(all_tracks, delays, log_to_all)
             out_file = output_dir / Path(ref_file).name
-
-            # *** FIX: Pass 'all_tracks' to the token builder ***
             tokens = self._build_mkvmerge_tokens(plan, str(out_file), chapters_xml, ter_attachments, all_tracks)
-
             opts_path = self._write_mkvmerge_opts(tokens, job_temp, runner)
 
             self.progress(0.8)
@@ -135,7 +121,14 @@ class JobPipeline:
     def _build_plan_from_profile(self, all_tracks: Dict[str, List[Dict]], delays: Dict, log_callback: Callable) -> Dict:
         final_plan = []
         profile = self.config.get('merge_profile', [])
+
+        exclude_str = self.config.get('exclude_codecs', '').lower()
+        excluded_codecs = {codec.strip() for codec in exclude_str.split(',') if codec.strip()}
+
         log_callback("--- Building merge plan from profile ---")
+        if excluded_codecs:
+            log_callback(f"[Info] Global codec exclusion list is active: {', '.join(sorted(excluded_codecs))}")
+
         available_tracks = {source: list(tracks) for source, tracks in all_tracks.items()}
 
         for rule in sorted(profile, key=lambda r: r.get('priority', 999)):
@@ -153,12 +146,20 @@ class JobPipeline:
             for track in available_tracks.get(source, []):
                 if track.get('type', '').lower() == rule_type:
                     track_lang = track.get('lang', 'und').lower()
+
                     if 'any' in rule_langs or track_lang in rule_langs:
+                        codec_id_str = track.get('codec_id', '').lower()
+                        is_excluded = any(ex_codec in codec_id_str for ex_codec in excluded_codecs)
+
+                        if is_excluded:
+                            log_callback(f"  (-) SKIPPING track '{track.get('name')}' (codec: {track.get('codec_id')}) due to exclusion rule.")
+                            continue
+
                         tracks_to_add.append(track)
 
             if tracks_to_add:
                 if should_swap and len(tracks_to_add) == 2:
-                    log_callback(f"  (i) Swapping order of 2 subtitle tracks found by rule.")
+                    log_callback(f"  (i) Swapping order of 2 tracks found by rule.")
                     tracks_to_add.reverse()
 
                 for track in tracks_to_add:
@@ -241,26 +242,26 @@ class JobPipeline:
         default_audio_track_id = -1
         default_sub_track_id = -1
 
-        if default_audio_rule:
+        def find_first_matching_track(rule, track_type):
+            if not rule: return -1
+            rule_langs = {lang.strip() for lang in rule['lang'].lower().split(',')}
             for i, track in enumerate(plan):
-                if track['type'].lower() == 'audio':
-                     if track in all_tracks[default_audio_rule['source']]:
-                        default_audio_track_id = i
-                        break
-        if default_sub_rule:
-            for i, track in enumerate(plan):
-                 if track['type'].lower() == 'subtitles':
-                    if track in all_tracks[default_sub_rule['source']]:
-                        default_sub_track_id = i
-                        break
+                if track['type'].lower() == track_type.lower():
+                    if track in all_tracks.get(rule['source'], []):
+                        track_lang = track.get('lang', 'und').lower()
+                        if 'any' in rule_langs or track_lang in rule_langs:
+                            return i
+            return -1
+
+        default_audio_track_id = find_first_matching_track(default_audio_rule, 'audio')
+        default_sub_track_id = find_first_matching_track(default_sub_rule, 'subtitles')
 
         first_video_idx = next((i for i, t in enumerate(plan) if t.get('type') == 'video'), -1)
 
         track_order_indices = []
         for i, track in enumerate(plan):
             source_path = track.get('path')
-            if not source_path:
-                raise KeyError(f"Track dictionary at index {i} is missing the 'path' key.")
+            if not source_path: raise KeyError(f"Track dictionary at index {i} is missing the 'path' key.")
 
             role = 'ref'
             if 'sec_track' in Path(source_path).name: role = 'sec'
@@ -272,14 +273,10 @@ class JobPipeline:
 
             is_default = (i == first_video_idx) or (i == default_audio_track_id) or (i == default_sub_track_id)
 
-            tokens.extend(['--language', f"0:{self._norm_lang(track.get('lang', 'und'))}"])
+            tokens.extend(['--language', f"0:{track.get('lang', 'und')}"])
             tokens.extend(['--track-name', f"0:{track.get('name', '')}"])
             tokens.extend(['--sync', f'0:{delay}'])
             tokens.extend(['--default-track-flag', f"0:{'yes' if is_default else 'no'}"])
-            # Force flag for subtitles: default sub optionally forced, others cleared
-            if (track.get('type') or '').lower() == 'subtitles':
-                forced_on = bool(self.config.get('force_default_sub')) and is_default
-                tokens.extend(['--forced-display-flag', f"0:{'yes' if forced_on else 'no'}"])
             tokens.extend(['--compression', '0:none'])
 
             if self.config.get('apply_dialog_norm_gain') and track['type'] == 'audio':
