@@ -32,7 +32,7 @@ def _ext_for_codec(ttype: str, codec_id: str) -> str:
     if ttype == 'video':
         if 'V_MPEGH/ISO/HEVC' in cid: return 'h265'
         if 'V_MPEG4/ISO/AVC' in cid: return 'h264'
-        if 'V_MPEG1/2' in cid: return 'mpg'  # <-- FIX: Correctly handle DVD video
+        if 'V_MPEG1/2' in cid: return 'mpg'
         if 'V_VP9' in cid: return 'vp9'
         if 'V_AV1' in cid: return 'av1'
         return 'bin'
@@ -213,8 +213,8 @@ def process_chapters(ref_mkv: str, temp_dir: Path, runner: CommandRunner, tool_p
 def _probe_keyframes_ns(ref_video_path: str, runner: CommandRunner, tool_paths: dict) -> list[int]:
     """Returns a sorted list of keyframe timestamps in nanoseconds."""
     args = [
-        'ffprobe', '-v', 'error', '-select_streams', 'v:0', '-skip_frame', 'nokey',
-        '-show_entries', 'frame=pkt_pts_time', '-of', 'json', str(ref_video_path)
+        'ffprobe', '-v', 'error', '-select_streams', 'v:0',
+        '-show_entries', 'frame=pkt_pts_time,key_frame', '-of', 'json', str(ref_video_path)
     ]
     out = runner.run(args, tool_paths)
     if not out:
@@ -225,7 +225,8 @@ def _probe_keyframes_ns(ref_video_path: str, runner: CommandRunner, tool_paths: 
         data = json.loads(out)
         kfs_ns = [
             int(round(float(frame['pkt_pts_time']) * 1_000_000_000))
-            for frame in data.get('frames', []) if 'pkt_pts_time' in frame
+            for frame in data.get('frames', [])
+            if 'pkt_pts_time' in frame and frame.get('key_frame') == 1
         ]
         kfs_ns.sort()
         runner._log_message(f'[Chapters] Found {len(kfs_ns)} keyframes for snapping.')
