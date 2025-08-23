@@ -13,6 +13,7 @@ from vsg_qt.main_window import MainWindow
 def main():
     """Initializes and runs the PyQt application."""
     app = QApplication(sys.argv)
+    app.setApplicationName("Video Sync & Merge")
     window = MainWindow()
     window.show()
     sys.exit(app.exec())

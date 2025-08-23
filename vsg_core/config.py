@@ -42,6 +42,15 @@ class AppConfig:
             'log_progress_step': 20,
             'log_show_options_pretty': False,
             'log_show_options_json': False,
+            # --- New Merge Profile ---
+            'merge_profile': [
+                {"enabled": True, "source": "REF", "type": "Video", "lang": "any", "priority": 10},
+                {"enabled": True, "source": "SEC", "type": "Audio", "lang": "any", "priority": 20},
+                {"enabled": True, "source": "REF", "type": "Audio", "lang": "any", "priority": 30},
+                {"enabled": True, "source": "TER", "type": "Subtitles", "lang": "any", "priority": 40},
+                {"enabled": True, "source": "SEC", "type": "Subtitles", "lang": "any", "priority": 50},
+                {"enabled": True, "source": "REF", "type": "Subtitles", "lang": "any", "priority": 60}
+            ]
         }
         self.settings = self.defaults.copy()
         self.load()
@@ -55,7 +64,6 @@ class AppConfig:
                 with open(self.settings_path, 'r', encoding='utf-8') as f:
                     loaded_settings = json.load(f)
 
-                # Merge loaded settings with defaults to ensure all keys exist
                 for key, default_value in self.defaults.items():
                     if key not in loaded_settings:
                         loaded_settings[key] = default_value

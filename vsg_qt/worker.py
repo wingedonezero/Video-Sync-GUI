@@ -4,8 +4,9 @@
 The background worker for running analysis/merge jobs without freezing the GUI.
 """
 
+from pathlib import Path
 from PySide6.QtCore import QObject, QRunnable, Signal, Slot
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Tuple, Optional
 
 from vsg_core.pipeline import JobPipeline
 
@@ -14,19 +15,19 @@ class WorkerSignals(QObject):
     log = Signal(str)
     progress = Signal(float) # 0.0 to 1.0
     status = Signal(str)
-    finished = Signal(dict) # Emits the final result dictionary
+    finished_job = Signal(dict) # Emits result for a single job
+    finished_all = Signal(list) # Emits all results when batch is done
 
 class JobWorker(QRunnable):
     """
-    A QRunnable worker that executes a JobPipeline in a separate thread.
+    A QRunnable worker that executes a list of jobs in a separate thread.
     """
-    def __init__(self, config: Dict[str, Any], ref_file: str, sec_file: Optional[str], ter_file: Optional[str], and_merge: bool):
+    def __init__(self, config: Dict[str, Any], jobs: List[Tuple[str, Optional[str], Optional[str]]], and_merge: bool, output_dir: str):
         super().__init__()
         self.config = config
-        self.ref_file = ref_file
-        self.sec_file = sec_file
-        self.ter_file = ter_file
+        self.jobs = jobs
         self.and_merge = and_merge
+        self.output_dir = output_dir
         self.signals = WorkerSignals()
 
     @Slot()
@@ -38,10 +39,19 @@ class JobWorker(QRunnable):
             progress_callback=lambda val: self.signals.progress.emit(val)
         )
 
-        try:
-            result = pipeline.run_job(self.ref_file, self.sec_file, self.ter_file, self.and_merge)
-            self.signals.finished.emit(result)
-        except Exception as e:
-            error_result = {'status': 'Failed', 'error': str(e)}
-            self.signals.log.emit(f'[FATAL WORKER ERROR] {e}')
-            self.signals.finished.emit(error_result)
+        all_results = []
+        total_jobs = len(self.jobs)
+
+        for i, (ref_file, sec_file, ter_file) in enumerate(self.jobs, 1):
+            try:
+                self.signals.status.emit(f'Processing {i}/{total_jobs}: {Path(ref_file).name}')
+                result = pipeline.run_job(ref_file, sec_file, ter_file, self.and_merge, self.output_dir)
+                self.signals.finished_job.emit(result)
+                all_results.append(result)
+            except Exception as e:
+                error_result = {'status': 'Failed', 'error': str(e), 'name': Path(ref_file).name}
+                self.signals.log.emit(f'[FATAL WORKER ERROR] Job {i} failed: {e}')
+                self.signals.finished_job.emit(error_result)
+                all_results.append(error_result)
+
+        self.signals.finished_all.emit(all_results)

@@ -24,19 +24,17 @@ class JobPipeline:
         self.tool_paths = {}
 
     def _find_required_tools(self):
-        """Ensures all required command-line tools are found in the system PATH."""
         for tool in ['ffmpeg', 'ffprobe', 'mkvmerge', 'mkvextract']:
             self.tool_paths[tool] = shutil.which(tool)
             if not self.tool_paths[tool]:
                 raise FileNotFoundError(f"Required tool '{tool}' not found in PATH.")
-
         self.tool_paths['videodiff'] = shutil.which('videodiff')
 
-    def run_job(self, ref_file: str, sec_file: Optional[str], ter_file: Optional[str], and_merge: bool) -> Dict[str, Any]:
+    def run_job(self, ref_file: str, sec_file: Optional[str], ter_file: Optional[str], and_merge: bool, output_dir_str: str) -> Dict[str, Any]:
         """
         Executes the full analysis and optional merge pipeline.
         """
-        output_dir = Path(self.config['output_folder'])
+        output_dir = Path(output_dir_str)
         output_dir.mkdir(parents=True, exist_ok=True)
         log_path = output_dir / f"{Path(ref_file).stem}.log"
 
@@ -75,7 +73,7 @@ class JobPipeline:
             if not and_merge:
                 log_to_all('--- Analysis Complete (No Merge) ---')
                 self.progress(1.0)
-                return {'status': 'Analyzed', 'delay_sec': delay_sec, 'delay_ter': delay_ter}
+                return {'status': 'Analyzed', 'delay_sec': delay_sec, 'delay_ter': delay_ter, 'name': Path(ref_file).name}
 
             log_to_all('--- Merge Planning Phase ---')
             self.progress(0.25)
@@ -97,10 +95,11 @@ class JobPipeline:
 
             ref_tracks = mkv_utils.extract_tracks(ref_file, job_temp, runner, self.tool_paths, 'ref', all_tracks=True)
             sec_tracks = mkv_utils.extract_tracks(sec_file, job_temp, runner, self.tool_paths, 'sec', audio=True, subs=True) if sec_file else []
-            ter_tracks = mkv_utils.extract_tracks(ter_file, job_temp, runner, self.tool_paths, 'ter', audio=False, subs=True) if ter_file else []
+            ter_tracks = mkv_utils.extract_tracks(ter_file, job_temp, runner, self.tool_paths, 'ter', audio=True, subs=True) if ter_file else []
+
+            all_tracks = {'REF': ref_tracks, 'SEC': sec_tracks, 'TER': ter_tracks}
             ter_attachments = mkv_utils.extract_attachments(ter_file, job_temp, runner, self.tool_paths, 'ter') if ter_file else []
 
-            # *** FIX: Implement subtitle swap logic ***
             if self.config.get('swap_subtitle_order', False) and sec_tracks:
                 subs_in_sec = [t for t in sec_tracks if t['type'] == 'subtitles']
                 if len(subs_in_sec) >= 2:
@@ -114,7 +113,7 @@ class JobPipeline:
             log_to_all('--- Merge Execution Phase ---')
             self.progress(0.6)
 
-            plan = self._build_plan(ref_tracks, sec_tracks, ter_tracks, delays)
+            plan = self._build_plan_from_profile(all_tracks, delays, log_to_all)
             out_file = output_dir / Path(ref_file).name
 
             tokens = self._build_mkvmerge_tokens(plan, str(out_file), chapters_xml, ter_attachments)
@@ -128,17 +127,57 @@ class JobPipeline:
 
             log_to_all(f'[SUCCESS] Output file created: {out_file}')
             self.progress(1.0)
-            return {'status': 'Merged', 'output': str(out_file), 'delay_sec': delay_sec, 'delay_ter': delay_ter}
+            return {'status': 'Merged', 'output': str(out_file), 'delay_sec': delay_sec, 'delay_ter': delay_ter, 'name': Path(ref_file).name}
 
         except Exception as e:
             log_to_all(f'[FATAL ERROR] Job failed: {e}')
-            return {'status': 'Failed', 'error': str(e)}
+            return {'status': 'Failed', 'error': str(e), 'name': Path(ref_file).name}
         finally:
             if not and_merge or merge_ok:
                  shutil.rmtree(job_temp, ignore_errors=True)
             log_to_all('=== Job Finished ===')
             handler.close()
             logger.removeHandler(handler)
+
+    def _build_plan_from_profile(self, all_tracks: Dict[str, List[Dict]], delays: Dict, log_callback: Callable) -> Dict:
+        final_plan = []
+        profile = self.config.get('merge_profile', [])
+        log_callback("--- Building merge plan from profile ---")
+
+        available_tracks = {source: list(tracks) for source, tracks in all_tracks.items()}
+
+        for rule in sorted(profile, key=lambda r: r.get('priority', 999)):
+            if not rule.get('enabled', False):
+                continue
+
+            source = rule.get('source')
+            rule_type = rule.get('type', '').lower()
+            rule_langs_str = rule.get('lang', 'any').lower()
+            rule_langs = {lang.strip() for lang in rule_langs_str.split(',')}
+            log_callback(f"Processing rule: {source} -> {rule_type} (langs: {rule_langs_str})")
+
+            tracks_to_add = []
+
+            for track in available_tracks.get(source, []):
+                track_type = track.get('type', '').lower()
+                track_lang = track.get('lang', 'und').lower()
+
+                if track_type == rule_type:
+                    lang_match = 'any' in rule_langs or track_lang in rule_langs
+                    if lang_match:
+                        tracks_to_add.append(track)
+
+            if tracks_to_add:
+                for track in tracks_to_add:
+                    log_callback(f"  (+) INCLUDING track: {source} {track['type']} '{track.get('name')}' (lang: {track.get('lang', 'und')})")
+                    final_plan.append(track)
+                    if track in available_tracks.get(source, []):
+                        available_tracks[source].remove(track)
+            else:
+                log_callback(f"  (i) No matching tracks found for rule.")
+
+        log_callback(f"--- Final plan contains {len(final_plan)} tracks. ---")
+        return {'plan': final_plan, 'delays': delays}
 
     def _run_analysis(self, ref_file, sec_file, ter_file, runner):
         delay_sec, delay_ter = None, None
@@ -151,8 +190,8 @@ class JobPipeline:
                 if not (self.config['videodiff_error_min'] <= err <= self.config['videodiff_error_max']):
                     raise RuntimeError(f"VideoDiff error ({err:.2f}) out of bounds.")
             else:
-                lang = 'jpn' if self.config.get('match_jpn_secondary') else None
-                results = analysis.run_audio_correlation(ref_file, sec_file, Path(self.config['temp_root']), self.config, runner, self.tool_paths, lang, 'sec')
+                lang_for_analysis = self.config.get('match_jpn_secondary')
+                results = analysis.run_audio_correlation(ref_file, sec_file, Path(self.config['temp_root']), self.config, runner, self.tool_paths, 'jpn' if lang_for_analysis else None, 'sec')
                 best = self._best_from_results(results)
                 if not best: raise RuntimeError('Audio analysis for Secondary yielded no valid result.')
                 delay_sec = best['delay']
@@ -165,8 +204,8 @@ class JobPipeline:
                  if not (self.config['videodiff_error_min'] <= err <= self.config['videodiff_error_max']):
                     raise RuntimeError(f"VideoDiff error ({err:.2f}) out of bounds.")
             else:
-                lang = 'jpn' if self.config.get('match_jpn_tertiary') else None
-                results = analysis.run_audio_correlation(ref_file, ter_file, Path(self.config['temp_root']), self.config, runner, self.tool_paths, lang, 'ter')
+                lang_for_analysis = self.config.get('match_jpn_tertiary')
+                results = analysis.run_audio_correlation(ref_file, ter_file, Path(self.config['temp_root']), self.config, runner, self.tool_paths, 'jpn' if lang_for_analysis else None, 'ter')
                 best = self._best_from_results(results)
                 if not best: raise RuntimeError('Audio analysis for Tertiary yielded no valid result.')
                 delay_ter = best['delay']
@@ -188,16 +227,6 @@ class JobPipeline:
         best_of_each_contender = [max((r for r in valid if r['delay'] == d), key=lambda x: x['match']) for d in contenders]
 
         return max(best_of_each_contender, key=lambda x: x['match'])
-
-    def _build_plan(self, ref_tracks, sec_tracks, ter_tracks, delays):
-        plan = []
-        plan.extend(t for t in ref_tracks if t['type'] == 'video')
-        plan.extend(t for t in sec_tracks if t['type'] == 'audio')
-        plan.extend(t for t in ref_tracks if t['type'] == 'audio')
-        plan.extend(t for t in ter_tracks if t['type'] == 'subtitles')
-        plan.extend(t for t in sec_tracks if t['type'] == 'subtitles')
-        plan.extend(t for t in ref_tracks if t['type'] not in ('video', 'audio'))
-        return {'plan': plan, 'delays': delays}
 
     def _build_mkvmerge_tokens(self, plan_data, output_file, chapters_xml, attachments):
         tokens = ['--output', output_file]
