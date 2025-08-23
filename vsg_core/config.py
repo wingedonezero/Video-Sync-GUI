@@ -42,6 +42,7 @@ class AppConfig:
             'log_show_options_pretty': False,
             'log_show_options_json': False,
             'exclude_codecs': '',
+            'disable_track_statistics_tags': False,  # New Setting
             'merge_profile': [
                 {"enabled": True, "source": "REF", "type": "Video", "lang": "any", "exclude_langs": "", "priority": 10, "is_default": False, "swap_first_two": False},
                 {"enabled": True, "source": "SEC", "type": "Audio", "lang": "any", "exclude_langs": "", "priority": 20, "is_default": True, "swap_first_two": False},

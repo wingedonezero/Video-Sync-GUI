@@ -151,14 +151,10 @@ class JobPipeline:
                 if track.get('type', '').lower() == rule_type:
                     track_lang = track.get('lang', 'und').lower()
 
-                    # Language Inclusion Check
                     lang_included = 'any' in rule_langs or track_lang in rule_langs
-
-                    # Language Exclusion Check
                     lang_excluded = rule_exclude_langs and track_lang in rule_exclude_langs
 
                     if lang_included and not lang_excluded:
-                        # Codec Exclusion Check
                         codec_id_str = track.get('codec_id', '').lower()
                         codec_excluded = any(ex_codec in codec_id_str for ex_codec in excluded_codecs)
 
@@ -241,6 +237,9 @@ class JobPipeline:
         tokens = ['--output', output_file]
         if chapters_xml:
             tokens.extend(['--chapters', chapters_xml])
+
+        if self.config.get('disable_track_statistics_tags', False):
+            tokens.append('--disable-track-statistics-tags')
 
         plan = plan_data['plan']
         delays = plan_data['delays']
