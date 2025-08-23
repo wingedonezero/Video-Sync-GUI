@@ -15,8 +15,6 @@ from . import analysis, mkv_utils
 from .process import CommandRunner
 
 class JobPipeline:
-    """Orchestrates a single analysis or merge job from start to finish."""
-
     def __init__(self, config: dict, log_callback: Callable[[str], None], progress_callback: Callable[[float], None]):
         self.config = config
         self.gui_log_callback = log_callback
@@ -31,9 +29,6 @@ class JobPipeline:
         self.tool_paths['videodiff'] = shutil.which('videodiff')
 
     def run_job(self, ref_file: str, sec_file: Optional[str], ter_file: Optional[str], and_merge: bool, output_dir_str: str) -> Dict[str, Any]:
-        """
-        Executes the full analysis and optional merge pipeline.
-        """
         output_dir = Path(output_dir_str)
         output_dir.mkdir(parents=True, exist_ok=True)
         log_path = output_dir / f"{Path(ref_file).stem}.log"
@@ -79,49 +74,36 @@ class JobPipeline:
             self.progress(0.25)
 
             delays = {'secondary_ms': delay_sec or 0, 'tertiary_ms': delay_ter or 0}
-
             present_delays = [0]
             if delay_sec is not None: present_delays.append(delay_sec)
             if delay_ter is not None: present_delays.append(delay_ter)
             min_delay = min(present_delays)
             global_shift = -min_delay if min_delay < 0 else 0
             delays['_global_shift'] = global_shift
-
             log_to_all(f'[Delay] Raw delays (ms): ref=0, sec={delays["secondary_ms"]}, ter={delays["tertiary_ms"]}')
             log_to_all(f'[Delay] Applying lossless global shift: +{global_shift} ms')
 
             log_to_all('--- Extraction Phase ---')
             self.progress(0.4)
-
             ref_tracks = mkv_utils.extract_tracks(ref_file, job_temp, runner, self.tool_paths, 'ref', all_tracks=True)
             sec_tracks = mkv_utils.extract_tracks(sec_file, job_temp, runner, self.tool_paths, 'sec', audio=True, subs=True) if sec_file else []
             ter_tracks = mkv_utils.extract_tracks(ter_file, job_temp, runner, self.tool_paths, 'ter', audio=True, subs=True) if ter_file else []
-
             all_tracks = {'REF': ref_tracks, 'SEC': sec_tracks, 'TER': ter_tracks}
             ter_attachments = mkv_utils.extract_attachments(ter_file, job_temp, runner, self.tool_paths, 'ter') if ter_file else []
-
-            if self.config.get('swap_subtitle_order', False) and sec_tracks:
-                subs_in_sec = [t for t in sec_tracks if t['type'] == 'subtitles']
-                if len(subs_in_sec) >= 2:
-                    log_to_all('[Info] Swapping first two Secondary subtitle tracks.')
-                    t1_original_index = sec_tracks.index(subs_in_sec[0])
-                    t2_original_index = sec_tracks.index(subs_in_sec[1])
-                    sec_tracks[t1_original_index], sec_tracks[t2_original_index] = sec_tracks[t2_original_index], sec_tracks[t1_original_index]
-
             chapters_xml = mkv_utils.process_chapters(ref_file, job_temp, runner, self.tool_paths, self.config, global_shift)
 
             log_to_all('--- Merge Execution Phase ---')
             self.progress(0.6)
-
             plan = self._build_plan_from_profile(all_tracks, delays, log_to_all)
             out_file = output_dir / Path(ref_file).name
 
-            tokens = self._build_mkvmerge_tokens(plan, str(out_file), chapters_xml, ter_attachments)
+            # *** FIX: Pass 'all_tracks' to the token builder ***
+            tokens = self._build_mkvmerge_tokens(plan, str(out_file), chapters_xml, ter_attachments, all_tracks)
+
             opts_path = self._write_mkvmerge_opts(tokens, job_temp, runner)
 
             self.progress(0.8)
             merge_ok = runner.run(['mkvmerge', f'@{opts_path}'], self.tool_paths) is not None
-
             if not merge_ok:
                 raise RuntimeError('mkvmerge execution failed.')
 
@@ -143,7 +125,6 @@ class JobPipeline:
         final_plan = []
         profile = self.config.get('merge_profile', [])
         log_callback("--- Building merge plan from profile ---")
-
         available_tracks = {source: list(tracks) for source, tracks in all_tracks.items()}
 
         for rule in sorted(profile, key=lambda r: r.get('priority', 999)):
@@ -154,20 +135,21 @@ class JobPipeline:
             rule_type = rule.get('type', '').lower()
             rule_langs_str = rule.get('lang', 'any').lower()
             rule_langs = {lang.strip() for lang in rule_langs_str.split(',')}
+            should_swap = rule.get('swap_first_two', False)
             log_callback(f"Processing rule: {source} -> {rule_type} (langs: {rule_langs_str})")
 
             tracks_to_add = []
-
             for track in available_tracks.get(source, []):
-                track_type = track.get('type', '').lower()
-                track_lang = track.get('lang', 'und').lower()
-
-                if track_type == rule_type:
-                    lang_match = 'any' in rule_langs or track_lang in rule_langs
-                    if lang_match:
+                if track.get('type', '').lower() == rule_type:
+                    track_lang = track.get('lang', 'und').lower()
+                    if 'any' in rule_langs or track_lang in rule_langs:
                         tracks_to_add.append(track)
 
             if tracks_to_add:
+                if should_swap and len(tracks_to_add) == 2:
+                    log_callback(f"  (i) Swapping order of 2 subtitle tracks found by rule.")
+                    tracks_to_add.reverse()
+
                 for track in tracks_to_add:
                     log_callback(f"  (+) INCLUDING track: {source} {track['type']} '{track.get('name')}' (lang: {track.get('lang', 'und')})")
                     final_plan.append(track)
@@ -182,6 +164,9 @@ class JobPipeline:
     def _run_analysis(self, ref_file, sec_file, ter_file, runner):
         delay_sec, delay_ter = None, None
         mode = self.config.get('analysis_mode', 'Audio Correlation')
+        ref_lang = self.config.get('analysis_lang_ref') or None
+        sec_lang = self.config.get('analysis_lang_sec') or None
+        ter_lang = self.config.get('analysis_lang_ter') or None
 
         if sec_file:
             runner._log_message(f'Analyzing Secondary file ({mode})...')
@@ -190,8 +175,10 @@ class JobPipeline:
                 if not (self.config['videodiff_error_min'] <= err <= self.config['videodiff_error_max']):
                     raise RuntimeError(f"VideoDiff error ({err:.2f}) out of bounds.")
             else:
-                lang_for_analysis = self.config.get('match_jpn_secondary')
-                results = analysis.run_audio_correlation(ref_file, sec_file, Path(self.config['temp_root']), self.config, runner, self.tool_paths, 'jpn' if lang_for_analysis else None, 'sec')
+                results = analysis.run_audio_correlation(
+                    ref_file, sec_file, Path(self.config['temp_root']), self.config,
+                    runner, self.tool_paths, ref_lang=ref_lang, target_lang=sec_lang, role_tag='sec'
+                )
                 best = self._best_from_results(results)
                 if not best: raise RuntimeError('Audio analysis for Secondary yielded no valid result.')
                 delay_sec = best['delay']
@@ -204,8 +191,10 @@ class JobPipeline:
                  if not (self.config['videodiff_error_min'] <= err <= self.config['videodiff_error_max']):
                     raise RuntimeError(f"VideoDiff error ({err:.2f}) out of bounds.")
             else:
-                lang_for_analysis = self.config.get('match_jpn_tertiary')
-                results = analysis.run_audio_correlation(ref_file, ter_file, Path(self.config['temp_root']), self.config, runner, self.tool_paths, 'jpn' if lang_for_analysis else None, 'ter')
+                results = analysis.run_audio_correlation(
+                    ref_file, ter_file, Path(self.config['temp_root']), self.config,
+                    runner, self.tool_paths, ref_lang=ref_lang, target_lang=ter_lang, role_tag='ter'
+                )
                 best = self._best_from_results(results)
                 if not best: raise RuntimeError('Audio analysis for Tertiary yielded no valid result.')
                 delay_ter = best['delay']
@@ -218,17 +207,14 @@ class JobPipeline:
         min_pct = self.config.get('min_match_pct', 5.0)
         valid = [r for r in results if r['match'] > min_pct]
         if not valid: return None
-
         from collections import Counter
         counts = Counter(r['delay'] for r in valid)
         max_freq = counts.most_common(1)[0][1]
-
         contenders = [d for d, f in counts.items() if f == max_freq]
         best_of_each_contender = [max((r for r in valid if r['delay'] == d), key=lambda x: x['match']) for d in contenders]
-
         return max(best_of_each_contender, key=lambda x: x['match'])
 
-    def _build_mkvmerge_tokens(self, plan_data, output_file, chapters_xml, attachments):
+    def _build_mkvmerge_tokens(self, plan_data, output_file, chapters_xml, attachments, all_tracks):
         tokens = ['--output', output_file]
         if chapters_xml:
             tokens.extend(['--chapters', chapters_xml])
@@ -237,22 +223,27 @@ class JobPipeline:
         delays = plan_data['delays']
         global_shift = delays.get('_global_shift', 0)
 
-        video_indices = [i for i, t in enumerate(plan) if t.get('type') == 'video']
-        audio_indices = [i for i, t in enumerate(plan) if t.get('type') == 'audio']
-        sub_indices = [i for i, t in enumerate(plan) if t.get('type') == 'subtitles']
+        profile = self.config.get('merge_profile', [])
+        default_audio_rule = next((r for r in profile if r.get('is_default') and r.get('type') == 'Audio'), None)
+        default_sub_rule = next((r for r in profile if r.get('is_default') and r.get('type') == 'Subtitles'), None)
 
-        first_video_idx = video_indices[0] if video_indices else -1
-        first_audio_idx = audio_indices[0] if audio_indices else -1
-        default_sub_idx = -1
+        default_audio_track_id = -1
+        default_sub_track_id = -1
 
-        if self.config.get('first_sub_default', True) and sub_indices:
-            signs_keys = ('sign', 'signs', 'song', 'songs', 'ops', 'eds', 'karaoke', 'titles')
-            for i in sub_indices:
-                if any(k in (plan[i].get('name') or '').lower() for k in signs_keys):
-                    default_sub_idx = i
-                    break
-            if default_sub_idx == -1:
-                default_sub_idx = sub_indices[0]
+        if default_audio_rule:
+            for i, track in enumerate(plan):
+                if track['type'].lower() == 'audio':
+                     if track in all_tracks[default_audio_rule['source']]:
+                        default_audio_track_id = i
+                        break
+        if default_sub_rule:
+            for i, track in enumerate(plan):
+                 if track['type'].lower() == 'subtitles':
+                    if track in all_tracks[default_sub_rule['source']]:
+                        default_sub_track_id = i
+                        break
+
+        first_video_idx = next((i for i, t in enumerate(plan) if t.get('type') == 'video'), -1)
 
         track_order_indices = []
         for i, track in enumerate(plan):
@@ -268,7 +259,7 @@ class JobPipeline:
             if role == 'sec': delay += delays.get('secondary_ms', 0)
             elif role == 'ter': delay += delays.get('tertiary_ms', 0)
 
-            is_default = (i == first_video_idx) or (i == first_audio_idx) or (i == default_sub_idx)
+            is_default = (i == first_video_idx) or (i == default_audio_track_id) or (i == default_sub_track_id)
 
             tokens.extend(['--language', f"0:{track.get('lang', 'und')}"])
             tokens.extend(['--track-name', f"0:{track.get('name', '')}"])

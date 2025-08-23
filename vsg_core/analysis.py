@@ -56,7 +56,6 @@ def find_audio_delay(ref_wav: str, sec_wav: str, log_callback) -> Tuple[Optional
             log_callback("Sample rates do not match, skipping correlation.")
             return None, 0.0, None
 
-        # Normalize signals
         ref_sig = (ref_sig - np.mean(ref_sig)) / (np.std(ref_sig) + 1e-9)
         sec_sig = (sec_sig - np.mean(sec_sig)) / (np.std(sec_sig) + 1e-9)
 
@@ -75,12 +74,14 @@ def find_audio_delay(ref_wav: str, sec_wav: str, log_callback) -> Tuple[Optional
 
 def run_audio_correlation(
     ref_file: str, target_file: str, temp_dir: Path, config: dict,
-    runner: CommandRunner, tool_paths: dict, match_lang: Optional[str], role_tag: str
+    runner: CommandRunner, tool_paths: dict, ref_lang: Optional[str], target_lang: Optional[str], role_tag: str
 ) -> List[Dict[str, Any]]:
     """Orchestrates the audio correlation workflow by analyzing chunks."""
 
-    idx1 = get_audio_stream_index(ref_file, runner, tool_paths, language=None)
-    idx2 = get_audio_stream_index(target_file, runner, tool_paths, language=match_lang)
+    idx1 = get_audio_stream_index(ref_file, runner, tool_paths, language=ref_lang)
+    idx2 = get_audio_stream_index(target_file, runner, tool_paths, language=target_lang)
+
+    runner._log_message(f"Selected streams for analysis: REF (lang='{ref_lang or 'first'}', index={idx1}), {role_tag.upper()} (lang='{target_lang or 'first'}', index={idx2})")
 
     if idx1 is None or idx2 is None:
         raise ValueError('Could not locate required audio streams for correlation.')
@@ -140,7 +141,6 @@ def run_videodiff(ref_file: str, target_file: str, config: dict, runner: Command
     if not last_line:
         raise RuntimeError(f"Could not find a valid '[Result]' line in videodiff output.")
 
-    # Regex: (itsoffset|ss)\s*:\s*(-?\d+(?:\.\d+)?)s.*?error:\s*([0-9.]+)
     match = re.search(
         r'(itsoffset|ss)\s*:\s*(-?\d+(?:\.\d+)?)s.*?error:\s*([0-9.]+)',
         last_line,

@@ -7,7 +7,7 @@ The settings/options dialog window for the PyQt application.
 from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget, QFormLayout,
     QLineEdit, QPushButton, QFileDialog, QCheckBox, QComboBox, QSpinBox, QDoubleSpinBox,
-    QListWidget, QListWidgetItem
+    QListWidget, QListWidgetItem, QLabel
 )
 from PySide6.QtCore import Qt
 
@@ -27,35 +27,52 @@ class RuleDialog(QDialog):
         self.enabled_check = QCheckBox('Enabled')
         self.enabled_check.setChecked(True)
 
+        self.default_check = QCheckBox('⭐ Make Default Track')
+        self.swap_check = QCheckBox('Swap order of first two tracks found')
+
         layout = QFormLayout(self)
         layout.addRow('Source:', self.source_combo)
         layout.addRow('Track Type:', self.type_combo)
-        layout.addRow('Language (any, eng, jpn, fre, ...):', self.lang_edit)
-
+        layout.addRow('Language (any, eng, jpn, ...):', self.lang_edit)
         layout.addWidget(self.enabled_check)
+        layout.addWidget(self.default_check)
+        layout.addWidget(self.swap_check)
 
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         layout.addRow(button_box)
 
+        self.type_combo.currentTextChanged.connect(self.on_type_changed)
+
         if rule:
             self.source_combo.setCurrentText(rule.get('source', 'REF'))
             self.type_combo.setCurrentText(rule.get('type', 'Video'))
             self.lang_edit.setText(rule.get('lang', 'any'))
             self.enabled_check.setChecked(rule.get('enabled', True))
+            self.default_check.setChecked(rule.get('is_default', False))
+            self.swap_check.setChecked(rule.get('swap_first_two', False))
+
+        self.on_type_changed(self.type_combo.currentText())
+
+    def on_type_changed(self, text):
+        """Show/hide options based on track type."""
+        is_video = text == 'Video'
+        is_subs = text == 'Subtitles'
+        self.default_check.setVisible(not is_video)
+        self.swap_check.setVisible(is_subs)
 
     def get_rule(self):
         return {
             'source': self.source_combo.currentText(),
             'type': self.type_combo.currentText(),
             'lang': self.lang_edit.text().strip().lower() or 'any',
-            'enabled': self.enabled_check.isChecked()
+            'enabled': self.enabled_check.isChecked(),
+            'is_default': self.default_check.isChecked() and not self.type_combo.currentText() == 'Video',
+            'swap_first_two': self.swap_check.isChecked() and self.type_combo.currentText() == 'Subtitles'
         }
 
 class OptionsDialog(QDialog):
-    """A tabbed dialog for managing all application settings."""
-
     def __init__(self, config, parent=None):
         super().__init__(parent)
         self.config = config
@@ -84,35 +101,22 @@ class OptionsDialog(QDialog):
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
         main_layout.addWidget(button_box)
-
         self.load_settings()
 
     def _create_merge_plan_tab(self):
         widget = QWidget()
         layout = QHBoxLayout(widget)
-
         layout.addWidget(self.profile_list_widget, 3)
-
         button_layout = QVBoxLayout()
-        add_btn = QPushButton('Add Rule...')
-        edit_btn = QPushButton('Edit Rule...')
-        remove_btn = QPushButton('Remove Rule')
-        move_up_btn = QPushButton('Move Up')
-        move_down_btn = QPushButton('Move Down')
-
-        add_btn.clicked.connect(self.add_rule)
-        edit_btn.clicked.connect(self.edit_rule)
-        remove_btn.clicked.connect(self.remove_rule)
-        move_up_btn.clicked.connect(self.move_rule_up)
-        move_down_btn.clicked.connect(self.move_rule_down)
-
-        button_layout.addWidget(add_btn)
-        button_layout.addWidget(edit_btn)
-        button_layout.addWidget(remove_btn)
+        for text, slot in [('Add Rule...', self.add_rule), ('Edit Rule...', self.edit_rule), ('Remove Rule', self.remove_rule)]:
+            btn = QPushButton(text)
+            btn.clicked.connect(slot)
+            button_layout.addWidget(btn)
         button_layout.addStretch()
-        button_layout.addWidget(move_up_btn)
-        button_layout.addWidget(move_down_btn)
-
+        for text, slot in [('Move Up', self.move_rule_up), ('Move Down', self.move_rule_down)]:
+            btn = QPushButton(text)
+            btn.clicked.connect(slot)
+            button_layout.addWidget(btn)
         layout.addLayout(button_layout, 1)
         return widget
 
@@ -137,16 +141,22 @@ class OptionsDialog(QDialog):
         self.analysis_widgets['min_match_pct'] = QDoubleSpinBox(minimum=0.1, maximum=100.0, decimals=1, singleStep=1.0)
         self.analysis_widgets['videodiff_error_min'] = QDoubleSpinBox(minimum=0.0, maximum=500.0, decimals=2)
         self.analysis_widgets['videodiff_error_max'] = QDoubleSpinBox(minimum=0.0, maximum=500.0, decimals=2)
-        self.analysis_widgets['match_jpn_secondary'] = QCheckBox('For analysis, prefer JPN audio on Secondary')
-        self.analysis_widgets['match_jpn_tertiary'] = QCheckBox('For analysis, prefer JPN audio on Tertiary')
+        self.analysis_widgets['analysis_lang_ref'] = QLineEdit()
+        self.analysis_widgets['analysis_lang_ref'].setPlaceholderText('Blank = first available')
+        self.analysis_widgets['analysis_lang_sec'] = QLineEdit()
+        self.analysis_widgets['analysis_lang_sec'].setPlaceholderText('Blank = first available')
+        self.analysis_widgets['analysis_lang_ter'] = QLineEdit()
+        self.analysis_widgets['analysis_lang_ter'].setPlaceholderText('Blank = first available')
         layout.addRow('Analysis Mode:', self.analysis_widgets['analysis_mode'])
         layout.addRow('Audio: Scan Chunks:', self.analysis_widgets['scan_chunk_count'])
         layout.addRow('Audio: Chunk Duration (s):', self.analysis_widgets['scan_chunk_duration'])
         layout.addRow('Audio: Minimum Match %:', self.analysis_widgets['min_match_pct'])
         layout.addRow('VideoDiff: Min Allowed Error:', self.analysis_widgets['videodiff_error_min'])
         layout.addRow('VideoDiff: Max Allowed Error:', self.analysis_widgets['videodiff_error_max'])
-        layout.addRow(self.analysis_widgets['match_jpn_secondary'])
-        layout.addRow(self.analysis_widgets['match_jpn_tertiary'])
+        layout.addRow(QLabel('<b>Analysis Audio Track Selection</b>'))
+        layout.addRow('REF Language:', self.analysis_widgets['analysis_lang_ref'])
+        layout.addRow('SEC Language:', self.analysis_widgets['analysis_lang_sec'])
+        layout.addRow('TER Language:', self.analysis_widgets['analysis_lang_ter'])
         return widget
 
     def _create_chapters_tab(self):
@@ -168,9 +178,7 @@ class OptionsDialog(QDialog):
     def _create_merge_behavior_tab(self):
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        self.merge_widgets['swap_subtitle_order'] = QCheckBox('Swap first 2 subtitle tracks (from any source)')
         self.merge_widgets['apply_dialog_norm_gain'] = QCheckBox('Remove dialog normalization gain (AC3/E-AC3)')
-        self.merge_widgets['first_sub_default'] = QCheckBox('Make first subtitle in final order the default track')
         for w in self.merge_widgets.values():
             layout.addWidget(w)
         return widget
@@ -193,19 +201,13 @@ class OptionsDialog(QDialog):
         return widget
 
     def load_settings(self):
-        for key, widget in self.storage_widgets.items(): self._set_widget_val(widget, self.config.get(key))
-        for key, widget in self.analysis_widgets.items(): self._set_widget_val(widget, self.config.get(key))
-        for key, widget in self.chapters_widgets.items(): self._set_widget_val(widget, self.config.get(key))
-        for key, widget in self.merge_widgets.items(): self._set_widget_val(widget, self.config.get(key))
-        for key, widget in self.logging_widgets.items(): self._set_widget_val(widget, self.config.get(key))
+        for key, widget_map in [('storage_widgets', self.storage_widgets), ('analysis_widgets', self.analysis_widgets), ('chapters_widgets', self.chapters_widgets), ('merge_widgets', self.merge_widgets), ('logging_widgets', self.logging_widgets)]:
+            for key, widget in widget_map.items(): self._set_widget_val(widget, self.config.get(key))
         self.populate_profile_list()
 
     def accept(self):
-        for key, widget in self.storage_widgets.items(): self.config.set(key, self._get_widget_val(widget))
-        for key, widget in self.analysis_widgets.items(): self.config.set(key, self._get_widget_val(widget))
-        for key, widget in self.chapters_widgets.items(): self.config.set(key, self._get_widget_val(widget))
-        for key, widget in self.merge_widgets.items(): self.config.set(key, self._get_widget_val(widget))
-        for key, widget in self.logging_widgets.items(): self.config.set(key, self._get_widget_val(widget))
+        for key, widget_map in [('storage_widgets', self.storage_widgets), ('analysis_widgets', self.analysis_widgets), ('chapters_widgets', self.chapters_widgets), ('merge_widgets', self.merge_widgets), ('logging_widgets', self.logging_widgets)]:
+            for key, widget in widget_map.items(): self.config.set(key, self._get_widget_val(widget))
         self.save_profile_from_list()
         super().accept()
 
@@ -221,13 +223,16 @@ class OptionsDialog(QDialog):
     def update_item_text(self, item: QListWidgetItem):
         rule = item.data(Qt.UserRole)
         status = "✅" if rule.get('enabled') else "❌"
-        text = f"{status} {rule['source']} -> {rule['type']} ({rule['lang']})"
-        item.setText(text)
+        default = "⭐" if rule.get('is_default') else ""
+        swap = "🔄" if rule.get('swap_first_two') else ""
+        text = f"{status} {rule['source']} -> {rule['type']} ({rule['lang']}) {swap}{default}"
+        item.setText(text.strip())
 
     def add_rule(self):
         dialog = RuleDialog(parent=self)
         if dialog.exec():
             new_rule = dialog.get_rule()
+            self.handle_default_rules(new_rule)
             item = QListWidgetItem()
             item.setData(Qt.UserRole, new_rule)
             self.update_item_text(item)
@@ -238,13 +243,25 @@ class OptionsDialog(QDialog):
         if not item: return
         dialog = RuleDialog(rule=item.data(Qt.UserRole), parent=self)
         if dialog.exec():
-            item.setData(Qt.UserRole, dialog.get_rule())
+            updated_rule = dialog.get_rule()
+            self.handle_default_rules(updated_rule, item)
+            item.setData(Qt.UserRole, updated_rule)
             self.update_item_text(item)
+
+    def handle_default_rules(self, new_rule, current_item=None):
+        """Ensure only one default rule per track type."""
+        if new_rule['is_default']:
+            for i in range(self.profile_list_widget.count()):
+                item = self.profile_list_widget.item(i)
+                if item == current_item: continue
+                rule = item.data(Qt.UserRole)
+                if rule['type'] == new_rule['type']:
+                    rule['is_default'] = False
+                    self.update_item_text(item)
 
     def remove_rule(self):
         item = self.profile_list_widget.currentItem()
-        if item:
-            self.profile_list_widget.takeItem(self.profile_list_widget.row(item))
+        if item: self.profile_list_widget.takeItem(self.profile_list_widget.row(item))
 
     def move_rule_up(self):
         row = self.profile_list_widget.currentRow()
@@ -271,23 +288,17 @@ class OptionsDialog(QDialog):
 
     def _create_dir_input(self):
         widget = QWidget()
-        layout = QHBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        line_edit = QLineEdit()
-        button = QPushButton('Browse…')
-        layout.addWidget(line_edit)
-        layout.addWidget(button)
+        layout = QHBoxLayout(widget); layout.setContentsMargins(0, 0, 0, 0)
+        line_edit = QLineEdit(); button = QPushButton('Browse…')
+        layout.addWidget(line_edit); layout.addWidget(button)
         button.clicked.connect(lambda: self._browse_for_dir(line_edit))
         return widget
 
     def _create_file_input(self):
         widget = QWidget()
-        layout = QHBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        line_edit = QLineEdit()
-        button = QPushButton('Browse…')
-        layout.addWidget(line_edit)
-        layout.addWidget(button)
+        layout = QHBoxLayout(widget); layout.setContentsMargins(0, 0, 0, 0)
+        line_edit = QLineEdit(); button = QPushButton('Browse…')
+        layout.addWidget(line_edit); layout.addWidget(button)
         button.clicked.connect(lambda: self._browse_for_file(line_edit))
         return widget
 
@@ -303,7 +314,7 @@ class OptionsDialog(QDialog):
         if isinstance(widget, QCheckBox): return widget.isChecked()
         if isinstance(widget, (QSpinBox, QDoubleSpinBox)): return widget.value()
         if isinstance(widget, QComboBox): return widget.currentText()
-        if isinstance(widget, QWidget) and isinstance(widget.layout().itemAt(0).widget(), QLineEdit):
+        if isinstance(widget, QWidget) and widget.layout() and isinstance(widget.layout().itemAt(0).widget(), QLineEdit):
             return widget.layout().itemAt(0).widget().text()
         return widget.text() if isinstance(widget, QLineEdit) else None
 
@@ -312,5 +323,5 @@ class OptionsDialog(QDialog):
         elif isinstance(widget, (QSpinBox, QDoubleSpinBox)): widget.setValue(value)
         elif isinstance(widget, QComboBox): widget.setCurrentText(str(value))
         elif isinstance(widget, QLineEdit): widget.setText(str(value))
-        elif isinstance(widget, QWidget) and isinstance(widget.layout().itemAt(0).widget(), QLineEdit):
+        elif isinstance(widget, QWidget) and widget.layout() and isinstance(widget.layout().itemAt(0).widget(), QLineEdit):
             widget.layout().itemAt(0).widget().setText(str(value))
