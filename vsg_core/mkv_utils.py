@@ -27,11 +27,12 @@ def get_stream_info(mkv_path: str, runner: CommandRunner, tool_paths: dict) -> O
         return None
 
 def _ext_for_codec(ttype: str, codec_id: str) -> str:
-    """Determines a file extension based on track type and codec ID. (Improved)"""
+    """Determines a file extension based on track type and codec ID."""
     cid = (codec_id or '').upper()
     if ttype == 'video':
         if 'V_MPEGH/ISO/HEVC' in cid: return 'h265'
         if 'V_MPEG4/ISO/AVC' in cid: return 'h264'
+        if 'V_MPEG1/2' in cid: return 'mpg'  # <-- FIX: Correctly handle DVD video
         if 'V_VP9' in cid: return 'vp9'
         if 'V_AV1' in cid: return 'av1'
         return 'bin'
@@ -165,13 +166,11 @@ def process_chapters(ref_mkv: str, temp_dir: Path, runner: CommandRunner, tool_p
         return None
 
     try:
-        # BOM removal
         if xml_content.startswith('\ufeff'):
             xml_content = xml_content[1:]
 
         root = ET.fromstring(xml_content)
 
-        # 1. Rename chapters if enabled
         if config.get('rename_chapters', False):
             for i, atom in enumerate(root.findall('.//ChapterAtom'), 1):
                 disp = atom.find('ChapterDisplay')
@@ -182,7 +181,6 @@ def process_chapters(ref_mkv: str, temp_dir: Path, runner: CommandRunner, tool_p
                 ET.SubElement(new_disp, 'ChapterLanguage').text = 'und'
             runner._log_message('[Chapters] Renamed chapters to "Chapter NN".')
 
-        # 2. Shift all timestamps by the global shift
         shift_ns = shift_ms * 1_000_000
         if shift_ns != 0:
             for atom in root.findall('.//ChapterAtom'):
@@ -192,7 +190,6 @@ def process_chapters(ref_mkv: str, temp_dir: Path, runner: CommandRunner, tool_p
                         node.text = _fmt_ns(_parse_ns(node.text) + shift_ns)
             runner._log_message(f'[Chapters] Shifted all timestamps by +{shift_ms} ms.')
 
-        # 3. Snap to keyframes if enabled
         if config.get('snap_chapters', False):
             keyframes_ns = _probe_keyframes_ns(ref_mkv, runner, tool_paths)
             if keyframes_ns:
@@ -200,10 +197,8 @@ def process_chapters(ref_mkv: str, temp_dir: Path, runner: CommandRunner, tool_p
             else:
                 runner._log_message('[Chapters] Snap skipped: could not load keyframes.')
 
-        # 4. Final normalization of end times
         _normalize_chapter_end_times(root, runner)
 
-        # 5. Write the final XML file
         out_path = temp_dir / f'{Path(ref_mkv).stem}_chapters_modified.xml'
         tree = ET.ElementTree(root)
         tree.write(out_path, encoding='UTF-8', xml_declaration=True)
@@ -257,7 +252,6 @@ def _snap_chapter_times_inplace(root: ET.Element, keyframes_ns: list[int], confi
         if not keyframes_ns:
             return ts_ns
 
-        # Find insertion point
         i = bisect.bisect_right(keyframes_ns, ts_ns)
 
         prev_kf = keyframes_ns[i - 1] if i > 0 else keyframes_ns[0]
