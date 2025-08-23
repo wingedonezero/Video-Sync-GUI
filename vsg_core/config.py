@@ -41,14 +41,14 @@ class AppConfig:
             'log_progress_step': 20,
             'log_show_options_pretty': False,
             'log_show_options_json': False,
-            'exclude_codecs': '',  # New setting for codec exclusion
+            'exclude_codecs': '',
             'merge_profile': [
-                {"enabled": True, "source": "REF", "type": "Video", "lang": "any", "priority": 10, "is_default": False, "swap_first_two": False},
-                {"enabled": True, "source": "SEC", "type": "Audio", "lang": "any", "priority": 20, "is_default": True, "swap_first_two": False},
-                {"enabled": True, "source": "REF", "type": "Audio", "lang": "any", "priority": 30, "is_default": False, "swap_first_two": False},
-                {"enabled": True, "source": "TER", "type": "Subtitles", "lang": "any", "priority": 40, "is_default": True, "swap_first_two": False},
-                {"enabled": True, "source": "SEC", "type": "Subtitles", "lang": "any", "priority": 50, "is_default": False, "swap_first_two": True},
-                {"enabled": True, "source": "REF", "type": "Subtitles", "lang": "any", "priority": 60, "is_default": False, "swap_first_two": False}
+                {"enabled": True, "source": "REF", "type": "Video", "lang": "any", "exclude_langs": "", "priority": 10, "is_default": False, "swap_first_two": False},
+                {"enabled": True, "source": "SEC", "type": "Audio", "lang": "any", "exclude_langs": "", "priority": 20, "is_default": True, "swap_first_two": False},
+                {"enabled": True, "source": "REF", "type": "Audio", "lang": "any", "exclude_langs": "", "priority": 30, "is_default": False, "swap_first_two": False},
+                {"enabled": True, "source": "TER", "type": "Subtitles", "lang": "any", "exclude_langs": "", "priority": 40, "is_default": True, "swap_first_two": False},
+                {"enabled": True, "source": "SEC", "type": "Subtitles", "lang": "any", "exclude_langs": "", "priority": 50, "is_default": False, "swap_first_two": True},
+                {"enabled": True, "source": "REF", "type": "Subtitles", "lang": "any", "exclude_langs": "", "priority": 60, "is_default": False, "swap_first_two": False}
             ]
         }
         self.settings = self.defaults.copy()
@@ -62,13 +62,11 @@ class AppConfig:
                 with open(self.settings_path, 'r', encoding='utf-8') as f:
                     loaded_settings = json.load(f)
 
-                # Add any new default keys to an existing settings file
                 for key, default_value in self.defaults.items():
                     if key not in loaded_settings:
                         loaded_settings[key] = default_value
                         changed = True
 
-                # Ensure rules from older versions have the new keys
                 if 'merge_profile' in loaded_settings:
                     for rule in loaded_settings['merge_profile']:
                         if 'swap_first_two' not in rule:
@@ -76,6 +74,9 @@ class AppConfig:
                             changed = True
                         if 'is_default' not in rule:
                             rule['is_default'] = False
+                            changed = True
+                        if 'exclude_langs' not in rule:
+                            rule['exclude_langs'] = ''
                             changed = True
 
                 self.settings = loaded_settings

@@ -139,20 +139,31 @@ class JobPipeline:
             rule_type = rule.get('type', '').lower()
             rule_langs_str = rule.get('lang', 'any').lower()
             rule_langs = {lang.strip() for lang in rule_langs_str.split(',')}
+
+            rule_exclude_langs_str = rule.get('exclude_langs', '').lower()
+            rule_exclude_langs = {lang.strip() for lang in rule_exclude_langs_str.split(',') if lang.strip()}
+
             should_swap = rule.get('swap_first_two', False)
-            log_callback(f"Processing rule: {source} -> {rule_type} (langs: {rule_langs_str})")
+            log_callback(f"Processing rule: {source} -> {rule_type} (In: {rule_langs_str}, Ex: {rule_exclude_langs_str or 'none'})")
 
             tracks_to_add = []
             for track in available_tracks.get(source, []):
                 if track.get('type', '').lower() == rule_type:
                     track_lang = track.get('lang', 'und').lower()
 
-                    if 'any' in rule_langs or track_lang in rule_langs:
-                        codec_id_str = track.get('codec_id', '').lower()
-                        is_excluded = any(ex_codec in codec_id_str for ex_codec in excluded_codecs)
+                    # Language Inclusion Check
+                    lang_included = 'any' in rule_langs or track_lang in rule_langs
 
-                        if is_excluded:
-                            log_callback(f"  (-) SKIPPING track '{track.get('name')}' (codec: {track.get('codec_id')}) due to exclusion rule.")
+                    # Language Exclusion Check
+                    lang_excluded = rule_exclude_langs and track_lang in rule_exclude_langs
+
+                    if lang_included and not lang_excluded:
+                        # Codec Exclusion Check
+                        codec_id_str = track.get('codec_id', '').lower()
+                        codec_excluded = any(ex_codec in codec_id_str for ex_codec in excluded_codecs)
+
+                        if codec_excluded:
+                            log_callback(f"  (-) SKIPPING track '{track.get('name')}' (codec: {track.get('codec_id')}) due to global codec exclusion.")
                             continue
 
                         tracks_to_add.append(track)

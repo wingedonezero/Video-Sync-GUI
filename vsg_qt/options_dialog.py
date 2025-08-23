@@ -22,6 +22,7 @@ class RuleDialog(QDialog):
         self.type_combo = QComboBox()
         self.type_combo.addItems(['Video', 'Audio', 'Subtitles'])
         self.lang_edit = QLineEdit('any')
+        self.exclude_langs_edit = QLineEdit()
         self.enabled_check = QCheckBox('Enabled')
         self.enabled_check.setChecked(True)
         self.default_check = QCheckBox('⭐ Make Default Track')
@@ -30,7 +31,8 @@ class RuleDialog(QDialog):
         layout = QFormLayout(self)
         layout.addRow('Source:', self.source_combo)
         layout.addRow('Track Type:', self.type_combo)
-        layout.addRow('Language (any, eng, jpn, ...):', self.lang_edit)
+        layout.addRow('Include Languages (any, eng, ...):', self.lang_edit)
+        layout.addRow('Exclude Languages (eng, jpn, ...):', self.exclude_langs_edit)
         layout.addWidget(self.enabled_check)
         layout.addWidget(self.default_check)
         layout.addWidget(self.swap_check)
@@ -46,6 +48,7 @@ class RuleDialog(QDialog):
             self.source_combo.setCurrentText(rule.get('source', 'REF'))
             self.type_combo.setCurrentText(rule.get('type', 'Video'))
             self.lang_edit.setText(rule.get('lang', 'any'))
+            self.exclude_langs_edit.setText(rule.get('exclude_langs', ''))
             self.enabled_check.setChecked(rule.get('enabled', True))
             self.default_check.setChecked(rule.get('is_default', False))
             self.swap_check.setChecked(rule.get('swap_first_two', False))
@@ -65,6 +68,7 @@ class RuleDialog(QDialog):
             'source': self.source_combo.currentText(),
             'type': rule_type,
             'lang': self.lang_edit.text().strip().lower() or 'any',
+            'exclude_langs': self.exclude_langs_edit.text().strip().lower(),
             'enabled': self.enabled_check.isChecked(),
             'is_default': self.default_check.isChecked() and rule_type != 'Video',
             'swap_first_two': self.swap_check.isChecked() and rule_type == 'Subtitles'
@@ -195,7 +199,14 @@ class OptionsDialog(QDialog):
         status = "✅" if rule.get('enabled') else "❌"
         default = "⭐" if rule.get('is_default') else ""
         swap = "🔄" if rule.get('swap_first_two') else ""
-        text = f"{status} {rule['source']} -> {rule['type']} ({rule['lang']}) {swap}{default}"
+        include_lang = rule.get('lang', 'any')
+        exclude_lang = rule.get('exclude_langs', '')
+
+        lang_str = f"In: {include_lang}"
+        if exclude_lang:
+            lang_str += f", Ex: {exclude_lang}"
+
+        text = f"{status} {rule['source']} -> {rule['type']} ({lang_str}) {swap}{default}"
         item.setText(text.strip())
 
     def add_rule(self):
