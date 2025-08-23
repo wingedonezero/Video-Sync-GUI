@@ -21,6 +21,17 @@ class JobPipeline:
         self.progress = progress_callback
         self.tool_paths = {}
 
+    
+    def _norm_lang(self, code: str) -> str:
+        try:
+            if not code:
+                return 'und'
+            m = code.lower()
+            # Map 3-letter to 2-letter when common
+            mapping = {'eng': 'en', 'jpn': 'ja', 'jap': 'ja', 'ger': 'de', 'fre': 'fr', 'spa': 'es', 'por': 'pt', 'chi': 'zh', 'zho': 'zh', 'und': 'und'}
+            return mapping.get(m, m)
+        except Exception:
+            return 'und'
     def _find_required_tools(self):
         for tool in ['ffmpeg', 'ffprobe', 'mkvmerge', 'mkvextract']:
             self.tool_paths[tool] = shutil.which(tool)
@@ -261,10 +272,14 @@ class JobPipeline:
 
             is_default = (i == first_video_idx) or (i == default_audio_track_id) or (i == default_sub_track_id)
 
-            tokens.extend(['--language', f"0:{track.get('lang', 'und')}"])
+            tokens.extend(['--language', f"0:{self._norm_lang(track.get('lang', 'und'))}"])
             tokens.extend(['--track-name', f"0:{track.get('name', '')}"])
             tokens.extend(['--sync', f'0:{delay}'])
             tokens.extend(['--default-track-flag', f"0:{'yes' if is_default else 'no'}"])
+            # Force flag for subtitles: default sub optionally forced, others cleared
+            if (track.get('type') or '').lower() == 'subtitles':
+                forced_on = bool(self.config.get('force_default_sub')) and is_default
+                tokens.extend(['--forced-display-flag', f"0:{'yes' if forced_on else 'no'}"])
             tokens.extend(['--compression', '0:none'])
 
             if self.config.get('apply_dialog_norm_gain') and track['type'] == 'audio':
