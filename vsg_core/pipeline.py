@@ -171,7 +171,7 @@ class JobPipeline:
 
                 for track in tracks_to_add:
                     log_callback(f"  (+) INCLUDING track: {source} {track['type']} '{track.get('name')}' (lang: {track.get('lang', 'und')})")
-                    final_plan.append(track)
+                    final_plan.append({'track': track, 'rule': rule}) # Store rule with track
                     if track in available_tracks.get(source, []):
                         available_tracks[source].remove(track)
             else:
@@ -241,35 +241,19 @@ class JobPipeline:
         if self.config.get('disable_track_statistics_tags', False):
             tokens.append('--disable-track-statistics-tags')
 
-        plan = plan_data['plan']
+        plan_items = plan_data['plan']
         delays = plan_data['delays']
         global_shift = delays.get('_global_shift', 0)
 
-        profile = self.config.get('merge_profile', [])
-        default_audio_rule = next((r for r in profile if r.get('is_default') and r.get('type') == 'Audio'), None)
-        default_sub_rule = next((r for r in profile if r.get('is_default') and r.get('type') == 'Subtitles'), None)
-
-        default_audio_track_id = -1
-        default_sub_track_id = -1
-
-        def find_first_matching_track(rule, track_type):
-            if not rule: return -1
-            rule_langs = {lang.strip() for lang in rule['lang'].lower().split(',')}
-            for i, track in enumerate(plan):
-                if track['type'].lower() == track_type.lower():
-                    if track in all_tracks.get(rule['source'], []):
-                        track_lang = track.get('lang', 'und').lower()
-                        if 'any' in rule_langs or track_lang in rule_langs:
-                            return i
-            return -1
-
-        default_audio_track_id = find_first_matching_track(default_audio_rule, 'audio')
-        default_sub_track_id = find_first_matching_track(default_sub_rule, 'subtitles')
+        # We only need the track part of the plan items for this section
+        plan = [item['track'] for item in plan_items]
 
         first_video_idx = next((i for i, t in enumerate(plan) if t.get('type') == 'video'), -1)
 
         track_order_indices = []
-        for i, track in enumerate(plan):
+        for i, item in enumerate(plan_items):
+            track = item['track']
+            rule = item['rule']
             source_path = track.get('path')
             if not source_path: raise KeyError(f"Track dictionary at index {i} is missing the 'path' key.")
 
@@ -281,12 +265,16 @@ class JobPipeline:
             if role == 'sec': delay += delays.get('secondary_ms', 0)
             elif role == 'ter': delay += delays.get('tertiary_ms', 0)
 
-            is_default = (i == first_video_idx) or (i == default_audio_track_id) or (i == default_sub_track_id)
+            is_default = (i == first_video_idx) or (rule.get('is_default', False) and track['type'].lower() == 'audio')
+            is_forced = rule.get('is_forced', False) and track['type'].lower() == 'subtitles'
 
             tokens.extend(['--language', f"0:{track.get('lang', 'und')}"])
-            tokens.extend(['--track-name', f"0:{track.get('name', '')}"])
+            if rule.get('apply_track_name', False):
+                tokens.extend(['--track-name', f"0:{track.get('name', '')}"])
+
             tokens.extend(['--sync', f'0:{delay}'])
             tokens.extend(['--default-track-flag', f"0:{'yes' if is_default else 'no'}"])
+            tokens.extend(['--forced-track-flag', f"0:{'yes' if is_forced else 'no'}"])
             tokens.extend(['--compression', '0:none'])
 
             if self.config.get('apply_dialog_norm_gain') and track['type'] == 'audio':

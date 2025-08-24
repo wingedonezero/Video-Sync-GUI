@@ -27,6 +27,7 @@ class RuleDialog(QDialog):
         self.enabled_check.setChecked(True)
         self.default_check = QCheckBox('⭐ Make Default Track')
         self.swap_check = QCheckBox('Swap order of first two tracks found')
+        self.apply_name_check = QCheckBox('Apply original track name') # New
 
         layout = QFormLayout(self)
         layout.addRow('Source:', self.source_combo)
@@ -34,6 +35,7 @@ class RuleDialog(QDialog):
         layout.addRow('Include Languages (any, eng, ...):', self.lang_edit)
         layout.addRow('Exclude Languages (eng, jpn, ...):', self.exclude_langs_edit)
         layout.addWidget(self.enabled_check)
+        layout.addWidget(self.apply_name_check)
         layout.addWidget(self.default_check)
         layout.addWidget(self.swap_check)
 
@@ -52,6 +54,7 @@ class RuleDialog(QDialog):
             self.enabled_check.setChecked(rule.get('enabled', True))
             self.default_check.setChecked(rule.get('is_default', False))
             self.swap_check.setChecked(rule.get('swap_first_two', False))
+            self.apply_name_check.setChecked(rule.get('apply_track_name', False))
 
         self.on_type_changed(self.type_combo.currentText())
 
@@ -71,7 +74,8 @@ class RuleDialog(QDialog):
             'exclude_langs': self.exclude_langs_edit.text().strip().lower(),
             'enabled': self.enabled_check.isChecked(),
             'is_default': self.default_check.isChecked() and rule_type != 'Video',
-            'swap_first_two': self.swap_check.isChecked() and rule_type == 'Subtitles'
+            'swap_first_two': self.swap_check.isChecked() and rule_type == 'Subtitles',
+            'apply_track_name': self.apply_name_check.isChecked()
         }
 
 class OptionsDialog(QDialog):
