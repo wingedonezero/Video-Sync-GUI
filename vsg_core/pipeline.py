@@ -96,7 +96,7 @@ class JobPipeline:
             self.progress(0.6)
             plan = self._build_plan_from_profile(all_tracks, delays, log_to_all)
             out_file = output_dir / Path(ref_file).name
-            tokens = self._build_mkvmerge_tokens(plan, str(out_file), chapters_xml, ter_attachments, all_tracks)
+            tokens = self._build_mkvmerge_tokens(plan, str(out_file), chapters_xml, ter_attachments)
             opts_path = self._write_mkvmerge_opts(tokens, job_temp, runner)
 
             self.progress(0.8)
@@ -165,13 +165,13 @@ class JobPipeline:
                         tracks_to_add.append(track)
 
             if tracks_to_add:
-                if should_swap and len(tracks_to_add) == 2:
-                    log_callback(f"  (i) Swapping order of 2 tracks found by rule.")
-                    tracks_to_add.reverse()
+                if should_swap and len(tracks_to_add) >= 2:
+                    log_callback(f"  (i) Swapping order of first 2 tracks found by rule.")
+                    tracks_to_add[0], tracks_to_add[1] = tracks_to_add[1], tracks_to_add[0]
 
                 for track in tracks_to_add:
                     log_callback(f"  (+) INCLUDING track: {source} {track['type']} '{track.get('name')}' (lang: {track.get('lang', 'und')})")
-                    final_plan.append({'track': track, 'rule': rule}) # Store rule with track
+                    final_plan.append({'track': track, 'rule': rule})
                     if track in available_tracks.get(source, []):
                         available_tracks[source].remove(track)
             else:
@@ -233,7 +233,7 @@ class JobPipeline:
         best_of_each_contender = [max((r for r in valid if r['delay'] == d), key=lambda x: x['match']) for d in contenders]
         return max(best_of_each_contender, key=lambda x: x['match'])
 
-    def _build_mkvmerge_tokens(self, plan_data, output_file, chapters_xml, attachments, all_tracks):
+    def _build_mkvmerge_tokens(self, plan_data: Dict, output_file: str, chapters_xml: Optional[str], attachments: List[str]) -> List[str]:
         tokens = ['--output', output_file]
         if chapters_xml:
             tokens.extend(['--chapters', chapters_xml])
@@ -245,8 +245,18 @@ class JobPipeline:
         delays = plan_data['delays']
         global_shift = delays.get('_global_shift', 0)
 
-        # We only need the track part of the plan items for this section
         plan = [item['track'] for item in plan_items]
+
+        default_audio_track_id = -1
+        default_sub_track_id = -1
+
+        # Find the first track that came from a rule with is_default=True for each type
+        for i, item in enumerate(plan_items):
+            if item['rule'].get('is_default'):
+                if item['track']['type'] == 'audio' and default_audio_track_id == -1:
+                    default_audio_track_id = i
+                elif item['track']['type'] == 'subtitles' and default_sub_track_id == -1:
+                    default_sub_track_id = i
 
         first_video_idx = next((i for i, t in enumerate(plan) if t.get('type') == 'video'), -1)
 
@@ -265,16 +275,14 @@ class JobPipeline:
             if role == 'sec': delay += delays.get('secondary_ms', 0)
             elif role == 'ter': delay += delays.get('tertiary_ms', 0)
 
-            is_default = (i == first_video_idx) or (rule.get('is_default', False) and track['type'].lower() == 'audio')
-            is_forced = rule.get('is_forced', False) and track['type'].lower() == 'subtitles'
+            is_default = (i == first_video_idx) or (i == default_audio_track_id) or (i == default_sub_track_id)
 
             tokens.extend(['--language', f"0:{track.get('lang', 'und')}"])
-            if rule.get('apply_track_name', False):
+            if rule.get('apply_track_name', False) and track.get('name'):
                 tokens.extend(['--track-name', f"0:{track.get('name', '')}"])
 
             tokens.extend(['--sync', f'0:{delay}'])
             tokens.extend(['--default-track-flag', f"0:{'yes' if is_default else 'no'}"])
-            tokens.extend(['--forced-track-flag', f"0:{'yes' if is_forced else 'no'}"])
             tokens.extend(['--compression', '0:none'])
 
             if self.config.get('apply_dialog_norm_gain') and track['type'] == 'audio':

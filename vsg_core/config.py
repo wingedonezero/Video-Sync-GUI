@@ -44,12 +44,12 @@ class AppConfig:
             'exclude_codecs': '',
             'disable_track_statistics_tags': False,
             'merge_profile': [
-                {"enabled": True, "source": "REF", "type": "Video", "lang": "any", "exclude_langs": "", "priority": 10, "is_default": False, "is_forced": False, "swap_first_two": False, "apply_track_name": False},
-                {"enabled": True, "source": "SEC", "type": "Audio", "lang": "any", "exclude_langs": "", "priority": 20, "is_default": True, "is_forced": False, "swap_first_two": False, "apply_track_name": False},
-                {"enabled": True, "source": "REF", "type": "Audio", "lang": "any", "exclude_langs": "", "priority": 30, "is_default": False, "is_forced": False, "swap_first_two": False, "apply_track_name": False},
-                {"enabled": True, "source": "TER", "type": "Subtitles", "lang": "any", "exclude_langs": "", "priority": 40, "is_default": False, "is_forced": True, "swap_first_two": False, "apply_track_name": True},
-                {"enabled": True, "source": "SEC", "type": "Subtitles", "lang": "any", "exclude_langs": "", "priority": 50, "is_default": False, "is_forced": False, "swap_first_two": True, "apply_track_name": True},
-                {"enabled": True, "source": "REF", "type": "Subtitles", "lang": "any", "exclude_langs": "", "priority": 60, "is_default": False, "is_forced": False, "swap_first_two": False, "apply_track_name": False}
+                {"enabled": True, "source": "REF", "type": "Video", "lang": "any", "exclude_langs": "", "priority": 10, "is_default": False, "swap_first_two": False, "apply_track_name": False},
+                {"enabled": True, "source": "SEC", "type": "Audio", "lang": "any", "exclude_langs": "", "priority": 20, "is_default": True, "swap_first_two": False, "apply_track_name": False},
+                {"enabled": True, "source": "REF", "type": "Audio", "lang": "any", "exclude_langs": "", "priority": 30, "is_default": False, "swap_first_two": False, "apply_track_name": False},
+                {"enabled": True, "source": "TER", "type": "Subtitles", "lang": "any", "exclude_langs": "", "priority": 40, "is_default": True, "swap_first_two": False, "apply_track_name": True},
+                {"enabled": True, "source": "SEC", "type": "Subtitles", "lang": "any", "exclude_langs": "", "priority": 50, "is_default": False, "swap_first_two": True, "apply_track_name": True},
+                {"enabled": True, "source": "REF", "type": "Subtitles", "lang": "any", "exclude_langs": "", "priority": 60, "is_default": False, "swap_first_two": False, "apply_track_name": False}
             ]
         }
         self.settings = self.defaults.copy()
@@ -74,7 +74,7 @@ class AppConfig:
                         if 'is_default' not in rule: rule['is_default'] = False; changed = True
                         if 'exclude_langs' not in rule: rule['exclude_langs'] = ''; changed = True
                         if 'apply_track_name' not in rule: rule['apply_track_name'] = False; changed = True
-
+                        if 'is_forced' in rule: del rule['is_forced']; changed = True # Clean up old key
 
                 self.settings = loaded_settings
 

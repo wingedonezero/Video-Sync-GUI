@@ -27,7 +27,7 @@ class RuleDialog(QDialog):
         self.enabled_check.setChecked(True)
         self.default_check = QCheckBox('⭐ Make Default Track')
         self.swap_check = QCheckBox('Swap order of first two tracks found')
-        self.apply_name_check = QCheckBox('Apply original track name') # New
+        self.apply_name_check = QCheckBox('Apply original track name')
 
         layout = QFormLayout(self)
         layout.addRow('Source:', self.source_combo)
