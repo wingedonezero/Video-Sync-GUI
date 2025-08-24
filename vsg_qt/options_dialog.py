@@ -28,6 +28,7 @@ class RuleDialog(QDialog):
         self.default_check = QCheckBox('⭐ Make Default Track')
         self.swap_check = QCheckBox('Swap order of first two tracks found')
         self.apply_name_check = QCheckBox('Apply original track name')
+        self.forced_display_check = QCheckBox('📌 Make Forced Display Track')
 
         layout = QFormLayout(self)
         layout.addRow('Source:', self.source_combo)
@@ -37,6 +38,7 @@ class RuleDialog(QDialog):
         layout.addWidget(self.enabled_check)
         layout.addWidget(self.apply_name_check)
         layout.addWidget(self.default_check)
+        layout.addWidget(self.forced_display_check)
         layout.addWidget(self.swap_check)
 
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -55,6 +57,7 @@ class RuleDialog(QDialog):
             self.default_check.setChecked(rule.get('is_default', False))
             self.swap_check.setChecked(rule.get('swap_first_two', False))
             self.apply_name_check.setChecked(rule.get('apply_track_name', False))
+            self.forced_display_check.setChecked(rule.get('is_forced_display', False))
 
         self.on_type_changed(self.type_combo.currentText())
 
@@ -64,6 +67,7 @@ class RuleDialog(QDialog):
         is_subs = text == 'Subtitles'
         self.default_check.setVisible(not is_video)
         self.swap_check.setVisible(is_subs)
+        self.forced_display_check.setVisible(is_subs)
 
     def get_rule(self):
         rule_type = self.type_combo.currentText()
@@ -75,7 +79,8 @@ class RuleDialog(QDialog):
             'enabled': self.enabled_check.isChecked(),
             'is_default': self.default_check.isChecked() and rule_type != 'Video',
             'swap_first_two': self.swap_check.isChecked() and rule_type == 'Subtitles',
-            'apply_track_name': self.apply_name_check.isChecked()
+            'apply_track_name': self.apply_name_check.isChecked(),
+            'is_forced_display': self.forced_display_check.isChecked() and rule_type == 'Subtitles'
         }
 
 class OptionsDialog(QDialog):
@@ -204,6 +209,7 @@ class OptionsDialog(QDialog):
         rule = item.data(Qt.UserRole)
         status = "✅" if rule.get('enabled') else "❌"
         default = "⭐" if rule.get('is_default') else ""
+        forced = "📌" if rule.get('is_forced_display') else ""
         swap = "🔄" if rule.get('swap_first_two') else ""
         include_lang = rule.get('lang', 'any')
         exclude_lang = rule.get('exclude_langs', '')
@@ -212,7 +218,7 @@ class OptionsDialog(QDialog):
         if exclude_lang:
             lang_str += f", Ex: {exclude_lang}"
 
-        text = f"{status} {rule['source']} -> {rule['type']} ({lang_str}) {swap}{default}"
+        text = f"{status} {rule['source']} -> {rule['type']} ({lang_str}) {swap}{default}{forced}"
         item.setText(text.strip())
 
     def add_rule(self):
@@ -230,15 +236,17 @@ class OptionsDialog(QDialog):
             item.setData(Qt.UserRole, updated_rule); self.update_item_text(item)
 
     def handle_flag_rules(self, new_rule, current_item=None):
-        """Ensure only one default rule per track type."""
-        if new_rule.get('is_default'):
-            for i in range(self.profile_list_widget.count()):
-                item = self.profile_list_widget.item(i)
-                if item == current_item: continue
-                rule = item.data(Qt.UserRole)
-                if rule.get('type') == new_rule.get('type'):
-                    rule['is_default'] = False
-                    self.update_item_text(item)
+        """Ensure only one default/forced rule per track type."""
+        flags_to_check = ['is_default', 'is_forced_display']
+        for flag in flags_to_check:
+            if new_rule.get(flag):
+                for i in range(self.profile_list_widget.count()):
+                    item = self.profile_list_widget.item(i)
+                    if item == current_item: continue
+                    rule = item.data(Qt.UserRole)
+                    if rule.get('type') == new_rule.get('type'):
+                        rule[flag] = False
+                        self.update_item_text(item)
 
     def remove_rule(self):
         item = self.profile_list_widget.currentItem()

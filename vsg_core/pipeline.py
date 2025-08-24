@@ -249,14 +249,16 @@ class JobPipeline:
 
         default_audio_track_id = -1
         default_sub_track_id = -1
+        forced_display_sub_id = -1
 
-        # Find the first track that came from a rule with is_default=True for each type
         for i, item in enumerate(plan_items):
             if item['rule'].get('is_default'):
                 if item['track']['type'] == 'audio' and default_audio_track_id == -1:
                     default_audio_track_id = i
                 elif item['track']['type'] == 'subtitles' and default_sub_track_id == -1:
                     default_sub_track_id = i
+            if item['rule'].get('is_forced_display') and item['track']['type'] == 'subtitles' and forced_display_sub_id == -1:
+                forced_display_sub_id = i
 
         first_video_idx = next((i for i, t in enumerate(plan) if t.get('type') == 'video'), -1)
 
@@ -283,6 +285,9 @@ class JobPipeline:
 
             tokens.extend(['--sync', f'0:{delay}'])
             tokens.extend(['--default-track-flag', f"0:{'yes' if is_default else 'no'}"])
+            if i == forced_display_sub_id:
+                tokens.extend(['--forced-display-flag', '0:yes'])
+
             tokens.extend(['--compression', '0:none'])
 
             if self.config.get('apply_dialog_norm_gain') and track['type'] == 'audio':
