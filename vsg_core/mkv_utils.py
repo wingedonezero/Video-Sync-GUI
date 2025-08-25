@@ -56,37 +56,103 @@ def _ext_for_codec(ttype: str, codec_id: str) -> str:
         return 'sub'
     return 'bin'
 
-def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: dict, role: str, audio=True, subs=True, all_tracks=False) -> List[Dict[str, Any]]:
-    """Extracts specified track types from an MKV file."""
+
+def _pcm_codec_from_bit_depth(bit_depth: Optional[int]) -> str:
+    """Map bit depth to an ffmpeg PCM codec. Defaults to 16-bit signed if unknown."""
+    try:
+        bd = int(bit_depth) if bit_depth is not None else 16
+    except (TypeError, ValueError):
+        bd = 16
+    if bd >= 64:
+        return 'pcm_f64le'
+    if bd >= 32:
+        # prefer signed 32-bit; if source was float 32, Matroska/ffmpeg will still accept this
+        return 'pcm_s32le'
+    if bd >= 24:
+        return 'pcm_s24le'
+    return 'pcm_s16le'
+
+
+def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: dict,
+                   role: str, audio=True, subs=True, all_tracks=False) -> List[Dict[str, Any]]:
+    """Extracts specified track types from an MKV file.
+    Uses mkvextract for everything it supports, and falls back to ffmpeg for A_MS/ACM audio.
+    """
     info = get_stream_info(mkv, runner, tool_paths)
     if not info:
         raise ValueError(f'Could not get stream info for extraction from {mkv}')
 
-    tracks_to_extract, specs = [], []
+    tracks_to_extract: List[Dict[str, Any]] = []
+    specs: List[str] = []
+    ffmpeg_cmds: List[List[str]] = []
+
+    # Maintain audio stream index for ffmpeg -map 0:a:N
+    audio_idx = -1
+
     for track in info.get('tracks', []):
         ttype = track['type']
         want = all_tracks or (audio and ttype == 'audio') or (subs and ttype == 'subtitles')
         if not want:
             continue
 
-        tid = track['id']
-        codec = track.get('properties', {}).get('codec_id', '')
-        ext = _ext_for_codec(ttype, codec)
-        out_path = temp_dir / f'{role}_track_{Path(mkv).stem}_{tid}.{ext}'
+        if ttype == 'audio':
+            audio_idx += 1
 
-        tracks_to_extract.append({
+        tid = track['id']
+        props = track.get('properties', {}) or {}
+        codec = (props.get('codec_id') or '').upper()
+        ext = _ext_for_codec(ttype, codec)
+
+        # Default output path (keep your existing naming scheme)
+        out_path = temp_dir / f"{role}_track_{Path(mkv).stem}_{tid}.{ext if ext != 'bin' else 'wav'}"
+
+        rec = {
             'id': tid,
             'type': ttype,
-            'lang': track.get('properties', {}).get('language', 'und'),
-            'name': track.get('properties', {}).get('track_name', ''),
+            'lang': props.get('language', 'und'),
+            'name': props.get('track_name', ''),
             'path': str(out_path),
-            'codec_id': codec
-        })
-        specs.append(f'{tid}:{out_path}')
+            'codec_id': props.get('codec_id', '')
+        }
+        tracks_to_extract.append(rec)
+
+        # Fallback ONLY for A_MS/ACM audio (PCM under ACM wrapper)
+        if ttype == 'audio' and 'A_MS/ACM' in codec:
+            bit_depth = props.get('audio_bits_per_sample') or props.get('bit_depth')
+            pcm_codec = _pcm_codec_from_bit_depth(bit_depth)
+
+            # Force .wav extension for ACM fallback
+            out_path = out_path.with_suffix('.wav')
+            rec['path'] = str(out_path)
+
+            cmd = [
+                'ffmpeg', '-y', '-v', 'error', '-nostdin',
+                '-i', str(mkv),
+                '-map', f'0:a:{audio_idx}',
+                '-vn', '-sn',
+                '-acodec', pcm_codec,
+                str(out_path)
+            ]
+            ffmpeg_cmds.append(cmd)
+            try:
+                runner._log_message(f"[Extract] Using ffmpeg fallback for A_MS/ACM (track {tid}) -> {out_path.name}")
+            except Exception:
+                pass
+            continue
+
+        # Otherwise use mkvextract as before
+        out_path = temp_dir / f"{role}_track_{Path(mkv).stem}_{tid}.{ext}"
+        rec['path'] = str(out_path)
+        specs.append(f"{tid}:{out_path}")
 
     if specs:
         runner.run(['mkvextract', str(mkv), 'tracks'] + specs, tool_paths)
+
+    for cmd in ffmpeg_cmds:
+        runner.run(cmd, tool_paths)
+
     return tracks_to_extract
+
 
 def extract_attachments(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: dict, role: str) -> List[str]:
     """Extracts all attachments from an MKV file."""
