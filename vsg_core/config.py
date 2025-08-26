@@ -1,3 +1,5 @@
+# config.py
+
 # -*- coding: utf-8 -*-
 
 """
@@ -15,6 +17,9 @@ class AppConfig:
         self.script_dir = Path(__file__).resolve().parent.parent
         self.settings_path = self.script_dir / settings_filename
         self.defaults = {
+            'last_ref_path': '',                      # <-- ADDED
+            'last_sec_path': '',                      # <-- ADDED
+            'last_ter_path': '',                      # <-- ADDED
             'output_folder': str(self.script_dir / 'sync_output'),
             'temp_root': str(self.script_dir / 'temp_work'),
             'videodiff_path': '',
@@ -43,6 +48,7 @@ class AppConfig:
             'log_show_options_json': False,
             'exclude_codecs': '',
             'disable_track_statistics_tags': False,
+            'merge_mode': 'plan',                     # <-- ADDED
             'merge_profile': [
                 {"enabled": True, "source": "REF", "type": "Video", "lang": "any", "exclude_langs": "", "priority": 10, "is_default": False, "swap_first_two": False, "apply_track_name": False, "is_forced_display": False},
                 {"enabled": True, "source": "SEC", "type": "Audio", "lang": "any", "exclude_langs": "", "priority": 20, "is_default": True, "swap_first_two": False, "apply_track_name": False, "is_forced_display": False},

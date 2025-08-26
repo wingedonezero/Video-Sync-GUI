@@ -1,3 +1,5 @@
+# vsg_qt/worker.py
+
 # -*- coding: utf-8 -*-
 
 """
@@ -22,10 +24,10 @@ class JobWorker(QRunnable):
     """
     A QRunnable worker that executes a list of jobs in a separate thread.
     """
-    def __init__(self, config: Dict[str, Any], jobs: List[Tuple[str, Optional[str], Optional[str]]], and_merge: bool, output_dir: str):
+    def __init__(self, config: Dict[str, Any], jobs: List[Dict], and_merge: bool, output_dir: str):
         super().__init__()
         self.config = config
-        self.jobs = jobs
+        self.jobs = jobs  # jobs are now dicts
         self.and_merge = and_merge
         self.output_dir = output_dir
         self.signals = WorkerSignals()
@@ -42,10 +44,20 @@ class JobWorker(QRunnable):
         all_results = []
         total_jobs = len(self.jobs)
 
-        for i, (ref_file, sec_file, ter_file) in enumerate(self.jobs, 1):
+        for i, job_data in enumerate(self.jobs, 1):
+            ref_file = job_data['ref']
             try:
                 self.signals.status.emit(f'Processing {i}/{total_jobs}: {Path(ref_file).name}')
-                result = pipeline.run_job(ref_file, sec_file, ter_file, self.and_merge, self.output_dir)
+
+                result = pipeline.run_job(
+                    ref_file=ref_file,
+                    sec_file=job_data.get('sec'),
+                    ter_file=job_data.get('ter'),
+                    and_merge=self.and_merge,
+                    output_dir_str=self.output_dir,
+                    manual_layout=job_data.get('manual_layout') # Pass manual layout
+                )
+
                 self.signals.finished_job.emit(result)
                 all_results.append(result)
             except Exception as e:

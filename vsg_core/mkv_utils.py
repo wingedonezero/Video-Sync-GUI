@@ -1,3 +1,5 @@
+# vsg_core/mkv_utils.py
+
 # -*- coding: utf-8 -*-
 
 """
@@ -13,29 +15,41 @@ from typing import List, Dict, Any, Optional
 
 from .process import CommandRunner
 
+def get_track_info_for_dialog(ref_file: str, sec_file: Optional[str], ter_file: Optional[str], runner: CommandRunner, tool_paths: dict) -> Dict[str, List[Dict]]:
+    # ... (This function is unchanged)
+    all_tracks = {'REF': [], 'SEC': [], 'TER': []}
+    source_map = {'REF': ref_file, 'SEC': sec_file, 'TER': ter_file}
+    for source, filepath in source_map.items():
+        if not filepath or not Path(filepath).exists():
+            continue
+        info = get_stream_info(filepath, runner, tool_paths)
+        if not info or 'tracks' not in info:
+            continue
+        for track in info.get('tracks', []):
+            props = track.get('properties', {}) or {}
+            record = {
+                'source': source, 'original_path': filepath, 'id': track['id'],
+                'type': track['type'], 'codec_id': props.get('codec_id', 'N/A'),
+                'lang': props.get('language', 'und'), 'name': props.get('track_name', '')
+            }
+            all_tracks[source].append(record)
+    return all_tracks
+
 def _pcm_codec_from_bit_depth(bit_depth):
-    """Map bit depth to an ffmpeg PCM codec conservatively."""
+    # ... (This function is unchanged)
     try:
         bd = int(bit_depth) if bit_depth is not None else 16
     except (TypeError, ValueError):
         bd = 16
-    if bd >= 64:
-        return 'pcm_f64le'
-    if bd >= 32:
-        # Prefer signed 32-bit PCM by default; adjust if you later detect float
-        return 'pcm_s32le'
-    if bd >= 24:
-        return 'pcm_s24le'
+    if bd >= 64: return 'pcm_f64le'
+    if bd >= 32: return 'pcm_s32le'
+    if bd >= 24: return 'pcm_s24le'
     return 'pcm_s16le'
 
-
-# --- Track and Attachment Extraction ---
-
 def get_stream_info(mkv_path: str, runner: CommandRunner, tool_paths: dict) -> Optional[Dict[str, Any]]:
-    """Gets multimedia stream information using mkvmerge -J."""
+    # ... (This function is unchanged)
     out = runner.run(['mkvmerge', '-J', str(mkv_path)], tool_paths)
-    if not out:
-        return None
+    if not out: return None
     try:
         return json.loads(out)
     except json.JSONDecodeError:
@@ -43,7 +57,7 @@ def get_stream_info(mkv_path: str, runner: CommandRunner, tool_paths: dict) -> O
         return None
 
 def _ext_for_codec(ttype: str, codec_id: str) -> str:
-    """Determines a file extension based on track type and codec ID."""
+    # ... (This function is unchanged)
     cid = (codec_id or '').upper()
     if ttype == 'video':
         if 'V_MPEGH/ISO/HEVC' in cid: return 'h265'
@@ -72,7 +86,8 @@ def _ext_for_codec(ttype: str, codec_id: str) -> str:
         return 'sub'
     return 'bin'
 
-def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: dict, role: str, audio=True, subs=True, all_tracks=False) -> List[Dict[str, Any]]:
+def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: dict, role: str,
+                   audio=True, subs=True, all_tracks=False, specific_tracks: Optional[List[int]] = None) -> List[Dict[str, Any]]:
     """Extracts specified track types from an MKV file."""
     info = get_stream_info(mkv, runner, tool_paths)
     if not info:
@@ -84,38 +99,40 @@ def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: 
 
     for track in info.get('tracks', []):
         ttype = track['type']
-        want = all_tracks or (audio and ttype == 'audio') or (subs and ttype == 'subtitles')
+        tid = track['id']
+
+        # --- MODIFIED LOGIC ---
+        if specific_tracks is not None:
+            # If a specific list is provided, only extract those tracks
+            want = tid in specific_tracks
+        else:
+            # Fallback to the original category-based logic
+            want = all_tracks or (audio and ttype == 'audio') or (subs and ttype == 'subtitles')
+        # --- END MODIFIED LOGIC ---
+
         if not want:
             continue
 
         if ttype == 'audio':
             audio_idx += 1
 
-        tid = track['id']
         props = track.get('properties', {}) or {}
         codec = (props.get('codec_id') or '')
         ext = _ext_for_codec(ttype, codec)
         out_path = temp_dir / f'{role}_track_{Path(mkv).stem}_{tid}.{ext}'
 
         record = {
-            'id': tid,
-            'type': ttype,
-            'lang': props.get('language', 'und'),
-            'name': props.get('track_name', ''),
-            'path': str(out_path),
-            'codec_id': codec
+            'id': tid, 'type': ttype, 'lang': props.get('language', 'und'),
+            'name': props.get('track_name', ''), 'path': str(out_path),
+            'codec_id': codec, 'source': role.upper()
         }
         tracks_to_extract.append(record)
 
-        # Fallback ONLY for A_MS/ACM audio (bit-exact first, then PCM encode if needed)
         if ttype == 'audio' and 'A_MS/ACM' in codec.upper():
-            # Force .wav extension for ACM fallback
             out_path = out_path.with_suffix('.wav')
             record['path'] = str(out_path)
-
             bit_depth = props.get('audio_bits_per_sample') or props.get('bit_depth')
             pcm_codec = _pcm_codec_from_bit_depth(bit_depth)
-
             ffmpeg_jobs.append({'idx': audio_idx, 'tid': tid, 'out': str(out_path), 'pcm': pcm_codec})
         else:
             specs.append(f'{tid}:{out_path}')
@@ -123,15 +140,10 @@ def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: 
     if specs:
         runner.run(['mkvextract', str(mkv), 'tracks'] + specs, tool_paths)
 
-    # Run ffmpeg jobs: try bit-for-bit stream copy first, then fallback to PCM encode
     for job in ffmpeg_jobs:
         copy_cmd = [
-            'ffmpeg', '-y', '-v', 'error', '-nostdin',
-            '-i', str(mkv),
-            '-map', f"0:a:{job['idx']}",
-            '-vn', '-sn',
-            '-c:a', 'copy',
-            job['out']
+            'ffmpeg', '-y', '-v', 'error', '-nostdin', '-i', str(mkv),
+            '-map', f"0:a:{job['idx']}", '-vn', '-sn', '-c:a', 'copy', job['out']
         ]
         try:
             runner._log_message(f"Attempting stream copy for A_MS/ACM (track {job['tid']}) -> {Path(job['out']).name}")
@@ -140,41 +152,35 @@ def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: 
         except Exception as e:
             runner._log_message(f"Stream copy refused for A_MS/ACM (track {job['tid']}): {e}. Falling back to {job['pcm']}.")
             ffmpeg_pcm_cmd = [
-                'ffmpeg', '-y', '-v', 'error', '-nostdin',
-                '-i', str(mkv),
-                '-map', f"0:a:{job['idx']}",
-                '-vn', '-sn',
-                '-acodec', job['pcm'],
-                job['out']
+                'ffmpeg', '-y', '-v', 'error', '-nostdin', '-i', str(mkv),
+                '-map', f"0:a:{job['idx']}", '-vn', '-sn', '-acodec', job['pcm'], job['out']
             ]
             runner.run(ffmpeg_pcm_cmd, tool_paths)
 
     return tracks_to_extract
 
+# --- The rest of the file (extract_attachments and all chapter functions) is unchanged ---
 def extract_attachments(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: dict, role: str) -> List[str]:
-    """Extracts all attachments from an MKV file."""
+    # ... (unchanged)
     info = get_stream_info(mkv, runner, tool_paths)
     files, specs = [], []
     for attachment in (info or {}).get('attachments', []):
         out_path = temp_dir / f"{role}_att_{attachment['id']}_{attachment['file_name']}"
         specs.append(f"{attachment['id']}:{out_path}")
         files.append(str(out_path))
-
     if specs:
         runner.run(['mkvextract', str(mkv), 'attachments'] + specs, tool_paths)
     return files
 
-# --- Chapter Processing ---
-
 def _parse_ns(t: str) -> int:
-    """Parses HH:MM:SS.fffffffff time string to nanoseconds."""
+    # ... (unchanged)
     hh, mm, rest = t.strip().split(':')
     ss, frac = (rest.split('.') + ['0'])[:2]
     frac = (frac + '000000000')[:9]
     return (int(hh) * 3600 + int(mm) * 60 + int(ss)) * 1_000_000_000 + int(frac)
 
 def _fmt_ns(ns: int) -> str:
-    """Formats nanoseconds to HH:MM:SS.fffffffff time string."""
+    # ... (unchanged)
     ns = max(0, ns)
     frac = ns % 1_000_000_000
     total_s = ns // 1_000_000_000
@@ -184,56 +190,43 @@ def _fmt_ns(ns: int) -> str:
     return f'{hh:02d}:{mm:02d}:{ss:02d}.{frac:09d}'
 
 def _normalize_chapter_end_times(root: ET.Element, runner: CommandRunner):
-    """Ensures each chapter's end time is valid."""
+    # ... (unchanged)
     atoms = root.findall('.//ChapterAtom')
     chapters = []
     for atom in atoms:
         st_el = atom.find('ChapterTimeStart')
         if st_el is not None and st_el.text:
             chapters.append({'atom': atom, 'start_ns': _parse_ns(st_el.text)})
-
     chapters.sort(key=lambda x: x['start_ns'])
-
     fixed_count = 0
     for i, chap in enumerate(chapters):
         atom = chap['atom']
         st_ns = chap['start_ns']
         en_el = atom.find('ChapterTimeEnd')
-
         next_start_ns = chapters[i + 1]['start_ns'] if i + 1 < len(chapters) else None
-
         desired_en_ns = _parse_ns(en_el.text) if en_el is not None and en_el.text else st_ns + 1_000_000
-
         if next_start_ns is not None:
             desired_en_ns = min(desired_en_ns, next_start_ns)
-
-        desired_en_ns = max(desired_en_ns, st_ns + 1) # Ensure end is after start
-
+        desired_en_ns = max(desired_en_ns, st_ns + 1)
         if en_el is None:
             en_el = ET.SubElement(atom, 'ChapterTimeEnd')
-
         new_text = _fmt_ns(desired_en_ns)
         if en_el.text != new_text:
             en_el.text = new_text
             fixed_count += 1
-
     if fixed_count > 0:
         runner._log_message(f'[Chapters] Normalized {fixed_count} chapter end times.')
 
-
 def process_chapters(ref_mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: dict, config: dict, shift_ms: int) -> Optional[str]:
-    """Main function to handle all chapter operations: rename, shift, and snap."""
+    # ... (unchanged)
     xml_content = runner.run(['mkvextract', str(ref_mkv), 'chapters', '-'], tool_paths)
     if not xml_content or not xml_content.strip():
         runner._log_message('No chapters found in reference file.')
         return None
-
     try:
         if xml_content.startswith('\ufeff'):
             xml_content = xml_content[1:]
-
         root = ET.fromstring(xml_content)
-
         if config.get('rename_chapters', False):
             for i, atom in enumerate(root.findall('.//ChapterAtom'), 1):
                 disp = atom.find('ChapterDisplay')
@@ -243,7 +236,6 @@ def process_chapters(ref_mkv: str, temp_dir: Path, runner: CommandRunner, tool_p
                 ET.SubElement(new_disp, 'ChapterString').text = f'Chapter {i:02d}'
                 ET.SubElement(new_disp, 'ChapterLanguage').text = 'und'
             runner._log_message('[Chapters] Renamed chapters to "Chapter NN".')
-
         shift_ns = shift_ms * 1_000_000
         if shift_ns != 0:
             for atom in root.findall('.//ChapterAtom'):
@@ -252,29 +244,24 @@ def process_chapters(ref_mkv: str, temp_dir: Path, runner: CommandRunner, tool_p
                     if node is not None and node.text:
                         node.text = _fmt_ns(_parse_ns(node.text) + shift_ns)
             runner._log_message(f'[Chapters] Shifted all timestamps by +{shift_ms} ms.')
-
         if config.get('snap_chapters', False):
             keyframes_ns = _probe_keyframes_ns(ref_mkv, runner, tool_paths)
             if keyframes_ns:
                 _snap_chapter_times_inplace(root, keyframes_ns, config, runner)
             else:
                 runner._log_message('[Chapters] Snap skipped: could not load keyframes.')
-
         _normalize_chapter_end_times(root, runner)
-
         out_path = temp_dir / f'{Path(ref_mkv).stem}_chapters_modified.xml'
         tree = ET.ElementTree(root)
         tree.write(out_path, encoding='UTF-8', xml_declaration=True)
         runner._log_message(f'Chapters XML written to: {out_path}')
         return str(out_path)
-
     except Exception as e:
         runner._log_message(f'[ERROR] Chapter processing failed: {e}')
         return None
 
-
 def _probe_keyframes_ns(ref_video_path: str, runner: CommandRunner, tool_paths: dict) -> list[int]:
-    """Returns a sorted list of keyframe timestamps in nanoseconds using the fast packet method."""
+    # ... (unchanged)
     args = [
         'ffprobe', '-v', 'error', '-select_streams', 'v:0',
         '-show_entries', 'packet=pts_time,flags', '-of', 'json', str(ref_video_path)
@@ -283,7 +270,6 @@ def _probe_keyframes_ns(ref_video_path: str, runner: CommandRunner, tool_paths: 
     if not out:
         runner._log_message('[WARN] ffprobe for keyframes produced no output.')
         return []
-
     try:
         data = json.loads(out)
         kfs_ns = [
@@ -298,46 +284,32 @@ def _probe_keyframes_ns(ref_video_path: str, runner: CommandRunner, tool_paths: 
         runner._log_message(f'[WARN] Could not parse ffprobe keyframe JSON: {e}')
         return []
 
-
 def _snap_chapter_times_inplace(root: ET.Element, keyframes_ns: list[int], config: dict, runner: CommandRunner):
-    """Modifies chapter start/end times in the XML tree to snap to keyframes."""
+    # ... (unchanged)
     mode = config.get('snap_mode', 'previous')
     threshold_ms = config.get('snap_threshold_ms', 250)
     starts_only = config.get('snap_starts_only', True)
     threshold_ns = threshold_ms * 1_000_000
-
-    changed_count = 0
-    moved = 0
-    on_kf = 0
-    too_far = 0
-
+    changed_count, moved, on_kf, too_far = 0, 0, 0, 0
     def pick_candidate(ts_ns: int) -> int:
-        """Find the best keyframe candidate based on mode."""
-        if not keyframes_ns:
-            return ts_ns
-
+        if not keyframes_ns: return ts_ns
         i = bisect.bisect_right(keyframes_ns, ts_ns)
-
         prev_kf = keyframes_ns[i - 1] if i > 0 else keyframes_ns[0]
-
         if mode == 'previous':
             return prev_kf
-        else:  # nearest
+        else:
             next_kf = keyframes_ns[i] if i < len(keyframes_ns) else keyframes_ns[-1]
             return prev_kf if abs(ts_ns - prev_kf) <= abs(ts_ns - next_kf) else next_kf
-
     for atom in root.findall('.//ChapterAtom'):
         tags_to_snap = ['ChapterTimeStart']
         if not starts_only:
             tags_to_snap.append('ChapterTimeEnd')
-
         for tag in tags_to_snap:
             node = atom.find(tag)
             if node is not None and node.text:
                 original_ns = _parse_ns(node.text)
                 candidate_ns = pick_candidate(original_ns)
                 delta_ns = abs(original_ns - candidate_ns)
-
                 if delta_ns == 0:
                     if tag == 'ChapterTimeStart': on_kf +=1
                 elif delta_ns <= threshold_ns:
@@ -346,7 +318,6 @@ def _snap_chapter_times_inplace(root: ET.Element, keyframes_ns: list[int], confi
                     if tag == 'ChapterTimeStart': moved += 1
                 else:
                     if tag == 'ChapterTimeStart': too_far += 1
-
     summary = f'Snap result: moved={moved}, on_kf={on_kf}, too_far={too_far}'
     details = f'(kfs={len(keyframes_ns)}, mode={mode}, thr={threshold_ms}ms, starts_only={starts_only})'
     runner._log_message(f'[Chapters] {summary} {details}')
