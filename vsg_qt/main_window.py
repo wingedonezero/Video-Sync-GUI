@@ -1,11 +1,6 @@
 # vsg_qt/main_window.py
 
 # -*- coding: utf-8 -*-
-
-"""
-The main window of the PyQt application.
-"""
-
 import sys
 import shutil
 from pathlib import Path
@@ -14,7 +9,7 @@ from collections import Counter
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QLineEdit, QLabel, QFileDialog, QGroupBox, QTextEdit, QProgressBar,
-    QMessageBox, QRadioButton
+    QMessageBox, QRadioButton, QCheckBox
 )
 from PySide6.QtCore import Qt, QThreadPool
 
@@ -31,7 +26,6 @@ class MainWindow(QMainWindow):
     """Main application window."""
 
     def __init__(self):
-        # ... (unchanged)
         super().__init__()
         self.setWindowTitle('Video/Audio Sync & Merge - PySide6 Edition')
         self.setGeometry(100, 100, 1000, 600)
@@ -47,33 +41,40 @@ class MainWindow(QMainWindow):
         self.ter_delay_label = QLabel('—')
         self.plan_mode_radio = QRadioButton("Merge Plan")
         self.manual_mode_radio = QRadioButton("Manual Selection")
+        self.auto_apply_check = QCheckBox("Auto-apply this layout to all matching files in batch")
         self.options_btn = QPushButton('Settings…')
         self.setup_ui()
         self.apply_config_to_ui()
 
     def setup_ui(self):
-        # ... (unchanged)
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
+
         top_button_layout = QHBoxLayout()
         self.options_btn.clicked.connect(self.open_options_dialog)
         top_button_layout.addWidget(self.options_btn)
         top_button_layout.addStretch()
         main_layout.addLayout(top_button_layout)
+
         inputs_group = QGroupBox('Input Files (File or Directory)')
         inputs_layout = QVBoxLayout(inputs_group)
         inputs_layout.addLayout(self._create_file_input('Reference:', self.ref_input, self._browse_ref))
         inputs_layout.addLayout(self._create_file_input('Secondary:', self.sec_input, self._browse_sec))
         inputs_layout.addLayout(self._create_file_input('Tertiary:', self.ter_input, self._browse_ter))
         main_layout.addWidget(inputs_group)
+
         merge_mode_group = QGroupBox("Merge Mode")
-        merge_mode_layout = QHBoxLayout(merge_mode_group)
-        merge_mode_layout.addWidget(self.plan_mode_radio)
-        merge_mode_layout.addWidget(self.manual_mode_radio)
-        merge_mode_layout.addStretch()
+        merge_mode_layout = QVBoxLayout(merge_mode_group)
+        radio_layout = QHBoxLayout()
+        radio_layout.addWidget(self.plan_mode_radio)
+        radio_layout.addWidget(self.manual_mode_radio)
+        radio_layout.addStretch()
+        merge_mode_layout.addLayout(radio_layout)
+        merge_mode_layout.addWidget(self.auto_apply_check)
         self.plan_mode_radio.toggled.connect(self._on_merge_mode_changed)
         main_layout.addWidget(merge_mode_group)
+
         actions_group = QGroupBox('Actions')
         actions_layout = QHBoxLayout(actions_group)
         analyze_btn = QPushButton('Analyze Only')
@@ -84,6 +85,8 @@ class MainWindow(QMainWindow):
         actions_layout.addWidget(analyze_merge_btn)
         actions_layout.addStretch()
         main_layout.addWidget(actions_group)
+
+        # ... (rest of setup_ui is unchanged)
         status_layout = QHBoxLayout()
         status_layout.addWidget(QLabel('Status:'))
         status_layout.addWidget(self.status_label, 1)
@@ -108,9 +111,13 @@ class MainWindow(QMainWindow):
         log_layout.addWidget(self.log_output)
         main_layout.addWidget(log_group)
 
+
     def _on_merge_mode_changed(self, checked):
-        # ... (unchanged)
-        if checked:
+        # The new auto-apply checkbox is only visible and relevant for manual mode
+        is_plan_mode = self.plan_mode_radio.isChecked()
+        self.auto_apply_check.setVisible(not is_plan_mode)
+
+        if is_plan_mode:
             self.config.set('merge_mode', 'plan')
             self.options_btn.setEnabled(True)
         else:
@@ -118,61 +125,8 @@ class MainWindow(QMainWindow):
             self.options_btn.setEnabled(False)
         self.config.save()
 
-    def _create_file_input(self, label_text: str, line_edit: QLineEdit, browse_slot):
-        # ... (unchanged)
-        layout = QHBoxLayout()
-        layout.addWidget(QLabel(label_text), 1)
-        layout.addWidget(line_edit, 8)
-        browse_btn = QPushButton('Browse…')
-        browse_btn.clicked.connect(browse_slot)
-        layout.addWidget(browse_btn, 1)
-        return layout
-
-    def _browse_ref(self): self._browse_for_path(self.ref_input, "Select Reference File or Directory")
-    def _browse_sec(self): self._browse_for_path(self.sec_input, "Select Secondary File or Directory")
-    def _browse_ter(self): self._browse_for_path(self.ter_input, "Select Tertiary File or Directory")
-
-    def _browse_for_path(self, line_edit: QLineEdit, caption: str):
-        # ... (unchanged)
-        dialog = QFileDialog(self, caption)
-        dialog.setFileMode(QFileDialog.FileMode.AnyFile)
-        if self.config.get('last_ref_path'):
-            start_dir = str(Path(self.config.get('last_ref_path')).parent)
-            dialog.setDirectory(start_dir)
-        if dialog.exec():
-            line_edit.setText(dialog.selectedFiles()[0])
-
-    def open_options_dialog(self):
-        # ... (unchanged)
-        dialog = OptionsDialog(self.config, self)
-        if dialog.exec():
-            self.config.save()
-            self.append_log('Settings saved.')
-
-    def apply_config_to_ui(self):
-        # ... (unchanged)
-        self.ref_input.setText(self.config.get('last_ref_path', ''))
-        self.sec_input.setText(self.config.get('last_sec_path', ''))
-        self.ter_input.setText(self.config.get('last_ter_path', ''))
-        merge_mode = self.config.get('merge_mode', 'plan')
-        if merge_mode == 'manual':
-            self.manual_mode_radio.setChecked(True)
-            self.options_btn.setEnabled(False)
-        else:
-            self.plan_mode_radio.setChecked(True)
-            self.options_btn.setEnabled(True)
-
-    def save_ui_to_config(self):
-        # ... (unchanged)
-        self.config.set('last_ref_path', self.ref_input.text())
-        self.config.set('last_sec_path', self.sec_input.text())
-        self.config.set('last_ter_path', self.ter_input.text())
-        self.config.save()
-
     def _generate_track_signature(self, track_info):
-        """Creates a stable signature of a file's track layout."""
-        # A signature is a count of each 'SOURCE_type' of track.
-        # e.g., {'REF_video': 1, 'REF_audio': 2, 'SEC_audio': 1}
+        """Creates a stable signature of a file's track layout based on counts."""
         return Counter(
             f"{t['source']}_{t['type']}"
             for source_list in track_info.values() for t in source_list
@@ -200,15 +154,16 @@ class MainWindow(QMainWindow):
             processed_jobs = []
             last_manual_layout = None
             last_track_signature = None
+            auto_apply_enabled = self.auto_apply_check.isChecked()
 
             tool_paths = {t: shutil.which(t) for t in ['mkvmerge']}
             if not tool_paths['mkvmerge']:
-                QMessageBox.critical(self, "Tool Not Found", "mkvmerge not found in your system's PATH.")
+                QMessageBox.critical(self, "Tool Not Found", "mkvmerge not found.")
                 return
 
             runner = CommandRunner(self.config.settings, lambda msg: self.append_log(f'[Pre-Scan] {msg}'))
 
-            for job_data in initial_jobs:
+            for i, job_data in enumerate(initial_jobs):
                 self.status_label.setText(f"Pre-scanning {Path(job_data['ref']).name}...")
                 try:
                     track_info = mkv_utils.get_track_info_for_dialog(
@@ -219,48 +174,61 @@ class MainWindow(QMainWindow):
                     QMessageBox.warning(self, "Pre-scan Failed", f"Could not analyze tracks for {Path(job_data['ref']).name}:\n{e}")
                     return
 
-                layout_to_carry_over = None
                 current_signature = self._generate_track_signature(track_info)
-                if last_track_signature and current_signature == last_track_signature:
-                    layout_to_carry_over = last_manual_layout
+                current_layout = None
 
-                dialog = ManualSelectionDialog(track_info, self, previous_layout=layout_to_carry_over)
+                # --- NEW AUTO-APPLY LOGIC ---
+                # Decide if we can skip the dialog entirely
+                should_auto_apply = (
+                    auto_apply_enabled and
+                    last_manual_layout is not None and
+                    last_track_signature is not None and
+                    current_signature == last_track_signature
+                )
 
-                if dialog.exec():
-                    current_layout = dialog.get_manual_layout()
-                    if not current_layout:
-                         self.append_log(f"Job '{Path(job_data['ref']).name}' was skipped by user.")
-                         last_manual_layout = None # Reset on skip
-                         last_track_signature = None
-                         continue
+                if should_auto_apply:
+                    self.append_log(f"Auto-applying previous layout to {Path(job_data['ref']).name}...")
+                    current_layout = last_manual_layout
+                else:
+                    # Show the dialog if not auto-applying
+                    layout_to_carry_over = None
+                    if last_track_signature and current_signature == last_track_signature:
+                        layout_to_carry_over = last_manual_layout
 
+                    dialog = ManualSelectionDialog(track_info, self, previous_layout=layout_to_carry_over)
+                    if dialog.exec():
+                        current_layout = dialog.get_manual_layout()
+                    else:
+                        self.append_log("Batch run cancelled by user.")
+                        self.status_label.setText("Ready")
+                        return
+
+                if current_layout:
                     job_data['manual_layout'] = current_layout
                     processed_jobs.append(job_data)
                     last_manual_layout = current_layout
                     last_track_signature = current_signature
                 else:
-                    self.append_log("Batch run cancelled by user during manual selection.")
-                    self.status_label.setText("Ready")
-                    return
+                    self.append_log(f"Job '{Path(job_data['ref']).name}' was skipped.")
+                    last_manual_layout = None
+                    last_track_signature = None
 
             final_jobs = processed_jobs
 
+        # ... (rest of function is unchanged)
         if not final_jobs:
             self.status_label.setText("Ready")
             self.append_log("No jobs to run after user selection.")
             return
-
         output_dir = self.config.get('output_folder')
         is_batch = Path(ref_path_str).is_dir() and len(final_jobs) > 1
         if is_batch:
             output_dir = str(Path(output_dir) / Path(ref_path_str).name)
-
         self.log_output.clear()
         self.status_label.setText(f'Starting batch of {len(final_jobs)} jobs…')
         self.progress_bar.setValue(0)
         self.sec_delay_label.setText('—')
         self.ter_delay_label.setText('—')
-
         worker = JobWorker(self.config.settings, final_jobs, and_merge, output_dir)
         worker.signals.log.connect(self.append_log)
         worker.signals.progress.connect(self.update_progress)
@@ -269,22 +237,42 @@ class MainWindow(QMainWindow):
         worker.signals.finished_all.connect(self.batch_finished)
         self.thread_pool.start(worker)
 
+    # ... (the rest of the file is unchanged)
+    def _create_file_input(self, label_text: str, line_edit: QLineEdit, browse_slot):
+        layout = QHBoxLayout()
+        layout.addWidget(QLabel(label_text), 1)
+        layout.addWidget(line_edit, 8)
+        browse_btn = QPushButton('Browse…')
+        browse_btn.clicked.connect(browse_slot)
+        layout.addWidget(browse_btn, 1)
+        return layout
+    def _browse_ref(self): self._browse_for_path(self.ref_input, "Select Reference File or Directory")
+    def _browse_sec(self): self._browse_for_path(self.sec_input, "Select Secondary File or Directory")
+    def _browse_ter(self): self._browse_for_path(self.ter_input, "Select Tertiary File or Directory")
+    def open_options_dialog(self):
+        dialog = OptionsDialog(self.config, self)
+        if dialog.exec():
+            self.config.save()
+            self.append_log('Settings saved.')
+    def apply_config_to_ui(self):
+        self.ref_input.setText(self.config.get('last_ref_path', ''))
+        self.sec_input.setText(self.config.get('last_sec_path', ''))
+        self.ter_input.setText(self.config.get('last_ter_path', ''))
+        self._on_merge_mode_changed(self.plan_mode_radio.isChecked()) # This will set visibility
+    def save_ui_to_config(self):
+        self.config.set('last_ref_path', self.ref_input.text())
+        self.config.set('last_sec_path', self.sec_input.text())
+        self.config.set('last_ter_path', self.ter_input.text())
+        self.config.save()
     def append_log(self, message: str):
-        # ... (unchanged)
         self.log_output.append(message)
         if self.config.get('log_autoscroll', True):
             self.log_output.verticalScrollBar().setValue(self.log_output.verticalScrollBar().maximum())
-
     def update_progress(self, value: float):
-        # ... (unchanged)
         self.progress_bar.setValue(int(value * 100))
-
     def update_status(self, message: str):
-        # ... (unchanged)
         self.status_label.setText(message)
-
     def job_finished(self, result: dict):
-        # ... (unchanged)
         if 'delay_sec' in result:
             self.sec_delay_label.setText(f"{result['delay_sec']} ms" if result['delay_sec'] is not None else "—")
         if 'delay_ter' in result:
@@ -295,14 +283,10 @@ class MainWindow(QMainWindow):
             self.append_log(f"--- Job Summary for {name}: FAILED ---")
         else:
             self.append_log(f"--- Job Summary for {name}: {status} ---")
-
     def batch_finished(self, all_results: list):
-        # ... (unchanged)
         self.update_status(f'All {len(all_results)} jobs finished.')
         self.progress_bar.setValue(100)
         QMessageBox.information(self, "Batch Complete", f"Finished processing {len(all_results)} jobs.")
-
     def closeEvent(self, event):
-        # ... (unchanged)
         self.save_ui_to_config()
         super().closeEvent(event)
