@@ -16,7 +16,6 @@ from typing import List, Dict, Any, Optional
 from .process import CommandRunner
 
 def get_track_info_for_dialog(ref_file: str, sec_file: Optional[str], ter_file: Optional[str], runner: CommandRunner, tool_paths: dict) -> Dict[str, List[Dict]]:
-    # ... (This function is unchanged)
     all_tracks = {'REF': [], 'SEC': [], 'TER': []}
     source_map = {'REF': ref_file, 'SEC': sec_file, 'TER': ter_file}
     for source, filepath in source_map.items():
@@ -36,7 +35,6 @@ def get_track_info_for_dialog(ref_file: str, sec_file: Optional[str], ter_file: 
     return all_tracks
 
 def _pcm_codec_from_bit_depth(bit_depth):
-    # ... (This function is unchanged)
     try:
         bd = int(bit_depth) if bit_depth is not None else 16
     except (TypeError, ValueError):
@@ -47,7 +45,6 @@ def _pcm_codec_from_bit_depth(bit_depth):
     return 'pcm_s16le'
 
 def get_stream_info(mkv_path: str, runner: CommandRunner, tool_paths: dict) -> Optional[Dict[str, Any]]:
-    # ... (This function is unchanged)
     out = runner.run(['mkvmerge', '-J', str(mkv_path)], tool_paths)
     if not out: return None
     try:
@@ -57,11 +54,10 @@ def get_stream_info(mkv_path: str, runner: CommandRunner, tool_paths: dict) -> O
         return None
 
 def _ext_for_codec(ttype: str, codec_id: str) -> str:
-    # ... (This function is unchanged)
     cid = (codec_id or '').upper()
     if ttype == 'video':
         if 'V_MPEGH/ISO/HEVC' in cid: return 'h265'
-        if 'V_MPEG4/ISO/AVC' in cid: return 'h264'
+        if 'V_MPEG4/ISO/AVC' in cid: return 'h24'
         if 'V_MPEG1/2' in cid: return 'mpg'
         if 'V_VP9' in cid: return 'vp9'
         if 'V_AV1' in cid: return 'av1'
@@ -101,14 +97,10 @@ def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: 
         ttype = track['type']
         tid = track['id']
 
-        # --- MODIFIED LOGIC ---
         if specific_tracks is not None:
-            # If a specific list is provided, only extract those tracks
             want = tid in specific_tracks
         else:
-            # Fallback to the original category-based logic
             want = all_tracks or (audio and ttype == 'audio') or (subs and ttype == 'subtitles')
-        # --- END MODIFIED LOGIC ---
 
         if not want:
             continue
@@ -145,23 +137,25 @@ def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: 
             'ffmpeg', '-y', '-v', 'error', '-nostdin', '-i', str(mkv),
             '-map', f"0:a:{job['idx']}", '-vn', '-sn', '-c:a', 'copy', job['out']
         ]
-        try:
-            runner._log_message(f"Attempting stream copy for A_MS/ACM (track {job['tid']}) -> {Path(job['out']).name}")
-            runner.run(copy_cmd, tool_paths)
+        runner._log_message(f"Attempting stream copy for A_MS/ACM (track {job['tid']}) -> {Path(job['out']).name}")
+
+        # --- FIXED LOGIC ---
+        # Check the return value of runner.run() instead of using try/except
+        if runner.run(copy_cmd, tool_paths) is not None:
             runner._log_message(f"Stream copy succeeded for A_MS/ACM (track {job['tid']})")
-        except Exception as e:
-            runner._log_message(f"Stream copy refused for A_MS/ACM (track {job['tid']}): {e}. Falling back to {job['pcm']}.")
+        else:
+            runner._log_message(f"Stream copy refused for A_MS/ACM (track {job['tid']}). Falling back to {job['pcm']}.")
             ffmpeg_pcm_cmd = [
                 'ffmpeg', '-y', '-v', 'error', '-nostdin', '-i', str(mkv),
                 '-map', f"0:a:{job['idx']}", '-vn', '-sn', '-acodec', job['pcm'], job['out']
             ]
             runner.run(ffmpeg_pcm_cmd, tool_paths)
+    # --- END FIXED LOGIC ---
 
     return tracks_to_extract
 
 # --- The rest of the file (extract_attachments and all chapter functions) is unchanged ---
 def extract_attachments(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: dict, role: str) -> List[str]:
-    # ... (unchanged)
     info = get_stream_info(mkv, runner, tool_paths)
     files, specs = [], []
     for attachment in (info or {}).get('attachments', []):
@@ -173,14 +167,12 @@ def extract_attachments(mkv: str, temp_dir: Path, runner: CommandRunner, tool_pa
     return files
 
 def _parse_ns(t: str) -> int:
-    # ... (unchanged)
     hh, mm, rest = t.strip().split(':')
     ss, frac = (rest.split('.') + ['0'])[:2]
     frac = (frac + '000000000')[:9]
     return (int(hh) * 3600 + int(mm) * 60 + int(ss)) * 1_000_000_000 + int(frac)
 
 def _fmt_ns(ns: int) -> str:
-    # ... (unchanged)
     ns = max(0, ns)
     frac = ns % 1_000_000_000
     total_s = ns // 1_000_000_000
@@ -190,7 +182,6 @@ def _fmt_ns(ns: int) -> str:
     return f'{hh:02d}:{mm:02d}:{ss:02d}.{frac:09d}'
 
 def _normalize_chapter_end_times(root: ET.Element, runner: CommandRunner):
-    # ... (unchanged)
     atoms = root.findall('.//ChapterAtom')
     chapters = []
     for atom in atoms:
@@ -218,7 +209,6 @@ def _normalize_chapter_end_times(root: ET.Element, runner: CommandRunner):
         runner._log_message(f'[Chapters] Normalized {fixed_count} chapter end times.')
 
 def process_chapters(ref_mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: dict, config: dict, shift_ms: int) -> Optional[str]:
-    # ... (unchanged)
     xml_content = runner.run(['mkvextract', str(ref_mkv), 'chapters', '-'], tool_paths)
     if not xml_content or not xml_content.strip():
         runner._log_message('No chapters found in reference file.')
@@ -261,7 +251,6 @@ def process_chapters(ref_mkv: str, temp_dir: Path, runner: CommandRunner, tool_p
         return None
 
 def _probe_keyframes_ns(ref_video_path: str, runner: CommandRunner, tool_paths: dict) -> list[int]:
-    # ... (unchanged)
     args = [
         'ffprobe', '-v', 'error', '-select_streams', 'v:0',
         '-show_entries', 'packet=pts_time,flags', '-of', 'json', str(ref_video_path)
@@ -285,7 +274,6 @@ def _probe_keyframes_ns(ref_video_path: str, runner: CommandRunner, tool_paths: 
         return []
 
 def _snap_chapter_times_inplace(root: ET.Element, keyframes_ns: list[int], config: dict, runner: CommandRunner):
-    # ... (unchanged)
     mode = config.get('snap_mode', 'previous')
     threshold_ms = config.get('snap_threshold_ms', 250)
     starts_only = config.get('snap_starts_only', True)
