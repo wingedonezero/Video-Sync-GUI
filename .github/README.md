@@ -1,364 +1,595 @@
-# Video Sync GUI — v1.0
+# Video/Audio Sync & Merge — PySide6 Edition
 
-A purpose-built GUI for **lossless** audio/subtitle alignment and MKV remuxing with a focus on correctness, repeatability, and readable logs. It wraps a proven CLI pipeline into a DearPyGui app and codifies the rules we’ve refined: **accurate delay detection, positive-only (lossless) delay application, clean chapter handling, predictable track ordering & defaults, and safe mkvmerge option assembly**.
+A focused desktop tool to **analyze A/V timing** and perform a **lossless MKV remux** with predictable, auditable behavior.  
+The app discovers delays, applies a **positive‑only global shift** (so no content gets trimmed), handles chapters and subtitles, and writes a mkvmerge options file you can inspect and replay.
 
-This README is intentionally exhaustive so another engineer (or another chat) can understand the whole system end-to-end.
+> **Scope of this README**  
+> This document describes the *baseline* application — the exact code you shared (before any experimental “expert/advanced repair” features). It is intentionally exhaustive so a new contributor can understand end‑to‑end behavior and implementation details.
 
 ---
 
-## Table of contents
-- [Philosophy & goals](#philosophy--goals)
-- [Key features](#key-features)
-- [Workflows](#workflows)
-- [Delay discovery](#delay-discovery)
-  - [Audio cross-correlation](#audio-crosscorrelation)
+## Table of Contents
+
+- [Key Ideas](#key-ideas)
+- [Architecture](#architecture)
+- [Job Lifecycle](#job-lifecycle)
+- [Delay Discovery Engines](#delay-discovery-engines)
+  - [Audio Cross‑Correlation (deep dive)](#audio-cross-correlation-deep-dive)
   - [VideoDiff](#videodiff)
-  - [Rounding & units](#rounding--units)
-  - [Lossless “positive-only” delay scheme](#lossless-positiveonly-delay-scheme)
+- [Positive‑Only Timing Model](#positive-only-timing-model)
+- [Merge Planning](#merge-planning)
+  - [Profile‑Driven (Merge Plan)](#profile-driven-merge-plan)
+  - [Manual Selection](#manual-selection)
+- [Subtitles](#subtitles)
 - [Chapters](#chapters)
-  - [Renaming](#renaming)
-  - [Time shifting](#time-shifting)
-  - [Snap to keyframes (optional)](#snap-to-keyframes-optional)
-- [Tracks: ordering, language, defaults, compression](#tracks-ordering-language-defaults-compression)
-- [Attachments (fonts)](#attachments-fonts)
-- [mkvmerge options file format](#mkvmerge-options-file-format)
-- [Temporary/output layout & naming](#temporaryoutput-layout--naming)
-- [Logging & settings](#logging--settings)
-- [GUI layout & controls](#gui-layout--controls)
-- [Configuration file reference](#configuration-file-reference)
+- [Attachments](#attachments)
+- [mkvmerge Options File](#mkvmerge-options-file)
+- [Temporary Files, Outputs, Logs](#temporary-files-outputs-logs)
+- [GUI Overview](#gui-overview)
+- [Configuration Reference](#configuration-reference)
 - [Dependencies](#dependencies)
-- [Known limitations / notes](#known-limitations--notes)
-- [Versioning](#versioning)
+- [Run It](#run-it)
+- [Troubleshooting](#troubleshooting)
+- [Developer Notes](#developer-notes)
+- [Design Invariants & Edge Cases](#design-invariants--edge-cases)
+- [Performance Notes](#performance-notes)
+- [Known Limitations](#known-limitations)
+- [Appendix A: Log Line Guide](#appendix-a-log-line-guide)
+- [Appendix B: Demux Extension Map](#appendix-b-demux-extension-map)
+- [Appendix C: Configuration Keys (Table)](#appendix-c-configuration-keys-table)
 
 ---
 
-## Philosophy & goals
-- **Bit-exact where possible.** No re-encoding; use mkvextract/mkvmerge to demux/remux.  
-- **Lossless sync.** Never “cut off” early audio via negative delays; always shift with **positive** delays by moving the global start forward.  
-- **Deterministic assembly.** mkvmerge command is written to a JSON option file and logged, with stable ordering and rule-driven defaults.  
-- **Readable logs.** Compact by default; rich enough for debugging when needed.  
-- **Debuggable temp tree.** Every stage writes to a per-job folder with predictable names.
+## Key Ideas
+
+- **Lossless by design:** the pipeline never applies negative per‑track delays that could discard leading content. We transform all timings into a **non‑negative** scheme via a global shift.
+- **Deterministic & auditable:** we construct the mkvmerge command as a token array and persist it (`opts.json`). You can read, diff, and replay it.
+- **Separation of concerns:** analysis, planning, extraction, subtitles, chapters, and merging are isolated but connected through explicit data structures.
+- **Language‑aware analysis (optional):** reference/target audio stream selection can prefer a specific language tag (e.g., `jpn`, `eng`) to improve correlation robustness.
 
 ---
 
-## Key features
-- **Two analysis engines**:
-  - **Audio cross-correlation** with tunable chunking & minimum match threshold.
-  - **VideoDiff** (external tool) for video-based offset + confidence (error) reporting.
-- **Lossless delay application**:
-  - Converts raw offsets (which may be negative) into a **positive-only** scheme by shifting the global start so the earliest track becomes 0 ms.
-  - Applies the proper per-track residuals to **all** media streams and **chapters**.
-- **Chapter handling**:
-  - Optional **rename** to `Chapter 01`, `Chapter 02`, … (no language prefix).
-  - **Time-shift** chapters by the computed global shift.
-  - **Optional “snap to keyframes”**: starts-only or starts+ends with tolerance.
-- **Track ordering & defaults** (sane playback behavior):
-  - Audio defaults only on **first audio in final order** (or per user rule).
-  - Subtitles: optional “**make first sub in final order default**”, and special handling for a **“Signs / Songs”** track (can be marked default by rule).
-  - Language tags are preserved / propagated; names standardized.
-- **Compression & dialog normalization**:
-  - `--compression 0:none` applied to **all tracks** except attachments.
-  - Optional **`--remove-dialog-normalization-gain`** for supported audio types.
-- **Attachments**: fonts collected and attached; attachments **never** get compression flags.
-- **mkvmerge option files**:
-  - **JSON array of tokens** (argv) built programmatically (the format mkvmerge actually accepts for `@file.json`).
-  - A “pretty” companion text is emitted for human review.
-- **Storage control**:
-  - **Temp root** folder selector with default under the script directory.
-  - Output folder selector; persistent across sessions.
-- **Compact logs + autoscroll**:
-  - One command line per tool + throttled progress; short error tails.
-  - Log window auto-scrolls to bottom while jobs run.
-- **Per-job artifact logging**:
-  - Logs include the **final merge order**, selected delays, chapter adjustments, and the **exact option file** used by mkvmerge.
+## Architecture
+
+```
+repo-root/
+├─ main.py                      # App entry point
+├─ vsg_core/                    # Headless engine
+│  ├─ analysis.py               # Delay discovery (Audio XCorr, VideoDiff)
+│  ├─ config.py                 # Settings load/save, defaults, dir creation
+│  ├─ job_discovery.py          # Single-file & folder batch discovery
+│  ├─ mkv_utils.py              # mkvmerge/mkvextract helpers, demux, chapters
+│  ├─ pipeline.py               # Orchestration of a full job
+│  ├─ process.py                # Command runner with compact logging
+│  └─ subtitle_utils.py         # SRT→ASS, rescale, font-size multiply
+└─ vsg_qt/                      # PySide6 GUI
+   ├─ main_window.py            # Main window, file pickers, log, actions
+   ├─ worker.py                 # Threaded job runner (no UI freeze)
+   ├─ manual_selection_dialog.py# Drag/drop track picker + flags
+   ├─ options_dialog.py         # Settings tabs & Merge Profile editor
+   └─ track_widget.py           # Per-track widget with toggles
+```
+
+**Key modules**
+
+- `vsg_core.process.CommandRunner` — canonical way to run external processes with uniform logging, progress throttling, error tails.
+- `vsg_core.analysis` — two delay engines:
+  - **Audio cross‑correlation** (librosa + scipy) with chunked extraction via ffmpeg.
+  - **VideoDiff** integration (external tool), with error bounds.
+- `vsg_core.pipeline.JobPipeline` — the orchestrator. Calls analysis, converts delays into positive‑only residuals, builds extraction + mkvmerge plans, executes merge, writes artifacts.
+- `vsg_core.mkv_utils` — inspects MKVs (`mkvmerge -J`), extracts tracks (`mkvextract` + ffmpeg for special cases), processes chapters (XML), and attaches files.
+- `vsg_core.subtitle_utils` — SRT→ASS conversion, ASS PlayRes rescale, font size multiplication (style‑aware, line‑by‑line safe).
 
 ---
 
-## Workflows
-1. **Analyze only**
-   - Demux what’s needed for analysis.
-   - Run either **Audio XCorr** or **VideoDiff** once.
-   - Report offset (ms) and analysis confidence (for VideoDiff: lower error is better; > 100 = reject).
+## Job Lifecycle
 
-2. **Analyze & Merge**
-   - Analyze as above.
-   - Compute **positive-only delay plan**.
-   - Optionally **shift/rename/snap** chapters.
-   - Build mkvmerge **JSON option file** (tokens) respecting all rules.
-   - Merge to final MKV with attachments.
+Processing one *Reference* file with optional *Secondary* and *Tertiary* files:
 
-> **Tip:** VideoDiff runs **exactly once**; Audio XCorr may work in chunks internally but reports a single best-fit offset. If VideoDiff error > configured max, the job **fails early**.
+1. **Analysis**
+   - For each Secondary/Tertiary, compute delay vs Reference using selected engine.
+   - Log per‑chunk results and final “determined” delay.
+
+2. **Merge Planning**
+   - Convert raw delays to a **positive‑only** scheme (see below).
+   - Build a track plan:
+     - **Merge Plan mode** uses the JSON‑like rule set in settings.
+     - **Manual Selection** mode uses the user’s drag/drop layout.
+
+3. **Extraction**
+   - Demux only those tracks that appear in the final plan. Special handling for `A_MS/ACM` (attempt copy, else decode to PCM with correct bit depth).
+
+4. **Subtitles (optional per track)**
+   - Convert SRT→ASS, rescale PlayRes to match video, multiply text size.
+
+5. **Chapters**
+   - Optional rename to “Chapter NN”.
+   - Shift all `ChapterTimeStart/End` by the **global shift**.
+   - Optional **snap** starts (and optionally ends) to keyframes within a threshold.
+
+6. **Merge Execution**
+   - Create `opts.json` (mkvmerge token array) and (optionally) a pretty dump.
+   - Run mkvmerge with `@opts.json`.
+
+7. **Cleanup**
+   - On success (or on analyze‑only), remove the temp job directory.
+   - Logs are written next to the output MKV (or in the chosen output folder).
 
 ---
 
-## Delay discovery
+## Delay Discovery Engines
 
-### Audio cross-correlation
-- Compares audio waveforms from Reference vs. Secondary/Tertiary sources to estimate offset.
-- **Settings**:
-  - **Chunk size** (sec): analysis stride (bigger = fewer comparisons, smaller = more robust but slower).
-  - **Minimum match %**: reject if lower (prevents merging dubious results).
-- Produces a raw offset in seconds (can be negative if secondary starts “earlier”).
+### Audio Cross‑Correlation (deep dive)
+
+**Objective:** Estimate relative delay (ms) between the Reference audio stream and a target (Secondary/Tertiary) stream.
+
+Even when languages differ, many mixes share music/SFX transients. By correlating short segments that avoid long silences, we locate a robust lag.
+
+#### Stream selection (language‑aware)
+
+- Inspect `mkvmerge -J` JSON and enumerate `tracks` of type `audio`.
+- If the user provided a language code (e.g., `analysis_lang_sec="jpn"`), pick the **first audio** whose `properties.language` matches.
+- Otherwise, use the **first** audio track.
+- Indexes map to `ffmpeg -map 0:a:<index>` for extraction.
+
+> For best robustness, prefer **like‑for‑like** (e.g., JPN vs JPN) when available.
+
+#### Window extraction
+
+For each scan point `tᵢ`, extract **mono, 48 kHz** WAV windows from both files:
+
+```bash
+ffmpeg -y -v error -ss <tᵢ> -i <file> -map 0:a:<idx> -t <dur> -vn \
+       -acodec pcm_s16le -ar 48000 -ac 1 <out.wav>
+```
+
+- Default duration `dur` = **15s** (configurable).
+- Conservative logging: the exact command line is mirrored to the GUI log.
+
+#### Scan schedule
+
+- Determine program duration `D` from `ffprobe` (format duration).
+- Defaults:
+  - `scan_chunk_count = 10`
+  - `scan_chunk_duration = 15`
+  - We analyze a band `[0.10*D, 0.90*D)` and distribute windows evenly (skip early logos and late credits to avoid silence).
+
+This balances robustness with I/O/runtime.
+
+#### DSP steps
+
+We load WAVs (mono) with librosa, preserving native rate (48 kHz). Then normalize to z‑scores to remove gain bias:
+
+```python
+x = (x - mean(x)) / (std(x) + 1e-9)
+y = (y - mean(y)) / (std(y) + 1e-9)
+```
+
+Compute **full discrete cross‑correlation** (scipy), then find the peak lag:
+
+```python
+c = correlate(x, y, mode='full', method='auto')
+k* = argmax(c) - (len(y) - 1)     # lag in samples (y vs x)
+τ  = k* / fs                       # seconds
+delay_ms = round(1000 * τ)
+```
+
+We also compute a **match/confidence** heuristic:
+
+```python
+norm = sqrt( sum(x^2) * sum(y^2) )
+match_pct = 100 * (max(|c|) / (norm + 1e-9))
+```
+
+This is a normalized peak height — higher is “sharper” alignment. It is not a probability.
+
+##### Pre‑whitening / DC removal
+
+The z‑score step behaves like a simple pre‑whitening/normalization, reducing the impact of level shifts and DC offsets so that edge energy (transients) drives the peak.
+
+##### Windowing considerations
+
+- 15s windows capture multiple transients; longer windows (20–30s) increase robustness at the cost of time.  
+- If matches are weak, increase duration or adjust language selection.
+
+#### Aggregating results across windows
+
+1. Drop windows with `match_pct <= min_match_pct` (default **5.0**).  
+2. Compute the **mode** (most frequent) delay among remaining windows.  
+3. From the modal group, pick the window with **max match %**. That tuple `(delay_ms, match%)` is the **determined** delay.
+
+This favors **consistency** over any single window’s outlier result.
+
+#### Practical tuning
+
+| Symptom | What to try |
+|---|---|
+| Low match% overall | Increase `scan_chunk_duration` to 20–30s; ensure language selection compares similar mixes (e.g., JPN vs JPN). |
+| Two clusters of delays | Baseline uses one global delay; confirm with **Analyze Only** and consider whether underlying media truly has a splice (outside baseline scope). |
+| Slow analysis | Reduce `scan_chunk_count`; shrink scan band if needed. |
+
+---
 
 ### VideoDiff
-- External tool that compares video frames and prints a final line with **`itsoffset:`** or **`ss:`** in seconds (e.g., `ss: 1.08527`).
-- We parse the **last result line** when the program completes.
-- **Confidence/error**: lower is better; **> 100** is rejected.
-- In logs we record both the raw value and the parsed ms.
 
-### Rounding & units
-- Internally we work ms-accurate.  
-- **Audio XCorr**: round to the nearest ms (traditional rounding; if the 4th decimal ≥ 5, round up).  
-- **VideoDiff**: same rounding of its seconds value to ms.
-- mkvmerge accepts sub-ms in some contexts, but our pipeline standardizes on ms for consistency across tools and logs.
+If `analysis_mode="VideoDiff"`:
 
-### Lossless “positive-only” delay scheme
-Negative mkvmerge delays **crop** streams (lossy). We **never** do that.
+- Execute external `videodiff` with `(ref, target)` and parse the last `[Result]` line.
+- Extract either `ss:` or `itsoffset:` seconds and `error:` value.
+- If kind is `ss`, invert sign for our delay semantics.
+- Enforce that `error ∈ [videodiff_error_min, videodiff_error_max]`; otherwise reject result.
 
-**Rule**: Identify the most negative offset, call it `N` (e.g., `-1085 ms`).  
-- Add `+|N|` to **all** tracks (global shift).  
-- Then apply **per-track** residuals so the earliest track lands at `0 ms`.
+Use this when audio mixes are too divergent for correlation (e.g., commentary tracks).
 
-Example:
-- Video (reference): `0 ms` raw → becomes `+1085 ms`.
-- Audio A (secondary): `-1085 ms` → becomes `0 ms`.
-- Audio B (tertiary): `-1001 ms` → becomes `+84 ms`.
+---
 
-Chapters are shifted by the **global** `+|N|` so they stay aligned to the reference content.
+## Positive‑Only Timing Model
+
+**Problem:** `mkvmerge --sync` with negative values can drop leading content.
+
+**Solution:** Convert raw delays to **non‑negative residuals** by applying a global shift equal to the absolute most negative delay.
+
+Let raw delays (ms) be:
+```
+ref = 0
+sec = -1001
+ter = -1000
+```
+
+1. **Global shift**: `global_shift = -min(ref, sec, ter) = 1001`
+2. **Residuals**:
+   - `ref_resid = ref + global_shift = 1001`
+   - `sec_resid = sec + global_shift = 0`
+   - `ter_resid = ter + global_shift = 1`
+3. **Merge sync flags** (per input group): `--sync 0:<residual_ms>`
+4. **Chapters**: shift all timestamps by `+global_shift` so chapters align with delayed streams.
+
+This guarantees that **no input** is asked to start before t=0 in mkvmerge, eliminating trimming.
+
+---
+
+## Merge Planning
+
+After delays are converted, the planner builds a final list of **(track, flags)** entries and a `--track-order` to match GUI order.
+
+### Profile‑Driven (Merge Plan)
+
+A prioritized list of rules (Settings → Merge Plan) defines what to include. Each rule:
+
+- `source`: `REF` | `SEC` | `TER`
+- `type`: `Video` | `Audio` | `Subtitles`
+- `lang`: CSV or `any` (match against `properties.language`)
+- `exclude_langs`: CSV (omit these even if `lang=any`)
+- `enabled`: bool
+- `is_default`: bool (first match of this type becomes the default track)
+- `is_forced_display`: bool (subs)
+- `swap_first_two`: bool (subs; swap first two matches)
+- `apply_track_name`: bool (pass the input’s `track_name` to output)
+- `rescale`: bool (ASS/SSA only; rewrite PlayRes to video)
+
+**Global codec exclusions** (`exclude_codecs`) filter *all* matches whose codec id contains any excluded token (e.g., `ac3`, `dts`, `pcm`).
+
+**Default logic**
+
+- The **first video** is implicitly default.  
+- Exactly one **audio** and one **subtitles** track can be marked default via flags.
+
+**Per‑track mkvmerge arguments** (generated in order):
+
+```
+--language 0:<lang>
+--track-name 0:<name>                 # if apply_track_name and input had a name
+--sync 0:<global_shift + role_residual>
+--default-track-flag 0:<yes/no>
+--forced-display-flag 0:yes           # if is_forced_display
+--compression 0:none
+--remove-dialog-normalization-gain 0  # if enabled and codec is AC3/E-AC3
+( <extracted-file-path> )
+```
+
+Finally we add attachments (if any) and `--track-order <inputIdx0>:0,<inputIdx1>:0,...`.
+
+### Manual Selection
+
+Instead of rules, the user drags tracks into **Final Output**:
+
+- Reorder entries to match desired output.
+- Per‑entry toggles: Default (A/V/S), Forced (subs), Keep Name, Convert to ASS (SRT), Rescale (ASS/SSA), Size Multiplier (subs).
+
+**Batch auto‑apply:** If enabled, and the **shape signature** (counts of [source × type]) of the next file matches the previous, automatically carry over the layout.
+
+All subsequent stages (extraction, chapters, merge) are identical to the rule‑based plan.
+
+---
+
+## Subtitles
+
+- **SRT → ASS** (optional): via ffmpeg; if output exists, we replace the path.  
+- **Rescale PlayRes** (ASS/SSA only): probe reference video width/height via ffprobe and rewrite `PlayResX/PlayResY` if they differ.  
+- **Font size multiplier** (ASS/SSA only): parse `Style:` lines and multiply the font size value, keeping other fields intact. Safe parsing avoids corrupting the file.
 
 ---
 
 ## Chapters
 
-### Renaming
-If enabled, final chapter names are normalized to **`Chapter 01`**, `Chapter 02`, … (no `en:` prefix).
+- **Rename** (optional): clear `ChapterDisplay` and write “Chapter NN”.  
+- **Shift timestamps**: add `global_shift` (ms → ns) to both `ChapterTimeStart` and `ChapterTimeEnd`.  
+- **Snap to keyframes** (optional): probe keyframes via ffprobe and, for starts (and optionally ends), move within `snap_threshold_ms` according to mode (`previous` or `nearest`).  
+- **Normalize ends**: ensure each chapter has a valid end; cap ends to next chapter’s start; guarantee strictly increasing intervals.
 
-### Time shifting
-Chapters are shifted by the global positive shift so that:
-- The **reference video**’s timeline 0 moves to the **new** global start.
-- Chapter **content** remains aligned to the same visuals.
-
-### Snap to keyframes (optional)
-- Goal: improve seek UX by aligning chapter boundaries to nearby I-frames.
-- Modes:
-  - **Starts only**
-  - **Starts & Ends**
-- **Tolerance**: configurable (e.g., ±250 ms).  
-  - If a chapter boundary is **within tolerance** of a keyframe, we snap it.
-  - If already within tolerance, we leave it as is.
-  - If **no nearby keyframe** (or out of tolerance), we **don’t move** it and log “too_far”.
-- **Log summary** (compact):
-  ```
-  [Chapters] Snap result: moved=X, on_kf=Y, too_far=Z (kfs=..., mode=..., thr=...ms)
-  ```
-- Full per-chapter spam is disabled by default (can be re-enabled for debugging).
-
-> Note: This is optional because some releases prefer untouched chapter times exactly from source.
+All chapter edits are written to a temporary XML file and passed to mkvmerge via `--chapters`.
 
 ---
 
-## Tracks: ordering, language, defaults, compression
-- **Ordering**
-  - We keep deterministic group order: **Reference** → **Secondary** → **Tertiary**.
-  - Within groups, order is the demuxed stream order unless user swap options are enabled.
-  - **English audio first** in final order when present.
+## Attachments
 
-- **Language tags**
-  - Carried through from source when available; can be supplemented by heuristics (e.g., “jpn” matching on secondary/tertiary by filename hints).
-  - The GUI shows and propagates the language for video, audio, and subtitles.
-
-- **Default track flags**
-  - **Audio**: only the **first audio** in final order gets `--default-track-flag yes` (unless user toggles a different rule).
-  - **Subtitles**:
-    - Optional: “**first sub in final order default**”.
-    - **“Signs / Songs”** track: if detected, can be made default per rule (so signs are on by default).
-    - If there’s **no English audio**, we mark the **first subtitle** default to aid accessibility.
-
-- **Compression**
-  - `--compression 0:none` on **every track** (video/audio/subs) **except attachments**.
-  - Attachments don’t support/need compression flags.
-
-- **Dialog normalization (optional)**
-  - If enabled, `--remove-dialog-normalization-gain` is applied to supported audio tracks **via the option file** (off by default).
+If the Tertiary file contains attachments (fonts, images), we extract and `--attach-file` them to the output. These are input‑agnostic artifacts and do not interact with sync timing.
 
 ---
 
-## Attachments (fonts)
-- All font attachments from sources are collected and re-attached.
-- Filenames are preserved; non-ASCII safe paths handled.
-- **No** compression flags are applied to attachments.
+## mkvmerge Options File
 
----
+We emit tokens as JSON (`opts.json`) and run:
 
-## mkvmerge options file format
-We write a **JSON option file** that mkvmerge accepts via `@/path/to/opts.json`.  
-**Format**: a **JSON array of command-line tokens** (exact argv), not a structured object.
-
-Example (abridged “pretty” view we log):
 ```
---output /path/out.mkv
---chapters /path/chapters_mod.xml
-( /path/ref_video.avc ) --language 0:eng --default-track-flag 0:no --compression 0:none
-( /path/sec_audio.truehd ) --language 0:eng --sync 0:84 --default-track-flag 0:yes --compression 0:none
-( /path/ter_subs.ass ) --language 0:eng --track-name 0:Signs / Songs --default-track-flag 0:no --compression 0:none
---attach-file /path/font0.ttf
---attach-file /path/font1.ttf
+mkvmerge @<opts.json>
 ```
 
-We produce two files per job:
-- `opts.json` — the actual **token array** consumed by mkvmerge.
-- `opts.pretty.txt` — line-wrapped human summary (what you’ll see in logs if you enable the dump flags).
+Optionally we also write a pretty text dump (`opts.pretty.txt`) for human inspection:
 
-This solves:
-- Over-long shell commands,
-- Quoting/escaping issues,
-- The “flag looked like a file” failure mode (we validated tokenization thoroughly).
-
----
-
-## Temporary/output layout & naming
-Per job we create:  
-`<temp_root>/job_<N>_<epoch>/`
-- `ref_track_...` / `sec_track_...` / `ter_track_...` — demuxed streams (extensions match codecs; no symlinks).
-- `*_chapters.xml`, `*_chapters_mod.xml` — raw/shifted/snap-processed chapters.
-- `att_*.ttf` — attachments written with stable numbering.
-- `opts.json`, `opts.pretty.txt` — mkvmerge options.
-- Any analysis intermediates (e.g., extracted WAV for XCorr) live here.
-
-Outputs:
-- Final MKV: `<output_folder>/<index>.mkv`
-- Job log: `<output_folder>/<index>.log`
-
----
-
-## Logging & settings
-**Compact by default**:
-- Log only `$ command`, throttled `Progress: N%`, and small tails on error.
-- Chapter snap prints a single summary line.
-- Option dumps are **off** unless explicitly enabled.
-
-**Autoscroll**: Log window follows new lines when enabled.
-
-### Controlling verbosity (in `settings_gui.json`)
-```json
-{
-  "log_compact": true,
-  "log_progress_step": 100,
-  "log_tail_lines": 0,
-  "log_error_tail": 20,
-  "log_show_options_pretty": false,
-  "log_show_options_json": false,
-  "log_autoscroll": true
-}
+```
+--output "<out.mkv>" \
+  --chapters "<chapters.xml>" \
+  --language 0:jpn --sync 0:1001 --default-track-flag 0:yes --compression 0:none ( "<ref_video.h264>" ) \
+  ...
 ```
 
-> The app **merges** `settings_gui.json` with in-code defaults at startup and rewrites the file if keys are missing. The **Load Settings** button re-applies the file to the UI safely.
+This makes the merge **reproducible** and easy to debug.
 
 ---
 
-## GUI layout & controls
+## Temporary Files, Outputs, Logs
 
-### Inputs
-- **Reference**, **Secondary**, **Tertiary** file pickers (video containers).
-- Read-only inferred details (languages, streams) are shown when available.
+Each job creates a unique temp dir: `temp_root/job_<ref-stem>_<epoch>/` with:
 
-### Menus
-- **Storage**
-  - **Temp root** (default: `{script_dir}/temp_work/`), auto-created if unset.
-  - **Output folder** (persistent).
-- **Analysis Settings**
-  - **Mode**: Audio XCorr / VideoDiff.
-  - **XCorr**:
-    - Chunk (sec)
-    - Minimum match (%)
-  - **VideoDiff**:
-    - Path to binary
-    - Max error (reject if > threshold)
-- **Global**
-  - **Rename chapters** to `Chapter NN`.
-  - **Snap chapters** (Off / Starts / Starts+Ends) + tolerance (ms).
-  - **First sub default** (toggle).
-  - **Signs / Songs default** (toggle).
-  - **Remove dialog normalization gain** (toggle).
-  - **Swap subtitle order** / language match hints (e.g., `jpn` on secondary/tertiary).
-  - **Logging options** (checkboxes for autoscroll/compact, optional dumps).
+- `ref_track_*`, `sec_track_*`, `ter_track_*`: demuxed streams
+- `_chapters_modified.xml`: edited chapters
+- `opts.json` (+ optional `opts.pretty.txt`): mkvmerge args
+- `wav_*`: short analysis windows for audio correlation
+- `att_*`: attachments from TER if present
 
-### Action buttons
-- **Analyze** — run the chosen analysis only.
-- **Analyze & Merge** — full pipeline with positive-only delay plan.
+**Output:** `<output_folder>/<ReferenceFileName>.mkv` (same filename as Reference)  
+**Run log:** `<output_folder>/<ReferenceFileName>.log`
+
+Compact logging shows *throttled* progress and prints the tail of stderr on error for signal‑to‑noise.
 
 ---
 
-## Configuration file reference
-Located next to the script: `settings_gui.json` (auto-created/updated).
+## GUI Overview
 
-Common keys (non-exhaustive):
-```json
-{
-  "temp_root": "/path/to/temp_work",
-  "output_folder": "/path/to/Output",
-  "workflow": "analyze_only | analyze_merge",
-  "analysis_mode": "xcorr | videodiff",
+- **Inputs**: Reference, Secondary, Tertiary (files or directories).
+- **Modes**:
+  - **Merge Plan** (profile rules)
+  - **Manual Selection** (drag/drop final list; optional auto‑apply across batch)
+- **Actions**:
+  - **Analyze Only** → Compute and display delays (no merge).
+  - **Analyze & Merge** → Full pipeline.
+- **Settings Tabs**:
+  - Storage: output folder, temp root, optional VideoDiff path
+  - Analysis: engine choice, chunk count/duration, min match %, VideoDiff error bounds, language prefs (REF/SEC/TER)
+  - Chapters: rename, snap mode/threshold, starts‑only toggle
+  - Merge Behavior: remove dialog normalization gain, codec blacklist, disable track statistics tags
+  - Logging: compact mode, autoscroll, progress step %, error tail lines, pretty/json options dump
+  - Merge Plan: rule editor with priority ordering
 
-  "xcorr_chunk_sec": 8,
-  "xcorr_min_match_pct": 75,
+---
 
-  "videodiff_path": "/usr/local/bin/videodiff",
-  "videodiff_max_error": 50,
+## Configuration Reference
 
-  "rename_chapters": true,
-  "snap_chapters": true,
-  "snap_mode": "starts|both",
-  "snap_tolerance_ms": 250,
+Settings are persisted to `settings.json`. Missing keys are auto‑added with defaults.
 
-  "first_sub_default": true,
-  "signs_sub_default": true,
+- **Storage & Tools**
+  - `output_folder` (str) — default `sync_output/` under repo root
+  - `temp_root` (str) — default `temp_work/` under repo root
+  - `videodiff_path` (str) — blank uses PATH
 
-  "apply_dialog_norm_gain": false,
+- **Analysis**
+  - `analysis_mode` (str) — `"Audio Correlation"` | `"VideoDiff"`
+  - `scan_chunk_count` (int) — default **10**
+  - `scan_chunk_duration` (int, seconds) — default **15**
+  - `min_match_pct` (float) — default **5.0**
+  - `analysis_lang_ref` / `analysis_lang_sec` / `analysis_lang_ter` (str, optional ISO like `jpn`, `eng`)
+  - `videodiff_error_min` / `videodiff_error_max` (float) — bounds for VideoDiff acceptance
 
-  "log_compact": true,
-  "log_progress_step": 100,
-  "log_tail_lines": 0,
-  "log_error_tail": 20,
-  "log_show_options_pretty": false,
-  "log_show_options_json": false,
-  "log_autoscroll": true
-}
-```
+- **Workflow**
+  - `merge_mode` (str) — `"plan"` | `"manual"`
 
-> Any missing keys are filled from defaults at app start and written back.
+- **Chapters**
+  - `rename_chapters` (bool)
+  - `snap_chapters` (bool)
+  - `snap_mode` (str) — `"previous"` | `"nearest"`
+  - `snap_threshold_ms` (int) — default **250**
+  - `snap_starts_only` (bool) — only snap chapter starts
+
+- **Merge Behavior**
+  - `apply_dialog_norm_gain` (bool) — remove dialnorm for AC3/E‑AC3
+  - `exclude_codecs` (str) — comma list (e.g., `"ac3, dts, pcm"`)
+  - `disable_track_statistics_tags` (bool)
+  - `merge_profile` (list[rule]) — see Merge Plan
+
+- **Logging**
+  - `log_compact` (bool) — compact stdout
+  - `log_autoscroll` (bool) — GUI behavior
+  - `log_progress_step` (int %) — progress throttling (e.g., 20 → 0/20/40/60/80/100)
+  - `log_error_tail` (int lines) — tail lines printed on error
+  - `log_tail_lines` (int lines) — tail lines printed on success
+  - `log_show_options_pretty` / `log_show_options_json` (bool)
+
+- **Archival**
+  - `archive_logs` (bool) — after batch, zip per‑file logs and delete the originals
 
 ---
 
 ## Dependencies
-- **Python 3.9+** (user tested on 3.13)
-- **DearPyGui 2.1.0**
-- **MKVToolNix** (`mkvmerge`, `mkvextract`)
-- **FFmpeg/ffprobe** (for keyframe & analysis helpers)
-- **VideoDiff** (external) if using that analysis mode
 
-Make sure the binaries are in `PATH` or set explicit paths in settings where applicable.
+- **Python 3.9+**
+- **MKVToolNix**: `mkvmerge`, `mkvextract`
+- **FFmpeg**: `ffmpeg`, `ffprobe`
+- **VideoDiff** (optional): if using that mode
+- Python packages: `PySide6`, `librosa`, `numpy`, `scipy`
 
----
-
-## Known limitations / notes
-- **MediaInfo “frame rate” on audio**: It’s container framing math (e.g., 1600/1920 samples per frame), **not** a change to the audio sample rate or bitstream. Our pipeline demuxes and remuxes **bit-for-bit**.
-- **MediaInfo duplicate “Delay” lines**: different granularities/aliases of the same timing; the authoritative values are the ones we compute & feed into mkvmerge.
-- **Precision**: We standardize offsets to **ms**. mkvmerge can accept higher precision in some contexts, but cross-tool consistency & determinism are the priority.
-- **Chapter snapping**: optional; if most points are already near keyframes, moving only a few is expected. We log **moved / on_kf / too_far** counts.
+Ensure binaries are on `PATH` (or set explicit paths in Settings).
 
 ---
 
-## Versioning
-- Starting point: **v1.0** (this baseline).
-- We’ll bump by **+0.01 per change** (1.01, 1.02, …).
-- Keep `CHANGELOG.md` updated alongside code.
+## Run It
+
+```bash
+python main.py
+```
+
+1. Select Reference (and optional Secondary/Tertiary). Files or matching folders.
+2. Choose **Analyze Only** to validate delays, or **Analyze & Merge** to produce the final MKV.
+3. Watch the log for:
+   - Per‑chunk XCorr lines and final delays
+   - Positive‑only **global shift**
+   - Chapter processing summary
+   - mkvmerge options file path
+   - Success path for the output file
 
 ---
 
-### Why we do things this way (design notes)
+## Troubleshooting
 
-- **Positive-only delays**: Negative delays **truncate** early samples. By shifting the global start forward so the earliest stream is at 0 ms, we keep **all data** and maintain perfect sync by adding silence where needed.
-- **JSON token option files**: Long, complex merges are brittle on shell lines (quoting, spaces, UTF-8). The JSON argv format is **exactly** what mkvmerge consumes internally and avoids the “flag interpreted as file” class of bugs.
-- **Compression disabled**: Some players behave better and we avoid “smart” muxer defaults altering payload; attachments don’t support compression flags anyway.
-- **Chapter snapping**: Purely for seek ergonomics; optional because some releases want untouched chapter boundaries.
+- **Tool not found** — make sure `mkvmerge`, `mkvextract`, `ffmpeg`, `ffprobe` are installed and on `PATH`.  
+- **XCorr unstable/low confidence** — increase `scan_chunk_duration` and/or `scan_chunk_count`; ensure language selection targets comparable mixes (JPN vs JPN, ENG vs ENG).  
+- **Defaults/forced flags not what you expected** — In **Merge Plan**, check rule ordering and flags; in **Manual** mode, adjust the final list toggles.  
+- **Chapters misaligned** — Verify `global_shift` in logs equals the shift applied to chapter XML; if snapping is on, try increasing `snap_threshold_ms` or switch `snap_mode`.  
+- **mkvmerge failure** — Open `opts.json`, replay via terminal, and examine stderr; the app also prints the error tail.  
+
+---
+
+## Developer Notes
+
+- **Demux strategy**: `mkvextract` for general tracks; for `A_MS/ACM` we first try stream copy with ffmpeg, else decode to PCM using a bit‑depth‑aware codec (`pcm_s16le`, `pcm_s24le`, `pcm_s32le`, `pcm_f64le`).  
+- **Language selection** (analysis only) is independent from merge inclusion rules.  
+- **Track ordering** is fully deterministic: we append inputs in the exact GUI/plan order and then emit a matching `--track-order`.  
+- **Logging style** balances signal/noise; compact mode prints progress and only a tail of verbose output on success/failure.
+
+---
+
+## Design Invariants & Edge Cases
+
+- **No negative `--sync`** is ever passed to mkvmerge; all per‑input `--sync` values are ≥ 0 after applying the global shift.
+- **Reference video** dictates chapter rescale and subtitle PlayRes.
+- **Manual layout auto‑apply** is only used when the **shape signature** (counts of `[source × type]`) matches the prior job to prevent accidental mismatches.
+- **Codec exclusions** are substring checks against `codec_id` lowercased (e.g., `a_ac3`, `a_dts`, `a_pcm`).
+- **Chapters normalization** ensures strictly increasing intervals and prevents open‑ended atoms from overlapping into the next.
+
+---
+
+## Performance Notes
+
+- XCorr windowing is the main cost. Defaults (`10 × 15s`) trade speed vs. robustness.  
+- SSD churn is minimized by deleting temp job directories on success.  
+- For faster previews, reduce `scan_chunk_count` and/or `scan_chunk_duration` — then confirm with a second run if needed.
+
+---
+
+## Known Limitations
+
+- Baseline engine uses a **single global delay** per Secondary/Tertiary. It does not splice or model time‑varying drift (that would be an “advanced repair” feature outside this README’s scope).  
+- XCorr can be confused by long uniform ambiences; tuning the window schedule usually fixes it.  
+- VideoDiff requires a separate binary and is subject to its error metric semantics.
+
+---
+
+## Appendix A: Log Line Guide
+
+Examples you’ll see in the GUI log:
+
+```
+$ ffprobe -v error -select_streams v:0 -show_entries format=duration -of csv=p=0 "ref.mkv"
+Chunk @1278s -> Delay -1001 ms (Match 95.28%)
+Secondary delay determined: -1001 ms
+[Delay] Raw delays (ms): ref=0, sec=-1001, ter=-1000
+[Delay] Applying lossless global shift: +1001 ms
+[Chapters] Renamed chapters to "Chapter NN".
+[Chapters] Shifted all timestamps by +1001 ms.
+[Chapters] Snap result: moved=3, on_kf=5, too_far=1 (kfs=1234, mode=previous, thr=250ms, starts_only=True)
+mkvmerge options file written to: temp_work/job_ref_.../opts.json
+[SUCCESS] Output file created: sync_output/RefTitle.mkv
+```
+
+---
+
+## Appendix B: Demux Extension Map
+
+| Track type | codec_id contains       | Demux extension |
+|---|---|---|
+| video | `V_MPEGH/ISO/HEVC` | `.h265` |
+|  | `V_MPEG4/ISO/AVC` | `.h264` |
+|  | `V_MPEG1/2` | `.mpg` |
+|  | `V_VP9` | `.vp9` |
+|  | `V_AV1` | `.av1` |
+|  | *(else)* | `.bin` |
+| audio | `A_TRUEHD` | `.thd` |
+|  | `A_EAC3` | `.eac3` |
+|  | `A_AC3` | `.ac3` |
+|  | `A_DTS` | `.dts` |
+|  | `A_AAC` | `.aac` |
+|  | `A_FLAC` | `.flac` |
+|  | `A_OPUS` | `.opus` |
+|  | `A_VORBIS` | `.ogg` |
+|  | `A_PCM` | `.wav` |
+|  | *(else)* | `.bin` |
+| subs | `S_TEXT/ASS` | `.ass` |
+|  | `S_TEXT/SSA` | `.ssa` |
+|  | `S_TEXT/UTF8` | `.srt` |
+|  | `S_HDMV/PGS` | `.sup` |
+|  | `S_VOBSUB` | `.sub` |
+|  | *(else)* | `.sub` |
+
+Special case: `A_MS/ACM` → attempt stream copy; if refused, decode to PCM with bit‑depth‑aware codec.
+
+---
+
+## Appendix C: Configuration Keys (Table)
+
+| Key | Type | Default | Notes |
+|---|---|---|---|
+| `output_folder` | str | `sync_output` | Output target for merged MKV & job logs |
+| `temp_root` | str | `temp_work` | Per‑job scratch directory root |
+| `videodiff_path` | str | `""` | If blank, use PATH |
+| `analysis_mode` | str | `Audio Correlation` | or `VideoDiff` |
+| `scan_chunk_count` | int | `10` | Number of windows for XCorr |
+| `scan_chunk_duration` | int | `15` | Seconds per window |
+| `min_match_pct` | float | `5.0` | Discard XCorr results below this |
+| `analysis_lang_ref` | str | `""` | ISO (`jpn`, `eng`) or blank for first stream |
+| `analysis_lang_sec` | str | `""` | Same as above |
+| `analysis_lang_ter` | str | `""` | Same as above |
+| `videodiff_error_min` | float | `0.0` | Reject if error < min |
+| `videodiff_error_max` | float | `100.0` | Reject if error > max |
+| `merge_mode` | str | `plan` | or `manual` |
+| `rename_chapters` | bool | `false` | Rename to `Chapter NN` |
+| `snap_chapters` | bool | `false` | Enable keyframe snapping |
+| `snap_mode` | str | `previous` | or `nearest` |
+| `snap_threshold_ms` | int | `250` | Max move distance |
+| `snap_starts_only` | bool | `true` | Only snap starts |
+| `apply_dialog_norm_gain` | bool | `false` | Remove dialnorm for AC3/E‑AC3 |
+| `disable_track_statistics_tags` | bool | `false` | mkvmerge flag |
+| `exclude_codecs` | str | `""` | CSV blacklist (`ac3,dts,pcm`) |
+| `merge_profile` | list | *(see defaults)* | Rule list, priority‑ordered |
+| `log_compact` | bool | `true` | Compact command runner logs |
+| `log_autoscroll` | bool | `true` | GUI behavior |
+| `log_progress_step` | int | `20` | % step for progress lines |
+| `log_error_tail` | int | `20` | stderr tail lines on error |
+| `log_tail_lines` | int | `0` | stdout tail on success |
+| `log_show_options_pretty` | bool | `false` | Dump pretty opts |
+| `log_show_options_json` | bool | `false` | Dump raw JSON opts |
+| `archive_logs` | bool | `true` | Zip logs after batch |
+
+---
+
+**License**  
+This project wraps external tools; respect their licenses. The GUI/engine code is released under the project’s chosen license (add a LICENSE file if needed).
