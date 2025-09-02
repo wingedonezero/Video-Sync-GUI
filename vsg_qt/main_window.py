@@ -10,7 +10,7 @@ from collections import Counter
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QLineEdit, QLabel, QFileDialog, QGroupBox, QTextEdit, QProgressBar,
-    QMessageBox, QRadioButton, QCheckBox
+    QMessageBox, QCheckBox
 )
 from PySide6.QtCore import Qt, QThreadPool, QTimer
 
@@ -42,11 +42,12 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel('Ready')
         self.sec_delay_label = QLabel('—')
         self.ter_delay_label = QLabel('—')
-        self.plan_mode_radio = QRadioButton("Merge Plan")
-        self.manual_mode_radio = QRadioButton("Manual Selection")
+
+        # Manual-only: auto-apply controls are the only merge UI toggles
         self.auto_apply_check = QCheckBox("Auto-apply this layout to all matching files in batch")
         self.auto_apply_strict_check = QCheckBox("Strict match (type + lang + codec)")
         self.archive_logs_check = QCheckBox("Archive logs to a zip file on batch completion")
+
         self.options_btn = QPushButton('Settings…')
         self.setup_ui()
         self.apply_config_to_ui()
@@ -56,12 +57,14 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
 
+        # Top row: Settings button
         top_button_layout = QHBoxLayout()
         self.options_btn.clicked.connect(self.open_options_dialog)
         top_button_layout.addWidget(self.options_btn)
         top_button_layout.addStretch()
         main_layout.addLayout(top_button_layout)
 
+        # Inputs
         inputs_group = QGroupBox('Input Files (File or Directory)')
         inputs_layout = QVBoxLayout(inputs_group)
         inputs_layout.addLayout(self._create_file_input('Reference:', self.ref_input, self._browse_ref))
@@ -69,18 +72,19 @@ class MainWindow(QMainWindow):
         inputs_layout.addLayout(self._create_file_input('Tertiary:', self.ter_input, self._browse_ter))
         main_layout.addWidget(inputs_group)
 
-        merge_mode_group = QGroupBox("Merge Mode")
-        merge_mode_layout = QVBoxLayout(merge_mode_group)
-        radio_layout = QHBoxLayout()
-        radio_layout.addWidget(self.plan_mode_radio)
-        radio_layout.addWidget(self.manual_mode_radio)
-        radio_layout.addStretch()
-        merge_mode_layout.addLayout(radio_layout)
-        merge_mode_layout.addWidget(self.auto_apply_check)
-        merge_mode_layout.addWidget(self.auto_apply_strict_check)
-        self.plan_mode_radio.toggled.connect(self._on_merge_mode_changed)
-        main_layout.addWidget(merge_mode_group)
+        # Manual Selection behavior (since this is the only mode now)
+        manual_group = QGroupBox("Manual Selection Behavior")
+        manual_layout = QVBoxLayout(manual_group)
+        # (Optional helper text, no functional effect)
+        helper = QLabel("For Analyze & Merge, you’ll select tracks per file. "
+                        "Auto-apply reuses your last layout when the track signature matches.")
+        helper.setWordWrap(True)
+        manual_layout.addWidget(helper)
+        manual_layout.addWidget(self.auto_apply_check)
+        manual_layout.addWidget(self.auto_apply_strict_check)
+        main_layout.addWidget(manual_group)
 
+        # Actions
         actions_group = QGroupBox('Actions')
         actions_main_layout = QVBoxLayout(actions_group)
         actions_button_layout = QHBoxLayout()
@@ -95,6 +99,7 @@ class MainWindow(QMainWindow):
         actions_main_layout.addWidget(self.archive_logs_check)
         main_layout.addWidget(actions_group)
 
+        # Status / progress
         status_layout = QHBoxLayout()
         status_layout.addWidget(QLabel('Status:'))
         status_layout.addWidget(self.status_label, 1)
@@ -104,6 +109,7 @@ class MainWindow(QMainWindow):
         self.progress_bar.setTextVisible(True)
         main_layout.addLayout(status_layout)
 
+        # Results
         results_group = QGroupBox('Latest Job Results')
         results_layout = QHBoxLayout(results_group)
         results_layout.addWidget(QLabel('Secondary Delay:'))
@@ -114,25 +120,13 @@ class MainWindow(QMainWindow):
         results_layout.addStretch()
         main_layout.addWidget(results_group)
 
+        # Log
         log_group = QGroupBox('Log')
         log_layout = QVBoxLayout(log_group)
         self.log_output.setReadOnly(True)
         self.log_output.setFontFamily('monospace')
         log_layout.addWidget(self.log_output)
         main_layout.addWidget(log_group)
-
-    def _on_merge_mode_changed(self, checked):
-        is_plan_mode = self.plan_mode_radio.isChecked()
-        self.auto_apply_check.setVisible(not is_plan_mode)
-        self.auto_apply_strict_check.setVisible(not is_plan_mode)
-
-        if is_plan_mode:
-            self.config.set('merge_mode', 'plan')
-            self.options_btn.setEnabled(True)
-        else:
-            self.config.set('merge_mode', 'manual')
-            self.options_btn.setEnabled(False)
-        self.config.save()
 
     def _create_file_input(self, label_text: str, line_edit: QLineEdit, browse_slot):
         layout = QHBoxLayout()
@@ -153,7 +147,6 @@ class MainWindow(QMainWindow):
         if self.config.get('last_ref_path'):
             start_dir = str(Path(self.config.get('last_ref_path')).parent)
             dialog.setDirectory(start_dir)
-
         if dialog.exec():
             line_edit.setText(dialog.selectedFiles()[0])
 
@@ -169,12 +162,6 @@ class MainWindow(QMainWindow):
         self.ter_input.setText(self.config.get('last_ter_path', ''))
         self.archive_logs_check.setChecked(self.config.get('archive_logs', True))
         self.auto_apply_strict_check.setChecked(self.config.get('auto_apply_strict', False))
-
-        merge_mode = self.config.get('merge_mode', 'plan')
-        self.plan_mode_radio.setChecked(merge_mode == 'plan')
-        self.manual_mode_radio.setChecked(merge_mode == 'manual')
-
-        self._on_merge_mode_changed(self.plan_mode_radio.isChecked())
 
     def save_ui_to_config(self):
         self.config.set('last_ref_path', self.ref_input.text())
@@ -241,7 +228,9 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "No Jobs Found", "No valid jobs could be found."); return
 
         final_jobs = initial_jobs
-        if self.config.get('merge_mode') == 'manual' and and_merge:
+
+        # Manual-only path: for merges, always gather a manual layout per job
+        if and_merge:
             processed_jobs = []; last_manual_layout = None; last_track_signature = None
             auto_apply_enabled = self.auto_apply_check.isChecked()
             strict_match = self.auto_apply_strict_check.isChecked()

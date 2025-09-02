@@ -82,6 +82,7 @@ class JobPipeline:
                 extracted_map = {f"{t['source']}_{t['id']}": t for t in all_extracted_tracks}
                 plan = self._build_plan_from_manual_layout(manual_layout, delays, extracted_map, log_to_all)
             else:
+                # Fallback remains (not expected in normal UI path)
                 ref_tracks_ext = mkv_utils.extract_tracks(ref_file, job_temp, runner, self.tool_paths, 'ref', all_tracks=True)
                 sec_tracks_ext = mkv_utils.extract_tracks(sec_file, job_temp, runner, self.tool_paths, 'sec', audio=True, subs=True) if sec_file else []
                 ter_tracks_ext = mkv_utils.extract_tracks(ter_file, job_temp, runner, self.tool_paths, 'ter', audio=True, subs=True) if ter_file else []
@@ -147,7 +148,7 @@ class JobPipeline:
         return {'plan': final_plan, 'delays': delays}
 
     def _build_plan_from_profile(self, all_tracks: Dict[str, List[Dict]], delays: Dict, log_callback: Callable) -> Dict:
-        # This function is unchanged
+        # (unchanged)
         final_plan = []
         profile = self.config.get('merge_profile', [])
         exclude_str = self.config.get('exclude_codecs', '').lower()
@@ -240,15 +241,24 @@ class JobPipeline:
         return max(best_of_each_contender, key=lambda x: x['match'])
 
     def _build_mkvmerge_tokens(self, plan_data: Dict, output_file: str, chapters_xml: Optional[str], attachments: List[str]) -> List[str]:
-        # ... (unchanged)
+        # --- harmless log-only guardrails (no behavior change) ---
+        plan_items = plan_data['plan']
+        video_items = [it for it in plan_items if it['track'].get('type') == 'video']
+        if video_items:
+            if not any(it['track'].get('source', 'REF').upper() == 'REF' for it in video_items):
+                self.gui_log_callback("[WARN] No REF video present in final plan. If this was intended (audio-only), ignore this warning.")
+            if any(it['track'].get('source', 'REF').upper() != 'REF' for it in video_items):
+                self.gui_log_callback("[WARN] Non-REF video detected in final plan (SEC/TER). The UI should prevent this; proceeding anyway.")
+
         tokens = ['--output', output_file]
         if chapters_xml:
             tokens.extend(['--chapters', chapters_xml])
         if self.config.get('disable_track_statistics_tags', False):
             tokens.append('--disable-track-statistics-tags')
-        plan_items = plan_data['plan']
         delays = plan_data['delays']
         global_shift = delays.get('_global_shift', 0)
+
+        # Determine default/forced indices
         default_audio_track_id, default_sub_track_id, forced_display_sub_id = -1, -1, -1
         for i, item in enumerate(plan_items):
             if item['rule'].get('is_default'):
@@ -256,6 +266,7 @@ class JobPipeline:
                 elif item['track']['type'] == 'subtitles' and default_sub_track_id == -1: default_sub_track_id = i
             if item['rule'].get('is_forced_display') and item['track']['type'] == 'subtitles' and forced_display_sub_id == -1:
                 forced_display_sub_id = i
+
         first_video_idx = next((i for i, item in enumerate(plan_items) if item['track'].get('type') == 'video'), -1)
         track_order_indices = []
         for i, item in enumerate(plan_items):

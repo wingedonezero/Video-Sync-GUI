@@ -1,109 +1,30 @@
 # vsg_qt/options_dialog.py
 # -*- coding: utf-8 -*-
 """
-The settings/options dialog window for the PyQt application.
+Settings dialog (without Merge Plan tab).
 """
 from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget, QFormLayout,
     QLineEdit, QPushButton, QFileDialog, QCheckBox, QComboBox, QSpinBox, QDoubleSpinBox,
-    QListWidget, QListWidgetItem, QLabel, QScrollArea
+    QLabel, QScrollArea
 )
 from PySide6.QtCore import Qt
 
-class RuleDialog(QDialog):
-    """A dialog for creating and editing a merge profile rule."""
-    def __init__(self, rule=None, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle('Edit Merge Rule')
-
-        self.source_combo = QComboBox()
-        self.source_combo.addItems(['REF', 'SEC', 'TER'])
-        self.type_combo = QComboBox()
-        self.type_combo.addItems(['Video', 'Audio', 'Subtitles'])
-        self.lang_edit = QLineEdit('any')
-        self.exclude_langs_edit = QLineEdit()
-        self.enabled_check = QCheckBox('Enabled')
-        self.enabled_check.setChecked(True)
-        self.default_check = QCheckBox('⭐ Make Default Track')
-        self.swap_check = QCheckBox('Swap order of first two tracks found')
-        self.apply_name_check = QCheckBox('Apply original track name')
-        self.forced_display_check = QCheckBox('📌 Make Forced Display Track')
-        self.rescale_check = QCheckBox('📏 Rescale to video resolution (ASS/SSA only)')  # <-- ADDED
-
-        layout = QFormLayout(self)
-        layout.addRow('Source:', self.source_combo)
-        layout.addRow('Track Type:', self.type_combo)
-        layout.addRow('Include Languages (any, eng, ...):', self.lang_edit)
-        layout.addRow('Exclude Languages (eng, jpn, ...):', self.exclude_langs_edit)
-        layout.addWidget(self.enabled_check)
-        layout.addWidget(self.apply_name_check)
-        layout.addWidget(self.default_check)
-        layout.addWidget(self.forced_display_check)
-        layout.addWidget(self.swap_check)
-        layout.addWidget(self.rescale_check)  # <-- ADDED
-
-        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
-        layout.addRow(button_box)
-
-        self.type_combo.currentTextChanged.connect(self.on_type_changed)
-
-        if rule:
-            self.source_combo.setCurrentText(rule.get('source', 'REF'))
-            self.type_combo.setCurrentText(rule.get('type', 'Video'))
-            self.lang_edit.setText(rule.get('lang', 'any'))
-            self.exclude_langs_edit.setText(rule.get('exclude_langs', ''))
-            self.enabled_check.setChecked(rule.get('enabled', True))
-            self.default_check.setChecked(rule.get('is_default', False))
-            self.swap_check.setChecked(rule.get('swap_first_two', False))
-            self.apply_name_check.setChecked(rule.get('apply_track_name', False))
-            self.forced_display_check.setChecked(rule.get('is_forced_display', False))
-            self.rescale_check.setChecked(rule.get('rescale', False))  # <-- ADDED
-
-        self.on_type_changed(self.type_combo.currentText())
-
-    def on_type_changed(self, text):
-        """Show/hide options based on track type."""
-        is_video = text == 'Video'
-        is_subs = text == 'Subtitles'
-        self.default_check.setVisible(not is_video)
-        self.swap_check.setVisible(is_subs)
-        self.forced_display_check.setVisible(is_subs)
-        self.rescale_check.setVisible(is_subs)  # <-- ADDED
-
-    def get_rule(self):
-        rule_type = self.type_combo.currentText()
-        return {
-            'source': self.source_combo.currentText(),
-            'type': rule_type,
-            'lang': self.lang_edit.text().strip().lower() or 'any',
-            'exclude_langs': self.exclude_langs_edit.text().strip().lower(),
-            'enabled': self.enabled_check.isChecked(),
-            'is_default': self.default_check.isChecked() and rule_type != 'Video',
-            'swap_first_two': self.swap_check.isChecked() and rule_type == 'Subtitles',
-            'apply_track_name': self.apply_name_check.isChecked(),
-            'is_forced_display': self.forced_display_check.isChecked() and rule_type == 'Subtitles',
-            'rescale': self.rescale_check.isChecked() and rule_type == 'Subtitles'  # <-- ADDED
-        }
 
 class OptionsDialog(QDialog):
     def __init__(self, config, parent=None):
         super().__init__(parent)
         self.config = config
         self.setWindowTitle('Application Settings')
-        # Make the dialog comfortably sized but not fullscreen-required
         self.setMinimumSize(900, 600)
 
         self.tabs = QTabWidget()
         self.storage_widgets, self.analysis_widgets, self.chapters_widgets, self.merge_widgets, self.logging_widgets = {}, {}, {}, {}, {}
-        self.profile_list_widget = QListWidget()
 
         main_layout = QVBoxLayout(self)
         main_layout.addWidget(self.tabs)
 
-        # Wrap each tab content in a scroll area so content can grow without requiring fullscreen
-        self.tabs.addTab(self._wrap_scroll(self._create_merge_plan_tab()), 'Merge Plan')
+        # Only the functional tabs remain
         self.tabs.addTab(self._wrap_scroll(self._create_storage_tab()), 'Storage')
         self.tabs.addTab(self._wrap_scroll(self._create_analysis_tab()), 'Analysis')
         self.tabs.addTab(self._wrap_scroll(self._create_chapters_tab()), 'Chapters')
@@ -125,20 +46,6 @@ class OptionsDialog(QDialog):
         return sa
 
     # ---- Tabs ----
-    def _create_merge_plan_tab(self):
-        widget = QWidget()
-        layout = QHBoxLayout(widget)
-        layout.addWidget(self.profile_list_widget, 3)
-
-        button_layout = QVBoxLayout()
-        for text, slot in [('Add Rule...', self.add_rule), ('Edit Rule...', self.edit_rule), ('Remove Rule', self.remove_rule)]:
-            btn = QPushButton(text); btn.clicked.connect(slot); button_layout.addWidget(btn)
-        button_layout.addStretch()
-        for text, slot in [('Move Up', self.move_rule_up), ('Move Down', self.move_rule_down)]:
-            btn = QPushButton(text); btn.clicked.connect(slot); button_layout.addWidget(btn)
-        layout.addLayout(button_layout, 1)
-        return widget
-
     def _create_storage_tab(self):
         widget = QWidget()
         layout = QFormLayout(widget)
@@ -235,108 +142,25 @@ class OptionsDialog(QDialog):
         layout.addRow(self.logging_widgets['log_show_options_json'])
         return widget
 
-    # ---- Settings I/O (unchanged logic) ----
+    # ---- Settings I/O ----
     def load_settings(self):
-        for key, widget_map in [('storage_widgets', self.storage_widgets), ('analysis_widgets', self.analysis_widgets), ('chapters_widgets', self.chapters_widgets), ('merge_widgets', self.merge_widgets), ('logging_widgets', self.logging_widgets)]:
+        for _, widget_map in [('storage_widgets', self.storage_widgets),
+                              ('analysis_widgets', self.analysis_widgets),
+                              ('chapters_widgets', self.chapters_widgets),
+                              ('merge_widgets', self.merge_widgets),
+                              ('logging_widgets', self.logging_widgets)]:
             for key, widget in widget_map.items():
                 self._set_widget_val(widget, self.config.get(key))
-        self.populate_profile_list()
 
     def accept(self):
-        for key, widget_map in [('storage_widgets', self.storage_widgets), ('analysis_widgets', self.analysis_widgets), ('chapters_widgets', self.chapters_widgets), ('merge_widgets', self.merge_widgets), ('logging_widgets', self.logging_widgets)]:
+        for _, widget_map in [('storage_widgets', self.storage_widgets),
+                              ('analysis_widgets', self.analysis_widgets),
+                              ('chapters_widgets', self.chapters_widgets),
+                              ('merge_widgets', self.merge_widgets),
+                              ('logging_widgets', self.logging_widgets)]:
             for key, widget in widget_map.items():
                 self.config.set(key, self._get_widget_val(widget))
-        self.save_profile_from_list()
         super().accept()
-
-    # ---- Merge Plan list helpers ----
-    def populate_profile_list(self):
-        self.profile_list_widget.clear()
-        profile = self.config.get('merge_profile', [])
-        for rule in profile:
-            item = QListWidgetItem()
-            item.setData(Qt.UserRole, rule)
-            self.update_item_text(item)
-            self.profile_list_widget.addItem(item)
-
-    def update_item_text(self, item: QListWidgetItem):
-        rule = item.data(Qt.UserRole)
-        status = "✅" if rule.get('enabled') else "❌"
-        default = "⭐" if rule.get('is_default') else ""
-        forced = "📌" if rule.get('is_forced_display') else ""
-        swap = "🔄" if rule.get('swap_first_two') else ""
-        rescale = "📏" if rule.get('rescale') else ""  # <-- ADDED
-        include_lang = rule.get('lang', 'any')
-        exclude_lang = rule.get('exclude_langs', '')
-
-        lang_str = f"In: {include_lang}"
-        if exclude_lang:
-            lang_str += f", Ex: {exclude_lang}"
-
-        text = f"{status} {rule['source']} -> {rule['type']} ({lang_str}) {swap}{rescale}{default}{forced}"
-        item.setText(text.strip().replace("  ", " "))
-
-    def add_rule(self):
-        dialog = RuleDialog(parent=self)
-        if dialog.exec():
-            new_rule = dialog.get_rule()
-            self.handle_flag_rules(new_rule)
-            item = QListWidgetItem()
-            item.setData(Qt.UserRole, new_rule)
-            self.update_item_text(item)
-            self.profile_list_widget.addItem(item)
-
-    def edit_rule(self):
-        item = self.profile_list_widget.currentItem()
-        if not item:
-            return
-        dialog = RuleDialog(rule=item.data(Qt.UserRole), parent=self)
-        if dialog.exec():
-            updated_rule = dialog.get_rule()
-            self.handle_flag_rules(updated_rule, item)
-            item.setData(Qt.UserRole, updated_rule)
-            self.update_item_text(item)
-
-    def handle_flag_rules(self, new_rule, current_item=None):
-        flags_to_check = ['is_default', 'is_forced_display']
-        for flag in flags_to_check:
-            if new_rule.get(flag):
-                for i in range(self.profile_list_widget.count()):
-                    item = self.profile_list_widget.item(i)
-                    if item == current_item:
-                        continue
-                    rule = item.data(Qt.UserRole)
-                    if rule.get('type') == new_rule.get('type'):
-                        rule[flag] = False
-                        self.update_item_text(item)
-
-    def remove_rule(self):
-        item = self.profile_list_widget.currentItem()
-        if item:
-            self.profile_list_widget.takeItem(self.profile_list_widget.row(item))
-
-    def move_rule_up(self):
-        row = self.profile_list_widget.currentRow()
-        if row > 0:
-            item = self.profile_list_widget.takeItem(row)
-            self.profile_list_widget.insertItem(row - 1, item)
-            self.profile_list_widget.setCurrentRow(row - 1)
-
-    def move_rule_down(self):
-        row = self.profile_list_widget.currentRow()
-        if row < self.profile_list_widget.count() - 1:
-            item = self.profile_list_widget.takeItem(row)
-            self.profile_list_widget.insertItem(row + 1, item)
-            self.profile_list_widget.setCurrentRow(row + 1)
-
-    def save_profile_from_list(self):
-        new_profile = []
-        for i in range(self.profile_list_widget.count()):
-            item = self.profile_list_widget.item(i)
-            rule = item.data(Qt.UserRole)
-            rule['priority'] = (i + 1) * 10
-            new_profile.append(rule)
-        self.config.set('merge_profile', new_profile)
 
     # ---- generic widget helpers ----
     def _create_dir_input(self):
@@ -372,7 +196,8 @@ class OptionsDialog(QDialog):
             line_edit.setText(path)
 
     def _get_widget_val(self, widget):
-        if isinstance(widget, QCheckBox): 
+        from PySide6.QtWidgets import QSpinBox, QDoubleSpinBox
+        if isinstance(widget, QCheckBox):
             return widget.isChecked()
         if isinstance(widget, (QSpinBox, QDoubleSpinBox)):
             return widget.value()
@@ -383,6 +208,7 @@ class OptionsDialog(QDialog):
         return widget.text() if isinstance(widget, QLineEdit) else None
 
     def _set_widget_val(self, widget, value):
+        from PySide6.QtWidgets import QSpinBox, QDoubleSpinBox
         if isinstance(widget, QCheckBox):
             widget.setChecked(bool(value))
         elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):

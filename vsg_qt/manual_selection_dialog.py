@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QListWidget, QAbstractItemView, QListWidgetItem, QGroupBox, QMenu,
     QScrollArea, QWidget
 )
+from PySide6.QtGui import QColor
 from .track_widget import TrackWidget
 
 
@@ -27,11 +28,11 @@ class FinalListWidget(QListWidget):
             source_item = source.currentItem()
             if source_item:
                 track_data = source_item.data(Qt.UserRole)
-                # REF-only video guardrail: block SEC/TER video drops
-                if track_data and self.dialog._is_blocked_video(track_data):
-                    event.ignore()
-                    return
                 if track_data:
+                    # Guardrail: block SEC/TER video
+                    if self.dialog.is_blocked_video(track_data):
+                        event.ignore()
+                        return
                     self.dialog.add_track_to_final_list(track_data)
             event.accept()
         else:
@@ -98,7 +99,7 @@ class ManualSelectionDialog(QDialog):
         # Configure + populate
         self._configure_source_lists()
         self._populate_source_lists()
-        self._wire_double_clicks()  # <-- double-click to add stays enabled
+        self._wire_double_clicks()
 
         if previous_layout:
             self.info_label.setText("✅ Pre-populated with the layout from the previous file.")
@@ -115,11 +116,6 @@ class ManualSelectionDialog(QDialog):
         self.button_box.rejected.connect(self.reject)
         root.addWidget(self.button_box)
 
-    # ---------- REF-only video guard helper ----------
-    def _is_blocked_video(self, track: dict) -> bool:
-        """True if attempting to add a video track that is not from REF."""
-        return (track.get('type') == 'video') and (track.get('source') in ('SEC', 'TER'))
-
     # ---------- Source Lists ----------
     def _create_source_list(self, _title):
         lw = QListWidget()
@@ -131,6 +127,14 @@ class ManualSelectionDialog(QDialog):
             source_list.setSelectionMode(QAbstractItemView.SingleSelection)
             source_list.setDefaultDropAction(Qt.CopyAction)
 
+    def is_blocked_video(self, track_data: dict) -> bool:
+        """SEC/TER video is not allowed to enter the final plan."""
+        try:
+            return (track_data.get('type', '').lower() == 'video' and
+                    track_data.get('source', '').upper() in ('SEC', 'TER'))
+        except Exception:
+            return False
+
     def _populate_source_lists(self):
         source_map = {'REF': self.ref_list, 'SEC': self.sec_list, 'TER': self.ter_list}
         for source_key, list_widget in source_map.items():
@@ -141,15 +145,17 @@ class ManualSelectionDialog(QDialog):
                 item = QListWidgetItem(item_text, list_widget)
                 item.setData(Qt.UserRole, track)
 
-                # Grey out & disable SEC/TER video so they can't be added
-                if self._is_blocked_video(track):
-                    item.setForeground(Qt.gray)
-                    # remove ItemIsEnabled to block selection/drag/double-click
-                    item.setFlags(item.flags() & ~Qt.ItemIsEnabled)
-                    item.setToolTip("Video tracks can only be added from REF (enforced).")
+                # Guardrail: visually disable SEC/TER video (cannot be dragged or selected)
+                if self.is_blocked_video(track):
+                    flags = item.flags()
+                    flags &= ~Qt.ItemIsDragEnabled
+                    flags &= ~Qt.ItemIsEnabled
+                    item.setFlags(flags)
+                    item.setForeground(QColor('#888'))
+                    item.setToolTip("Video from Secondary/Tertiary is disabled. REF-only video is allowed.")
 
     def _wire_double_clicks(self):
-        """Enable double-click to add from any source list to Final Output."""
+        """Enable double-click to add from any source list to Final Output (with guardrail)."""
         for lw in (self.ref_list, self.sec_list, self.ter_list):
             lw.itemDoubleClicked.connect(self._on_source_item_double_clicked)
 
@@ -157,10 +163,9 @@ class ManualSelectionDialog(QDialog):
         if not item:
             return
         td = item.data(Qt.UserRole)
-        # block SEC/TER video on double-click
-        if td and self._is_blocked_video(td):
-            return
         if td:
+            if self.is_blocked_video(td):
+                return
             self.add_track_to_final_list(td)
 
     # ---------- Pre-populate Final list from previous layout (by order within source/type) ----------
@@ -189,22 +194,18 @@ class ManualSelectionDialog(QDialog):
                     'rescale': prev.get('rescale', False),
                     'size_multiplier': prev.get('size_multiplier', 1.0),
                 })
-                # guard pre-populate as well
-                if not self._is_blocked_video(data):
+                # Even if the previous layout had SEC/TER video, guardrail prevents adding
+                if not self.is_blocked_video(data):
                     self.add_track_to_final_list(data, from_prepopulation=True)
             counters[(src, ttype)] = idx + 1
 
     # ---------- Add a selected track to Final Output ----------
     def add_track_to_final_list(self, track_data, from_prepopulation=False):
-        # final guard: never allow SEC/TER video by any path
-        if self._is_blocked_video(track_data):
-            return
         item = QListWidgetItem()
         self.final_list.addItem(item)
         widget = TrackWidget(track_data)
 
         if from_prepopulation:
-            # Carry flags into widget hidden state
             if hasattr(widget, 'cb_default'): widget.cb_default.setChecked(track_data.get('is_default', False))
             if hasattr(widget, 'cb_forced'): widget.cb_forced.setChecked(track_data.get('is_forced_display', False))
             if hasattr(widget, 'cb_name'): widget.cb_name.setChecked(track_data.get('apply_track_name', False))
@@ -212,8 +213,6 @@ class ManualSelectionDialog(QDialog):
             if hasattr(widget, 'size_multiplier'): widget.size_multiplier.setValue(track_data.get('size_multiplier', 1.0))
             if 'S_TEXT/UTF8' in (getattr(widget, 'codec_id', '') or '').upper():
                 if hasattr(widget, 'cb_convert'): widget.cb_convert.setChecked(track_data.get('convert_to_ass', False))
-
-            # Ensure visuals reflect the carried state
             if hasattr(widget, 'refresh_badges'): widget.refresh_badges()
             if hasattr(widget, 'refresh_summary'): widget.refresh_summary()
 
