@@ -45,6 +45,7 @@ class MainWindow(QMainWindow):
         self.plan_mode_radio = QRadioButton("Merge Plan")
         self.manual_mode_radio = QRadioButton("Manual Selection")
         self.auto_apply_check = QCheckBox("Auto-apply this layout to all matching files in batch")
+        self.auto_apply_strict_check = QCheckBox("Strict match (type + lang + codec)")
         self.archive_logs_check = QCheckBox("Archive logs to a zip file on batch completion")
         self.options_btn = QPushButton('Settings…')
         self.setup_ui()
@@ -76,6 +77,7 @@ class MainWindow(QMainWindow):
         radio_layout.addStretch()
         merge_mode_layout.addLayout(radio_layout)
         merge_mode_layout.addWidget(self.auto_apply_check)
+        merge_mode_layout.addWidget(self.auto_apply_strict_check)
         self.plan_mode_radio.toggled.connect(self._on_merge_mode_changed)
         main_layout.addWidget(merge_mode_group)
 
@@ -122,6 +124,7 @@ class MainWindow(QMainWindow):
     def _on_merge_mode_changed(self, checked):
         is_plan_mode = self.plan_mode_radio.isChecked()
         self.auto_apply_check.setVisible(not is_plan_mode)
+        self.auto_apply_strict_check.setVisible(not is_plan_mode)
 
         if is_plan_mode:
             self.config.set('merge_mode', 'plan')
@@ -165,6 +168,7 @@ class MainWindow(QMainWindow):
         self.sec_input.setText(self.config.get('last_sec_path', ''))
         self.ter_input.setText(self.config.get('last_ter_path', ''))
         self.archive_logs_check.setChecked(self.config.get('archive_logs', True))
+        self.auto_apply_strict_check.setChecked(self.config.get('auto_apply_strict', False))
 
         merge_mode = self.config.get('merge_mode', 'plan')
         self.plan_mode_radio.setChecked(merge_mode == 'plan')
@@ -177,13 +181,50 @@ class MainWindow(QMainWindow):
         self.config.set('last_sec_path', self.sec_input.text())
         self.config.set('last_ter_path', self.ter_input.text())
         self.config.set('archive_logs', self.archive_logs_check.isChecked())
+        self.config.set('auto_apply_strict', self.auto_apply_strict_check.isChecked())
         self.config.save()
 
-    def _generate_track_signature(self, track_info):
+    def _generate_track_signature(self, track_info, strict=False):
+        if not strict:
+            return Counter(
+                f"{t['source']}_{t['type']}"
+                for source_list in track_info.values() for t in source_list
+            )
+        # strict signature includes language and codec id
         return Counter(
-            f"{t['source']}_{t['type']}"
+            f"{t['source']}_{t['type']}_{(t.get('lang') or 'und').lower()}_{(t.get('codec_id') or '').lower()}"
             for source_list in track_info.values() for t in source_list
         )
+
+    def _materialize_layout(self, abstract_layout, track_info):
+        """Map an abstract previous layout (no IDs) onto the current file by (source,type) order."""
+        pools = {'REF': [], 'SEC': [], 'TER': []}
+        for src in pools.keys():
+            pools[src] = [t for t in track_info.get(src, [])]
+        counters = {}
+        realized = []
+        for item in abstract_layout or []:
+            src = item.get('source'); ttype = item.get('type')
+            idx = counters.get((src, ttype), 0)
+            matching = [t for t in pools.get(src, []) if t.get('type') == ttype]
+            if idx < len(matching):
+                base = matching[idx].copy()
+                base.update({
+                    'is_default': item.get('is_default', False),
+                    'is_forced_display': item.get('is_forced_display', False),
+                    'apply_track_name': item.get('apply_track_name', False),
+                    'convert_to_ass': item.get('convert_to_ass', False),
+                    'rescale': item.get('rescale', False),
+                    'size_multiplier': item.get('size_multiplier', 1.0),
+                })
+                realized.append(base)
+            counters[(src, ttype)] = idx + 1
+        return realized
+
+    def _layout_to_template(self, layout):
+        """Strip per-file fields _in memory_ (no persistence)."""
+        kept_keys = {'source', 'type', 'is_default', 'is_forced_display', 'apply_track_name', 'convert_to_ass', 'rescale', 'size_multiplier'}
+        return [{k: v for k, v in t.items() if k in kept_keys} for t in (layout or [])]
 
     def start_batch(self, and_merge: bool):
         self.save_ui_to_config()
@@ -203,6 +244,7 @@ class MainWindow(QMainWindow):
         if self.config.get('merge_mode') == 'manual' and and_merge:
             processed_jobs = []; last_manual_layout = None; last_track_signature = None
             auto_apply_enabled = self.auto_apply_check.isChecked()
+            strict_match = self.auto_apply_strict_check.isChecked()
             tool_paths = {t: shutil.which(t) for t in ['mkvmerge']}
             if not tool_paths['mkvmerge']:
                 QMessageBox.critical(self, "Tool Not Found", "mkvmerge not found."); return
@@ -212,20 +254,27 @@ class MainWindow(QMainWindow):
                 try:
                     track_info = mkv_utils.get_track_info_for_dialog(job_data['ref'], job_data.get('sec'), job_data.get('ter'), runner, tool_paths)
                 except Exception as e:
-                    QMessageBox.warning(self, "Pre-scan Failed", f"Could not analyze tracks for {Path(job_data['ref']).name}:\n{e}"); return
-                current_signature = self._generate_track_signature(track_info); current_layout = None
+                    msg = f"Could not analyze tracks for {Path(job_data['ref']).name}:\n{e}"
+                    QMessageBox.warning(self, "Pre-scan Failed", msg)
+                    return
+                current_signature = self._generate_track_signature(track_info, strict=strict_match); current_layout = None
                 should_auto_apply = (auto_apply_enabled and last_manual_layout is not None and last_track_signature is not None and current_signature == last_track_signature)
                 if should_auto_apply:
-                    self.append_log(f"Auto-applying previous layout to {Path(job_data['ref']).name}..."); current_layout = last_manual_layout
+                    current_layout = self._materialize_layout(last_manual_layout, track_info)
+                    self.append_log(f"Auto-applied previous layout to {Path(job_data['ref']).name}... (strict={'on' if strict_match else 'off'})")
                 else:
                     layout_to_carry_over = None
-                    if last_track_signature and current_signature == last_track_signature: layout_to_carry_over = last_manual_layout
+                    if last_track_signature and current_signature == last_track_signature:
+                        layout_to_carry_over = last_manual_layout  # abstract; dialog will map by order
                     dialog = ManualSelectionDialog(track_info, self, previous_layout=layout_to_carry_over)
-                    if dialog.exec(): current_layout = dialog.get_manual_layout()
-                    else: self.append_log("Batch run cancelled by user."); self.status_label.setText("Ready"); return
+                    if dialog.exec():
+                        current_layout = dialog.get_manual_layout()
+                    else:
+                        self.append_log("Batch run cancelled by user."); self.status_label.setText("Ready"); return
                 if current_layout:
                     job_data['manual_layout'] = current_layout; processed_jobs.append(job_data)
-                    last_manual_layout = current_layout; last_track_signature = current_signature
+                    last_manual_layout = self._layout_to_template(current_layout)  # store abstract in memory only
+                    last_track_signature = current_signature
                 else:
                     self.append_log(f"Job '{Path(job_data['ref']).name}' was skipped.")
                     last_manual_layout = None; last_track_signature = None

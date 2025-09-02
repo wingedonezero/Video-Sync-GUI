@@ -43,6 +43,7 @@ class AppConfig:
             'disable_track_statistics_tags': False,
             'merge_mode': 'plan',
             'archive_logs': True,
+            'auto_apply_strict': False,
             'merge_profile': [
                 {"enabled": True, "source": "REF", "type": "Video", "lang": "any", "exclude_langs": "", "priority": 10, "is_default": False, "swap_first_two": False, "apply_track_name": False, "is_forced_display": False, "rescale": False},
                 {"enabled": True, "source": "SEC", "type": "Audio", "lang": "any", "exclude_langs": "", "priority": 20, "is_default": True, "swap_first_two": False, "apply_track_name": False, "is_forced_display": False, "rescale": False},
