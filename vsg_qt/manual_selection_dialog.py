@@ -27,6 +27,10 @@ class FinalListWidget(QListWidget):
             source_item = source.currentItem()
             if source_item:
                 track_data = source_item.data(Qt.UserRole)
+                # REF-only video guardrail: block SEC/TER video drops
+                if track_data and self.dialog._is_blocked_video(track_data):
+                    event.ignore()
+                    return
                 if track_data:
                     self.dialog.add_track_to_final_list(track_data)
             event.accept()
@@ -94,7 +98,7 @@ class ManualSelectionDialog(QDialog):
         # Configure + populate
         self._configure_source_lists()
         self._populate_source_lists()
-        self._wire_double_clicks()  # <-- restore double-click to add
+        self._wire_double_clicks()  # <-- double-click to add stays enabled
 
         if previous_layout:
             self.info_label.setText("✅ Pre-populated with the layout from the previous file.")
@@ -110,6 +114,11 @@ class ManualSelectionDialog(QDialog):
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
         root.addWidget(self.button_box)
+
+    # ---------- REF-only video guard helper ----------
+    def _is_blocked_video(self, track: dict) -> bool:
+        """True if attempting to add a video track that is not from REF."""
+        return (track.get('type') == 'video') and (track.get('source') in ('SEC', 'TER'))
 
     # ---------- Source Lists ----------
     def _create_source_list(self, _title):
@@ -132,6 +141,13 @@ class ManualSelectionDialog(QDialog):
                 item = QListWidgetItem(item_text, list_widget)
                 item.setData(Qt.UserRole, track)
 
+                # Grey out & disable SEC/TER video so they can't be added
+                if self._is_blocked_video(track):
+                    item.setForeground(Qt.gray)
+                    # remove ItemIsEnabled to block selection/drag/double-click
+                    item.setFlags(item.flags() & ~Qt.ItemIsEnabled)
+                    item.setToolTip("Video tracks can only be added from REF (enforced).")
+
     def _wire_double_clicks(self):
         """Enable double-click to add from any source list to Final Output."""
         for lw in (self.ref_list, self.sec_list, self.ter_list):
@@ -141,6 +157,9 @@ class ManualSelectionDialog(QDialog):
         if not item:
             return
         td = item.data(Qt.UserRole)
+        # block SEC/TER video on double-click
+        if td and self._is_blocked_video(td):
+            return
         if td:
             self.add_track_to_final_list(td)
 
@@ -170,11 +189,16 @@ class ManualSelectionDialog(QDialog):
                     'rescale': prev.get('rescale', False),
                     'size_multiplier': prev.get('size_multiplier', 1.0),
                 })
-                self.add_track_to_final_list(data, from_prepopulation=True)
+                # guard pre-populate as well
+                if not self._is_blocked_video(data):
+                    self.add_track_to_final_list(data, from_prepopulation=True)
             counters[(src, ttype)] = idx + 1
 
     # ---------- Add a selected track to Final Output ----------
     def add_track_to_final_list(self, track_data, from_prepopulation=False):
+        # final guard: never allow SEC/TER video by any path
+        if self._is_blocked_video(track_data):
+            return
         item = QListWidgetItem()
         self.final_list.addItem(item)
         widget = TrackWidget(track_data)
