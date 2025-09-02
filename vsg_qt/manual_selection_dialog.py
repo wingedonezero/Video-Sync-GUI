@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
 )
 from .track_widget import TrackWidget
 
+
 class FinalListWidget(QListWidget):
     """Final output list with drag-drop from source lists and light helpers."""
     def __init__(self, dialog, parent=None):
@@ -32,8 +33,13 @@ class FinalListWidget(QListWidget):
         else:
             super().dropEvent(event)
 
+
 class ManualSelectionDialog(QDialog):
-    """Manual track selection dialog — left column scroll w/ REF, SEC, TER stacked; right is Final Output."""
+    """
+    Manual track selection dialog
+    LEFT: a single scroll column with three sections (REF/SEC/TER).
+    RIGHT: Final Output list that accepts drags; per-item inline “Settings…” dropdown.
+    """
     def __init__(self, track_info, parent=None, previous_layout=None):
         super().__init__(parent)
         self.setWindowTitle("Manual Track Selection")
@@ -43,7 +49,7 @@ class ManualSelectionDialog(QDialog):
 
         root = QVBoxLayout(self)
 
-        # Optional banner
+        # Banner for pre-population notice
         self.info_label = QLabel()
         self.info_label.setVisible(False)
         self.info_label.setStyleSheet("color: green; font-weight: bold;")
@@ -88,17 +94,18 @@ class ManualSelectionDialog(QDialog):
         # Configure + populate
         self._configure_source_lists()
         self._populate_source_lists()
+        self._wire_double_clicks()  # <-- restore double-click to add
 
         if previous_layout:
             self.info_label.setText("✅ Pre-populated with the layout from the previous file.")
             self.info_label.setVisible(True)
             self._prepopulate_from_layout(previous_layout)
 
-        # Context menu on Final list for quick actions (no extra UI chrome)
+        # Context menu on Final list for quick actions
         self.final_list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.final_list.customContextMenuRequested.connect(self._show_context_menu)
 
-        # Ok/Cancel — unchanged
+        # Ok/Cancel
         self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         self.button_box.accepted.connect(self.accept)
         self.button_box.rejected.connect(self.reject)
@@ -125,9 +132,20 @@ class ManualSelectionDialog(QDialog):
                 item = QListWidgetItem(item_text, list_widget)
                 item.setData(Qt.UserRole, track)
 
-    # ---------- Populate Final list ----------
+    def _wire_double_clicks(self):
+        """Enable double-click to add from any source list to Final Output."""
+        for lw in (self.ref_list, self.sec_list, self.ter_list):
+            lw.itemDoubleClicked.connect(self._on_source_item_double_clicked)
+
+    def _on_source_item_double_clicked(self, item: QListWidgetItem):
+        if not item:
+            return
+        td = item.data(Qt.UserRole)
+        if td:
+            self.add_track_to_final_list(td)
+
+    # ---------- Pre-populate Final list from previous layout (by order within source/type) ----------
     def _prepopulate_from_layout(self, layout):
-        """Map previous layout by (source,type) order to current file tracks."""
         pools = {}
         counters = {}
         for src in ('REF', 'SEC', 'TER'):
@@ -155,12 +173,14 @@ class ManualSelectionDialog(QDialog):
                 self.add_track_to_final_list(data, from_prepopulation=True)
             counters[(src, ttype)] = idx + 1
 
+    # ---------- Add a selected track to Final Output ----------
     def add_track_to_final_list(self, track_data, from_prepopulation=False):
         item = QListWidgetItem()
         self.final_list.addItem(item)
         widget = TrackWidget(track_data)
+
         if from_prepopulation:
-            # carry over flags to widget
+            # Carry flags into widget hidden state
             if hasattr(widget, 'cb_default'): widget.cb_default.setChecked(track_data.get('is_default', False))
             if hasattr(widget, 'cb_forced'): widget.cb_forced.setChecked(track_data.get('is_forced_display', False))
             if hasattr(widget, 'cb_name'): widget.cb_name.setChecked(track_data.get('apply_track_name', False))
@@ -169,14 +189,20 @@ class ManualSelectionDialog(QDialog):
             if 'S_TEXT/UTF8' in (getattr(widget, 'codec_id', '') or '').upper():
                 if hasattr(widget, 'cb_convert'): widget.cb_convert.setChecked(track_data.get('convert_to_ass', False))
 
-        # keep one default per type in realtime
+            # Ensure visuals reflect the carried state
+            if hasattr(widget, 'refresh_badges'): widget.refresh_badges()
+            if hasattr(widget, 'refresh_summary'): widget.refresh_summary()
+
+        # Enforce one default per track type in real time
         if hasattr(widget, 'cb_default'):
             widget.cb_default.clicked.connect(lambda checked, w=widget: self._enforce_single_default(checked, w))
 
         item.setSizeHint(widget.sizeHint())
         self.final_list.setItemWidget(item, widget)
+        self.final_list.setCurrentItem(item)
+        self.final_list.scrollToItem(item)
 
-    # ---------- Context menu (no visual layout changes) ----------
+    # ---------- Context menu ----------
     def _show_context_menu(self, pos: QPoint):
         item = self.final_list.itemAt(pos)
         if not item:
@@ -198,6 +224,7 @@ class ManualSelectionDialog(QDialog):
         action = menu.exec_(self.final_list.mapToGlobal(pos))
         if not action:
             return
+
         if action == act_up:
             self._move_item(-1)
         elif action == act_down:
@@ -206,12 +233,14 @@ class ManualSelectionDialog(QDialog):
             if hasattr(widget, 'cb_default'):
                 widget.cb_default.setChecked(True)
                 self._normalize_single_default_for_type(widget.track_type, prefer_widget=widget)
-                if hasattr(widget, 'refresh_label'): widget.refresh_label()
+                if hasattr(widget, 'refresh_badges'): widget.refresh_badges()
+                if hasattr(widget, 'refresh_summary'): widget.refresh_summary()
         elif act_forced and action == act_forced:
             if hasattr(widget, 'cb_forced'):
                 widget.cb_forced.setChecked(not widget.cb_forced.isChecked())
                 self._normalize_forced_subtitles()
-                if hasattr(widget, 'refresh_label'): widget.refresh_label()
+                if hasattr(widget, 'refresh_badges'): widget.refresh_badges()
+                if hasattr(widget, 'refresh_summary'): widget.refresh_summary()
         elif action == act_delete:
             row = self.final_list.row(item)
             self.final_list.takeItem(row)
@@ -240,7 +269,8 @@ class ManualSelectionDialog(QDialog):
                 if hasattr(w, 'cb_default'):
                     w.cb_default.setChecked(True)
                     self._normalize_single_default_for_type(w.track_type, prefer_widget=w)
-                    if hasattr(w, 'refresh_label'): w.refresh_label()
+                    if hasattr(w, 'refresh_badges'): w.refresh_badges()
+                    if hasattr(w, 'refresh_summary'): w.refresh_summary()
             event.accept(); return
         if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_F:
             item = self.final_list.currentItem()
@@ -249,7 +279,8 @@ class ManualSelectionDialog(QDialog):
                 if getattr(w, 'track_type', '') == 'subtitles' and hasattr(w, 'cb_forced'):
                     w.cb_forced.setChecked(not w.cb_forced.isChecked())
                     self._normalize_forced_subtitles()
-                    if hasattr(w, 'refresh_label'): w.refresh_label()
+                    if hasattr(w, 'refresh_badges'): w.refresh_badges()
+                    if hasattr(w, 'refresh_summary'): w.refresh_summary()
             event.accept(); return
         if event.key() == Qt.Key_Delete:
             item = self.final_list.currentItem()
@@ -261,7 +292,8 @@ class ManualSelectionDialog(QDialog):
 
     # ---------- Normalization helpers ----------
     def _enforce_single_default(self, checked, sender_widget):
-        if not checked: return
+        if not checked:
+            return
         sender_type = sender_widget.track_type
         for i in range(self.final_list.count()):
             item = self.final_list.item(i)
@@ -269,7 +301,8 @@ class ManualSelectionDialog(QDialog):
             if widget and widget is not sender_widget and widget.track_type == sender_type:
                 if hasattr(widget, 'cb_default'):
                     widget.cb_default.setChecked(False)
-                    if hasattr(widget, 'refresh_label'): widget.refresh_label()
+                    if hasattr(widget, 'refresh_badges'): widget.refresh_badges()
+                    if hasattr(widget, 'refresh_summary'): widget.refresh_summary()
 
     def _normalize_single_default_for_type(self, ttype, prefer_widget=None):
         first_found = None
@@ -280,18 +313,24 @@ class ManualSelectionDialog(QDialog):
                 continue
             if hasattr(widget, 'cb_default'):
                 if prefer_widget and widget is prefer_widget:
-                    widget.cb_default.setChecked(True); first_found = widget
+                    widget.cb_default.setChecked(True)
+                    first_found = widget
                 elif widget.cb_default.isChecked():
-                    if not first_found: first_found = widget
-                    else: widget.cb_default.setChecked(False)
-                if hasattr(widget, 'refresh_label'): widget.refresh_label()
+                    if not first_found:
+                        first_found = widget
+                    else:
+                        widget.cb_default.setChecked(False)
+                if hasattr(widget, 'refresh_badges'): widget.refresh_badges()
+                if hasattr(widget, 'refresh_summary'): widget.refresh_summary()
+
         if not first_found:
             for i in range(self.final_list.count()):
                 item = self.final_list.item(i)
                 widget = self.final_list.itemWidget(item)
                 if widget and getattr(widget, 'track_type', None) == ttype and hasattr(widget, 'cb_default'):
                     widget.cb_default.setChecked(True)
-                    if hasattr(widget, 'refresh_label'): widget.refresh_label()
+                    if hasattr(widget, 'refresh_badges'): widget.refresh_badges()
+                    if hasattr(widget, 'refresh_summary'): widget.refresh_summary()
                     break
 
     def _normalize_forced_subtitles(self):
@@ -302,9 +341,12 @@ class ManualSelectionDialog(QDialog):
             if not widget or getattr(widget, 'track_type', None) != 'subtitles':
                 continue
             if hasattr(widget, 'cb_forced') and widget.cb_forced.isChecked():
-                if not first: first = widget
-                else: widget.cb_forced.setChecked(False)
-            if hasattr(widget, 'refresh_label'): widget.refresh_label()
+                if not first:
+                    first = widget
+                else:
+                    widget.cb_forced.setChecked(False)
+            if hasattr(widget, 'refresh_badges'): widget.refresh_badges()
+            if hasattr(widget, 'refresh_summary'): widget.refresh_summary()
 
     # ---------- Accept ----------
     def accept(self):
@@ -320,12 +362,18 @@ class ManualSelectionDialog(QDialog):
             if widget:
                 track_data = widget.track_data.copy()
                 cfg = {}
-                if hasattr(widget, 'cb_default'): cfg['is_default'] = widget.cb_default.isChecked()
-                if hasattr(widget, 'cb_forced'): cfg['is_forced_display'] = widget.cb_forced.isChecked()
-                if hasattr(widget, 'cb_name'): cfg['apply_track_name'] = widget.cb_name.isChecked()
-                if hasattr(widget, 'cb_rescale'): cfg['rescale'] = widget.cb_rescale.isChecked()
-                if hasattr(widget, 'cb_convert'): cfg['convert_to_ass'] = widget.cb_convert.isChecked()
-                if hasattr(widget, 'size_multiplier'): cfg['size_multiplier'] = widget.size_multiplier.value()
+                if hasattr(widget, 'cb_default'):
+                    cfg['is_default'] = widget.cb_default.isChecked()
+                if hasattr(widget, 'cb_forced'):
+                    cfg['is_forced_display'] = widget.cb_forced.isChecked()
+                if hasattr(widget, 'cb_name'):
+                    cfg['apply_track_name'] = widget.cb_name.isChecked()
+                if hasattr(widget, 'cb_rescale'):
+                    cfg['rescale'] = widget.cb_rescale.isChecked()
+                if hasattr(widget, 'cb_convert'):
+                    cfg['convert_to_ass'] = widget.cb_convert.isChecked()
+                if hasattr(widget, 'size_multiplier'):
+                    cfg['size_multiplier'] = widget.size_multiplier.value()
                 track_data.update(cfg)
                 self.manual_layout.append(track_data)
         super().accept()

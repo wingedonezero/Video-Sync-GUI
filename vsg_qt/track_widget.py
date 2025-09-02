@@ -51,6 +51,10 @@ class TrackWidget(QWidget):
         self.summary.setVisible(False)
         root.addWidget(self.summary)
 
+        # Ensure initial render reflects current state
+        self.refresh_badges()
+        self.refresh_summary()
+
     # ---------- Menu construction / synchronization ----------
     def _ensure_menu(self):
         if hasattr(self, 'menu') and self.menu is not None:
@@ -139,6 +143,12 @@ class TrackWidget(QWidget):
                 badges.append("📌")
             if self.cb_rescale.isChecked():
                 badges.append("📏")
+            # Badge when size multiplier != 1.0
+            try:
+                if abs(float(self.size_multiplier.value()) - 1.0) > 1e-6:
+                    badges.append("🔤")
+            except Exception:
+                pass
         badge_str = ("  " + " ".join(badges)) if badges else ""
         return base + name_part + badge_str
 
