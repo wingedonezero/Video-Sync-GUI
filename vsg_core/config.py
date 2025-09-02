@@ -20,7 +20,6 @@ class AppConfig:
             'analysis_lang_ref': '',
             'analysis_lang_sec': '',
             'analysis_lang_ter': '',
-            'workflow': 'Analyze & Merge',
             'scan_chunk_count': 10,
             'scan_chunk_duration': 15,
             'min_match_pct': 5.0,
@@ -39,19 +38,9 @@ class AppConfig:
             'log_progress_step': 20,
             'log_show_options_pretty': False,
             'log_show_options_json': False,
-            'exclude_codecs': '',
             'disable_track_statistics_tags': False,
-            'merge_mode': 'plan',
             'archive_logs': True,
-            'auto_apply_strict': False,
-            'merge_profile': [
-                {"enabled": True, "source": "REF", "type": "Video", "lang": "any", "exclude_langs": "", "priority": 10, "is_default": False, "swap_first_two": False, "apply_track_name": False, "is_forced_display": False, "rescale": False},
-                {"enabled": True, "source": "SEC", "type": "Audio", "lang": "any", "exclude_langs": "", "priority": 20, "is_default": True, "swap_first_two": False, "apply_track_name": False, "is_forced_display": False, "rescale": False},
-                {"enabled": True, "source": "REF", "type": "Audio", "lang": "any", "exclude_langs": "", "priority": 30, "is_default": False, "swap_first_two": False, "apply_track_name": False, "is_forced_display": False, "rescale": False},
-                {"enabled": True, "source": "TER", "type": "Subtitles", "lang": "any", "exclude_langs": "", "priority": 40, "is_default": False, "swap_first_two": False, "apply_track_name": True, "is_forced_display": True, "rescale": True},
-                {"enabled": True, "source": "SEC", "type": "Subtitles", "lang": "any", "exclude_langs": "", "priority": 50, "is_default": True, "swap_first_two": True, "apply_track_name": True, "is_forced_display": False, "rescale": True},
-                {"enabled": True, "source": "REF", "type": "Subtitles", "lang": "any", "exclude_langs": "", "priority": 60, "is_default": False, "swap_first_two": False, "apply_track_name": False, "is_forced_display": False, "rescale": False}
-            ]
+            'auto_apply_strict': False
         }
         self.settings = self.defaults.copy()
         self.load()
@@ -63,19 +52,13 @@ class AppConfig:
             try:
                 with open(self.settings_path, 'r', encoding='utf-8') as f:
                     loaded_settings = json.load(f)
+
+                # Add any missing default keys; ignore unknown legacy keys
                 for key, default_value in self.defaults.items():
                     if key not in loaded_settings:
                         loaded_settings[key] = default_value
                         changed = True
-                if 'merge_profile' in loaded_settings:
-                    for rule in loaded_settings['merge_profile']:
-                        if 'swap_first_two' not in rule: rule['swap_first_two'] = False; changed = True
-                        if 'is_default' not in rule: rule['is_default'] = False; changed = True
-                        if 'exclude_langs' not in rule: rule['exclude_langs'] = ''; changed = True
-                        if 'apply_track_name' not in rule: rule['apply_track_name'] = False; changed = True
-                        if 'is_forced_display' not in rule: rule['is_forced_display'] = False; changed = True
-                        if 'is_forced' in rule: del rule['is_forced']; changed = True
-                        if 'rescale' not in rule: rule['rescale'] = False; changed = True
+
                 self.settings = loaded_settings
             except (json.JSONDecodeError, IOError):
                 self.settings = self.defaults.copy()
@@ -83,6 +66,7 @@ class AppConfig:
         else:
             self.settings = self.defaults.copy()
             changed = True
+
         if changed:
             self.save()
 

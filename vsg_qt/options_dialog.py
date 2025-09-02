@@ -117,11 +117,8 @@ class OptionsDialog(QDialog):
         widget = QWidget()
         layout = QFormLayout(widget)
         self.merge_widgets['apply_dialog_norm_gain'] = QCheckBox('Remove dialog normalization gain (AC3/E-AC3)')
-        self.merge_widgets['exclude_codecs'] = QLineEdit()
-        self.merge_widgets['exclude_codecs'].setPlaceholderText('e.g., ac3, dts, pcm')
         self.merge_widgets['disable_track_statistics_tags'] = QCheckBox('Disable track statistics tags (for purist remuxes)')
         layout.addRow(self.merge_widgets['apply_dialog_norm_gain'])
-        layout.addRow('Exclude codecs (comma-separated):', self.merge_widgets['exclude_codecs'])
         layout.addRow(self.merge_widgets['disable_track_statistics_tags'])
         return widget
 
