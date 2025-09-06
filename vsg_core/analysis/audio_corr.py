@@ -1,3 +1,4 @@
+# vsg_core/analysis/audio_corr.py
 # -*- coding: utf-8 -*-
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple, Callable
@@ -11,7 +12,33 @@ from ..io.runner import CommandRunner
 
 LogFn = Callable[[str], None]
 
+# Common 2->3 letter language code normalization for mkvmerge metadata
+_LANG2TO3 = {
+    'en':'eng','ja':'jpn','jp':'jpn','zh':'zho','cn':'zho','es':'spa','de':'deu','fr':'fra','it':'ita','pt':'por',
+    'ru':'rus','ko':'kor','ar':'ara','tr':'tur','pl':'pol','nl':'nld','sv':'swe','no':'nor','fi':'fin','da':'dan',
+    'cs':'ces','sk':'slk','sl':'slv','hu':'hun','el':'ell','he':'heb','id':'ind','vi':'vie','th':'tha','hi':'hin',
+    'ur':'urd','fa':'fas','uk':'ukr','ro':'ron','bg':'bul','sr':'srp','hr':'hrv','ms':'msa','bn':'ben','ta':'tam','te':'tel'
+}
+
+def _normalize_lang(lang: Optional[str]) -> Optional[str]:
+    """
+    Normalize a user-specified language code to mkvmerge's 3-letter form.
+    - Blank/None -> None (means: pick first available)
+    - 'und' -> None (treat as no preference)
+    - 2-letter codes -> best-effort map to 3-letter
+    - 3+ letters -> lowercased passthrough
+    """
+    if not lang:
+        return None
+    s = lang.strip().lower()
+    if not s or s == 'und':
+        return None
+    if len(s) == 2 and s in _LANG2TO3:
+        return _LANG2TO3[s]
+    return s  # assume already 3-letter (e.g., 'eng', 'jpn', etc.)
+
 def _get_audio_stream_index(mkv_path: str, runner: CommandRunner, tool_paths: dict, language: Optional[str]) -> Optional[int]:
+    desired = _normalize_lang(language)
     out = runner.run(['mkvmerge', '-J', str(mkv_path)], tool_paths)
     if not out:
         return None
@@ -24,8 +51,11 @@ def _get_audio_stream_index(mkv_path: str, runner: CommandRunner, tool_paths: di
                 idx += 1
                 if first_found_idx is None:
                     first_found_idx = idx
-                if language and t.get('properties', {}).get('language') == language:
-                    return idx
+                if desired:
+                    lang = (t.get('properties', {}) or {}).get('language')
+                    if lang and lang.strip().lower() == desired:
+                        return idx
+        # no explicit match or no desired language: take first audio
         return first_found_idx
     except json.JSONDecodeError:
         return None
@@ -67,12 +97,16 @@ def run_audio_correlation(
     runner: CommandRunner, tool_paths: dict, ref_lang: Optional[str],
     target_lang: Optional[str], role_tag: str
 ) -> List[Dict[str, Any]]:
-    idx1 = _get_audio_stream_index(ref_file, runner, tool_paths, language=ref_lang)
-    idx2 = _get_audio_stream_index(target_file, runner, tool_paths, language=target_lang)
+    # Normalize language inputs once here (for logging & selection)
+    ref_norm = _normalize_lang(ref_lang)
+    tgt_norm = _normalize_lang(target_lang)
+
+    idx1 = _get_audio_stream_index(ref_file, runner, tool_paths, language=ref_norm)
+    idx2 = _get_audio_stream_index(target_file, runner, tool_paths, language=tgt_norm)
 
     runner._log_message(
-        f"Selected streams for analysis: REF (lang='{ref_lang or 'first'}', index={idx1}), "
-        f"{role_tag.upper()} (lang='{target_lang or 'first'}', index={idx2})"
+        f"Selected streams for analysis: REF (lang='{ref_norm or 'first'}', index={idx1}), "
+        f"{role_tag.upper()} (lang='{tgt_norm or 'first'}', index={idx2})"
     )
 
     if idx1 is None or idx2 is None:

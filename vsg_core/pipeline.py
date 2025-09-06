@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from typing import List, Dict, Any, Callable, Optional
 
-from .process import CommandRunner
+from .io.runner import CommandRunner
 from .orchestrator.pipeline import Orchestrator
 
 

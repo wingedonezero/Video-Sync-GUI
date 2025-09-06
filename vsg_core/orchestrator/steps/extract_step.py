@@ -4,12 +4,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, Any, List
 
-from vsg_core.process import CommandRunner
+from vsg_core.io.runner import CommandRunner
 from vsg_core.orchestrator.steps.context import Context
 from vsg_core.models.jobs import PlanItem
 from vsg_core.models.media import Track, StreamProps
 from vsg_core.models.enums import SourceRole, TrackType
-from vsg_core import mkv_utils
+from vsg_core.extraction.tracks import extract_tracks
 
 
 class ExtractStep:
@@ -29,9 +29,9 @@ class ExtractStep:
 
         runner._log_message(f"Manual selection: preparing to extract {len(ref_ids)} REF, {len(sec_ids)} SEC, {len(ter_ids)} TER tracks.")
 
-        ref_tracks_ext = mkv_utils.extract_tracks(ctx.ref_file, ctx.temp_dir, runner, ctx.tool_paths, 'ref', specific_tracks=ref_ids)
-        sec_tracks_ext = mkv_utils.extract_tracks(ctx.sec_file, ctx.temp_dir, runner, ctx.tool_paths, 'sec', specific_tracks=sec_ids) if (ctx.sec_file and sec_ids) else []
-        ter_tracks_ext = mkv_utils.extract_tracks(ctx.ter_file, ctx.temp_dir, runner, ctx.tool_paths, 'ter', specific_tracks=ter_ids) if (ctx.ter_file and ter_ids) else []
+        ref_tracks_ext = extract_tracks(ctx.ref_file, ctx.temp_dir, runner, ctx.tool_paths, 'ref', specific_tracks=ref_ids)
+        sec_tracks_ext = extract_tracks(ctx.sec_file, ctx.temp_dir, runner, ctx.tool_paths, 'sec', specific_tracks=sec_ids) if (ctx.sec_file and sec_ids) else []
+        ter_tracks_ext = extract_tracks(ctx.ter_file, ctx.temp_dir, runner, ctx.tool_paths, 'ter', specific_tracks=ter_ids) if (ctx.ter_file and ter_ids) else []
 
         extracted_map: Dict[str, Dict[str, Any]] = {f"{t['source'].upper()}_{t['id']}": t for t in (ref_tracks_ext + sec_tracks_ext + ter_tracks_ext)}
 

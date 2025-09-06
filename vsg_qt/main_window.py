@@ -18,8 +18,8 @@ from .options_dialog import OptionsDialog
 from .worker import JobWorker
 from vsg_core.config import AppConfig
 from vsg_core.job_discovery import discover_jobs
-from vsg_core.process import CommandRunner
-from vsg_core import mkv_utils
+from vsg_core.io.runner import CommandRunner
+from vsg_core.extraction.tracks import get_track_info_for_dialog
 from .manual_selection_dialog import ManualSelectionDialog
 
 
@@ -241,7 +241,7 @@ class MainWindow(QMainWindow):
             for i, job_data in enumerate(initial_jobs):
                 self.status_label.setText(f"Pre-scanning {Path(job_data['ref']).name}...")
                 try:
-                    track_info = mkv_utils.get_track_info_for_dialog(job_data['ref'], job_data.get('sec'), job_data.get('ter'), runner, tool_paths)
+                    track_info = get_track_info_for_dialog(job_data['ref'], job_data.get('sec'), job_data.get('ter'), runner, tool_paths)
                 except Exception as e:
                     msg = f"Could not analyze tracks for {Path(job_data['ref']).name}:\n{e}"
                     QMessageBox.warning(self, "Pre-scan Failed", msg)

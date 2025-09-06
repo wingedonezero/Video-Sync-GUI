@@ -8,7 +8,7 @@ import shutil
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Callable
 
-from vsg_core.process import CommandRunner
+from vsg_core.io.runner import CommandRunner
 from vsg_core.models.settings import AppSettings
 from vsg_core.orchestrator.steps import (
     Context,

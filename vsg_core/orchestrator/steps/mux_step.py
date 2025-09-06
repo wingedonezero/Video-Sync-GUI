@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from vsg_core.process import CommandRunner
+from vsg_core.io.runner import CommandRunner
 from vsg_core.orchestrator.steps.context import Context
 from vsg_core.models.jobs import MergePlan, Delays
 from vsg_core.mux.options_builder import MkvmergeOptionsBuilder
