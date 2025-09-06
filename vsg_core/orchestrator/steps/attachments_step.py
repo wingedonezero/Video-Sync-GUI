@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from vsg_core.io.runner import CommandRunner
 from vsg_core.orchestrator.steps.context import Context
-from vsg_core import mkv_utils
+from vsg_core.extraction.attachments import extract_attachments  # ← direct import
 
 
 class AttachmentsStep:
@@ -14,6 +14,6 @@ class AttachmentsStep:
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
         files = []
         if ctx.and_merge and ctx.ter_file:
-            files = mkv_utils.extract_attachments(ctx.ter_file, ctx.temp_dir, runner, ctx.tool_paths, 'ter') or []
+            files = extract_attachments(ctx.ter_file, ctx.temp_dir, runner, ctx.tool_paths, 'ter') or []
         ctx.attachments = files
         return ctx

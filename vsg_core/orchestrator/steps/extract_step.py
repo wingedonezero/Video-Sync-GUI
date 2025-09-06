@@ -9,7 +9,7 @@ from vsg_core.orchestrator.steps.context import Context
 from vsg_core.models.jobs import PlanItem
 from vsg_core.models.media import Track, StreamProps
 from vsg_core.models.enums import SourceRole, TrackType
-from vsg_core import mkv_utils
+from vsg_core.extraction.tracks import extract_tracks  # ← direct import
 
 
 class ExtractStep:
@@ -27,13 +27,19 @@ class ExtractStep:
         sec_ids = [t['id'] for t in ctx.manual_layout if t.get('source', '').upper() == 'SEC']
         ter_ids = [t['id'] for t in ctx.manual_layout if t.get('source', '').upper() == 'TER']
 
-        runner._log_message(f"Manual selection: preparing to extract {len(ref_ids)} REF, {len(sec_ids)} SEC, {len(ter_ids)} TER tracks.")
+        runner._log_message(
+            f"Manual selection: preparing to extract {len(ref_ids)} REF, "
+            f"{len(sec_ids)} SEC, {len(ter_ids)} TER tracks."
+        )
 
-        ref_tracks_ext = mkv_utils.extract_tracks(ctx.ref_file, ctx.temp_dir, runner, ctx.tool_paths, 'ref', specific_tracks=ref_ids)
-        sec_tracks_ext = mkv_utils.extract_tracks(ctx.sec_file, ctx.temp_dir, runner, ctx.tool_paths, 'sec', specific_tracks=sec_ids) if (ctx.sec_file and sec_ids) else []
-        ter_tracks_ext = mkv_utils.extract_tracks(ctx.ter_file, ctx.temp_dir, runner, ctx.tool_paths, 'ter', specific_tracks=ter_ids) if (ctx.ter_file and ter_ids) else []
+        ref_tracks_ext = extract_tracks(ctx.ref_file, ctx.temp_dir, runner, ctx.tool_paths, 'ref', specific_tracks=ref_ids)
+        sec_tracks_ext = extract_tracks(ctx.sec_file, ctx.temp_dir, runner, ctx.tool_paths, 'sec', specific_tracks=sec_ids) if (ctx.sec_file and sec_ids) else []
+        ter_tracks_ext = extract_tracks(ctx.ter_file, ctx.temp_dir, runner, ctx.tool_paths, 'ter', specific_tracks=ter_ids) if (ctx.ter_file and ter_ids) else []
 
-        extracted_map: Dict[str, Dict[str, Any]] = {f"{t['source'].upper()}_{t['id']}": t for t in (ref_tracks_ext + sec_tracks_ext + ter_tracks_ext)}
+        extracted_map: Dict[str, Dict[str, Any]] = {
+            f"{t['source'].upper()}_{t['id']}": t
+            for t in (ref_tracks_ext + sec_tracks_ext + ter_tracks_ext)
+        }
 
         items: List[PlanItem] = []
         for sel in ctx.manual_layout:
