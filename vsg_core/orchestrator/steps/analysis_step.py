@@ -6,8 +6,7 @@ from typing import Optional, List, Dict, Any
 from vsg_core.io.runner import CommandRunner
 from vsg_core.orchestrator.steps.context import Context
 from vsg_core.models.jobs import Delays
-from vsg_core.analysis.audio_corr import run_audio_correlation
-from vsg_core.analysis.videodiff import run_videodiff
+from vsg_core import analysis as core_analysis
 
 
 def _best_from_results(results: List[Dict[str, Any]], min_match_pct: float) -> Optional[Dict[str, Any]]:
@@ -47,12 +46,12 @@ class AnalysisStep:
         if ctx.sec_file:
             runner._log_message(f'Analyzing Secondary file ({mode})...')
             if mode == 'VideoDiff':
-                delay_ms, err = run_videodiff(ctx.ref_file, ctx.sec_file, ctx.settings_dict, runner, ctx.tool_paths)
+                delay_ms, err = core_analysis.run_videodiff(ctx.ref_file, ctx.sec_file, ctx.settings_dict, runner, ctx.tool_paths)
                 if not (ctx.settings.videodiff_error_min <= err <= ctx.settings.videodiff_error_max):
                     raise RuntimeError(f"VideoDiff error ({err:.2f}) out of bounds.")
                 delay_sec = delay_ms
             else:
-                results = run_audio_correlation(
+                results = core_analysis.run_audio_correlation(
                     ctx.ref_file, ctx.sec_file, ctx.temp_dir, ctx.settings_dict,
                     runner, ctx.tool_paths, ref_lang=ref_lang, target_lang=sec_lang, role_tag='sec'
                 )
@@ -66,12 +65,12 @@ class AnalysisStep:
         if ctx.ter_file:
             runner._log_message(f'Analyzing Tertiary file ({mode})...')
             if mode == 'VideoDiff':
-                delay_ms, err = run_videodiff(ctx.ref_file, ctx.ter_file, ctx.settings_dict, runner, ctx.tool_paths)
+                delay_ms, err = core_analysis.run_videodiff(ctx.ref_file, ctx.ter_file, ctx.settings_dict, runner, ctx.tool_paths)
                 if not (ctx.settings.videodiff_error_min <= err <= ctx.settings.videodiff_error_max):
                     raise RuntimeError(f"VideoDiff error ({err:.2f}) out of bounds.")
                 delay_ter = delay_ms
             else:
-                results = run_audio_correlation(
+                results = core_analysis.run_audio_correlation(
                     ctx.ref_file, ctx.ter_file, ctx.temp_dir, ctx.settings_dict,
                     runner, ctx.tool_paths, ref_lang=ref_lang, target_lang=ter_lang, role_tag='ter'
                 )

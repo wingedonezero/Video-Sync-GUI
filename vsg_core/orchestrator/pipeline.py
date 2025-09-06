@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import time
-import shutil
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Callable
 
@@ -49,13 +48,13 @@ class Orchestrator:
           - chapters_xml (when merging)
           - attachments (when merging)
           - out_file and tokens (when merging)
-        Any exception raised inside a step propagates upward after cleanup.
+        Any exception raised inside a step propagates upward.
         """
 
         # Build typed settings while preserving the raw dict for legacy helpers
         settings = AppSettings.from_config(settings_dict)
 
-        # Per-job temp workspace (separate from UI's log folder). We keep it isolated and clean it.
+        # Per-job temp workspace dedicated to the orchestrator.
         base_temp = Path(settings_dict.get("temp_root", Path.cwd() / "temp_work"))
         job_temp = base_temp / f"orch_{Path(ref_file).stem}_{int(time.time())}"
         job_temp.mkdir(parents=True, exist_ok=True)
@@ -78,48 +77,38 @@ class Orchestrator:
             manual_layout=manual_layout or [],
         )
 
-        try:
-            # --- Analysis (always) ---
-            log('--- Analysis Phase ---')
-            progress(0.10)
-            ctx = AnalysisStep().run(ctx, runner)
+        # --- Analysis (always) ---
+        log('--- Analysis Phase ---')
+        progress(0.10)
+        ctx = AnalysisStep().run(ctx, runner)
 
-            if not and_merge:
-                # Analyze-only path ends here; caller will read delays from ctx
-                return ctx
-
-            # --- Extraction ---
-            log('--- Extraction Phase ---')
-            progress(0.40)
-            ctx = ExtractStep().run(ctx, runner)
-
-            # --- Subtitles transforms ---
-            log('--- Subtitle Processing Phase ---')
-            ctx = SubtitlesStep().run(ctx, runner)
-
-            # --- Chapters ---
-            log('--- Chapters Phase ---')
-            ctx = ChaptersStep().run(ctx, runner)
-
-            # --- Attachments ---
-            log('--- Attachments Phase ---')
-            progress(0.60)
-            ctx = AttachmentsStep().run(ctx, runner)
-
-            # --- Mux token build (no execution here) ---
-            log('--- Merge Planning Phase ---')
-            progress(0.75)
-            ctx = MuxStep().run(ctx, runner)
-
-            # Caller (JobPipeline) will write @opts and invoke mkvmerge.
-            progress(0.80)
+        if not and_merge:
+            # Analyze-only path ends here; caller will read delays from ctx
             return ctx
 
-        finally:
-            # Cleanup our per-job temp workspace. The outer JobPipeline already
-            # archives logs separately and cleans its own temp if applicable.
-            try:
-                shutil.rmtree(job_temp, ignore_errors=True)
-            except Exception:
-                # Non-fatal; nothing else to do here.
-                pass
+        # --- Extraction ---
+        log('--- Extraction Phase ---')
+        progress(0.40)
+        ctx = ExtractStep().run(ctx, runner)
+
+        # --- Subtitles transforms ---
+        log('--- Subtitle Processing Phase ---')
+        ctx = SubtitlesStep().run(ctx, runner)
+
+        # --- Chapters ---
+        log('--- Chapters Phase ---')
+        ctx = ChaptersStep().run(ctx, runner)
+
+        # --- Attachments ---
+        log('--- Attachments Phase ---')
+        progress(0.60)
+        ctx = AttachmentsStep().run(ctx, runner)
+
+        # --- Mux token build (no execution here) ---
+        log('--- Merge Planning Phase ---')
+        progress(0.75)
+        ctx = MuxStep().run(ctx, runner)
+
+        # Caller (JobPipeline) will write @opts and invoke mkvmerge.
+        progress(0.80)
+        return ctx

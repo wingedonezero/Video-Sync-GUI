@@ -80,10 +80,12 @@ class JobPipeline:
             log_to_all('[ERROR] Manual layout required for merge (Manual Selection is the only merge method).')
             return {'status': 'Failed', 'error': 'Manual layout required for merge', 'name': Path(ref_file).name}
 
+        # Our own small temp just for @opts.json
         job_temp = Path(self.config['temp_root']) / f'job_{Path(ref_file).stem}_{int(time.time())}'
         job_temp.mkdir(parents=True, exist_ok=True)
 
         merge_ok = False
+        ctx_temp_dir: Optional[Path] = None  # orchestrator temp to clean later
         try:
             log_to_all('--- Initializing Job ---')
             self.progress(0.0)
@@ -103,6 +105,12 @@ class JobPipeline:
                 manual_layout=manual_layout or []
             )
 
+            # Keep a handle to orchestrator temp so we can clean it AFTER mkvmerge
+            try:
+                ctx_temp_dir = Path(getattr(ctx, 'temp_dir', None)) if getattr(ctx, 'temp_dir', None) else None
+            except Exception:
+                ctx_temp_dir = None
+
             # Analyze-only: return delays (unchanged)
             if not and_merge:
                 log_to_all('--- Analysis Complete (No Merge) ---')
@@ -120,6 +128,7 @@ class JobPipeline:
             if not ctx.tokens:
                 raise RuntimeError('Internal error: mkvmerge tokens were not generated.')
 
+            # Write @opts.json and execute mkvmerge
             opts_path = self._write_mkvmerge_opts(ctx.tokens, job_temp, runner)
 
             merge_ok = runner.run(['mkvmerge', f'@{opts_path}'], self.tool_paths) is not None
@@ -141,8 +150,16 @@ class JobPipeline:
             log_to_all(f'[FATAL ERROR] Job failed: {e}')
             return {'status': 'Failed', 'error': str(e), 'name': Path(ref_file).name}
         finally:
-            if not and_merge or merge_ok:
+            # Clean both temps AFTER mkvmerge/analysis completes
+            try:
+                if ctx_temp_dir and ctx_temp_dir.exists():
+                    shutil.rmtree(ctx_temp_dir, ignore_errors=True)
+            except Exception:
+                pass
+            try:
                 shutil.rmtree(job_temp, ignore_errors=True)
+            except Exception:
+                pass
             log_to_all('=== Job Finished ===')
             handler.close()
             logger.removeHandler(handler)

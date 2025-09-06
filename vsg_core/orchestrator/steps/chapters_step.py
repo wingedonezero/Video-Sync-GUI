@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from vsg_core.io.runner import CommandRunner
 from vsg_core.orchestrator.steps.context import Context
-from vsg_core.chapters.process import process_chapters
+from vsg_core import mkv_utils
 
 
 class ChaptersStep:
@@ -18,7 +18,7 @@ class ChaptersStep:
             return ctx
 
         shift_ms = ctx.delays.global_shift_ms if ctx.delays else 0
-        xml_path = process_chapters(
+        xml_path = mkv_utils.process_chapters(
             ctx.ref_file,
             ctx.temp_dir,
             runner,
