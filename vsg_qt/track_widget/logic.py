@@ -1,6 +1,9 @@
+# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 from PySide6.QtWidgets import QMenu, QWidgetAction
 from .helpers import compose_label_text, build_summary_text
+
 
 class TrackWidgetLogic:
     """
@@ -10,6 +13,7 @@ class TrackWidgetLogic:
     def __init__(self, view):
         self.v = view
         self._menu = None
+        self._in_apply = False  # reentrancy guard
         self._install_menu()
         self.refresh_badges()
         self.refresh_summary()
@@ -29,10 +33,12 @@ class TrackWidgetLogic:
         act.setDefaultWidget(container)
         self._menu.addAction(act)
 
-        # Sync on show
+        # Sync on show (no-op but kept for symmetry/extensibility)
         self._menu.aboutToShow.connect(self.sync_state_to_menu)
-        # Apply live on toggle/value change (already connected in _build_menu_form)
 
+        # The controls in the menu are the SAME widgets as the hidden state.
+        # Their signals are already connected in TrackWidget.ui to call
+        # self.apply_state_from_menu() on change.
         v.btn.setMenu(self._menu)
 
     def sync_state_to_menu(self):
@@ -40,18 +46,23 @@ class TrackWidgetLogic:
         Copy current hidden state -> visible menu controls (they are the same widgets).
         Nothing to do since we show the same widgets; kept for symmetry/extensibility.
         """
-        # No-op: the menu uses the same underlying widgets.
+        # No-op.
         pass
 
     def apply_state_from_menu(self):
         """
-        Copy menu controls -> hidden state (they are the same), then refresh UI.
+        Menu controls and hidden state are the same widgets now, so there is
+        nothing to copy. Just refresh UI; DO NOT emit toggled here or we will
+        recurse via our own signal connections.
         """
-        # No-op for same reason; ensure UI reflects any changes.
-        # Emit toggled if default changed to allow upstream normalization.
-        self._emit_default_toggled_if_changed()
-        self.refresh_badges()
-        self.refresh_summary()
+        if self._in_apply:
+            return
+        self._in_apply = True
+        try:
+            self.refresh_badges()
+            self.refresh_summary()
+        finally:
+            self._in_apply = False
 
     # ----- UI refresh -----
     def refresh_badges(self):
@@ -77,16 +88,6 @@ class TrackWidgetLogic:
             'rescale': v.cb_rescale.isChecked(),
             'size_multiplier': v.size_multiplier.value() if v.track_type == 'subtitles' else 1.0
         }
-
-    # ----- Internal -----
-    def _emit_default_toggled_if_changed(self):
-        v = self.v
-        # When menu toggles default, we want to signal upstream enforcement.
-        # We simulate "change detection" by toggling emit manually.
-        try:
-            v.cb_default.toggled.emit(v.cb_default.isChecked())
-        except Exception:
-            pass
 
 
 # Small wrapper to keep helpers import-local for logic
