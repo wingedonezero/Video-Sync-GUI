@@ -165,17 +165,27 @@ class JobPipeline:
             logger.removeHandler(handler)
 
     # --------------------------------------------------------------------------------------------
-    # opts.json writer (unchanged behavior)
+    # opts.json writer (honor pretty + json logging flags)
     # --------------------------------------------------------------------------------------------
     def _write_mkvmerge_opts(self, tokens, temp_dir: Path, runner: CommandRunner) -> str:
         opts_path = temp_dir / 'opts.json'
         try:
+            # Always write raw tokens JSON file used by mkvmerge @opts
             opts_path.write_text(json.dumps(tokens, ensure_ascii=False), encoding='utf-8')
             runner._log_message(f'mkvmerge options file written to: {opts_path}')
+
+            # Optional: inline raw JSON in the log
+            if self.config.get('log_show_options_json'):
+                runner._log_message('--- mkvmerge options (json) ---\n' +
+                                    json.dumps(tokens, indent=2, ensure_ascii=False) +
+                                    '\n-------------------------------')
+
+            # Optional: pretty shell-like one-per-line form
             if self.config.get('log_show_options_pretty'):
                 pretty_path = temp_dir / 'opts.pretty.txt'
                 pretty_path.write_text(' \\\n  '.join(tokens), encoding='utf-8')
                 runner._log_message(f'--- mkvmerge options (pretty) ---\n{pretty_path.read_text()}\n-------------------------------')
+
             return str(opts_path)
         except Exception as e:
             raise IOError(f"Failed to write mkvmerge options file: {e}")

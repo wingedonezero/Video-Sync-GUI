@@ -1,51 +1,23 @@
 # vsg_qt/manual_selection_dialog.py
 # -*- coding: utf-8 -*-
 
-from PySide6.QtCore import Qt, QPoint
+from __future__ import annotations
+from typing import Dict, List, Tuple
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QDialogButtonBox,
-    QListWidget, QAbstractItemView, QListWidgetItem, QGroupBox, QMenu,
-    QScrollArea, QWidget
+    QGroupBox, QScrollArea, QWidget
 )
-from PySide6.QtGui import QColor
-from .track_widget import TrackWidget
 
-
-class FinalListWidget(QListWidget):
-    """Final output list with drag-drop from source lists and light helpers."""
-    def __init__(self, dialog, parent=None):
-        super().__init__(parent)
-        self.dialog = dialog
-        self.setDragEnabled(True)
-        self.setAcceptDrops(True)
-        self.setDropIndicatorShown(True)
-        self.setDefaultDropAction(Qt.MoveAction)
-        self.setSelectionMode(QAbstractItemView.SingleSelection)
-
-    def dropEvent(self, event):
-        source = event.source()
-        if source and source != self:
-            source_item = source.currentItem()
-            if source_item:
-                track_data = source_item.data(Qt.UserRole)
-                if track_data:
-                    # Guardrail: block SEC/TER video
-                    if self.dialog.is_blocked_video(track_data):
-                        event.ignore()
-                        return
-                    self.dialog.add_track_to_final_list(track_data)
-            event.accept()
-        else:
-            super().dropEvent(event)
-
+from vsg_qt.manual import SourceTrackList, FinalPlanList
 
 class ManualSelectionDialog(QDialog):
     """
-    Manual track selection dialog
-    LEFT: a single scroll column with three sections (REF/SEC/TER).
-    RIGHT: Final Output list that accepts drags; per-item inline “Settings…” dropdown.
+    Manual track selection dialog (modular):
+      LEFT: SourceTrackList per REF/SEC/TER in a single scroll column
+      RIGHT: FinalPlanList that holds TrackWidgets
     """
-    def __init__(self, track_info, parent=None, previous_layout=None):
+    def __init__(self, track_info: Dict[str, List[dict]], parent=None, previous_layout: List[dict] | None = None):
         super().__init__(parent)
         self.setWindowTitle("Manual Track Selection")
         self.setMinimumSize(1200, 700)
@@ -54,139 +26,96 @@ class ManualSelectionDialog(QDialog):
 
         root = QVBoxLayout(self)
 
-        # Banner for pre-population notice
+        # banner
         self.info_label = QLabel()
         self.info_label.setVisible(False)
         self.info_label.setStyleSheet("color: green; font-weight: bold;")
         root.addWidget(self.info_label, 0, Qt.AlignCenter)
 
-        main_row = QHBoxLayout()
+        row = QHBoxLayout()
 
-        # ---- LEFT: single scroll column with three sections ----
-        left_scroll = QScrollArea()
-        left_scroll.setWidgetResizable(True)
-        left_wrap = QWidget()
-        left_v = QVBoxLayout(left_wrap)
-        left_v.setContentsMargins(0, 0, 0, 0)
+        # left scroll column
+        left_scroll = QScrollArea(); left_scroll.setWidgetResizable(True)
+        left_wrap = QWidget(); left_v = QVBoxLayout(left_wrap); left_v.setContentsMargins(0,0,0,0)
 
-        self.ref_list = self._create_source_list("Reference Tracks")
-        self.sec_list = self._create_source_list("Secondary Tracks")
-        self.ter_list = self._create_source_list("Tertiary Tracks")
+        self.ref_list = SourceTrackList(is_blocked=self.is_blocked_video, on_add=self._add_to_final)
+        self.sec_list = SourceTrackList(is_blocked=self.is_blocked_video, on_add=self._add_to_final)
+        self.ter_list = SourceTrackList(is_blocked=self.is_blocked_video, on_add=self._add_to_final)
 
-        for title, lw in [
-            ("Reference Tracks", self.ref_list),
-            ("Secondary Tracks", self.sec_list),
-            ("Tertiary Tracks", self.ter_list),
-        ]:
-            group = QGroupBox(title)
-            gl = QVBoxLayout(group)
-            gl.addWidget(lw)
-            left_v.addWidget(group)
+        for title, lw in [("Reference Tracks", self.ref_list),
+                          ("Secondary Tracks", self.sec_list),
+                          ("Tertiary Tracks", self.ter_list)]:
+            grp = QGroupBox(title); gl = QVBoxLayout(grp); gl.addWidget(lw); left_v.addWidget(grp)
 
         left_v.addStretch(1)
         left_scroll.setWidget(left_wrap)
-        main_row.addWidget(left_scroll, 1)
+        row.addWidget(left_scroll, 1)
 
-        # ---- RIGHT: Final Output ----
-        self.final_list = FinalListWidget(self)
+        # right: final list
+        self.final_list = FinalPlanList(self)
         final_group = QGroupBox("Final Output (Drag to reorder)")
-        final_layout = QVBoxLayout(final_group)
-        final_layout.addWidget(self.final_list)
-        main_row.addWidget(final_group, 2)
+        vg = QVBoxLayout(final_group); vg.addWidget(self.final_list)
+        row.addWidget(final_group, 2)
 
-        root.addLayout(main_row)
+        root.addLayout(row)
 
-        # Configure + populate
-        self._configure_source_lists()
-        self._populate_source_lists()
-        self._wire_double_clicks()
+        # populate sources
+        self._populate_sources()
 
+        # pre-populate from previous abstract layout (optional)
         if previous_layout:
             self.info_label.setText("✅ Pre-populated with the layout from the previous file.")
             self.info_label.setVisible(True)
-            self._prepopulate_from_layout(previous_layout)
+            for td in self._materialize_from_previous(previous_layout):
+                if not self.is_blocked_video(td):
+                    self.final_list.add_track(td, from_prepopulation=True)
 
-        # Context menu on Final list for quick actions
-        self.final_list.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.final_list.customContextMenuRequested.connect(self._show_context_menu)
+        # ok/cancel
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        root.addWidget(btns)
 
-        # Ok/Cancel
-        self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        self.button_box.accepted.connect(self.accept)
-        self.button_box.rejected.connect(self.reject)
-        root.addWidget(self.button_box)
-
-    # ---------- Source Lists ----------
-    def _create_source_list(self, _title):
-        lw = QListWidget()
-        return lw
-
-    def _configure_source_lists(self):
-        for source_list in (self.ref_list, self.sec_list, self.ter_list):
-            source_list.setDragEnabled(True)
-            source_list.setSelectionMode(QAbstractItemView.SingleSelection)
-            source_list.setDefaultDropAction(Qt.CopyAction)
-
+    # ---------- policies ----------
     def is_blocked_video(self, track_data: dict) -> bool:
-        """SEC/TER video is not allowed to enter the final plan."""
+        """SEC/TER video may not be added to final plan."""
         try:
-            return (track_data.get('type', '').lower() == 'video' and
-                    track_data.get('source', '').upper() in ('SEC', 'TER'))
+            return (track_data.get('type','').lower() == 'video' and
+                    track_data.get('source','').upper() in ('SEC','TER'))
         except Exception:
             return False
 
-    def _populate_source_lists(self):
-        source_map = {'REF': self.ref_list, 'SEC': self.sec_list, 'TER': self.ter_list}
-        for source_key, list_widget in source_map.items():
-            for track in self.track_info.get(source_key, []):
-                name_part = f" '{track['name']}'" if track['name'] else ""
-                item_text = (f"[{track['type'][0].upper()}-{track['id']}] "
-                             f"{track['codec_id']} ({track['lang']}){name_part}")
-                item = QListWidgetItem(item_text, list_widget)
-                item.setData(Qt.UserRole, track)
+    # ---------- population ----------
+    def _populate_sources(self):
+        self.ref_list.populate(self.track_info.get('REF', []))
+        self.sec_list.populate(self.track_info.get('SEC', []))
+        self.ter_list.populate(self.track_info.get('TER', []))
 
-                # Guardrail: visually disable SEC/TER video (cannot be dragged or selected)
-                if self.is_blocked_video(track):
-                    flags = item.flags()
-                    flags &= ~Qt.ItemIsDragEnabled
-                    flags &= ~Qt.ItemIsEnabled
-                    item.setFlags(flags)
-                    item.setForeground(QColor('#888'))
-                    item.setToolTip("Video from Secondary/Tertiary is disabled. REF-only video is allowed.")
+    # ---------- bridge: source -> final ----------
+    def _add_to_final(self, track_data: dict):
+        if not self.is_blocked_video(track_data):
+            self.final_list.add_track(track_data)
 
-    def _wire_double_clicks(self):
-        """Enable double-click to add from any source list to Final Output (with guardrail)."""
-        for lw in (self.ref_list, self.sec_list, self.ter_list):
-            lw.itemDoubleClicked.connect(self._on_source_item_double_clicked)
-
-    def _on_source_item_double_clicked(self, item: QListWidgetItem):
-        if not item:
-            return
-        td = item.data(Qt.UserRole)
-        if td:
-            if self.is_blocked_video(td):
-                return
-            self.add_track_to_final_list(td)
-
-    # ---------- Pre-populate Final list from previous layout (by order within source/type) ----------
-    def _prepopulate_from_layout(self, layout):
+    # ---------- previous layout materialization (by order within (source,type)) ----------
+    def _materialize_from_previous(self, layout: List[dict]) -> List[dict]:
         pools = {}
-        counters = {}
-        for src in ('REF', 'SEC', 'TER'):
+        counters: Dict[Tuple[str,str], int] = {}
+        for src in ('REF','SEC','TER'):
             for t in self.track_info.get(src, []):
-                key = (src, t['type'], counters.get((src, t['type']), 0))
+                key = (src, t['type'], counters.get((src,t['type']), 0))
                 pools[key] = t
-                counters[(src, t['type'])] = counters.get((src, t['type']), 0) + 1
+                counters[(src,t['type'])] = counters.get((src,t['type']), 0) + 1
 
         counters.clear()
+        realized = []
         for prev in layout:
             src, ttype = prev['source'], prev['type']
             idx = counters.get((src, ttype), 0)
             key = (src, ttype, idx)
             match = pools.get(key)
             if match:
-                data = match.copy()
-                data.update({
+                td = match.copy()
+                td.update({
                     'is_default': prev.get('is_default', False),
                     'is_forced_display': prev.get('is_forced_display', False),
                     'apply_track_name': prev.get('apply_track_name', False),
@@ -194,211 +123,51 @@ class ManualSelectionDialog(QDialog):
                     'rescale': prev.get('rescale', False),
                     'size_multiplier': prev.get('size_multiplier', 1.0),
                 })
-                # Even if the previous layout had SEC/TER video, guardrail prevents adding
-                if not self.is_blocked_video(data):
-                    self.add_track_to_final_list(data, from_prepopulation=True)
+                realized.append(td)
             counters[(src, ttype)] = idx + 1
+        return realized
 
-    # ---------- Add a selected track to Final Output ----------
-    def add_track_to_final_list(self, track_data, from_prepopulation=False):
-        item = QListWidgetItem()
-        self.final_list.addItem(item)
-        widget = TrackWidget(track_data)
-
-        if from_prepopulation:
-            if hasattr(widget, 'cb_default'): widget.cb_default.setChecked(track_data.get('is_default', False))
-            if hasattr(widget, 'cb_forced'): widget.cb_forced.setChecked(track_data.get('is_forced_display', False))
-            if hasattr(widget, 'cb_name'): widget.cb_name.setChecked(track_data.get('apply_track_name', False))
-            if hasattr(widget, 'cb_rescale'): widget.cb_rescale.setChecked(track_data.get('rescale', False))
-            if hasattr(widget, 'size_multiplier'): widget.size_multiplier.setValue(track_data.get('size_multiplier', 1.0))
-            if 'S_TEXT/UTF8' in (getattr(widget, 'codec_id', '') or '').upper():
-                if hasattr(widget, 'cb_convert'): widget.cb_convert.setChecked(track_data.get('convert_to_ass', False))
-            if hasattr(widget, 'refresh_badges'): widget.refresh_badges()
-            if hasattr(widget, 'refresh_summary'): widget.refresh_summary()
-
-        # Enforce one default per track type in real time
-        if hasattr(widget, 'cb_default'):
-            widget.cb_default.clicked.connect(lambda checked, w=widget: self._enforce_single_default(checked, w))
-
-        item.setSizeHint(widget.sizeHint())
-        self.final_list.setItemWidget(item, widget)
-        self.final_list.setCurrentItem(item)
-        self.final_list.scrollToItem(item)
-
-    # ---------- Context menu ----------
-    def _show_context_menu(self, pos: QPoint):
-        item = self.final_list.itemAt(pos)
-        if not item:
-            return
-        widget = self.final_list.itemWidget(item)
-        menu = QMenu(self)
-
-        act_up = menu.addAction("Move Up")
-        act_down = menu.addAction("Move Down")
-        menu.addSeparator()
-        act_default = menu.addAction("Make Default")
-        if getattr(widget, 'track_type', '') == 'subtitles':
-            act_forced = menu.addAction("Toggle Forced")
-        else:
-            act_forced = None
-        menu.addSeparator()
-        act_delete = menu.addAction("Delete")
-
-        action = menu.exec_(self.final_list.mapToGlobal(pos))
-        if not action:
-            return
-
-        if action == act_up:
-            self._move_item(-1)
-        elif action == act_down:
-            self._move_item(+1)
-        elif action == act_default:
-            if hasattr(widget, 'cb_default'):
-                widget.cb_default.setChecked(True)
-                self._normalize_single_default_for_type(widget.track_type, prefer_widget=widget)
-                if hasattr(widget, 'refresh_badges'): widget.refresh_badges()
-                if hasattr(widget, 'refresh_summary'): widget.refresh_summary()
-        elif act_forced and action == act_forced:
-            if hasattr(widget, 'cb_forced'):
-                widget.cb_forced.setChecked(not widget.cb_forced.isChecked())
-                self._normalize_forced_subtitles()
-                if hasattr(widget, 'refresh_badges'): widget.refresh_badges()
-                if hasattr(widget, 'refresh_summary'): widget.refresh_summary()
-        elif action == act_delete:
-            row = self.final_list.row(item)
-            self.final_list.takeItem(row)
-
-    def _move_item(self, delta: int):
-        item = self.final_list.currentItem()
-        if not item:
-            return
-        row = self.final_list.row(item)
-        new_row = row + delta
-        if 0 <= new_row < self.final_list.count():
-            it = self.final_list.takeItem(row)
-            self.final_list.insertItem(new_row, it)
-            self.final_list.setCurrentItem(it)
-
-    # ---------- Keyboard helpers ----------
+    # ---------- keyboard helpers ----------
     def keyPressEvent(self, event):
         if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Up:
-            self._move_item(-1); event.accept(); return
+            self.final_list.move_selected(-1); event.accept(); return
         if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Down:
-            self._move_item(+1); event.accept(); return
+            self.final_list.move_selected(+1); event.accept(); return
         if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_D:
-            item = self.final_list.currentItem()
-            if item:
-                w = self.final_list.itemWidget(item)
+            it = self.final_list.currentItem()
+            if it:
+                w = self.final_list.itemWidget(it)
                 if hasattr(w, 'cb_default'):
                     w.cb_default.setChecked(True)
-                    self._normalize_single_default_for_type(w.track_type, prefer_widget=w)
+                    self.final_list.normalize_single_default_for_type(w.track_type, prefer_widget=w)
                     if hasattr(w, 'refresh_badges'): w.refresh_badges()
                     if hasattr(w, 'refresh_summary'): w.refresh_summary()
             event.accept(); return
         if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_F:
-            item = self.final_list.currentItem()
-            if item:
-                w = self.final_list.itemWidget(item)
+            it = self.final_list.currentItem()
+            if it:
+                w = self.final_list.itemWidget(it)
                 if getattr(w, 'track_type', '') == 'subtitles' and hasattr(w, 'cb_forced'):
                     w.cb_forced.setChecked(not w.cb_forced.isChecked())
-                    self._normalize_forced_subtitles()
+                    self.final_list.normalize_forced_subtitles()
                     if hasattr(w, 'refresh_badges'): w.refresh_badges()
                     if hasattr(w, 'refresh_summary'): w.refresh_summary()
             event.accept(); return
         if event.key() == Qt.Key_Delete:
-            item = self.final_list.currentItem()
-            if item:
-                row = self.final_list.row(item)
+            it = self.final_list.currentItem()
+            if it:
+                row = self.final_list.row(it)
                 self.final_list.takeItem(row)
             event.accept(); return
         super().keyPressEvent(event)
 
-    # ---------- Normalization helpers ----------
-    def _enforce_single_default(self, checked, sender_widget):
-        if not checked:
-            return
-        sender_type = sender_widget.track_type
-        for i in range(self.final_list.count()):
-            item = self.final_list.item(i)
-            widget = self.final_list.itemWidget(item)
-            if widget and widget is not sender_widget and widget.track_type == sender_type:
-                if hasattr(widget, 'cb_default'):
-                    widget.cb_default.setChecked(False)
-                    if hasattr(widget, 'refresh_badges'): widget.refresh_badges()
-                    if hasattr(widget, 'refresh_summary'): widget.refresh_summary()
-
-    def _normalize_single_default_for_type(self, ttype, prefer_widget=None):
-        first_found = None
-        for i in range(self.final_list.count()):
-            item = self.final_list.item(i)
-            widget = self.final_list.itemWidget(item)
-            if not widget or getattr(widget, 'track_type', None) != ttype:
-                continue
-            if hasattr(widget, 'cb_default'):
-                if prefer_widget and widget is prefer_widget:
-                    widget.cb_default.setChecked(True)
-                    first_found = widget
-                elif widget.cb_default.isChecked():
-                    if not first_found:
-                        first_found = widget
-                    else:
-                        widget.cb_default.setChecked(False)
-                if hasattr(widget, 'refresh_badges'): widget.refresh_badges()
-                if hasattr(widget, 'refresh_summary'): widget.refresh_summary()
-
-        if not first_found:
-            for i in range(self.final_list.count()):
-                item = self.final_list.item(i)
-                widget = self.final_list.itemWidget(item)
-                if widget and getattr(widget, 'track_type', None) == ttype and hasattr(widget, 'cb_default'):
-                    widget.cb_default.setChecked(True)
-                    if hasattr(widget, 'refresh_badges'): widget.refresh_badges()
-                    if hasattr(widget, 'refresh_summary'): widget.refresh_summary()
-                    break
-
-    def _normalize_forced_subtitles(self):
-        first = None
-        for i in range(self.final_list.count()):
-            item = self.final_list.item(i)
-            widget = self.final_list.itemWidget(item)
-            if not widget or getattr(widget, 'track_type', None) != 'subtitles':
-                continue
-            if hasattr(widget, 'cb_forced') and widget.cb_forced.isChecked():
-                if not first:
-                    first = widget
-                else:
-                    widget.cb_forced.setChecked(False)
-            if hasattr(widget, 'refresh_badges'): widget.refresh_badges()
-            if hasattr(widget, 'refresh_summary'): widget.refresh_summary()
-
-    # ---------- Accept ----------
+    # ---------- accept ----------
     def accept(self):
         # normalize before building
-        self._normalize_single_default_for_type('audio')
-        self._normalize_single_default_for_type('subtitles')
-        self._normalize_forced_subtitles()
-
-        self.manual_layout = []
-        for i in range(self.final_list.count()):
-            item = self.final_list.item(i)
-            widget = self.final_list.itemWidget(item)
-            if widget:
-                track_data = widget.track_data.copy()
-                cfg = {}
-                if hasattr(widget, 'cb_default'):
-                    cfg['is_default'] = widget.cb_default.isChecked()
-                if hasattr(widget, 'cb_forced'):
-                    cfg['is_forced_display'] = widget.cb_forced.isChecked()
-                if hasattr(widget, 'cb_name'):
-                    cfg['apply_track_name'] = widget.cb_name.isChecked()
-                if hasattr(widget, 'cb_rescale'):
-                    cfg['rescale'] = widget.cb_rescale.isChecked()
-                if hasattr(widget, 'cb_convert'):
-                    cfg['convert_to_ass'] = widget.cb_convert.isChecked()
-                if hasattr(widget, 'size_multiplier'):
-                    cfg['size_multiplier'] = widget.size_multiplier.value()
-                track_data.update(cfg)
-                self.manual_layout.append(track_data)
+        self.final_list.normalize_single_default_for_type('audio')
+        self.final_list.normalize_single_default_for_type('subtitles')
+        self.final_list.normalize_forced_subtitles()
+        self.manual_layout = self.final_list.build_layout()
         super().accept()
 
     def get_manual_layout(self):
