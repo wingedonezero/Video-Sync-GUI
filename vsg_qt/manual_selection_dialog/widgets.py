@@ -1,3 +1,4 @@
+# vsg_qt/manual_selection_dialog/widgets.py
 from __future__ import annotations
 from typing import Optional
 from PySide6.QtCore import Qt, QPoint
@@ -19,7 +20,7 @@ class SourceList(QListWidget):
     def add_track_item(self, track: dict, guard_block: bool):
         name_part = f" '{track['name']}'" if track.get('name') else ""
         item_text = (f"[{track['type'][0].upper()}-{track['id']}] "
-                     f"{track.get('codec_id','')} ({track.get('lang','und')}){name_part}")
+                       f"{track.get('codec_id','')} ({track.get('lang','und')}){name_part}")
         it = QListWidgetItem(item_text, self)
         it.setData(Qt.UserRole, track)
 
@@ -69,19 +70,23 @@ class FinalList(QListWidget):
 
         widget = TrackWidget(track_data)
 
-        # If pre-populating with saved flags
+        # Connect the style editor button to the dialog's launch method
+        if hasattr(widget, 'style_editor_btn'):
+            # FIX: The lambda now accepts the 'checked' boolean from the signal, preventing it
+            # from overriding the 'w' variable which correctly holds the widget instance.
+            widget.style_editor_btn.clicked.connect(lambda checked, w=widget: self.dialog._launch_style_editor(w))
+
         if preset:
-            if hasattr(widget, 'cb_default'):    widget.cb_default.setChecked(track_data.get('is_default', False))
-            if hasattr(widget, 'cb_forced'):     widget.cb_forced.setChecked(track_data.get('is_forced_display', False))
-            if hasattr(widget, 'cb_name'):       widget.cb_name.setChecked(track_data.get('apply_track_name', False))
-            if hasattr(widget, 'cb_rescale'):    widget.cb_rescale.setChecked(track_data.get('rescale', False))
+            if hasattr(widget, 'cb_default'):   widget.cb_default.setChecked(track_data.get('is_default', False))
+            if hasattr(widget, 'cb_forced'):    widget.cb_forced.setChecked(track_data.get('is_forced_display', False))
+            if hasattr(widget, 'cb_name'):      widget.cb_name.setChecked(track_data.get('apply_track_name', False))
+            if hasattr(widget, 'cb_rescale'):   widget.cb_rescale.setChecked(track_data.get('rescale', False))
             if hasattr(widget, 'size_multiplier'): widget.size_multiplier.setValue(track_data.get('size_multiplier', 1.0))
             if 'S_TEXT/UTF8' in (getattr(widget, 'codec_id', '') or '').upper():
                 if hasattr(widget, 'cb_convert'): widget.cb_convert.setChecked(track_data.get('convert_to_ass', False))
             if hasattr(widget, 'refresh_badges'):  widget.refresh_badges()
             if hasattr(widget, 'refresh_summary'): widget.refresh_summary()
 
-        # enforce one-default-per-type in real time
         if hasattr(widget, 'cb_default'):
             widget.cb_default.clicked.connect(lambda checked, w=widget: self._enforce_single_default(checked, w))
 
@@ -93,40 +98,45 @@ class FinalList(QListWidget):
     # ---- Context menu ----
     def _show_context_menu(self, pos: QPoint):
         item = self.itemAt(pos)
-        if not item:
-            return
+        if not item: return
         widget = self.itemWidget(item)
         menu = QMenu(self)
+
+        is_subs = getattr(widget, 'track_type', '') == 'subtitles'
 
         act_up = menu.addAction("Move Up")
         act_down = menu.addAction("Move Down")
         menu.addSeparator()
+
+        act_copy = menu.addAction("✂️ Copy Styles")
+        act_paste = menu.addAction("📋 Paste Styles")
+        act_copy.setEnabled(is_subs)
+        act_paste.setEnabled(is_subs and self.dialog._style_clipboard is not None)
+        menu.addSeparator()
+
         act_default = menu.addAction("Make Default")
-        act_forced = menu.addAction("Toggle Forced") if getattr(widget, 'track_type', '') == 'subtitles' else None
+        act_forced = menu.addAction("Toggle Forced") if is_subs else None
         menu.addSeparator()
         act_del = menu.addAction("Delete")
 
         act = menu.exec_(self.mapToGlobal(pos))
-        if not act:
-            return
-        if act == act_up:
-            self._move_by(-1)
-        elif act == act_down:
-            self._move_by(+1)
+        if not act: return
+
+        if act == act_up: self._move_by(-1)
+        elif act == act_down: self._move_by(+1)
+        elif act == act_copy: self.dialog._copy_styles(widget)
+        elif act == act_paste: self.dialog._paste_styles(widget)
         elif act == act_default and hasattr(widget, 'cb_default'):
             widget.cb_default.setChecked(True)
             ManualLogic.normalize_single_default_for_type(self._widgets_of_type('audio') + self._widgets_of_type('subtitles'),
-                                                          widget.track_type, prefer_widget=widget)
-            if hasattr(widget, 'refresh_badges'):  widget.refresh_badges()
-            if hasattr(widget, 'refresh_summary'): widget.refresh_summary()
+                                                        widget.track_type, prefer_widget=widget)
+            widget.refresh_badges(); widget.refresh_summary()
         elif act_forced and act == act_forced and hasattr(widget, 'cb_forced'):
             widget.cb_forced.setChecked(not widget.cb_forced.isChecked())
             ManualLogic.normalize_forced_subtitles(self._widgets_of_type('subtitles'))
-            if hasattr(widget, 'refresh_badges'):  widget.refresh_badges()
-            if hasattr(widget, 'refresh_summary'): widget.refresh_summary()
+            widget.refresh_badges(); widget.refresh_summary()
         elif act == act_del:
-            row = self.row(item)
-            self.takeItem(row)
+            self.takeItem(self.row(item))
 
     # ---- helpers ----
     def _move_by(self, delta: int):
@@ -149,9 +159,7 @@ class FinalList(QListWidget):
         return out
 
     def _enforce_single_default(self, checked, sender_widget):
-        if not checked:
-            return
-        # ensure single default among same type
+        if not checked: return
         ManualLogic.normalize_single_default_for_type(
             self._widgets_of_type(sender_widget.track_type),
             sender_widget.track_type,

@@ -1,3 +1,4 @@
+# vsg_qt/track_widget/helpers.py
 from __future__ import annotations
 
 def compose_label_text(w) -> str:
@@ -25,6 +26,9 @@ def compose_label_text(w) -> str:
                 badges.append("🔤")
         except Exception:
             pass
+        if w.track_data.get('user_modified_path'):
+            badges.append("📝")
+
 
     badge_str = ("  " + " ".join(badges)) if badges else ""
     return base + name_part + badge_str
@@ -38,6 +42,8 @@ def build_summary_text(w) -> str:
     if w.cb_default.isChecked():
         parts.append("⭐ Default")
     if w.track_type == 'subtitles':
+        if w.track_data.get('user_modified_path'):
+            parts.append("📝 Styled")
         if w.cb_forced.isChecked():
             parts.append("📌 Forced Display")
         if w.cb_rescale.isChecked():

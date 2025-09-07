@@ -1,7 +1,8 @@
+# vsg_qt/track_widget/ui.py
 from __future__ import annotations
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox,
-    QDoubleSpinBox, QToolButton, QWidget as QtWidget, QFormLayout
+    QDoubleSpinBox, QToolButton, QWidget as QtWidget, QFormLayout, QPushButton
 )
 from PySide6.QtCore import Qt
 from .logic import TrackWidgetLogic
@@ -9,10 +10,6 @@ from .logic import TrackWidgetLogic
 class TrackWidget(QWidget):
     """
     Reusable row widget shown in ManualSelectionDialog's Final list.
-    Public API preserved:
-      - attributes: track_data, track_type, codec_id, source
-                    cb_default, cb_forced, cb_convert, cb_rescale, size_multiplier, cb_name
-      - methods: refresh_badges(), refresh_summary(), get_config()
     """
     def __init__(self, track_data: dict, parent=None):
         super().__init__(parent)
@@ -43,9 +40,21 @@ class TrackWidget(QWidget):
 
         # Top row: label + dropdown
         row = QHBoxLayout(); row.setContentsMargins(0,0,0,0); row.setSpacing(8)
-        self.label = QLabel("")   # text filled by logic
+        self.label = QLabel("")
         self.label.setToolTip(f"Source: {self.source}")
         row.addWidget(self.label, 1)
+
+        self.style_editor_btn = QPushButton("Style Editor...")
+        self.style_editor_btn.setVisible(is_subs)
+
+        # FIX: Only enable the button for text-based, editable subtitle formats
+        editable_sub_codecs = ['S_TEXT/UTF8', 'S_TEXT/ASS', 'S_TEXT/SSA']
+        is_editable = any(codec in (self.codec_id or '').upper() for codec in editable_sub_codecs)
+        self.style_editor_btn.setEnabled(is_editable)
+        if not is_editable and is_subs:
+            self.style_editor_btn.setToolTip("Style editor is not available for image-based subtitles (e.g., PGS, VobSub).")
+
+        row.addWidget(self.style_editor_btn)
 
         self.btn = QToolButton(self)
         self.btn.setText("Settings…")
@@ -71,15 +80,9 @@ class TrackWidget(QWidget):
             self.cb_rescale.toggled.connect(self._logic.apply_state_from_menu)
             self.size_multiplier.valueChanged.connect(lambda _v: self._logic.apply_state_from_menu())
 
-    # ---------- Menu form factory (consumed by logic) ----------
-    def _build_menu_form(self) -> QtWidget:
-        """
-        Builds a simple form layout made of the same hidden controls.
-        Using the same widgets means state is always synchronized.
-        """
-        container = QtWidget(self)
+    def _build_menu_form(self) -> QWidget:
+        container = QWidget(self)
         form = QFormLayout(container); form.setContentsMargins(8,8,8,8)
-
         form.addRow(self.cb_default)
         if self.track_type == 'subtitles':
             form.addRow(self.cb_forced)
@@ -89,7 +92,6 @@ class TrackWidget(QWidget):
         form.addRow(self.cb_name)
         return container
 
-    # ---------- Public API (kept for backward compatibility) ----------
     def refresh_badges(self):
         self._logic.refresh_badges()
 
