@@ -1,33 +1,36 @@
-# vsg_core/analysis/audio_corr.py
 # -*- coding: utf-8 -*-
-from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple, Callable
+"""
+Audio cross-correlation utilities (decode-once, in-memory).
+- No Qt/GUI.
+- Same stream-pick + sign convention as your original.
+- Decodes each file once to 48 kHz mono PCM, slices chunks in memory,
+  and logs per-chunk delay with both rounded and high-precision values.
+"""
 
+from __future__ import annotations
 import json
-import librosa
+import math
+import subprocess
+from pathlib import Path
+from typing import Callable, Dict, List, Optional, Tuple
+
 import numpy as np
-import scipy.signal
+import scipy.signal  # same backend as before
 
-from ..io.runner import CommandRunner
+# ---------------------------------------------------------------------------
+# Language normalization (unchanged behavior)
+# ---------------------------------------------------------------------------
 
-LogFn = Callable[[str], None]
-
-# Common 2->3 letter language code normalization for mkvmerge metadata
 _LANG2TO3 = {
-    'en':'eng','ja':'jpn','jp':'jpn','zh':'zho','cn':'zho','es':'spa','de':'deu','fr':'fra','it':'ita','pt':'por',
-    'ru':'rus','ko':'kor','ar':'ara','tr':'tur','pl':'pol','nl':'nld','sv':'swe','no':'nor','fi':'fin','da':'dan',
-    'cs':'ces','sk':'slk','sl':'slv','hu':'hun','el':'ell','he':'heb','id':'ind','vi':'vie','th':'tha','hi':'hin',
-    'ur':'urd','fa':'fas','uk':'ukr','ro':'ron','bg':'bul','sr':'srp','hr':'hrv','ms':'msa','bn':'ben','ta':'tam','te':'tel'
+    'en': 'eng','ja': 'jpn','jp': 'jpn','zh': 'zho','cn': 'zho','es': 'spa','de': 'deu',
+    'fr': 'fra','it': 'ita','pt': 'por','ru': 'rus','ko': 'kor','ar': 'ara','tr': 'tur',
+    'pl': 'pol','nl': 'nld','sv': 'swe','no': 'nor','fi': 'fin','da': 'dan','cs': 'ces',
+    'sk': 'slk','sl': 'slv','hu': 'hun','el': 'ell','he': 'heb','id': 'ind','vi': 'vie',
+    'th': 'tha','hi': 'hin','ur': 'urd','fa': 'fas','uk': 'ukr','ro': 'ron','bg': 'bul',
+    'sr': 'srp','hr': 'hrv','ms': 'msa','bn': 'ben','ta': 'tam','te': 'tel'
 }
 
 def _normalize_lang(lang: Optional[str]) -> Optional[str]:
-    """
-    Normalize a user-specified language code to mkvmerge's 3-letter form.
-    - Blank/None -> None (means: pick first available)
-    - 'und' -> None (treat as no preference)
-    - 2-letter codes -> best-effort map to 3-letter
-    - 3+ letters -> lowercased passthrough
-    """
     if not lang:
         return None
     s = lang.strip().lower()
@@ -35,112 +38,212 @@ def _normalize_lang(lang: Optional[str]) -> Optional[str]:
         return None
     if len(s) == 2 and s in _LANG2TO3:
         return _LANG2TO3[s]
-    return s  # assume already 3-letter (e.g., 'eng', 'jpn', etc.)
+    return s
 
-def _get_audio_stream_index(mkv_path: str, runner: CommandRunner, tool_paths: dict, language: Optional[str]) -> Optional[int]:
+# ---------------------------------------------------------------------------
+# Low-level helpers
+# ---------------------------------------------------------------------------
+
+def _bin(tool_paths: Dict[str, str], name: str) -> str:
+    p = (tool_paths or {}).get(name)
+    return p or name
+
+def _get_audio_stream_index(
+    mkv_path: str,
+    language: Optional[str],
+    log: Callable[[str], None],
+    tool_paths: Dict[str, str] | None = None,
+) -> Optional[int]:
+    """
+    Return the 0-based audio-stream index (for -map 0:a:<idx>).
+    Prefer `language` (3-letter) if provided, else first audio stream.
+    """
     desired = _normalize_lang(language)
-    out = runner.run(['mkvmerge', '-J', str(mkv_path)], tool_paths)
-    if not out:
-        return None
+    cmd = [_bin(tool_paths, 'mkvmerge'), '-J', str(mkv_path)]
     try:
-        info = json.loads(out)
-        idx = -1
-        first_found_idx = None
-        for t in info.get('tracks', []):
-            if t.get('type') == 'audio':
-                idx += 1
-                if first_found_idx is None:
-                    first_found_idx = idx
-                if desired:
-                    lang = (t.get('properties', {}) or {}).get('language')
-                    if lang and lang.strip().lower() == desired:
-                        return idx
-        # no explicit match or no desired language: take first audio
-        return first_found_idx
-    except json.JSONDecodeError:
+        out = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        info = json.loads(out.stdout)
+    except Exception as e:
+        log(f"[mkvmerge] probe failed: {e}")
         return None
 
-def _extract_audio_chunk(source_file: str, output_wav: str, start_time: float, duration: float,
-                         runner: CommandRunner, tool_paths: dict, stream_index: int) -> bool:
+    idx = -1
+    first_found = None
+    for t in info.get('tracks', []):
+        if t.get('type') == 'audio':
+            idx += 1
+            if first_found is None:
+                first_found = idx
+            if desired:
+                lang = ((t.get('properties') or {}).get('language') or '').strip().lower()
+                if lang == desired:
+                    return idx
+    return first_found
+
+def _decode_audio_to_array(
+    source_file: str,
+    stream_index: int,
+    sr_out: int,
+    mono: bool,
+    log: Callable[[str], None],
+    tool_paths: Dict[str, str] | None = None,
+) -> Tuple[np.ndarray, int]:
+    """
+    Decode one stream to PCM (s16le) via ffmpeg piping.
+    Returns (float32 mono array in [-1,1], sr_out).
+    """
     cmd = [
-        'ffmpeg', '-y', '-v', 'error', '-ss', str(start_time),
-        '-i', str(source_file), '-map', f'0:a:{stream_index}', '-t', str(duration),
-        '-vn', '-acodec', 'pcm_s16le', '-ar', '48000', '-ac', '1', str(output_wav)
+        _bin(tool_paths, 'ffmpeg'), '-v', 'error', '-nostdin',
+        '-i', str(source_file),
+        '-map', f'0:a:{stream_index}',
+        '-ac', '1' if mono else '2',
+        '-ar', str(sr_out),
+        '-f', 's16le', '-'  # raw PCM to stdout
     ]
-    return runner.run(cmd, tool_paths) is not None
-
-def _find_audio_delay(ref_wav: str, sec_wav: str, log: LogFn) -> Tuple[Optional[int], float, Optional[float]]:
     try:
-        ref_sig, rate_ref = librosa.load(ref_wav, sr=None, mono=True)
-        sec_sig, rate_sec = librosa.load(sec_wav, sr=None, mono=True)
-        if rate_ref != rate_sec:
-            log("Sample rates do not match, skipping correlation.")
+        proc = subprocess.run(cmd, capture_output=True, check=True)
+    except subprocess.CalledProcessError as e:
+        tail = (e.stderr or b'')[-400:].decode('utf-8', errors='ignore')
+        log(f"[ffmpeg] decode failed (exit {e.returncode}). stderr tail:\n{tail}")
+        raise
+
+    pcm = np.frombuffer(proc.stdout, dtype=np.int16)
+    if pcm.size == 0:
+        raise RuntimeError("ffmpeg produced no PCM data.")
+    y = pcm.astype(np.float32) / 32768.0
+    return y, sr_out
+
+def _slice_by_time(y: np.ndarray, sr: int, start_s: float, dur_s: float) -> np.ndarray:
+    start = int(round(start_s * sr))
+    length = int(round(dur_s * sr))
+    if start < 0:
+        start = 0
+    end = min(start + length, y.shape[0])
+    if end <= start:
+        return np.zeros((0,), dtype=np.float32)
+    return y[start:end].copy()
+
+def _find_audio_delay(
+    ref_sig: np.ndarray,
+    sec_sig: np.ndarray,
+    sr: int,
+) -> Tuple[Optional[int], float, Optional[float]]:
+    """
+    Same math/sign as your original:
+      lag_samples = argmax(corr) - (len(sec) - 1)
+      delay_ms    = round(lag_samples / sr * 1000)
+      match %     = peak / (||ref||*||sec||)
+    """
+    try:
+        if ref_sig.size == 0 or sec_sig.size == 0:
             return None, 0.0, None
 
-        ref_sig = (ref_sig - np.mean(ref_sig)) / (np.std(ref_sig) + 1e-9)
-        sec_sig = (sec_sig - np.mean(sec_sig)) / (np.std(sec_sig) + 1e-9)
+        ref = ref_sig.astype(np.float32)
+        sec = sec_sig.astype(np.float32)
+        ref = (ref - ref.mean()) / (ref.std() + 1e-9)
+        sec = (sec - sec.mean()) / (sec.std() + 1e-9)
 
-        corr = scipy.signal.correlate(ref_sig, sec_sig, mode='full', method='auto')
-        lag_samples = np.argmax(corr) - (len(sec_sig) - 1)
-        raw_delay_s = float(lag_samples) / float(rate_ref)
+        corr = scipy.signal.correlate(ref, sec, mode='full', method='auto')
+        peak_idx = int(np.argmax(corr))
+        lag_samples = peak_idx - (len(sec) - 1)
+        raw_delay_s = lag_samples / float(sr)
 
-        norm_factor = np.sqrt(np.sum(ref_sig**2) * np.sum(sec_sig**2))
-        match_pct = (np.max(np.abs(corr)) / (norm_factor + 1e-9)) * 100.0
+        norm_factor = math.sqrt(float((ref**2).sum()) * float((sec**2).sum()))
+        match_pct = (float(np.max(np.abs(corr))) / (norm_factor + 1e-9)) * 100.0
 
-        return round(raw_delay_s * 1000), match_pct, raw_delay_s
-    except Exception as e:
-        log(f'Error in find_audio_delay: {e}')
+        return int(round(raw_delay_s * 1000.0)), match_pct, raw_delay_s
+    except Exception:
         return None, 0.0, None
 
+# ---------------------------------------------------------------------------
+# Public: decode once, slice many, correlate (with per-chunk logging)
+# ---------------------------------------------------------------------------
+
 def run_audio_correlation(
-    ref_file: str, target_file: str, temp_dir: Path, config: dict,
-    runner: CommandRunner, tool_paths: dict, ref_lang: Optional[str],
-    target_lang: Optional[str], role_tag: str
-) -> List[Dict[str, Any]]:
-    # Normalize language inputs once here (for logging & selection)
+    ref_file: str,
+    target_file: str,
+    temp_dir_unused: Path,    # kept for signature compatibility
+    config: Dict,             # expects scan_chunk_count, scan_chunk_duration; optional 'chunk_starts'
+    runner,                   # object with ._log_message(str)
+    tool_paths: Dict[str, str],
+    ref_lang: Optional[str],
+    target_lang: Optional[str],
+    role_tag: str,
+    *,
+    sr_out: int = 48000,
+    mono: bool = True,
+    full_span_like_cli: bool = False,  # True: chunk starts from 0s..(end-chunk)
+    log_chunks: bool = True,           # per-chunk verbose logging
+) -> List[Dict[str, float]]:
+    log = getattr(runner, "_log_message", print)
+
+    # Stream selection
     ref_norm = _normalize_lang(ref_lang)
     tgt_norm = _normalize_lang(target_lang)
 
-    idx1 = _get_audio_stream_index(ref_file, runner, tool_paths, language=ref_norm)
-    idx2 = _get_audio_stream_index(target_file, runner, tool_paths, language=tgt_norm)
+    idx_ref = _get_audio_stream_index(ref_file, ref_norm, log, tool_paths)
+    idx_tgt = _get_audio_stream_index(target_file, tgt_norm, log, tool_paths)
 
-    runner._log_message(
-        f"Selected streams for analysis: REF (lang='{ref_norm or 'first'}', index={idx1}), "
-        f"{role_tag.upper()} (lang='{tgt_norm or 'first'}', index={idx2})"
+    log(
+        f"Selected streams: REF (lang='{ref_norm or 'first'}', index={idx_ref}), "
+        f"{role_tag.upper()} (lang='{tgt_norm or 'first'}', index={idx_tgt})"
     )
+    if idx_ref is None or idx_tgt is None:
+        raise ValueError("Could not locate required audio streams for correlation.")
 
-    if idx1 is None or idx2 is None:
-        raise ValueError('Could not locate required audio streams for correlation.')
+    # Decode once
+    y_ref, sr_ref = _decode_audio_to_array(ref_file, idx_ref, sr_out, mono, log, tool_paths)
+    y_tgt, sr_tgt = _decode_audio_to_array(target_file, idx_tgt, sr_out, mono, log, tool_paths)
+    if sr_ref != sr_tgt:
+        raise RuntimeError(f"Sample rate mismatch: ref={sr_ref}, tgt={sr_tgt}")
 
-    out = runner.run(['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
-                      '-of', 'csv=p=0', str(ref_file)], tool_paths)
-    try:
-        duration = float(out.strip()) if out else 0.0
-    except (ValueError, TypeError):
-        duration = 0.0
+    duration_s = len(y_ref) / float(sr_ref)
+    chunks = int(max(1, int(config.get('scan_chunk_count', 10))))
+    chunk_dur = float(config.get('scan_chunk_duration', 15.0))
 
-    chunks = int(config.get('scan_chunk_count', 10))
-    chunk_dur = int(config.get('scan_chunk_duration', 15))
+    explicit_starts: Optional[List[float]] = config.get('chunk_starts')
+    if explicit_starts:
+        starts = [max(0.0, min(duration_s, float(s))) for s in explicit_starts]
+    else:
+        if full_span_like_cli:
+            if chunks == 1:
+                starts = [0.0]
+            else:
+                step = (max(0.0, duration_s - chunk_dur)) / (chunks - 1)
+                starts = [i * step for i in range(chunks)]
+        else:
+            scan_range = max(0.0, duration_s * 0.8)
+            start_offset = duration_s * 0.1
+            starts = [start_offset + (scan_range / max(1, chunks - 1) * i) for i in range(chunks)]
 
-    scan_range = max(0.0, duration * 0.8)
-    start_offset = duration * 0.1
-    starts = [start_offset + (scan_range / max(1, chunks - 1) * i) for i in range(chunks)]
+    if log_chunks:
+        log(f"Reference decoded: {duration_s:.2f} s @ {sr_ref} Hz, mono")
+        log(f"Processing {chunks} chunks of {chunk_dur:.1f} seconds each")
 
-    results = []
-    for i, start_time in enumerate(starts, 1):
-        tmp1 = temp_dir / f'wav_ref_{Path(ref_file).stem}_{int(start_time)}_{i}.wav'
-        tmp2 = temp_dir / f'wav_{role_tag}_{Path(target_file).stem}_{int(start_time)}_{i}.wav'
-        try:
-            ok1 = _extract_audio_chunk(ref_file, str(tmp1), start_time, chunk_dur, runner, tool_paths, idx1)
-            ok2 = _extract_audio_chunk(target_file, str(tmp2), start_time, chunk_dur, runner, tool_paths, idx2)
-            if ok1 and ok2:
-                delay, match, raw = _find_audio_delay(str(tmp1), str(tmp2), runner._log_message)
-                if delay is not None:
-                    result = {'delay': delay, 'match': match, 'raw_delay': raw, 'start': start_time}
-                    results.append(result)
-                    runner._log_message(f"Chunk @{int(start_time)}s -> Delay {delay:+} ms (Match {match:.2f}%)")
-        finally:
-            for p in (tmp1, tmp2):
-                if p.exists():
-                    p.unlink()
+    results: List[Dict[str, float]] = []
+    for i, s in enumerate(starts, 1):
+        ref_chunk = _slice_by_time(y_ref, sr_ref, s, chunk_dur)
+        tgt_chunk = _slice_by_time(y_tgt, sr_tgt, s, chunk_dur)
+
+        n = min(ref_chunk.shape[0], tgt_chunk.shape[0])
+        if n <= 100:
+            continue
+        if ref_chunk.shape[0] != n:
+            ref_chunk = ref_chunk[:n]
+        if tgt_chunk.shape[0] != n:
+            tgt_chunk = tgt_chunk[:n]
+
+        delay_ms, match_pct, raw_delay_s = _find_audio_delay(ref_chunk, tgt_chunk, sr_ref)
+        if delay_ms is not None:
+            raw_ms = raw_delay_s * 1000.0 if raw_delay_s is not None else float(delay_ms)
+            results.append({
+                'delay': float(delay_ms),
+                'match': float(match_pct),
+                'raw_delay': float(raw_delay_s) if raw_delay_s is not None else float(delay_ms) / 1000.0,
+                'start': float(s),
+            })
+            if log_chunks:
+                # integer (for mkvmerge) + raw with 3 decimals, both signed
+                log(f"  Chunk {i}/{chunks} (@{s:.1f}s): delay = {int(delay_ms):+d} ms  (raw = {raw_ms:+.3f} ms, match={match_pct:.2f}%)")
+
     return results
