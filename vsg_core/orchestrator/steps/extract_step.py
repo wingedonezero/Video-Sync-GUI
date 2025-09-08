@@ -1,3 +1,4 @@
+# vsg_core/orchestrator/steps/extract_step.py
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
@@ -75,11 +76,11 @@ class ExtractStep:
                     extracted_path=Path(trk['path']),
                     is_default=bool(sel.get('is_default', False)),
                     is_forced_display=bool(sel.get('is_forced_display', False)),
-                    # ↓↓↓ FIX: default is False (only keep name when user opted in)
                     apply_track_name=bool(sel.get('apply_track_name', False)),
                     convert_to_ass=bool(sel.get('convert_to_ass', False)),
                     rescale=bool(sel.get('rescale', False)),
-                    size_multiplier=float(sel.get('size_multiplier', 1.0))
+                    size_multiplier=float(sel.get('size_multiplier', 1.0)),
+                    style_patch=sel.get('style_patch') # NEW: Pass the patch to the PlanItem
                 )
             )
 

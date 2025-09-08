@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import tempfile
 import zipfile
+import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -14,9 +15,8 @@ from PySide6.QtCore import QTimer
 from vsg_core.config import AppConfig
 from vsg_core.job_discovery import discover_jobs
 from vsg_core.io.runner import CommandRunner
-from vsg_core.extraction.tracks import get_track_info_for_dialog, extract_tracks
+from vsg_core.extraction.tracks import get_track_info_for_dialog
 from vsg_core.subtitles.style_engine import StyleEngine
-from vsg_core.subtitles.convert import convert_srt_to_ass
 from vsg_qt.worker import JobWorker
 from vsg_qt.manual_selection_dialog import ManualSelectionDialog
 from vsg_qt.options_dialog import OptionsDialog
@@ -25,6 +25,7 @@ from .helpers import (
     generate_track_signature,
     materialize_layout,
     layout_to_template,
+    get_style_signature, # NEW: Import new signature logic
 )
 
 class MainController:
@@ -32,7 +33,8 @@ class MainController:
         self.v = view
         self.config: AppConfig = view.config
         self.worker: Optional[JobWorker] = None
-        self.style_template_cache: Dict[str, List[str]] = {}
+        # The cache will now store signature -> patch dictionary
+        self.style_patch_cache: Dict[str, Dict] = {}
 
     def open_options_dialog(self):
         dialog = OptionsDialog(self.config, self.v)
@@ -92,9 +94,8 @@ class MainController:
             QMessageBox.information(self.v, "No Jobs Found", "No valid jobs could be found."); return
 
         final_jobs = initial_jobs
-        self.style_template_cache.clear()
-
         if and_merge:
+            self.style_patch_cache.clear() # Clear cache for new batch
             processed_jobs = []
             last_manual_layout = None
             last_track_signature = None
@@ -108,31 +109,34 @@ class MainController:
             runner = CommandRunner(self.config.settings, self.append_log)
 
             for i, job_data in enumerate(initial_jobs):
-                self.v.status_label.setText(f"Pre-scanning {Path(job_data['ref']).name}...")
+                self.v.status_label.setText(f"Scanning {Path(job_data['ref']).name}...")
                 try:
                     track_info = get_track_info_for_dialog(job_data['ref'], job_data.get('sec'), job_data.get('ter'), runner, tool_paths)
-                    if self.style_template_cache:
-                        self._apply_cached_styles(track_info, runner, tool_paths)
                 except Exception as e:
-                    QMessageBox.warning(self.v, "Pre-scan Failed", f"Could not analyze tracks for {Path(job_data['ref']).name}:\n{e}"); return
+                    QMessageBox.warning(self.v, "Scan Failed", f"Could not analyze tracks for {Path(job_data['ref']).name}:\n{e}"); return
+
+                # NEW: Centralized styling step. This runs for EVERY job.
+                self._apply_patches_for_job(track_info)
 
                 current_signature = generate_track_signature(track_info, strict=strict_match)
                 current_layout = None
 
                 if (auto_apply_enabled and last_manual_layout is not None and
                     last_track_signature is not None and current_signature == last_track_signature):
+                    # Auto-apply will now correctly carry over the 'style_patch'
                     current_layout = materialize_layout(last_manual_layout, track_info)
                     self.append_log(f"Auto-applied previous layout to {Path(job_data['ref']).name}...")
                 else:
                     layout_to_carry_over = last_manual_layout if last_track_signature and current_signature == last_track_signature else None
 
-                    # FIX: Pass the main log callback to the dialog to prevent terminal spam
                     dialog = ManualSelectionDialog(track_info, parent=self.v,
                                                    previous_layout=layout_to_carry_over,
                                                    log_callback=self.append_log)
 
                     if dialog.exec():
                         current_layout = dialog.get_manual_layout()
+                        # After user interaction, check if the editor was used and update the cache
+                        self._update_style_cache(current_layout, track_info)
                     else:
                         self.append_log("Batch run cancelled by user."); self.v.status_label.setText("Ready"); return
 
@@ -141,7 +145,6 @@ class MainController:
                     processed_jobs.append(job_data)
                     last_manual_layout = layout_to_template(current_layout)
                     last_track_signature = current_signature
-                    self._update_style_cache(current_layout)
                 else:
                     self.append_log(f"Job '{Path(job_data['ref']).name}' was skipped.")
                     last_manual_layout = None; last_track_signature = None
@@ -169,65 +172,47 @@ class MainController:
         from PySide6.QtCore import QThreadPool
         QThreadPool.globalInstance().start(self.worker)
 
-    def _apply_cached_styles(self, track_info: dict, runner: CommandRunner, tool_paths: dict):
+    def _apply_patches_for_job(self, track_info: Dict[str, List[Dict]]):
+        """Finds matching patches in the cache and injects them into the track_info."""
+        if not self.style_patch_cache:
+            return
+
         for source in ('REF', 'SEC', 'TER'):
-            for track in track_info.get(source, []):
-                if track['type'] != 'subtitles': continue
+            subs_in_source = [t for t in track_info.get(source, []) if t.get('type') == 'subtitles']
+            for i, track in enumerate(subs_in_source):
+                signature = get_style_signature(track, i)
+                if signature in self.style_patch_cache:
+                    track['style_patch'] = self.style_patch_cache[signature]
+                    self.append_log(f"[Style] Found and queued patch for track '{signature}'.")
 
-                temp_path = self._extract_temp_sub(track, runner, tool_paths)
-                if not temp_path: continue
-
-                content_sig = StyleEngine.get_content_signature(temp_path)
-                name_sig = StyleEngine.get_name_signature(track.get('name'))
-
-                style_block = self.style_template_cache.get(content_sig) or self.style_template_cache.get(name_sig)
-
-                if style_block:
-                    engine = StyleEngine(temp_path)
-                    engine.set_raw_style_block(style_block)
-                    track['user_modified_path'] = temp_path
-                    self.append_log(f"Auto-styled '{track['name']}' using cached template.")
-
-    def _update_style_cache(self, layout: List[dict]):
+    def _update_style_cache(self, layout: List[dict], track_info: Dict[str, List[Dict]]):
+        """
+        After the dialog closes, find which track was edited (if any), get its
+        patch and signature, and store it in the cache.
+        """
+        edited_track = None
+        style_patch = None
         for track in layout:
-            if track.get('type') == 'subtitles' and track.get('user_modified_path'):
-                edited_path = track['user_modified_path']
+            if track.get('style_patch'):
+                edited_track = track
+                style_patch = track['style_patch']
+                break
 
-                original_temp_path = self._extract_temp_sub(track, None, None, force_new=True)
-                if not original_temp_path: continue
+        if not edited_track or not style_patch:
+            return
 
-                content_sig = StyleEngine.get_content_signature(original_temp_path)
-                name_sig = StyleEngine.get_name_signature(track.get('name'))
+        # We need to find the track's index for the signature fallback
+        source_list = [t for t in track_info.get(edited_track['source'], []) if t.get('type') == 'subtitles']
+        idx = -1
+        for i, t in enumerate(source_list):
+            if t['id'] == edited_track['id']:
+                idx = i
+                break
 
-                edited_engine = StyleEngine(edited_path)
-                style_block = edited_engine.get_raw_style_block()
-
-                if style_block:
-                    if content_sig: self.style_template_cache[content_sig] = style_block
-                    if name_sig: self.style_template_cache[name_sig] = style_block
-
-    def _extract_temp_sub(self, track_data: dict, runner: Optional[CommandRunner], tool_paths: Optional[dict], force_new=False) -> Optional[str]:
-        if not force_new and track_data.get('user_modified_path'):
-            return track_data['user_modified_path']
-
-        source_file = track_data.get('original_path'); track_id = track_data.get('id')
-        if not source_file: return None
-
-        _runner = runner or CommandRunner(self.config.settings, self.append_log)
-        _tool_paths = tool_paths or {t: shutil.which(t) for t in ['mkvmerge', 'mkvextract', 'ffmpeg']}
-
-        try:
-            temp_dir = Path(tempfile.gettempdir()) / f"vsg_cache_sig_{Path(source_file).stem}_{track_id}"
-            temp_dir.mkdir(parents=True, exist_ok=True)
-            extracted = extract_tracks(source_file, temp_dir, _runner, _tool_paths, 'cache', specific_tracks=[track_id])
-            if not extracted: return None
-
-            temp_path = extracted[0]['path']
-            if Path(temp_path).suffix.lower() == '.srt':
-                temp_path = convert_srt_to_ass(temp_path, _runner, _tool_paths)
-            return temp_path
-        except Exception:
-            return None
+        signature = get_style_signature(edited_track, idx)
+        if signature:
+            self.style_patch_cache[signature] = style_patch
+            self.append_log(f"[Style] Saved patch for '{signature}' for batch use.")
 
     def job_finished(self, result: dict):
         if 'delay_sec' in result: self.v.sec_delay_label.setText(f"{result['delay_sec']} ms" if result['delay_sec'] is not None else "—")
@@ -247,6 +232,7 @@ class MainController:
         is_batch = Path(ref_path_str).is_dir() and len(all_results) > 1
         if is_batch and self.v.archive_logs_check.isChecked() and output_dir:
             QTimer.singleShot(0, lambda: self._archive_logs_for_batch(output_dir))
+
         QMessageBox.information(self.v, "Batch Complete", f"Finished processing {len(all_results)} jobs.")
 
     def _archive_logs_for_batch(self, output_dir: Path):

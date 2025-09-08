@@ -1,7 +1,8 @@
+# vsg_core/models/jobs.py
 # -*- coding: utf-8 -*-
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Optional, Dict, Any
 from .media import Track
 from .enums import SourceRole
 
@@ -19,10 +20,10 @@ class Delays:
     tertiary_ms: int | None = None
     global_shift_ms: int = 0  # computed from min([0, sec?, ter?])
 
-@dataclass(frozen=True)
+@dataclass
 class PlanItem:
     track: Track
-    extracted_path: Path | None = None  # filled after extraction
+    extracted_path: Optional[Path] = None  # filled after extraction
     # UI flags:
     is_default: bool = False
     is_forced_display: bool = False       # subs only
@@ -30,6 +31,7 @@ class PlanItem:
     convert_to_ass: bool = False          # srt -> ass
     rescale: bool = False                 # ASS/SSA PlayRes match
     size_multiplier: float = 1.0          # subs only
+    style_patch: Optional[Dict[str, Any]] = None # NEW: To carry style changes
 
 @dataclass(frozen=True)
 class MergePlan:

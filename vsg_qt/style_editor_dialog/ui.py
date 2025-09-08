@@ -60,7 +60,7 @@ class StyleEditorDialog(QDialog):
         # Second row with Strip Tags and new Resample button
         actions_row = QHBoxLayout()
         self.strip_tags_btn = QPushButton("Strip Tags from Line(s)")
-        self.resample_btn = QPushButton("Resample...") # NEW: Add Resample button
+        self.resample_btn = QPushButton("Resample...")
         actions_row.addWidget(self.strip_tags_btn)
         actions_row.addWidget(self.resample_btn)
         actions_row.addStretch()
@@ -76,7 +76,6 @@ class StyleEditorDialog(QDialog):
         scroll_area.setWidgetResizable(True)
         form_widget = QWidget()
         form_layout = QFormLayout(form_widget)
-        # ... (all style_widgets are created here as before)
         self.style_widgets['fontname'] = QLineEdit()
         self.style_widgets['fontsize'] = QDoubleSpinBox(); self.style_widgets['fontsize'].setRange(1, 500)
         self.style_widgets['primarycolor'] = QPushButton("Pick...")
@@ -116,8 +115,16 @@ class StyleEditorDialog(QDialog):
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
 
+    def get_style_patch(self):
+        """Public method to retrieve the generated patch."""
+        return self._logic.generated_patch
+
+    def accept(self):
+        """Generate the patch before closing."""
+        self._logic.generate_patch()
+        super().accept()
+
     def _connect_signals(self):
-        # ... (player and playback signals are the same)
         self.player_thread.new_frame.connect(self.update_video_frame)
         self.player_thread.duration_changed.connect(self.setup_seek_slider)
         self.player_thread.time_changed.connect(self.update_slider_position)
@@ -129,11 +136,8 @@ class StyleEditorDialog(QDialog):
         self.reset_style_btn.clicked.connect(self._logic.reset_current_style)
         self.style_selector.currentTextChanged.connect(self._logic.on_style_selected)
         self.strip_tags_btn.clicked.connect(self._logic.strip_tags_from_selected)
-
-        # NEW: Connect the resample button
         self.resample_btn.clicked.connect(self._logic.open_resample_dialog)
 
-        # ... (style widget connections are the same)
         for widget in self.style_widgets.values():
             if isinstance(widget, QLineEdit):
                 widget.editingFinished.connect(self._logic.update_current_style)
@@ -146,7 +150,6 @@ class StyleEditorDialog(QDialog):
         self.style_widgets['outlinecolor'].clicked.connect(lambda: self._logic.pick_color(self.style_widgets['outlinecolor'], "outlinecolor"))
         self.style_widgets['backcolor'].clicked.connect(lambda: self._logic.pick_color(self.style_widgets['backcolor'], "backcolor"))
 
-    # ... (rest of the file is unchanged)
     def update_video_frame(self, image: QImage, timestamp: float):
         pixmap = QPixmap.fromImage(image)
         self.video_frame.set_pixmap(pixmap)
@@ -158,12 +161,10 @@ class StyleEditorDialog(QDialog):
     def handle_slider_press(self): self.is_seeking = True
     def handle_slider_release(self):
         self.is_seeking = False
-        self._logic.update_current_style()
         self.player_thread.seek(self.seek_slider.value())
     def handle_event_selection_changed(self):
         selected_items = self.events_table.selectedItems()
         if not selected_items: return
-        self._logic.update_current_style()
         self._logic.on_event_selected()
         row = selected_items[0].row()
         start_time_ms_str = self.events_table.item(row, 1).text()

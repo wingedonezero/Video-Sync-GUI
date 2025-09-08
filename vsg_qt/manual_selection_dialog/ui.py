@@ -3,6 +3,7 @@
 from __future__ import annotations
 import shutil
 import tempfile
+import time
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Callable
 
@@ -36,6 +37,9 @@ class ManualSelectionDialog(QDialog):
         self._style_clipboard: Optional[List[str]] = None
         self.log_callback = log_callback or (lambda msg: print(f"[Dialog] {msg}"))
 
+        # This will hold a reference to the single widget that was edited
+        self.edited_widget = None
+
         root = QVBoxLayout(self)
         self.info_label = QLabel()
         self.info_label.setVisible(False)
@@ -57,6 +61,7 @@ class ManualSelectionDialog(QDialog):
         root.addLayout(row)
         self._populate_sources()
         self._wire_double_clicks()
+
         if previous_layout:
             realized = ManualLogic.prepopulate(previous_layout, self.track_info)
             if realized:
@@ -65,42 +70,58 @@ class ManualSelectionDialog(QDialog):
                 for t in realized:
                     if not ManualLogic.is_blocked_video(t):
                         self.final_list.add_track_widget(t, preset=True)
+
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
 
-    def _get_temp_subtitle_path(self, widget: TrackWidget, for_read_only=False) -> Optional[str]:
+    def _ensure_editable_subtitle_path(self, widget: TrackWidget) -> Optional[str]:
+        """
+        Ensures an editable temp file for a subtitle track exists.
+        If a modified path already exists, it returns it. Otherwise, it extracts a fresh one.
+        """
         track_data = widget.track_data
+
+        # If a path to a modified version already exists, use it.
         if track_data.get('user_modified_path'):
             return track_data['user_modified_path']
-        if for_read_only:
-            return None
+
+        # Otherwise, extract a fresh copy for editing.
         source_file = track_data.get('original_path')
         track_id = track_data.get('id')
         if not all([source_file, track_id is not None, self.parent_config]):
+            self.log_callback("[ERROR] Missing info required for subtitle extraction.")
             return None
 
         runner = CommandRunner(self.parent_config.settings, self.log_callback)
         tool_paths = {t: shutil.which(t) for t in ['mkvmerge', 'mkvextract', 'ffmpeg']}
 
         try:
-            temp_dir = Path(tempfile.gettempdir()) / f"vsg_style_edit_{Path(source_file).stem}_{track_id}"
+            # Create a unique temp directory for this specific extraction
+            temp_dir = Path(tempfile.gettempdir()) / f"vsg_style_edit_{Path(source_file).stem}_{track_id}_{int(time.time())}"
             temp_dir.mkdir(parents=True, exist_ok=True)
-            extracted = extract_tracks(source_file, temp_dir, runner, tool_paths, 'temp', specific_tracks=[track_id])
-            if not extracted: return None
-            temp_path = extracted[0]['path']
-            if Path(temp_path).suffix.lower() == '.srt':
-                temp_path = convert_srt_to_ass(temp_path, runner, tool_paths)
-            widget.track_data['user_modified_path'] = temp_path
-            return temp_path
-        except Exception:
+
+            extracted = extract_tracks(source_file, temp_dir, runner, tool_paths, 'edit', specific_tracks=[track_id])
+            if not extracted:
+                self.log_callback(f"[ERROR] mkvextract failed for track ID {track_id} from {source_file}")
+                return None
+
+            temp_path_str = extracted[0]['path']
+            if Path(temp_path_str).suffix.lower() == '.srt':
+                temp_path_str = convert_srt_to_ass(temp_path_str, runner, tool_paths)
+
+            # Store this new path as the user-modified path for future use
+            widget.track_data['user_modified_path'] = temp_path_str
+            return temp_path_str
+        except Exception as e:
+            self.log_callback(f"[ERROR] Exception during subtitle preparation: {e}")
             return None
 
     def _copy_styles(self, widget: TrackWidget):
-        temp_path = self._get_temp_subtitle_path(widget)
+        temp_path = self._ensure_editable_subtitle_path(widget)
         if not temp_path:
-            QMessageBox.information(self, "Copy Styles", "Could not prepare subtitle file for copying.")
+            QMessageBox.warning(self, "Error", "Could not prepare subtitle file for copying.")
             return
         engine = StyleEngine(temp_path)
         self._style_clipboard = engine.get_raw_style_block()
@@ -112,9 +133,9 @@ class ManualSelectionDialog(QDialog):
 
     def _paste_styles(self, widget: TrackWidget):
         if not self._style_clipboard: return
-        temp_path = self._get_temp_subtitle_path(widget)
+        temp_path = self._ensure_editable_subtitle_path(widget)
         if not temp_path:
-            QMessageBox.information(self, "Paste Styles", "Could not prepare subtitle file for pasting.")
+            QMessageBox.warning(self, "Error", "Could not prepare subtitle file for pasting.")
             return
         engine = StyleEngine(temp_path)
         engine.set_raw_style_block(self._style_clipboard)
@@ -122,22 +143,27 @@ class ManualSelectionDialog(QDialog):
         self.info_label.setVisible(True)
         widget.refresh_badges()
         widget.refresh_summary()
+        self.edited_widget = widget
 
     def _launch_style_editor(self, widget: TrackWidget):
         track_data = widget.track_data
-        source_file = track_data.get('original_path')
-        track_id = track_data.get('id')
         ref_video_path = self.track_info.get('REF', [{}])[0].get('original_path')
+        if not ref_video_path:
+             QMessageBox.warning(self, "Error", "Could not launch editor: Reference video path is missing.")
+             return
 
-        if not all([source_file, track_id is not None, ref_video_path, self.parent_config]):
-            QMessageBox.warning(self, "Error", "Could not launch editor: Missing necessary file information.")
+        # This now robustly gets or creates the editable subtitle file
+        editable_sub_path = self._ensure_editable_subtitle_path(widget)
+        if not editable_sub_path:
+            QMessageBox.critical(self, "Error Preparing Editor", "Failed to extract or prepare the subtitle file.")
             return
 
         runner = CommandRunner(self.parent_config.settings, self.log_callback)
-        tool_paths = {t: shutil.which(t) for t in ['mkvmerge', 'mkvextract', 'ffmpeg']}
+        tool_paths = {t: shutil.which(t) for t in ['mkvmerge', 'mkvextract']}
 
         fonts_dir = None
         try:
+            source_file = track_data.get('original_path')
             font_temp_dir = Path(tempfile.gettempdir()) / f"vsg_fonts_{Path(source_file).stem}"
             font_temp_dir.mkdir(parents=True, exist_ok=True)
             extracted_fonts = extract_attachments(source_file, font_temp_dir, runner, tool_paths, 'font')
@@ -147,14 +173,11 @@ class ManualSelectionDialog(QDialog):
         except Exception as e:
             self.log_callback(f"[WARN] Could not extract fonts: {e}")
 
-        temp_subtitle_path_str = self._get_temp_subtitle_path(widget)
-        if not temp_subtitle_path_str:
-            QMessageBox.critical(self, "Error Preparing Editor", "Failed to extract or prepare the subtitle file.")
-            return
-
-        editor = StyleEditorDialog(ref_video_path, temp_subtitle_path_str, fonts_dir=fonts_dir, parent=self)
+        editor = StyleEditorDialog(ref_video_path, editable_sub_path, fonts_dir=fonts_dir, parent=self)
         if editor.exec():
-            widget.track_data['user_modified_path'] = temp_subtitle_path_str
+            # The patch is now the primary artifact of editing
+            widget.track_data['style_patch'] = editor.get_style_patch()
+            self.edited_widget = widget
             widget.refresh_badges()
             widget.refresh_summary()
 
@@ -171,7 +194,7 @@ class ManualSelectionDialog(QDialog):
         if not item: return
         td = item.data(Qt.UserRole)
         if td and not ManualLogic.is_blocked_video(td):
-            self.final_list.add_track_widget(td)
+            self.final_list.add_track_widget(td, preset=('style_patch' in td))
 
     def keyPressEvent(self, event):
         if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Up: self.final_list._move_by(-1); event.accept(); return

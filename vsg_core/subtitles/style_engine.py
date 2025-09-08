@@ -44,6 +44,7 @@ class StyleEngine:
             qt_alpha = 255 - c.a
             return f"#{qt_alpha:02X}{c.r:02X}{c.g:02X}{c.b:02X}"
 
+        # FIX: Removed 'alignment' as it is not editable in the UI
         return {
             "fontname": style.fontname, "fontsize": style.fontsize,
             "primarycolor": to_qt_hex(style.primarycolor),
@@ -54,7 +55,7 @@ class StyleEngine:
             "underline": style.underline, "strikeout": style.strikeout,
             "outline": style.outline, "shadow": style.shadow,
             "marginl": style.marginl, "marginr": style.marginr,
-            "marginv": style.marginv, "alignment": style.alignment,
+            "marginv": style.marginv,
         }
 
     def update_style_attributes(self, style_name: str, attributes: Dict[str, Any]):
@@ -73,6 +74,8 @@ class StyleEngine:
 
         style = self.subs.styles[style_name]
         for key, value in attributes.items():
+            if key == "alignment": # Explicitly ignore alignment if it ever slips through
+                continue
             if "color" in key and isinstance(value, str):
                 setattr(style, key, from_qt_hex(value))
             else:
@@ -82,13 +85,11 @@ class StyleEngine:
         """Returns all subtitle events, ensuring plaintext is included."""
         if not self.subs: return []
 
-        # This regex will find and remove all {...} style blocks.
         tag_pattern = re.compile(r'{[^}]+}')
 
         return [{
                     "line_num": i + 1, "start": event.start, "end": event.end,
                     "style": event.style, "text": event.text,
-                    # FIX: Manually strip tags from the raw text for a reliable plaintext version.
                     "plaintext": tag_pattern.sub('', event.text)
                 }
                 for i, event in enumerate(self.subs.events)]
@@ -121,6 +122,32 @@ class StyleEngine:
         self.save()
 
     @staticmethod
+    def merge_styles_from_template(target_path: str, template_path: str) -> bool:
+        """
+        Merges styles from a template file into a target file.
+        Only styles with matching names are updated; unique styles in the target are preserved.
+        """
+        try:
+            target_subs = pysubs2.load(target_path, encoding='utf-8')
+            template_subs = pysubs2.load(template_path, encoding='utf-8')
+
+            template_styles = {s.name: s for s in template_subs.styles.values()}
+            updated_count = 0
+
+            for style_name, style_object in target_subs.styles.items():
+                if style_name in template_styles:
+                    target_subs.styles[style_name] = template_styles[style_name].copy()
+                    updated_count += 1
+
+            if updated_count > 0:
+                target_subs.save(target_path, encoding='utf-8')
+                return True
+            return False
+        except Exception as e:
+            print(f"Error merging styles: {e}")
+            return False
+
+    @staticmethod
     def get_content_signature(subtitle_path: str) -> Optional[str]:
         """Generates a unique hash of the [V4+ Styles] block for content matching."""
         try:
@@ -136,7 +163,6 @@ class StyleEngine:
                 elif in_styles_block and not line_strip:
                     break
             if not style_lines: return None
-            # Silently fix a typo here from sha2a56 to sha256
             return hashlib.sha256('\n'.join(sorted(style_lines)).encode('utf-8')).hexdigest()
         except Exception:
             return None
@@ -145,7 +171,7 @@ class StyleEngine:
     def get_name_signature(track_name: str) -> Optional[str]:
         """Generates a fallback signature from the track name (e.g., 'Signs [LostYears]')."""
         if not track_name: return None
-        match = re.search(r'([\w\s&]+)\s\[([\w\s]+)\]', track_name)
-        if match:
-            return f"{match.group(1).strip()}-{match.group(2).strip()}"
-        return track_name.strip()
+        sanitized_name = re.sub(r'[\\/*?:"<>|]', "", track_name)
+        sanitized_name = sanitized_name.strip()
+        if not sanitized_name: return None
+        return sanitized_name
