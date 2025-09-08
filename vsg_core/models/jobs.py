@@ -31,7 +31,8 @@ class PlanItem:
     convert_to_ass: bool = False          # srt -> ass
     rescale: bool = False                 # ASS/SSA PlayRes match
     size_multiplier: float = 1.0          # subs only
-    style_patch: Optional[Dict[str, Any]] = None # NEW: To carry style changes
+    style_patch: Optional[Dict[str, Any]] = None
+    user_modified_path: Optional[str] = None # NEW: To track if the editor was used
 
 @dataclass(frozen=True)
 class MergePlan:

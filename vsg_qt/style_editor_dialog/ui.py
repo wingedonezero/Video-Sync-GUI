@@ -49,7 +49,6 @@ class StyleEditorDialog(QDialog):
         right_pane_group = QGroupBox("Style Controls")
         right_pane_layout = QVBoxLayout(right_pane_group)
 
-        # Top row with Style Selector and Reset button
         top_row = QHBoxLayout()
         self.style_selector = QComboBox()
         self.reset_style_btn = QPushButton("Reset Style")
@@ -57,7 +56,6 @@ class StyleEditorDialog(QDialog):
         top_row.addWidget(self.reset_style_btn)
         right_pane_layout.addLayout(top_row)
 
-        # Second row with Strip Tags and new Resample button
         actions_row = QHBoxLayout()
         self.strip_tags_btn = QPushButton("Strip Tags from Line(s)")
         self.resample_btn = QPushButton("Resample...")
@@ -121,6 +119,8 @@ class StyleEditorDialog(QDialog):
 
     def accept(self):
         """Generate the patch before closing."""
+        # FIX: Save any pending UI changes to the engine before generating the patch
+        self._logic.update_current_style()
         self._logic.generate_patch()
         super().accept()
 

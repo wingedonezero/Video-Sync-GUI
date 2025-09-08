@@ -80,7 +80,8 @@ class ExtractStep:
                     convert_to_ass=bool(sel.get('convert_to_ass', False)),
                     rescale=bool(sel.get('rescale', False)),
                     size_multiplier=float(sel.get('size_multiplier', 1.0)),
-                    style_patch=sel.get('style_patch') # NEW: Pass the patch to the PlanItem
+                    style_patch=sel.get('style_patch'),
+                    user_modified_path=sel.get('user_modified_path') # NEW: Pass the modified path
                 )
             )
 

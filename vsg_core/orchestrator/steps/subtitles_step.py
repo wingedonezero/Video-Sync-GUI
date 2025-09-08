@@ -16,7 +16,7 @@ from vsg_core.subtitles.style_engine import StyleEngine
 
 class SubtitlesStep:
     """
-    Applies subtitle transforms per rules, prioritizing style patches.
+    Applies subtitle transforms per rules, prioritizing files modified by the editor.
     """
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
         if not ctx.and_merge or not ctx.extracted_items:
@@ -32,22 +32,30 @@ class SubtitlesStep:
                     new_path = convert_srt_to_ass(str(item.extracted_path), runner, ctx.tool_paths)
                     item.extracted_path = Path(new_path)
 
-            # Now, apply the style patch if it exists.
-            if item.style_patch and item.extracted_path:
-                runner._log_message(f"[Style] Applying patch to track {item.track.id}...")
-                engine = StyleEngine(str(item.extracted_path))
-                if engine.subs:
-                    for style_name, changes in item.style_patch.items():
-                        if style_name in engine.subs.styles:
-                            engine.update_style_attributes(style_name, changes)
-                    engine.save()
-                    runner._log_message(f"[Style] Patch applied successfully.")
-                else:
-                    runner._log_message(f"[Style] WARNING: Could not load subtitle file to apply patch.")
-                # After patching, skip other manual transforms as the patch is the source of truth
+            # If the file was touched by the Style Editor...
+            if item.user_modified_path:
+                runner._log_message(f"[Subtitles] Using editor-modified file for track {item.track.id}.")
+                # Copy the final, edited version to the location the muxer expects.
+                shutil.copy(item.user_modified_path, item.extracted_path)
+
+                # Now, apply a patch if one was generated. The patch is applied to the
+                # file that was just copied, which already contains other editor changes (like resampling).
+                if item.style_patch:
+                    runner._log_message(f"[Style] Applying patch to track {item.track.id}...")
+                    engine = StyleEngine(str(item.extracted_path))
+                    if engine.subs:
+                        for style_name, changes in item.style_patch.items():
+                            if style_name in engine.subs.styles:
+                                engine.update_style_attributes(style_name, changes)
+                        engine.save()
+                        runner._log_message(f"[Style] Patch applied successfully.")
+                    else:
+                        runner._log_message(f"[Style] WARNING: Could not load subtitle file to apply patch.")
+
+                # Since the editor was used, this file is considered final. Skip other transforms.
                 continue
 
-            # --- The following logic only runs if no patch was provided ---
+            # --- The following automated logic only runs if the Style Editor was NOT used ---
             if item.rescale:
                 rescale_subtitle(str(item.extracted_path), ctx.ref_file, runner, ctx.tool_paths)
 
