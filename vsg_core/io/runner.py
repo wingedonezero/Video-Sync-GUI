@@ -1,3 +1,5 @@
+# vsg_core/io/runner.py
+
 # -*- coding: utf-8 -*-
 
 """
@@ -6,7 +8,7 @@ Wrapper for running external command-line processes.
 
 import subprocess
 import shlex
-from typing import List, Callable, Optional
+from typing import List, Callable, Optional, Union
 from datetime import datetime
 
 class CommandRunner:
@@ -23,10 +25,11 @@ class CommandRunner:
         line = f'[{ts}] {message}'
         self.log(line)
 
-    def run(self, cmd: List[str], tool_paths: dict) -> Optional[str]:
+    def run(self, cmd: List[str], tool_paths: dict, is_binary: bool = False) -> Optional[Union[str, bytes]]:
         """
         Executes a command and handles logging based on configuration.
-        Returns the captured stdout or None on failure.
+        Returns captured stdout as a string, or bytes if is_binary=True.
+        Returns None on failure.
         """
         if not cmd:
             return None
@@ -47,41 +50,51 @@ class CommandRunner:
         prog_step = max(1, int(self.config.get('log_progress_step', 100)))
 
         try:
-            proc = subprocess.Popen(
-                full_cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding='utf-8',
-                errors='replace'
-            )
+            # Setup for either text or binary mode
+            popen_kwargs = {
+                "stdout": subprocess.PIPE,
+                "stderr": subprocess.STDOUT,
+            }
+            if not is_binary:
+                popen_kwargs["text"] = True
+                popen_kwargs["encoding"] = 'utf-8'
+                popen_kwargs["errors"] = 'replace'
 
-            out_buf = ''
-            last_prog = -1
+            proc = subprocess.Popen(full_cmd, **popen_kwargs)
+
+            # Handle text stream for logging if not binary mode
+            stream = proc.stdout if not is_binary else None
+            out_buf_list = []
             tail_buffer = []
+            last_prog = -1
 
             if compact:
                 from collections import deque
                 tail_buffer = deque(maxlen=max(tail_ok, err_tail, 1))
 
-            for line in iter(proc.stdout.readline, ''):
-                out_buf += line
-                if compact:
-                    if line.startswith('Progress: '):
-                        try:
-                            pct = int(line.strip().split()[-1].rstrip('%'))
-                            if last_prog < 0 or pct >= last_prog + prog_step or pct == 100:
-                                self._log_message(f'Progress: {pct}%')
-                                last_prog = pct
-                        except (ValueError, IndexError):
-                            pass
+            if stream:
+                for line in iter(stream.readline, ''):
+                    out_buf_list.append(line)
+                    if compact:
+                        if line.startswith('Progress: '):
+                            try:
+                                pct = int(line.strip().split()[-1].rstrip('%'))
+                                if last_prog < 0 or pct >= last_prog + prog_step or pct == 100:
+                                    self._log_message(f'Progress: {pct}%')
+                                    last_prog = pct
+                            except (ValueError, IndexError):
+                                pass
+                        else:
+                            tail_buffer.append(line)
                     else:
-                        tail_buffer.append(line)
-                else:
-                    self._log_message(line.rstrip('\n'))
+                        self._log_message(line.rstrip('\n'))
 
-            proc.wait()
+            # Wait and get final output
+            stdout_data, _ = proc.communicate()
             rc = proc.returncode or 0
+
+            # Use final captured data if binary mode
+            final_output = stdout_data if is_binary else "".join(out_buf_list)
 
             if rc != 0:
                 self._log_message(f'[!] Command failed with exit code {rc}')
@@ -97,7 +110,7 @@ class CommandRunner:
                 if success_lines:
                     self._log_message('[stdout/tail]\n' + ''.join(success_lines).rstrip())
 
-            return out_buf
+            return final_output
         except Exception as e:
             self._log_message(f'[!] Failed to execute command: {e}')
             return None

@@ -1,249 +1,210 @@
+# vsg_core/analysis/audio_corr.py
+
 # -*- coding: utf-8 -*-
 """
-Audio cross-correlation utilities (decode-once, in-memory).
-- No Qt/GUI.
-- Same stream-pick + sign convention as your original.
-- Decodes each file once to 48 kHz mono PCM, slices chunks in memory,
-  and logs per-chunk delay with both rounded and high-precision values.
+In-memory audio cross-correlation for delay detection.
+Implements a decode-once strategy for improved accuracy and consistency.
 """
 
 from __future__ import annotations
+
 import json
 import math
-import subprocess
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
-import scipy.signal  # same backend as before
+from scipy.signal import correlate, firwin, lfilter, resample_poly
 
-# ---------------------------------------------------------------------------
-# Language normalization (unchanged behavior)
-# ---------------------------------------------------------------------------
+from ..io.runner import CommandRunner
 
+# --- Language Normalization (from original file) ---
 _LANG2TO3 = {
-    'en': 'eng','ja': 'jpn','jp': 'jpn','zh': 'zho','cn': 'zho','es': 'spa','de': 'deu',
-    'fr': 'fra','it': 'ita','pt': 'por','ru': 'rus','ko': 'kor','ar': 'ara','tr': 'tur',
-    'pl': 'pol','nl': 'nld','sv': 'swe','no': 'nor','fi': 'fin','da': 'dan','cs': 'ces',
-    'sk': 'slk','sl': 'slv','hu': 'hun','el': 'ell','he': 'heb','id': 'ind','vi': 'vie',
-    'th': 'tha','hi': 'hin','ur': 'urd','fa': 'fas','uk': 'ukr','ro': 'ron','bg': 'bul',
-    'sr': 'srp','hr': 'hrv','ms': 'msa','bn': 'ben','ta': 'tam','te': 'tel'
+    'en': 'eng', 'ja': 'jpn', 'jp': 'jpn', 'zh': 'zho', 'cn': 'zho', 'es': 'spa', 'de': 'deu', 'fr': 'fra',
+    'it': 'ita', 'pt': 'por', 'ru': 'rus', 'ko': 'kor', 'ar': 'ara', 'tr': 'tur', 'pl': 'pol', 'nl': 'nld',
+    'sv': 'swe', 'no': 'nor', 'fi': 'fin', 'da': 'dan', 'cs': 'ces', 'sk': 'slk', 'sl': 'slv', 'hu': 'hun',
+    'el': 'ell', 'he': 'heb', 'id': 'ind', 'vi': 'vie', 'th': 'tha', 'hi': 'hin', 'ur': 'urd', 'fa': 'fas',
+    'uk': 'ukr', 'ro': 'ron', 'bg': 'bul', 'sr': 'srp', 'hr': 'hrv', 'ms': 'msa', 'bn': 'ben', 'ta': 'tam',
+    'te': 'tel'
 }
-
 def _normalize_lang(lang: Optional[str]) -> Optional[str]:
-    if not lang:
-        return None
+    if not lang: return None
     s = lang.strip().lower()
-    if not s or s == 'und':
-        return None
-    if len(s) == 2 and s in _LANG2TO3:
-        return _LANG2TO3[s]
-    return s
+    if not s or s == 'und': return None
+    return _LANG2TO3.get(s, s) if len(s) == 2 else s
 
-# ---------------------------------------------------------------------------
-# Low-level helpers
-# ---------------------------------------------------------------------------
 
-def _bin(tool_paths: Dict[str, str], name: str) -> str:
-    p = (tool_paths or {}).get(name)
-    return p or name
-
-def _get_audio_stream_index(
-    mkv_path: str,
-    language: Optional[str],
-    log: Callable[[str], None],
-    tool_paths: Dict[str, str] | None = None,
-) -> Optional[int]:
-    """
-    Return the 0-based audio-stream index (for -map 0:a:<idx>).
-    Prefer `language` (3-letter) if provided, else first audio stream.
-    """
-    desired = _normalize_lang(language)
-    cmd = [_bin(tool_paths, 'mkvmerge'), '-J', str(mkv_path)]
+# --- DSP & IO Helpers ---
+def _get_audio_stream_index(mkv_path: str, lang: Optional[str], runner: CommandRunner, tool_paths: dict) -> Optional[int]:
+    """Return 0-based audio stream index for ffmpeg -map 0:a:{idx}."""
+    out = runner.run(['mkvmerge', '-J', str(mkv_path)], tool_paths)
+    if not out or not isinstance(out, str): return None
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        info = json.loads(out.stdout)
-    except Exception as e:
-        log(f"[mkvmerge] probe failed: {e}")
+        info = json.loads(out)
+        audio_tracks = [t for t in info.get('tracks', []) if t.get('type') == 'audio']
+        if not audio_tracks: return None
+        if lang:
+            for i, t in enumerate(audio_tracks):
+                props = t.get('properties', {})
+                if (props.get('language') or '').strip().lower() == lang:
+                    return i
+        return 0 # Default to the first audio track
+    except (json.JSONDecodeError, IndexError):
         return None
 
-    idx = -1
-    first_found = None
-    for t in info.get('tracks', []):
-        if t.get('type') == 'audio':
-            idx += 1
-            if first_found is None:
-                first_found = idx
-            if desired:
-                lang = ((t.get('properties') or {}).get('language') or '').strip().lower()
-                if lang == desired:
-                    return idx
-    return first_found
+def _probe_stream_sr(file_path: str, a_index: int, runner: CommandRunner, tool_paths: dict) -> int:
+    """Probes the native sample rate of a specific audio stream."""
+    out = runner.run([
+        'ffprobe', '-v', 'error', '-select_streams', f'a:{a_index}',
+        '-show_entries', 'stream=sample_rate', '-of', 'csv=p=0', str(file_path)
+    ], tool_paths)
+    try:
+        return int(str(out).strip())
+    except (ValueError, TypeError):
+        return 48000 # Fallback
 
-def _decode_audio_to_array(
-    source_file: str,
-    stream_index: int,
-    sr_out: int,
-    mono: bool,
-    log: Callable[[str], None],
-    tool_paths: Dict[str, str] | None = None,
-) -> Tuple[np.ndarray, int]:
-    """
-    Decode one stream to PCM (s16le) via ffmpeg piping.
-    Returns (float32 mono array in [-1,1], sr_out).
-    """
+def _decode_to_memory(file_path: str, a_index: int, out_sr: int, runner: CommandRunner, tool_paths: dict) -> np.ndarray:
+    """Decodes one audio stream to a mono float32 NumPy array."""
     cmd = [
-        _bin(tool_paths, 'ffmpeg'), '-v', 'error', '-nostdin',
-        '-i', str(source_file),
-        '-map', f'0:a:{stream_index}',
-        '-ac', '1' if mono else '2',
-        '-ar', str(sr_out),
-        '-f', 's16le', '-'  # raw PCM to stdout
+        'ffmpeg', '-nostdin', '-v', 'error',
+        '-i', str(file_path), '-map', f'0:a:{a_index}',
+        '-ac', '1', '-ar', str(out_sr), '-f', 'f32le', '-'
     ]
+    pcm_bytes = runner.run(cmd, tool_paths, is_binary=True)
+    if not pcm_bytes or not isinstance(pcm_bytes, bytes):
+        raise RuntimeError(f'ffmpeg decode failed for {Path(file_path).name}')
+    return np.frombuffer(pcm_bytes, dtype=np.float32)
+
+def _apply_lowpass(waveform: np.ndarray, sr: int, cutoff_hz: int) -> np.ndarray:
+    """Applies a simple FIR low-pass filter."""
+    if cutoff_hz <= 0: return waveform
     try:
-        proc = subprocess.run(cmd, capture_output=True, check=True)
-    except subprocess.CalledProcessError as e:
-        tail = (e.stderr or b'')[-400:].decode('utf-8', errors='ignore')
-        log(f"[ffmpeg] decode failed (exit {e.returncode}). stderr tail:\n{tail}")
-        raise
-
-    pcm = np.frombuffer(proc.stdout, dtype=np.int16)
-    if pcm.size == 0:
-        raise RuntimeError("ffmpeg produced no PCM data.")
-    y = pcm.astype(np.float32) / 32768.0
-    return y, sr_out
-
-def _slice_by_time(y: np.ndarray, sr: int, start_s: float, dur_s: float) -> np.ndarray:
-    start = int(round(start_s * sr))
-    length = int(round(dur_s * sr))
-    if start < 0:
-        start = 0
-    end = min(start + length, y.shape[0])
-    if end <= start:
-        return np.zeros((0,), dtype=np.float32)
-    return y[start:end].copy()
-
-def _find_audio_delay(
-    ref_sig: np.ndarray,
-    sec_sig: np.ndarray,
-    sr: int,
-) -> Tuple[Optional[int], float, Optional[float]]:
-    """
-    Same math/sign as your original:
-      lag_samples = argmax(corr) - (len(sec) - 1)
-      delay_ms    = round(lag_samples / sr * 1000)
-      match %     = peak / (||ref||*||sec||)
-    """
-    try:
-        if ref_sig.size == 0 or sec_sig.size == 0:
-            return None, 0.0, None
-
-        ref = ref_sig.astype(np.float32)
-        sec = sec_sig.astype(np.float32)
-        ref = (ref - ref.mean()) / (ref.std() + 1e-9)
-        sec = (sec - sec.mean()) / (sec.std() + 1e-9)
-
-        corr = scipy.signal.correlate(ref, sec, mode='full', method='auto')
-        peak_idx = int(np.argmax(corr))
-        lag_samples = peak_idx - (len(sec) - 1)
-        raw_delay_s = lag_samples / float(sr)
-
-        norm_factor = math.sqrt(float((ref**2).sum()) * float((sec**2).sum()))
-        match_pct = (float(np.max(np.abs(corr))) / (norm_factor + 1e-9)) * 100.0
-
-        return int(round(raw_delay_s * 1000.0)), match_pct, raw_delay_s
+        nyquist = sr / 2
+        num_taps = 101 # Simple FIR filter
+        hz = min(cutoff_hz, nyquist - 1)
+        h = firwin(num_taps, hz / nyquist)
+        return lfilter(h, 1.0, waveform).astype(np.float32)
     except Exception:
-        return None, 0.0, None
+        return waveform # Return original on filter error
 
-# ---------------------------------------------------------------------------
-# Public: decode once, slice many, correlate (with per-chunk logging)
-# ---------------------------------------------------------------------------
+def _find_delay(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int, peak_fit: bool) -> Tuple[float, float]:
+    """Calculates delay and match percentage between two normalized chunks."""
+    r = (ref_chunk - np.mean(ref_chunk)) / (np.std(ref_chunk) + 1e-9)
+    # --- The fix is on the next line ---
+    t = (tgt_chunk - np.mean(tgt_chunk)) / (np.std(tgt_chunk) + 1e-9)
+    # ----------------------------------
+    c = correlate(r, t, mode='full', method='fft')
 
+    k = np.argmax(np.abs(c))
+    lag_samples = float(k - (len(t) - 1))
+
+    # Parabolic peak interpolation for sub-sample accuracy
+    if peak_fit and 0 < k < len(c) - 1:
+        y1, y2, y3 = c[k-1], c[k], c[k+1]
+        delta = 0.5 * (y1 - y3) / (y1 - 2*y2 + y3)
+        if -1 < delta < 1: # Ensure delta is reasonable
+            lag_samples += delta
+
+    raw_delay_s = lag_samples / float(sr)
+    match_pct = (np.abs(c[k]) / (np.sqrt(np.sum(r**2) * np.sum(t**2)) + 1e-9)) * 100.0
+    return raw_delay_s * 1000.0, match_pct
+
+
+# --- Public API ---
 def run_audio_correlation(
     ref_file: str,
     target_file: str,
-    temp_dir_unused: Path,    # kept for signature compatibility
-    config: Dict,             # expects scan_chunk_count, scan_chunk_duration; optional 'chunk_starts'
-    runner,                   # object with ._log_message(str)
+    temp_dir_unused: Path,
+    config: Dict,
+    runner: CommandRunner,
     tool_paths: Dict[str, str],
     ref_lang: Optional[str],
     target_lang: Optional[str],
-    role_tag: str,
-    *,
-    sr_out: int = 48000,
-    mono: bool = True,
-    full_span_like_cli: bool = False,  # True: chunk starts from 0s..(end-chunk)
-    log_chunks: bool = True,           # per-chunk verbose logging
-) -> List[Dict[str, float]]:
-    log = getattr(runner, "_log_message", print)
+    role_tag: str
+) -> List[Dict]:
+    """
+    Performs in-memory audio correlation and returns a list of per-chunk results.
+    The caller is responsible for choosing the final delay from this data.
+    """
+    log = runner._log_message
 
-    # Stream selection
-    ref_norm = _normalize_lang(ref_lang)
-    tgt_norm = _normalize_lang(target_lang)
+    # --- 1. Parse Config ---
+    cfg = {
+        'chunks': int(config.get('scan_chunk_count', 10)),
+        'chunk_dur': float(config.get('scan_chunk_duration', 15.0)),
+        'min_match': float(config.get('min_match_pct', 5.0)),
+        'decode_native': bool(config.get('audio_decode_native', False)),
+        'peak_fit': bool(config.get('audio_peak_fit', False)),
+        'bandlimit': int(config.get('audio_bandlimit_hz', 0)),
+    }
+    bandlimit_str = f"{cfg['bandlimit']} Hz" if cfg['bandlimit'] > 0 else "Off"
+    log(f"Config: chunks={cfg['chunks']}, chunk_dur={cfg['chunk_dur']}s, min_match_pct={cfg['min_match']:.1f}, "
+        f"decode_native={cfg['decode_native']}, peak_fit={cfg['peak_fit']}, bandlimit={bandlimit_str}")
 
-    idx_ref = _get_audio_stream_index(ref_file, ref_norm, log, tool_paths)
-    idx_tgt = _get_audio_stream_index(target_file, tgt_norm, log, tool_paths)
-
-    log(
-        f"Selected streams: REF (lang='{ref_norm or 'first'}', index={idx_ref}), "
-        f"{role_tag.upper()} (lang='{tgt_norm or 'first'}', index={idx_tgt})"
-    )
+    # --- 2. Stream Selection ---
+    ref_norm, tgt_norm = _normalize_lang(ref_lang), _normalize_lang(target_lang)
+    idx_ref = _get_audio_stream_index(ref_file, ref_norm, runner, tool_paths)
+    idx_tgt = _get_audio_stream_index(target_file, tgt_norm, runner, tool_paths)
     if idx_ref is None or idx_tgt is None:
         raise ValueError("Could not locate required audio streams for correlation.")
+    log(f"Selected streams: REF (lang='{ref_norm or 'first'}', index={idx_ref}), "
+        f"{role_tag.upper()} (lang='{tgt_norm or 'first'}', index={idx_tgt})")
 
-    # Decode once
-    y_ref, sr_ref = _decode_audio_to_array(ref_file, idx_ref, sr_out, mono, log, tool_paths)
-    y_tgt, sr_tgt = _decode_audio_to_array(target_file, idx_tgt, sr_out, mono, log, tool_paths)
-    if sr_ref != sr_tgt:
-        raise RuntimeError(f"Sample rate mismatch: ref={sr_ref}, tgt={sr_tgt}")
-
-    duration_s = len(y_ref) / float(sr_ref)
-    chunks = int(max(1, int(config.get('scan_chunk_count', 10))))
-    chunk_dur = float(config.get('scan_chunk_duration', 15.0))
-
-    explicit_starts: Optional[List[float]] = config.get('chunk_starts')
-    if explicit_starts:
-        starts = [max(0.0, min(duration_s, float(s))) for s in explicit_starts]
+    # --- 3. Decode and Resample ---
+    DEFAULT_SR = 48000
+    if cfg['decode_native']:
+        sr_ref = _probe_stream_sr(ref_file, idx_ref, runner, tool_paths)
+        sr_tgt = _probe_stream_sr(target_file, idx_tgt, runner, tool_paths)
     else:
-        if full_span_like_cli:
-            if chunks == 1:
-                starts = [0.0]
-            else:
-                step = (max(0.0, duration_s - chunk_dur)) / (chunks - 1)
-                starts = [i * step for i in range(chunks)]
-        else:
-            scan_range = max(0.0, duration_s * 0.8)
-            start_offset = duration_s * 0.1
-            starts = [start_offset + (scan_range / max(1, chunks - 1) * i) for i in range(chunks)]
+        sr_ref = sr_tgt = DEFAULT_SR
 
-    if log_chunks:
-        log(f"Reference decoded: {duration_s:.2f} s @ {sr_ref} Hz, mono")
-        log(f"Processing {chunks} chunks of {chunk_dur:.1f} seconds each")
+    ref_pcm = _decode_to_memory(ref_file, idx_ref, sr_ref, runner, tool_paths)
+    tgt_pcm = _decode_to_memory(target_file, idx_tgt, sr_tgt, runner, tool_paths)
 
-    results: List[Dict[str, float]] = []
-    for i, s in enumerate(starts, 1):
-        ref_chunk = _slice_by_time(y_ref, sr_ref, s, chunk_dur)
-        tgt_chunk = _slice_by_time(y_tgt, sr_tgt, s, chunk_dur)
+    if sr_ref != sr_tgt:
+        log(f"Resampling target audio from {sr_tgt} Hz to {sr_ref} Hz...")
+        up = sr_ref // math.gcd(sr_ref, sr_tgt)
+        down = sr_tgt // math.gcd(sr_ref, sr_tgt)
+        tgt_pcm = resample_poly(tgt_pcm, up, down).astype(np.float32)
 
-        n = min(ref_chunk.shape[0], tgt_chunk.shape[0])
-        if n <= 100:
+    # --- 4. Pre-processing ---
+    ref_pcm = _apply_lowpass(ref_pcm, sr_ref, cfg['bandlimit'])
+    tgt_pcm = _apply_lowpass(tgt_pcm, sr_ref, cfg['bandlimit']) # Use sr_ref as final rate
+
+    duration_s = len(ref_pcm) / float(sr_ref)
+    log(f"Reference decoded: {duration_s:.2f} s @ {sr_ref} Hz, mono")
+    log(f"Processing {cfg['chunks']} chunks of {cfg['chunk_dur']:.1f} seconds each (scan window ≈ 10% → 90%)")
+
+    # --- 5. Per-Chunk Correlation ---
+    scan_range = max(0.0, duration_s * 0.8)
+    start_offset = duration_s * 0.1
+    starts = [start_offset + (scan_range / max(1, cfg['chunks'] - 1) * i) for i in range(cfg['chunks'])]
+
+    results = []
+    chunk_samples = int(round(cfg['chunk_dur'] * sr_ref))
+
+    for i, t0 in enumerate(starts, 1):
+        start_sample = int(round(t0 * sr_ref))
+        end_sample = start_sample + chunk_samples
+        if end_sample > len(ref_pcm) or end_sample > len(tgt_pcm):
             continue
-        if ref_chunk.shape[0] != n:
-            ref_chunk = ref_chunk[:n]
-        if tgt_chunk.shape[0] != n:
-            tgt_chunk = tgt_chunk[:n]
 
-        delay_ms, match_pct, raw_delay_s = _find_audio_delay(ref_chunk, tgt_chunk, sr_ref)
-        if delay_ms is not None:
-            raw_ms = raw_delay_s * 1000.0 if raw_delay_s is not None else float(delay_ms)
-            results.append({
-                'delay': float(delay_ms),
-                'match': float(match_pct),
-                'raw_delay': float(raw_delay_s) if raw_delay_s is not None else float(delay_ms) / 1000.0,
-                'start': float(s),
-            })
-            if log_chunks:
-                # integer (for mkvmerge) + raw with 3 decimals, both signed
-                log(f"  Chunk {i}/{chunks} (@{s:.1f}s): delay = {int(delay_ms):+d} ms  (raw = {raw_ms:+.3f} ms, match={match_pct:.2f}%)")
+        ref_chunk = ref_pcm[start_sample:end_sample]
+        tgt_chunk = tgt_pcm[start_sample:end_sample]
+
+        raw_ms, match = _find_delay(ref_chunk, tgt_chunk, sr_ref, cfg['peak_fit'])
+        accepted = match >= cfg['min_match']
+
+        status_str = "ACCEPTED" if accepted else f"REJECTED (below {cfg['min_match']:.1f}%)"
+        log(f"  Chunk {i}/{cfg['chunks']} (@{t0:.1f}s): delay = {int(round(raw_ms)):+d} ms  "
+            f"(raw = {raw_ms:+.3f} ms, match={match:.2f}%) — {status_str}")
+
+        results.append({
+            'delay': int(round(raw_ms)),
+            'raw_delay': raw_ms,
+            'match': match,
+            'start': t0,
+            'accepted': accepted
+        })
 
     return results

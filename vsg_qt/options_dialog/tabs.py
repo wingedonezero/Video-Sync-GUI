@@ -1,3 +1,5 @@
+# vsg_qt/options_dialog/tabs.py
+
 from __future__ import annotations
 from typing import Dict
 from PySide6.QtWidgets import (
@@ -79,12 +81,28 @@ class AnalysisTab(QWidget):
         self.widgets['analysis_lang_sec'] = QLineEdit(); self.widgets['analysis_lang_sec'].setPlaceholderText('Blank = first available')
         self.widgets['analysis_lang_ter'] = QLineEdit(); self.widgets['analysis_lang_ter'].setPlaceholderText('Blank = first available')
 
+        # --- New Advanced Audio Settings ---
+        self.widgets['audio_decode_native'] = QCheckBox("Decode at native sample rate (may be less stable)")
+        self.widgets['audio_peak_fit'] = QCheckBox("Enable sub-sample peak fitting (higher precision)")
+        bl_hz = QSpinBox(); bl_hz.setRange(0, 22000); bl_hz.setSuffix(" Hz"); bl_hz.setToolTip("0 = Off")
+        self.widgets['audio_bandlimit_hz'] = bl_hz
+        # -----------------------------------
+
         f.addRow('Analysis Mode:', self.widgets['analysis_mode'])
-        f.addRow('Audio: Scan Chunks:', self.widgets['scan_chunk_count'])
-        f.addRow('Audio: Chunk Duration (s):', self.widgets['scan_chunk_duration'])
-        f.addRow('Audio: Minimum Match %:', self.widgets['min_match_pct'])
-        f.addRow('VideoDiff: Min Allowed Error:', self.widgets['videodiff_error_min'])
-        f.addRow('VideoDiff: Max Allowed Error:', self.widgets['videodiff_error_max'])
+        f.addRow(QLabel('<b>Audio Correlation Settings</b>'))
+        f.addRow('Scan Chunks:', self.widgets['scan_chunk_count'])
+        f.addRow('Chunk Duration (s):', self.widgets['scan_chunk_duration'])
+        f.addRow('Minimum Match %:', self.widgets['min_match_pct'])
+
+        f.addRow(QLabel('<b>Advanced Correlation Settings (Experimental)</b>'))
+        f.addRow(self.widgets['audio_decode_native'])
+        f.addRow(self.widgets['audio_peak_fit'])
+        f.addRow("Apply low-pass filter below:", self.widgets['audio_bandlimit_hz'])
+
+        f.addRow(QLabel('<b>VideoDiff Settings</b>'))
+        f.addRow('Min Allowed Error:', self.widgets['videodiff_error_min'])
+        f.addRow('Max Allowed Error:', self.widgets['videodiff_error_max'])
+
         f.addRow(QLabel('<b>Analysis Audio Track Selection</b>'))
         f.addRow('REF Language:', self.widgets['analysis_lang_ref'])
         f.addRow('SEC Language:', self.widgets['analysis_lang_sec'])

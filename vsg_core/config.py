@@ -25,6 +25,11 @@ class AppConfig:
             'min_match_pct': 5.0,
             'videodiff_error_min': 0.0,
             'videodiff_error_max': 100.0,
+            # --- New Advanced Audio Settings ---
+            'audio_decode_native': False,
+            'audio_peak_fit': False,
+            'audio_bandlimit_hz': 0,
+            # -----------------------------------
             'rename_chapters': False,
             'apply_dialog_norm_gain': False,
             'snap_chapters': False,
