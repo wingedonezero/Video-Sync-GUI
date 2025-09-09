@@ -12,16 +12,12 @@ from vsg_core.models.enums import TrackType
 from vsg_core.extraction.tracks import extract_tracks
 
 class ExtractStep:
-    """
-    Extracts selected tracks per manual layout from all sources.
-    """
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
         if not ctx.and_merge:
             ctx.extracted_items = []
             return ctx
 
         all_extracted_tracks = []
-        # Loop through all sources and extract the tracks specified in the manual layout
         for source_key, source_path in ctx.sources.items():
             track_ids_to_extract = [t['id'] for t in ctx.manual_layout if t.get('source') == source_key]
             if track_ids_to_extract:
@@ -33,7 +29,6 @@ class ExtractStep:
                 )
                 all_extracted_tracks.extend(extracted_for_source)
 
-        # Create a lookup map using the consistent 'source' key
         extracted_map: Dict[str, Dict[str, Any]] = {
             f"{t['source']}_{t['id']}": t
             for t in all_extracted_tracks
@@ -41,7 +36,6 @@ class ExtractStep:
 
         items: List[PlanItem] = []
         for sel in ctx.manual_layout:
-            # Use the consistent 'source' key for lookup
             key = f"{sel.get('source', '')}_{sel['id']}"
             trk = extracted_map.get(key)
             if not trk:
@@ -49,7 +43,7 @@ class ExtractStep:
                 continue
 
             track_model = Track(
-                source=sel['source'], # Use the reliable source from the user selection
+                source=sel['source'],
                 id=int(trk['id']),
                 type=TrackType(trk.get('type', 'video')),
                 props=StreamProps(

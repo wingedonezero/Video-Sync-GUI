@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (
     QLineEdit, QLabel, QGroupBox, QTextEdit, QProgressBar,
     QCheckBox
 )
+from PySide6.QtCore import Qt
 
 from vsg_core.config import AppConfig
 from .controller import MainController
@@ -39,14 +40,11 @@ class MainWindow(QMainWindow):
         central = QWidget(); self.setCentralWidget(central)
         main = QVBoxLayout(central)
 
-        # Top row
         top_row = QHBoxLayout()
         self.options_btn = QPushButton('Settings…')
-        self.options_btn.clicked.connect(self.controller.open_options_dialog)
         top_row.addWidget(self.options_btn); top_row.addStretch()
         main.addLayout(top_row)
 
-        # Main actions
         actions_group = QGroupBox('Main Workflow')
         actions_layout = QVBoxLayout(actions_group)
         self.queue_jobs_btn = QPushButton('Open Job Queue for Merging...')
@@ -55,39 +53,35 @@ class MainWindow(QMainWindow):
         actions_layout.addWidget(self.archive_logs_check)
         main.addWidget(actions_group)
 
-        # Quick Analysis Tool
         analysis_group = QGroupBox('Quick Analysis (Analyze Only)')
         analysis_layout = QVBoxLayout(analysis_group)
-        analysis_layout.addLayout(self._create_file_input('Reference:', self.ref_input, lambda: self.controller.browse_for_path(self.ref_input, "Select Reference File or Directory")))
-        analysis_layout.addLayout(self._create_file_input('Secondary:', self.sec_input, lambda: self.controller.browse_for_path(self.sec_input, "Select Secondary File or Directory")))
-        analysis_layout.addLayout(self._create_file_input('Tertiary:', self.ter_input, lambda: self.controller.browse_for_path(self.ter_input, "Select Tertiary File or Directory")))
+        analysis_layout.addLayout(self._create_file_input('Source 1 (Reference):', self.ref_input, lambda: self.controller.browse_for_path(self.ref_input, "Select Reference File or Directory")))
+        analysis_layout.addLayout(self._create_file_input('Source 2:', self.sec_input, lambda: self.controller.browse_for_path(self.sec_input, "Select Secondary File or Directory")))
+        analysis_layout.addLayout(self._create_file_input('Source 3:', self.ter_input, lambda: self.controller.browse_for_path(self.ter_input, "Select Tertiary File or Directory")))
         analyze_btn = QPushButton('Analyze Only')
         analysis_layout.addWidget(analyze_btn, 0, Qt.AlignRight)
         main.addWidget(analysis_group)
 
-        # Connect signals
-        analyze_btn.clicked.connect(lambda: self.controller.start_batch(and_merge=False))
+        self.options_btn.clicked.connect(self.controller.open_options_dialog)
+        analyze_btn.clicked.connect(self.controller.start_batch_analyze_only)
         self.queue_jobs_btn.clicked.connect(self.controller.open_job_queue)
 
-        # Status / progress
         status_layout = QHBoxLayout()
         status_layout.addWidget(QLabel('Status:'))
         status_layout.addWidget(self.status_label, 1)
         status_layout.addWidget(self.progress_bar)
         main.addLayout(status_layout)
 
-        # Results
         results_group = QGroupBox('Latest Job Results')
         results_layout = QHBoxLayout(results_group)
-        results_layout.addWidget(QLabel('Secondary Delay:'))
+        results_layout.addWidget(QLabel('Source 2 Delay:'))
         results_layout.addWidget(self.sec_delay_label)
         results_layout.addSpacing(20)
-        results_layout.addWidget(QLabel('Tertiary Delay:'))
+        results_layout.addWidget(QLabel('Source 3 Delay:'))
         results_layout.addWidget(self.ter_delay_label)
         results_layout.addStretch()
         main.addWidget(results_group)
 
-        # Log
         log_group = QGroupBox('Log')
         log_layout = QVBoxLayout(log_group)
         log_layout.addWidget(self.log_output)

@@ -1,8 +1,5 @@
+# vsg_qt/worker/runner.py
 # -*- coding: utf-8 -*-
-"""
-QRunnable worker that executes analysis/merge jobs via vsg_core.pipeline.JobPipeline
-without freezing the GUI.
-"""
 from pathlib import Path
 from typing import Dict, Any, List
 
@@ -11,24 +8,17 @@ from PySide6.QtCore import QRunnable, Slot
 from vsg_core.pipeline import JobPipeline
 from .signals import WorkerSignals
 
-
 class JobWorker(QRunnable):
-    """
-    A QRunnable worker that executes a list of jobs in a separate thread.
-    - Emits granular signals for UI updates.
-    - Behavior is identical to the previous monolithic worker.py.
-    """
     def __init__(self, config: Dict[str, Any], jobs: List[Dict], and_merge: bool, output_dir: str):
         super().__init__()
         self.config = config
-        self.jobs = jobs                  # Each job is a dict: {'ref', 'sec'?, 'ter'?, 'manual_layout'?}
+        self.jobs = jobs
         self.and_merge = and_merge
         self.output_dir = output_dir
         self.signals = WorkerSignals()
 
     @Slot()
     def run(self):
-        """Main entry executed in the worker thread."""
         pipeline = JobPipeline(
             config=self.config,
             log_callback=lambda msg: self.signals.log.emit(msg),
@@ -39,27 +29,35 @@ class JobWorker(QRunnable):
         total_jobs = len(self.jobs)
 
         for i, job_data in enumerate(self.jobs, 1):
-            ref_file = job_data['ref']
+            sources = job_data.get('sources', {})
+            source1_file = sources.get("Source 1")
+            if not source1_file:
+                self.signals.log.emit(f"[FATAL WORKER ERROR] Job {i} is missing 'Source 1'. Skipping.")
+                continue
+
+            # Store original Source 1 path for batch output folder logic in controller
+            job_data['ref_path_for_batch_check'] = source1_file
+
             try:
-                self.signals.status.emit(f'Processing {i}/{total_jobs}: {Path(ref_file).name}')
+                self.signals.status.emit(f'Processing {i}/{total_jobs}: {Path(source1_file).name}')
 
                 result = pipeline.run_job(
-                    ref_file=ref_file,
-                    sec_file=job_data.get('sec'),
-                    ter_file=job_data.get('ter'),
+                    sources=sources,
                     and_merge=self.and_merge,
                     output_dir_str=self.output_dir,
-                    manual_layout=job_data.get('manual_layout'),  # Manual selection payload (if any)
+                    manual_layout=job_data.get('manual_layout'),
                 )
+
+                result['job_data_for_batch_check'] = job_data
 
                 self.signals.finished_job.emit(result)
                 all_results.append(result)
 
             except Exception as e:
                 error_result = {
-                    'status': 'Failed',
-                    'error': str(e),
-                    'name': Path(ref_file).name,
+                    'status': 'Failed', 'error': str(e),
+                    'name': Path(source1_file).name,
+                    'job_data_for_batch_check': job_data
                 }
                 self.signals.log.emit(f'[FATAL WORKER ERROR] Job {i} failed: {e}')
                 self.signals.finished_job.emit(error_result)

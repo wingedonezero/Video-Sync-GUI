@@ -4,6 +4,7 @@ from __future__ import annotations
 import shutil
 import tempfile
 import time
+import re
 from pathlib import Path
 from typing import Dict, List, Any, Optional, Callable
 
@@ -40,18 +41,22 @@ class ManualSelectionDialog(QDialog):
 
         self.source_lists: Dict[str, SourceList] = {}
 
+        # --- Main Layout ---
         root = QVBoxLayout(self)
         self.info_label = QLabel()
         self.info_label.setVisible(False)
         self.info_label.setStyleSheet("color: green; font-weight: bold;")
         root.addWidget(self.info_label, 0, Qt.AlignCenter)
-        row = QHBoxLayout()
-        left_scroll = QScrollArea(); left_scroll.setWidgetResizable(True)
-        left_wrap = QWidget()
-        self.left_vbox = QVBoxLayout(left_wrap); self.left_vbox.setContentsMargins(0,0,0,0)
 
-        # --- Dynamic source list creation ---
-        sorted_sources = sorted(track_info.keys(), key=lambda k: int(k.split(" ")[1]))
+        main_hbox = QHBoxLayout()
+
+        # --- Left Pane (Dynamic Source Lists) ---
+        left_scroll = QScrollArea(); left_scroll.setWidgetResizable(True)
+        left_widget = QWidget()
+        self.left_vbox = QVBoxLayout(left_widget)
+        self.left_vbox.setContentsMargins(0,0,0,0)
+
+        sorted_sources = sorted(track_info.keys(), key=lambda k: int(re.search(r'\d+', k).group()))
         for source_key in sorted_sources:
             title = f"{source_key} Tracks"
             if source_key == "Source 1":
@@ -64,18 +69,26 @@ class ManualSelectionDialog(QDialog):
             group_layout = QVBoxLayout(group_box)
             group_layout.addWidget(source_list_widget)
             self.left_vbox.addWidget(group_box)
-        # ------------------------------------
 
         self.left_vbox.addStretch(1)
-        left_scroll.setWidget(left_wrap)
-        row.addWidget(left_scroll, 1)
+        left_scroll.setWidget(left_widget)
+        main_hbox.addWidget(left_scroll, 1)
 
+        # --- Right Pane (Final Layout) ---
         self.final_list = FinalList(self)
         final_group = QGroupBox("Final Output (Drag to reorder)")
-        gl = QVBoxLayout(final_group); gl.addWidget(self.final_list)
-        row.addWidget(final_group, 2)
-        root.addLayout(row)
+        final_layout = QVBoxLayout(final_group); final_layout.addWidget(self.final_list)
+        main_hbox.addWidget(final_group, 2)
 
+        root.addLayout(main_hbox)
+
+        # --- Dialog Buttons ---
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        btns.accepted.connect(self.accept)
+        btns.rejected.connect(self.reject)
+        root.addWidget(btns)
+
+        # --- Initial Population ---
         self._populate_sources()
         self._wire_double_clicks()
 
@@ -87,11 +100,6 @@ class ManualSelectionDialog(QDialog):
                 for t in realized:
                     if not ManualLogic.is_blocked_video(t):
                         self.final_list.add_track_widget(t, preset=True)
-
-        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        btns.accepted.connect(self.accept)
-        btns.rejected.connect(self.reject)
-        root.addWidget(btns)
 
     def _ensure_editable_subtitle_path(self, widget: TrackWidget) -> Optional[str]:
         track_data = widget.track_data
@@ -204,11 +212,35 @@ class ManualSelectionDialog(QDialog):
     def keyPressEvent(self, event):
         if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Up: self.final_list._move_by(-1); event.accept(); return
         if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Down: self.final_list._move_by(+1); event.accept(); return
-        # ... (key press handlers for default/forced/delete are unchanged) ...
+        if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_D:
+            item = self.final_list.currentItem()
+            if item:
+                w = self.final_list.itemWidget(item)
+                if hasattr(w, 'cb_default'):
+                    w.cb_default.setChecked(True)
+                    ManualLogic.normalize_single_default_for_type(self.final_list._widgets_of_type(w.track_type), w.track_type, prefer_widget=w)
+                    if hasattr(w, 'refresh_badges'): w.refresh_badges()
+                    if hasattr(w, 'refresh_summary'): w.refresh_summary()
+            event.accept(); return
+        if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_F:
+            item = self.final_list.currentItem()
+            if item:
+                w = self.final_list.itemWidget(item)
+                if getattr(w, 'track_type', '') == 'subtitles' and hasattr(w, 'cb_forced'):
+                    w.cb_forced.setChecked(not w.cb_forced.isChecked())
+                    ManualLogic.normalize_forced_subtitles(self.final_list._widgets_of_type('subtitles'))
+                    if hasattr(w, 'refresh_badges'): w.refresh_badges()
+                    if hasattr(w, 'refresh_summary'): w.refresh_summary()
+            event.accept(); return
+        if event.key() == Qt.Key_Delete:
+            item = self.final_list.currentItem()
+            if item: self.final_list.takeItem(self.final_list.row(item)); event.accept(); return
         super().keyPressEvent(event)
 
     def accept(self):
-        # ... (normalization logic is unchanged) ...
+        ManualLogic.normalize_single_default_for_type(self.final_list._widgets_of_type('audio'), 'audio')
+        ManualLogic.normalize_single_default_for_type(self.final_list._widgets_of_type('subtitles'), 'subtitles')
+        ManualLogic.normalize_forced_subtitles(self.final_list._widgets_of_type('subtitles'))
         widgets = []
         for i in range(self.final_list.count()):
             it = self.final_list.item(i)
@@ -217,4 +249,5 @@ class ManualSelectionDialog(QDialog):
         self.manual_layout = ManualLogic.build_layout_from_widgets(widgets)
         super().accept()
 
-    def get_manual_layout(self): return self.manual_layout
+    def get_manual_layout(self):
+        return self.manual_layout

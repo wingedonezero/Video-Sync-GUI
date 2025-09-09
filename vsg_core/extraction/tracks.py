@@ -18,7 +18,7 @@ def _pcm_codec_from_bit_depth(bit_depth):
 
 def get_stream_info(mkv_path: str, runner: CommandRunner, tool_paths: dict) -> Optional[Dict[str, Any]]:
     out = runner.run(['mkvmerge', '-J', str(mkv_path)], tool_paths)
-    if not out: return None
+    if not out or not isinstance(out, str): return None
     try:
         return json.loads(out)
     except json.JSONDecodeError:
@@ -74,12 +74,13 @@ def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: 
         props = track.get('properties', {}) or {}
         codec = props.get('codec_id') or ''
         ext = _ext_for_codec(ttype, codec)
-        out_path = temp_dir / f"{role}_track_{Path(mkv).stem}_{tid}.{ext}"
+        safe_role = role.replace(" ", "_")
+        out_path = temp_dir / f"{safe_role}_track_{Path(mkv).stem}_{tid}.{ext}"
 
         record = {
             'id': tid, 'type': ttype, 'lang': props.get('language', 'und'),
             'name': props.get('track_name', ''), 'path': str(out_path),
-            'codec_id': codec, 'source_key': role # Changed from 'source'
+            'codec_id': codec, 'source': role # Standardize to 'source'
         }
         tracks_to_extract.append(record)
 
@@ -105,9 +106,6 @@ def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: 
     return tracks_to_extract
 
 def get_track_info_for_dialog(sources: Dict[str, str], runner: CommandRunner, tool_paths: dict) -> Dict[str, List[Dict]]:
-    """
-    Generalized to accept a dictionary of sources.
-    """
     all_tracks: Dict[str, List[Dict]] = {key: [] for key in sources}
     for source_key, filepath in sources.items():
         if not filepath or not Path(filepath).exists():
