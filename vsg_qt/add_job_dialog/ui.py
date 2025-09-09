@@ -5,38 +5,43 @@ from typing import List, Dict
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QDialogButtonBox,
-    QLineEdit, QLabel, QGroupBox, QMessageBox, QFileDialog
+    QLineEdit, QLabel, QMessageBox, QFileDialog, QScrollArea, QWidget
 )
 
 from vsg_core.job_discovery import discover_jobs
 
 class AddJobDialog(QDialog):
     """
-    A dialog for selecting source directories/files to discover jobs
+    A dialog for dynamically adding sources to discover jobs
     and add them to the main Job Queue.
     """
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Add Job(s) to Queue")
-        self.setMinimumSize(600, 200)
+        self.setMinimumSize(700, 300)
 
         self.discovered_jobs: List[Dict] = []
+        self.source_inputs: List[QLineEdit] = []
         self._build_ui()
+        # Start with 2 sources by default for a new job
+        self.add_source_input()
+        self.add_source_input()
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
-        inputs_group = QGroupBox('Select Sources (Files or Directories)')
-        inputs_layout = QVBoxLayout(inputs_group)
 
-        self.ref_input = QLineEdit()
-        self.sec_input = QLineEdit()
-        self.ter_input = QLineEdit()
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
 
-        inputs_layout.addLayout(self._create_file_input('Source 1 (Reference):', self.ref_input))
-        inputs_layout.addLayout(self._create_file_input('Source 2:', self.sec_input))
-        inputs_layout.addLayout(self._create_file_input('Source 3:', self.ter_input))
+        container = QWidget()
+        self.inputs_layout = QVBoxLayout(container)
+        scroll_area.setWidget(container)
 
-        layout.addWidget(inputs_group)
+        layout.addWidget(scroll_area)
+
+        add_source_btn = QPushButton("Add Another Source")
+        add_source_btn.clicked.connect(self.add_source_input)
+        layout.addWidget(add_source_btn)
 
         dialog_btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         ok_button = dialog_btns.button(QDialogButtonBox.Ok)
@@ -47,7 +52,18 @@ class AddJobDialog(QDialog):
 
         layout.addWidget(dialog_btns)
 
-    def _create_file_input(self, label_text: str, line_edit: QLineEdit):
+    def add_source_input(self):
+        """Dynamically adds a new source input row to the dialog."""
+        source_num = len(self.source_inputs) + 1
+        label_text = f"Source {source_num} (Reference):" if source_num == 1 else f"Source {source_num}:"
+
+        line_edit = QLineEdit()
+        self.source_inputs.append(line_edit)
+
+        row = self._create_file_input(label_text, line_edit)
+        self.inputs_layout.addLayout(row)
+
+    def _create_file_input(self, label_text: str, line_edit: QLineEdit) -> QHBoxLayout:
         layout = QHBoxLayout()
         layout.addWidget(QLabel(label_text), 1)
         layout.addWidget(line_edit, 4)
@@ -64,16 +80,18 @@ class AddJobDialog(QDialog):
 
     def find_and_accept(self):
         """Discover jobs from paths and accept the dialog if any are found."""
-        ref_path = self.ref_input.text().strip()
-        sec_path = self.sec_input.text().strip() or None
-        ter_path = self.ter_input.text().strip() or None
+        sources: Dict[str, str] = {}
+        for i, line_edit in enumerate(self.source_inputs):
+            path = line_edit.text().strip()
+            if path:
+                sources[f"Source {i+1}"] = path
 
-        if not ref_path:
+        if "Source 1" not in sources:
             QMessageBox.warning(self, "Input Required", "Source 1 (Reference) cannot be empty.")
             return
 
         try:
-            self.discovered_jobs = discover_jobs(ref_path, sec_path, ter_path)
+            self.discovered_jobs = discover_jobs(sources)
             if not self.discovered_jobs:
                 QMessageBox.information(self, "No Jobs Found", "No matching jobs could be discovered from the provided paths.")
                 return

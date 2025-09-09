@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import List, Dict, Any
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QTableWidgetItem, QMessageBox
+from PySide6.QtWidgets import QTableWidgetItem, QMessageBox, QHeaderView
 
 from vsg_core.io.runner import CommandRunner
 from vsg_core.extraction.tracks import get_track_info_for_dialog
@@ -37,33 +37,55 @@ class JobQueueLogic:
                 job['signature'] = None
 
             self.jobs.extend(new_jobs)
-            self.jobs.sort(key=lambda j: natural_sort_key(Path(j['ref']).name))
+            self.jobs.sort(key=lambda j: natural_sort_key(Path(j['sources']['Source 1']).name))
             self.populate_table()
 
     def populate_table(self):
+        """Fills the QTableWidget with the current list of jobs, adding columns if needed."""
         self.v.table.setRowCount(0)
+
+        max_sources = 0
+        if self.jobs:
+            max_sources = max(len(job['sources']) for job in self.jobs)
+
+        # Base columns: #, Status
+        num_base_cols = 2
+        # Ensure table has enough columns for #, Status, and all sources
+        if self.v.table.columnCount() < num_base_cols + max_sources:
+            self.v.table.setColumnCount(num_base_cols + max_sources)
+            headers = ["#", "Status"] + [f"Source {i+1}" for i in range(max_sources)]
+            headers[2] = "Source 1 (Reference)"
+            self.v.table.setHorizontalHeaderLabels(headers)
+            self.v.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+            self.v.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            for i in range(2, self.v.table.columnCount()):
+                 self.v.table.horizontalHeader().setSectionResizeMode(i, QHeaderView.Stretch)
+
         self.v.table.setRowCount(len(self.jobs))
         for row, job in enumerate(self.jobs):
             self._update_row(row, job)
-        self.v.table.resizeColumnsToContents()
 
     def _update_row(self, row: int, job: Dict):
         status_text = "Configured ✓" if job['status'] == "Configured" else "Not Configured"
         order_item = QTableWidgetItem(str(row + 1)); order_item.setTextAlignment(Qt.AlignCenter)
         self.v.table.setItem(row, 0, order_item)
         self.v.table.setItem(row, 1, QTableWidgetItem(status_text))
-        self.v.table.setItem(row, 2, QTableWidgetItem(Path(job['ref']).name))
-        self.v.table.setItem(row, 3, QTableWidgetItem(Path(job['sec']).name if job.get('sec') else ''))
-        self.v.table.setItem(row, 4, QTableWidgetItem(Path(job['ter']).name if job.get('ter') else ''))
+
+        # Populate source columns dynamically
+        for i in range(2, self.v.table.columnCount()):
+            source_key = f"Source {i-1}"
+            path_str = job['sources'].get(source_key)
+            item_text = Path(path_str).name if path_str else ''
+            self.v.table.setItem(row, i, QTableWidgetItem(item_text))
 
     def _get_track_info_for_job(self, job: Dict) -> Dict | None:
         if job and job.get('track_info') is None:
             try:
                 runner = CommandRunner(self.v.config.settings, self.v.log_callback)
                 tool_paths = {t: shutil.which(t) for t in ['mkvmerge', 'mkvextract', 'ffmpeg']}
-                job['track_info'] = get_track_info_for_dialog(job['ref'], job.get('sec'), job.get('ter'), runner, tool_paths)
+                job['track_info'] = get_track_info_for_dialog(job['sources'], runner, tool_paths)
             except Exception as e:
-                QMessageBox.critical(self.v, "Error Analyzing Tracks", f"Could not analyze tracks for {Path(job['ref']).name}:\n{e}")
+                QMessageBox.critical(self.v, "Error Analyzing Tracks", f"Could not analyze tracks for {Path(job['sources']['Source 1']).name}:\n{e}")
                 return None
         return job.get('track_info') if job else None
 
@@ -138,7 +160,7 @@ class JobQueueLogic:
         if job['status'] == 'Configured':
             self._layout_clipboard = layout_to_template(job['manual_layout'])
             self._clipboard_source_job = job
-            self.v.log_callback(f"[Queue] Copied layout from {Path(job['ref']).name}.")
+            self.v.log_callback(f"[Queue] Copied layout from {Path(job['sources']['Source 1']).name}.")
         else:
             QMessageBox.warning(self.v, "Not Configured", "Cannot copy layout from a job that has not been configured.")
 
@@ -160,7 +182,7 @@ class JobQueueLogic:
             proceed = True
             if source_sig != target_sig:
                 reply = QMessageBox.warning(self.v, "Signature Mismatch",
-                    f"The layout from '{Path(self._clipboard_source_job['ref']).name}' may not be compatible with '{Path(target_job['ref']).name}'.\n\n"
+                    f"The layout from '{Path(self._clipboard_source_job['sources']['Source 1']).name}' may not be compatible with '{Path(target_job['sources']['Source 1']).name}'.\n\n"
                     "Do you want to apply it anyway?",
                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
                 proceed = (reply == QMessageBox.Yes)

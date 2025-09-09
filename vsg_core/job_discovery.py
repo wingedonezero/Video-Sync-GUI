@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 def discover_jobs(sources: Dict[str, str]) -> List[Dict[str, Dict[str, str]]]:
     """
@@ -23,10 +23,13 @@ def discover_jobs(sources: Dict[str, str]) -> List[Dict[str, Dict[str, str]]]:
     # --- Single File Mode ---
     if source1_path.is_file():
         job_sources = {"Source 1": str(source1_path)}
+        has_other_sources = False
         for key, path in other_source_paths.items():
             if path.is_file():
                 job_sources[key] = str(path)
-        return [{'sources': job_sources}]
+                has_other_sources = True
+        # A single job is only valid if it has at least one other source to sync against
+        return [{'sources': job_sources}] if has_other_sources else []
 
     # --- Batch (Folder) Mode ---
     if source1_path.is_dir():

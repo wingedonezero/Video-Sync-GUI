@@ -28,11 +28,12 @@ class ExtractStep:
                 runner._log_message(f"Preparing to extract {len(track_ids_to_extract)} track(s) from {source_key}...")
                 extracted_for_source = extract_tracks(
                     str(source_path), ctx.temp_dir, runner, ctx.tool_paths,
-                    role=source_key.replace(" ", "_"), # e.g., "Source_1"
+                    role=source_key,
                     specific_tracks=track_ids_to_extract
                 )
                 all_extracted_tracks.extend(extracted_for_source)
 
+        # Create a lookup map using the consistent 'source' key
         extracted_map: Dict[str, Dict[str, Any]] = {
             f"{t['source']}_{t['id']}": t
             for t in all_extracted_tracks
@@ -40,14 +41,15 @@ class ExtractStep:
 
         items: List[PlanItem] = []
         for sel in ctx.manual_layout:
-            key = f"{sel.get('source', '').replace(' ', '_')}_{sel['id']}"
+            # Use the consistent 'source' key for lookup
+            key = f"{sel.get('source', '')}_{sel['id']}"
             trk = extracted_map.get(key)
             if not trk:
                 runner._log_message(f"[WARNING] Could not find extracted file for {key}. Skipping.")
                 continue
 
             track_model = Track(
-                source=trk.get('source_key', 'Source 1'),
+                source=sel['source'], # Use the reliable source from the user selection
                 id=int(trk['id']),
                 type=TrackType(trk.get('type', 'video')),
                 props=StreamProps(

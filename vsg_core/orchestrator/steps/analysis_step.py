@@ -2,13 +2,13 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 from typing import Optional, List, Dict, Any
+from collections import Counter
+import numpy as np
 
 from vsg_core.io.runner import CommandRunner
 from vsg_core.orchestrator.steps.context import Context
 from vsg_core.models.jobs import Delays
 from vsg_core.analysis import run_audio_correlation, run_videodiff
-from collections import Counter
-import numpy as np
 
 def _select_best_delay(results: List[Dict[str, Any]], min_match_pct: float, runner: CommandRunner, role_tag: str) -> Optional[int]:
     accepted = [r for r in results if r.get('accepted', False)]
@@ -55,13 +55,13 @@ class AnalysisStep:
 
             delay_ms: Optional[int] = None
             if mode == 'VideoDiff':
-                delay, err = run_videodiff(source1_file, source_file, ctx.settings_dict, runner, ctx.tool_paths)
+                delay, err = run_videodiff(str(source1_file), str(source_file), ctx.settings_dict, runner, ctx.tool_paths)
                 if not (ctx.settings.videodiff_error_min <= err <= ctx.settings.videodiff_error_max):
                     raise RuntimeError(f"VideoDiff error for {source_key} ({err:.2f}) out of bounds.")
                 delay_ms = delay
             else:
                 results = run_audio_correlation(
-                    source1_file, source_file, ctx.temp_dir, ctx.settings_dict, runner, ctx.tool_paths,
+                    str(source1_file), str(source_file), ctx.temp_dir, ctx.settings_dict, runner, ctx.tool_paths,
                     ref_lang=ctx.settings.analysis_lang_source1,
                     target_lang=ctx.settings.analysis_lang_others,
                     role_tag=source_key
