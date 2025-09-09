@@ -2,37 +2,35 @@
 # -*- coding: utf-8 -*-
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, Optional, Dict, Any
+from typing import Literal, Optional, Dict, Any, List
+
 from .media import Track
-from .enums import SourceRole
 
 @dataclass(frozen=True)
 class JobSpec:
-    ref: Path
-    sec: Path | None = None
-    ter: Path | None = None
-    # When present, this is the Manual Selection payload from the UI (list of dicts).
+    # Replaces ref, sec, ter with a dynamic dictionary
+    sources: Dict[str, Path]
+    # Manual layout payload from the UI (list of dicts)
     manual_layout: list[dict] | None = None
 
 @dataclass(frozen=True)
 class Delays:
-    secondary_ms: int | None = None
-    tertiary_ms: int | None = None
-    global_shift_ms: int = 0  # computed from min([0, sec?, ter?])
+    # Replaces secondary_ms, tertiary_ms
+    source_delays_ms: Dict[str, int] = field(default_factory=dict)
+    global_shift_ms: int = 0
 
 @dataclass
 class PlanItem:
     track: Track
-    extracted_path: Optional[Path] = None  # filled after extraction
-    # UI flags:
+    extracted_path: Optional[Path] = None
     is_default: bool = False
-    is_forced_display: bool = False       # subs only
+    is_forced_display: bool = False
     apply_track_name: bool = False
-    convert_to_ass: bool = False          # srt -> ass
-    rescale: bool = False                 # ASS/SSA PlayRes match
-    size_multiplier: float = 1.0          # subs only
+    convert_to_ass: bool = False
+    rescale: bool = False
+    size_multiplier: float = 1.0
     style_patch: Optional[Dict[str, Any]] = None
-    user_modified_path: Optional[str] = None # NEW: To track if the editor was used
+    user_modified_path: Optional[str] = None
 
 @dataclass(frozen=True)
 class MergePlan:
@@ -46,6 +44,6 @@ class JobResult:
     status: Literal['Merged', 'Analyzed', 'Failed']
     name: str
     output: str | None = None
-    delay_sec: int | None = None
-    delay_ter: int | None = None
+    # Replaces delay_sec, delay_ter
+    delays: Dict[str, int] | None = None
     error: str | None = None

@@ -1,9 +1,7 @@
 # vsg_core/config.py
-
 # -*- coding: utf-8 -*-
 import json
 from pathlib import Path
-import shutil
 
 class AppConfig:
     def __init__(self, settings_filename='settings.json'):
@@ -17,6 +15,10 @@ class AppConfig:
             'temp_root': str(self.script_dir / 'temp_work'),
             'videodiff_path': '',
             'analysis_mode': 'Audio Correlation',
+            # --- Generalized Language Settings ---
+            'analysis_lang_source1': 'eng',
+            'analysis_lang_others': 'eng',
+            # --- Old keys for backward compatibility (will be phased out) ---
             'analysis_lang_ref': '',
             'analysis_lang_sec': '',
             'analysis_lang_ter': '',
@@ -25,11 +27,9 @@ class AppConfig:
             'min_match_pct': 5.0,
             'videodiff_error_min': 0.0,
             'videodiff_error_max': 100.0,
-            # --- New Advanced Audio Settings ---
             'audio_decode_native': False,
             'audio_peak_fit': False,
             'audio_bandlimit_hz': 0,
-            # -----------------------------------
             'rename_chapters': False,
             'apply_dialog_norm_gain': False,
             'snap_chapters': False,
@@ -57,13 +57,10 @@ class AppConfig:
             try:
                 with open(self.settings_path, 'r', encoding='utf-8') as f:
                     loaded_settings = json.load(f)
-
-                # Add any missing default keys; ignore unknown legacy keys
                 for key, default_value in self.defaults.items():
                     if key not in loaded_settings:
                         loaded_settings[key] = default_value
                         changed = True
-
                 self.settings = loaded_settings
             except (json.JSONDecodeError, IOError):
                 self.settings = self.defaults.copy()
@@ -71,7 +68,6 @@ class AppConfig:
         else:
             self.settings = self.defaults.copy()
             changed = True
-
         if changed:
             self.save()
 

@@ -1,58 +1,52 @@
 # vsg_core/job_discovery.py
-
 # -*- coding: utf-8 -*-
-
-"""
-Handles the discovery of jobs for batch processing.
-"""
-
+from __future__ import annotations
 from pathlib import Path
 from typing import List, Dict, Optional
 
-def discover_jobs(ref_path_str: str, sec_path_str: Optional[str], ter_path_str: Optional[str]) -> List[Dict[str, Optional[str]]]:
+def discover_jobs(sources: Dict[str, str]) -> List[Dict[str, Dict[str, str]]]:
     """
-    Discovers jobs based on input paths.
-    Returns a list of job dictionaries, each with 'ref', 'sec', and 'ter' keys.
+    Discovers jobs based on a dictionary of source paths.
+    'Source 1' is the reference for filename matching.
+    Returns a list of job dictionaries, each with a 'sources' key.
     """
-    if not ref_path_str:
-        raise ValueError("Reference path cannot be empty.")
+    source1_path_str = sources.get("Source 1")
+    if not source1_path_str:
+        raise ValueError("Source 1 (Reference) path cannot be empty.")
 
-    ref_path = Path(ref_path_str)
-    if not ref_path.exists():
-        raise FileNotFoundError(f"Reference path does not exist: {ref_path}")
+    source1_path = Path(source1_path_str)
+    if not source1_path.exists():
+        raise FileNotFoundError(f"Source 1 path does not exist: {source1_path}")
 
-    sec_path = Path(sec_path_str) if sec_path_str else None
-    ter_path = Path(ter_path_str) if ter_path_str else None
+    other_source_paths = {key: Path(path) for key, path in sources.items() if key != "Source 1" and path}
 
     # --- Single File Mode ---
-    if ref_path.is_file():
-        sec_file = str(sec_path) if sec_path and sec_path.is_file() else None
-        ter_file = str(ter_path) if ter_path and ter_path.is_file() else None
-        return [{'ref': str(ref_path), 'sec': sec_file, 'ter': ter_file}]
+    if source1_path.is_file():
+        job_sources = {"Source 1": str(source1_path)}
+        for key, path in other_source_paths.items():
+            if path.is_file():
+                job_sources[key] = str(path)
+        return [{'sources': job_sources}]
 
     # --- Batch (Folder) Mode ---
-    if ref_path.is_dir():
-        if (sec_path and sec_path.is_file()) or (ter_path and ter_path.is_file()):
-            raise ValueError("If Reference is a folder, Secondary and Tertiary must also be folders or empty.")
+    if source1_path.is_dir():
+        for key, path in other_source_paths.items():
+            if path.is_file():
+                raise ValueError(f"If Source 1 is a folder, all other sources must also be folders or empty.")
 
         jobs = []
-        for ref_file in sorted(ref_path.iterdir()):
-            if ref_file.is_file() and ref_file.suffix.lower() in ['.mkv', '.mp4', '.m4v']:
-                sec_file_match = sec_path / ref_file.name if sec_path else None
-                ter_file_match = ter_path / ref_file.name if ter_path else None
+        for ref_file in sorted(ref_file for ref_file in source1_path.iterdir() if ref_file.is_file() and ref_file.suffix.lower() in ['.mkv', '.mp4', '.m4v']):
+            job_sources = {"Source 1": str(ref_file)}
+            has_other_sources = False
+            for key, path in other_source_paths.items():
+                match_file = path / ref_file.name
+                if match_file.is_file():
+                    job_sources[key] = str(match_file)
+                    has_other_sources = True
 
-                valid_sec = str(sec_file_match) if sec_file_match and sec_file_match.is_file() else None
-                valid_ter = str(ter_file_match) if ter_file_match and ter_file_match.is_file() else None
-
-                # A job is only valid if it has at least one secondary or tertiary file to sync with.
-                if valid_sec or valid_ter:
-                    jobs.append({'ref': str(ref_file), 'sec': valid_sec, 'ter': valid_ter})
-
-        if not jobs:
-            # This is not an error, it's just a case of no matching files.
-            # The UI will handle the "No Jobs Found" message.
-            pass
+            if has_other_sources:
+                jobs.append({'sources': job_sources})
 
         return jobs
 
-    raise ValueError("Reference path is not a valid file or directory.")
+    raise ValueError("Source 1 path is not a valid file or directory.")

@@ -1,0 +1,193 @@
+Video Sync GUI - Consolidated Architecture
+
+This document provides a detailed, unified overview of the entire Video Sync GUI application, combining the UI (vsg_qt) and the core engine (vsg_core). It is designed to be a comprehensive guide for developers and AI, explaining the responsibility of each module and the end-to-end flow of a sync and merge job.
+1. High-Level Design Philosophy
+
+The application is architected with a clear separation of concerns, loosely following a Model-View-Controller pattern:
+
+    View (vsg_qt): The user-facing components, built with PySide6. This layer is responsible for displaying information and capturing user input. It contains no business logic.
+
+    Controller (vsg_qt): The logic that drives the UI. It responds to user actions, prepares data, and initiates background tasks.
+
+    Model & Engine (vsg_core): The powerful backend that performs all media analysis and processing. It is entirely independent of the UI and could be used in other applications.
+
+A background worker thread acts as the bridge, ensuring the UI remains responsive while the engine performs heavy lifting.
+2. Directory & Module Map
+
+This structure maps each responsibility to a specific file in the repository.
+
+wingedonezero-video-sync-gui/
+├── main.py                  # Application entry point
+
+├── vsg_qt/                  # User Interface Layer
+│   ├── main_window/         # Main application window
+│   ├── manual_selection_dialog/ # Dialog for picking tracks
+│   ├── options_dialog/      # Application settings dialog
+│   ├── style_editor_dialog/ # Advanced subtitle style editor
+│   ├── track_widget/        # UI for a single track in the selection dialog
+│   └── worker/              # Background thread runner and signals
+│
+└── vsg_core/                # Core Engine Layer
+    ├── pipeline.py          # Main entry point for the engine
+    ├── orchestrator/        # Step-by-step pipeline execution
+    ├── analysis/            # Audio/video delay detection algorithms
+    ├── extraction/          # Track and attachment extraction logic
+    ├── subtitles/           # Subtitle processing (convert, rescale, style)
+    ├── chapters/            # Chapter processing (rename, snap, shift)
+    ├── mux/                 # mkvmerge command builder
+    ├── models/              # Data structures for the engine (jobs, tracks, etc.)
+    ├── io/                  # Low-level command execution
+    ├── config.py            # Settings persistence
+    └── job_discovery.py     # Finds files for batch processing
+
+3. The User Interface Layer (vsg_qt)
+
+The UI is responsible for all user interaction.
+3.1. Main Window (main_window/)
+
+    window.py: The main application shell. It builds the UI with input fields, buttons, a log view, and a progress bar. It delegates all actions to the controller.
+
+    controller.py: The "brain" of the UI. It:
+
+        Loads and saves settings.
+
+        Opens the Options and Manual Selection dialogs.
+
+        Initiates jobs by creating and launching the JobWorker.
+
+        Listens for signals from the worker to update the log, progress bar, and status labels.
+
+        Manages the "Auto-apply" logic for batch jobs.
+
+3.2. Manual Selection Dialog (manual_selection_dialog/)
+
+This is the most critical UI component for merge jobs.
+
+    ui.py: Defines the two-pane layout: a list of available source tracks on the left, and the final track layout on the right.
+
+    logic.py: Enforces key guardrails (e.g., only allowing video from the REF file) and normalizes the final selection (e.g., ensuring only one "default" audio track).
+
+    widgets.py & track_widget/: The TrackWidget is the reusable UI element for each track in the final layout. It displays track info, badges (⭐, 📌), and provides the "Settings..." and "Style Editor..." buttons.
+
+3.3. Subtitle Style Editor (style_editor_dialog/)
+
+An advanced, self-contained tool for live-previewing subtitle style changes.
+
+    ui.py: The editor dialog, containing the video player, style controls, and event list.
+
+    logic.py: Uses pysubs2 as a backend to load, modify, and save subtitle style properties. It generates a "patch" of changes to be applied later.
+
+    player_thread.py: A dedicated background thread using PyAV to decode the video and FFmpeg's filter graph to render subtitles directly onto the video frames in real-time. This ensures a 100% accurate preview.
+
+4. The UI-to-Core Bridge (vsg_qt/worker/)
+
+This small but vital layer decouples the UI from the engine.
+
+    runner.py (JobWorker): A QRunnable object that lives in a background thread pool. Its sole job is to call the core engine's main entry point (vsg_core.pipeline.JobPipeline.run_job).
+
+    signals.py (WorkerSignals): A QObject that defines signals (log, progress, finished_job, etc.). The worker emits these signals to safely send updates from the background thread to the UI thread without freezing the application.
+
+5. The Core Engine (vsg_core)
+
+The engine is a modular pipeline that processes a job step-by-step.
+5.1. Main Façade (pipeline.py)
+
+The JobPipeline class is the single entry point for the core. It:
+
+    Receives a job from the JobWorker.
+
+    Sets up per-job logging.
+
+    Calls the Orchestrator to perform all the media processing steps.
+
+    Receives the final mkvmerge command tokens from the orchestrator.
+
+    Executes mkvmerge using the CommandRunner.
+
+    Cleans up temporary files.
+
+5.2. The Orchestrator (orchestrator/)
+
+This is the heart of the engine's logic.
+
+    pipeline.py (Orchestrator): This class defines the sequence of operations. It creates a Context object (a data container) and passes it through each step in the pipeline.
+
+    The Step Order:
+
+        Analysis (analysis_step.py): Determines the time delay for SEC and TER files.
+
+        Extraction (extract_step.py): Extracts the specific tracks chosen by the user.
+
+        Subtitles (subtitles_step.py): Applies any requested subtitle modifications.
+
+        Chapters (chapters_step.py): Processes chapter information.
+
+        Attachments (attachments_step.py): Extracts font files, etc.
+
+        Mux (mux_step.py): Builds the final mkvmerge command arguments.
+
+5.3. Core Utilities (The Tools)
+
+These are the specialized modules that perform the actual work, called by the orchestrator's steps.
+
+    analysis/audio_corr.py: The high-accuracy "decode-once" engine. It decodes full audio tracks into memory and uses NumPy/SciPy to find the precise, stable time offset, eliminating seek jitter.
+
+    extraction/tracks.py: Uses mkvextract to pull specified tracks from media containers.
+
+    subtitles/: A collection of modules to handle specific transforms: convert.py (SRT to ASS), rescale.py (adjusts resolution), and style.py (applies font multipliers).
+
+    chapters/: Modules for reading, shifting, snapping, and renaming chapter markers.
+
+    mux/options_builder.py: A dedicated class that converts the final plan (tracks, delays, chapters, attachments) into a list of command-line tokens for mkvmerge, ensuring all flags and offsets are correctly formatted.
+
+    io/runner.py (CommandRunner): A low-level wrapper for running external processes (ffmpeg, mkvmerge, etc.). It handles command logging, streaming output, and error reporting.
+
+6. End-to-End Job Flow (Analyze & Merge)
+
+This traces a single user click from start to finish to show how the pieces connect.
+
+    User Action: The user configures inputs in the MainWindow and clicks "Analyze & Merge".
+
+    UI Controller (main_window/controller.py):
+
+        Calls job_discovery.py to find all matching files.
+
+        Opens the ManualSelectionDialog for the first job. The user selects tracks and options (e.g., setting a subtitle track to "Default" and enabling "Rescale").
+
+        The dialog returns a manual_layout (a list of dictionaries describing the user's choices).
+
+    Worker Creation: The controller creates a JobWorker instance, giving it the list of jobs (including the manual_layout). It starts the worker on a background thread.
+
+    Core Entry (vsg_core/pipeline.py):
+
+        The JobWorker calls JobPipeline.run_job().
+
+        JobPipeline sets up a temporary directory and calls the Orchestrator.
+
+    Orchestration (vsg_core/orchestrator/):
+
+        analysis_step runs audio_corr.py, which decodes audio to memory, finds the raw delay (e.g., -679 ms), and returns the chunk data. The step logic analyzes this data, selects the final delay, and adds it to the Context object.
+
+        extract_step reads the manual_layout, calls extraction/tracks.py to pull the selected video, audio, and subtitle tracks into the temp directory, and adds their new paths to the Context.
+
+        subtitles_step checks the Context for subtitle tracks with active flags. It sees the "Rescale" flag is on and calls subtitles/rescale.py to modify the extracted subtitle file in place.
+
+        chapters_step and attachments_step run, adding chapter XML and font files to the Context.
+
+        mux_step calls mux/options_builder.py, which reads everything from the Context (track paths, delays, chapter file, etc.) and generates the final list of mkvmerge command tokens.
+
+    Execution (vsg_core/pipeline.py):
+
+        The Orchestrator returns the populated Context to the JobPipeline.
+
+        JobPipeline takes the tokens, writes them to an opts.json file, and uses io/runner.py to execute mkvmerge @opts.json.
+
+    Feedback Loop:
+
+        Throughout this process, the CommandRunner and Orchestrator emit log messages.
+
+        The JobWorker catches these and emits a log signal.
+
+        The MainWindow's controller receives the signal and appends the message to the log view on the UI thread.
+
+    Completion: The job finishes, and the worker emits a finished_job signal with the result. The controller updates the UI to show the final status.

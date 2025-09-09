@@ -1,7 +1,8 @@
+# vsg_core/models/media.py
 # -*- coding: utf-8 -*-
 from dataclasses import dataclass
 from pathlib import Path
-from .enums import TrackType, SourceRole
+from .enums import TrackType
 
 @dataclass(frozen=True)
 class StreamProps:
@@ -11,9 +12,9 @@ class StreamProps:
 
 @dataclass(frozen=True)
 class Track:
-    source: SourceRole            # REF/SEC/TER
-    id: int                       # mkvmerge track id (per container)
-    type: TrackType               # video | audio | subtitles
+    source: str  # Was SourceRole, now a string like "Source 1"
+    id: int      # mkvmerge track id (per container)
+    type: TrackType
     props: StreamProps
 
 @dataclass(frozen=True)

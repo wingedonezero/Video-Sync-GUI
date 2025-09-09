@@ -2,39 +2,24 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-import shutil
-import tempfile
 import zipfile
-import time
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from PySide6.QtWidgets import QMessageBox
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QTimer, QThreadPool
 
 from vsg_core.config import AppConfig
 from vsg_core.job_discovery import discover_jobs
-from vsg_core.io.runner import CommandRunner
-from vsg_core.extraction.tracks import get_track_info_for_dialog
-from vsg_core.subtitles.style_engine import StyleEngine
 from vsg_qt.worker import JobWorker
-from vsg_qt.manual_selection_dialog import ManualSelectionDialog
 from vsg_qt.options_dialog import OptionsDialog
-
-from .helpers import (
-    generate_track_signature,
-    materialize_layout,
-    layout_to_template,
-    get_style_signature, # NEW: Import new signature logic
-)
+from vsg_qt.job_queue_dialog import JobQueueDialog
 
 class MainController:
     def __init__(self, view: "MainWindow"):
         self.v = view
         self.config: AppConfig = view.config
         self.worker: Optional[JobWorker] = None
-        # The cache will now store signature -> patch dictionary
-        self.style_patch_cache: Dict[str, Dict] = {}
 
     def open_options_dialog(self):
         dialog = OptionsDialog(self.config, self.v)
@@ -48,7 +33,6 @@ class MainController:
         v.sec_input.setText(self.config.get('last_sec_path', ''))
         v.ter_input.setText(self.config.get('last_ter_path', ''))
         v.archive_logs_check.setChecked(self.config.get('archive_logs', True))
-        v.auto_apply_strict_check.setChecked(self.config.get('auto_apply_strict', False))
 
     def save_ui_to_config(self):
         v = self.v
@@ -56,7 +40,6 @@ class MainController:
         self.config.set('last_sec_path', v.sec_input.text())
         self.config.set('last_ter_path', v.ter_input.text())
         self.config.set('archive_logs', v.archive_logs_check.isChecked())
-        self.config.set('auto_apply_strict', v.auto_apply_strict_check.isChecked())
         self.config.save()
 
     def append_log(self, message: str):
@@ -81,7 +64,39 @@ class MainController:
         if dialog.exec():
             line_edit.setText(dialog.selectedFiles()[0])
 
+    def open_job_queue(self):
+        """Opens the Job Queue dialog to manage and run merge jobs."""
+        self.save_ui_to_config()
+        # The queue starts empty and is populated via its "Add Job(s)..." button
+        queue_dialog = JobQueueDialog(config=self.config, log_callback=self.append_log, parent=self.v)
+        if queue_dialog.exec():
+            final_jobs = queue_dialog.get_configured_jobs()
+            if final_jobs:
+                self._run_configured_jobs(final_jobs)
+            else:
+                self.append_log("Queue closed with no jobs to run.")
+                self.v.status_label.setText("Ready")
+
+    def _run_configured_jobs(self, final_jobs: List[Dict]):
+        """Takes a list of configured jobs and starts the worker."""
+        # Determine the base output directory from the first job
+        ref_path_str = final_jobs[0]['ref']
+        output_dir = self.config.get('output_folder')
+        is_batch = Path(ref_path_str).is_dir() and len(final_jobs) > 1
+        if is_batch:
+            # Note: This assumes all jobs in a batch share the same root ref folder.
+            # This will need to be more robust when manual jobs with different folders are added.
+            output_dir = str(Path(output_dir) / Path(ref_path_str).parent.name)
+
+        self._start_worker(final_jobs, and_merge=True, output_dir=output_dir)
+
     def start_batch(self, and_merge: bool):
+        """Handles the 'Analyze Only' workflow using the main window inputs."""
+        if and_merge:
+            # This is now handled by open_job_queue
+            self.open_job_queue()
+            return
+
         self.save_ui_to_config()
         ref_path_str = self.v.ref_input.text().strip()
         try:
@@ -91,128 +106,31 @@ class MainController:
         except (ValueError, FileNotFoundError) as e:
             QMessageBox.warning(self.v, "Job Discovery Error", str(e)); return
         if not initial_jobs:
-            QMessageBox.information(self.v, "No Jobs Found", "No valid jobs could be found."); return
-
-        final_jobs = initial_jobs
-        if and_merge:
-            self.style_patch_cache.clear() # Clear cache for new batch
-            processed_jobs = []
-            last_manual_layout = None
-            last_track_signature = None
-            auto_apply_enabled = self.v.auto_apply_check.isChecked()
-            strict_match = self.v.auto_apply_strict_check.isChecked()
-
-            tool_paths = {t: shutil.which(t) for t in ['mkvmerge', 'mkvextract', 'ffmpeg']}
-            if not all(tool_paths.values()):
-                QMessageBox.critical(self.v, "Tool Not Found", "A required tool (mkvmerge, mkvextract, ffmpeg) was not found in your PATH."); return
-
-            runner = CommandRunner(self.config.settings, self.append_log)
-
-            for i, job_data in enumerate(initial_jobs):
-                self.v.status_label.setText(f"Scanning {Path(job_data['ref']).name}...")
-                try:
-                    track_info = get_track_info_for_dialog(job_data['ref'], job_data.get('sec'), job_data.get('ter'), runner, tool_paths)
-                except Exception as e:
-                    QMessageBox.warning(self.v, "Scan Failed", f"Could not analyze tracks for {Path(job_data['ref']).name}:\n{e}"); return
-
-                # NEW: Centralized styling step. This runs for EVERY job.
-                self._apply_patches_for_job(track_info)
-
-                current_signature = generate_track_signature(track_info, strict=strict_match)
-                current_layout = None
-
-                if (auto_apply_enabled and last_manual_layout is not None and
-                    last_track_signature is not None and current_signature == last_track_signature):
-                    # Auto-apply will now correctly carry over the 'style_patch'
-                    current_layout = materialize_layout(last_manual_layout, track_info)
-                    self.append_log(f"Auto-applied previous layout to {Path(job_data['ref']).name}...")
-                else:
-                    layout_to_carry_over = last_manual_layout if last_track_signature and current_signature == last_track_signature else None
-
-                    dialog = ManualSelectionDialog(track_info, parent=self.v,
-                                                   previous_layout=layout_to_carry_over,
-                                                   log_callback=self.append_log)
-
-                    if dialog.exec():
-                        current_layout = dialog.get_manual_layout()
-                        # After user interaction, check if the editor was used and update the cache
-                        self._update_style_cache(current_layout, track_info)
-                    else:
-                        self.append_log("Batch run cancelled by user."); self.v.status_label.setText("Ready"); return
-
-                if current_layout:
-                    job_data['manual_layout'] = current_layout
-                    processed_jobs.append(job_data)
-                    last_manual_layout = layout_to_template(current_layout)
-                    last_track_signature = current_signature
-                else:
-                    self.append_log(f"Job '{Path(job_data['ref']).name}' was skipped.")
-                    last_manual_layout = None; last_track_signature = None
-
-            final_jobs = processed_jobs
-
-        if not final_jobs:
-            self.v.status_label.setText("Ready"); self.append_log("No jobs to run after user selection."); return
+            QMessageBox.information(self.v, "No Jobs Found", "No valid jobs could be found for the selected inputs."); return
 
         output_dir = self.config.get('output_folder')
-        is_batch = Path(ref_path_str).is_dir() and len(final_jobs) > 1
+        is_batch = Path(ref_path_str).is_dir() and len(initial_jobs) > 1
         if is_batch:
             output_dir = str(Path(output_dir) / Path(ref_path_str).name)
 
-        self.v.log_output.clear(); self.v.status_label.setText(f'Starting batch of {len(final_jobs)} jobs…')
-        self.v.progress_bar.setValue(0); self.v.sec_delay_label.setText('—'); self.v.ter_delay_label.setText('—')
+        self._start_worker(initial_jobs, and_merge=False, output_dir=output_dir)
 
-        self.worker = JobWorker(self.config.settings, final_jobs, and_merge, output_dir)
+    def _start_worker(self, jobs: List[Dict], and_merge: bool, output_dir: str):
+        """Shared logic to configure and start the JobWorker."""
+        self.v.log_output.clear()
+        self.v.status_label.setText(f'Starting batch of {len(jobs)} jobs…')
+        self.v.progress_bar.setValue(0)
+        self.v.sec_delay_label.setText('—')
+        self.v.ter_delay_label.setText('—')
+
+        self.worker = JobWorker(self.config.settings, jobs, and_merge, output_dir)
         self.worker.signals.log.connect(self.append_log)
         self.worker.signals.progress.connect(self.update_progress)
         self.worker.signals.status.connect(self.update_status)
         self.worker.signals.finished_job.connect(self.job_finished)
         self.worker.signals.finished_all.connect(self.batch_finished)
 
-        from PySide6.QtCore import QThreadPool
         QThreadPool.globalInstance().start(self.worker)
-
-    def _apply_patches_for_job(self, track_info: Dict[str, List[Dict]]):
-        """Finds matching patches in the cache and injects them into the track_info."""
-        if not self.style_patch_cache:
-            return
-
-        for source in ('REF', 'SEC', 'TER'):
-            subs_in_source = [t for t in track_info.get(source, []) if t.get('type') == 'subtitles']
-            for i, track in enumerate(subs_in_source):
-                signature = get_style_signature(track, i)
-                if signature in self.style_patch_cache:
-                    track['style_patch'] = self.style_patch_cache[signature]
-                    self.append_log(f"[Style] Found and queued patch for track '{signature}'.")
-
-    def _update_style_cache(self, layout: List[dict], track_info: Dict[str, List[Dict]]):
-        """
-        After the dialog closes, find which track was edited (if any), get its
-        patch and signature, and store it in the cache.
-        """
-        edited_track = None
-        style_patch = None
-        for track in layout:
-            if track.get('style_patch'):
-                edited_track = track
-                style_patch = track['style_patch']
-                break
-
-        if not edited_track or not style_patch:
-            return
-
-        # We need to find the track's index for the signature fallback
-        source_list = [t for t in track_info.get(edited_track['source'], []) if t.get('type') == 'subtitles']
-        idx = -1
-        for i, t in enumerate(source_list):
-            if t['id'] == edited_track['id']:
-                idx = i
-                break
-
-        signature = get_style_signature(edited_track, idx)
-        if signature:
-            self.style_patch_cache[signature] = style_patch
-            self.append_log(f"[Style] Saved patch for '{signature}' for batch use.")
 
     def job_finished(self, result: dict):
         if 'delay_sec' in result: self.v.sec_delay_label.setText(f"{result['delay_sec']} ms" if result['delay_sec'] is not None else "—")
@@ -228,8 +146,19 @@ class MainController:
             for result in all_results:
                 if result.get('status') in ['Merged', 'Analyzed'] and 'output' in result and result['output']:
                     output_dir = Path(result['output']).parent; break
-        ref_path_str = self.v.ref_input.text().strip()
-        is_batch = Path(ref_path_str).is_dir() and len(all_results) > 1
+
+        # Determine if it was a batch run by checking if the first ref_path was a directory.
+        ref_path_str = ""
+        if all_results and 'ref_path_for_batch_check' in all_results[0]:
+             ref_path_str = all_results[0]['ref_path_for_batch_check']
+        elif all_results:
+             # Fallback for analyze-only jobs which may not have this key
+             job_for_path = next((job for job in self.worker.jobs if job['name'] == all_results[0]['name']), None)
+             if job_for_path: ref_path_str = job_for_path['ref']
+
+
+        is_batch = Path(ref_path_str).is_dir() if ref_path_str else len(all_results) > 1
+
         if is_batch and self.v.archive_logs_check.isChecked() and output_dir:
             QTimer.singleShot(0, lambda: self._archive_logs_for_batch(output_dir))
 

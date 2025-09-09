@@ -1,7 +1,9 @@
+# vsg_core/extraction/tracks.py
 # -*- coding: utf-8 -*-
 import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+
 from ..io.runner import CommandRunner
 
 def _pcm_codec_from_bit_depth(bit_depth):
@@ -27,10 +29,10 @@ def _ext_for_codec(ttype: str, codec_id: str) -> str:
     cid = (codec_id or '').upper()
     if ttype == 'video':
         if 'V_MPEGH/ISO/HEVC' in cid: return 'h265'
-        if 'V_MPEG4/ISO/AVC' in cid:  return 'h264'  # fixed
-        if 'V_MPEG1/2' in cid:        return 'mpg'
-        if 'V_VP9' in cid:            return 'vp9'
-        if 'V_AV1' in cid:            return 'av1'
+        if 'V_MPEG4/ISO/AVC' in cid:  return 'h264'
+        if 'V_MPEG1/2' in cid:      return 'mpg'
+        if 'V_VP9' in cid:          return 'vp9'
+        if 'V_AV1' in cid:          return 'av1'
         return 'bin'
     if ttype == 'audio':
         if 'A_TRUEHD' in cid: return 'thd'
@@ -48,43 +50,36 @@ def _ext_for_codec(ttype: str, codec_id: str) -> str:
         if 'S_TEXT/SSA' in cid: return 'ssa'
         if 'S_TEXT/UTF8' in cid:return 'srt'
         if 'S_HDMV/PGS' in cid: return 'sup'
-        if 'S_VOBSUB' in cid:   return 'sub'
+        if 'S_VOBSUB' in cid:  return 'sub'
         return 'sub'
     return 'bin'
 
 def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: dict, role: str,
-                   audio=True, subs=True, all_tracks=False, specific_tracks: Optional[List[int]] = None) -> List[Dict[str, Any]]:
+                   specific_tracks: Optional[List[int]] = None) -> List[Dict[str, Any]]:
     info = get_stream_info(mkv, runner, tool_paths)
     if not info:
         raise ValueError(f'Could not get stream info for extraction from {mkv}')
 
-    tracks_to_extract, specs = [], []
-    ffmpeg_jobs = []
+    tracks_to_extract, specs, ffmpeg_jobs = [], [], []
     audio_idx = -1
 
     for track in info.get('tracks', []):
-        ttype = track['type']
-        tid = track['id']
-
-        if specific_tracks is not None:
-            want = tid in specific_tracks
-        else:
-            want = all_tracks or (audio and ttype == 'audio') or (subs and ttype == 'subtitles')
-        if not want:
+        ttype, tid = track['type'], track['id']
+        if specific_tracks is not None and tid not in specific_tracks:
             continue
 
         if ttype == 'audio':
             audio_idx += 1
 
         props = track.get('properties', {}) or {}
-        codec = (props.get('codec_id') or '')
+        codec = props.get('codec_id') or ''
         ext = _ext_for_codec(ttype, codec)
-        out_path = temp_dir / f'{role}_track_{Path(mkv).stem}_{tid}.{ext}'
+        out_path = temp_dir / f"{role}_track_{Path(mkv).stem}_{tid}.{ext}"
 
         record = {
             'id': tid, 'type': ttype, 'lang': props.get('language', 'und'),
             'name': props.get('track_name', ''), 'path': str(out_path),
-            'codec_id': codec, 'source': role.upper()
+            'codec_id': codec, 'source_key': role # Changed from 'source'
         }
         tracks_to_extract.append(record)
 
@@ -101,27 +96,20 @@ def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: 
         runner.run(['mkvextract', str(mkv), 'tracks'] + specs, tool_paths)
 
     for job in ffmpeg_jobs:
-        copy_cmd = [
-            'ffmpeg', '-y', '-v', 'error', '-nostdin', '-i', str(mkv),
-            '-map', f"0:a:{job['idx']}", '-vn', '-sn', '-c:a', 'copy', job['out']
-        ]
-        runner._log_message(f"Attempting stream copy for A_MS/ACM (track {job['tid']}) -> {Path(job['out']).name}")
-        if runner.run(copy_cmd, tool_paths) is not None:
-            runner._log_message(f"Stream copy succeeded for A_MS/ACM (track {job['tid']})")
-        else:
+        copy_cmd = ['ffmpeg', '-y', '-v', 'error', '-nostdin', '-i', str(mkv), '-map', f"0:a:{job['idx']}", '-vn', '-sn', '-c:a', 'copy', job['out']]
+        if runner.run(copy_cmd, tool_paths) is None:
             runner._log_message(f"Stream copy refused for A_MS/ACM (track {job['tid']}). Falling back to {job['pcm']}.")
-            ffmpeg_pcm_cmd = [
-                'ffmpeg', '-y', '-v', 'error', '-nostdin', '-i', str(mkv),
-                '-map', f"0:a:{job['idx']}", '-vn', '-sn', '-acodec', job['pcm'], job['out']
-            ]
-            runner.run(ffmpeg_pcm_cmd, tool_paths)
+            pcm_cmd = ['ffmpeg', '-y', '-v', 'error', '-nostdin', '-i', str(mkv), '-map', f"0:a:{job['idx']}", '-vn', '-sn', '-acodec', job['pcm'], job['out']]
+            runner.run(pcm_cmd, tool_paths)
 
     return tracks_to_extract
 
-def get_track_info_for_dialog(ref_file: str, sec_file: Optional[str], ter_file: Optional[str], runner: CommandRunner, tool_paths: dict):
-    all_tracks = {'REF': [], 'SEC': [], 'TER': []}
-    source_map = {'REF': ref_file, 'SEC': sec_file, 'TER': ter_file}
-    for source, filepath in source_map.items():
+def get_track_info_for_dialog(sources: Dict[str, str], runner: CommandRunner, tool_paths: dict) -> Dict[str, List[Dict]]:
+    """
+    Generalized to accept a dictionary of sources.
+    """
+    all_tracks: Dict[str, List[Dict]] = {key: [] for key in sources}
+    for source_key, filepath in sources.items():
         if not filepath or not Path(filepath).exists():
             continue
         info = get_stream_info(filepath, runner, tool_paths)
@@ -130,9 +118,9 @@ def get_track_info_for_dialog(ref_file: str, sec_file: Optional[str], ter_file: 
         for track in info.get('tracks', []):
             props = track.get('properties', {}) or {}
             record = {
-                'source': source, 'original_path': filepath, 'id': track['id'],
+                'source': source_key, 'original_path': filepath, 'id': track['id'],
                 'type': track['type'], 'codec_id': props.get('codec_id', 'N/A'),
                 'lang': props.get('language', 'und'), 'name': props.get('track_name', '')
             }
-            all_tracks[source].append(record)
+            all_tracks[source_key].append(record)
     return all_tracks

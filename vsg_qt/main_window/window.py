@@ -1,16 +1,15 @@
+# vsg_qt/main_window/window.py
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QLineEdit, QLabel, QFileDialog, QGroupBox, QTextEdit, QProgressBar,
+    QLineEdit, QLabel, QGroupBox, QTextEdit, QProgressBar,
     QCheckBox
 )
-from PySide6.QtCore import Qt
 
 from vsg_core.config import AppConfig
 from .controller import MainController
-
 
 class MainWindow(QMainWindow):
     """Slim UI shell: builds widgets & delegates logic to MainController."""
@@ -25,7 +24,6 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self.controller.apply_config_to_ui()
 
-    # ---------- UI construction ----------
     def _build_ui(self):
         self.ref_input = QLineEdit()
         self.sec_input = QLineEdit()
@@ -36,9 +34,6 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel('Ready')
         self.sec_delay_label = QLabel('—')
         self.ter_delay_label = QLabel('—')
-
-        self.auto_apply_check = QCheckBox("Auto-apply this layout to all matching files in batch")
-        self.auto_apply_strict_check = QCheckBox("Strict match (type + lang + codec)")
         self.archive_logs_check = QCheckBox("Archive logs to a zip file on batch completion")
 
         central = QWidget(); self.setCentralWidget(central)
@@ -51,39 +46,28 @@ class MainWindow(QMainWindow):
         top_row.addWidget(self.options_btn); top_row.addStretch()
         main.addLayout(top_row)
 
-        # Inputs
-        inputs_group = QGroupBox('Input Files (File or Directory)')
-        inputs_layout = QVBoxLayout(inputs_group)
-        inputs_layout.addLayout(self._create_file_input('Reference:', self.ref_input, lambda: self.controller.browse_for_path(self.ref_input, "Select Reference File or Directory")))
-        inputs_layout.addLayout(self._create_file_input('Secondary:', self.sec_input, lambda: self.controller.browse_for_path(self.sec_input, "Select Secondary File or Directory")))
-        inputs_layout.addLayout(self._create_file_input('Tertiary:', self.ter_input, lambda: self.controller.browse_for_path(self.ter_input, "Select Tertiary File or Directory")))
-        main.addWidget(inputs_group)
-
-        # Manual behavior
-        manual_group = QGroupBox("Manual Selection Behavior")
-        manual_layout = QVBoxLayout(manual_group)
-        helper = QLabel("For Analyze & Merge, you’ll select tracks per file. "
-                        "Auto-apply reuses your last layout when the track signature matches.")
-        helper.setWordWrap(True)
-        manual_layout.addWidget(helper)
-        manual_layout.addWidget(self.auto_apply_check)
-        manual_layout.addWidget(self.auto_apply_strict_check)
-        main.addWidget(manual_group)
-
-        # Actions
-        actions_group = QGroupBox('Actions')
-        actions_main_layout = QVBoxLayout(actions_group)
-        actions_button_layout = QHBoxLayout()
-        analyze_btn = QPushButton('Analyze Only')
-        analyze_merge_btn = QPushButton('Analyze & Merge')
-        analyze_btn.clicked.connect(lambda: self.controller.start_batch(and_merge=False))
-        analyze_merge_btn.clicked.connect(lambda: self.controller.start_batch(and_merge=True))
-        actions_button_layout.addWidget(analyze_btn)
-        actions_button_layout.addWidget(analyze_merge_btn)
-        actions_button_layout.addStretch()
-        actions_main_layout.addLayout(actions_button_layout)
-        actions_main_layout.addWidget(self.archive_logs_check)
+        # Main actions
+        actions_group = QGroupBox('Main Workflow')
+        actions_layout = QVBoxLayout(actions_group)
+        self.queue_jobs_btn = QPushButton('Open Job Queue for Merging...')
+        self.queue_jobs_btn.setStyleSheet("font-size: 14px; padding: 5px;")
+        actions_layout.addWidget(self.queue_jobs_btn)
+        actions_layout.addWidget(self.archive_logs_check)
         main.addWidget(actions_group)
+
+        # Quick Analysis Tool
+        analysis_group = QGroupBox('Quick Analysis (Analyze Only)')
+        analysis_layout = QVBoxLayout(analysis_group)
+        analysis_layout.addLayout(self._create_file_input('Reference:', self.ref_input, lambda: self.controller.browse_for_path(self.ref_input, "Select Reference File or Directory")))
+        analysis_layout.addLayout(self._create_file_input('Secondary:', self.sec_input, lambda: self.controller.browse_for_path(self.sec_input, "Select Secondary File or Directory")))
+        analysis_layout.addLayout(self._create_file_input('Tertiary:', self.ter_input, lambda: self.controller.browse_for_path(self.ter_input, "Select Tertiary File or Directory")))
+        analyze_btn = QPushButton('Analyze Only')
+        analysis_layout.addWidget(analyze_btn, 0, Qt.AlignRight)
+        main.addWidget(analysis_group)
+
+        # Connect signals
+        analyze_btn.clicked.connect(lambda: self.controller.start_batch(and_merge=False))
+        self.queue_jobs_btn.clicked.connect(self.controller.open_job_queue)
 
         # Status / progress
         status_layout = QHBoxLayout()
@@ -118,7 +102,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(browse_btn, 1)
         return layout
 
-    # ---------- lifecycle ----------
     def closeEvent(self, event):
         self.controller.on_close()
         super().closeEvent(event)

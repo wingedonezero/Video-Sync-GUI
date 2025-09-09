@@ -1,3 +1,4 @@
+# vsg_core/models/settings.py
 # -*- coding: utf-8 -*-
 from dataclasses import dataclass
 from .enums import AnalysisMode, SnapMode
@@ -8,9 +9,9 @@ class AppSettings:
     temp_root: str
     videodiff_path: str
     analysis_mode: AnalysisMode
-    analysis_lang_ref: str | None
-    analysis_lang_sec: str | None
-    analysis_lang_ter: str | None
+    # Consolidate language settings
+    analysis_lang_source1: str | None
+    analysis_lang_others: str | None
     scan_chunk_count: int
     scan_chunk_duration: int
     min_match_pct: float
@@ -35,14 +36,17 @@ class AppSettings:
 
     @classmethod
     def from_config(cls, cfg: dict) -> "AppSettings":
+        # Handle legacy keys for a smooth transition
+        analysis_lang_source1 = cfg.get('analysis_lang_source1') or cfg.get('analysis_lang_ref')
+        analysis_lang_others = cfg.get('analysis_lang_others') or cfg.get('analysis_lang_sec')
+
         return cls(
             output_folder=cfg['output_folder'],
             temp_root=cfg['temp_root'],
             videodiff_path=cfg.get('videodiff_path',''),
             analysis_mode=AnalysisMode(cfg.get('analysis_mode','Audio Correlation')),
-            analysis_lang_ref=cfg.get('analysis_lang_ref') or None,
-            analysis_lang_sec=cfg.get('analysis_lang_sec') or None,
-            analysis_lang_ter=cfg.get('analysis_lang_ter') or None,
+            analysis_lang_source1=analysis_lang_source1 or None,
+            analysis_lang_others=analysis_lang_others or None,
             scan_chunk_count=int(cfg['scan_chunk_count']),
             scan_chunk_duration=int(cfg['scan_chunk_duration']),
             min_match_pct=float(cfg['min_match_pct']),

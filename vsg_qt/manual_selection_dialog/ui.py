@@ -24,20 +24,18 @@ from vsg_core.io.runner import CommandRunner
 from vsg_core.subtitles.style_engine import StyleEngine
 
 class ManualSelectionDialog(QDialog):
-    def __init__(self, track_info: Dict[str, List[dict]], parent=None,
-                 previous_layout: Optional[List[dict]] = None,
-                 log_callback: Optional[Callable[[str], None]] = None):
+    def __init__(self, track_info: Dict[str, List[dict]], *, config: "AppConfig",
+                 log_callback: Optional[Callable[[str], None]] = None, parent=None,
+                 previous_layout: Optional[List[dict]] = None):
         super().__init__(parent)
         self.setWindowTitle("Manual Track Selection")
         self.setMinimumSize(1200, 700)
 
         self.track_info = track_info
-        self.manual_layout: Optional[List[dict]] = None
-        self.parent_config = parent.config if parent and hasattr(parent, 'config') else None
-        self._style_clipboard: Optional[List[str]] = None
+        self.config = config
         self.log_callback = log_callback or (lambda msg: print(f"[Dialog] {msg}"))
-
-        # This will hold a reference to the single widget that was edited
+        self.manual_layout: Optional[List[dict]] = None
+        self._style_clipboard: Optional[List[str]] = None
         self.edited_widget = None
 
         root = QVBoxLayout(self)
@@ -77,31 +75,22 @@ class ManualSelectionDialog(QDialog):
         root.addWidget(btns)
 
     def _ensure_editable_subtitle_path(self, widget: TrackWidget) -> Optional[str]:
-        """
-        Ensures an editable temp file for a subtitle track exists.
-        If a modified path already exists, it returns it. Otherwise, it extracts a fresh one.
-        """
         track_data = widget.track_data
-
-        # If a path to a modified version already exists, use it.
         if track_data.get('user_modified_path'):
             return track_data['user_modified_path']
 
-        # Otherwise, extract a fresh copy for editing.
         source_file = track_data.get('original_path')
         track_id = track_data.get('id')
-        if not all([source_file, track_id is not None, self.parent_config]):
-            self.log_callback("[ERROR] Missing info required for subtitle extraction.")
+        if not all([source_file, track_id is not None, self.config]):
+            self.log_callback("[ERROR] Missing info required for subtitle extraction (config or track data).")
             return None
 
-        runner = CommandRunner(self.parent_config.settings, self.log_callback)
+        runner = CommandRunner(self.config.settings, self.log_callback)
         tool_paths = {t: shutil.which(t) for t in ['mkvmerge', 'mkvextract', 'ffmpeg']}
 
         try:
-            # Create a unique temp directory for this specific extraction
             temp_dir = Path(tempfile.gettempdir()) / f"vsg_style_edit_{Path(source_file).stem}_{track_id}_{int(time.time())}"
             temp_dir.mkdir(parents=True, exist_ok=True)
-
             extracted = extract_tracks(source_file, temp_dir, runner, tool_paths, 'edit', specific_tracks=[track_id])
             if not extracted:
                 self.log_callback(f"[ERROR] mkvextract failed for track ID {track_id} from {source_file}")
@@ -111,7 +100,6 @@ class ManualSelectionDialog(QDialog):
             if Path(temp_path_str).suffix.lower() == '.srt':
                 temp_path_str = convert_srt_to_ass(temp_path_str, runner, tool_paths)
 
-            # Store this new path as the user-modified path for future use
             widget.track_data['user_modified_path'] = temp_path_str
             return temp_path_str
         except Exception as e:
@@ -149,16 +137,15 @@ class ManualSelectionDialog(QDialog):
         track_data = widget.track_data
         ref_video_path = self.track_info.get('REF', [{}])[0].get('original_path')
         if not ref_video_path:
-             QMessageBox.warning(self, "Error", "Could not launch editor: Reference video path is missing.")
-             return
+            QMessageBox.warning(self, "Error", "Could not launch editor: Reference video path is missing.")
+            return
 
-        # This now robustly gets or creates the editable subtitle file
         editable_sub_path = self._ensure_editable_subtitle_path(widget)
         if not editable_sub_path:
             QMessageBox.critical(self, "Error Preparing Editor", "Failed to extract or prepare the subtitle file.")
             return
 
-        runner = CommandRunner(self.parent_config.settings, self.log_callback)
+        runner = CommandRunner(self.config.settings, self.log_callback)
         tool_paths = {t: shutil.which(t) for t in ['mkvmerge', 'mkvextract']}
 
         fonts_dir = None
@@ -175,7 +162,6 @@ class ManualSelectionDialog(QDialog):
 
         editor = StyleEditorDialog(ref_video_path, editable_sub_path, fonts_dir=fonts_dir, parent=self)
         if editor.exec():
-            # The patch is now the primary artifact of editing
             widget.track_data['style_patch'] = editor.get_style_patch()
             self.edited_widget = widget
             widget.refresh_badges()
@@ -206,7 +192,7 @@ class ManualSelectionDialog(QDialog):
                 if hasattr(w, 'cb_default'):
                     w.cb_default.setChecked(True)
                     ManualLogic.normalize_single_default_for_type(self.final_list._widgets_of_type(w.track_type), w.track_type, prefer_widget=w)
-                    if hasattr(w, 'refresh_badges'):  w.refresh_badges()
+                    if hasattr(w, 'refresh_badges'): w.refresh_badges()
                     if hasattr(w, 'refresh_summary'): w.refresh_summary()
             event.accept(); return
         if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_F:
@@ -216,7 +202,7 @@ class ManualSelectionDialog(QDialog):
                 if getattr(w, 'track_type', '') == 'subtitles' and hasattr(w, 'cb_forced'):
                     w.cb_forced.setChecked(not w.cb_forced.isChecked())
                     ManualLogic.normalize_forced_subtitles(self.final_list._widgets_of_type('subtitles'))
-                    if hasattr(w, 'refresh_badges'):  w.refresh_badges()
+                    if hasattr(w, 'refresh_badges'): w.refresh_badges()
                     if hasattr(w, 'refresh_summary'): w.refresh_summary()
             event.accept(); return
         if event.key() == Qt.Key_Delete:
