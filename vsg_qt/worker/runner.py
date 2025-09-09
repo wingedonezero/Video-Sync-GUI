@@ -35,6 +35,9 @@ class JobWorker(QRunnable):
                 self.signals.log.emit(f"[FATAL WORKER ERROR] Job {i} is missing 'Source 1'. Skipping.")
                 continue
 
+            # Store original Source 1 path for batch output folder logic in controller
+            job_data['ref_path_for_batch_check'] = source1_file
+
             try:
                 self.signals.status.emit(f'Processing {i}/{total_jobs}: {Path(source1_file).name}')
 
@@ -43,9 +46,10 @@ class JobWorker(QRunnable):
                     and_merge=self.and_merge,
                     output_dir_str=self.output_dir,
                     manual_layout=job_data.get('manual_layout'),
+                    # BUG FIX: Pass the attachment sources to the pipeline
+                    attachment_sources=job_data.get('attachment_sources')
                 )
 
-                # Pass original job data through for the batch check in the controller
                 result['job_data_for_batch_check'] = job_data
 
                 self.signals.finished_job.emit(result)

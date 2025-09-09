@@ -35,6 +35,7 @@ class JobQueueLogic:
                 job['manual_layout'] = None
                 job['track_info'] = None
                 job['signature'] = None
+                job['attachment_sources'] = [] # Initialize attachment sources
 
             self.jobs.extend(new_jobs)
             self.jobs.sort(key=lambda j: natural_sort_key(Path(j['sources']['Source 1']).name))
@@ -59,7 +60,7 @@ class JobQueueLogic:
             self.v.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
             self.v.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
             for i in range(2, self.v.table.columnCount()):
-                 self.v.table.horizontalHeader().setSectionResizeMode(i, QHeaderView.Stretch)
+                   self.v.table.horizontalHeader().setSectionResizeMode(i, QHeaderView.Stretch)
 
         self.v.table.setRowCount(len(self.jobs))
         for row, job in enumerate(self.jobs):
@@ -82,7 +83,7 @@ class JobQueueLogic:
         if job and job.get('track_info') is None:
             try:
                 runner = CommandRunner(self.v.config.settings, self.v.log_callback)
-                tool_paths = {t: shutil.which(t) for t in ['mkvmerge', 'mkvextract', 'ffmpeg']}
+                tool_paths = {t: shutil.which(t) for t in ['mkvmerge', 'mkvextract', 'ffmpeg', 'ffprobe']}
                 job['track_info'] = get_track_info_for_dialog(job['sources'], runner, tool_paths)
             except Exception as e:
                 QMessageBox.critical(self.v, "Error Analyzing Tracks", f"Could not analyze tracks for {Path(job['sources']['Source 1']).name}:\n{e}")
@@ -101,13 +102,21 @@ class JobQueueLogic:
         track_info = self._get_track_info_for_job(job)
         if not track_info: return
 
-        dialog = ManualSelectionDialog(track_info, config=self.v.config,
-                                     log_callback=self.v.log_callback, parent=self.v,
-                                     previous_layout=layout_to_template(job['manual_layout']))
+        dialog = ManualSelectionDialog(
+            track_info,
+            config=self.v.config,
+            log_callback=self.v.log_callback,
+            parent=self.v,
+            previous_layout=layout_to_template(job['manual_layout']),
+            previous_attachment_sources=job.get('attachment_sources')
+        )
         if dialog.exec():
-            job['manual_layout'] = dialog.get_manual_layout()
+            # BUG FIX: Call the new method and unpack both results
+            layout, attachment_sources = dialog.get_manual_layout_and_attachment_sources()
+            job['manual_layout'] = layout
+            job['attachment_sources'] = attachment_sources
             job['status'] = "Configured"
-            job['signature'] = None
+            job['signature'] = None # Clear signature as it was manually configured
             self._update_row(row, job)
 
     def apply_layout_to_matching(self):
@@ -127,6 +136,7 @@ class JobQueueLogic:
 
         source_sig = generate_track_signature(source_track_info, strict=strict_match)
         source_template = layout_to_template(source_job['manual_layout'])
+        source_attachment_sources = source_job.get('attachment_sources', [])
 
         updated_count = 0
         for i, target_job in enumerate(self.jobs):
@@ -138,6 +148,7 @@ class JobQueueLogic:
             target_sig = generate_track_signature(target_track_info, strict=strict_match)
             if source_sig == target_sig:
                 target_job['manual_layout'] = materialize_layout(source_template, target_track_info)
+                target_job['attachment_sources'] = source_attachment_sources
                 target_job['status'] = 'Configured'
                 self._update_row(i, target_job)
                 updated_count += 1
@@ -151,46 +162,6 @@ class JobQueueLogic:
         for row in selected_rows:
             del self.jobs[row]
         self.populate_table()
-
-    def copy_layout(self):
-        selected_rows = self.v.table.selectionModel().selectedRows()
-        if not selected_rows: return
-
-        job = self.jobs[selected_rows[0].row()]
-        if job['status'] == 'Configured':
-            self._layout_clipboard = layout_to_template(job['manual_layout'])
-            self._clipboard_source_job = job
-            self.v.log_callback(f"[Queue] Copied layout from {Path(job['sources']['Source 1']).name}.")
-        else:
-            QMessageBox.warning(self.v, "Not Configured", "Cannot copy layout from a job that has not been configured.")
-
-    def paste_layout(self):
-        selected_indices = [r.row() for r in self.v.table.selectionModel().selectedRows()]
-        if not selected_indices or not self._layout_clipboard: return
-
-        strict_match = self.v.config.get('auto_apply_strict', False)
-        source_track_info = self._get_track_info_for_job(self._clipboard_source_job)
-        source_sig = generate_track_signature(source_track_info, strict=strict_match)
-
-        for row in selected_indices:
-            target_job = self.jobs[row]
-            target_track_info = self._get_track_info_for_job(target_job)
-            if not target_track_info: continue
-
-            target_sig = generate_track_signature(target_track_info, strict=strict_match)
-
-            proceed = True
-            if source_sig != target_sig:
-                reply = QMessageBox.warning(self.v, "Signature Mismatch",
-                    f"The layout from '{Path(self._clipboard_source_job['sources']['Source 1']).name}' may not be compatible with '{Path(target_job['sources']['Source 1']).name}'.\n\n"
-                    "Do you want to apply it anyway?",
-                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-                proceed = (reply == QMessageBox.Yes)
-
-            if proceed:
-                target_job['manual_layout'] = materialize_layout(self._layout_clipboard, target_track_info)
-                target_job['status'] = 'Configured'
-                self._update_row(row, target_job)
 
     def get_configured_jobs(self) -> List[Dict]:
         return [job for job in self.jobs if job['status'] == 'Configured']

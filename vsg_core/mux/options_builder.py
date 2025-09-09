@@ -23,7 +23,7 @@ class MkvmergeOptionsBuilder:
         order_entries: List[str] = []
         for i, item in enumerate(plan.items):
             tr = item.track
-            delay_ms = self._effective_delay_ms(plan, tr)
+            delay_ms = self._effective_delay_ms(plan, item)
             is_default = (i == first_video_idx) or (i == default_audio_idx) or (i == default_sub_idx)
 
             tokens += ['--language', f"0:{tr.props.lang or 'und'}"]
@@ -44,7 +44,8 @@ class MkvmergeOptionsBuilder:
                     tokens += ['--remove-dialog-normalization-gain', '0']
 
             if not item.extracted_path:
-                raise ValueError(f"Plan item at index {i} missing extracted_path")
+                raise ValueError(f"Plan item at index {i} ('{tr.props.name}') missing extracted_path")
+
             tokens += ['(', str(item.extracted_path), ')']
             order_entries.append(f"{i}:0")
 
@@ -62,9 +63,14 @@ class MkvmergeOptionsBuilder:
                 return i
         return -1
 
-    def _effective_delay_ms(self, plan: MergePlan, tr: Track) -> int:
-        # Generalized delay lookup
+    def _effective_delay_ms(self, plan: MergePlan, item: PlanItem) -> int:
+        tr = item.track
         d = plan.delays.global_shift_ms
-        if tr.source != "Source 1":
-            d += plan.delays.source_delays_ms.get(tr.source, 0)
+
+        # Use the 'sync_to' property for external files, otherwise fall back to the track's own source.
+        sync_key = item.sync_to if tr.source == 'External' else tr.source
+
+        if sync_key and sync_key != "Source 1":
+            d += plan.delays.source_delays_ms.get(sync_key, 0)
+
         return int(d)

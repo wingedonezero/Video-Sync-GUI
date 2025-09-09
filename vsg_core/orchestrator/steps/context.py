@@ -9,6 +9,7 @@ from typing import Callable, Optional, List, Dict, Any
 from vsg_core.models.settings import AppSettings
 from vsg_core.models.jobs import PlanItem, Delays
 
+
 @dataclass
 class Context:
     # Provided by Orchestrator entry
@@ -19,10 +20,11 @@ class Context:
     progress: Callable[[float], None]
     output_dir: str
     temp_dir: Path
-    # Replaces ref_file, sec_file, ter_file with a dynamic dictionary
     sources: Dict[str, str] = field(default_factory=dict)
     and_merge: bool = False
     manual_layout: List[Dict[str, Any]] = field(default_factory=list)
+    # NEW: Stores the list of sources to pull attachments from
+    attachment_sources: List[str] = field(default_factory=list)
 
     # Filled along the pipeline
     delays: Optional[Delays] = None
@@ -32,7 +34,6 @@ class Context:
 
     # Results/summaries
     out_file: Optional[str] = None
-    # delay_sec_val and delay_ter_val are now obsolete
 
     # mkvmerge @opts tokens produced by MuxStep
     tokens: Optional[List[str]] = None

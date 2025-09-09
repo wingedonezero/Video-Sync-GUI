@@ -31,6 +31,8 @@ class PlanItem:
     size_multiplier: float = 1.0
     style_patch: Optional[Dict[str, Any]] = None
     user_modified_path: Optional[str] = None
+    # NEW: For external files, specifies which source to sync against
+    sync_to: Optional[str] = None
 
 @dataclass(frozen=True)
 class MergePlan:

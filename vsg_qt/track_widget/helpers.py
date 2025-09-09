@@ -29,7 +29,6 @@ def compose_label_text(w) -> str:
         if w.track_data.get('user_modified_path'):
             badges.append("📝")
 
-
     badge_str = ("  " + " ".join(badges)) if badges else ""
     return base + name_part + badge_str
 
@@ -41,6 +40,12 @@ def build_summary_text(w) -> str:
     parts = []
     if w.cb_default.isChecked():
         parts.append("⭐ Default")
+
+    if w.source == 'External' and hasattr(w, 'sync_to_combo'):
+        sync_target = w.sync_to_combo.currentText()
+        if sync_target != "No Sync":
+            parts.append(f"🔗 Sync to {sync_target}")
+
     if w.track_type == 'subtitles':
         if w.track_data.get('user_modified_path'):
             parts.append("📝 Styled")
@@ -55,6 +60,7 @@ def build_summary_text(w) -> str:
             pass
         if w.cb_convert.isChecked():
             parts.append("Convert to ASS")
+
     if w.cb_name.isChecked():
         parts.append("Keep Name")
 

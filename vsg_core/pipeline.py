@@ -29,7 +29,9 @@ class JobPipeline:
         sources: Dict[str, str],
         and_merge: bool,
         output_dir_str: str,
-        manual_layout: Optional[List[Dict]] = None
+        manual_layout: Optional[List[Dict]] = None,
+        # BUG FIX: Add attachment_sources to the method signature
+        attachment_sources: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         source1_file = sources.get("Source 1")
         if not source1_file:
@@ -76,7 +78,10 @@ class JobPipeline:
             ctx = orch.run(
                 settings_dict=self.config, tool_paths=self.tool_paths, log=log_to_all, progress=self.progress,
                 sources=sources, and_merge=and_merge,
-                output_dir=str(output_dir), manual_layout=manual_layout or []
+                output_dir=str(output_dir),
+                manual_layout=manual_layout or [],
+                # BUG FIX: Pass attachment_sources to the orchestrator
+                attachment_sources=attachment_sources or []
             )
             ctx_temp_dir = getattr(ctx, 'temp_dir', None)
 

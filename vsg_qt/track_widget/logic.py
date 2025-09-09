@@ -1,9 +1,9 @@
+# vsg_qt/track_widget/logic.py
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
 from PySide6.QtWidgets import QMenu, QWidgetAction
 from .helpers import compose_label_text, build_summary_text
-
 
 class TrackWidgetLogic:
     """
@@ -25,36 +25,13 @@ class TrackWidgetLogic:
 
         v = self.v
         self._menu = QMenu(v)
-
-        # Container widget holding the options (we reuse the hidden controls directly)
-        # This ensures state is single-sourced in the hidden controls.
-        container = v._build_menu_form()  # returns QWidget with controls laid out
+        container = v._build_menu_form()
         act = QWidgetAction(self._menu)
         act.setDefaultWidget(container)
         self._menu.addAction(act)
-
-        # Sync on show (no-op but kept for symmetry/extensibility)
-        self._menu.aboutToShow.connect(self.sync_state_to_menu)
-
-        # The controls in the menu are the SAME widgets as the hidden state.
-        # Their signals are already connected in TrackWidget.ui to call
-        # self.apply_state_from_menu() on change.
         v.btn.setMenu(self._menu)
 
-    def sync_state_to_menu(self):
-        """
-        Copy current hidden state -> visible menu controls (they are the same widgets).
-        Nothing to do since we show the same widgets; kept for symmetry/extensibility.
-        """
-        # No-op.
-        pass
-
     def apply_state_from_menu(self):
-        """
-        Menu controls and hidden state are the same widgets now, so there is
-        nothing to copy. Just refresh UI; DO NOT emit toggled here or we will
-        recurse via our own signal connections.
-        """
         if self._in_apply:
             return
         self._in_apply = True
@@ -66,7 +43,7 @@ class TrackWidgetLogic:
 
     # ----- UI refresh -----
     def refresh_badges(self):
-        self.v.label.setText(compute_label(self.v))
+        self.v.label.setText(compose_label_text(self.v))
 
     def refresh_summary(self):
         txt = build_summary_text(self.v)
@@ -80,7 +57,7 @@ class TrackWidgetLogic:
     # ----- Public helpers used by TrackWidget -----
     def get_config(self) -> dict:
         v = self.v
-        return {
+        config = {
             'is_default': v.cb_default.isChecked(),
             'is_forced_display': v.cb_forced.isChecked(),
             'apply_track_name': v.cb_name.isChecked(),
@@ -88,8 +65,8 @@ class TrackWidgetLogic:
             'rescale': v.cb_rescale.isChecked(),
             'size_multiplier': v.size_multiplier.value() if v.track_type == 'subtitles' else 1.0
         }
+        # Add the new sync_to value if the widget exists and is visible
+        if hasattr(v, 'sync_to_combo') and v.sync_to_combo.isVisible():
+            config['sync_to'] = v.sync_to_combo.currentData() # Use currentData to get 'Source 1' or None
 
-
-# Small wrapper to keep helpers import-local for logic
-def compute_label(v) -> str:
-    return compose_label_text(v)
+        return config

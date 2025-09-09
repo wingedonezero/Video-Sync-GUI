@@ -1,6 +1,7 @@
 # vsg_core/orchestrator/steps/extract_step.py
 # -*- coding: utf-8 -*-
 from __future__ import annotations
+import shutil
 from pathlib import Path
 from typing import Dict, Any, List
 
@@ -17,6 +18,7 @@ class ExtractStep:
             ctx.extracted_items = []
             return ctx
 
+        # --- Part 1: Extract tracks from MKV sources ---
         all_extracted_tracks = []
         for source_key, source_path in ctx.sources.items():
             track_ids_to_extract = [t['id'] for t in ctx.manual_layout if t.get('source') == source_key]
@@ -34,39 +36,61 @@ class ExtractStep:
             for t in all_extracted_tracks
         }
 
+        # --- Part 2: Build the final PlanItem list ---
         items: List[PlanItem] = []
         for sel in ctx.manual_layout:
-            key = f"{sel.get('source', '')}_{sel['id']}"
-            trk = extracted_map.get(key)
-            if not trk:
-                runner._log_message(f"[WARNING] Could not find extracted file for {key}. Skipping.")
-                continue
+            source = sel.get('source', '')
 
-            track_model = Track(
-                source=sel['source'],
-                id=int(trk['id']),
-                type=TrackType(trk.get('type', 'video')),
-                props=StreamProps(
-                    codec_id=trk.get('codec_id', '') or '',
-                    lang=trk.get('lang', 'und') or 'und',
-                    name=trk.get('name', '') or ''
-                )
-            )
+            if source == 'External':
+                # Handle external files by copying them to the temp dir
+                original_path = Path(sel['original_path'])
+                temp_path = ctx.temp_dir / original_path.name
+                shutil.copy(original_path, temp_path)
 
-            items.append(
-                PlanItem(
-                    track=track_model,
-                    extracted_path=Path(trk['path']),
-                    is_default=bool(sel.get('is_default', False)),
-                    is_forced_display=bool(sel.get('is_forced_display', False)),
-                    apply_track_name=bool(sel.get('apply_track_name', False)),
-                    convert_to_ass=bool(sel.get('convert_to_ass', False)),
-                    rescale=bool(sel.get('rescale', False)),
-                    size_multiplier=float(sel.get('size_multiplier', 1.0)),
-                    style_patch=sel.get('style_patch'),
-                    user_modified_path=sel.get('user_modified_path')
+                track_model = Track(
+                    source='External',
+                    id=0, # Dummy ID
+                    type=TrackType.SUBTITLES, # Only subtitles are supported for now
+                    props=StreamProps(
+                        codec_id=sel.get('codec_id', ''),
+                        lang=sel.get('lang', 'und'),
+                        name=sel.get('name', '')
+                    )
                 )
-            )
+                plan_item = PlanItem(track=track_model, extracted_path=temp_path)
+
+            else:
+                # Handle tracks from MKV files
+                key = f"{source}_{sel['id']}"
+                trk = extracted_map.get(key)
+                if not trk:
+                    runner._log_message(f"[WARNING] Could not find extracted file for {key}. Skipping.")
+                    continue
+
+                track_model = Track(
+                    source=source,
+                    id=int(trk['id']),
+                    type=TrackType(trk.get('type', 'video')),
+                    props=StreamProps(
+                        codec_id=trk.get('codec_id', '') or '',
+                        lang=trk.get('lang', 'und') or 'und',
+                        name=trk.get('name', '') or ''
+                    )
+                )
+                plan_item = PlanItem(track=track_model, extracted_path=Path(trk['path']))
+
+            # Apply all shared settings from the manual layout selection (`sel`)
+            plan_item.is_default = bool(sel.get('is_default', False))
+            plan_item.is_forced_display = bool(sel.get('is_forced_display', False))
+            plan_item.apply_track_name = bool(sel.get('apply_track_name', False))
+            plan_item.convert_to_ass = bool(sel.get('convert_to_ass', False))
+            plan_item.rescale = bool(sel.get('rescale', False))
+            plan_item.size_multiplier = float(sel.get('size_multiplier', 1.0))
+            plan_item.style_patch = sel.get('style_patch')
+            plan_item.user_modified_path = sel.get('user_modified_path')
+            plan_item.sync_to = sel.get('sync_to') # Add sync_to property
+
+            items.append(plan_item)
 
         ctx.extracted_items = items
         return ctx

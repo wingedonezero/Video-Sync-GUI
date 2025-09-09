@@ -27,6 +27,8 @@ class Orchestrator:
         and_merge: bool,
         output_dir: str,
         manual_layout: List[Dict[str, Any]],
+        # BUG FIX: Add attachment_sources to the method signature
+        attachment_sources: List[str]
     ) -> Context:
         """
         Executes the pipeline steps using the new dynamic sources model.
@@ -53,6 +55,8 @@ class Orchestrator:
             sources=sources,
             and_merge=bool(and_merge),
             manual_layout=manual_layout or [],
+            # BUG FIX: Pass attachment_sources to the context
+            attachment_sources=attachment_sources
         )
 
         log('--- Analysis Phase ---')
