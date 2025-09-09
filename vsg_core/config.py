@@ -16,12 +16,9 @@ class AppConfig:
             'videodiff_path': '',
             'analysis_mode': 'Audio Correlation',
             # --- Generalized Language Settings ---
-            'analysis_lang_source1': 'eng',
-            'analysis_lang_others': 'eng',
-            # --- Old keys for backward compatibility (will be phased out) ---
-            'analysis_lang_ref': '',
-            'analysis_lang_sec': '',
-            'analysis_lang_ter': '',
+            'analysis_lang_source1': '',
+            'analysis_lang_others': '',
+            # -------------------------------------
             'scan_chunk_count': 10,
             'scan_chunk_duration': 15,
             'min_match_pct': 5.0,
@@ -57,6 +54,22 @@ class AppConfig:
             try:
                 with open(self.settings_path, 'r', encoding='utf-8') as f:
                     loaded_settings = json.load(f)
+
+                # Migrate old keys to new keys if they exist and new keys are not set
+                if 'analysis_lang_ref' in loaded_settings and not loaded_settings.get('analysis_lang_source1'):
+                    loaded_settings['analysis_lang_source1'] = loaded_settings['analysis_lang_ref']
+                    changed = True
+                if 'analysis_lang_sec' in loaded_settings and not loaded_settings.get('analysis_lang_others'):
+                    loaded_settings['analysis_lang_others'] = loaded_settings['analysis_lang_sec']
+                    changed = True
+
+                # Remove old keys
+                for old_key in ['analysis_lang_ref', 'analysis_lang_sec', 'analysis_lang_ter']:
+                    if old_key in loaded_settings:
+                        del loaded_settings[old_key]
+                        changed = True
+
+                # Ensure all default keys exist
                 for key, default_value in self.defaults.items():
                     if key not in loaded_settings:
                         loaded_settings[key] = default_value
@@ -68,13 +81,17 @@ class AppConfig:
         else:
             self.settings = self.defaults.copy()
             changed = True
+
         if changed:
             self.save()
 
     def save(self):
         try:
+            # Prune obsolete keys before saving
+            keys_to_save = self.defaults.keys()
+            settings_to_save = {k: self.settings.get(k) for k in keys_to_save if k in self.settings}
             with open(self.settings_path, 'w', encoding='utf-8') as f:
-                json.dump(self.settings, f, indent=4)
+                json.dump(settings_to_save, f, indent=4)
         except IOError as e:
             print(f"Error saving settings: {e}")
 

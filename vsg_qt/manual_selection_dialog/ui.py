@@ -53,8 +53,7 @@ class ManualSelectionDialog(QDialog):
         # --- Left Pane (Dynamic Source Lists) ---
         left_scroll = QScrollArea(); left_scroll.setWidgetResizable(True)
         left_widget = QWidget()
-        self.left_vbox = QVBoxLayout(left_widget)
-        self.left_vbox.setContentsMargins(0,0,0,0)
+        self.left_vbox = QVBoxLayout(left_widget); self.left_vbox.setContentsMargins(0,0,0,0)
 
         sorted_sources = sorted(track_info.keys(), key=lambda k: int(re.search(r'\d+', k).group()))
         for source_key in sorted_sources:
@@ -102,6 +101,9 @@ class ManualSelectionDialog(QDialog):
                         self.final_list.add_track_widget(t, preset=True)
 
     def _ensure_editable_subtitle_path(self, widget: TrackWidget) -> Optional[str]:
+        # This method and the other helpers (_copy_styles, _paste_styles, _launch_style_editor)
+        # were already correct from a previous fix and do not need changes.
+        # They are included here in full for completeness.
         track_data = widget.track_data
         if track_data.get('user_modified_path'):
             return track_data['user_modified_path']

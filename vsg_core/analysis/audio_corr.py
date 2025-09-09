@@ -90,9 +90,9 @@ def _apply_lowpass(waveform: np.ndarray, sr: int, cutoff_hz: int) -> np.ndarray:
 def _find_delay(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int, peak_fit: bool) -> Tuple[float, float]:
     """Calculates delay and match percentage between two normalized chunks."""
     r = (ref_chunk - np.mean(ref_chunk)) / (np.std(ref_chunk) + 1e-9)
-    # --- The fix is on the next line ---
+    # --- BUG FIX: Was using ref_chunk instead of tgt_chunk ---
     t = (tgt_chunk - np.mean(tgt_chunk)) / (np.std(tgt_chunk) + 1e-9)
-    # ----------------------------------
+    # --------------------------------------------------------
     c = correlate(r, t, mode='full', method='fft')
 
     k = np.argmax(np.abs(c))
