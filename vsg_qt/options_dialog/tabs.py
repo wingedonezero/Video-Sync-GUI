@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Dict
 from PySide6.QtWidgets import (
     QWidget, QFormLayout, QCheckBox, QComboBox, QSpinBox, QDoubleSpinBox,
-    QHBoxLayout, QLineEdit, QPushButton, QFileDialog, QLabel
+    QHBoxLayout, QLineEdit, QPushButton, QFileDialog, QLabel, QGroupBox, QVBoxLayout
 )
 
 def _dir_input() -> QWidget:
@@ -49,48 +49,109 @@ class AnalysisTab(QWidget):
     def __init__(self):
         super().__init__()
         self.widgets: Dict[str, QWidget] = {}
-        f = QFormLayout(self)
 
-        mode = QComboBox(); mode.addItems(['Audio Correlation', 'VideoDiff'])
-        self.widgets['analysis_mode'] = mode
+        main_layout = QVBoxLayout(self)
 
-        scc = QSpinBox(); scc.setRange(1, 100)
-        scd = QSpinBox(); scd.setRange(1, 120)
-        mmp = QDoubleSpinBox(); mmp.setRange(0.1, 100.0); mmp.setDecimals(1); mmp.setSingleStep(1.0)
-        self.widgets['scan_chunk_count'] = scc
-        self.widgets['scan_chunk_duration'] = scd
-        self.widgets['min_match_pct'] = mmp
+        # --- Group 1: Audio Pre-Processing ---
+        prep_group = QGroupBox("Step 1: Audio Pre-Processing")
+        prep_group.setToolTip("Optionally prepares audio before analysis to improve signal quality.")
+        prep_layout = QFormLayout(prep_group)
 
-        vmin = QDoubleSpinBox(); vmin.setRange(0.0, 500.0); vmin.setDecimals(2)
-        vmax = QDoubleSpinBox(); vmax.setRange(0.0, 500.0); vmax.setDecimals(2)
-        self.widgets['videodiff_error_min'] = vmin
-        self.widgets['videodiff_error_max'] = vmax
+        self.widgets['source_separation_model'] = QComboBox()
+        self.widgets['source_separation_model'].addItems(['None (Use Original Audio)', 'Demucs (Isolate Dialogue)'])
+        self.widgets['source_separation_model'].setToolTip("Uses an AI model (Demucs) to separate dialogue from music/effects.\nRecommended for files with very loud background noise that causes poor matches.\nThis is a slow process and requires Demucs to be installed.")
 
-        # --- UPDATED: Generalized Language hints ---
-        self.widgets['analysis_lang_source1'] = QLineEdit(); self.widgets['analysis_lang_source1'].setPlaceholderText('e.g., eng (blank = first available)')
-        self.widgets['analysis_lang_others'] = QLineEdit(); self.widgets['analysis_lang_others'].setPlaceholderText('e.g., jpn (blank = first available)')
-        # -----------------------------------------
+        self.widgets['filtering_method'] = QComboBox()
+        self.widgets['filtering_method'].addItems(['None', 'Low-Pass Filter', 'Dialogue Band-Pass Filter'])
+        self.widgets['filtering_method'].setToolTip("'Low-Pass' removes high-frequency noise. 'Dialogue Band-Pass' isolates\ncommon speech frequencies, which is highly effective for improving matches.")
 
-        self.widgets['audio_decode_native'] = QCheckBox("Decode at native sample rate (may be less stable)")
-        self.widgets['audio_peak_fit'] = QCheckBox("Enable sub-sample peak fitting (higher precision)")
-        bl_hz = QSpinBox(); bl_hz.setRange(0, 22000); bl_hz.setSuffix(" Hz"); bl_hz.setToolTip("0 = Off")
-        self.widgets['audio_bandlimit_hz'] = bl_hz
+        self.cutoff_container = QWidget()
+        cutoff_layout = QFormLayout(self.cutoff_container)
+        cutoff_layout.setContentsMargins(0, 0, 0, 0)
 
-        f.addRow('Analysis Mode:', self.widgets['analysis_mode'])
-        f.addRow(QLabel('<b>Audio Correlation Settings</b>'))
-        f.addRow('Scan Chunks:', self.widgets['scan_chunk_count'])
-        f.addRow('Chunk Duration (s):', self.widgets['scan_chunk_duration'])
-        f.addRow('Minimum Match %:', self.widgets['min_match_pct'])
-        f.addRow(QLabel('<b>Advanced Correlation Settings (Experimental)</b>'))
-        f.addRow(self.widgets['audio_decode_native'])
-        f.addRow(self.widgets['audio_peak_fit'])
-        f.addRow("Apply low-pass filter below:", self.widgets['audio_bandlimit_hz'])
-        f.addRow(QLabel('<b>VideoDiff Settings</b>'))
-        f.addRow('Min Allowed Error:', self.widgets['videodiff_error_min'])
-        f.addRow('Max Allowed Error:', self.widgets['videodiff_error_max'])
-        f.addRow(QLabel('<b>Analysis Audio Track Selection</b>'))
-        f.addRow('Source 1 (Reference) Language:', self.widgets['analysis_lang_source1'])
-        f.addRow('Other Sources Language:', self.widgets['analysis_lang_others'])
+        self.widgets['audio_bandlimit_hz'] = QSpinBox()
+        self.widgets['audio_bandlimit_hz'].setRange(0, 22000)
+        self.widgets['audio_bandlimit_hz'].setSuffix(" Hz")
+        self.widgets['audio_bandlimit_hz'].setToolTip("The frequency above which sounds will be removed. Set to 0 to disable.")
+        cutoff_layout.addRow("Low-Pass Cutoff:", self.widgets['audio_bandlimit_hz'])
+
+        prep_layout.addRow("Source Separation:", self.widgets['source_separation_model'])
+        prep_layout.addRow("Audio Filtering:", self.widgets['filtering_method'])
+        prep_layout.addRow(self.cutoff_container)
+
+        main_layout.addWidget(prep_group)
+
+        # --- Group 2: Core Analysis Engine ---
+        core_group = QGroupBox("Step 2: Core Analysis Engine")
+        core_group.setToolTip("Configures the main algorithm for detecting the time delay.")
+        core_layout = QFormLayout(core_group)
+
+        self.widgets['correlation_method'] = QComboBox()
+        self.widgets['correlation_method'].addItems(['Standard Correlation (SCC)', 'Phase Correlation (GCC-PHAT)', 'VideoDiff'])
+        self.widgets['correlation_method'].setToolTip("'Standard' is fast and compares audio waveform shapes.\n'Phase' is more robust against volume and mixing differences.\n'VideoDiff' analyzes video frames instead of audio.")
+
+        self.widgets['scan_chunk_count'] = QSpinBox(); self.widgets['scan_chunk_count'].setRange(1, 100)
+        self.widgets['scan_chunk_count'].setToolTip("How many different segments of the files to analyze.\nMore chunks can improve accuracy on longer files.")
+
+        self.widgets['scan_chunk_duration'] = QSpinBox(); self.widgets['scan_chunk_duration'].setRange(1, 120)
+        self.widgets['scan_chunk_duration'].setToolTip("The length of each audio segment to compare in seconds.\nLonger durations can be more stable but are slower.")
+
+        self.widgets['min_match_pct'] = QDoubleSpinBox(); self.widgets['min_match_pct'].setRange(0.1, 100.0); self.widgets['min_match_pct'].setDecimals(1); self.widgets['min_match_pct'].setSingleStep(1.0)
+        self.widgets['min_match_pct'].setToolTip("A single chunk's analysis is rejected if its confidence\nscore is below this percentage.")
+
+        self.widgets['min_accepted_chunks'] = QSpinBox(); self.widgets['min_accepted_chunks'].setRange(1, 100)
+        self.widgets['min_accepted_chunks'].setToolTip("If the total number of accepted chunks is less than this, the entire\nanalysis for the file will fail. Prevents a result based on too few matches.")
+
+        core_layout.addRow("Correlation Method:", self.widgets['correlation_method'])
+        core_layout.addRow("Number of Chunks:", self.widgets['scan_chunk_count'])
+        core_layout.addRow("Duration of Chunks (s):", self.widgets['scan_chunk_duration'])
+        core_layout.addRow("Minimum Match Confidence (%):", self.widgets['min_match_pct'])
+        core_layout.addRow("Minimum Accepted Chunks:", self.widgets['min_accepted_chunks'])
+
+        main_layout.addWidget(core_group)
+
+        # --- Group 3: Audio Track Selection ---
+        lang_group = QGroupBox("Step 3: Audio Track Selection")
+        lang_group.setToolTip("Specify a language code (e.g., 'eng', 'jpn') to ensure analysis uses a specific audio track.")
+        lang_layout = QFormLayout(lang_group)
+
+        self.widgets['analysis_lang_source1'] = QLineEdit()
+        self.widgets['analysis_lang_source1'].setPlaceholderText("e.g., eng (blank = first audio track)")
+        self.widgets['analysis_lang_others'] = QLineEdit()
+        self.widgets['analysis_lang_others'].setPlaceholderText("e.g., jpn (blank = first audio track)")
+
+        lang_layout.addRow("Source 1 (Reference) Language:", self.widgets['analysis_lang_source1'])
+        lang_layout.addRow("Other Sources Language:", self.widgets['analysis_lang_others'])
+
+        main_layout.addWidget(lang_group)
+
+        # --- Group 4: Advanced Tweaks & Diagnostics ---
+        adv_group = QGroupBox("Step 4: Advanced Tweaks & Diagnostics")
+        adv_layout = QVBoxLayout(adv_group)
+
+        # FIX: Re-added the SoXR resampler option
+        self.widgets['use_soxr'] = QCheckBox("Use High-Quality Resampling (SoXR)")
+        self.widgets['use_soxr'].setToolTip("Uses a higher-quality algorithm when resampling audio.\nRequires an FFmpeg build that includes SoXR.")
+
+        self.widgets['audio_peak_fit'] = QCheckBox("Enable Sub-Sample Peak Fitting (SCC only)")
+        self.widgets['audio_peak_fit'].setToolTip("Uses parabolic interpolation to find the delay with sub-sample\nprecision. Only applies to the 'Standard Correlation (SCC)' method.")
+
+        self.widgets['log_audio_drift'] = QCheckBox("Log Audio Drift Metric")
+        self.widgets['log_audio_drift'].setToolTip("Calculates and logs the difference in delay between the start and\nend of the file. Useful for diagnosing framerate mismatches.")
+
+        adv_layout.addWidget(self.widgets['use_soxr']) # FIX: Added to layout
+        adv_layout.addWidget(self.widgets['audio_peak_fit'])
+        adv_layout.addWidget(self.widgets['log_audio_drift'])
+
+        main_layout.addWidget(adv_group)
+        main_layout.addStretch(1)
+
+        self.widgets['filtering_method'].currentTextChanged.connect(self._update_filter_options)
+        self._update_filter_options(self.widgets['filtering_method'].currentText())
+
+    def _update_filter_options(self, text: str):
+        is_low_pass = (text == "Low-Pass Filter")
+        self.cutoff_container.setVisible(is_low_pass)
 
 class ChaptersTab(QWidget):
     def __init__(self):

@@ -14,11 +14,18 @@ class AppConfig:
             'output_folder': str(self.script_dir / 'sync_output'),
             'temp_root': str(self.script_dir / 'temp_work'),
             'videodiff_path': '',
-            'analysis_mode': 'Audio Correlation',
-            # --- Generalized Language Settings ---
+
+            # --- New Flexible Analysis Settings ---
+            'source_separation_model': 'None (Use Original Audio)',
+            'filtering_method': 'Dialogue Band-Pass Filter',
+            'correlation_method': 'Phase Correlation (GCC-PHAT)',
+            'min_accepted_chunks': 3,
+            'log_audio_drift': True,
+            # ------------------------------------
+
+            'analysis_mode': 'Audio Correlation', # Kept for legacy compatibility if needed
             'analysis_lang_source1': '',
             'analysis_lang_others': '',
-            # -------------------------------------
             'scan_chunk_count': 10,
             'scan_chunk_duration': 15,
             'min_match_pct': 5.0,
