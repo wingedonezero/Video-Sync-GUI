@@ -45,25 +45,98 @@ This document is intentionally **exhaustive**. It explains *what each module doe
 ## 1) Directory layout
 
 ```
-wingedonezero-video-sync-gui/
-├── main.py                                # Qt entry point
-├── vsg_core/
-│   ├── __init__.py
-│   ├── analysis.py                        # Audio correlation + VideoDiff
-│   ├── config.py                          # AppConfig with defaults + persistence
-│   ├── job_discovery.py                   # Single file or batch (dir) discovery
-│   ├── mkv_utils.py                       # mkvmerge/ffprobe helpers; chapters
-│   ├── pipeline.py                        # JobPipeline orchestration
-│   ├── process.py                         # CommandRunner process wrapper
-│   └── subtitle_utils.py                  # SRT→ASS, rescale, font scaling
-└── vsg_qt/
-    ├── __init__.py
-    ├── main_window.py                     # Main UI: inputs, run, log, options
-    ├── manual_selection_dialog.py         # Track picker + per-track “Settings…”
-    ├── options_dialog.py                  # Settings tabs
-    ├── track_settings_dialog.py           # (popup editor; mirrors TrackWidget menu)
-    ├── track_widget.py                    # Per-track inline UI widget
-    └── worker.py                          # QRunnable and signals
+Directory structure:
+└── wingedonezero-video-sync-gui/
+    ├── main.py
+    ├── vsg_core/
+    │   ├── __init__.py
+    │   ├── config.py
+    │   ├── job_discovery.py
+    │   ├── pipeline.py
+    │   ├── analysis/
+    │   │   ├── __init__.py
+    │   │   ├── audio_corr.py
+    │   │   └── videodiff.py
+    │   ├── chapters/
+    │   │   ├── keyframes.py
+    │   │   └── process.py
+    │   ├── extraction/
+    │   │   ├── attachments.py
+    │   │   └── tracks.py
+    │   ├── io/
+    │   │   └── runner.py
+    │   ├── models/
+    │   │   ├── __init__.py
+    │   │   ├── converters.py
+    │   │   ├── enums.py
+    │   │   ├── jobs.py
+    │   │   ├── media.py
+    │   │   └── settings.py
+    │   ├── mux/
+    │   │   └── options_builder.py
+    │   ├── orchestrator/
+    │   │   ├── pipeline.py
+    │   │   └── steps/
+    │   │       ├── __init__.py
+    │   │       ├── analysis_step.py
+    │   │       ├── attachments_step.py
+    │   │       ├── chapters_step.py
+    │   │       ├── context.py
+    │   │       ├── extract_step.py
+    │   │       ├── mux_step.py
+    │   │       └── subtitles_step.py
+    │   └── subtitles/
+    │       ├── convert.py
+    │       ├── rescale.py
+    │       ├── style.py
+    │       └── style_engine.py
+    └── vsg_qt/
+        ├── __init__.py
+        ├── add_job_dialog/
+        │   ├── __init__.py
+        │   └── ui.py
+        ├── job_queue_dialog/
+        │   ├── __init__.py
+        │   ├── logic.py
+        │   └── ui.py
+        ├── main_window/
+        │   ├── __init__.py
+        │   ├── controller.py
+        │   ├── helpers.py
+        │   └── window.py
+        ├── manual_selection_dialog/
+        │   ├── __init__.py
+        │   ├── logic.py
+        │   ├── ui.py
+        │   └── widgets.py
+        ├── options_dialog/
+        │   ├── __init__.py
+        │   ├── logic.py
+        │   ├── tabs.py
+        │   └── ui.py
+        ├── resample_dialog/
+        │   ├── __init__.py
+        │   └── ui.py
+        ├── style_editor_dialog/
+        │   ├── __init__.py
+        │   ├── logic.py
+        │   ├── player_thread.py
+        │   ├── ui.py
+        │   └── video_widget.py
+        ├── track_settings_dialog/
+        │   ├── __init__.py
+        │   ├── logic.py
+        │   └── ui.py
+        ├── track_widget/
+        │   ├── __init__.py
+        │   ├── helpers.py
+        │   ├── logic.py
+        │   └── ui.py
+        └── worker/
+            ├── __init__.py
+            ├── runner.py
+            └── signals.py
+
 ```
 
 ---

@@ -46,7 +46,6 @@ class JobWorker(QRunnable):
                     and_merge=self.and_merge,
                     output_dir_str=self.output_dir,
                     manual_layout=job_data.get('manual_layout'),
-                    # BUG FIX: Pass the attachment sources to the pipeline
                     attachment_sources=job_data.get('attachment_sources')
                 )
 
