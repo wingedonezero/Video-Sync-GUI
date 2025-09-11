@@ -25,21 +25,29 @@ class JobQueueLogic:
         self._layout_clipboard: Dict | None = None
         self._clipboard_source_job: Dict | None = None
 
+    def add_jobs(self, new_jobs: List[Dict]):
+        """Adds a list of discovered jobs to the queue."""
+        for job in new_jobs:
+            job['status'] = "Not Configured"
+            job['manual_layout'] = None
+            job['track_info'] = None
+            job['signature'] = None
+            job['attachment_sources'] = []
+
+        # SORTING FIX: Sort only the new batch of jobs being added
+        new_jobs.sort(key=lambda j: natural_sort_key(Path(j['sources']['Source 1']).name))
+
+        # Extend the existing list with the newly sorted batch
+        self.jobs.extend(new_jobs)
+
+        # Repopulate the table without re-sorting the whole list
+        self.v.populate_table()
+
     def add_jobs_from_dialog(self):
         """Opens the AddJobDialog and appends discovered jobs to the queue."""
         dialog = AddJobDialog(self.v)
         if dialog.exec():
-            new_jobs = dialog.get_discovered_jobs()
-            for job in new_jobs:
-                job['status'] = "Not Configured"
-                job['manual_layout'] = None
-                job['track_info'] = None
-                job['signature'] = None
-                job['attachment_sources'] = [] # Initialize attachment sources
-
-            self.jobs.extend(new_jobs)
-            self.jobs.sort(key=lambda j: natural_sort_key(Path(j['sources']['Source 1']).name))
-            self.populate_table()
+            self.add_jobs(dialog.get_discovered_jobs())
 
     def populate_table(self):
         """Fills the QTableWidget with the current list of jobs, adding columns if needed."""
@@ -49,9 +57,7 @@ class JobQueueLogic:
         if self.jobs:
             max_sources = max(len(job['sources']) for job in self.jobs)
 
-        # Base columns: #, Status
         num_base_cols = 2
-        # Ensure table has enough columns for #, Status, and all sources
         if self.v.table.columnCount() < num_base_cols + max_sources:
             self.v.table.setColumnCount(num_base_cols + max_sources)
             headers = ["#", "Status"] + [f"Source {i+1}" for i in range(max_sources)]
@@ -72,7 +78,6 @@ class JobQueueLogic:
         self.v.table.setItem(row, 0, order_item)
         self.v.table.setItem(row, 1, QTableWidgetItem(status_text))
 
-        # Populate source columns dynamically
         for i in range(2, self.v.table.columnCount()):
             source_key = f"Source {i-1}"
             path_str = job['sources'].get(source_key)
@@ -95,7 +100,7 @@ class JobQueueLogic:
         if not selected_rows:
             QMessageBox.information(self.v, "No Job Selected", "Please select a single job from the list to configure.")
             return
-        self.configure_job_at_row(selected_rows[0].row())
+        self.v.configure_job_at_row(selected_rows[0].row())
 
     def configure_job_at_row(self, row: int):
         job = self.jobs[row]
@@ -111,12 +116,11 @@ class JobQueueLogic:
             previous_attachment_sources=job.get('attachment_sources')
         )
         if dialog.exec():
-            # BUG FIX: Call the new method and unpack both results
             layout, attachment_sources = dialog.get_manual_layout_and_attachment_sources()
             job['manual_layout'] = layout
             job['attachment_sources'] = attachment_sources
             job['status'] = "Configured"
-            job['signature'] = None # Clear signature as it was manually configured
+            job['signature'] = None
             self._update_row(row, job)
 
     def apply_layout_to_matching(self):
@@ -162,6 +166,46 @@ class JobQueueLogic:
         for row in selected_rows:
             del self.jobs[row]
         self.populate_table()
+
+    def copy_layout(self):
+        selected_rows = self.v.table.selectionModel().selectedRows()
+        if not selected_rows: return
+
+        job = self.jobs[selected_rows[0].row()]
+        if job['status'] == 'Configured':
+            self._layout_clipboard = layout_to_template(job['manual_layout'])
+            self._clipboard_source_job = job
+            self.v.log_callback(f"[Queue] Copied layout from {Path(job['sources']['Source 1']).name}.")
+        else:
+            QMessageBox.warning(self.v, "Not Configured", "Cannot copy layout from a job that has not been configured.")
+
+    def paste_layout(self):
+        selected_indices = [r.row() for r in self.v.table.selectionModel().selectedRows()]
+        if not selected_indices or not self._layout_clipboard: return
+
+        strict_match = self.v.config.get('auto_apply_strict', False)
+        source_track_info = self._get_track_info_for_job(self._clipboard_source_job)
+        source_sig = generate_track_signature(source_track_info, strict=strict_match)
+
+        for row in selected_indices:
+            target_job = self.jobs[row]
+            target_track_info = self._get_track_info_for_job(target_job)
+            if not target_track_info: continue
+
+            target_sig = generate_track_signature(target_track_info, strict=strict_match)
+
+            proceed = True
+            if source_sig != target_sig:
+                reply = QMessageBox.warning(self.v, "Signature Mismatch",
+                    f"The layout from '{Path(self._clipboard_source_job['sources']['Source 1']).name}' may not be compatible with '{Path(target_job['sources']['Source 1']).name}'.\n\n"
+                    "Do you want to apply it anyway?",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                proceed = (reply == QMessageBox.Yes)
+
+            if proceed:
+                target_job['manual_layout'] = materialize_layout(self._layout_clipboard, target_track_info)
+                target_job['status'] = 'Configured'
+                self._update_row(row, target_job)
 
     def get_configured_jobs(self) -> List[Dict]:
         return [job for job in self.jobs if job['status'] == 'Configured']

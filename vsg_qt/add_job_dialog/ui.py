@@ -10,10 +10,52 @@ from PySide6.QtWidgets import (
 
 from vsg_core.job_discovery import discover_jobs
 
+class SourceInputWidget(QWidget):
+    """A self-contained widget for a single source input row that handles drag-and-drop."""
+    def __init__(self, source_num: int, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+
+        layout = QHBoxLayout(self)
+
+        label_text = f"Source {source_num} (Reference):" if source_num == 1 else f"Source {source_num}:"
+        label = QLabel(label_text)
+        self.line_edit = QLineEdit()
+        browse_btn = QPushButton("Browse…")
+
+        browse_btn.clicked.connect(self._browse_for_path)
+
+        layout.addWidget(label, 1)
+        layout.addWidget(self.line_edit, 4)
+        layout.addWidget(browse_btn)
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        if event.mimeData().hasUrls():
+            # Use the path of the first dropped file
+            path = event.mimeData().urls()[0].toLocalFile()
+            self.line_edit.setText(path)
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def _browse_for_path(self):
+        dialog = QFileDialog(self, "Select Source")
+        dialog.setFileMode(QFileDialog.FileMode.AnyFile)
+        if dialog.exec():
+            self.line_edit.setText(dialog.selectedFiles()[0])
+
+    def text(self) -> str:
+        return self.line_edit.text()
+
 class AddJobDialog(QDialog):
     """
-    A dialog for dynamically adding sources to discover jobs
-    and add them to the main Job Queue.
+    A dialog for dynamically adding sources to discover jobs.
     """
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -21,9 +63,10 @@ class AddJobDialog(QDialog):
         self.setMinimumSize(700, 300)
 
         self.discovered_jobs: List[Dict] = []
-        self.source_inputs: List[QLineEdit] = []
+        self.source_widgets: List[SourceInputWidget] = []
         self._build_ui()
-        # Start with 2 sources by default for a new job
+
+        # Start with 2 sources by default
         self.add_source_input()
         self.add_source_input()
 
@@ -53,36 +96,35 @@ class AddJobDialog(QDialog):
         layout.addWidget(dialog_btns)
 
     def add_source_input(self):
-        """Dynamically adds a new source input row to the dialog."""
-        source_num = len(self.source_inputs) + 1
-        label_text = f"Source {source_num} (Reference):" if source_num == 1 else f"Source {source_num}:"
+        """Adds a new SourceInputWidget to the dialog."""
+        source_num = len(self.source_widgets) + 1
+        source_widget = SourceInputWidget(source_num)
+        self.source_widgets.append(source_widget)
+        self.inputs_layout.addWidget(source_widget)
 
-        line_edit = QLineEdit()
-        self.source_inputs.append(line_edit)
+    def populate_sources_from_paths(self, paths: List[str]):
+        """Pre-fills the source inputs from a list of paths."""
+        # Clear any default inputs
+        while self.inputs_layout.count():
+            child = self.inputs_layout.takeAt(0)
+            if child and child.widget():
+                child.widget().deleteLater()
+        self.source_widgets.clear()
 
-        row = self._create_file_input(label_text, line_edit)
-        self.inputs_layout.addLayout(row)
+        # Add an input for each dropped path
+        for path in paths:
+            self.add_source_input()
+            self.source_widgets[-1].line_edit.setText(path)
 
-    def _create_file_input(self, label_text: str, line_edit: QLineEdit) -> QHBoxLayout:
-        layout = QHBoxLayout()
-        layout.addWidget(QLabel(label_text), 1)
-        layout.addWidget(line_edit, 4)
-        browse_btn = QPushButton('Browse…')
-        browse_btn.clicked.connect(lambda: self._browse_for_path(line_edit, "Select Source"))
-        layout.addWidget(browse_btn)
-        return layout
-
-    def _browse_for_path(self, line_edit: QLineEdit, caption: str):
-        dialog = QFileDialog(self, caption)
-        dialog.setFileMode(QFileDialog.FileMode.AnyFile)
-        if dialog.exec():
-            line_edit.setText(dialog.selectedFiles()[0])
+        # Ensure at least two inputs exist if user drops only one file
+        if len(self.source_widgets) < 2:
+            self.add_source_input()
 
     def find_and_accept(self):
         """Discover jobs from paths and accept the dialog if any are found."""
         sources: Dict[str, str] = {}
-        for i, line_edit in enumerate(self.source_inputs):
-            path = line_edit.text().strip()
+        for i, source_widget in enumerate(self.source_widgets):
+            path = source_widget.text().strip()
             if path:
                 sources[f"Source {i+1}"] = path
 
