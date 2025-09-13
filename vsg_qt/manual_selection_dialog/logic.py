@@ -1,103 +1,120 @@
 # vsg_qt/manual_selection_dialog/logic.py
+# -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import Dict, List, Any, Optional
+from typing import List, Dict, Any
+
+from vsg_qt.track_widget.ui import TrackWidget
 
 class ManualLogic:
-    @staticmethod
-    def is_blocked_video(track_data: dict) -> bool:
-        """Video is only allowed from Source 1."""
-        try:
-            return (
-                (track_data.get('type', '').lower() == 'video') and
-                (track_data.get('source', '') != 'Source 1')
-            )
-        except Exception:
-            return False
+    """A controller instance for the ManualSelectionDialog."""
+    def __init__(self, view: "ManualSelectionDialog"):
+        self.v = view
 
-    @staticmethod
-    def prepopulate(layout: List[dict], track_info: Dict[str, List[dict]]) -> List[dict]:
+    def is_blocked_video(self, track_data: dict) -> bool:
+        """Video is only allowed from Source 1."""
+        return track_data.get('type') == 'video' and track_data.get('source') != 'Source 1'
+
+    def prepopulate_from_layout(self, layout: List[Dict]):
+        """Populates the final list using a previously configured layout."""
         if not layout:
-            return []
+            return
+
+        # Create a lookup pool of available tracks
         pools = {}
         counters = {}
-
-        sorted_sources = sorted(track_info.keys(), key=lambda k: int(k.split(" ")[1]))
-        for src in sorted_sources:
-            for t in track_info.get(src, []):
-                key = (src, t['type'], counters.get((src, t['type']), 0))
+        for src_key, track_list in self.v.track_info.items():
+            for t in track_list:
+                key = (src_key, t['type'], counters.get((src_key, t['type']), 0))
                 pools[key] = t
-                counters[(src, t['type'])] = counters.get((src, t['type']), 0) + 1
+                counters[(src_key, t['type'])] = counters.get((src_key, t['type']), 0) + 1
 
+        # Realize the layout against the available tracks
+        realized_layout = []
         counters.clear()
-        realized = []
-        for prev in layout:
-            src, ttype = prev.get('source'), prev.get('type')
+        for prev_item in layout:
+            src, ttype = prev_item.get('source'), prev_item.get('type')
             idx = counters.get((src, ttype), 0)
             counters[(src, ttype)] = idx + 1
+
             match = pools.get((src, ttype, idx))
-            if not match:
-                continue
+            if match:
+                new_item = match.copy()
+                new_item.update(prev_item) # Apply saved settings
+                realized_layout.append(new_item)
 
-            d = match.copy()
-            d.update({
-                'is_default': prev.get('is_default', False),
-                'is_forced_display': prev.get('is_forced_display', False),
-                'apply_track_name': prev.get('apply_track_name', False),
-                'convert_to_ass': prev.get('convert_to_ass', False),
-                'rescale': prev.get('rescale', False),
-                'size_multiplier': prev.get('size_multiplier', 1.0),
-            })
-            realized.append(d)
-        return realized
+        # Add the widgets to the UI
+        for track_data in realized_layout:
+            if not self.is_blocked_video(track_data):
+                self.v.final_list.add_track_widget(track_data, preset=True)
 
-    @staticmethod
-    def build_layout_from_widgets(widgets: List[Any]) -> List[dict]:
-        out: List[dict] = []
+    def get_final_layout_and_attachments(self) -> tuple[List[Dict], List[str]]:
+        """Builds the layout from widgets and gets selected attachment sources."""
+        widgets = []
+        for i in range(self.v.final_list.count()):
+            widgets.append(self.v.final_list.itemWidget(self.v.final_list.item(i)))
+
+        # Final normalization before returning data
+        self.normalize_single_default_for_type(widgets, 'audio')
+        self.normalize_single_default_for_type(widgets, 'subtitles')
+        self.normalize_forced_subtitles(widgets)
+
+        layout = self.build_layout_from_widgets(widgets)
+        attachment_sources = [key for key, cb in self.v.attachment_checkboxes.items() if cb.isChecked()]
+
+        return layout, attachment_sources
+
+    def build_layout_from_widgets(self, widgets: List[TrackWidget]) -> List[dict]:
+        """Creates the final layout data structure from the UI widgets."""
+        out = []
         for w in widgets:
             td = dict(w.track_data)
-            cfg = {}
-            if hasattr(w, 'cb_default'):      cfg['is_default'] = w.cb_default.isChecked()
-            if hasattr(w, 'cb_forced'):       cfg['is_forced_display'] = w.cb_forced.isChecked()
-            if hasattr(w, 'cb_name'):         cfg['apply_track_name'] = w.cb_name.isChecked()
-            if hasattr(w, 'cb_rescale'):      cfg['rescale'] = w.cb_rescale.isChecked()
-            if hasattr(w, 'cb_convert'):      cfg['convert_to_ass'] = w.cb_convert.isChecked()
-            if hasattr(w, 'size_multiplier'): cfg['size_multiplier'] = w.size_multiplier.value()
+            cfg = w.get_config() # Get settings directly from the widget's logic
             td.update(cfg)
             out.append(td)
         return out
 
-    # ... (normalization helpers are unchanged) ...
-    @staticmethod
-    def normalize_single_default_for_type(widgets: List[Any], ttype: str, prefer_widget=None):
-        first = None
-        for w in widgets:
-            if getattr(w, 'track_type', None) != ttype: continue
-            if not hasattr(w, 'cb_default'): continue
-            if prefer_widget and w is prefer_widget:
-                w.cb_default.setChecked(True)
-                first = w
-            elif w.cb_default.isChecked():
-                if not first: first = w
-                else: w.cb_default.setChecked(False)
-            if hasattr(w, 'refresh_badges'): w.refresh_badges()
-            if hasattr(w, 'refresh_summary'): w.refresh_summary()
+    def normalize_single_default_for_type(self, widgets: List[TrackWidget], ttype: str, prefer_widget=None):
+        """Ensures only one 'Default' flag is set per track type."""
+        first_default = None
 
-        if not first:
-            for w in widgets:
-                if getattr(w, 'track_type', None) == ttype and hasattr(w, 'cb_default'):
+        # First pass: identify the preferred or first-found default
+        for w in widgets:
+            if w.track_type == ttype:
+                if prefer_widget and w is prefer_widget:
                     w.cb_default.setChecked(True)
-                    if hasattr(w, 'refresh_badges'):  w.refresh_badges()
-                    if hasattr(w, 'refresh_summary'): w.refresh_summary()
+                    first_default = w
+                    break
+                if w.cb_default.isChecked():
+                    first_default = w
                     break
 
-    @staticmethod
-    def normalize_forced_subtitles(widgets: List[Any]):
-        first = None
+        # If no default was found, make the first track of that type the default
+        if not first_default:
+            for w in widgets:
+                if w.track_type == ttype:
+                    w.cb_default.setChecked(True)
+                    first_default = w
+                    break
+
+        # Second pass: unset all other defaults
         for w in widgets:
-            if getattr(w, 'track_type', None) != 'subtitles': continue
-            if not hasattr(w, 'cb_forced'): continue
-            if w.cb_forced.isChecked():
-                if not first: first = w
-                else: w.cb_forced.setChecked(False)
-            if hasattr(w, 'refresh_badges'):  w.refresh_badges()
-            if hasattr(w, 'refresh_summary'): w.refresh_summary()
+            if w.track_type == ttype and w is not first_default:
+                w.cb_default.setChecked(False)
+            w.refresh_badges()
+            w.refresh_summary()
+
+    def normalize_forced_subtitles(self, widgets: List[TrackWidget]):
+        """Ensures at most one 'Forced' flag is set for subtitles."""
+        first_forced = None
+        for w in widgets:
+            if w.track_type == 'subtitles':
+                if w.cb_forced.isChecked():
+                    if not first_forced:
+                        first_forced = w
+                    else:
+                        w.cb_forced.setChecked(False)
+        # Refresh all subtitle widgets
+        for w in widgets:
+            if w.track_type == 'subtitles':
+                w.refresh_badges()
+                w.refresh_summary()

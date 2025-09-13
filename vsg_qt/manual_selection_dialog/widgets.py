@@ -1,4 +1,5 @@
 # vsg_qt/manual_selection_dialog/widgets.py
+# -*- coding: utf-8 -*-
 from __future__ import annotations
 from typing import Optional
 from PySide6.QtCore import Qt, QPoint
@@ -20,7 +21,7 @@ class SourceList(QListWidget):
     def add_track_item(self, track: dict, guard_block: bool):
         name_part = f" '{track['name']}'" if track.get('name') else ""
         item_text = (f"[{track['type'][0].upper()}-{track['id']}] "
-                       f"{track.get('codec_id','')} ({track.get('lang','und')}){name_part}")
+                     f"{track.get('codec_id','')} ({track.get('lang','und')}){name_part}")
         it = QListWidgetItem(item_text, self)
         it.setData(Qt.UserRole, track)
 
@@ -30,16 +31,15 @@ class SourceList(QListWidget):
             flags &= ~Qt.ItemIsEnabled
             it.setFlags(flags)
             it.setForeground(QColor('#888'))
-            it.setToolTip("Video from Secondary/Tertiary is disabled. REF-only video is allowed.")
+            it.setToolTip("Video from other sources is disabled. Only Source 1 video is allowed.")
         return it
 
 
 class FinalList(QListWidget):
     """
-    Final output list that accepts drops from SourceList and renders TrackWidget rows.
-    Context menu implements move up/down, default/forced toggles, and delete.
+    Final output list that accepts drops and renders TrackWidget rows.
     """
-    def __init__(self, dialog, parent=None):
+    def __init__(self, dialog: "ManualSelectionDialog", parent=None):
         super().__init__(parent)
         self.dialog = dialog
         self.setDragEnabled(True)
@@ -50,37 +50,33 @@ class FinalList(QListWidget):
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
-    # ---- DnD ----
     def dropEvent(self, event):
         source = event.source()
         if source and source is not self:
             it = source.currentItem()
             if it:
                 track = it.data(Qt.UserRole)
-                if track and not ManualLogic.is_blocked_video(track):
+                if track and not self.dialog._logic.is_blocked_video(track):
                     self.add_track_widget(track)
             event.accept()
             return
         super().dropEvent(event)
 
-    # ---- Add one TrackWidget row ----
     def add_track_widget(self, track_data: dict, preset=False):
         item = QListWidgetItem()
         self.addItem(item)
 
-        widget = TrackWidget(track_data)
+        widget = TrackWidget(track_data, available_sources=self.dialog.available_sources)
 
-        # Connect the style editor button to the dialog's launch method
         if hasattr(widget, 'style_editor_btn'):
-            # FIX: The lambda now accepts the 'checked' boolean from the signal, preventing it
-            # from overriding the 'w' variable which correctly holds the widget instance.
             widget.style_editor_btn.clicked.connect(lambda checked, w=widget: self.dialog._launch_style_editor(w))
 
         if preset:
-            if hasattr(widget, 'cb_default'):   widget.cb_default.setChecked(track_data.get('is_default', False))
-            if hasattr(widget, 'cb_forced'):    widget.cb_forced.setChecked(track_data.get('is_forced_display', False))
-            if hasattr(widget, 'cb_name'):      widget.cb_name.setChecked(track_data.get('apply_track_name', False))
-            if hasattr(widget, 'cb_rescale'):   widget.cb_rescale.setChecked(track_data.get('rescale', False))
+            # FIX: Changed all instances of 'w' to 'widget'
+            if hasattr(widget, 'cb_default'):      widget.cb_default.setChecked(track_data.get('is_default', False))
+            if hasattr(widget, 'cb_forced'):       widget.cb_forced.setChecked(track_data.get('is_forced_display', False))
+            if hasattr(widget, 'cb_name'):         widget.cb_name.setChecked(track_data.get('apply_track_name', False))
+            if hasattr(widget, 'cb_rescale'):      widget.cb_rescale.setChecked(track_data.get('rescale', False))
             if hasattr(widget, 'size_multiplier'): widget.size_multiplier.setValue(track_data.get('size_multiplier', 1.0))
             if 'S_TEXT/UTF8' in (getattr(widget, 'codec_id', '') or '').upper():
                 if hasattr(widget, 'cb_convert'): widget.cb_convert.setChecked(track_data.get('convert_to_ass', False))
@@ -95,7 +91,6 @@ class FinalList(QListWidget):
         self.setCurrentItem(item)
         self.scrollToItem(item)
 
-    # ---- Context menu ----
     def _show_context_menu(self, pos: QPoint):
         item = self.itemAt(pos)
         if not item: return
@@ -128,17 +123,15 @@ class FinalList(QListWidget):
         elif act == act_paste: self.dialog._paste_styles(widget)
         elif act == act_default and hasattr(widget, 'cb_default'):
             widget.cb_default.setChecked(True)
-            ManualLogic.normalize_single_default_for_type(self._widgets_of_type('audio') + self._widgets_of_type('subtitles'),
-                                                        widget.track_type, prefer_widget=widget)
-            widget.refresh_badges(); widget.refresh_summary()
+            self.dialog._logic.normalize_single_default_for_type(
+                self._widgets_of_type(widget.track_type), widget.track_type, prefer_widget=widget
+            )
         elif act_forced and act == act_forced and hasattr(widget, 'cb_forced'):
             widget.cb_forced.setChecked(not widget.cb_forced.isChecked())
-            ManualLogic.normalize_forced_subtitles(self._widgets_of_type('subtitles'))
-            widget.refresh_badges(); widget.refresh_summary()
+            self.dialog._logic.normalize_forced_subtitles(self._widgets_of_type('subtitles'))
         elif act == act_del:
             self.takeItem(self.row(item))
 
-    # ---- helpers ----
     def _move_by(self, delta: int):
         item = self.currentItem()
         if not item: return
@@ -150,17 +143,11 @@ class FinalList(QListWidget):
             self.setCurrentItem(it)
 
     def _widgets_of_type(self, ttype: str):
-        out = []
-        for i in range(self.count()):
-            it = self.item(i)
-            w = self.itemWidget(it)
-            if w and getattr(w, 'track_type', None) == ttype:
-                out.append(w)
-        return out
+        return [self.itemWidget(self.item(i)) for i in range(self.count()) if getattr(self.itemWidget(self.item(i)), 'track_type', None) == ttype]
 
     def _enforce_single_default(self, checked, sender_widget):
         if not checked: return
-        ManualLogic.normalize_single_default_for_type(
+        self.dialog._logic.normalize_single_default_for_type(
             self._widgets_of_type(sender_widget.track_type),
             sender_widget.track_type,
             prefer_widget=sender_widget
