@@ -18,6 +18,10 @@ class LayoutPersistence:
     def save_layout(self, job_id: str, layout_data: Dict) -> bool:
         """Saves a job layout using a temporary file to prevent corruption."""
         try:
+            # *** THE FIX IS HERE ***
+            # Ensure the target directory exists right before saving.
+            self.layouts_dir.mkdir(parents=True, exist_ok=True)
+
             layout_file = self.layouts_dir / f"{job_id}.json"
             temp_file = layout_file.with_suffix('.tmp')
 
