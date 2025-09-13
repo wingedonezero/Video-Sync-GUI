@@ -23,7 +23,7 @@ class AppConfig:
             'log_audio_drift': True,
             # ------------------------------------
 
-            'analysis_mode': 'Audio Correlation', # Kept for legacy compatibility if needed
+            'analysis_mode': 'Audio Correlation',
             'analysis_lang_source1': '',
             'analysis_lang_others': '',
             'scan_chunk_count': 10,
@@ -31,6 +31,10 @@ class AppConfig:
             'min_match_pct': 5.0,
             'videodiff_error_min': 0.0,
             'videodiff_error_max': 100.0,
+
+            # *** FIX IS HERE ***
+            'use_soxr': False, # Added the missing key for the SoXR resampler
+
             'audio_decode_native': False,
             'audio_peak_fit': False,
             'audio_bandlimit_hz': 0,
