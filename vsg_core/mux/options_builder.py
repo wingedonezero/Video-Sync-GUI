@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import List
 from ..models.jobs import MergePlan, PlanItem
 from ..models.settings import AppSettings
+from ..models.enums import TrackType
 
 class MkvmergeOptionsBuilder:
     def build(self, plan: MergePlan, settings: AppSettings) -> List[str]:
@@ -14,33 +15,35 @@ class MkvmergeOptionsBuilder:
         if settings.disable_track_statistics_tags:
             tokens += ['--disable-track-statistics-tags']
 
-        # NEW: Handle corrected/preserved audio tracks for segmented correction
-        corrected_tracks = [i for i, item in enumerate(plan.items) if 'Corrected' in (item.track.props.name or '')]
-        preserved_tracks = [i for i, item in enumerate(plan.items) if 'Original' in (item.track.props.name or '')]
+        # Reorder plan to move preserved tracks to the end of their type group
+        final_items = [item for item in plan.items if not item.is_preserved]
+        preserved_items = [item for item in plan.items if item.is_preserved]
 
-        default_audio_idx = self._first_index(plan.items, kind='audio', predicate=lambda it: it.is_default)
-        default_sub_idx = self._first_index(plan.items, kind='subtitles', predicate=lambda it: it.is_default)
-        first_video_idx = self._first_index(plan.items, kind='video', predicate=lambda it: True)
-        forced_sub_idx = self._first_index(plan.items, kind='subtitles', predicate=lambda it: it.is_forced_display)
+        # Find the index of the last audio track to insert preserved audio after
+        last_audio_idx = -1
+        for i, item in enumerate(final_items):
+            if item.track.type == TrackType.AUDIO:
+                last_audio_idx = i
 
-        # NEW: For segmented correction, ensure corrected tracks are default and preserved are not
-        if corrected_tracks:
-            # Make first corrected track the default audio
-            for i, item in enumerate(plan.items):
-                if item.track.type.value == 'audio':
-                    if i in corrected_tracks:
-                        item.is_default = (i == corrected_tracks[0])  # Only first corrected is default
-                    elif i in preserved_tracks:
-                        item.is_default = False  # Preserved tracks are never default
+        if last_audio_idx != -1:
+            final_items[last_audio_idx+1:last_audio_idx+1] = preserved_items
+        else:
+            final_items.extend(preserved_items)
+
+        default_audio_idx = self._first_index(final_items, kind='audio', predicate=lambda it: it.is_default)
+        default_sub_idx = self._first_index(final_items, kind='subtitles', predicate=lambda it: it.is_default)
+        first_video_idx = self._first_index(final_items, kind='video', predicate=lambda it: True)
+        forced_sub_idx = self._first_index(final_items, kind='subtitles', predicate=lambda it: it.is_forced_display)
 
         order_entries: List[str] = []
-        for i, item in enumerate(plan.items):
+        for i, item in enumerate(final_items):
             tr = item.track
-            delay_ms = self._effective_delay_ms(plan, item)
 
-            # NEW: Corrected tracks get 0 delay (they're already perfectly synced)
-            if 'Corrected' in (tr.props.name or ''):
-                delay_ms = plan.delays.global_shift_ms  # Only apply global shift
+            # Corrected tracks get 0 delay, preserved tracks get simple delay
+            if '(Corrected)' in (tr.props.name or ''):
+                delay_ms = plan.delays.global_shift_ms
+            else:
+                delay_ms = self._effective_delay_ms(plan, item)
 
             is_default = (i == first_video_idx) or (i == default_audio_idx) or (i == default_sub_idx)
 

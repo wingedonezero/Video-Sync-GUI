@@ -68,22 +68,20 @@ class Orchestrator:
         progress(0.40)
         ctx = ExtractStep().run(ctx, runner)
 
-        # NEW: Run segmented correction if enabled
-        if ctx.settings_dict.get('segmented_enabled', False) and ctx.segment_edls:
+        # (THE FIX IS HERE) Check for the correct variable: segment_flags
+        if ctx.settings_dict.get('segmented_enabled', False) and ctx.segment_flags:
             log('--- Segmented Audio Correction Phase ---')
             progress(0.50)
             ctx = SegmentCorrectionStep().run(ctx, runner)
 
         log('--- Subtitle Processing Phase ---')
-        progress(0.55)
         ctx = SubtitlesStep().run(ctx, runner)
 
         log('--- Chapters Phase ---')
-        progress(0.60)
         ctx = ChaptersStep().run(ctx, runner)
 
         log('--- Attachments Phase ---')
-        progress(0.65)
+        progress(0.60)
         ctx = AttachmentsStep().run(ctx, runner)
 
         log('--- Merge Planning Phase ---')

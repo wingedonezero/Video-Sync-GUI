@@ -1,11 +1,8 @@
 # vsg_core/io/runner.py
-
 # -*- coding: utf-8 -*-
-
 """
 Wrapper for running external command-line processes.
 """
-
 import subprocess
 import shlex
 from typing import List, Callable, Optional, Union
@@ -25,9 +22,10 @@ class CommandRunner:
         line = f'[{ts}] {message}'
         self.log(line)
 
-    def run(self, cmd: List[str], tool_paths: dict, is_binary: bool = False) -> Optional[Union[str, bytes]]:
+    def run(self, cmd: List[str], tool_paths: dict, is_binary: bool = False, input_data: Optional[bytes] = None) -> Optional[Union[str, bytes]]:
         """
         Executes a command and handles logging based on configuration.
+        Can optionally pass binary `input_data` to the process's stdin.
         Returns captured stdout as a string, or bytes if is_binary=True.
         Returns None on failure.
         """
@@ -50,11 +48,14 @@ class CommandRunner:
         prog_step = max(1, int(self.config.get('log_progress_step', 100)))
 
         try:
-            # Setup for either text or binary mode
             popen_kwargs = {
                 "stdout": subprocess.PIPE,
                 "stderr": subprocess.STDOUT,
             }
+            # (THE FIX IS HERE) Add stdin handling
+            if input_data is not None:
+                popen_kwargs["stdin"] = subprocess.PIPE
+
             if not is_binary:
                 popen_kwargs["text"] = True
                 popen_kwargs["encoding"] = 'utf-8'
@@ -62,55 +63,48 @@ class CommandRunner:
 
             proc = subprocess.Popen(full_cmd, **popen_kwargs)
 
-            # Handle text stream for logging if not binary mode
-            stream = proc.stdout if not is_binary else None
-            out_buf_list = []
-            tail_buffer = []
-            last_prog = -1
-
-            if compact:
-                from collections import deque
-                tail_buffer = deque(maxlen=max(tail_ok, err_tail, 1))
-
-            if stream:
-                for line in iter(stream.readline, ''):
-                    out_buf_list.append(line)
-                    if compact:
-                        if line.startswith('Progress: '):
-                            try:
-                                pct = int(line.strip().split()[-1].rstrip('%'))
-                                if last_prog < 0 or pct >= last_prog + prog_step or pct == 100:
-                                    self._log_message(f'Progress: {pct}%')
-                                    last_prog = pct
-                            except (ValueError, IndexError):
-                                pass
-                        else:
-                            tail_buffer.append(line)
-                    else:
-                        self._log_message(line.rstrip('\n'))
-
-            # Wait and get final output
-            stdout_data, _ = proc.communicate()
+            # (THE FIX IS HERE) Pass input_data to communicate
+            stdout_data, _ = proc.communicate(input=input_data)
             rc = proc.returncode or 0
 
-            # Use final captured data if binary mode
-            final_output = stdout_data if is_binary else "".join(out_buf_list)
+            # Handle text stream for logging if not binary mode
+            out_buf_list = []
+            if not is_binary and stdout_data:
+                out_buf_list = stdout_data.splitlines(keepends=True)
+
+            if compact and not is_binary:
+                from collections import deque
+                tail_buffer = deque(maxlen=max(tail_ok, err_tail, 1))
+                last_prog = -1
+                for line in out_buf_list:
+                    if line.startswith('Progress: '):
+                        try:
+                            pct = int(line.strip().split()[-1].rstrip('%'))
+                            if last_prog < 0 or pct >= last_prog + prog_step or pct == 100:
+                                self._log_message(f'Progress: {pct}%')
+                                last_prog = pct
+                        except (ValueError, IndexError):
+                            pass
+                    else:
+                        tail_buffer.append(line)
+            elif not is_binary:
+                for line in out_buf_list:
+                    self._log_message(line.rstrip('\n'))
 
             if rc != 0:
                 self._log_message(f'[!] Command failed with exit code {rc}')
-                if compact and err_tail > 0 and tail_buffer:
-                    from itertools import islice
+                if compact and not is_binary and err_tail > 0 and tail_buffer:
                     error_lines = list(tail_buffer)[-err_tail:]
                     if error_lines:
                         self._log_message('[stderr/tail]\n' + ''.join(error_lines).rstrip())
                 return None
 
-            if compact and tail_ok > 0 and tail_buffer:
+            if compact and not is_binary and tail_ok > 0 and tail_buffer:
                 success_lines = list(tail_buffer)[-tail_ok:]
                 if success_lines:
                     self._log_message('[stdout/tail]\n' + ''.join(success_lines).rstrip())
 
-            return final_output
+            return stdout_data if is_binary else "".join(out_buf_list)
         except Exception as e:
             self._log_message(f'[!] Failed to execute command: {e}')
             return None

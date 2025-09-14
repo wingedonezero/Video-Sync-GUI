@@ -8,14 +8,11 @@ from .media import Track
 
 @dataclass(frozen=True)
 class JobSpec:
-    # Replaces ref, sec, ter with a dynamic dictionary
     sources: Dict[str, Path]
-    # Manual layout payload from the UI (list of dicts)
     manual_layout: list[dict] | None = None
 
 @dataclass(frozen=True)
 class Delays:
-    # Replaces secondary_ms, tertiary_ms
     source_delays_ms: Dict[str, int] = field(default_factory=dict)
     global_shift_ms: int = 0
 
@@ -31,8 +28,12 @@ class PlanItem:
     size_multiplier: float = 1.0
     style_patch: Optional[Dict[str, Any]] = None
     user_modified_path: Optional[str] = None
-    # NEW: For external files, specifies which source to sync against
     sync_to: Optional[str] = None
+    is_preserved: bool = False
+
+    # This field stores the user's selection from the UI dropdown (e.g., "Source 2_3")
+    correction_source: Optional[str] = None
+
 
 @dataclass(frozen=True)
 class MergePlan:
@@ -46,6 +47,5 @@ class JobResult:
     status: Literal['Merged', 'Analyzed', 'Failed']
     name: str
     output: str | None = None
-    # Replaces delay_sec, delay_ter
     delays: Dict[str, int] | None = None
     error: str | None = None

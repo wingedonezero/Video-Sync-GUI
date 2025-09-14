@@ -42,7 +42,6 @@ class ExtractStep:
             source = sel.get('source', '')
 
             if source == 'External':
-                # Handle external files by copying them to the temp dir
                 original_path = Path(sel['original_path'])
                 temp_path = ctx.temp_dir / original_path.name
                 shutil.copy(original_path, temp_path)
@@ -50,7 +49,7 @@ class ExtractStep:
                 track_model = Track(
                     source='External',
                     id=0, # Dummy ID
-                    type=TrackType.SUBTITLES, # Only subtitles are supported for now
+                    type=TrackType.SUBTITLES,
                     props=StreamProps(
                         codec_id=sel.get('codec_id', ''),
                         lang=sel.get('lang', 'und'),
@@ -60,7 +59,6 @@ class ExtractStep:
                 plan_item = PlanItem(track=track_model, extracted_path=temp_path)
 
             else:
-                # Handle tracks from MKV files
                 key = f"{source}_{sel['id']}"
                 trk = extracted_map.get(key)
                 if not trk:
@@ -79,7 +77,6 @@ class ExtractStep:
                 )
                 plan_item = PlanItem(track=track_model, extracted_path=Path(trk['path']))
 
-            # Apply all shared settings from the manual layout selection (`sel`)
             plan_item.is_default = bool(sel.get('is_default', False))
             plan_item.is_forced_display = bool(sel.get('is_forced_display', False))
             plan_item.apply_track_name = bool(sel.get('apply_track_name', False))
@@ -88,7 +85,10 @@ class ExtractStep:
             plan_item.size_multiplier = float(sel.get('size_multiplier', 1.0))
             plan_item.style_patch = sel.get('style_patch')
             plan_item.user_modified_path = sel.get('user_modified_path')
-            plan_item.sync_to = sel.get('sync_to') # Add sync_to property
+            plan_item.sync_to = sel.get('sync_to')
+
+            # (THE FIX IS HERE) Copy the user's selection from the layout into the final PlanItem.
+            plan_item.correction_source = sel.get('correction_source')
 
             items.append(plan_item)
 

@@ -8,7 +8,6 @@ Implements a decode-once strategy for improved accuracy and consistency.
 from __future__ import annotations
 
 import json
-import math
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
@@ -34,22 +33,27 @@ def _normalize_lang(lang: Optional[str]) -> Optional[str]:
 
 
 # --- DSP & IO Helpers ---
-def _get_audio_stream_index(mkv_path: str, lang: Optional[str], runner: CommandRunner, tool_paths: dict) -> Optional[int]:
-    """Return 0-based audio stream index for ffmpeg -map 0:a:{idx}."""
+def get_audio_stream_info(mkv_path: str, lang: Optional[str], runner: CommandRunner, tool_paths: dict) -> Tuple[Optional[int], Optional[int]]:
+    """
+    Finds the best audio stream and returns its 0-based index and mkvmerge track ID.
+    Returns: A tuple of (stream_index, track_id) or (None, None).
+    """
     out = runner.run(['mkvmerge', '-J', str(mkv_path)], tool_paths)
-    if not out or not isinstance(out, str): return None
+    if not out or not isinstance(out, str): return None, None
     try:
         info = json.loads(out)
         audio_tracks = [t for t in info.get('tracks', []) if t.get('type') == 'audio']
-        if not audio_tracks: return None
+        if not audio_tracks: return None, None
         if lang:
             for i, t in enumerate(audio_tracks):
                 props = t.get('properties', {})
                 if (props.get('language') or '').strip().lower() == lang:
-                    return i
-        return 0
+                    return i, t.get('id')
+        # Fallback to the first audio track
+        first_track = audio_tracks[0]
+        return 0, first_track.get('id')
     except (json.JSONDecodeError, IndexError):
-        return None
+        return None, None
 
 def _decode_to_memory(file_path: str, a_index: int, out_sr: int, use_soxr: bool, runner: CommandRunner, tool_paths: dict) -> np.ndarray:
     """Decodes one audio stream to a mono float32 NumPy array."""
@@ -93,27 +97,15 @@ def _apply_lowpass(waveform: np.ndarray, sr: int, cutoff_hz: int) -> np.ndarray:
 def _find_delay_gcc_phat(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> Tuple[float, float]:
     """Calculates delay using Generalized Cross-Correlation with Phase Transform."""
     n = len(ref_chunk) + len(tgt_chunk) - 1
-
     R = np.fft.fft(ref_chunk, n)
     T = np.fft.fft(tgt_chunk, n)
-
-    # BUG FIX: The cross-power spectrum must be R * conj(T) to get the delay of T relative to R.
-    # The previous order, T * conj(R), was inverting the sign of the delay.
     G = R * np.conj(T)
     G_phat = G / (np.abs(G) + 1e-9)
-
     r_phat = np.fft.ifft(G_phat)
-
     k = np.argmax(np.abs(r_phat))
-
-    if k > n / 2:
-        lag_samples = k - n
-    else:
-        lag_samples = k
-
+    lag_samples = k - n if k > n / 2 else k
     delay_ms = (lag_samples / float(sr)) * 1000.0
     match_confidence = np.abs(r_phat[k]) * 100
-
     return delay_ms, match_confidence
 
 def _find_delay_scc(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int, peak_fit: bool) -> Tuple[float, float]:
@@ -144,16 +136,20 @@ def run_audio_correlation(
     target_lang: Optional[str],
     role_tag: str
 ) -> List[Dict]:
+    """
+    Runs the full analysis and returns a list of chunk result dictionaries.
+    """
     log = runner._log_message
 
     # --- 1. Select streams ---
     ref_norm, tgt_norm = _normalize_lang(ref_lang), _normalize_lang(target_lang)
-    idx_ref = _get_audio_stream_index(ref_file, ref_norm, runner, tool_paths)
-    idx_tgt = _get_audio_stream_index(target_file, tgt_norm, runner, tool_paths)
+    idx_ref, _ = get_audio_stream_info(ref_file, ref_norm, runner, tool_paths)
+    idx_tgt, id_tgt = get_audio_stream_info(target_file, tgt_norm, runner, tool_paths)
+
     if idx_ref is None or idx_tgt is None:
         raise ValueError("Could not locate required audio streams for correlation.")
     log(f"Selected streams: REF (lang='{ref_norm or 'first'}', index={idx_ref}), "
-        f"{role_tag.upper()} (lang='{tgt_norm or 'first'}', index={idx_tgt})")
+        f"{role_tag.upper()} (lang='{tgt_norm or 'first'}', index={idx_tgt}, track_id={id_tgt})")
 
     # --- 2. Decode ---
     DEFAULT_SR = 48000
@@ -202,16 +198,13 @@ def run_audio_correlation(
         tgt_chunk = tgt_pcm[start_sample:end_sample]
 
         if 'Phase Correlation (GCC-PHAT)' in correlation_method:
-             raw_ms, match = _find_delay_gcc_phat(ref_chunk, tgt_chunk, DEFAULT_SR)
+            raw_ms, match = _find_delay_gcc_phat(ref_chunk, tgt_chunk, DEFAULT_SR)
         else:
-             raw_ms, match = _find_delay_scc(ref_chunk, tgt_chunk, DEFAULT_SR, peak_fit)
+            raw_ms, match = _find_delay_scc(ref_chunk, tgt_chunk, DEFAULT_SR, peak_fit)
 
         accepted = match >= min_match
-
         status_str = "ACCEPTED" if accepted else f"REJECTED (below {min_match:.1f})"
-
         log(f"  Chunk {i}/{chunk_count} (@{t0:.1f}s): delay = {int(round(raw_ms)):+d} ms (raw={raw_ms:+.3f}, match={match:.2f}) — {status_str}")
-
         results.append({
             'delay': int(round(raw_ms)), 'raw_delay': raw_ms,
             'match': match, 'start': t0, 'accepted': accepted
