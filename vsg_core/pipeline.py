@@ -9,6 +9,7 @@ from typing import List, Dict, Any, Callable, Optional
 
 from .io.runner import CommandRunner
 from .orchestrator.pipeline import Orchestrator
+from .postprocess import finalize_merged_file
 
 class JobPipeline:
     def __init__(self, config: dict, log_callback: Callable[[str], None], progress_callback: Callable[[float], None]):
@@ -131,35 +132,8 @@ class JobPipeline:
             logger.removeHandler(handler)
 
     def _run_post_merge_steps(self, temp_output_path: Path, final_output_path: Path, runner: CommandRunner):
-        log = runner._log_message
-        log("--- Post-Merge: Finalizing File ---")
-
-        ffmpeg_input = str(temp_output_path)
-        ffmpeg_temp_output = str(temp_output_path.with_suffix('.normalized.mkv'))
-
-        log("[Finalize] Step 1/2: Rebasing timestamps with FFmpeg...")
-        # FIX: Added '-map 0' to ensure all streams (video, audio, subs, chapters, attachments) are copied.
-        ffmpeg_cmd = ['ffmpeg', '-y', '-i', ffmpeg_input, '-c', 'copy', '-map', '0', '-fflags', '+genpts', '-avoid_negative_ts', 'make_zero', ffmpeg_temp_output]
-        ffmpeg_ok = runner.run(ffmpeg_cmd, self.tool_paths) is not None
-
-        if not ffmpeg_ok:
-            log("[WARNING] Timestamp normalization with FFmpeg failed. The original merged file will be used.")
-            shutil.move(ffmpeg_input, final_output_path)
-            return
-
-        Path(ffmpeg_input).unlink()
-        Path(ffmpeg_temp_output).rename(temp_output_path)
-        log("Timestamp normalization successful.")
-
-        if self.config.get('post_mux_strip_tags', False):
-            log("[Finalize] Step 2/2: Stripping ENCODER tag with mkvpropedit...")
-            propedit_cmd = ['mkvpropedit', ffmpeg_input, '--tags', 'all:']
-            runner.run(propedit_cmd, self.tool_paths)
-            log("Stripped ENCODER tag successfully.")
-
-        shutil.move(ffmpeg_input, final_output_path)
-        log("[Finalize] Post-merge finalization complete.")
-
+        """Delegate post-merge processing to the dedicated finalization module."""
+        finalize_merged_file(temp_output_path, final_output_path, runner, self.config, self.tool_paths)
 
     def _write_mkvmerge_opts(self, tokens, temp_dir: Path, runner: CommandRunner) -> str:
         opts_path = temp_dir / 'opts.json'
