@@ -32,6 +32,9 @@ class Context:
     chapters_xml: Optional[str] = None
     attachments: Optional[List[str]] = None
 
+    # NEW: Store segment EDLs for sources that have stepping detected
+    segment_edls: Dict[str, List[Dict]] = field(default_factory=dict)
+
     # Results/summaries
     out_file: Optional[str] = None
 

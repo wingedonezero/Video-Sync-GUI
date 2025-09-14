@@ -8,7 +8,7 @@ from typing import Optional, List, Dict, Any, Callable
 from vsg_core.io.runner import CommandRunner
 from vsg_core.models.settings import AppSettings
 from vsg_core.orchestrator.steps import (
-    Context, AnalysisStep, ExtractStep, SubtitlesStep,
+    Context, AnalysisStep, ExtractStep, SegmentCorrectionStep, SubtitlesStep,
     ChaptersStep, AttachmentsStep, MuxStep
 )
 
@@ -68,14 +68,22 @@ class Orchestrator:
         progress(0.40)
         ctx = ExtractStep().run(ctx, runner)
 
+        # NEW: Run segmented correction if enabled
+        if ctx.settings_dict.get('segmented_enabled', False) and ctx.segment_edls:
+            log('--- Segmented Audio Correction Phase ---')
+            progress(0.50)
+            ctx = SegmentCorrectionStep().run(ctx, runner)
+
         log('--- Subtitle Processing Phase ---')
+        progress(0.55)
         ctx = SubtitlesStep().run(ctx, runner)
 
         log('--- Chapters Phase ---')
+        progress(0.60)
         ctx = ChaptersStep().run(ctx, runner)
 
         log('--- Attachments Phase ---')
-        progress(0.60)
+        progress(0.65)
         ctx = AttachmentsStep().run(ctx, runner)
 
         log('--- Merge Planning Phase ---')

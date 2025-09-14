@@ -50,6 +50,29 @@ class AnalysisTab(QWidget):
         super().__init__()
         self.widgets: Dict[str, QWidget] = {}
         main_layout = QVBoxLayout(self)
+
+        # NEW: Segmented Audio Correction section
+        segment_group = QGroupBox("🔧 Segmented Audio Correction (Experimental)")
+        segment_group.setToolTip("Automatically fixes complex sync issues with multiple step-changes in a single audio track.")
+        segment_layout = QFormLayout(segment_group)
+
+        self.widgets['segmented_enabled'] = QCheckBox("Enable segmented audio correction")
+        self.widgets['segmented_enabled'].setToolTip(
+            "When enabled, detects audio tracks with stepping sync issues and creates perfectly corrected versions.\n"
+            "Only applies when multiple distinct delay segments are detected."
+        )
+
+        self.widgets['segmented_qa_threshold'] = QDoubleSpinBox()
+        self.widgets['segmented_qa_threshold'].setRange(50.0, 99.0)
+        self.widgets['segmented_qa_threshold'].setValue(85.0)
+        self.widgets['segmented_qa_threshold'].setDecimals(1)
+        self.widgets['segmented_qa_threshold'].setSuffix("%")
+        self.widgets['segmented_qa_threshold'].setToolTip("Quality assurance threshold - corrected tracks must correlate above this percentage with the reference.")
+
+        segment_layout.addRow(self.widgets['segmented_enabled'])
+        segment_layout.addRow("QA Correlation Threshold:", self.widgets['segmented_qa_threshold'])
+        main_layout.addWidget(segment_group)
+
         prep_group = QGroupBox("Step 1: Audio Pre-Processing")
         prep_group.setToolTip("Optionally prepares audio before analysis to improve signal quality.")
         prep_layout = QFormLayout(prep_group)
@@ -67,6 +90,7 @@ class AnalysisTab(QWidget):
         prep_layout.addRow("Audio Filtering:", self.widgets['filtering_method'])
         prep_layout.addRow(self.cutoff_container)
         main_layout.addWidget(prep_group)
+
         core_group = QGroupBox("Step 2: Core Analysis Engine")
         core_layout = QFormLayout(core_group)
         self.widgets['correlation_method'] = QComboBox(); self.widgets['correlation_method'].addItems(['Standard Correlation (SCC)', 'Phase Correlation (GCC-PHAT)', 'VideoDiff'])
@@ -80,6 +104,7 @@ class AnalysisTab(QWidget):
         core_layout.addRow("Minimum Match Confidence (%):", self.widgets['min_match_pct'])
         core_layout.addRow("Minimum Accepted Chunks:", self.widgets['min_accepted_chunks'])
         main_layout.addWidget(core_group)
+
         lang_group = QGroupBox("Step 3: Audio Track Selection")
         lang_layout = QFormLayout(lang_group)
         self.widgets['analysis_lang_source1'] = QLineEdit(); self.widgets['analysis_lang_source1'].setPlaceholderText("e.g., eng (blank = first audio track)")
@@ -87,6 +112,7 @@ class AnalysisTab(QWidget):
         lang_layout.addRow("Source 1 (Reference) Language:", self.widgets['analysis_lang_source1'])
         lang_layout.addRow("Other Sources Language:", self.widgets['analysis_lang_others'])
         main_layout.addWidget(lang_group)
+
         adv_group = QGroupBox("Step 4: Advanced Tweaks & Diagnostics")
         adv_layout = QVBoxLayout(adv_group)
         self.widgets['use_soxr'] = QCheckBox("Use High-Quality Resampling (SoXR)")
@@ -96,6 +122,7 @@ class AnalysisTab(QWidget):
         adv_layout.addWidget(self.widgets['audio_peak_fit'])
         adv_layout.addWidget(self.widgets['log_audio_drift'])
         main_layout.addWidget(adv_group)
+
         main_layout.addStretch(1)
         self.widgets['filtering_method'].currentTextChanged.connect(self._update_filter_options)
         self._update_filter_options(self.widgets['filtering_method'].currentText())

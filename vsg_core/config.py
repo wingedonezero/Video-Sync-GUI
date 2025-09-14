@@ -55,6 +55,10 @@ class AppConfig:
             # NEW: Post-merge options
             'post_mux_normalize_timestamps': False,
             'post_mux_strip_tags': False,
+
+            # NEW: Segmented Audio Correction
+            'segmented_enabled': False,
+            'segmented_qa_threshold': 85.0,
         }
         self.settings = self.defaults.copy()
         self.load()

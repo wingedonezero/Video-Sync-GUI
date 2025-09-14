@@ -6,9 +6,7 @@ from ..models.jobs import MergePlan, PlanItem
 from ..models.settings import AppSettings
 
 class MkvmergeOptionsBuilder:
-    # FIX: Removed output_file from the method signature
     def build(self, plan: MergePlan, settings: AppSettings) -> List[str]:
-        # FIX: The token list no longer starts with the --output flag
         tokens: List[str] = []
 
         if plan.chapters_xml:
@@ -16,15 +14,34 @@ class MkvmergeOptionsBuilder:
         if settings.disable_track_statistics_tags:
             tokens += ['--disable-track-statistics-tags']
 
+        # NEW: Handle corrected/preserved audio tracks for segmented correction
+        corrected_tracks = [i for i, item in enumerate(plan.items) if 'Corrected' in (item.track.props.name or '')]
+        preserved_tracks = [i for i, item in enumerate(plan.items) if 'Original' in (item.track.props.name or '')]
+
         default_audio_idx = self._first_index(plan.items, kind='audio', predicate=lambda it: it.is_default)
         default_sub_idx = self._first_index(plan.items, kind='subtitles', predicate=lambda it: it.is_default)
         first_video_idx = self._first_index(plan.items, kind='video', predicate=lambda it: True)
         forced_sub_idx = self._first_index(plan.items, kind='subtitles', predicate=lambda it: it.is_forced_display)
 
+        # NEW: For segmented correction, ensure corrected tracks are default and preserved are not
+        if corrected_tracks:
+            # Make first corrected track the default audio
+            for i, item in enumerate(plan.items):
+                if item.track.type.value == 'audio':
+                    if i in corrected_tracks:
+                        item.is_default = (i == corrected_tracks[0])  # Only first corrected is default
+                    elif i in preserved_tracks:
+                        item.is_default = False  # Preserved tracks are never default
+
         order_entries: List[str] = []
         for i, item in enumerate(plan.items):
             tr = item.track
             delay_ms = self._effective_delay_ms(plan, item)
+
+            # NEW: Corrected tracks get 0 delay (they're already perfectly synced)
+            if 'Corrected' in (tr.props.name or ''):
+                delay_ms = plan.delays.global_shift_ms  # Only apply global shift
+
             is_default = (i == first_video_idx) or (i == default_audio_idx) or (i == default_sub_idx)
 
             tokens += ['--language', f"0:{tr.props.lang or 'und'}"]
