@@ -13,12 +13,6 @@ class MuxStep:
     Builds mkvmerge tokens and stores them on the context.
     """
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
-        source1_file = ctx.sources.get("Source 1")
-        if not source1_file:
-            raise ValueError("Context is missing Source 1 for determining output filename.")
-
-        out_path = Path(ctx.output_dir) / Path(source1_file).name
-
         plan = MergePlan(
             items=ctx.extracted_items or [],
             delays=ctx.delays or Delays(),
@@ -27,8 +21,11 @@ class MuxStep:
         )
 
         builder = MkvmergeOptionsBuilder()
-        tokens = builder.build(plan, ctx.settings, out_path)
+        # FIX: The builder no longer needs the output path.
+        # The --output flag will be added later by the JobPipeline.
+        tokens = builder.build(plan, ctx.settings)
 
-        ctx.out_file = str(out_path)
+        # The pipeline will now determine the final output file
+        ctx.out_file = None
         ctx.tokens = tokens
         return ctx

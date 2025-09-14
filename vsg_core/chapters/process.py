@@ -21,7 +21,6 @@ def _fmt_ns(ns: int) -> str:
     ss = total_s % 60
     return f'{hh:02d}:{mm:02d}:{ss:02d}.{frac:09d}'
 
-# Helper for readable log timestamps
 def _fmt_ns_for_log(ns: int) -> str:
     ms = round(ns / 1_000_000)
     total_s, ms = divmod(ms, 1000)
@@ -35,7 +34,6 @@ def _normalize_chapter_end_times(root: ET.Element, runner: CommandRunner):
     for i, atom in enumerate(atoms):
         st_el = atom.find('ChapterTimeStart')
         if st_el is not None and st_el.text:
-            # Get chapter name for logging
             name_node = atom.find('.//ChapterString')
             name = name_node.text if name_node is not None else f"Chapter {i+1}"
             chapters.append({'atom': atom, 'start_ns': _parse_ns(st_el.text), 'name': name})
@@ -49,16 +47,19 @@ def _normalize_chapter_end_times(root: ET.Element, runner: CommandRunner):
         next_start_ns = chapters[i + 1]['start_ns'] if i + 1 < len(chapters) else None
 
         original_en_text = en_el.text if en_el is not None and en_el.text else None
-        desired_en_ns = _parse_ns(original_en_text) if original_en_text else st_ns + 1_000_000
 
+        # FIX: New, more robust normalization logic
+        desired_en_ns = 0
         reason = ""
-        if next_start_ns is not None and desired_en_ns > next_start_ns:
-            desired_en_ns = next_start_ns
-            reason = " (to prevent overlap)"
 
-        if desired_en_ns <= st_ns:
-            desired_en_ns = st_ns + 1
-            reason = " (end time was before start time)"
+        if next_start_ns is not None:
+            # The end time should be exactly the start time of the next chapter.
+            desired_en_ns = next_start_ns
+            reason = " (to create seamless chapters)"
+        else:
+            # For the last chapter, just ensure it ends after it starts.
+            original_en_ns = _parse_ns(original_en_text) if original_en_text else st_ns
+            desired_en_ns = max(st_ns + 1_000_000_000, original_en_ns) # Default to 1 second duration
 
         if en_el is None:
             en_el = ET.SubElement(atom, 'ChapterTimeEnd')
@@ -104,8 +105,8 @@ def process_chapters(ref_mkv: str, temp_dir: Path, runner: CommandRunner, tool_p
             else:
                 runner._log_message('[Chapters] Snap skipped: could not load keyframes.')
 
-        runner._log_message('[Chapters] Normalizing chapter end times...')
-        _normalize_chapter_end_times(root, runner)
+            runner._log_message('[Chapters] Normalizing chapter end times...')
+            _normalize_chapter_end_times(root, runner)
 
         out_path = temp_dir / f'{Path(ref_mkv).stem}_chapters_modified.xml'
         ET.ElementTree(root).write(out_path, encoding='UTF-8', xml_declaration=True)

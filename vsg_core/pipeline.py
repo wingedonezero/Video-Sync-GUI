@@ -18,7 +18,7 @@ class JobPipeline:
         self.tool_paths = {}
 
     def _find_required_tools(self):
-        for tool in ['ffmpeg', 'ffprobe', 'mkvmerge', 'mkvextract']:
+        for tool in ['ffmpeg', 'ffprobe', 'mkvmerge', 'mkvextract', 'mkvpropedit']:
             self.tool_paths[tool] = shutil.which(tool)
             if not self.tool_paths[tool]:
                 raise FileNotFoundError(f"Required tool '{tool}' not found in PATH.")
@@ -68,9 +68,6 @@ class JobPipeline:
             log_to_all(f'[ERROR] {err_msg}')
             return {'status': 'Failed', 'error': err_msg, 'name': Path(source1_file).name}
 
-        job_temp = Path(self.config['temp_root']) / f'job_{Path(source1_file).stem}_{int(time.time())}'
-        job_temp.mkdir(parents=True, exist_ok=True)
-
         ctx_temp_dir: Optional[Path] = None
         try:
             orch = Orchestrator()
@@ -92,20 +89,33 @@ class JobPipeline:
                     'name': Path(source1_file).name
                 }
 
-            self.progress(0.8)
             if not ctx.tokens:
                 raise RuntimeError('Internal error: mkvmerge tokens were not generated.')
 
-            opts_path = self._write_mkvmerge_opts(ctx.tokens, job_temp, runner)
+            final_output_path = output_dir / Path(source1_file).name
+            mkvmerge_output_path = final_output_path
+
+            video_was_shifted = ctx.delays and ctx.delays.global_shift_ms > 0
+            normalize_enabled = self.config.get('post_mux_normalize_timestamps', False)
+
+            if normalize_enabled and video_was_shifted:
+                mkvmerge_output_path = ctx.temp_dir / final_output_path.name
+
+            ctx.tokens.insert(0, str(mkvmerge_output_path))
+            ctx.tokens.insert(0, '--output')
+
+            opts_path = self._write_mkvmerge_opts(ctx.tokens, ctx.temp_dir, runner)
             merge_ok = runner.run(['mkvmerge', f'@{opts_path}'], self.tool_paths) is not None
             if not merge_ok:
                 raise RuntimeError('mkvmerge execution failed.')
 
-            out_file = ctx.out_file or (Path(output_dir) / Path(source1_file).name)
-            log_to_all(f'[SUCCESS] Output file created: {out_file}')
+            if normalize_enabled and video_was_shifted:
+                self._run_post_merge_steps(mkvmerge_output_path, final_output_path, runner)
+
+            log_to_all(f'[SUCCESS] Output file created: {final_output_path}')
             self.progress(1.0)
             return {
-                'status': 'Merged', 'output': str(out_file),
+                'status': 'Merged', 'output': str(final_output_path),
                 'delays': ctx.delays.source_delays_ms if ctx.delays else {},
                 'name': Path(source1_file).name
             }
@@ -116,22 +126,49 @@ class JobPipeline:
         finally:
             if ctx_temp_dir and ctx_temp_dir.exists():
                 shutil.rmtree(ctx_temp_dir, ignore_errors=True)
-            shutil.rmtree(job_temp, ignore_errors=True)
             log_to_all('=== Job Finished ===')
             handler.close()
             logger.removeHandler(handler)
+
+    def _run_post_merge_steps(self, temp_output_path: Path, final_output_path: Path, runner: CommandRunner):
+        log = runner._log_message
+        log("--- Post-Merge: Finalizing File ---")
+
+        ffmpeg_input = str(temp_output_path)
+        ffmpeg_temp_output = str(temp_output_path.with_suffix('.normalized.mkv'))
+
+        log("[Finalize] Step 1/2: Rebasing timestamps with FFmpeg...")
+        # FIX: Added '-map 0' to ensure all streams (video, audio, subs, chapters, attachments) are copied.
+        ffmpeg_cmd = ['ffmpeg', '-y', '-i', ffmpeg_input, '-c', 'copy', '-map', '0', '-fflags', '+genpts', '-avoid_negative_ts', 'make_zero', ffmpeg_temp_output]
+        ffmpeg_ok = runner.run(ffmpeg_cmd, self.tool_paths) is not None
+
+        if not ffmpeg_ok:
+            log("[WARNING] Timestamp normalization with FFmpeg failed. The original merged file will be used.")
+            shutil.move(ffmpeg_input, final_output_path)
+            return
+
+        Path(ffmpeg_input).unlink()
+        Path(ffmpeg_temp_output).rename(temp_output_path)
+        log("Timestamp normalization successful.")
+
+        if self.config.get('post_mux_strip_tags', False):
+            log("[Finalize] Step 2/2: Stripping ENCODER tag with mkvpropedit...")
+            propedit_cmd = ['mkvpropedit', ffmpeg_input, '--tags', 'all:']
+            runner.run(propedit_cmd, self.tool_paths)
+            log("Stripped ENCODER tag successfully.")
+
+        shutil.move(ffmpeg_input, final_output_path)
+        log("[Finalize] Post-merge finalization complete.")
+
 
     def _write_mkvmerge_opts(self, tokens, temp_dir: Path, runner: CommandRunner) -> str:
         opts_path = temp_dir / 'opts.json'
         try:
             opts_path.write_text(json.dumps(tokens, ensure_ascii=False), encoding='utf-8')
-            runner._log_message(f'mkvmerge options file written to: {opts_path}')
             if self.config.get('log_show_options_json'):
                 runner._log_message('--- mkvmerge options (json) ---\n' + json.dumps(tokens, indent=2, ensure_ascii=False) + '\n-------------------------------')
             if self.config.get('log_show_options_pretty'):
-                pretty_path = temp_dir / 'opts.pretty.txt'
-                pretty_path.write_text(' \\\n  '.join(tokens), encoding='utf-8')
-                runner._log_message(f'--- mkvmerge options (pretty) ---\n{pretty_path.read_text()}\n-------------------------------')
+                runner._log_message(f'--- mkvmerge options (pretty) ---\n' + ' \\\n  '.join(tokens) + '\n-------------------------------')
             return str(opts_path)
         except Exception as e:
             raise IOError(f"Failed to write mkvmerge options file: {e}")

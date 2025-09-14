@@ -4,11 +4,12 @@ from pathlib import Path
 from typing import List
 from ..models.jobs import MergePlan, PlanItem
 from ..models.settings import AppSettings
-from ..models.media import Track
 
 class MkvmergeOptionsBuilder:
-    def build(self, plan: MergePlan, settings: AppSettings, output_file: Path) -> List[str]:
-        tokens: List[str] = ['--output', str(output_file)]
+    # FIX: Removed output_file from the method signature
+    def build(self, plan: MergePlan, settings: AppSettings) -> List[str]:
+        # FIX: The token list no longer starts with the --output flag
+        tokens: List[str] = []
 
         if plan.chapters_xml:
             tokens += ['--chapters', str(plan.chapters_xml)]
@@ -66,11 +67,7 @@ class MkvmergeOptionsBuilder:
     def _effective_delay_ms(self, plan: MergePlan, item: PlanItem) -> int:
         tr = item.track
         d = plan.delays.global_shift_ms
-
-        # Use the 'sync_to' property for external files, otherwise fall back to the track's own source.
         sync_key = item.sync_to if tr.source == 'External' else tr.source
-
         if sync_key and sync_key != "Source 1":
             d += plan.delays.source_delays_ms.get(sync_key, 0)
-
         return int(d)

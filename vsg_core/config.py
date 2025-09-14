@@ -31,10 +31,7 @@ class AppConfig:
             'min_match_pct': 5.0,
             'videodiff_error_min': 0.0,
             'videodiff_error_max': 100.0,
-
-            # *** FIX IS HERE ***
-            'use_soxr': False, # Added the missing key for the SoXR resampler
-
+            'use_soxr': False,
             'audio_decode_native': False,
             'audio_peak_fit': False,
             'audio_bandlimit_hz': 0,
@@ -53,7 +50,11 @@ class AppConfig:
             'log_show_options_json': False,
             'disable_track_statistics_tags': False,
             'archive_logs': True,
-            'auto_apply_strict': False
+            'auto_apply_strict': False,
+
+            # NEW: Post-merge options
+            'post_mux_normalize_timestamps': False,
+            'post_mux_strip_tags': False,
         }
         self.settings = self.defaults.copy()
         self.load()
@@ -66,7 +67,6 @@ class AppConfig:
                 with open(self.settings_path, 'r', encoding='utf-8') as f:
                     loaded_settings = json.load(f)
 
-                # Migrate old keys to new keys if they exist and new keys are not set
                 if 'analysis_lang_ref' in loaded_settings and not loaded_settings.get('analysis_lang_source1'):
                     loaded_settings['analysis_lang_source1'] = loaded_settings['analysis_lang_ref']
                     changed = True
@@ -74,13 +74,11 @@ class AppConfig:
                     loaded_settings['analysis_lang_others'] = loaded_settings['analysis_lang_sec']
                     changed = True
 
-                # Remove old keys
                 for old_key in ['analysis_lang_ref', 'analysis_lang_sec', 'analysis_lang_ter']:
                     if old_key in loaded_settings:
                         del loaded_settings[old_key]
                         changed = True
 
-                # Ensure all default keys exist
                 for key, default_value in self.defaults.items():
                     if key not in loaded_settings:
                         loaded_settings[key] = default_value
@@ -98,7 +96,6 @@ class AppConfig:
 
     def save(self):
         try:
-            # Prune obsolete keys before saving
             keys_to_save = self.defaults.keys()
             settings_to_save = {k: self.settings.get(k) for k in keys_to_save if k in self.settings}
             with open(self.settings_path, 'w', encoding='utf-8') as f:
