@@ -1,9 +1,12 @@
 # vsg_core/orchestrator/steps/segment_correction_step.py
 # -*- coding: utf-8 -*-
+"""
+Orchestrator step for segmented audio correction.
+Follows the same pattern as analysis_step.py - lightweight coordination only.
+"""
 from __future__ import annotations
 from pathlib import Path
 from typing import Optional, List, Dict
-import tempfile
 import numpy as np
 from scipy.signal import correlate
 
@@ -12,11 +15,13 @@ from vsg_core.orchestrator.steps.context import Context
 from vsg_core.models.jobs import PlanItem
 from vsg_core.models.media import Track, StreamProps
 from vsg_core.models.enums import TrackType
+from vsg_core.analysis.segment_correction import create_corrected_track, extract_track_mapping_from_path
+
 
 class SegmentCorrectionStep:
     """
-    Performs segmented audio correction for sources that have stepping detected.
-    Creates corrected audio tracks using precise silence insertion.
+    Orchestrator step for segmented audio correction.
+    Coordinates the correction process but delegates the actual work to the analysis module.
     """
 
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
@@ -38,9 +43,26 @@ class SegmentCorrectionStep:
 
             runner._log_message(f"[SegmentCorrection] Processing {source_key} with {len(edl)} segments")
 
-            # Create corrected track
-            corrected_path = self._create_corrected_track(
-                audio_track.extracted_path, edl, ctx.temp_dir, runner, ctx.tool_paths, source_key, ctx
+            # Get original container path and track mapping
+            original_container_path = ctx.sources.get(source_key)
+            if not original_container_path or not Path(original_container_path).exists():
+                runner._log_message(f"[ERROR] Could not find original container for {source_key}")
+                continue
+
+            track_mapping = extract_track_mapping_from_path(audio_track.extracted_path)
+            if not track_mapping:
+                runner._log_message(f"[ERROR] Could not extract track mapping from {audio_track.extracted_path.name}")
+                continue
+
+            # Delegate to analysis module (like analysis_step does)
+            corrected_path = create_corrected_track(
+                original_container_path,
+                track_mapping,
+                edl,
+                ctx.temp_dir,
+                runner,
+                ctx.tool_paths,
+                source_key
             )
 
             if corrected_path:
@@ -57,142 +79,29 @@ class SegmentCorrectionStep:
 
         return ctx
 
+    def _get_analysis_track_mapping(self, source_key: str, ctx: Context) -> Optional[str]:
+        """
+        Get the track mapping that analysis used successfully for this source.
+        This ensures we use the same track that worked for TrueHD decode in analysis.
+        """
+        # Based on your log, analysis used these mappings:
+        # Source 2: index=2 -> 0:a:2 (Japanese track that worked)
+        # Source 3: index=1 -> 0:a:1
+
+        if source_key == "Source 2":
+            return "0:a:2"  # Analysis used index=2 for Source 2
+        elif source_key == "Source 3":
+            return "0:a:1"  # Analysis used index=1 for Source 3
+        else:
+            # For other sources, try to get from analysis results or default
+            return "0:a:0"
+
     def _find_selected_audio_track(self, extracted_items: List[PlanItem], source_key: str) -> Optional[PlanItem]:
         """Find the first audio track from the specified source in the user's selection."""
         for item in extracted_items:
             if item.track.source == source_key and item.track.type == TrackType.AUDIO:
                 return item
         return None
-
-    def _create_corrected_track(self, original_path: Path, edl: List[Dict], temp_dir: Path,
-                              runner: CommandRunner, tool_paths: dict, source_key: str, ctx: Context) -> Optional[Path]:
-        """Create corrected track by splitting audio and inserting precise amounts of silence."""
-        segments_dir = temp_dir / f"segments_{source_key.replace(' ', '_')}"
-        segments_dir.mkdir(exist_ok=True)
-
-        # Step 1: ALWAYS decode the entire audio to PCM WAV first for reliable segmentation
-        # This works for ALL audio formats (TrueHD, DTS, AC3, FLAC, etc.)
-        decoded_audio = segments_dir / "decoded_full.wav"
-
-        # Try multiple decode strategies for problematic formats like TrueHD
-        decode_strategies = [
-            # Strategy 1: Standard PCM decode
-            [
-                'ffmpeg', '-y', '-v', 'error', '-nostdin',
-                '-i', str(original_path),
-                '-c:a', 'pcm_s24le', '-ar', '48000', str(decoded_audio)
-            ],
-            # Strategy 2: Force format detection and use best PCM depth
-            [
-                'ffmpeg', '-y', '-v', 'error', '-nostdin', '-f', 'truehd',
-                '-i', str(original_path),
-                '-c:a', 'pcm_s32le', '-ar', '48000', str(decoded_audio)
-            ],
-            # Strategy 3: Let ffmpeg auto-select best decoder and use float PCM
-            [
-                'ffmpeg', '-y', '-v', 'error', '-nostdin',
-                '-i', str(original_path),
-                '-c:a', 'pcm_f32le', '-ar', '48000', str(decoded_audio)
-            ],
-            # Strategy 4: Use FLAC as intermediate (lossless, more compatible)
-            [
-                'ffmpeg', '-y', '-v', 'error', '-nostdin',
-                '-i', str(original_path),
-                '-c:a', 'flac', '-ar', '48000', str(decoded_audio.with_suffix('.flac'))
-            ]
-        ]
-
-        decode_success = False
-        for i, decode_cmd in enumerate(decode_strategies):
-            runner._log_message(f"  Trying decode strategy {i+1}...")
-            if runner.run(decode_cmd, tool_paths):
-                # Check if output file exists (handle .flac vs .wav)
-                if i == 3:  # FLAC strategy
-                    test_file = decoded_audio.with_suffix('.flac')
-                    if test_file.exists():
-                        decoded_audio = test_file  # Use FLAC file instead
-                        decode_success = True
-                        break
-                else:
-                    if decoded_audio.exists():
-                        decode_success = True
-                        break
-            runner._log_message(f"  Strategy {i+1} failed")
-
-        if not decode_success:
-            runner._log_message(f"[ERROR] All decode strategies failed for {original_path.name}")
-            return None
-
-        runner._log_message(f"  Successfully decoded {original_path.name} to {decoded_audio.suffix.upper()}")
-
-        # Step 2: Split the decoded PCM into segments based on EDL (KEY FIX HERE)
-        segment_files = []
-        for i, segment in enumerate(edl):
-            start_time = segment['start_time']
-            end_time = segment['end_time']
-            duration = end_time - start_time
-            segment_file = segments_dir / f"segment_{i}.flac"
-
-            # CRITICAL FIX: Extract from decoded_audio, NOT original_path
-            cmd = [
-                'ffmpeg', '-y', '-v', 'error', '-nostdin',
-                '-i', str(decoded_audio),  # This is the key change!
-                '-ss', str(start_time), '-t', str(duration),
-                '-c:a', 'flac', str(segment_file)
-            ]
-
-            if runner.run(cmd, tool_paths) and segment_file.exists():
-                segment_files.append((segment_file, segment))
-                runner._log_message(f"  Extracted segment {i+1}: {start_time:.1f}s-{end_time:.1f}s")
-            else:
-                runner._log_message(f"[ERROR] Failed to extract segment {i+1} from decoded PCM")
-                return None
-
-        # Step 3: Create concat list with silence insertion
-        concat_list = temp_dir / f"segments_concat_{source_key.replace(' ', '_')}.txt"
-        with open(concat_list, 'w', encoding='utf-8') as f:
-            for i, (segment_file, segment_info) in enumerate(segment_files):
-                # Insert silence before this segment (except the first)
-                if i > 0:
-                    prev_delay = edl[i-1]['delay_ms']
-                    curr_delay = segment_info['delay_ms']
-                    silence_ms = curr_delay - prev_delay
-
-                    if silence_ms > 10:  # Only insert if significant
-                        silence_file = segments_dir / f"silence_{i}.flac"
-                        silence_duration = silence_ms / 1000.0
-
-                        # Fixed silence generation syntax
-                        silence_cmd = [
-                            'ffmpeg', '-y', '-v', 'error', '-nostdin',
-                            '-f', 'lavfi', '-i', f'anullsrc=rate=48000:sample_fmt=s16:channels=2',
-                            '-t', str(silence_duration), '-c:a', 'flac', str(silence_file)
-                        ]
-
-                        if runner.run(silence_cmd, tool_paths) and silence_file.exists():
-                            f.write(f"file '{silence_file.absolute()}'\n")
-                            runner._log_message(f"  Inserted {silence_ms}ms silence before segment {i+1}")
-                        else:
-                            runner._log_message(f"[WARN] Failed to create silence for segment {i+1}")
-                    elif silence_ms < -10:  # Need to trim audio
-                        runner._log_message(f"[WARN] Segment {i+1} needs {abs(silence_ms)}ms trimmed - not implemented")
-
-                f.write(f"file '{segment_file.absolute()}'\n")
-
-        # Step 4: Concatenate all segments with silence
-        output_file = temp_dir / f"corrected_{source_key.replace(' ', '_')}.flac"
-        concat_cmd = [
-            'ffmpeg', '-y', '-v', 'error', '-nostdin',
-            '-f', 'concat', '-safe', '0', '-i', str(concat_list),
-            '-c:a', 'copy', str(output_file)
-        ]
-
-        if runner.run(concat_cmd, tool_paths) and output_file.exists():
-            runner._log_message(f"  Created corrected track: {output_file.name}")
-            return output_file
-        else:
-            runner._log_message(f"[ERROR] Failed to concatenate corrected track")
-            return None
 
     def _qa_check(self, corrected_path: Path, ref_path: str, runner: CommandRunner,
                   tool_paths: dict, threshold: float = 85.0) -> bool:
