@@ -15,7 +15,6 @@ class MkvmergeOptionsBuilder:
         if settings.disable_track_statistics_tags:
             tokens += ['--disable-track-statistics-tags']
 
-        # Reorder plan to move preserved tracks to the end of their type group
         final_items = [item for item in plan.items if not item.is_preserved]
         preserved_items = [item for item in plan.items if item.is_preserved]
 
@@ -24,10 +23,11 @@ class MkvmergeOptionsBuilder:
             if item.track.type == TrackType.AUDIO:
                 last_audio_idx = i
 
-        if last_audio_idx != -1:
-            final_items.insert(last_audio_idx + 1, *preserved_items)
-        else:
-            final_items.extend(preserved_items)
+        if preserved_items:
+            if last_audio_idx != -1:
+                final_items.insert(last_audio_idx + 1, *preserved_items)
+            else:
+                final_items.extend(preserved_items)
 
         default_audio_idx = self._first_index(final_items, kind='audio', predicate=lambda it: it.is_default)
         default_sub_idx = self._first_index(final_items, kind='subtitles', predicate=lambda it: it.is_default)
@@ -38,9 +38,7 @@ class MkvmergeOptionsBuilder:
         for i, item in enumerate(final_items):
             tr = item.track
 
-            # THE FIX IS HERE: All tracks, including corrected ones, now use the same robust delay calculation.
             delay_ms = self._effective_delay_ms(plan, item)
-
             is_default = (i == first_video_idx) or (i == default_audio_idx) or (i == default_sub_idx)
 
             tokens += ['--language', f"0:{tr.props.lang or 'und'}"]
@@ -80,8 +78,13 @@ class MkvmergeOptionsBuilder:
                 return i
         return -1
 
+    # --- REVERTED TO ORIGINAL LOGIC ---
+    # The special handling for `is_corrected` was incorrect. All tracks from a
+    # source, including corrected ones, should receive the same delay calculation.
     def _effective_delay_ms(self, plan: MergePlan, item: PlanItem) -> int:
+        """Calculates the final sync delay for a track."""
         tr = item.track
+
         d = plan.delays.global_shift_ms
         sync_key = item.sync_to if tr.source == 'External' else tr.source
         if sync_key and sync_key != "Source 1":

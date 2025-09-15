@@ -75,7 +75,6 @@ class SegmentCorrectionStep:
             if corrected_path:
                 runner._log_message(f"[SUCCESS] Correction successful for '{target_item.track.props.name}'")
 
-                # Preserve the original track BEFORE modifying the target_item
                 preserved_item = copy.deepcopy(target_item)
                 preserved_item.is_preserved = True
                 preserved_item.is_default = False
@@ -89,8 +88,10 @@ class SegmentCorrectionStep:
                     )
                 )
 
-                # Now, modify the original target_item to become the corrected one
                 target_item.extracted_path = corrected_path
+                # --- NEW ---
+                # Set the flag so the muxer knows how to handle this track's delay
+                target_item.is_corrected = True
                 target_item.track = Track(
                     source=target_item.track.source, id=target_item.track.id, type=target_item.track.type,
                     props=StreamProps(
@@ -102,7 +103,6 @@ class SegmentCorrectionStep:
                 target_item.is_default = True
                 target_item.apply_track_name = True
 
-                # Add the preserved item to the list
                 last_audio_idx = max([i for i, item in enumerate(ctx.extracted_items) if item.track.type == TrackType.AUDIO and not item.is_preserved], default=-1)
                 if last_audio_idx != -1:
                     ctx.extracted_items.insert(last_audio_idx + 1, preserved_item)

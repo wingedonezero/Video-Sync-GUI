@@ -30,6 +30,9 @@ class PlanItem:
     user_modified_path: Optional[str] = None
     sync_to: Optional[str] = None
     is_preserved: bool = False
+    # --- NEW ---
+    # This flag marks the track as having undergone segmented correction.
+    is_corrected: bool = False
 
 @dataclass(frozen=True)
 class MergePlan:
