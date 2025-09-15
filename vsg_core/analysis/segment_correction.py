@@ -83,8 +83,8 @@ class AudioCorrector:
         return None
 
     def _build_precise_edl(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int, base_delay_ms: int) -> Optional[List[AudioSegment]]:
-        """Performs a two-pass detailed scan on mono audio to create an accurate Edit Decision List."""
-        self.log("  [Corrector] Starting Pass 1: High-resolution brute-force scan...")
+        """Performs a two-pass coarse and fine scan to create a sample-accurate Edit Decision List."""
+        self.log("  [Corrector] Starting Pass 1 (Coarse): High-resolution brute-force scan...")
         duration_s = min(len(ref_pcm), len(analysis_pcm)) / sample_rate
         window_s, step_s = 2.0, 0.25
         window_samples, step_samples = int(window_s * sample_rate), int(step_s * sample_rate)
@@ -107,27 +107,81 @@ class AudioCorrector:
             lag_samples = float(k - (len(t) - 1))
             delay_signal[i] = int(round((lag_samples / sample_rate) * 1000.0))
 
-        self.log(f"  [Corrector] Pass 1 complete ({num_chunks} chunks analyzed). Starting Pass 2: Change-point detection...")
+        self.log(f"  [Corrector] Pass 1 complete. Finding approximate change points...")
         algo = rpt.Binseg(model="l1").fit(delay_signal)
         penalty = np.log(num_chunks) * np.std(delay_signal)**2 * 0.1
-        change_points_indices = algo.predict(pen=penalty)
-        boundary_indices = sorted(list(set([0] + change_points_indices)))
+        approx_change_indices = algo.predict(pen=penalty)
+
+        self.log("  [Corrector] Starting Pass 2 (Fine): Refining change points to be sample-accurate...")
+        refined_change_indices = [0]
+        for approx_idx in approx_change_indices:
+            if approx_idx == 0 or approx_idx >= num_chunks: continue
+            refined_idx = self._refine_change_point(ref_pcm, analysis_pcm, approx_idx, step_samples, sample_rate)
+            refined_change_indices.append(refined_idx)
+
+        # --- FIX: Add the total length of the audio as the final boundary point ---
+        total_samples = len(ref_pcm)
+        refined_change_indices.append(total_samples)
+
+        boundary_indices = sorted(list(set(refined_change_indices)))
         segments = []
 
         for i in range(len(boundary_indices) - 1):
             start_idx, end_idx = boundary_indices[i], boundary_indices[i+1]
-            segment_delays = delay_signal[start_idx:end_idx]
-            if len(segment_delays) == 0: continue
-            stable_delay = Counter(round(d / 10) * 10 for d in segment_delays).most_common(1)[0][0]
-            segments.append(AudioSegment(start_s=(start_idx * step_s), end_s=(end_idx * step_s), delay_ms=stable_delay))
+            if start_idx >= end_idx: continue # Skip zero-length segments
+
+            coarse_start_chunk = start_idx // step_samples
+            coarse_end_chunk = end_idx // step_samples
+            segment_delays = delay_signal[coarse_start_chunk:coarse_end_chunk]
+            if len(segment_delays) == 0:
+                 # If segment is too small, use delay from chunk just before it
+                 stable_delay = delay_signal[max(0, coarse_start_chunk - 1)]
+            else:
+                stable_delay = Counter(round(d / 10) * 10 for d in segment_delays).most_common(1)[0][0]
+
+            segments.append(AudioSegment(start_s=(start_idx / sample_rate), end_s=(end_idx / sample_rate), delay_ms=stable_delay))
 
         if segments:
             segments[0].delay_ms = base_delay_ms
             self.log(f"  [Corrector] Detailed mapping found {len(segments)} segments.")
             for i, seg in enumerate(segments):
-                self.log(f"    - Segment {i+1}: {seg.start_s:.2f}s - {seg.end_s:.2f}s @ {seg.delay_ms}ms")
+                self.log(f"    - Segment {i+1}: {seg.start_s:.4f}s - {seg.end_s:.4f}s @ {seg.delay_ms}ms")
             return segments
         return None
+
+    def _refine_change_point(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, approx_chunk_idx: int, step_samples: int, sample_rate: int) -> int:
+        """Performs a surgical, sample-by-sample scan to find the exact change point."""
+        approx_sample_idx = approx_chunk_idx * step_samples
+        search_window_ms = 500
+        search_radius = int((search_window_ms / 1000) * sample_rate)
+
+        start_scan = max(0, approx_sample_idx - search_radius)
+        end_scan = min(len(ref_pcm), approx_sample_idx + search_radius)
+
+        corr_window_ms = 20
+        corr_radius = int((corr_window_ms / 1000) * sample_rate)
+
+        pre_chunk = analysis_pcm[start_scan - corr_radius : start_scan]
+        ref_chunk = ref_pcm[start_scan - corr_radius : start_scan]
+        r = (ref_chunk - np.mean(ref_chunk)) / (np.std(ref_chunk) + 1e-9)
+        t = (pre_chunk - np.mean(pre_chunk)) / (np.std(pre_chunk) + 1e-9)
+        c = correlate(r, t, 'full', 'fft')
+        baseline_lag = np.argmax(np.abs(c)) - (len(t) - 1)
+
+        for i in range(start_scan, end_scan - corr_radius):
+            post_chunk = analysis_pcm[i : i + corr_radius]
+            ref_chunk = ref_pcm[i : i + corr_radius]
+            r = (ref_chunk - np.mean(ref_chunk)) / (np.std(ref_chunk) + 1e-9)
+            t = (post_chunk - np.mean(post_chunk)) / (np.std(post_chunk) + 1e-9)
+            c = correlate(r, t, 'full', 'fft')
+            current_lag = np.argmax(np.abs(c)) - (len(t) - 1)
+
+            if abs(current_lag - baseline_lag) > 5:
+                self.log(f"    - Refined point from ~{(approx_sample_idx/sample_rate):.3f}s to {(i/sample_rate):.3f}s")
+                return i
+
+        self.log(f"    - Warning: Could not refine point at ~{(approx_sample_idx/sample_rate):.3f}s. Using original estimate.")
+        return approx_sample_idx
 
     def _assemble_from_pcm_in_memory(self, pcm_data: np.ndarray, edl: List[AudioSegment], channels: int, sample_rate: int) -> np.ndarray:
         """Creates a corrected PCM data stream in a new NumPy array for sample-perfect assembly."""
@@ -145,25 +199,21 @@ class AudioCorrector:
             start_sample = int(segment.start_s * sample_rate) * channels
             end_sample = int(segment.end_s * sample_rate) * channels
 
-            # Copy the gap/unchanged part before the current segment
             if start_sample > last_pos_in_old:
                 gap_chunk = pcm_data[last_pos_in_old:start_sample]
                 new_pcm[current_pos_in_new : current_pos_in_new + len(gap_chunk)] = gap_chunk
                 current_pos_in_new += len(gap_chunk)
 
-            # Insert silence if needed for this segment
             silence_to_add_ms = segment.delay_ms - base_delay
             if silence_to_add_ms > 10:
                 silence_samples = int(silence_to_add_ms / 1000 * sample_rate) * channels
-                current_pos_in_new += silence_samples # Advance position past the zeros
+                current_pos_in_new += silence_samples
 
-            # Copy the actual segment data
             segment_chunk = pcm_data[start_sample:end_sample]
             new_pcm[current_pos_in_new : current_pos_in_new + len(segment_chunk)] = segment_chunk
             current_pos_in_new += len(segment_chunk)
             last_pos_in_old = end_sample
 
-        # Copy any remaining data after the last segment
         if last_pos_in_old < len(pcm_data):
             final_chunk = pcm_data[last_pos_in_old:]
             new_pcm[current_pos_in_new : current_pos_in_new + len(final_chunk)] = final_chunk
@@ -181,10 +231,10 @@ class AudioCorrector:
         return self.runner.run(cmd, self.tool_paths, is_binary=True, input_data=pcm_data.tobytes()) is not None
 
     def _qa_check(self, corrected_path: str, ref_file_path: str, base_delay: int) -> bool:
-        """Verifies the corrected track against the original reference file."""
-        self.log("  [Corrector] Performing QA check on corrected audio map...")
+        """Verifies the corrected track against the original reference file with high density."""
+        self.log("  [Corrector] Performing rigorous QA check on corrected audio map...")
         qa_config = self.config.copy()
-        qa_config.update({'scan_chunk_count': 8, 'min_accepted_chunks': 5, 'min_match_pct': 70.0})
+        qa_config.update({'scan_chunk_count': 30, 'min_accepted_chunks': 28, 'min_match_pct': 70.0})
         try:
             results = run_audio_correlation(
                 ref_file=ref_file_path, target_file=corrected_path, config=qa_config,
@@ -198,11 +248,11 @@ class AudioCorrector:
             delays = [r['delay'] for r in accepted]
             median_delay = np.median(delays)
 
-            if abs(median_delay - base_delay) > 25:
+            if abs(median_delay - base_delay) > 20:
                 self.log(f"  [QA] FAILED: Median delay ({median_delay:.1f}ms) does not match base delay ({base_delay}ms).")
                 return False
 
-            if np.std(delays) > 30:
+            if np.std(delays) > 10:
                 self.log(f"  [QA] FAILED: Delay is unstable (Std Dev = {np.std(delays):.1f}ms).")
                 return False
 
@@ -237,7 +287,6 @@ class AudioCorrector:
         if not edl:
             self.log("  [Corrector] No distinct segments found. Aborting correction."); return None
 
-        # --- Re-instated QA Step ---
         self.log("  [Corrector] Assembling and verifying temporary QA track...")
         qa_pcm = self._assemble_from_pcm_in_memory(analysis_pcm, edl, 1, target_sr)
         qa_track_path = temp_dir / "qa_track.flac"
