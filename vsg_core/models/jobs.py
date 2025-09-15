@@ -29,10 +29,7 @@ class PlanItem:
     style_patch: Optional[Dict[str, Any]] = None
     user_modified_path: Optional[str] = None
     sync_to: Optional[str] = None
-
-    # Flag to mark a track for preservation after a correction has been applied to it.
     is_preserved: bool = False
-
 
 @dataclass(frozen=True)
 class MergePlan:

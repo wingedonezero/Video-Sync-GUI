@@ -16,21 +16,15 @@ class SegmentCorrectionStep:
         if not ctx.and_merge or not ctx.settings_dict.get('segmented_enabled', False) or not ctx.segment_flags:
             return ctx
 
-        # Identify which audio tracks the user wants to correct based on the final layout
         correction_jobs = []
-        # Find the single audio track selected from each source flagged for correction
         for source_key in {flag['analysis_track_key'].split('_')[0] for flag in ctx.segment_flags.values()}:
             targets = [item for item in ctx.extracted_items if item.track.source == source_key and item.track.type == TrackType.AUDIO]
             if len(targets) == 1:
                 target_item = targets[0]
-                # Find the corresponding flag for this source
                 for flag_key, flag_info in ctx.segment_flags.items():
                     if flag_key.startswith(source_key):
-                        correction_jobs.append({
-                            "target_item": target_item,
-                            "flag_info": flag_info
-                        })
-                        break # Assume one flag per source for now
+                        correction_jobs.append({ "target_item": target_item, "flag_info": flag_info })
+                        break
             else:
                 runner._log_message(f"[SegmentCorrection] Skipping correction for {source_key}: Expected exactly 1 selected audio track but found {len(targets)}. Ambiguous target.")
 
@@ -39,11 +33,7 @@ class SegmentCorrectionStep:
 
         runner._log_message("--- Segmented Audio Correction Phase ---")
 
-        extracted_audio_map = {
-            f"{item.track.source}_{item.track.id}": item
-            for item in ctx.extracted_items
-        }
-
+        extracted_audio_map = { f"{item.track.source}_{item.track.id}": item for item in ctx.extracted_items }
         corrector = AudioCorrector(runner, ctx.tool_paths, ctx.settings_dict)
 
         for job in correction_jobs:
@@ -65,7 +55,6 @@ class SegmentCorrectionStep:
                         role=f"{source_key}_internal", specific_tracks=[track_id]
                     )
                     if not internal_extract: raise RuntimeError("Internal extraction failed.")
-
                     analysis_track_path = internal_extract[0]['path']
                 except Exception as e:
                     runner._log_message(f"[ERROR] Failed to internally extract analysis track {analysis_track_key}: {e}")
@@ -75,41 +64,48 @@ class SegmentCorrectionStep:
 
             ref_file_path = ctx.sources.get("Source 1")
 
-            # THE FIX IS HERE: The `base_delay_ms` argument is removed from the call.
             corrected_path = corrector.run(
                 ref_file_path=ref_file_path,
                 analysis_audio_path=analysis_track_path,
                 target_audio_path=str(target_item.extracted_path),
+                base_delay_ms=flag_info['base_delay'],
                 temp_dir=ctx.temp_dir
             )
 
             if corrected_path:
                 runner._log_message(f"[SUCCESS] Correction successful for '{target_item.track.props.name}'")
 
+                # Preserve the original track BEFORE modifying the target_item
                 preserved_item = copy.deepcopy(target_item)
                 preserved_item.is_preserved = True
                 preserved_item.is_default = False
+                original_props = preserved_item.track.props
                 preserved_item.track = Track(
                     source=preserved_item.track.source, id=preserved_item.track.id, type=preserved_item.track.type,
                     props=StreamProps(
-                        codec_id=preserved_item.track.props.codec_id,
-                        lang=preserved_item.track.props.lang,
-                        name=f"{preserved_item.track.props.name} (Original)"
+                        codec_id=original_props.codec_id,
+                        lang=original_props.lang,
+                        name=f"{original_props.name} (Original)" if original_props.name else "Original"
                     )
                 )
 
+                # Now, modify the original target_item to become the corrected one
                 target_item.extracted_path = corrected_path
                 target_item.track = Track(
                     source=target_item.track.source, id=target_item.track.id, type=target_item.track.type,
                     props=StreamProps(
                         codec_id="FLAC",
-                        lang=target_item.track.props.lang,
-                        name=f"{target_item.track.props.name} (Corrected)"
+                        lang=original_props.lang,
+                        name=f"{original_props.name} (Corrected)" if original_props.name else "Corrected Audio"
                     )
                 )
                 target_item.is_default = True
                 target_item.apply_track_name = True
 
+                # Add the preserved item to the list
                 last_audio_idx = max([i for i, item in enumerate(ctx.extracted_items) if item.track.type == TrackType.AUDIO and not item.is_preserved], default=-1)
-                ctx.extracted_items.insert(last_audio_idx + 1, preserved_item)
+                if last_audio_idx != -1:
+                    ctx.extracted_items.insert(last_audio_idx + 1, preserved_item)
+                else:
+                    ctx.extracted_items.append(preserved_item)
         return ctx
