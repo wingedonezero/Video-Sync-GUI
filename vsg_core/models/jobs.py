@@ -29,10 +29,9 @@ class PlanItem:
     style_patch: Optional[Dict[str, Any]] = None
     user_modified_path: Optional[str] = None
     sync_to: Optional[str] = None
-    is_preserved: bool = False
 
-    # This field stores the user's selection from the UI dropdown (e.g., "Source 2_3")
-    correction_source: Optional[str] = None
+    # Flag to mark a track for preservation after a correction has been applied to it.
+    is_preserved: bool = False
 
 
 @dataclass(frozen=True)

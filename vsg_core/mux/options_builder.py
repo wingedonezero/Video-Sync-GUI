@@ -19,14 +19,13 @@ class MkvmergeOptionsBuilder:
         final_items = [item for item in plan.items if not item.is_preserved]
         preserved_items = [item for item in plan.items if item.is_preserved]
 
-        # Find the index of the last audio track to insert preserved audio after
         last_audio_idx = -1
         for i, item in enumerate(final_items):
             if item.track.type == TrackType.AUDIO:
                 last_audio_idx = i
 
         if last_audio_idx != -1:
-            final_items[last_audio_idx+1:last_audio_idx+1] = preserved_items
+            final_items.insert(last_audio_idx + 1, *preserved_items)
         else:
             final_items.extend(preserved_items)
 
@@ -39,11 +38,8 @@ class MkvmergeOptionsBuilder:
         for i, item in enumerate(final_items):
             tr = item.track
 
-            # Corrected tracks get 0 delay, preserved tracks get simple delay
-            if '(Corrected)' in (tr.props.name or ''):
-                delay_ms = plan.delays.global_shift_ms
-            else:
-                delay_ms = self._effective_delay_ms(plan, item)
+            # THE FIX IS HERE: All tracks, including corrected ones, now use the same robust delay calculation.
+            delay_ms = self._effective_delay_ms(plan, item)
 
             is_default = (i == first_video_idx) or (i == default_audio_idx) or (i == default_sub_idx)
 

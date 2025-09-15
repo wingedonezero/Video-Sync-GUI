@@ -43,7 +43,6 @@ class TrackWidget(QWidget):
         self.label.setToolTip(f"Source: {self.source}, Path: {self.track_data.get('original_path', 'N/A')}")
         row.addWidget(self.label, 1)
 
-        # --- NEW: Sync To Dropdown for External Files ---
         self.sync_to_combo = QComboBox()
         self.sync_to_combo.setVisible(False)
         if self.source == 'External' and available_sources:
@@ -53,7 +52,8 @@ class TrackWidget(QWidget):
             self.sync_to_combo.setVisible(True)
             row.addWidget(QLabel("Sync to:"))
             row.addWidget(self.sync_to_combo)
-        # ----------------------------------------------
+
+        row.addStretch()
 
         self.style_editor_btn = QPushButton("Style Editor...")
         self.style_editor_btn.setVisible(is_subs)
@@ -77,7 +77,6 @@ class TrackWidget(QWidget):
 
         self._logic = TrackWidgetLogic(self)
 
-        # Connect widget changes to logic updater
         self.cb_default.toggled.connect(self._logic.apply_state_from_menu)
         self.cb_name.toggled.connect(self._logic.apply_state_from_menu)
         if is_subs:

@@ -65,8 +65,8 @@ class TrackWidgetLogic:
             'rescale': v.cb_rescale.isChecked(),
             'size_multiplier': v.size_multiplier.value() if v.track_type == 'subtitles' else 1.0
         }
-        # Add the new sync_to value if the widget exists and is visible
+
         if hasattr(v, 'sync_to_combo') and v.sync_to_combo.isVisible():
-            config['sync_to'] = v.sync_to_combo.currentData() # Use currentData to get 'Source 1' or None
+            config['sync_to'] = v.sync_to_combo.currentData()
 
         return config
