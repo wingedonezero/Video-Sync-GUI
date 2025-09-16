@@ -4,8 +4,12 @@
 Phase III: Segment matching and remapping logic.
 """
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
-import numpy as np  # ADD THIS IMPORT
+from typing import List, Optional
+import numpy as np
+
+# This import is necessary for type hinting in the class
+from .fingerprint import AudioFingerprinter
+
 
 @dataclass
 class Segment:
@@ -28,25 +32,21 @@ class SegmentMatch:
 class SegmentMatcher:
     """Match and remap audio segments."""
 
-    def __init__(self, fingerprinter=None, log_func=None):
+    def __init__(self, fingerprinter: AudioFingerprinter, log_func=None):
         self.fingerprinter = fingerprinter
         self.log = log_func or print
         self.min_confidence = 0.5
 
-    def classify_segment(self, audio_chunk: np.ndarray, duration_s: float,
-                        sample_rate: int) -> str:
+    def classify_segment(self, audio_chunk: np.ndarray, duration_s: float) -> str:
         """Classify segment type based on audio characteristics."""
-        # Calculate RMS energy
+        # Simple RMS energy for silence detection
         rms = np.sqrt(np.mean(audio_chunk.astype(np.float64)**2))
-
-        # Silence detection
         max_val = np.abs(audio_chunk).max() if len(audio_chunk) > 0 else 1
         silence_threshold = max_val * 0.01
-
         if rms < silence_threshold:
             return "silence"
 
-        # Commercial detection by duration
+        # Simple duration check for common commercial lengths
         commercial_durations = [15, 30, 60]
         for com_dur in commercial_durations:
             if abs(duration_s - com_dur) < 2.0:
@@ -54,83 +54,51 @@ class SegmentMatcher:
 
         return "content"
 
-    def match_segments(self, ref_segments: List[Segment],
-                      target_segments: List[Segment]) -> List[SegmentMatch]:
+    def match_segments(self, ref_segments: List[Segment], target_segments: List[Segment]) -> List[SegmentMatch]:
         """
-        Match reference segments to target segments.
-        Uses fingerprints if available, falls back to temporal matching.
+        Match reference segments to target segments using fingerprints.
+        This version uses a confidence score and ensures one-to-one matching.
         """
         matches = []
-        used_targets = set()
+        used_target_indices = set()
 
         for ref_seg in ref_segments:
-            best_match = None
+            best_match_segment = None
             best_confidence = 0.0
             best_match_idx = -1
 
-            # Try fingerprint matching first
-            if ref_seg.fingerprint and self.fingerprinter:
-                for idx, target_seg in enumerate(target_segments):
-                    if idx in used_targets or not target_seg.fingerprint:
-                        continue
+            if not ref_seg.fingerprint or not self.fingerprinter:
+                continue
 
-                    # Compare fingerprints
-                    similarity = self.fingerprinter.compare_fingerprints(
-                        ref_seg.fingerprint, target_seg.fingerprint
-                    )
+            for i, target_seg in enumerate(target_segments):
+                if i in used_target_indices or not target_seg.fingerprint:
+                    continue
 
-                    if similarity > best_confidence:
-                        best_match = target_seg
-                        best_confidence = similarity
-                        best_match_idx = idx
+                # Use the robust similarity comparison
+                similarity = self.fingerprinter.compare_fingerprints(
+                    ref_seg.fingerprint, target_seg.fingerprint
+                )
 
-                        if similarity >= 1.0:  # Perfect match
-                            break
+                if similarity > best_confidence:
+                    best_confidence = similarity
+                    best_match_segment = target_seg
+                    best_match_idx = i
 
-            # Fallback to temporal matching
-            if best_confidence < 0.8:
-                ref_mid = (ref_seg.start_s + ref_seg.end_s) / 2
-                ref_duration = ref_seg.end_s - ref_seg.start_s
-
-                for idx, target_seg in enumerate(target_segments):
-                    if idx in used_targets:
-                        continue
-
-                    target_mid = (target_seg.start_s + target_seg.end_s) / 2
-                    target_duration = target_seg.end_s - target_seg.start_s
-
-                    # Calculate confidence based on position and duration
-                    time_diff = abs(ref_mid - target_mid)
-                    duration_diff = abs(ref_duration - target_duration)
-
-                    if time_diff < 10.0:  # Within 10 seconds
-                        time_confidence = 1.0 - (time_diff / 10.0)
-                        duration_confidence = 1.0 - min(duration_diff / ref_duration, 1.0)
-                        confidence = (time_confidence * 0.7 + duration_confidence * 0.3)
-
-                        if confidence > best_confidence:
-                            best_match = target_seg
-                            best_confidence = confidence
-                            best_match_idx = idx
-
-            # Mark target as used
-            if best_match_idx >= 0 and best_confidence > 0.3:
-                used_targets.add(best_match_idx)
-
-            # Determine action
-            if best_match and best_confidence > self.min_confidence:
+            # If we found a match that exceeds our minimum confidence, accept it.
+            if best_match_idx != -1 and best_confidence >= self.min_confidence:
+                used_target_indices.add(best_match_idx)
                 action = "use"
-            elif ref_seg.segment_type == "silence":
-                action = "insert_silence"
-            elif ref_seg.segment_type == "commercial":
-                action = "skip"
             else:
-                action = "skip"
-                self.log(f"    - No match for segment {ref_seg.start_s:.2f}s - {ref_seg.end_s:.2f}s")
+                # If no confident match was found, decide what to do.
+                best_match_segment = None # Ensure we don't carry over a low-confidence match
+                if ref_seg.segment_type == "commercial":
+                    action = "skip" # Commercial in reference that isn't in target
+                else:
+                    action = "insert_silence" # Content in reference that is missing from target
 
             matches.append(SegmentMatch(
                 ref_segment=ref_seg,
-                target_segment=best_match,
+                target_segment=best_match_segment,
                 match_confidence=best_confidence,
                 action=action
             ))
@@ -138,26 +106,33 @@ class SegmentMatcher:
         return matches
 
     def build_edl(self, matches: List[SegmentMatch], base_delay_ms: int) -> List[Segment]:
-        """Build final Edit Decision List from matches."""
+        """Build final Edit Decision List from the intelligent matches."""
         edl = []
-
         for match in matches:
             if match.action == "use" and match.target_segment:
-                # Add to EDL
+                # This is a confirmed match. Add the target segment to the playlist.
                 segment = match.target_segment
                 edl.append(segment)
+                self.log(f"    - EDL: Using segment {segment.start_s:.2f}s - {segment.end_s:.2f}s (Confidence: {match.match_confidence:.2f})")
 
-                self.log(f"    - Using segment: {segment.start_s:.2f}s - {segment.end_s:.2f}s "
-                        f"@ {segment.delay_ms}ms (confidence: {match.match_confidence:.2f})")
+            elif match.action == "insert_silence":
+                # The reference had content that the target was missing.
+                # We need to create a "silence" segment to fill the gap.
+                ref = match.ref_segment
+                duration = ref.end_s - ref.start_s
+                silence_segment = Segment(start_s=0, end_s=duration, delay_ms=0, segment_type="silence")
+                edl.append(silence_segment)
+                self.log(f"    - EDL: Inserting {duration:.2f}s of silence for missing reference content.")
 
             elif match.action == "skip":
+                # The reference had a segment (like a commercial) that we want to discard.
+                # We simply don't add it to the EDL.
                 ref = match.ref_segment
-                self.log(f"    - Skipping: {ref.start_s:.2f}s - {ref.end_s:.2f}s "
-                        f"(type: {ref.segment_type})")
+                self.log(f"    - EDL: Skipping reference segment {ref.start_s:.2f}s - {ref.end_s:.2f}s (Type: {ref.segment_type})")
 
-        # Set base delay for first segment
         if edl:
+            # Set the base delay for the very first piece of audio content.
             edl[0].delay_ms = base_delay_ms
-            self.log(f"  [Matching] Built EDL with {len(edl)} segments")
+            self.log(f"  [Matching] Built complex EDL with {len(edl)} actions.")
 
         return edl
