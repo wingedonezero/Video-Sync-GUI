@@ -8,7 +8,7 @@ from vsg_core.orchestrator.steps.context import Context
 from ...io.runner import CommandRunner
 from ...models.enums import TrackType
 from ...models.media import StreamProps, Track
-from ...analysis.segment_correction import AudioCorrector
+from ...analysis.segment_correction import AudioCorrector  # Still the same import
 from ...extraction.tracks import extract_tracks
 
 class SegmentCorrectionStep:
@@ -34,6 +34,8 @@ class SegmentCorrectionStep:
         runner._log_message("--- Segmented Audio Correction Phase ---")
 
         extracted_audio_map = { f"{item.track.source}_{item.track.id}": item for item in ctx.extracted_items }
+
+        # Initialize corrector with enhanced features
         corrector = AudioCorrector(runner, ctx.tool_paths, ctx.settings_dict)
 
         for job in correction_jobs:
@@ -64,6 +66,7 @@ class SegmentCorrectionStep:
 
             ref_file_path = ctx.sources.get("Source 1")
 
+            # Run the enhanced corrector
             corrected_path = corrector.run(
                 ref_file_path=ref_file_path,
                 analysis_audio_path=analysis_track_path,
@@ -73,8 +76,9 @@ class SegmentCorrectionStep:
             )
 
             if corrected_path:
-                runner._log_message(f"[SUCCESS] Correction successful for '{target_item.track.props.name}'")
+                runner._log_message(f"[SUCCESS] Enhanced correction successful for '{target_item.track.props.name}'")
 
+                # Rest of the code remains the same...
                 preserved_item = copy.deepcopy(target_item)
                 preserved_item.is_preserved = True
                 preserved_item.is_default = False
@@ -89,8 +93,6 @@ class SegmentCorrectionStep:
                 )
 
                 target_item.extracted_path = corrected_path
-                # --- NEW ---
-                # Set the flag so the muxer knows how to handle this track's delay
                 target_item.is_corrected = True
                 target_item.track = Track(
                     source=target_item.track.source, id=target_item.track.id, type=target_item.track.type,

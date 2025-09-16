@@ -56,9 +56,15 @@ class AppConfig:
             'post_mux_normalize_timestamps': False,
             'post_mux_strip_tags': False,
 
-            # NEW: Segmented Audio Correction
+            # NEW: Enhanced Segmented Audio Correction
             'segmented_enabled': False,
             'segmented_qa_threshold': 85.0,
+            'segment_use_mfcc': True,           # Use MFCC timbral analysis for boundaries
+            'segment_use_fingerprint': True,    # Use acoustic fingerprinting for matching
+            'segment_detect_commercials': True, # Detect and skip commercials
+            'segment_fingerprint_confidence': 0.5,  # Min confidence for fingerprint match
+            'segment_min_duration': 2.0,        # Minimum segment duration in seconds
+            'segment_boundary_merge_gap': 0.5,  # Merge boundaries closer than this (seconds)
         }
         self.settings = self.defaults.copy()
         self.load()
