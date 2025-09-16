@@ -57,7 +57,6 @@ class SegmentCorrectionStep:
             else:
                 analysis_track_path = str(analysis_item.extracted_path)
 
-            # --- Main Triage Logic ---
             result: CorrectionResult = corrector.run(
                 ref_file_path=ref_file_path,
                 analysis_audio_path=analysis_track_path,
@@ -74,7 +73,6 @@ class SegmentCorrectionStep:
 
             elif result.verdict == CorrectionVerdict.STEPPED:
                 corrected_path = result.data
-                runner._log_message(f"[SUCCESS] Enhanced correction successful for '{target_item.track.props.name}'")
 
                 preserved_item = copy.deepcopy(target_item)
                 preserved_item.is_preserved = True
@@ -104,7 +102,7 @@ class SegmentCorrectionStep:
 
                 ctx.extracted_items.append(preserved_item)
 
-            elif result.verdict in [CorrectionVerdict.COMPLEX, CorrectionVerdict.FAILED]:
+            elif result.verdict == CorrectionVerdict.FAILED:
                 error_message = result.data
                 raise RuntimeError(f"Segment correction for {source_key} failed: {error_message}")
 

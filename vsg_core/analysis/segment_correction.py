@@ -9,30 +9,25 @@ from typing import List, Dict, Any, Optional, Tuple
 from enum import Enum, auto
 
 import numpy as np
-import ruptures as rpt
 from scipy.signal import correlate
 from collections import Counter
 
 from ..io.runner import CommandRunner
 from ..analysis.audio_corr import get_audio_stream_info, run_audio_correlation
-from .segmentation import BoundaryDetector, AudioFingerprinter, SegmentMatcher, matching
 
 class CorrectionVerdict(Enum):
-    """Defines the outcome of the audio correction triage."""
     UNIFORM = auto()
     STEPPED = auto()
-    COMPLEX = auto()
     FAILED = auto()
 
 @dataclass
 class CorrectionResult:
-    """Holds the result of the AudioCorrector's analysis."""
     verdict: CorrectionVerdict
-    data: Any = None # Can be the median delay, a file path, or an error message
+    data: Any = None
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class AudioSegment:
-    """Represents a continuous segment of audio with a stable delay."""
+    """Represents an action point on the target timeline for the assembly function."""
     start_s: float
     end_s: float
     delay_ms: int
@@ -62,167 +57,153 @@ class AudioCorrector:
         self.tool_paths = tool_paths
         self.config = config
         self.log = runner._log_message
-        self.boundary_detector: Optional[BoundaryDetector] = None
-        self.fingerprinter: Optional[AudioFingerprinter] = None
-        self.matcher: Optional[SegmentMatcher] = None
 
-    def _init_segmentation_modules(self, sample_rate: int):
-        if self.boundary_detector is None:
-            self.boundary_detector = BoundaryDetector(sample_rate, self.log)
-            self.fingerprinter = AudioFingerprinter(sample_rate, self.log)
-            self.matcher = SegmentMatcher(self.fingerprinter, self.log)
-
-    def _decode_to_memory(self, file_path: str, stream_index: int, sample_rate: int, channels: int, force_mono: bool = False) -> Optional[np.ndarray]:
-        cmd = [ 'ffmpeg', '-nostdin', '-v', 'error', '-i', str(file_path), '-map', f'0:a:{stream_index}' ]
-        if force_mono: cmd.extend(['-ac', '1'])
-        else: cmd.extend(['-ac', str(channels)])
-        cmd.extend(['-ar', str(sample_rate), '-f', 's32le', '-'])
+    def _decode_to_memory(self, file_path: str, stream_index: int, sample_rate: int, channels: int = 1) -> Optional[np.ndarray]:
+        cmd = [ 'ffmpeg', '-nostdin', '-v', 'error', '-i', str(file_path), '-map', f'0:a:{stream_index}', '-ac', str(channels), '-ar', str(sample_rate), '-f', 's32le', '-' ]
         pcm_bytes = self.runner.run(cmd, self.tool_paths, is_binary=True)
         if pcm_bytes: return np.frombuffer(pcm_bytes, dtype=np.int32)
         self.log(f"[ERROR] Corrector failed to decode audio stream {stream_index} from '{Path(file_path).name}'")
         return None
 
-    def _build_precise_edl(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, delay_signal: np.ndarray, sample_rate: int, base_delay_ms: int, step_samples: int) -> Optional[List[AudioSegment]]:
-        num_chunks = len(delay_signal)
-        if num_chunks == 0:
-            self.log("[ERROR] No chunks to process in EDL building")
-            return None
+    def _get_delay_for_chunk(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, start_sample: int, num_samples: int, sample_rate: int, locality_samples: int) -> Optional[int]:
+        end_sample = start_sample + num_samples
+        if end_sample > len(ref_pcm): return None
+        ref_chunk = ref_pcm[start_sample:end_sample]
 
-        self.log(f"  [Corrector] Finding approximate change points from {num_chunks} chunks...")
-        algo = rpt.Binseg(model="l1").fit(delay_signal)
-        penalty = np.log(num_chunks) * np.std(delay_signal)**2 * 0.1
-        approx_change_indices = algo.predict(pen=penalty)
+        search_center = start_sample
+        search_start = max(0, search_center - locality_samples)
+        search_end = min(len(analysis_pcm), search_center + num_samples + locality_samples)
+        analysis_chunk = analysis_pcm[search_start:search_end]
 
-        self.log("  [Corrector] Refining change points to be sample-accurate...")
-        refined_change_indices = [0]
-        for approx_idx in approx_change_indices:
-            if approx_idx == 0 or approx_idx >= num_chunks: continue
-            refined_idx = self._refine_change_point(ref_pcm, analysis_pcm, approx_idx, step_samples, sample_rate)
-            refined_change_indices.append(refined_idx)
+        if len(ref_chunk) < 100 or len(analysis_chunk) < len(ref_chunk): return None
+        ref_std, analysis_std = np.std(ref_chunk), np.std(analysis_chunk)
+        if ref_std < 1e-6 or analysis_std < 1e-6: return None
 
-        refined_change_indices.append(len(ref_pcm))
+        r = (ref_chunk - np.mean(ref_chunk)) / (ref_std + 1e-9)
+        t = (analysis_chunk - np.mean(analysis_chunk)) / (analysis_std + 1e-9)
+        c = correlate(r, t, mode='valid', method='fft')
 
-        boundary_indices = sorted(list(set(refined_change_indices)))
-        segments = []
+        if len(c) == 0: return None
+        abs_c = np.abs(c)
+        k = np.argmax(abs_c)
 
-        for i in range(len(boundary_indices) - 1):
-            start_idx, end_idx = boundary_indices[i], boundary_indices[i+1]
-            if start_idx >= end_idx: continue
+        peak_val = abs_c[k]
+        noise_floor = np.median(abs_c) + 1e-9
+        confidence_ratio = peak_val / noise_floor
 
-            coarse_start_chunk = start_idx // step_samples
-            coarse_end_chunk = min(end_idx // step_samples, len(delay_signal))
+        if confidence_ratio < 5.0: return None
 
-            if coarse_start_chunk >= len(delay_signal):
-                coarse_start_chunk = len(delay_signal) - 1
+        lag_in_window = k
+        absolute_lag_start = search_start + lag_in_window
+        delay_samples = absolute_lag_start - start_sample
+        return int(round((delay_samples / sample_rate) * 1000.0))
 
-            segment_delays = delay_signal[coarse_start_chunk:coarse_end_chunk]
+    def _perform_coarse_scan(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int) -> List[Tuple[float, int]]:
+        self.log("  [Corrector] Stage 1: Performing coarse scan to find delay zones...")
+        chunk_duration_s, step_duration_s = 15, 60
+        chunk_samples = int(chunk_duration_s * sample_rate)
+        step_samples = int(step_duration_s * sample_rate)
+        locality_samples = int(10 * sample_rate)
+        coarse_map = []
+        num_samples = min(len(ref_pcm), len(analysis_pcm))
 
-            if len(segment_delays) == 0:
-                if coarse_start_chunk > 0:
-                    stable_delay = int(delay_signal[coarse_start_chunk - 1])
-                else:
-                    stable_delay = base_delay_ms
-            else:
-                stable_delay = int(Counter(segment_delays).most_common(1)[0][0])
+        initial_offset_seconds = 15.0
+        start_offset_samples = int(initial_offset_seconds * sample_rate)
 
-            segments.append(AudioSegment(start_s=(start_idx / sample_rate), end_s=(end_idx / sample_rate), delay_ms=stable_delay))
+        for start_sample in range(start_offset_samples, num_samples - chunk_samples, step_samples):
+            delay = self._get_delay_for_chunk(ref_pcm, analysis_pcm, start_sample, chunk_samples, sample_rate, locality_samples)
+            if delay is not None:
+                timestamp_s = start_sample / sample_rate
+                coarse_map.append((timestamp_s, delay))
+                self.log(f"    - Coarse point at {timestamp_s:.1f}s: delay = {delay}ms")
+        return coarse_map
 
-        if segments:
-            segments[0].delay_ms = base_delay_ms
-            self.log(f"  [Corrector] Detailed mapping found {len(segments)} segments.")
-            for i, seg in enumerate(segments):
-                self.log(f"    - Segment {i+1}: {seg.start_s:.4f}s - {seg.end_s:.4f}s @ {seg.delay_ms}ms")
-            return segments
-        return None
+    def _find_boundary_in_zone(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int, zone_start_s: float, zone_end_s: float, delay_before: int, delay_after: int) -> float:
+        self.log(f"  [Corrector] Stage 2: Performing fine scan in zone {zone_start_s:.1f}s - {zone_end_s:.1f}s...")
+        zone_start_sample, zone_end_sample = int(zone_start_s * sample_rate), int(zone_end_s * sample_rate)
+        chunk_samples = int(2.0 * sample_rate)
+        locality_samples = int(10 * sample_rate)
+        low, high = zone_start_sample, zone_end_sample
 
-    def _refine_change_point(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, approx_chunk_idx: int, step_samples: int, sample_rate: int) -> int:
-        approx_sample_idx = approx_chunk_idx * step_samples
-        search_radius = int((500 / 1000) * sample_rate)
-        start_scan = max(0, approx_sample_idx - search_radius)
-        end_scan = min(len(ref_pcm), approx_sample_idx + search_radius)
-        corr_radius = int((20 / 1000) * sample_rate)
+        for _ in range(10):
+            if high - low < chunk_samples: break
+            mid = (low + high) // 2
+            delay = self._get_delay_for_chunk(ref_pcm, analysis_pcm, mid, chunk_samples, sample_rate, locality_samples)
+            if delay is not None:
+                if abs(delay - delay_before) < abs(delay - delay_after): low = mid
+                else: high = mid
+            else: low += chunk_samples
 
-        # Ensure we have enough samples for correlation
-        if start_scan < corr_radius or end_scan > len(ref_pcm) - corr_radius:
-            return approx_sample_idx
-
-        pre_chunk = analysis_pcm[start_scan - corr_radius : start_scan]
-        ref_chunk = ref_pcm[start_scan - corr_radius : start_scan]
-
-        if len(pre_chunk) == 0 or len(ref_chunk) == 0:
-            return approx_sample_idx
-
-        r = (ref_chunk - np.mean(ref_chunk)) / (np.std(ref_chunk) + 1e-9)
-        t = (pre_chunk - np.mean(pre_chunk)) / (np.std(pre_chunk) + 1e-9)
-        c = correlate(r, t, 'full', 'fft')
-        baseline_lag = np.argmax(np.abs(c)) - (len(t) - 1)
-
-        for i in range(start_scan, end_scan - corr_radius):
-            post_chunk = analysis_pcm[i : i + corr_radius]
-            ref_chunk = ref_pcm[i : i + corr_radius]
-
-            if len(post_chunk) == 0 or len(ref_chunk) == 0:
-                continue
-
-            r = (ref_chunk - np.mean(ref_chunk)) / (np.std(ref_chunk) + 1e-9)
-            t = (post_chunk - np.mean(post_chunk)) / (np.std(post_chunk) + 1e-9)
-            c = correlate(r, t, 'full', 'fft')
-            current_lag = np.argmax(np.abs(c)) - (len(t) - 1)
-
-            if abs(current_lag - baseline_lag) > 5:
-                self.log(f"    - Refined point from ~{(approx_sample_idx/sample_rate):.3f}s to {(i/sample_rate):.3f}s")
-                return i
-
-        self.log(f"    - Warning: Could not refine point at ~{(approx_sample_idx/sample_rate):.3f}s. Using original estimate.")
-        return approx_sample_idx
-
-    def _assemble_from_pcm_in_memory(self, pcm_data: np.ndarray, edl: List[AudioSegment], channels: int, sample_rate: int) -> np.ndarray:
-        base_delay = edl[0].delay_ms
-        total_silence_ms = sum(max(0, seg.delay_ms - base_delay) for seg in edl)
-        total_silence_samples = int(total_silence_ms / 1000 * sample_rate) * channels
-        final_sample_count = pcm_data.shape[0] + total_silence_samples
-        new_pcm = np.zeros(final_sample_count, dtype=np.int32)
-        current_pos_in_new = 0
-        last_pos_in_old = 0
-
-        for segment in edl:
-            start_sample = int(segment.start_s * sample_rate) * channels
-            end_sample = int(segment.end_s * sample_rate) * channels
-
-            if start_sample > last_pos_in_old:
-                gap_chunk = pcm_data[last_pos_in_old:start_sample]
-                new_pcm[current_pos_in_new : current_pos_in_new + len(gap_chunk)] = gap_chunk
-                current_pos_in_new += len(gap_chunk)
-
-            silence_to_add_ms = segment.delay_ms - base_delay
-            if silence_to_add_ms > 10:
-                silence_samples = int(silence_to_add_ms / 1000 * sample_rate) * channels
-                current_pos_in_new += silence_samples
-
-            segment_chunk = pcm_data[start_sample:end_sample]
-            new_pcm[current_pos_in_new : current_pos_in_new + len(segment_chunk)] = segment_chunk
-            current_pos_in_new += len(segment_chunk)
-            last_pos_in_old = end_sample
-
-        if last_pos_in_old < len(pcm_data):
-            final_chunk = pcm_data[last_pos_in_old:]
-            new_pcm[current_pos_in_new : current_pos_in_new + len(final_chunk)] = final_chunk
-        return new_pcm
+        final_boundary_s = high / sample_rate
+        self.log(f"    - Found precise boundary at: {final_boundary_s:.3f}s")
+        return final_boundary_s
 
     def _encode_pcm_to_file(self, pcm_data: np.ndarray, out_path: Path, channels: int, channel_layout: str, sample_rate: int) -> bool:
         cmd = [ 'ffmpeg', '-y', '-v', 'error', '-nostdin', '-f', 's32le', '-ar', str(sample_rate), '-ac', str(channels), '-channel_layout', channel_layout, '-i', '-', '-c:a', 'flac', str(out_path) ]
         return self.runner.run(cmd, self.tool_paths, is_binary=True, input_data=pcm_data.tobytes()) is not None
 
+    def _assemble_from_pcm_in_memory(self, pcm_data: np.ndarray, edl: List[AudioSegment], channels: int, sample_rate: int) -> np.ndarray:
+        """Creates a corrected PCM stream using the trusted 'timeline walker' method."""
+        if not edl: return pcm_data
+
+        base_delay = edl[0].delay_ms
+        # Calculate total silence based on the final state of the EDL, which represents total delays
+        total_silence_ms = sum(max(0, seg.delay_ms - base_delay) for seg in edl[1:]) # Skip the base segment
+        total_silence_samples = int(total_silence_ms / 1000 * sample_rate) * channels
+        final_sample_count = len(pcm_data) + total_silence_samples
+        new_pcm = np.zeros(final_sample_count, dtype=np.int32)
+
+        current_pos_in_new = 0
+        last_pos_in_old = 0
+        current_base_delay = base_delay
+
+        for segment in edl:
+            target_action_sample = int(segment.start_s * sample_rate) * channels
+
+            if target_action_sample > last_pos_in_old:
+                chunk_to_copy = pcm_data[last_pos_in_old:target_action_sample]
+                if current_pos_in_new + len(chunk_to_copy) <= len(new_pcm):
+                    new_pcm[current_pos_in_new : current_pos_in_new + len(chunk_to_copy)] = chunk_to_copy
+                current_pos_in_new += len(chunk_to_copy)
+
+            silence_to_add_ms = segment.delay_ms - current_base_delay
+            if silence_to_add_ms > 10:
+                silence_samples = int(silence_to_add_ms / 1000 * sample_rate) * channels
+                current_pos_in_new += silence_samples
+
+            current_base_delay = segment.delay_ms
+            last_pos_in_old = target_action_sample
+
+        if last_pos_in_old < len(pcm_data):
+            final_chunk = pcm_data[last_pos_in_old:]
+            end_position = current_pos_in_new + len(final_chunk)
+            if end_position <= len(new_pcm):
+                 new_pcm[current_pos_in_new : end_position] = final_chunk
+                 current_pos_in_new = end_position
+
+        return new_pcm[:current_pos_in_new]
+
     def _qa_check(self, corrected_path: str, ref_file_path: str, base_delay: int) -> bool:
         self.log("  [Corrector] Performing rigorous QA check on corrected audio map...")
         qa_config = self.config.copy()
-        qa_config.update({'scan_chunk_count': 30, 'min_accepted_chunks': 28, 'min_match_pct': 70.0})
+
+        # --- THIS IS THE FIX ---
+        # Read the QA threshold from the config instead of hardcoding it.
+        qa_threshold = self.config.get('segmented_qa_threshold', 85.0)
+
+        qa_config.update({'scan_chunk_count': 30, 'min_accepted_chunks': 28, 'min_match_pct': qa_threshold})
+        self.log(f"  [QA] Using minimum match confidence of {qa_threshold:.1f}%")
+
         try:
-            results = run_audio_correlation(ref_file=ref_file_path, target_file=corrected_path, config=qa_config, runner=self.runner, tool_paths=self.tool_paths, ref_lang=None, target_lang=None, role_tag="QA")
+            results = run_audio_correlation(
+                ref_file=ref_file_path, target_file=corrected_path, config=qa_config,
+                runner=self.runner, tool_paths=self.tool_paths, ref_lang=None, target_lang=None, role_tag="QA"
+            )
             accepted = [r for r in results if r.get('accepted', False)]
             if len(accepted) < qa_config['min_accepted_chunks']:
                 self.log(f"  [QA] FAILED: Not enough confident chunks ({len(accepted)}/{qa_config['min_accepted_chunks']}).")
                 return False
+
             delays = [r['delay'] for r in accepted]
             median_delay = np.median(delays)
             if abs(median_delay - base_delay) > 20:
@@ -238,8 +219,6 @@ class AudioCorrector:
             return False
 
     def run(self, ref_file_path: str, analysis_audio_path: str, target_audio_path: str, base_delay_ms: int, temp_dir: Path) -> CorrectionResult:
-        """Main entry point. Performs triage to decide on the correction strategy."""
-        self.log(f"  [Corrector] Starting correction for '{Path(target_audio_path).name}'...")
         try:
             ref_index, _ = get_audio_stream_info(ref_file_path, None, self.runner, self.tool_paths)
             analysis_index, _ = get_audio_stream_info(analysis_audio_path, None, self.runner, self.tool_paths)
@@ -247,98 +226,39 @@ class AudioCorrector:
                 return CorrectionResult(CorrectionVerdict.FAILED, "Could not find audio streams for analysis.")
             _, _, sample_rate = _get_audio_properties(analysis_audio_path, analysis_index, self.runner, self.tool_paths)
 
-            self.log("  [Corrector] Decoding analysis tracks for high-resolution scan...")
-            ref_pcm = self._decode_to_memory(ref_file_path, ref_index, sample_rate, 1, force_mono=True)
-            analysis_pcm = self._decode_to_memory(analysis_audio_path, analysis_index, sample_rate, 1, force_mono=True)
-
+            ref_pcm = self._decode_to_memory(ref_file_path, ref_index, sample_rate)
+            analysis_pcm = self._decode_to_memory(analysis_audio_path, analysis_index, sample_rate)
             if ref_pcm is None or analysis_pcm is None:
-                return CorrectionResult(CorrectionVerdict.FAILED, "Failed to decode audio for analysis.")
+                return CorrectionResult(CorrectionVerdict.FAILED, "Failed to decode one or more audio tracks.")
 
-            # Log decoded sizes for debugging
-            self.log(f"  [Corrector] Decoded audio: ref={len(ref_pcm)} samples, analysis={len(analysis_pcm)} samples")
+            coarse_map = self._perform_coarse_scan(ref_pcm, analysis_pcm, sample_rate)
+            if not coarse_map:
+                return CorrectionResult(CorrectionVerdict.FAILED, "Coarse scan did not find any reliable sync points.")
 
-            # Check minimum audio length
-            min_duration_s = 5.0  # Require at least 5 seconds
-            if len(ref_pcm) < sample_rate * min_duration_s or len(analysis_pcm) < sample_rate * min_duration_s:
-                return CorrectionResult(CorrectionVerdict.FAILED, f"Audio too short for analysis (< {min_duration_s}s)")
+            stable_delays = [d for t, d in coarse_map]
+            if len(stable_delays) < 2 or np.std(stable_delays) < 50:
+                self.log("  [Corrector] Triage Result: Uniform delay detected.")
+                return CorrectionResult(CorrectionVerdict.UNIFORM, stable_delays[0] if stable_delays else base_delay_ms)
 
-            self.log("  [Corrector] Performing high-resolution scan for verification & triage...")
-            window_s, step_s = 2.0, 0.25
-            window_samples, step_samples = int(window_s * sample_rate), int(step_s * sample_rate)
+            edl: List[AudioSegment] = []
+            anchor_delay = coarse_map[0][1]
+            edl.append(AudioSegment(start_s=0.0, end_s=0.0, delay_ms=anchor_delay))
 
-            # Use the shorter of the two for safety
-            min_length = min(len(ref_pcm), len(analysis_pcm))
+            for i in range(len(coarse_map) - 1):
+                zone_start_s, delay_before = coarse_map[i]
+                zone_end_s, delay_after = coarse_map[i+1]
+                if abs(delay_before - delay_after) < 50: continue
 
-            # Check if we have enough samples for at least one window
-            if min_length < window_samples:
-                return CorrectionResult(CorrectionVerdict.FAILED, f"Audio too short for window size ({min_length} < {window_samples} samples)")
+                boundary_s_ref = self._find_boundary_in_zone(ref_pcm, analysis_pcm, sample_rate, zone_start_s, zone_end_s, delay_before, delay_after)
+                boundary_s_target = boundary_s_ref + (delay_before / 1000.0)
+                edl.append(AudioSegment(start_s=boundary_s_target, end_s=boundary_s_target, delay_ms=delay_after))
 
-            num_chunks = int((min_length - window_samples) / step_samples)
+            edl = sorted(list(set(edl)), key=lambda x: x.start_s)
 
-            if num_chunks <= 0:
-                return CorrectionResult(CorrectionVerdict.FAILED, "Not enough audio chunks for analysis")
+            self.log("  [Corrector] Final Edit Decision List (EDL) for assembly created:")
+            for i, seg in enumerate(edl): self.log(f"    - Action {i+1}: At target time {seg.start_s:.3f}s, new total delay is {seg.delay_ms}ms")
 
-            self.log(f"  [Corrector] Processing {num_chunks} chunks...")
-
-            delay_signal = np.zeros(num_chunks)
-            valid_chunks = 0
-
-            for i in range(num_chunks):
-                start = i * step_samples
-                end = start + window_samples
-
-                # Extra safety check
-                if end > min_length:
-                    break
-
-                ref_chunk = ref_pcm[start:end]
-                analysis_chunk = analysis_pcm[start:end]
-
-                # Check for silent/flat chunks
-                ref_std = np.std(ref_chunk)
-                analysis_std = np.std(analysis_chunk)
-
-                # Skip if either chunk is silent/flat
-                if ref_std < 1e-6 or analysis_std < 1e-6:
-                    # Use previous delay for continuity
-                    delay_signal[i] = delay_signal[i-1] if i > 0 else base_delay_ms
-                    continue
-
-                # Normal correlation calculation
-                r = (ref_chunk - np.mean(ref_chunk)) / (ref_std + 1e-9)
-                t = (analysis_chunk - np.mean(analysis_chunk)) / (analysis_std + 1e-9)
-
-                c = correlate(r, t, mode='full', method='fft')
-                k = np.argmax(np.abs(c))
-                delay_signal[i] = int(round((float(k - (len(t) - 1)) / sample_rate) * 1000.0))
-                valid_chunks += 1
-
-            if valid_chunks == 0:
-                return CorrectionResult(CorrectionVerdict.FAILED, "No valid audio chunks found (all silent/corrupted)")
-
-            self.log(f"  [Corrector] Processed {valid_chunks}/{num_chunks} valid chunks")
-
-            # Check for uniform delay
-            if np.std(delay_signal) < 15:
-                median_delay = int(round(np.median(delay_signal)))
-                self.log(f"  [Corrector] Triage Result: Uniform delay detected. Overriding with more accurate delay of {median_delay} ms.")
-                return CorrectionResult(CorrectionVerdict.UNIFORM, median_delay)
-
-            # Check for stepped delay
-            algo = rpt.Binseg(model="l1").fit(delay_signal)
-            penalty = np.log(num_chunks) * np.std(delay_signal)**2 * 0.1
-            change_points = algo.predict(pen=penalty)
-            num_segments = len(change_points)
-
-            if 2 <= num_segments <= 5:
-                self.log(f"  [Corrector] Triage Result: Stepped delay confirmed ({num_segments} segments). Proceeding with correction.")
-                edl = self._build_precise_edl(ref_pcm, analysis_pcm, delay_signal, sample_rate, base_delay_ms, step_samples)
-                if not edl:
-                    return CorrectionResult(CorrectionVerdict.FAILED, "Failed to build timing map.")
-                return self._run_tier2_assembly(ref_file_path, analysis_pcm, edl, target_audio_path, temp_dir)
-            else:
-                self.log(f"  [Corrector] Triage Result: Complex sync detected ({num_segments} segments). Full fingerprinting would be required.")
-                return CorrectionResult(CorrectionVerdict.COMPLEX, f"Sync is too complex ({num_segments} segments found).")
+            return self._run_final_assembly(target_audio_path, edl=edl, temp_dir=temp_dir, ref_file_path=ref_file_path, analysis_pcm=analysis_pcm)
 
         except Exception as e:
             self.log(f"[FATAL] AudioCorrector failed with exception: {e}")
@@ -346,42 +266,39 @@ class AudioCorrector:
             self.log(f"[DEBUG] Traceback: {traceback.format_exc()}")
             return CorrectionResult(CorrectionVerdict.FAILED, str(e))
 
-    def _run_tier2_assembly(self, ref_file_path: str, analysis_pcm: np.ndarray, edl: List[AudioSegment], target_audio_path: str, temp_dir: Path) -> CorrectionResult:
-        """Encapsulates the assembly and QA process for a simple stepped correction."""
+    def _run_final_assembly(self, target_audio_path: str, edl: List[AudioSegment], temp_dir: Path, ref_file_path: str, analysis_pcm: np.ndarray) -> CorrectionResult:
         try:
             target_index, _ = get_audio_stream_info(target_audio_path, None, self.runner, self.tool_paths)
             target_channels, target_layout, sample_rate = _get_audio_properties(target_audio_path, target_index, self.runner, self.tool_paths)
 
-            qa_pcm = self._assemble_from_pcm_in_memory(analysis_pcm, edl, 1, sample_rate)
-            qa_track_path = temp_dir / "qa_track.flac"
-            if not self._encode_pcm_to_file(qa_pcm, qa_track_path, 1, 'mono', sample_rate):
-                return CorrectionResult(CorrectionVerdict.FAILED, "Failed to assemble QA track.")
-            del qa_pcm
-
-            if not self._qa_check(str(qa_track_path), ref_file_path, edl[0].delay_ms):
-                return CorrectionResult(CorrectionVerdict.FAILED, "Corrected track failed QA check.")
-
-            del analysis_pcm
-            gc.collect()
-
-            self.log(f"  [Corrector] Decoding target audio track to memory ({target_layout})...")
-            target_pcm = self._decode_to_memory(target_audio_path, target_index, sample_rate, target_channels, force_mono=False)
+            self.log(f"  [Corrector] Stage 3: Decoding final target audio track ({target_layout})...")
+            target_pcm = self._decode_to_memory(target_audio_path, target_index, sample_rate, target_channels)
             if target_pcm is None:
-                return CorrectionResult(CorrectionVerdict.FAILED, "Failed to decode target audio.")
+                return CorrectionResult(CorrectionVerdict.FAILED, "Failed to decode target audio for final assembly.")
 
             self.log("  [Corrector] Assembling final corrected track in memory...")
             final_pcm = self._assemble_from_pcm_in_memory(target_pcm, edl, target_channels, sample_rate)
-            del target_pcm
-            gc.collect()
+            del target_pcm; gc.collect()
+
+            qa_track_path = temp_dir / "qa_track.flac"
+
+            qa_check_pcm = self._assemble_from_pcm_in_memory(analysis_pcm, edl, 1, sample_rate)
+            if not self._encode_pcm_to_file(qa_check_pcm, qa_track_path, 1, 'mono', sample_rate):
+                return CorrectionResult(CorrectionVerdict.FAILED, "Failed during QA track encoding.")
+            del qa_check_pcm; gc.collect()
+
+            if not self._qa_check(str(qa_track_path), ref_file_path, edl[0].delay_ms):
+                return CorrectionResult(CorrectionVerdict.FAILED, "Corrected track failed QA check.")
 
             source_key = Path(target_audio_path).stem.split('_track_')[0]
             final_corrected_path = temp_dir / f"corrected_{source_key}.flac"
 
             if not self._encode_pcm_to_file(final_pcm, final_corrected_path, target_channels, target_layout, sample_rate):
-                return CorrectionResult(CorrectionVerdict.FAILED, "Failed during final track assembly.")
-            del final_pcm
-            gc.collect()
+                return CorrectionResult(CorrectionVerdict.FAILED, "Failed during final multichannel track encoding.")
 
+            del final_pcm; gc.collect()
+
+            self.log(f"[SUCCESS] Enhanced correction successful for '{Path(target_audio_path).name}'")
             return CorrectionResult(CorrectionVerdict.STEPPED, final_corrected_path)
         except Exception as e:
-            return CorrectionResult(CorrectionVerdict.FAILED, f"Tier 2 assembly failed: {e}")
+            return CorrectionResult(CorrectionVerdict.FAILED, f"Final assembly failed: {e}")
