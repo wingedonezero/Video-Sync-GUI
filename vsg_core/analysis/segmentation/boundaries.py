@@ -59,7 +59,6 @@ class BoundaryDetector:
 
         self.log(f"  [Boundaries] Analyzed {num_chunks} chunks, finding change points...")
 
-        # Use ruptures exactly like the original
         algo = rpt.Binseg(model="l1").fit(delay_signal)
         penalty = np.log(num_chunks) * np.std(delay_signal)**2 * 0.1
         change_indices = algo.predict(pen=penalty)
@@ -73,7 +72,7 @@ class BoundaryDetector:
         segment_starts = [0] + change_indices[:-1]  # Exclude last (it's the end)
         segment_ends = change_indices
 
-        for i, (start_idx, end_idx) in enumerate(zip(segment_starts, segment_ends)):
+        for start_idx, end_idx in zip(segment_starts, segment_ends):
             # Calculate the median delay for THIS ENTIRE segment
             segment_delays = delay_signal[start_idx:end_idx]
             if len(segment_delays) > 0:
@@ -103,17 +102,13 @@ class BoundaryDetector:
         Find structural boundaries for complex audio (commercials, silence, etc).
         Only used when we need to handle complex cases.
         """
-        # For basic stepping correction, we don't need this
-        # It would only be used for commercial detection, reordering, etc
         return [0, len(audio)]
 
     def merge_boundaries(self, sync_boundaries: List[Tuple[int, int]],
-                        structural_boundaries: List[int],
-                        min_gap_s: float = 5.0) -> List[Tuple[int, int]]:
+                         structural_boundaries: List[int],
+                         min_gap_s: float = 5.0) -> List[Tuple[int, int]]:
         """
         For stepping correction, just use sync boundaries.
         Structural boundaries would only be merged for complex cases.
         """
-        # For now, just return sync boundaries
-        # This is where we'd merge if we detected commercials/reordering
         return sync_boundaries

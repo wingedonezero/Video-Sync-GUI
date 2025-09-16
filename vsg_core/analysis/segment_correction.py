@@ -7,13 +7,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
-from collections import Counter
+import ruptures as rpt
 from scipy.signal import correlate
+from collections import Counter
 
 from ..io.runner import CommandRunner
 from ..analysis.audio_corr import get_audio_stream_info, run_audio_correlation
-from .segmentation import BoundaryDetector, AudioFingerprinter, SegmentMatcher
-from .segmentation.matching import Segment
 
 @dataclass
 class AudioSegment:
@@ -49,23 +48,11 @@ def detect_stepping(chunks: List[Dict[str, Any]], config: dict) -> bool:
     if len(chunks) < 2:
         return False
 
-    # Get accepted delays
-    delays = [c['delay'] for c in chunks if c.get('accepted', False)]
-    if not delays:
+    accepted_delays = [c['delay'] for c in chunks if c.get('accepted', False)]
+    if len(accepted_delays) < 2:
         return False
 
-    drift = max(delays) - min(delays)
-
-    # Enhanced: Check for pattern changes if we have enough data
-    if len(delays) > 3:
-        # Check if delays are consistently changing (stepping pattern)
-        deltas = [delays[i+1] - delays[i] for i in range(len(delays)-1)]
-        # If we have significant changes between chunks, it's stepping
-        significant_changes = sum(1 for d in deltas if abs(d) > 100)
-        if significant_changes > 0:
-            return True
-
-    # If drift is more than 250ms, consider it stepping
+    drift = max(accepted_delays) - min(accepted_delays)
     return drift > 250
 
 class AudioCorrector:
@@ -78,11 +65,6 @@ class AudioCorrector:
         self.tool_paths = tool_paths
         self.config = config
         self.log = runner._log_message
-
-        # Initialize phase modules
-        self.boundary_detector = None
-        self.fingerprinter = None
-        self.matcher = None
 
     def _decode_to_memory(self, file_path: str, stream_index: int, sample_rate: int, channels: int, force_mono: bool = False) -> Optional[np.ndarray]:
         """Decodes a specific audio stream to a raw 32-bit PCM numpy array."""
@@ -104,68 +86,70 @@ class AudioCorrector:
         self.log(f"[ERROR] Corrector failed to decode audio stream {stream_index} from '{Path(file_path).name}'")
         return None
 
-    def _init_modules(self, sample_rate: int):
-        """Initialize processing modules with sample rate."""
-        self.boundary_detector = BoundaryDetector(sample_rate, self.log)
-        self.fingerprinter = AudioFingerprinter(sample_rate, self.log)
-        self.matcher = SegmentMatcher(self.fingerprinter, self.log)
-
-    def _build_precise_edl(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray,
-                          sample_rate: int, base_delay_ms: int) -> Optional[List[AudioSegment]]:
-        """Build EDL focusing on sync boundaries for stepping correction."""
-        if not self.boundary_detector:
-            self._init_modules(sample_rate)
-
-        self.log("  [Corrector] Starting stepped audio analysis...")
-
+    def _build_precise_edl(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int, base_delay_ms: int) -> Optional[List[AudioSegment]]:
+        """Performs a two-pass coarse and fine scan to create a sample-accurate Edit Decision List."""
+        self.log("  [Corrector] Starting Pass 1 (Coarse): High-resolution brute-force scan...")
         duration_s = min(len(ref_pcm), len(analysis_pcm)) / sample_rate
-        if duration_s < 10:
-            self.log("  [Corrector] Audio too short for segment analysis.")
+        window_s, step_s = 2.0, 0.25
+        window_samples, step_samples = int(window_s * sample_rate), int(step_s * sample_rate)
+
+        if duration_s < window_s * 10:
+            self.log("  [Corrector] Audio is too short for detailed segment analysis.")
             return None
 
-        # Phase I: Find sync boundaries (where delay changes)
-        sync_boundaries = self.boundary_detector.find_sync_boundaries(ref_pcm, analysis_pcm)
+        num_chunks = int((len(ref_pcm) - window_samples) / step_samples)
+        delay_signal = np.zeros(num_chunks)
 
-        # Check if we got reasonable number of segments
-        if len(sync_boundaries) > 20:  # Too many segments indicates over-segmentation
-            self.log(f"  [Corrector] WARNING: Found {len(sync_boundaries)-1} segments, may be over-segmented")
-            # Continue but warn
+        for i in range(num_chunks):
+            start = i * step_samples
+            end = start + window_samples
+            ref_chunk, analysis_chunk = ref_pcm[start:end], analysis_pcm[start:end]
+            r = (ref_chunk - np.mean(ref_chunk)) / (np.std(ref_chunk) + 1e-9)
+            t = (analysis_chunk - np.mean(analysis_chunk)) / (np.std(analysis_chunk) + 1e-9)
+            c = correlate(r, t, mode='full', method='fft')
+            k = np.argmax(np.abs(c))
+            lag_samples = float(k - (len(t) - 1))
+            delay_signal[i] = int(round((lag_samples / sample_rate) * 1000.0))
 
-        # Build segments from sync boundaries only
-        # Don't use structural boundaries for stepping correction
+        self.log(f"  [Corrector] Pass 1 complete. Finding approximate change points...")
+        algo = rpt.Binseg(model="l1").fit(delay_signal)
+        penalty = np.log(num_chunks) * np.std(delay_signal)**2 * 0.1
+        approx_change_indices = algo.predict(pen=penalty)
+
+        self.log("  [Corrector] Starting Pass 2 (Fine): Refining change points to be sample-accurate...")
+        refined_change_indices = [0]
+        for approx_idx in approx_change_indices:
+            if approx_idx == 0 or approx_idx >= num_chunks: continue
+            refined_idx = self._refine_change_point(ref_pcm, analysis_pcm, approx_idx, step_samples, sample_rate)
+            refined_change_indices.append(refined_idx)
+
+        refined_change_indices.append(len(ref_pcm)) # Add the end of the file as the final boundary
+
+        boundary_indices = sorted(list(set(refined_change_indices)))
         segments = []
-        for i in range(len(sync_boundaries) - 1):
-            start_sample, segment_delay = sync_boundaries[i]
-            end_sample, _ = sync_boundaries[i + 1]
 
-            if end_sample <= start_sample:
-                continue
+        for i in range(len(boundary_indices) - 1):
+            start_idx, end_idx = boundary_indices[i], boundary_indices[i+1]
+            if start_idx >= end_idx: continue
 
-            # For stepping correction, we use the delay from boundary detection
-            segments.append(AudioSegment(
-                start_s=start_sample / sample_rate,
-                end_s=end_sample / sample_rate,
-                delay_ms=segment_delay
-            ))
+            coarse_start_chunk = start_idx // step_samples
+            coarse_end_chunk = end_idx // step_samples
+            segment_delays = delay_signal[coarse_start_chunk:coarse_end_chunk]
+
+            if len(segment_delays) == 0:
+                stable_delay = int(delay_signal[max(0, coarse_start_chunk - 1)])
+            else:
+                stable_delay = Counter(segment_delays).most_common(1)[0][0]
+
+            segments.append(AudioSegment(start_s=(start_idx / sample_rate), end_s=(end_idx / sample_rate), delay_ms=int(stable_delay)))
 
         if segments:
-            # Override first segment delay with base delay
             segments[0].delay_ms = base_delay_ms
-
-            # Log summary
-            self.log(f"  [Corrector] Built EDL with {len(segments)} segments")
-            for i, seg in enumerate(segments, 1):
-                duration = seg.end_s - seg.start_s
-                self.log(f"    - Segment {i}: {seg.start_s:.1f}s - {seg.end_s:.1f}s "
-                        f"(duration: {duration:.1f}s) @ {seg.delay_ms}ms")
-
-            # Log delay distribution
-            delays = [seg.delay_ms for seg in segments]
-            unique_delays = Counter(delays)
-            if len(unique_delays) > 1:
-                self.log(f"  [Corrector] Delay distribution: {dict(unique_delays)}")
-
-        return segments if segments else None
+            self.log(f"  [Corrector] Detailed mapping found {len(segments)} segments.")
+            for i, seg in enumerate(segments):
+                self.log(f"    - Segment {i+1}: {seg.start_s:.4f}s - {seg.end_s:.4f}s @ {seg.delay_ms}ms")
+            return segments
+        return None
 
     def _refine_change_point(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, approx_chunk_idx: int, step_samples: int, sample_rate: int) -> int:
         """Performs a surgical, sample-by-sample scan to find the exact change point."""
@@ -195,10 +179,10 @@ class AudioCorrector:
             current_lag = np.argmax(np.abs(c)) - (len(t) - 1)
 
             if abs(current_lag - baseline_lag) > 5:
-                self.log(f"    - Refined change point from ~{(approx_sample_idx/sample_rate):.3f}s to {(i/sample_rate):.3f}s")
+                self.log(f"    - Refined point from ~{(approx_sample_idx/sample_rate):.3f}s to {(i/sample_rate):.3f}s")
                 return i
 
-        self.log(f"    - Warning: Could not refine change point at ~{(approx_sample_idx/sample_rate):.3f}s. Using original estimate.")
+        self.log(f"    - Warning: Could not refine point at ~{(approx_sample_idx/sample_rate):.3f}s. Using original estimate.")
         return approx_sample_idx
 
     def _assemble_from_pcm_in_memory(self, pcm_data: np.ndarray, edl: List[AudioSegment], channels: int, sample_rate: int) -> np.ndarray:
@@ -266,17 +250,13 @@ class AudioCorrector:
             delays = [r['delay'] for r in accepted]
             median_delay = np.median(delays)
 
-            # Allow more tolerance for stepped audio
-            if abs(median_delay - base_delay) > 50:
-                self.log(f"  [QA] WARNING: Median delay ({median_delay:.1f}ms) differs from base delay ({base_delay}ms).")
-                # Don't fail for stepped audio, as the median might be different
+            # The corrected track should have a consistent delay equal to the original base delay
+            if abs(median_delay - base_delay) > 20:
+                self.log(f"  [QA] FAILED: Median delay ({median_delay:.1f}ms) does not match base delay ({base_delay}ms).")
+                return False
 
-            # Check for consistency within segments
-            delay_std = np.std(delays)
-            if delay_std > 100:  # High variance expected for stepped audio
-                self.log(f"  [QA] INFO: Delay variance is high (Std Dev = {delay_std:.1f}ms) - expected for stepped audio.")
-            elif delay_std > 30:
-                self.log(f"  [QA] WARNING: Unexpected delay variance (Std Dev = {delay_std:.1f}ms).")
+            if np.std(delays) > 10:
+                self.log(f"  [QA] FAILED: Delay is unstable (Std Dev = {np.std(delays):.1f}ms).")
                 return False
 
             self.log("  [QA] PASSED: Timing map is verified and correct.")
@@ -314,11 +294,13 @@ class AudioCorrector:
         qa_pcm = self._assemble_from_pcm_in_memory(analysis_pcm, edl, 1, target_sr)
         qa_track_path = temp_dir / "qa_track.flac"
         if not self._encode_pcm_to_file(qa_pcm, qa_track_path, 1, 'mono', target_sr):
-             self.log("[ERROR] Corrector failed during temporary track assembly for QA."); return None
+                 self.log("[ERROR] Corrector failed during temporary track assembly for QA."); return None
         del qa_pcm
 
+        # In the old logic, the QA check was strict. If it failed, the process stopped.
+        # This prevents applying a bad correction.
         if not self._qa_check(str(qa_track_path), ref_file_path, base_delay_ms):
-             self.log("[WARNING] QA check failed, but continuing with correction for stepped audio.")
+                 self.log("[ERROR] Corrected track map failed QA check. Discarding result."); return None
 
         del ref_pcm, analysis_pcm; gc.collect()
 

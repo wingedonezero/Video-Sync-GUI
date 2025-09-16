@@ -78,15 +78,18 @@ class MkvmergeOptionsBuilder:
                 return i
         return -1
 
-    # --- REVERTED TO ORIGINAL LOGIC ---
-    # The special handling for `is_corrected` was incorrect. All tracks from a
-    # source, including corrected ones, should receive the same delay calculation.
     def _effective_delay_ms(self, plan: MergePlan, item: PlanItem) -> int:
-        """Calculates the final sync delay for a track."""
+        """
+        Calculates the final sync delay for a track.
+        This logic is now correct for ALL tracks, including corrected ones.
+        """
         tr = item.track
 
         d = plan.delays.global_shift_ms
         sync_key = item.sync_to if tr.source == 'External' else tr.source
+
+        # Apply the source-specific delay to align with the reference
         if sync_key and sync_key != "Source 1":
             d += plan.delays.source_delays_ms.get(sync_key, 0)
+
         return int(d)
