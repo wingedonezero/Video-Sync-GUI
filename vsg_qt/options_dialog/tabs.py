@@ -51,37 +51,7 @@ class AnalysisTab(QWidget):
         self.widgets: Dict[str, QWidget] = {}
         main_layout = QVBoxLayout(self)
 
-        segment_group = QGroupBox("🔧 Segmented Audio Correction (Experimental)")
-        segment_group.setToolTip("Automatically fixes complex sync issues with multiple step-changes in a single audio track.")
-        segment_layout = QFormLayout(segment_group)
-
-        self.widgets['segmented_enabled'] = QCheckBox("Enable segmented audio correction")
-        self.widgets['segmented_enabled'].setToolTip(
-            "When enabled, detects audio tracks with stepping sync issues and creates perfectly corrected versions.\n"
-            "Only applies when multiple distinct delay segments are detected."
-        )
-
-        self.widgets['segmented_qa_threshold'] = QDoubleSpinBox()
-        self.widgets['segmented_qa_threshold'].setRange(50.0, 99.0)
-        self.widgets['segmented_qa_threshold'].setValue(85.0)
-        self.widgets['segmented_qa_threshold'].setDecimals(1)
-        self.widgets['segmented_qa_threshold'].setSuffix("%")
-        self.widgets['segmented_qa_threshold'].setToolTip("Quality assurance threshold - corrected tracks must correlate above this percentage with the reference.")
-
-        # <-- NEW WIDGET ADDED HERE ---
-        self.widgets['segment_scan_offset_s'] = QDoubleSpinBox()
-        self.widgets['segment_scan_offset_s'].setRange(0.0, 300.0)
-        self.widgets['segment_scan_offset_s'].setValue(15.0)
-        self.widgets['segment_scan_offset_s'].setDecimals(1)
-        self.widgets['segment_scan_offset_s'].setSuffix(" s")
-        self.widgets['segment_scan_offset_s'].setToolTip("Ignore the first N seconds of the audio during the coarse scan to avoid unstable results from opening logos/music.")
-
-        segment_layout.addRow(self.widgets['segmented_enabled'])
-        segment_layout.addRow("QA Correlation Threshold:", self.widgets['segmented_qa_threshold'])
-        segment_layout.addRow("Initial Scan Offset:", self.widgets['segment_scan_offset_s'])
-
-        main_layout.addWidget(segment_group)
-
+        # --- Moved from top ---
         prep_group = QGroupBox("Step 1: Audio Pre-Processing")
         prep_group.setToolTip("Optionally prepares audio before analysis to improve signal quality.")
         prep_layout = QFormLayout(prep_group)
@@ -131,6 +101,50 @@ class AnalysisTab(QWidget):
         adv_layout.addWidget(self.widgets['audio_peak_fit'])
         adv_layout.addWidget(self.widgets['log_audio_drift'])
         main_layout.addWidget(adv_group)
+
+        # --- Segmented Correction Group (MOVED TO BOTTOM) ---
+        segment_group = QGroupBox("🔧 Segmented Audio Correction (Experimental & Advanced)")
+        segment_group.setToolTip("Automatically fixes complex sync issues with multiple step-changes in a single audio track.")
+        segment_layout = QFormLayout(segment_group)
+
+        self.widgets['segmented_enabled'] = QCheckBox("Enable segmented audio correction")
+        self.widgets['segmented_enabled'].setToolTip("When enabled, detects audio with stepping sync issues and creates a corrected version.")
+        segment_layout.addRow(self.widgets['segmented_enabled'])
+
+        # --- Main Controls ---
+        segment_layout.addRow(QLabel("<b>Main Controls</b>"))
+        self.widgets['segmented_qa_threshold'] = QDoubleSpinBox(); self.widgets['segmented_qa_threshold'].setRange(50.0, 99.0); self.widgets['segmented_qa_threshold'].setSuffix("%")
+        self.widgets['segment_scan_offset_s'] = QDoubleSpinBox(); self.widgets['segment_scan_offset_s'].setRange(0.0, 300.0); self.widgets['segment_scan_offset_s'].setSuffix(" s")
+        segment_layout.addRow("QA Correlation Threshold:", self.widgets['segmented_qa_threshold'])
+        segment_layout.addRow("Initial Scan Offset:", self.widgets['segment_scan_offset_s'])
+
+        # --- Detection & Triage ---
+        segment_layout.addRow(QLabel("<b>Detection & Triage Tweaks</b>"))
+        self.widgets['segment_stepping_drift_threshold_ms'] = QSpinBox(); self.widgets['segment_stepping_drift_threshold_ms'].setRange(50, 1000); self.widgets['segment_stepping_drift_threshold_ms'].setSuffix(" ms")
+        self.widgets['segment_triage_std_dev_ms'] = QSpinBox(); self.widgets['segment_triage_std_dev_ms'].setRange(10, 200); self.widgets['segment_triage_std_dev_ms'].setSuffix(" ms")
+        segment_layout.addRow("Stepping Detection Threshold:", self.widgets['segment_stepping_drift_threshold_ms'])
+        segment_layout.addRow("Triage Stability Threshold:", self.widgets['segment_triage_std_dev_ms'])
+
+        # --- Coarse Scan ---
+        segment_layout.addRow(QLabel("<b>Coarse Scan Tweaks</b>"))
+        self.widgets['segment_coarse_chunk_s'] = QSpinBox(); self.widgets['segment_coarse_chunk_s'].setRange(5, 60); self.widgets['segment_coarse_chunk_s'].setSuffix(" s")
+        self.widgets['segment_coarse_step_s'] = QSpinBox(); self.widgets['segment_coarse_step_s'].setRange(10, 300); self.widgets['segment_coarse_step_s'].setSuffix(" s")
+        self.widgets['segment_search_locality_s'] = QSpinBox(); self.widgets['segment_search_locality_s'].setRange(2, 30); self.widgets['segment_search_locality_s'].setSuffix(" s")
+        segment_layout.addRow("Coarse Scan Chunk Duration:", self.widgets['segment_coarse_chunk_s'])
+        segment_layout.addRow("Coarse Scan Step Size:", self.widgets['segment_coarse_step_s'])
+        segment_layout.addRow("Search Window Radius:", self.widgets['segment_search_locality_s'])
+
+        # --- Fine Scan ---
+        segment_layout.addRow(QLabel("<b>Fine Scan & Confidence Tweaks</b>"))
+        self.widgets['segment_min_confidence_ratio'] = QDoubleSpinBox(); self.widgets['segment_min_confidence_ratio'].setRange(2.0, 20.0); self.widgets['segment_min_confidence_ratio'].setDecimals(1)
+        self.widgets['segment_fine_chunk_s'] = QDoubleSpinBox(); self.widgets['segment_fine_chunk_s'].setRange(0.5, 10.0); self.widgets['segment_fine_chunk_s'].setSuffix(" s")
+        self.widgets['segment_fine_iterations'] = QSpinBox(); self.widgets['segment_fine_iterations'].setRange(5, 15)
+        segment_layout.addRow("Min. Correlation Confidence:", self.widgets['segment_min_confidence_ratio'])
+        segment_layout.addRow("Fine Scan Chunk Duration:", self.widgets['segment_fine_chunk_s'])
+        segment_layout.addRow("Fine Scan Iterations:", self.widgets['segment_fine_iterations'])
+
+        main_layout.addWidget(segment_group)
+        # --- End of Segmented Correction Group ---
 
         main_layout.addStretch(1)
         self.widgets['filtering_method'].currentTextChanged.connect(self._update_filter_options)

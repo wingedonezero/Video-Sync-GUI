@@ -15,13 +15,12 @@ class AppConfig:
             'temp_root': str(self.script_dir / 'temp_work'),
             'videodiff_path': '',
 
-            # --- New Flexible Analysis Settings ---
+            # --- Flexible Analysis Settings ---
             'source_separation_model': 'None (Use Original Audio)',
             'filtering_method': 'Dialogue Band-Pass Filter',
             'correlation_method': 'Phase Correlation (GCC-PHAT)',
             'min_accepted_chunks': 3,
             'log_audio_drift': True,
-            # ------------------------------------
 
             'analysis_mode': 'Audio Correlation',
             'analysis_lang_source1': '',
@@ -52,20 +51,25 @@ class AppConfig:
             'archive_logs': True,
             'auto_apply_strict': False,
 
-            # NEW: Post-merge options
+            # --- Post-merge options ---
             'post_mux_normalize_timestamps': False,
             'post_mux_strip_tags': False,
 
-            # NEW: Enhanced Segmented Audio Correction
+            # --- Enhanced Segmented Audio Correction ---
             'segmented_enabled': False,
             'segmented_qa_threshold': 85.0,
-            'segment_scan_offset_s': 15.0, # <-- NEW SETTING ADDED HERE
-            'segment_use_mfcc': True,       # Use MFCC timbral analysis for boundaries
-            'segment_use_fingerprint': True,    # Use acoustic fingerprinting for matching
-            'segment_detect_commercials': True, # Detect and skip commercials
-            'segment_fingerprint_confidence': 0.5,  # Min confidence for fingerprint match
-            'segment_min_duration': 2.0,        # Minimum segment duration in seconds
-            'segment_boundary_merge_gap': 0.5,  # Merge boundaries closer than this (seconds)
+            'segment_scan_offset_s': 15.0,
+            # Detection & Triage
+            'segment_stepping_drift_threshold_ms': 250,
+            'segment_triage_std_dev_ms': 50,
+            # Coarse Scan
+            'segment_coarse_chunk_s': 15,
+            'segment_coarse_step_s': 60,
+            'segment_search_locality_s': 10,
+            # Fine Scan & Confidence
+            'segment_min_confidence_ratio': 5.0,
+            'segment_fine_chunk_s': 2.0,
+            'segment_fine_iterations': 10,
         }
         self.settings = self.defaults.copy()
         self.load()

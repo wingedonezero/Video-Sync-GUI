@@ -49,7 +49,7 @@ def detect_stepping(chunks: List[Dict[str, Any]], config: dict) -> bool:
     accepted_delays = [c['delay'] for c in chunks if c.get('accepted', False)]
     if len(accepted_delays) < 2: return False
     drift = max(accepted_delays) - min(accepted_delays)
-    return drift > 250
+    return drift > config.get('segment_stepping_drift_threshold_ms', 250)
 
 class AudioCorrector:
     def __init__(self, runner: CommandRunner, tool_paths: dict, config: dict):
@@ -91,7 +91,9 @@ class AudioCorrector:
         noise_floor = np.median(abs_c) + 1e-9
         confidence_ratio = peak_val / noise_floor
 
-        if confidence_ratio < 5.0: return None
+        min_confidence = self.config.get('segment_min_confidence_ratio', 5.0)
+        if confidence_ratio < min_confidence:
+            return None
 
         lag_in_window = k
         absolute_lag_start = search_start + lag_in_window
@@ -100,10 +102,13 @@ class AudioCorrector:
 
     def _perform_coarse_scan(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int) -> List[Tuple[float, int]]:
         self.log("  [Corrector] Stage 1: Performing coarse scan to find delay zones...")
-        chunk_duration_s, step_duration_s = 15, 60
+        chunk_duration_s = self.config.get('segment_coarse_chunk_s', 15)
+        step_duration_s = self.config.get('segment_coarse_step_s', 60)
+        locality_s = self.config.get('segment_search_locality_s', 10)
+
         chunk_samples = int(chunk_duration_s * sample_rate)
         step_samples = int(step_duration_s * sample_rate)
-        locality_samples = int(10 * sample_rate)
+        locality_samples = int(locality_s * sample_rate)
         coarse_map = []
         num_samples = min(len(ref_pcm), len(analysis_pcm))
 
@@ -121,11 +126,16 @@ class AudioCorrector:
     def _find_boundary_in_zone(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int, zone_start_s: float, zone_end_s: float, delay_before: int, delay_after: int) -> float:
         self.log(f"  [Corrector] Stage 2: Performing fine scan in zone {zone_start_s:.1f}s - {zone_end_s:.1f}s...")
         zone_start_sample, zone_end_sample = int(zone_start_s * sample_rate), int(zone_end_s * sample_rate)
-        chunk_samples = int(2.0 * sample_rate)
-        locality_samples = int(10 * sample_rate)
+
+        fine_chunk_s = self.config.get('segment_fine_chunk_s', 2.0)
+        locality_s = self.config.get('segment_search_locality_s', 10)
+        iterations = self.config.get('segment_fine_iterations', 10)
+
+        chunk_samples = int(fine_chunk_s * sample_rate)
+        locality_samples = int(locality_s * sample_rate)
         low, high = zone_start_sample, zone_end_sample
 
-        for _ in range(10):
+        for _ in range(iterations):
             if high - low < chunk_samples: break
             mid = (low + high) // 2
             delay = self._get_delay_for_chunk(ref_pcm, analysis_pcm, mid, chunk_samples, sample_rate, locality_samples)
@@ -181,8 +191,8 @@ class AudioCorrector:
             final_chunk = pcm_data[last_pos_in_old:]
             end_position = current_pos_in_new + len(final_chunk)
             if end_position <= len(new_pcm):
-                 new_pcm[current_pos_in_new : end_position] = final_chunk
-                 current_pos_in_new = end_position
+               new_pcm[current_pos_in_new : end_position] = final_chunk
+               current_pos_in_new = end_position
 
         return new_pcm[:current_pos_in_new]
 
@@ -235,7 +245,8 @@ class AudioCorrector:
                 return CorrectionResult(CorrectionVerdict.FAILED, "Coarse scan did not find any reliable sync points.")
 
             stable_delays = [d for t, d in coarse_map]
-            if len(stable_delays) < 2 or np.std(stable_delays) < 50:
+            triage_std_dev_ms = self.config.get('segment_triage_std_dev_ms', 50)
+            if len(stable_delays) < 2 or np.std(stable_delays) < triage_std_dev_ms:
                 self.log("  [Corrector] Triage Result: Uniform delay detected.")
                 return CorrectionResult(CorrectionVerdict.UNIFORM, stable_delays[0] if stable_delays else base_delay_ms)
 
@@ -246,7 +257,8 @@ class AudioCorrector:
             for i in range(len(coarse_map) - 1):
                 zone_start_s, delay_before = coarse_map[i]
                 zone_end_s, delay_after = coarse_map[i+1]
-                if abs(delay_before - delay_after) < 50: continue
+                if abs(delay_before - delay_after) < triage_std_dev_ms:
+                    continue
 
                 boundary_s_ref = self._find_boundary_in_zone(ref_pcm, analysis_pcm, sample_rate, zone_start_s, zone_end_s, delay_before, delay_after)
                 boundary_s_target = boundary_s_ref + (delay_before / 1000.0)
@@ -275,7 +287,6 @@ class AudioCorrector:
             if target_pcm is None:
                 return CorrectionResult(CorrectionVerdict.FAILED, "Failed to decode target audio for final assembly.")
 
-            # --- CHANGE 3: Clearer Logging for Assembly Passes ---
             self.log("  [Corrector] Assembling temporary QA track...")
             qa_check_pcm = self._assemble_from_pcm_in_memory(analysis_pcm, edl, 1, sample_rate, log_prefix="QA")
 
