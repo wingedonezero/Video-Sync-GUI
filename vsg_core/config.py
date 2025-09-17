@@ -22,6 +22,14 @@ class AppConfig:
             'min_accepted_chunks': 3,
             'log_audio_drift': True,
 
+            # --- DSP & Filtering ---
+            'filter_bandpass_lowcut_hz': 300.0,
+            'filter_bandpass_highcut_hz': 3400.0,
+            'filter_bandpass_order': 5,
+            'filter_lowpass_taps': 101,
+            'scan_start_percentage': 5.0,
+            'scan_end_percentage': 95.0,
+
             'analysis_mode': 'Audio Correlation',
             'analysis_lang_source1': '',
             'analysis_lang_others': '',
@@ -59,14 +67,11 @@ class AppConfig:
             'segmented_enabled': False,
             'segmented_qa_threshold': 85.0,
             'segment_scan_offset_s': 15.0,
-            # Detection & Triage
             'segment_stepping_drift_threshold_ms': 250,
             'segment_triage_std_dev_ms': 50,
-            # Coarse Scan
             'segment_coarse_chunk_s': 15,
             'segment_coarse_step_s': 60,
             'segment_search_locality_s': 10,
-            # Fine Scan & Confidence
             'segment_min_confidence_ratio': 5.0,
             'segment_fine_chunk_s': 2.0,
             'segment_fine_iterations': 10,

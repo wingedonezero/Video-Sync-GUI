@@ -71,7 +71,7 @@ def _decode_to_memory(file_path: str, a_index: int, out_sr: int, use_soxr: bool,
         raise RuntimeError(f'ffmpeg decode failed for {Path(file_path).name}')
     return np.frombuffer(pcm_bytes, dtype=np.float32)
 
-def _apply_bandpass(waveform: np.ndarray, sr: int, lowcut=300.0, highcut=3400.0, order=5) -> np.ndarray:
+def _apply_bandpass(waveform: np.ndarray, sr: int, lowcut: float, highcut: float, order: int) -> np.ndarray:
     """Applies a Butterworth band-pass filter to isolate dialogue frequencies."""
     try:
         nyquist = 0.5 * sr
@@ -82,12 +82,11 @@ def _apply_bandpass(waveform: np.ndarray, sr: int, lowcut=300.0, highcut=3400.0,
     except Exception:
         return waveform
 
-def _apply_lowpass(waveform: np.ndarray, sr: int, cutoff_hz: int) -> np.ndarray:
+def _apply_lowpass(waveform: np.ndarray, sr: int, cutoff_hz: int, num_taps: int) -> np.ndarray:
     """Applies a simple FIR low-pass filter."""
     if cutoff_hz <= 0: return waveform
     try:
         nyquist = sr / 2
-        num_taps = 101
         hz = min(cutoff_hz, nyquist - 1)
         h = firwin(num_taps, hz / nyquist)
         return lfilter(h, 1.0, waveform).astype(np.float32)
@@ -161,24 +160,35 @@ def run_audio_correlation(
     filtering_method = config.get('filtering_method', 'None')
     if filtering_method == 'Dialogue Band-Pass Filter':
         log("Applying Dialogue Band-Pass filter...")
-        ref_pcm = _apply_bandpass(ref_pcm, DEFAULT_SR)
-        tgt_pcm = _apply_bandpass(tgt_pcm, DEFAULT_SR)
+        lowcut = config.get('filter_bandpass_lowcut_hz', 300.0)
+        highcut = config.get('filter_bandpass_highcut_hz', 3400.0)
+        order = config.get('filter_bandpass_order', 5)
+        ref_pcm = _apply_bandpass(ref_pcm, DEFAULT_SR, lowcut, highcut, order)
+        tgt_pcm = _apply_bandpass(tgt_pcm, DEFAULT_SR, lowcut, highcut, order)
     elif filtering_method == 'Low-Pass Filter':
         cutoff = int(config.get('audio_bandlimit_hz', 0))
         if cutoff > 0:
             log(f"Applying Low-Pass filter at {cutoff} Hz...")
-            ref_pcm = _apply_lowpass(ref_pcm, DEFAULT_SR, cutoff)
-            tgt_pcm = _apply_lowpass(tgt_pcm, DEFAULT_SR, cutoff)
+            taps = config.get('filter_lowpass_taps', 101)
+            ref_pcm = _apply_lowpass(ref_pcm, DEFAULT_SR, cutoff, taps)
+            tgt_pcm = _apply_lowpass(tgt_pcm, DEFAULT_SR, cutoff, taps)
 
     # --- 4. Per-Chunk Correlation ---
     duration_s = len(ref_pcm) / float(DEFAULT_SR)
     chunk_count = int(config.get('scan_chunk_count', 10))
     chunk_dur = float(config.get('scan_chunk_duration', 15.0))
-    scan_range = max(0.0, duration_s - chunk_dur)
-    start_offset = 0
-    if scan_range > 0:
-        scan_range = duration_s * 0.9
-        start_offset = duration_s * 0.05
+
+    start_pct = config.get('scan_start_percentage', 5.0)
+    end_pct = config.get('scan_end_percentage', 95.0)
+    if not 0.0 <= start_pct < end_pct <= 100.0: # Sanity check
+        start_pct, end_pct = 5.0, 95.0
+
+    scan_start_s = duration_s * (start_pct / 100.0)
+    scan_end_s = duration_s * (end_pct / 100.0)
+
+    # Total duration of the scannable area, accounting for the final chunk's length
+    scan_range = max(0.0, (scan_end_s - scan_start_s) - chunk_dur)
+    start_offset = scan_start_s
 
     starts = [start_offset + (scan_range / max(1, chunk_count - 1) * i) for i in range(chunk_count)]
     results = []
