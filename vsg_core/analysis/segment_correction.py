@@ -200,7 +200,17 @@ class AudioCorrector:
         self.log("  [Corrector] Performing rigorous QA check on corrected audio map...")
         qa_config = self.config.copy()
         qa_threshold = self.config.get('segmented_qa_threshold', 85.0)
-        qa_config.update({'scan_chunk_count': 30, 'min_accepted_chunks': 28, 'min_match_pct': qa_threshold})
+
+        # --- THIS IS THE FIX ---
+        # Use configurable settings instead of hardcoded values
+        qa_scan_chunks = self.config.get('segment_qa_chunk_count', 30)
+        qa_min_chunks = self.config.get('segment_qa_min_accepted_chunks', 28)
+
+        qa_config.update({
+            'scan_chunk_count': qa_scan_chunks,
+            'min_accepted_chunks': qa_min_chunks,
+            'min_match_pct': qa_threshold
+        })
         self.log(f"  [QA] Using minimum match confidence of {qa_threshold:.1f}%")
 
         try:
@@ -209,6 +219,8 @@ class AudioCorrector:
                 runner=self.runner, tool_paths=self.tool_paths, ref_lang=None, target_lang=None, role_tag="QA"
             )
             accepted = [r for r in results if r.get('accepted', False)]
+
+            # The check now uses the value from the config
             if len(accepted) < qa_config['min_accepted_chunks']:
                 self.log(f"  [QA] FAILED: Not enough confident chunks ({len(accepted)}/{qa_config['min_accepted_chunks']}).")
                 return False

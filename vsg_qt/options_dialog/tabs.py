@@ -121,7 +121,7 @@ class AnalysisTab(QWidget):
         adv_layout.addWidget(self.widgets['log_audio_drift'])
         main_layout.addWidget(adv_group)
 
-        # Segmented Correction Group (MOVED TO BOTTOM & ALL WIDGETS ADDED)
+        # Segmented Correction Group
         segment_group = QGroupBox("🔧 Segmented Audio Correction (Experimental & Advanced)")
         segment_layout = QFormLayout(segment_group)
         self.widgets['segmented_enabled'] = QCheckBox("Enable segmented audio correction"); self.widgets['segmented_enabled'].setToolTip("When enabled, detects audio with stepping sync issues and creates a corrected version.")
@@ -129,8 +129,12 @@ class AnalysisTab(QWidget):
         segment_layout.addRow(QLabel("<b>Main Controls</b>"))
         self.widgets['segmented_qa_threshold'] = QDoubleSpinBox(); self.widgets['segmented_qa_threshold'].setRange(50.0, 99.0); self.widgets['segmented_qa_threshold'].setSuffix("%"); self.widgets['segmented_qa_threshold'].setToolTip("Quality assurance threshold - corrected tracks must correlate above this percentage with the reference.")
         self.widgets['segment_scan_offset_s'] = QDoubleSpinBox(); self.widgets['segment_scan_offset_s'].setRange(0.0, 300.0); self.widgets['segment_scan_offset_s'].setSuffix(" s"); self.widgets['segment_scan_offset_s'].setToolTip("Ignore the first N seconds of the audio during the coarse scan to avoid unstable results from opening logos/music.")
+        self.widgets['segment_qa_chunk_count'] = QSpinBox(); self.widgets['segment_qa_chunk_count'].setRange(10, 100); self.widgets['segment_qa_chunk_count'].setToolTip("The number of chunks to scan during the final quality assurance check.")
+        self.widgets['segment_qa_min_accepted_chunks'] = QSpinBox(); self.widgets['segment_qa_min_accepted_chunks'].setRange(5, 100); self.widgets['segment_qa_min_accepted_chunks'].setToolTip("The minimum number of QA chunks that must pass for the correction to be successful.")
         segment_layout.addRow("QA Correlation Threshold:", self.widgets['segmented_qa_threshold'])
         segment_layout.addRow("Initial Scan Offset:", self.widgets['segment_scan_offset_s'])
+        segment_layout.addRow("QA Scan Chunks:", self.widgets['segment_qa_chunk_count'])
+        segment_layout.addRow("QA Min. Accepted Chunks:", self.widgets['segment_qa_min_accepted_chunks'])
         segment_layout.addRow(QLabel("<b>Detection & Triage Tweaks</b>"))
         self.widgets['segment_stepping_drift_threshold_ms'] = QSpinBox(); self.widgets['segment_stepping_drift_threshold_ms'].setRange(50, 1000); self.widgets['segment_stepping_drift_threshold_ms'].setSuffix(" ms"); self.widgets['segment_stepping_drift_threshold_ms'].setToolTip("Minimum time difference between chunks to trigger segmented correction.")
         self.widgets['segment_triage_std_dev_ms'] = QSpinBox(); self.widgets['segment_triage_std_dev_ms'].setRange(10, 200); self.widgets['segment_triage_std_dev_ms'].setSuffix(" ms"); self.widgets['segment_triage_std_dev_ms'].setToolTip("If the standard deviation of delays is below this, correction is skipped.")

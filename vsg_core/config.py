@@ -67,11 +67,16 @@ class AppConfig:
             'segmented_enabled': False,
             'segmented_qa_threshold': 85.0,
             'segment_scan_offset_s': 15.0,
+            'segment_qa_chunk_count': 30,
+            'segment_qa_min_accepted_chunks': 28,
+            # Detection & Triage
             'segment_stepping_drift_threshold_ms': 250,
             'segment_triage_std_dev_ms': 50,
+            # Coarse Scan
             'segment_coarse_chunk_s': 15,
             'segment_coarse_step_s': 60,
             'segment_search_locality_s': 10,
+            # Fine Scan & Confidence
             'segment_min_confidence_ratio': 5.0,
             'segment_fine_chunk_s': 2.0,
             'segment_fine_iterations': 10,
