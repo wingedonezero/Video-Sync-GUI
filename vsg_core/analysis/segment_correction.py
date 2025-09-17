@@ -107,16 +107,8 @@ class AudioCorrector:
         coarse_map = []
         num_samples = min(len(ref_pcm), len(analysis_pcm))
 
-        # --- CHANGE 1: Read offset from config ---
         initial_offset_seconds = self.config.get('segment_scan_offset_s', 15.0)
         start_offset_samples = int(initial_offset_seconds * sample_rate)
-
-        # Perform a scan at time 0 only if the offset is very small
-        if start_offset_samples < step_samples:
-            delay_at_start = self._get_delay_for_chunk(ref_pcm, analysis_pcm, 0, chunk_samples, sample_rate, locality_samples)
-            if delay_at_start is not None:
-                coarse_map.append((0.0, delay_at_start))
-                self.log(f"    - Coarse point at 0.0s: delay = {delay_at_start}ms")
 
         for start_sample in range(start_offset_samples, num_samples - chunk_samples, step_samples):
             delay = self._get_delay_for_chunk(ref_pcm, analysis_pcm, start_sample, chunk_samples, sample_rate, locality_samples)
@@ -150,7 +142,7 @@ class AudioCorrector:
         cmd = [ 'ffmpeg', '-y', '-v', 'error', '-nostdin', '-f', 's32le', '-ar', str(sample_rate), '-ac', str(channels), '-channel_layout', channel_layout, '-i', '-', '-c:a', 'flac', str(out_path) ]
         return self.runner.run(cmd, self.tool_paths, is_binary=True, input_data=pcm_data.tobytes()) is not None
 
-    def _assemble_from_pcm_in_memory(self, pcm_data: np.ndarray, edl: List[AudioSegment], channels: int, sample_rate: int) -> np.ndarray:
+    def _assemble_from_pcm_in_memory(self, pcm_data: np.ndarray, edl: List[AudioSegment], channels: int, sample_rate: int, log_prefix: str) -> np.ndarray:
         """Creates a corrected PCM stream using the trusted 'timeline walker' method."""
         if not edl: return pcm_data
 
@@ -173,14 +165,14 @@ class AudioCorrector:
                     new_pcm[current_pos_in_new : current_pos_in_new + len(chunk_to_copy)] = chunk_to_copy
                 current_pos_in_new += len(chunk_to_copy)
 
-            # --- CHANGE 2: Improved Logging ---
             silence_to_add_ms = segment.delay_ms - current_base_delay
-            if silence_to_add_ms > 10:
-                self.log(f"    - At {segment.start_s:.3f}s: Inserting {silence_to_add_ms}ms of silence to adjust timing.")
-                silence_samples = int(silence_to_add_ms / 1000 * sample_rate) * channels
-                current_pos_in_new += silence_samples
-            elif silence_to_add_ms < -10:
-                self.log(f"    - At {segment.start_s:.3f}s: Removing {-silence_to_add_ms}ms of audio to adjust timing.")
+            if abs(silence_to_add_ms) > 10:
+                if silence_to_add_ms > 0:
+                    self.log(f"    - [{log_prefix}] At {segment.start_s:.3f}s: Inserting {silence_to_add_ms}ms of silence.")
+                    silence_samples = int(silence_to_add_ms / 1000 * sample_rate) * channels
+                    current_pos_in_new += silence_samples
+                else:
+                    self.log(f"    - [{log_prefix}] At {segment.start_s:.3f}s: Removing {-silence_to_add_ms}ms of audio.")
 
             current_base_delay = segment.delay_ms
             last_pos_in_old = target_action_sample
@@ -197,7 +189,6 @@ class AudioCorrector:
     def _qa_check(self, corrected_path: str, ref_file_path: str, base_delay: int) -> bool:
         self.log("  [Corrector] Performing rigorous QA check on corrected audio map...")
         qa_config = self.config.copy()
-
         qa_threshold = self.config.get('segmented_qa_threshold', 85.0)
         qa_config.update({'scan_chunk_count': 30, 'min_accepted_chunks': 28, 'min_match_pct': qa_threshold})
         self.log(f"  [QA] Using minimum match confidence of {qa_threshold:.1f}%")
@@ -284,19 +275,21 @@ class AudioCorrector:
             if target_pcm is None:
                 return CorrectionResult(CorrectionVerdict.FAILED, "Failed to decode target audio for final assembly.")
 
-            self.log("  [Corrector] Assembling final corrected track in memory...")
-            final_pcm = self._assemble_from_pcm_in_memory(target_pcm, edl, target_channels, sample_rate)
-            del target_pcm; gc.collect()
+            # --- CHANGE 3: Clearer Logging for Assembly Passes ---
+            self.log("  [Corrector] Assembling temporary QA track...")
+            qa_check_pcm = self._assemble_from_pcm_in_memory(analysis_pcm, edl, 1, sample_rate, log_prefix="QA")
 
             qa_track_path = temp_dir / "qa_track.flac"
-
-            qa_check_pcm = self._assemble_from_pcm_in_memory(analysis_pcm, edl, 1, sample_rate)
             if not self._encode_pcm_to_file(qa_check_pcm, qa_track_path, 1, 'mono', sample_rate):
                 return CorrectionResult(CorrectionVerdict.FAILED, "Failed during QA track encoding.")
             del qa_check_pcm; gc.collect()
 
             if not self._qa_check(str(qa_track_path), ref_file_path, edl[0].delay_ms):
                 return CorrectionResult(CorrectionVerdict.FAILED, "Corrected track failed QA check.")
+
+            self.log("  [Corrector] Assembling final corrected track in memory...")
+            final_pcm = self._assemble_from_pcm_in_memory(target_pcm, edl, target_channels, sample_rate, log_prefix="Final")
+            del target_pcm; gc.collect()
 
             source_key = Path(target_audio_path).stem.split('_track_')[0]
             final_corrected_path = temp_dir / f"corrected_{source_key}.flac"

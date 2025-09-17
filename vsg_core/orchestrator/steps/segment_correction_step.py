@@ -87,6 +87,8 @@ class SegmentCorrectionStep:
                     )
                 )
 
+                # --- THIS IS THE FIX ---
+                # Update the main track item to point to the new, corrected FLAC file
                 target_item.extracted_path = corrected_path
                 target_item.is_corrected = True
                 target_item.track = Track(
@@ -94,11 +96,11 @@ class SegmentCorrectionStep:
                     props=StreamProps(
                         codec_id="FLAC",
                         lang=original_props.lang,
-                        name=f"{original_props.name} (Corrected)" if original_props.name else "Corrected Audio"
+                        name="" # Set the name to an empty string
                     )
                 )
                 target_item.is_default = True
-                target_item.apply_track_name = True
+                target_item.apply_track_name = False # Do not apply the track name
 
                 ctx.extracted_items.append(preserved_item)
 
