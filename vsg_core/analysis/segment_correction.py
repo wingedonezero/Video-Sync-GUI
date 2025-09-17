@@ -107,8 +107,16 @@ class AudioCorrector:
         coarse_map = []
         num_samples = min(len(ref_pcm), len(analysis_pcm))
 
-        initial_offset_seconds = 15.0
+        # --- CHANGE 1: Read offset from config ---
+        initial_offset_seconds = self.config.get('segment_scan_offset_s', 15.0)
         start_offset_samples = int(initial_offset_seconds * sample_rate)
+
+        # Perform a scan at time 0 only if the offset is very small
+        if start_offset_samples < step_samples:
+            delay_at_start = self._get_delay_for_chunk(ref_pcm, analysis_pcm, 0, chunk_samples, sample_rate, locality_samples)
+            if delay_at_start is not None:
+                coarse_map.append((0.0, delay_at_start))
+                self.log(f"    - Coarse point at 0.0s: delay = {delay_at_start}ms")
 
         for start_sample in range(start_offset_samples, num_samples - chunk_samples, step_samples):
             delay = self._get_delay_for_chunk(ref_pcm, analysis_pcm, start_sample, chunk_samples, sample_rate, locality_samples)
@@ -147,8 +155,7 @@ class AudioCorrector:
         if not edl: return pcm_data
 
         base_delay = edl[0].delay_ms
-        # Calculate total silence based on the final state of the EDL, which represents total delays
-        total_silence_ms = sum(max(0, seg.delay_ms - base_delay) for seg in edl[1:]) # Skip the base segment
+        total_silence_ms = sum(max(0, seg.delay_ms - base_delay) for seg in edl)
         total_silence_samples = int(total_silence_ms / 1000 * sample_rate) * channels
         final_sample_count = len(pcm_data) + total_silence_samples
         new_pcm = np.zeros(final_sample_count, dtype=np.int32)
@@ -166,10 +173,14 @@ class AudioCorrector:
                     new_pcm[current_pos_in_new : current_pos_in_new + len(chunk_to_copy)] = chunk_to_copy
                 current_pos_in_new += len(chunk_to_copy)
 
+            # --- CHANGE 2: Improved Logging ---
             silence_to_add_ms = segment.delay_ms - current_base_delay
             if silence_to_add_ms > 10:
+                self.log(f"    - At {segment.start_s:.3f}s: Inserting {silence_to_add_ms}ms of silence to adjust timing.")
                 silence_samples = int(silence_to_add_ms / 1000 * sample_rate) * channels
                 current_pos_in_new += silence_samples
+            elif silence_to_add_ms < -10:
+                self.log(f"    - At {segment.start_s:.3f}s: Removing {-silence_to_add_ms}ms of audio to adjust timing.")
 
             current_base_delay = segment.delay_ms
             last_pos_in_old = target_action_sample
@@ -187,10 +198,7 @@ class AudioCorrector:
         self.log("  [Corrector] Performing rigorous QA check on corrected audio map...")
         qa_config = self.config.copy()
 
-        # --- THIS IS THE FIX ---
-        # Read the QA threshold from the config instead of hardcoding it.
         qa_threshold = self.config.get('segmented_qa_threshold', 85.0)
-
         qa_config.update({'scan_chunk_count': 30, 'min_accepted_chunks': 28, 'min_match_pct': qa_threshold})
         self.log(f"  [QA] Using minimum match confidence of {qa_threshold:.1f}%")
 

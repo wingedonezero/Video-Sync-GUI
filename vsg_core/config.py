@@ -59,7 +59,8 @@ class AppConfig:
             # NEW: Enhanced Segmented Audio Correction
             'segmented_enabled': False,
             'segmented_qa_threshold': 85.0,
-            'segment_use_mfcc': True,           # Use MFCC timbral analysis for boundaries
+            'segment_scan_offset_s': 15.0, # <-- NEW SETTING ADDED HERE
+            'segment_use_mfcc': True,       # Use MFCC timbral analysis for boundaries
             'segment_use_fingerprint': True,    # Use acoustic fingerprinting for matching
             'segment_detect_commercials': True, # Detect and skip commercials
             'segment_fingerprint_confidence': 0.5,  # Min confidence for fingerprint match

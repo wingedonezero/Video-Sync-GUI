@@ -51,7 +51,6 @@ class AnalysisTab(QWidget):
         self.widgets: Dict[str, QWidget] = {}
         main_layout = QVBoxLayout(self)
 
-        # NEW: Segmented Audio Correction section
         segment_group = QGroupBox("🔧 Segmented Audio Correction (Experimental)")
         segment_group.setToolTip("Automatically fixes complex sync issues with multiple step-changes in a single audio track.")
         segment_layout = QFormLayout(segment_group)
@@ -69,8 +68,18 @@ class AnalysisTab(QWidget):
         self.widgets['segmented_qa_threshold'].setSuffix("%")
         self.widgets['segmented_qa_threshold'].setToolTip("Quality assurance threshold - corrected tracks must correlate above this percentage with the reference.")
 
+        # <-- NEW WIDGET ADDED HERE ---
+        self.widgets['segment_scan_offset_s'] = QDoubleSpinBox()
+        self.widgets['segment_scan_offset_s'].setRange(0.0, 300.0)
+        self.widgets['segment_scan_offset_s'].setValue(15.0)
+        self.widgets['segment_scan_offset_s'].setDecimals(1)
+        self.widgets['segment_scan_offset_s'].setSuffix(" s")
+        self.widgets['segment_scan_offset_s'].setToolTip("Ignore the first N seconds of the audio during the coarse scan to avoid unstable results from opening logos/music.")
+
         segment_layout.addRow(self.widgets['segmented_enabled'])
         segment_layout.addRow("QA Correlation Threshold:", self.widgets['segmented_qa_threshold'])
+        segment_layout.addRow("Initial Scan Offset:", self.widgets['segment_scan_offset_s'])
+
         main_layout.addWidget(segment_group)
 
         prep_group = QGroupBox("Step 1: Audio Pre-Processing")
@@ -162,7 +171,6 @@ class MergeBehaviorTab(QWidget):
         form1.addWidget(self.widgets['disable_track_statistics_tags'])
         main_layout.addWidget(general_group)
 
-        # NEW: Post-Merge Finalization section
         post_merge_group = QGroupBox("Post-Merge Finalization")
         post_merge_group.setToolTip("Optional, lossless steps that run after the main merge to improve compatibility.")
         form2 = QFormLayout(post_merge_group)
