@@ -1,4 +1,4 @@
-# vsg_core/analysis/segment_correction.py
+# vsg_core/correction/stepping.py
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 import json
@@ -14,6 +14,9 @@ from collections import Counter
 
 from ..io.runner import CommandRunner
 from ..analysis.audio_corr import get_audio_stream_info, run_audio_correlation
+from ..orchestrator.steps.context import Context
+from ..models.media import StreamProps, Track
+from ..extraction.tracks import extract_tracks
 
 class CorrectionVerdict(Enum):
     UNIFORM = auto()
@@ -44,14 +47,7 @@ def _get_audio_properties(file_path: str, stream_index: int, runner: CommandRunn
         return channels, channel_layout, sample_rate
     except (json.JSONDecodeError, IndexError, KeyError) as e: raise RuntimeError(f"Failed to parse ffprobe audio properties: {e}")
 
-def detect_stepping(chunks: List[Dict[str, Any]], config: dict) -> bool:
-    if len(chunks) < 2: return False
-    accepted_delays = [c['delay'] for c in chunks if c.get('accepted', False)]
-    if len(accepted_delays) < 2: return False
-    drift = max(accepted_delays) - min(accepted_delays)
-    return drift > config.get('segment_stepping_drift_threshold_ms', 250)
-
-class AudioCorrector:
+class SteppingCorrector:
     def __init__(self, runner: CommandRunner, tool_paths: dict, config: dict):
         self.runner = runner
         self.tool_paths = tool_paths
@@ -62,7 +58,7 @@ class AudioCorrector:
         cmd = [ 'ffmpeg', '-nostdin', '-v', 'error', '-i', str(file_path), '-map', f'0:a:{stream_index}', '-ac', str(channels), '-ar', str(sample_rate), '-f', 's32le', '-' ]
         pcm_bytes = self.runner.run(cmd, self.tool_paths, is_binary=True)
         if pcm_bytes: return np.frombuffer(pcm_bytes, dtype=np.int32)
-        self.log(f"[ERROR] Corrector failed to decode audio stream {stream_index} from '{Path(file_path).name}'")
+        self.log(f"[ERROR] SteppingCorrector failed to decode audio stream {stream_index} from '{Path(file_path).name}'")
         return None
 
     def _get_delay_for_chunk(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, start_sample: int, num_samples: int, sample_rate: int, locality_samples: int) -> Optional[int]:
@@ -101,7 +97,7 @@ class AudioCorrector:
         return int(round((delay_samples / sample_rate) * 1000.0))
 
     def _perform_coarse_scan(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int) -> List[Tuple[float, int]]:
-        self.log("  [Corrector] Stage 1: Performing coarse scan to find delay zones...")
+        self.log("  [SteppingCorrector] Stage 1: Performing coarse scan to find delay zones...")
         chunk_duration_s = self.config.get('segment_coarse_chunk_s', 15)
         step_duration_s = self.config.get('segment_coarse_step_s', 60)
         locality_s = self.config.get('segment_search_locality_s', 10)
@@ -124,7 +120,7 @@ class AudioCorrector:
         return coarse_map
 
     def _find_boundary_in_zone(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int, zone_start_s: float, zone_end_s: float, delay_before: int, delay_after: int) -> float:
-        self.log(f"  [Corrector] Stage 2: Performing fine scan in zone {zone_start_s:.1f}s - {zone_end_s:.1f}s...")
+        self.log(f"  [SteppingCorrector] Stage 2: Performing fine scan in zone {zone_start_s:.1f}s - {zone_end_s:.1f}s...")
         zone_start_sample, zone_end_sample = int(zone_start_s * sample_rate), int(zone_end_s * sample_rate)
 
         fine_chunk_s = self.config.get('segment_fine_chunk_s', 2.0)
@@ -191,18 +187,16 @@ class AudioCorrector:
             final_chunk = pcm_data[last_pos_in_old:]
             end_position = current_pos_in_new + len(final_chunk)
             if end_position <= len(new_pcm):
-               new_pcm[current_pos_in_new : end_position] = final_chunk
-               current_pos_in_new = end_position
+                new_pcm[current_pos_in_new : end_position] = final_chunk
+            current_pos_in_new = end_position
 
         return new_pcm[:current_pos_in_new]
 
     def _qa_check(self, corrected_path: str, ref_file_path: str, base_delay: int) -> bool:
-        self.log("  [Corrector] Performing rigorous QA check on corrected audio map...")
+        self.log("  [SteppingCorrector] Performing rigorous QA check on corrected audio map...")
         qa_config = self.config.copy()
         qa_threshold = self.config.get('segmented_qa_threshold', 85.0)
 
-        # --- THIS IS THE FIX ---
-        # Use configurable settings instead of hardcoded values
         qa_scan_chunks = self.config.get('segment_qa_chunk_count', 30)
         qa_min_chunks = self.config.get('segment_qa_min_accepted_chunks', 28)
 
@@ -220,7 +214,6 @@ class AudioCorrector:
             )
             accepted = [r for r in results if r.get('accepted', False)]
 
-            # The check now uses the value from the config
             if len(accepted) < qa_config['min_accepted_chunks']:
                 self.log(f"  [QA] FAILED: Not enough confident chunks ({len(accepted)}/{qa_config['min_accepted_chunks']}).")
                 return False
@@ -259,7 +252,7 @@ class AudioCorrector:
             stable_delays = [d for t, d in coarse_map]
             triage_std_dev_ms = self.config.get('segment_triage_std_dev_ms', 50)
             if len(stable_delays) < 2 or np.std(stable_delays) < triage_std_dev_ms:
-                self.log("  [Corrector] Triage Result: Uniform delay detected.")
+                self.log("  [SteppingCorrector] Triage Result: Uniform delay detected.")
                 return CorrectionResult(CorrectionVerdict.UNIFORM, stable_delays[0] if stable_delays else base_delay_ms)
 
             edl: List[AudioSegment] = []
@@ -278,13 +271,13 @@ class AudioCorrector:
 
             edl = sorted(list(set(edl)), key=lambda x: x.start_s)
 
-            self.log("  [Corrector] Final Edit Decision List (EDL) for assembly created:")
+            self.log("  [SteppingCorrector] Final Edit Decision List (EDL) for assembly created:")
             for i, seg in enumerate(edl): self.log(f"    - Action {i+1}: At target time {seg.start_s:.3f}s, new total delay is {seg.delay_ms}ms")
 
             return self._run_final_assembly(target_audio_path, edl=edl, temp_dir=temp_dir, ref_file_path=ref_file_path, analysis_pcm=analysis_pcm)
 
         except Exception as e:
-            self.log(f"[FATAL] AudioCorrector failed with exception: {e}")
+            self.log(f"[FATAL] SteppingCorrector failed with exception: {e}")
             import traceback
             self.log(f"[DEBUG] Traceback: {traceback.format_exc()}")
             return CorrectionResult(CorrectionVerdict.FAILED, str(e))
@@ -294,12 +287,12 @@ class AudioCorrector:
             target_index, _ = get_audio_stream_info(target_audio_path, None, self.runner, self.tool_paths)
             target_channels, target_layout, sample_rate = _get_audio_properties(target_audio_path, target_index, self.runner, self.tool_paths)
 
-            self.log(f"  [Corrector] Stage 3: Decoding final target audio track ({target_layout})...")
+            self.log(f"  [SteppingCorrector] Stage 3: Decoding final target audio track ({target_layout})...")
             target_pcm = self._decode_to_memory(target_audio_path, target_index, sample_rate, target_channels)
             if target_pcm is None:
                 return CorrectionResult(CorrectionVerdict.FAILED, "Failed to decode target audio for final assembly.")
 
-            self.log("  [Corrector] Assembling temporary QA track...")
+            self.log("  [SteppingCorrector] Assembling temporary QA track...")
             qa_check_pcm = self._assemble_from_pcm_in_memory(analysis_pcm, edl, 1, sample_rate, log_prefix="QA")
 
             qa_track_path = temp_dir / "qa_track.flac"
@@ -310,7 +303,7 @@ class AudioCorrector:
             if not self._qa_check(str(qa_track_path), ref_file_path, edl[0].delay_ms):
                 return CorrectionResult(CorrectionVerdict.FAILED, "Corrected track failed QA check.")
 
-            self.log("  [Corrector] Assembling final corrected track in memory...")
+            self.log("  [SteppingCorrector] Assembling final corrected track in memory...")
             final_pcm = self._assemble_from_pcm_in_memory(target_pcm, edl, target_channels, sample_rate, log_prefix="Final")
             del target_pcm; gc.collect()
 
@@ -322,7 +315,99 @@ class AudioCorrector:
 
             del final_pcm; gc.collect()
 
-            self.log(f"[SUCCESS] Enhanced correction successful for '{Path(target_audio_path).name}'")
+            self.log(f"[SUCCESS] Enhanced stepping correction successful for '{Path(target_audio_path).name}'")
             return CorrectionResult(CorrectionVerdict.STEPPED, final_corrected_path)
         except Exception as e:
             return CorrectionResult(CorrectionVerdict.FAILED, f"Final assembly failed: {e}")
+
+def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
+    """Main entry point for running the stepping correction process."""
+    extracted_audio_map = {
+        f"{item.track.source}_{item.track.id}": item
+        for item in ctx.extracted_items if item.track.type == TrackType.AUDIO
+    }
+
+    corrector = SteppingCorrector(runner, ctx.tool_paths, ctx.settings_dict)
+    ref_file_path = ctx.sources.get("Source 1")
+
+    for analysis_track_key, flag_info in ctx.segment_flags.items():
+        source_key = analysis_track_key.split('_')[0]
+        base_delay_ms = flag_info['base_delay']
+
+        target_items = [
+            item for item in ctx.extracted_items
+            if item.track.source == source_key and item.track.type == TrackType.AUDIO and not item.is_preserved
+        ]
+
+        if len(target_items) != 1:
+            runner._log_message(f"[SteppingCorrection] Skipping {source_key}: Expected 1 audio track to correct, found {len(target_items)}.")
+            continue
+
+        target_item = target_items[0]
+        analysis_item = extracted_audio_map.get(analysis_track_key)
+
+        if not analysis_item:
+            runner._log_message(f"[SteppingCorrection] Analysis track {analysis_track_key} not in layout. Extracting internally...")
+            source_container_path = ctx.sources.get(source_key)
+            track_id = int(analysis_track_key.split('_')[1])
+            try:
+                internal_extract = extract_tracks(
+                    source_container_path, ctx.temp_dir, runner, ctx.tool_paths,
+                    role=f"{source_key}_internal", specific_tracks=[track_id]
+                )
+                if not internal_extract: raise RuntimeError("Internal extraction failed.")
+                analysis_track_path = internal_extract[0]['path']
+            except Exception as e:
+                runner._log_message(f"[ERROR] Failed to internally extract analysis track {analysis_track_key}: {e}")
+                continue
+        else:
+            analysis_track_path = str(analysis_item.extracted_path)
+
+        result: CorrectionResult = corrector.run(
+            ref_file_path=ref_file_path,
+            analysis_audio_path=analysis_track_path,
+            target_audio_path=str(target_item.extracted_path),
+            base_delay_ms=base_delay_ms,
+            temp_dir=ctx.temp_dir
+        )
+
+        if result.verdict == CorrectionVerdict.UNIFORM:
+            new_delay = result.data
+            runner._log_message(f"[SteppingCorrection] Overriding delay for {source_key} with more accurate value: {new_delay} ms.")
+            if ctx.delays and source_key in ctx.delays.source_delays_ms:
+                ctx.delays.source_delays_ms[source_key] = new_delay
+
+        elif result.verdict == CorrectionVerdict.STEPPED:
+            corrected_path = result.data
+
+            preserved_item = copy.deepcopy(target_item)
+            preserved_item.is_preserved = True
+            preserved_item.is_default = False
+            original_props = preserved_item.track.props
+            preserved_item.track = Track(
+                source=preserved_item.track.source, id=preserved_item.track.id, type=preserved_item.track.type,
+                props=StreamProps(
+                    codec_id=original_props.codec_id,
+                    lang=original_props.lang,
+                    name=f"{original_props.name} (Original)" if original_props.name else "Original"
+                )
+            )
+
+            target_item.extracted_path = corrected_path
+            target_item.is_corrected = True
+            target_item.track = Track(
+                source=target_item.track.source, id=target_item.track.id, type=target_item.track.type,
+                props=StreamProps(
+                    codec_id="FLAC",
+                    lang=original_props.lang,
+                    name=f"{original_props.name} (Corrected)" if original_props.name else "Corrected"
+                )
+            )
+            target_item.apply_track_name = True
+            ctx.extracted_items.append(preserved_item)
+
+        elif result.verdict == CorrectionVerdict.FAILED:
+            error_message = result.data
+            raise RuntimeError(f"Stepping correction for {source_key} failed: {error_message}")
+
+    return ctx

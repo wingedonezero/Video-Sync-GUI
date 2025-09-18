@@ -4,15 +4,11 @@ from __future__ import annotations
 from typing import Optional, List, Dict, Any
 from collections import Counter
 
-import numpy as np
-from sklearn.cluster import DBSCAN
-
 from vsg_core.io.runner import CommandRunner
 from vsg_core.orchestrator.steps.context import Context
 from vsg_core.models.jobs import Delays
 from vsg_core.analysis.audio_corr import run_audio_correlation, get_audio_stream_info
-from vsg_core.analysis.videodiff import run_videodiff
-
+from vsg_core.analysis.drift_detection import diagnose_audio_issue
 
 def _choose_final_delay(results: List[Dict[str, Any]], config: Dict, runner: CommandRunner, role_tag: str) -> Optional[int]:
     min_match_pct = float(config.get('min_match_pct', 5.0))
@@ -23,12 +19,10 @@ def _choose_final_delay(results: List[Dict[str, Any]], config: Dict, runner: Com
         runner._log_message(f"[ERROR] Analysis failed: Only {len(accepted)} chunks were accepted.")
         return None
 
-    # Use the mode (most common delay) for the simple delay value
     counts = Counter(r['delay'] for r in accepted)
     winner = counts.most_common(1)[0][0]
     runner._log_message(f"{role_tag.capitalize()} delay determined: {winner:+d} ms (mode).")
     return winner
-
 
 class AnalysisStep:
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
@@ -44,7 +38,6 @@ class AnalysisStep:
                 continue
 
             runner._log_message(f"--- Analyzing {source_key} ---")
-
             tgt_lang = config.get('analysis_lang_others')
             _, target_track_id = get_audio_stream_info(source_file, tgt_lang, runner, ctx.tool_paths)
 
@@ -65,30 +58,22 @@ class AnalysisStep:
 
             source_delays[source_key] = delay_ms
 
-            # --- Smart Stepping Detection using DBSCAN ---
+            # --- Call the Diagnostic Engine ---
             if config.get('segmented_enabled', False):
-                accepted_chunks = [r for r in results if r.get('accepted', False)]
-                accepted_delays = [c['delay'] for c in accepted_chunks]
+                diagnosis, details = diagnose_audio_issue(
+                    video_path=source1_file,
+                    chunks=results,
+                    config=config,
+                    runner=runner,
+                    tool_paths=ctx.tool_paths
+                )
 
-                # Read DBSCAN parameters from config, with sensible defaults
-                epsilon_ms = config.get('detection_dbscan_epsilon_ms', 20.0)
-                min_samples = config.get('detection_dbscan_min_samples', 2)
-                min_chunks_for_test = 6
+                analysis_track_key = f"{source_key}_{target_track_id}"
 
-                if len(accepted_delays) >= min_chunks_for_test:
-                    delays_array = np.array(accepted_delays).reshape(-1, 1)
-                    db = DBSCAN(eps=epsilon_ms, min_samples=min_samples).fit(delays_array)
-                    labels = db.labels_
-                    unique_clusters = set(label for label in labels if label != -1)
-
-                    if len(unique_clusters) > 1:
-                        runner._log_message(f"[Stepping Detected] Found {len(unique_clusters)} distinct timing clusters for {source_key}. Flagging for detailed correction.")
-                        analysis_track_key = f"{source_key}_{target_track_id}"
-                        ctx.segment_flags[analysis_track_key] = {
-                            'has_segments': True,
-                            'base_delay': delay_ms,
-                            'analysis_track_key': analysis_track_key
-                        }
+                if diagnosis == "PAL_DRIFT":
+                    ctx.pal_drift_flags[analysis_track_key] = details
+                elif diagnosis == "STEPPING":
+                    ctx.segment_flags[analysis_track_key] = { 'base_delay': delay_ms }
 
         min_delay = min([0] + list(source_delays.values()))
         global_shift = -min_delay if min_delay < 0 else 0

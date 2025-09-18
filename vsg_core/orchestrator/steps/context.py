@@ -29,9 +29,11 @@ class Context:
     chapters_xml: Optional[str] = None
     attachments: Optional[List[str]] = None
 
-    # (NEW) Stores flags for tracks that need segmented correction
-    # Format: {'Source 2_3': {'has_segments': True, 'base_delay': -1013, 'analysis_track_key': 'Source 2_3'}}
+    # Stores flags for tracks that need segmented (stepping) correction
     segment_flags: Dict[str, Dict] = field(default_factory=dict)
+
+    # Stores flags for tracks that need PAL drift correction
+    pal_drift_flags: Dict[str, Dict] = field(default_factory=dict)
 
     # Results/summaries
     out_file: Optional[str] = None

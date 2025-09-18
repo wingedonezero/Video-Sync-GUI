@@ -8,7 +8,7 @@ from typing import Optional, List, Dict, Any, Callable
 from vsg_core.io.runner import CommandRunner
 from vsg_core.models.settings import AppSettings
 from vsg_core.orchestrator.steps import (
-    Context, AnalysisStep, ExtractStep, SegmentCorrectionStep, SubtitlesStep,
+    Context, AnalysisStep, ExtractStep, AudioCorrectionStep, SubtitlesStep,
     ChaptersStep, AttachmentsStep, MuxStep
 )
 
@@ -68,11 +68,11 @@ class Orchestrator:
         progress(0.40)
         ctx = ExtractStep().run(ctx, runner)
 
-        # (THE FIX IS HERE) Check for the correct variable: segment_flags
-        if ctx.settings_dict.get('segmented_enabled', False) and ctx.segment_flags:
-            log('--- Segmented Audio Correction Phase ---')
+        # Check for any advanced correction flags (stepping or drift)
+        if ctx.settings_dict.get('segmented_enabled', False) and (ctx.segment_flags or ctx.pal_drift_flags):
+            log('--- Advanced Audio Correction Phase ---')
             progress(0.50)
-            ctx = SegmentCorrectionStep().run(ctx, runner)
+            ctx = AudioCorrectionStep().run(ctx, runner)
 
         log('--- Subtitle Processing Phase ---')
         ctx = SubtitlesStep().run(ctx, runner)
