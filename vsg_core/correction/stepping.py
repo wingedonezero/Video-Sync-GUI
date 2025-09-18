@@ -17,6 +17,7 @@ from ..analysis.audio_corr import get_audio_stream_info, run_audio_correlation
 from ..orchestrator.steps.context import Context
 from ..models.media import StreamProps, Track
 from ..extraction.tracks import extract_tracks
+from ..models.enums import TrackType
 
 class CorrectionVerdict(Enum):
     UNIFORM = auto()
@@ -249,15 +250,14 @@ class SteppingCorrector:
             if not coarse_map:
                 return CorrectionResult(CorrectionVerdict.FAILED, "Coarse scan did not find any reliable sync points.")
 
-            stable_delays = [d for t, d in coarse_map]
-            triage_std_dev_ms = self.config.get('segment_triage_std_dev_ms', 50)
-            if len(stable_delays) < 2 or np.std(stable_delays) < triage_std_dev_ms:
-                self.log("  [SteppingCorrector] Triage Result: Uniform delay detected.")
-                return CorrectionResult(CorrectionVerdict.UNIFORM, stable_delays[0] if stable_delays else base_delay_ms)
+            # THE FIX: This entire triage block is removed.
+            # The decision to proceed was already made by the more intelligent AnalysisStep.
 
             edl: List[AudioSegment] = []
             anchor_delay = coarse_map[0][1]
             edl.append(AudioSegment(start_s=0.0, end_s=0.0, delay_ms=anchor_delay))
+
+            triage_std_dev_ms = self.config.get('segment_triage_std_dev_ms', 50)
 
             for i in range(len(coarse_map) - 1):
                 zone_start_s, delay_before = coarse_map[i]
@@ -371,6 +371,8 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
             temp_dir=ctx.temp_dir
         )
 
+        # This verdict is no longer possible after removing the triage check,
+        # but we can leave the handling here in case it's added back later.
         if result.verdict == CorrectionVerdict.UNIFORM:
             new_delay = result.data
             runner._log_message(f"[SteppingCorrection] Overriding delay for {source_key} with more accurate value: {new_delay} ms.")
