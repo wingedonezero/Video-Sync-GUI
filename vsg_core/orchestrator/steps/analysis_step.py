@@ -4,12 +4,15 @@ from __future__ import annotations
 from typing import Optional, List, Dict, Any
 from collections import Counter
 
+import numpy as np
+from sklearn.cluster import DBSCAN
+
 from vsg_core.io.runner import CommandRunner
 from vsg_core.orchestrator.steps.context import Context
 from vsg_core.models.jobs import Delays
 from vsg_core.analysis.audio_corr import run_audio_correlation, get_audio_stream_info
 from vsg_core.analysis.videodiff import run_videodiff
-from vsg_core.analysis.segment_correction import detect_stepping
+
 
 def _choose_final_delay(results: List[Dict[str, Any]], config: Dict, runner: CommandRunner, role_tag: str) -> Optional[int]:
     min_match_pct = float(config.get('min_match_pct', 5.0))
@@ -25,6 +28,7 @@ def _choose_final_delay(results: List[Dict[str, Any]], config: Dict, runner: Com
     winner = counts.most_common(1)[0][0]
     runner._log_message(f"{role_tag.capitalize()} delay determined: {winner:+d} ms (mode).")
     return winner
+
 
 class AnalysisStep:
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
@@ -61,16 +65,30 @@ class AnalysisStep:
 
             source_delays[source_key] = delay_ms
 
+            # --- Smart Stepping Detection using DBSCAN ---
             if config.get('segmented_enabled', False):
                 accepted_chunks = [r for r in results if r.get('accepted', False)]
-                if detect_stepping(accepted_chunks, config):
-                    analysis_track_key = f"{source_key}_{target_track_id}"
-                    runner._log_message(f"[Stepping Detected] Flagging {analysis_track_key} for detailed correction.")
-                    ctx.segment_flags[analysis_track_key] = {
-                        'has_segments': True,
-                        'base_delay': delay_ms,
-                        'analysis_track_key': analysis_track_key
-                    }
+                accepted_delays = [c['delay'] for c in accepted_chunks]
+
+                # Read DBSCAN parameters from config, with sensible defaults
+                epsilon_ms = config.get('detection_dbscan_epsilon_ms', 20.0)
+                min_samples = config.get('detection_dbscan_min_samples', 2)
+                min_chunks_for_test = 6
+
+                if len(accepted_delays) >= min_chunks_for_test:
+                    delays_array = np.array(accepted_delays).reshape(-1, 1)
+                    db = DBSCAN(eps=epsilon_ms, min_samples=min_samples).fit(delays_array)
+                    labels = db.labels_
+                    unique_clusters = set(label for label in labels if label != -1)
+
+                    if len(unique_clusters) > 1:
+                        runner._log_message(f"[Stepping Detected] Found {len(unique_clusters)} distinct timing clusters for {source_key}. Flagging for detailed correction.")
+                        analysis_track_key = f"{source_key}_{target_track_id}"
+                        ctx.segment_flags[analysis_track_key] = {
+                            'has_segments': True,
+                            'base_delay': delay_ms,
+                            'analysis_track_key': analysis_track_key
+                        }
 
         min_delay = min([0] + list(source_delays.values()))
         global_shift = -min_delay if min_delay < 0 else 0

@@ -28,9 +28,11 @@ def get_stream_info(mkv_path: str, runner: CommandRunner, tool_paths: dict) -> O
 def _ext_for_codec(ttype: str, codec_id: str) -> str:
     cid = (codec_id or '').upper()
     if ttype == 'video':
+        # More specific IDs must be checked first
         if 'V_MPEGH/ISO/HEVC' in cid: return 'h265'
         if 'V_MPEG4/ISO/AVC' in cid:  return 'h264'
-        if 'V_MPEG1/2' in cid:      return 'mpg'
+        # Generic fallback for all other MPEG-1, MPEG-2, and MPEG-4 Part 2 variants
+        if 'V_MPEG' in cid:         return 'mpg'
         if 'V_VP9' in cid:          return 'vp9'
         if 'V_AV1' in cid:          return 'av1'
         return 'bin'

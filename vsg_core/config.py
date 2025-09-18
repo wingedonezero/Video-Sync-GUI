@@ -70,7 +70,8 @@ class AppConfig:
             'segment_qa_chunk_count': 30,
             'segment_qa_min_accepted_chunks': 28,
             # Detection & Triage
-            'segment_stepping_drift_threshold_ms': 250,
+            'detection_dbscan_epsilon_ms': 20.0,
+            'detection_dbscan_min_samples': 2,
             'segment_triage_std_dev_ms': 50,
             # Coarse Scan
             'segment_coarse_chunk_s': 15,
