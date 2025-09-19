@@ -9,7 +9,7 @@ from typing import List, Dict, Any, Callable, Optional
 
 from .io.runner import CommandRunner
 from .orchestrator.pipeline import Orchestrator
-from .postprocess import finalize_merged_file
+from .postprocess import finalize_merged_file, check_if_rebasing_is_needed
 
 class JobPipeline:
     def __init__(self, config: dict, log_callback: Callable[[str], None], progress_callback: Callable[[float], None]):
@@ -96,11 +96,13 @@ class JobPipeline:
             final_output_path = output_dir / Path(source1_file).name
             mkvmerge_output_path = final_output_path
 
-            video_was_shifted = ctx.delays and ctx.delays.global_shift_ms > 0
             normalize_enabled = self.config.get('post_mux_normalize_timestamps', False)
+            temp_mux_path = ctx.temp_dir / final_output_path.name
 
-            if normalize_enabled and video_was_shifted:
-                mkvmerge_output_path = ctx.temp_dir / final_output_path.name
+            # Use a temporary path for the initial merge if normalization is enabled,
+            # as the finalizer will create the actual final file.
+            if normalize_enabled:
+                mkvmerge_output_path = temp_mux_path
 
             ctx.tokens.insert(0, str(mkvmerge_output_path))
             ctx.tokens.insert(0, '--output')
@@ -110,8 +112,12 @@ class JobPipeline:
             if not merge_ok:
                 raise RuntimeError('mkvmerge execution failed.')
 
-            if normalize_enabled and video_was_shifted:
-                self._run_post_merge_steps(mkvmerge_output_path, final_output_path, runner)
+            if normalize_enabled and check_if_rebasing_is_needed(mkvmerge_output_path, runner, self.tool_paths):
+                # We merged to a temp path, now run finalization to create the final_output_path
+                finalize_merged_file(mkvmerge_output_path, final_output_path, runner, self.config, self.tool_paths)
+            elif normalize_enabled:
+                # Rebasing was not needed, so just move the temp merged file to the final destination
+                shutil.move(mkvmerge_output_path, final_output_path)
 
             log_to_all(f'[SUCCESS] Output file created: {final_output_path}')
             self.progress(1.0)
@@ -130,10 +136,6 @@ class JobPipeline:
             log_to_all('=== Job Finished ===')
             handler.close()
             logger.removeHandler(handler)
-
-    def _run_post_merge_steps(self, temp_output_path: Path, final_output_path: Path, runner: CommandRunner):
-        """Delegate post-merge processing to the dedicated finalization module."""
-        finalize_merged_file(temp_output_path, final_output_path, runner, self.config, self.tool_paths)
 
     def _write_mkvmerge_opts(self, tokens, temp_dir: Path, runner: CommandRunner) -> str:
         opts_path = temp_dir / 'opts.json'
