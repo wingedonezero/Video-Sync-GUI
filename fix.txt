@@ -1,1 +1,0 @@
-fix when saving plan and copyign it setting first subtitle as default without you setting that
