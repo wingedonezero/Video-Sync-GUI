@@ -55,6 +55,8 @@ class ManualLogic:
 
         # Final normalization before returning data
         self.normalize_single_default_for_type(widgets, 'audio', force_default_if_none=True)
+        # --- THE FIX IS HERE ---
+        # Ensure we DO NOT force a default for subtitles.
         self.normalize_single_default_for_type(widgets, 'subtitles', force_default_if_none=False)
         self.normalize_forced_subtitles(widgets)
 

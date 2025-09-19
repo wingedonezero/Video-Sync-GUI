@@ -35,7 +35,6 @@ def diagnose_audio_issue(
 ) -> (str, Dict):
     """
     Analyzes correlation chunks to diagnose the type of sync issue.
-
     Returns:
         A tuple of (diagnosis_string, details_dict).
     """
@@ -60,22 +59,47 @@ def diagnose_audio_issue(
     min_samples = config.get('detection_dbscan_min_samples', 2)
     delays_reshaped = delays.reshape(-1, 1)
     db = DBSCAN(eps=epsilon_ms, min_samples=min_samples).fit(delays_reshaped)
-    unique_clusters = set(label for label in db.labels_ if label != -1)
+    labels = db.labels_
+    unique_clusters = set(label for label in labels if label != -1)
+
     if len(unique_clusters) > 1:
-        runner._log_message(f"[Stepping Detected] Found {len(unique_clusters)} distinct timing clusters.")
-        return "STEPPING", {}
+        # --- NEW HYBRID DETECTION LOGIC ---
+        # Stepping was detected. Now, check for linear drift WITHIN each step.
+        r2_threshold = config.get('drift_detection_r2_threshold', 0.90)
+        found_internal_drift = False
+        for cluster_id in unique_clusters:
+            cluster_indices = np.where(labels == cluster_id)[0]
+            if len(cluster_indices) < 4: # Need enough points to check for drift
+                continue
+
+            cluster_times = times[cluster_indices]
+            cluster_delays = delays[cluster_indices]
+
+            slope, intercept = np.polyfit(cluster_times, cluster_delays, 1)
+
+            if abs(slope) > 0.5: # Is the drift meaningful?
+                y_predicted = slope * cluster_times + intercept
+                correlation_matrix = np.corrcoef(cluster_delays, y_predicted)
+                r_squared = correlation_matrix[0, 1]**2
+                if r_squared > r2_threshold:
+                    found_internal_drift = True
+                    runner._log_message(f"[Hybrid Drift Detected] Found linear drift (slope={slope:.2f} ms/s) within a timing cluster.")
+                    break # Found what we need, no need to check other clusters
+
+        if found_internal_drift:
+            return "HYBRID_DRIFT", {}
+        else:
+            runner._log_message(f"[Stepping Detected] Found {len(unique_clusters)} distinct timing clusters with no significant internal drift.")
+            return "STEPPING", {}
+        # --- END NEW LOGIC ---
 
     # --- Test 3: Check for General Linear Drift ---
     slope, intercept = np.polyfit(times, delays, 1)
-    # Check if the slope is meaningful (e.g., > 0.5ms drift per second)
     if abs(slope) > 0.5:
-        # Calculate R-squared value to check for "straightness"
         y_predicted = slope * times + intercept
         correlation_matrix = np.corrcoef(delays, y_predicted)
         r_squared = correlation_matrix[0, 1]**2
-
         r2_threshold = config.get('drift_detection_r2_threshold', 0.90)
-
         if r_squared > r2_threshold:
             runner._log_message(f"[Linear Drift Detected] Delays fit a straight line with R-squared={r_squared:.3f} and slope={slope:.2f} ms/s.")
             return "LINEAR_DRIFT", {"rate": slope}

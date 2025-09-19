@@ -35,6 +35,9 @@ class Context:
     # Stores flags for tracks that need PAL drift correction
     pal_drift_flags: Dict[str, Dict] = field(default_factory=dict)
 
+    # Stores flags for tracks that need Hybrid (Stepping + Drift) correction
+    hybrid_drift_flags: Dict[str, Dict] = field(default_factory=dict)
+
     # Stores flags for tracks that need linear drift correction
     linear_drift_flags: Dict[str, Dict] = field(default_factory=dict)
 

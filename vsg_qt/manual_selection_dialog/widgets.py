@@ -72,7 +72,6 @@ class FinalList(QListWidget):
             widget.style_editor_btn.clicked.connect(lambda checked, w=widget: self.dialog._launch_style_editor(w))
 
         if preset:
-            # FIX: Changed all instances of 'w' to 'widget'
             if hasattr(widget, 'cb_default'):      widget.cb_default.setChecked(track_data.get('is_default', False))
             if hasattr(widget, 'cb_forced'):       widget.cb_forced.setChecked(track_data.get('is_forced_display', False))
             if hasattr(widget, 'cb_name'):         widget.cb_name.setChecked(track_data.get('apply_track_name', False))
@@ -124,7 +123,8 @@ class FinalList(QListWidget):
         elif act == act_default and hasattr(widget, 'cb_default'):
             widget.cb_default.setChecked(True)
             self.dialog._logic.normalize_single_default_for_type(
-                self._widgets_of_type(widget.track_type), widget.track_type, prefer_widget=widget
+                self._widgets_of_type(widget.track_type), widget.track_type,
+                force_default_if_none=False, prefer_widget=widget
             )
         elif act_forced and act == act_forced and hasattr(widget, 'cb_forced'):
             widget.cb_forced.setChecked(not widget.cb_forced.isChecked())
@@ -147,8 +147,12 @@ class FinalList(QListWidget):
 
     def _enforce_single_default(self, checked, sender_widget):
         if not checked: return
+        # --- FIX IS HERE ---
+        # The 'force_default_if_none' argument was missing.
+        # When manually clicking, we never want to force a default, so it's False.
         self.dialog._logic.normalize_single_default_for_type(
             self._widgets_of_type(sender_widget.track_type),
             sender_widget.track_type,
+            force_default_if_none=False,
             prefer_widget=sender_widget
         )
