@@ -54,8 +54,8 @@ class ManualLogic:
             widgets.append(self.v.final_list.itemWidget(self.v.final_list.item(i)))
 
         # Final normalization before returning data
-        self.normalize_single_default_for_type(widgets, 'audio')
-        self.normalize_single_default_for_type(widgets, 'subtitles')
+        self.normalize_single_default_for_type(widgets, 'audio', force_default_if_none=True)
+        self.normalize_single_default_for_type(widgets, 'subtitles', force_default_if_none=False)
         self.normalize_forced_subtitles(widgets)
 
         layout = self.build_layout_from_widgets(widgets)
@@ -73,7 +73,7 @@ class ManualLogic:
             out.append(td)
         return out
 
-    def normalize_single_default_for_type(self, widgets: List[TrackWidget], ttype: str, prefer_widget=None):
+    def normalize_single_default_for_type(self, widgets: List[TrackWidget], ttype: str, force_default_if_none: bool, prefer_widget=None):
         """Ensures only one 'Default' flag is set per track type."""
         first_default = None
 
@@ -88,8 +88,8 @@ class ManualLogic:
                     first_default = w
                     break
 
-        # If no default was found, make the first track of that type the default
-        if not first_default:
+        # If no default was found, make the first track of that type the default, but only if forced.
+        if not first_default and force_default_if_none:
             for w in widgets:
                 if w.track_type == ttype:
                     w.cb_default.setChecked(True)
