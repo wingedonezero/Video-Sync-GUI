@@ -72,8 +72,6 @@ class AnalysisStep:
 
                 if diagnosis == "PAL_DRIFT":
                     ctx.pal_drift_flags[analysis_track_key] = details
-                elif diagnosis == "HYBRID_DRIFT":
-                    ctx.hybrid_drift_flags[analysis_track_key] = { 'base_delay': delay_ms }
                 elif diagnosis == "STEPPING":
                     ctx.segment_flags[analysis_track_key] = { 'base_delay': delay_ms }
 

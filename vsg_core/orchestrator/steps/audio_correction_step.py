@@ -7,7 +7,6 @@ from ...io.runner import CommandRunner
 from ...correction.pal import run_pal_correction
 from ...correction.linear import run_linear_correction
 from ...correction.stepping import run_stepping_correction
-from ...correction.hybrid_step_drift import run_hybrid_correction
 
 class AudioCorrectionStep:
     """
@@ -19,13 +18,10 @@ class AudioCorrectionStep:
             return ctx
 
         # Router logic: Check for different types of required corrections.
+        # The order can be important if a file could have multiple issues.
         if ctx.pal_drift_flags:
             runner._log_message('--- PAL Drift Audio Correction Phase ---')
             ctx = run_pal_correction(ctx, runner)
-
-        elif ctx.hybrid_drift_flags:
-            runner._log_message('--- Hybrid (Stepping + Drift) Audio Correction Phase ---')
-            ctx = run_hybrid_correction(ctx, runner)
 
         elif ctx.linear_drift_flags:
             runner._log_message('--- Linear Drift Audio Correction Phase ---')
