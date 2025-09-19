@@ -3,7 +3,7 @@
 from __future__ import annotations
 import json
 import gc
-import copy # <-- THE FIX IS HERE
+import copy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
@@ -110,10 +110,22 @@ class SteppingCorrector:
         coarse_map = []
         num_samples = min(len(ref_pcm), len(analysis_pcm))
 
-        initial_offset_seconds = self.config.get('segment_scan_offset_s', 15.0)
-        start_offset_samples = int(initial_offset_seconds * sample_rate)
+        # Use the main analysis percentage settings to define the scan window.
+        duration_s = len(ref_pcm) / float(sample_rate)
+        start_pct = self.config.get('scan_start_percentage', 5.0)
+        end_pct = self.config.get('scan_end_percentage', 95.0)
 
-        for start_sample in range(start_offset_samples, num_samples - chunk_samples, step_samples):
+        scan_start_s = duration_s * (start_pct / 100.0)
+        scan_end_s = duration_s * (end_pct / 100.0)
+
+        start_offset_samples = int(scan_start_s * sample_rate)
+        # Ensure we don't scan past the calculated end percentage or the end of the shorter file.
+        scan_end_limit = min(int(scan_end_s * sample_rate), num_samples)
+
+        # Leave a safety margin to prevent the last chunk from reading garbage data.
+        scan_end_point = scan_end_limit - chunk_samples - step_samples
+
+        for start_sample in range(start_offset_samples, scan_end_point, step_samples):
             delay = self._get_delay_for_chunk(ref_pcm, analysis_pcm, start_sample, chunk_samples, sample_rate, locality_samples)
             if delay is not None:
                 timestamp_s = start_sample / sample_rate
