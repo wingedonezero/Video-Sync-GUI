@@ -133,20 +133,44 @@ class AnalysisTab(QWidget):
         segment_layout.addRow("QA Correlation Threshold:", self.widgets['segmented_qa_threshold'])
         segment_layout.addRow("QA Scan Chunks:", self.widgets['segment_qa_chunk_count'])
         segment_layout.addRow("QA Min. Accepted Chunks:", self.widgets['segment_qa_min_accepted_chunks'])
+
         segment_layout.addRow(QLabel("<b>Detection & Triage Tweaks</b>"))
         self.widgets['detection_dbscan_epsilon_ms'] = QDoubleSpinBox(); self.widgets['detection_dbscan_epsilon_ms'].setRange(5.0, 100.0); self.widgets['detection_dbscan_epsilon_ms'].setSuffix(" ms"); self.widgets['detection_dbscan_epsilon_ms'].setToolTip("Stability Tolerance: The maximum time difference for delays to be considered part of the same sync group.")
         self.widgets['detection_dbscan_min_samples'] = QSpinBox(); self.widgets['detection_dbscan_min_samples'].setRange(2, 10); self.widgets['detection_dbscan_min_samples'].setToolTip("Cluster Size: The minimum number of similar chunks needed to form a stable sync group.")
         self.widgets['segment_triage_std_dev_ms'] = QSpinBox(); self.widgets['segment_triage_std_dev_ms'].setRange(10, 200); self.widgets['segment_triage_std_dev_ms'].setSuffix(" ms"); self.widgets['segment_triage_std_dev_ms'].setToolTip("If the standard deviation of delays is below this, correction is skipped.")
+        # <-- NEW WIDGETS START HERE -->
+        self.widgets['drift_detection_r2_threshold'] = QDoubleSpinBox(); self.widgets['drift_detection_r2_threshold'].setRange(0.5, 1.0); self.widgets['drift_detection_r2_threshold'].setDecimals(2); self.widgets['drift_detection_r2_threshold'].setToolTip("For lossy codecs, how closely the drift must fit a straight line (R-squared value).")
+        self.widgets['drift_detection_r2_threshold_lossless'] = QDoubleSpinBox(); self.widgets['drift_detection_r2_threshold_lossless'].setRange(0.5, 1.0); self.widgets['drift_detection_r2_threshold_lossless'].setDecimals(2); self.widgets['drift_detection_r2_threshold_lossless'].setToolTip("For lossless codecs, how closely the drift must fit a straight line (R-squared value).")
+        self.widgets['drift_detection_slope_threshold_lossy'] = QDoubleSpinBox(); self.widgets['drift_detection_slope_threshold_lossy'].setRange(0.1, 5.0); self.widgets['drift_detection_slope_threshold_lossy'].setSuffix(" ms/s"); self.widgets['drift_detection_slope_threshold_lossy'].setToolTip("For lossy codecs, the minimum drift rate required to trigger a correction.")
+        self.widgets['drift_detection_slope_threshold_lossless'] = QDoubleSpinBox(); self.widgets['drift_detection_slope_threshold_lossless'].setRange(0.1, 5.0); self.widgets['drift_detection_slope_threshold_lossless'].setSuffix(" ms/s"); self.widgets['drift_detection_slope_threshold_lossless'].setToolTip("For lossless codecs, the minimum drift rate required to trigger a correction.")
+        # <-- NEW WIDGETS END HERE -->
         segment_layout.addRow("DBSCAN Epsilon (Stability):", self.widgets['detection_dbscan_epsilon_ms'])
         segment_layout.addRow("DBSCAN Min Samples (Size):", self.widgets['detection_dbscan_min_samples'])
         segment_layout.addRow("Triage Stability Threshold:", self.widgets['segment_triage_std_dev_ms'])
-        segment_layout.addRow(QLabel("<b>Coarse Scan Tweaks</b>"))
+        # <-- NEW WIDGETS START HERE -->
+        segment_layout.addRow("Lossy R² Threshold:", self.widgets['drift_detection_r2_threshold'])
+        segment_layout.addRow("Lossless R² Threshold:", self.widgets['drift_detection_r2_threshold_lossless'])
+        segment_layout.addRow("Lossy Slope Threshold:", self.widgets['drift_detection_slope_threshold_lossy'])
+        segment_layout.addRow("Lossless Slope Threshold:", self.widgets['drift_detection_slope_threshold_lossless'])
+        # <-- NEW WIDGETS END HERE -->
+
+        # <-- SECTION RENAMED AND NEW WIDGETS ADDED -->
+        segment_layout.addRow(QLabel("<b>Segment Scan & Correction Tweaks</b>"))
         self.widgets['segment_coarse_chunk_s'] = QSpinBox(); self.widgets['segment_coarse_chunk_s'].setRange(5, 60); self.widgets['segment_coarse_chunk_s'].setSuffix(" s"); self.widgets['segment_coarse_chunk_s'].setToolTip("Duration of audio chunks for the initial broad scan.")
         self.widgets['segment_coarse_step_s'] = QSpinBox(); self.widgets['segment_coarse_step_s'].setRange(10, 300); self.widgets['segment_coarse_step_s'].setSuffix(" s"); self.widgets['segment_coarse_step_s'].setToolTip("Time to jump forward between each coarse scan chunk.")
         self.widgets['segment_search_locality_s'] = QSpinBox(); self.widgets['segment_search_locality_s'].setRange(2, 30); self.widgets['segment_search_locality_s'].setSuffix(" s"); self.widgets['segment_search_locality_s'].setToolTip("The time window to search for a match in the target audio.")
+        self.widgets['segment_drift_r2_threshold'] = QDoubleSpinBox(); self.widgets['segment_drift_r2_threshold'].setRange(0.5, 1.0); self.widgets['segment_drift_r2_threshold'].setDecimals(2); self.widgets['segment_drift_r2_threshold'].setToolTip("Inside a segment, how closely the drift must fit a straight line to be corrected.")
+        self.widgets['segment_drift_slope_threshold'] = QDoubleSpinBox(); self.widgets['segment_drift_slope_threshold'].setRange(0.1, 5.0); self.widgets['segment_drift_slope_threshold'].setSuffix(" ms/s"); self.widgets['segment_drift_slope_threshold'].setToolTip("Inside a segment, the minimum drift rate required to trigger a correction.")
+        self.widgets['segment_drift_outlier_sensitivity'] = QDoubleSpinBox(); self.widgets['segment_drift_outlier_sensitivity'].setRange(1.0, 3.0); self.widgets['segment_drift_outlier_sensitivity'].setDecimals(1); self.widgets['segment_drift_outlier_sensitivity'].setToolTip("How aggressively to reject inconsistent measurements before calculating drift. Lower is stricter.")
+        self.widgets['segment_drift_scan_buffer_pct'] = QDoubleSpinBox(); self.widgets['segment_drift_scan_buffer_pct'].setRange(0.0, 10.0); self.widgets['segment_drift_scan_buffer_pct'].setSuffix(" %"); self.widgets['segment_drift_scan_buffer_pct'].setToolTip("Percentage of the start and end of a segment to ignore during drift scan.")
         segment_layout.addRow("Coarse Scan Chunk Duration:", self.widgets['segment_coarse_chunk_s'])
         segment_layout.addRow("Coarse Scan Step Size:", self.widgets['segment_coarse_step_s'])
         segment_layout.addRow("Search Window Radius:", self.widgets['segment_search_locality_s'])
+        segment_layout.addRow("Segment R² Threshold:", self.widgets['segment_drift_r2_threshold'])
+        segment_layout.addRow("Segment Slope Threshold:", self.widgets['segment_drift_slope_threshold'])
+        segment_layout.addRow("Segment Outlier Sensitivity:", self.widgets['segment_drift_outlier_sensitivity'])
+        segment_layout.addRow("Segment Scan Buffer:", self.widgets['segment_drift_scan_buffer_pct'])
+
         segment_layout.addRow(QLabel("<b>Fine Scan & Confidence Tweaks</b>"))
         self.widgets['segment_min_confidence_ratio'] = QDoubleSpinBox(); self.widgets['segment_min_confidence_ratio'].setRange(2.0, 20.0); self.widgets['segment_min_confidence_ratio'].setDecimals(1); self.widgets['segment_min_confidence_ratio'].setToolTip("Minimum ratio of correlation peak to noise floor for a valid match.")
         self.widgets['segment_fine_chunk_s'] = QDoubleSpinBox(); self.widgets['segment_fine_chunk_s'].setRange(0.5, 10.0); self.widgets['segment_fine_chunk_s'].setSuffix(" s"); self.widgets['segment_fine_chunk_s'].setToolTip("Duration of audio chunks for the high-precision boundary search.")

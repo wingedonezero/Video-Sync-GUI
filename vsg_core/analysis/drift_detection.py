@@ -31,7 +31,8 @@ def diagnose_audio_issue(
     chunks: List[Dict[str, Any]],
     config: Dict,
     runner: CommandRunner,
-    tool_paths: dict
+    tool_paths: dict,
+    codec_id: str
 ) -> (str, Dict):
     """
     Analyzes correlation chunks to diagnose the type of sync issue.
@@ -64,16 +65,22 @@ def diagnose_audio_issue(
         runner._log_message(f"[Stepping Detected] Found {len(unique_clusters)} distinct timing clusters.")
         return "STEPPING", {}
 
-    # --- Test 3: Check for General Linear Drift ---
+    # --- Test 3: Check for General Linear Drift (Now Codec-Aware) ---
     slope, intercept = np.polyfit(times, delays, 1)
-    # Check if the slope is meaningful (e.g., > 0.5ms drift per second)
-    if abs(slope) > 0.5:
-        # Calculate R-squared value to check for "straightness"
+
+    # <-- FIX: Use new settings from config -->
+    codec_name_lower = (codec_id or '').lower()
+    is_lossless = 'pcm' in codec_name_lower or 'flac' in codec_name_lower or 'truehd' in codec_name_lower
+
+    slope_threshold = config.get('drift_detection_slope_threshold_lossless') if is_lossless else config.get('drift_detection_slope_threshold_lossy')
+    r2_threshold = config.get('drift_detection_r2_threshold_lossless') if is_lossless else config.get('drift_detection_r2_threshold')
+
+    runner._log_message(f"[DriftDiagnosis] Codec: {codec_name_lower} (lossless={is_lossless}). Using R²>{r2_threshold:.2f}, slope>{slope_threshold:.1f} ms/s.")
+
+    if abs(slope) > slope_threshold:
         y_predicted = slope * times + intercept
         correlation_matrix = np.corrcoef(delays, y_predicted)
         r_squared = correlation_matrix[0, 1]**2
-
-        r2_threshold = config.get('drift_detection_r2_threshold', 0.90)
 
         if r_squared > r2_threshold:
             runner._log_message(f"[Linear Drift Detected] Delays fit a straight line with R-squared={r_squared:.3f} and slope={slope:.2f} ms/s.")

@@ -7,8 +7,9 @@ from collections import Counter
 from vsg_core.io.runner import CommandRunner
 from vsg_core.orchestrator.steps.context import Context
 from vsg_core.models.jobs import Delays
-from vsg_core.analysis.audio_corr import run_audio_correlation, get_audio_stream_info
+from vsg_core.analysis.audio_corr import run_audio_correlation
 from vsg_core.analysis.drift_detection import diagnose_audio_issue
+from vsg_core.extraction.tracks import get_stream_info # <-- FIX: Added import
 
 def _choose_final_delay(results: List[Dict[str, Any]], config: Dict, runner: CommandRunner, role_tag: str) -> Optional[int]:
     min_match_pct = float(config.get('min_match_pct', 5.0))
@@ -39,7 +40,30 @@ class AnalysisStep:
 
             runner._log_message(f"--- Analyzing {source_key} ---")
             tgt_lang = config.get('analysis_lang_others')
-            _, target_track_id = get_audio_stream_info(source_file, tgt_lang, runner, ctx.tool_paths)
+
+            # --- FIX: Get full stream info to find the codec ---
+            stream_info = get_stream_info(source_file, runner, ctx.tool_paths)
+            if not stream_info:
+                runner._log_message(f"[WARN] Could not get stream info for {source_key}. Skipping.")
+                continue
+
+            # Find the track that will be used for analysis to get its codec and ID
+            audio_tracks = [t for t in stream_info.get('tracks', []) if t.get('type') == 'audio']
+            target_track_obj = None
+            if not audio_tracks:
+                runner._log_message(f"[WARN] No audio tracks found in {source_key}. Skipping.")
+                continue
+            if tgt_lang:
+                for track in audio_tracks:
+                    if (track.get('properties', {}).get('language', '') or '').strip().lower() == tgt_lang:
+                        target_track_obj = track
+                        break
+            if not target_track_obj:
+                target_track_obj = audio_tracks[0] # Fallback to first track
+
+            target_track_id = target_track_obj.get('id')
+            target_codec_id = target_track_obj.get('properties', {}).get('codec_id', 'unknown')
+            # --- End Fix ---
 
             if target_track_id is None:
                 runner._log_message(f"[WARN] No suitable audio track found in {source_key} for analysis. Skipping.")
@@ -58,20 +82,22 @@ class AnalysisStep:
 
             source_delays[source_key] = delay_ms
 
-            # --- Call the Diagnostic Engine ---
             if config.get('segmented_enabled', False):
                 diagnosis, details = diagnose_audio_issue(
                     video_path=source1_file,
                     chunks=results,
                     config=config,
                     runner=runner,
-                    tool_paths=ctx.tool_paths
+                    tool_paths=ctx.tool_paths,
+                    codec_id=target_codec_id # <-- FIX: Pass codec to the diagnostic function
                 )
 
                 analysis_track_key = f"{source_key}_{target_track_id}"
 
                 if diagnosis == "PAL_DRIFT":
                     ctx.pal_drift_flags[analysis_track_key] = details
+                elif diagnosis == "LINEAR_DRIFT":
+                    ctx.linear_drift_flags[analysis_track_key] = details
                 elif diagnosis == "STEPPING":
                     ctx.segment_flags[analysis_track_key] = { 'base_delay': delay_ms }
 
