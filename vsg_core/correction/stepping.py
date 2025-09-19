@@ -163,7 +163,7 @@ class SteppingCorrector:
         self.log(f"  [SteppingCorrector] Stage 2.5: Analyzing segments for internal drift (Codec: {codec_name})...")
         final_edl = []
 
-        # <-- FIX: Use new settings from config -->
+        is_lossless = 'pcm' in codec_name or 'flac' in codec_name or 'truehd' in codec_name
         r_squared_threshold = self.config.get('segment_drift_r2_threshold', 0.75)
         slope_threshold = self.config.get('segment_drift_slope_threshold', 0.7)
         outlier_sensitivity = self.config.get('segment_drift_outlier_sensitivity', 1.5)
@@ -325,7 +325,8 @@ class SteppingCorrector:
 
             concat_list_path.write_text('\n'.join(segment_files), encoding='utf-8')
 
-            final_assembly_cmd = ['ffmpeg', '-y', '-v', 'error', '-f', 'concat', '-safe', '0', '-i', str(concat_list_path), '-c:a', 'flac', str(out_path)]
+            # --- FIX: Add -map_metadata -1 to prevent FFmpeg from adding an ENCODER tag ---
+            final_assembly_cmd = ['ffmpeg', '-y', '-v', 'error', '-f', 'concat', '-safe', '0', '-i', str(concat_list_path), '-map_metadata', '-1', '-c:a', 'flac', str(out_path)]
             if self.runner.run(final_assembly_cmd, self.tool_paths) is None:
                 raise RuntimeError("Final FFmpeg concat assembly failed.")
 
