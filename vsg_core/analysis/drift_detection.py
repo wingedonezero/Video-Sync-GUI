@@ -38,40 +38,47 @@ def diagnose_audio_issue(
 
     Returns:
         A tuple of (diagnosis_string, details_dict).
-        Example: ("PAL_DRIFT", {"rate": 40.8}), ("STEPPING", {}), ("UNIFORM", {})
     """
     accepted_chunks = [c for c in chunks if c.get('accepted', False)]
     if len(accepted_chunks) < 6:
         return "UNIFORM", {}
 
-    # --- Test 1: Check for PAL Drift ---
+    times = np.array([c['start'] for c in accepted_chunks])
+    delays = np.array([c['delay'] for c in accepted_chunks])
+
+    # --- Test 1: Check for PAL Drift (Specific Linear Drift) ---
     framerate = _get_video_framerate(video_path, runner, tool_paths)
     is_pal_framerate = abs(framerate - 25.0) < 0.1
-
     if is_pal_framerate:
-        times = np.array([c['start'] for c in accepted_chunks])
-        delays = np.array([c['delay'] for c in accepted_chunks])
-
-        # Perform linear regression to find the slope (drift rate in ms/s)
         slope, _ = np.polyfit(times, delays, 1)
-
-        # PAL drift is ~40.9ms per second. Check if the slope is close.
         if abs(slope - 40.9) < 5.0:
             runner._log_message(f"[PAL Drift Detected] Framerate is ~25fps and audio drift rate is {slope:.2f} ms/s.")
             return "PAL_DRIFT", {"rate": slope}
 
-    # --- Test 2: Check for Stepping ---
-    accepted_delays = [c['delay'] for c in accepted_chunks]
+    # --- Test 2: Check for Stepping (Clustered) ---
     epsilon_ms = config.get('detection_dbscan_epsilon_ms', 20.0)
     min_samples = config.get('detection_dbscan_min_samples', 2)
-
-    delays_array = np.array(accepted_delays).reshape(-1, 1)
-    db = DBSCAN(eps=epsilon_ms, min_samples=min_samples).fit(delays_array)
+    delays_reshaped = delays.reshape(-1, 1)
+    db = DBSCAN(eps=epsilon_ms, min_samples=min_samples).fit(delays_reshaped)
     unique_clusters = set(label for label in db.labels_ if label != -1)
-
     if len(unique_clusters) > 1:
         runner._log_message(f"[Stepping Detected] Found {len(unique_clusters)} distinct timing clusters.")
         return "STEPPING", {}
+
+    # --- Test 3: Check for General Linear Drift ---
+    slope, intercept = np.polyfit(times, delays, 1)
+    # Check if the slope is meaningful (e.g., > 0.5ms drift per second)
+    if abs(slope) > 0.5:
+        # Calculate R-squared value to check for "straightness"
+        y_predicted = slope * times + intercept
+        correlation_matrix = np.corrcoef(delays, y_predicted)
+        r_squared = correlation_matrix[0, 1]**2
+
+        r2_threshold = config.get('drift_detection_r2_threshold', 0.90)
+
+        if r_squared > r2_threshold:
+            runner._log_message(f"[Linear Drift Detected] Delays fit a straight line with R-squared={r_squared:.3f} and slope={slope:.2f} ms/s.")
+            return "LINEAR_DRIFT", {"rate": slope}
 
     # --- Default Case: Uniform Delay ---
     return "UNIFORM", {}

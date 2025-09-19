@@ -3,6 +3,7 @@
 from __future__ import annotations
 import json
 import gc
+import copy # <-- THE FIX IS HERE
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
@@ -250,9 +251,6 @@ class SteppingCorrector:
             if not coarse_map:
                 return CorrectionResult(CorrectionVerdict.FAILED, "Coarse scan did not find any reliable sync points.")
 
-            # THE FIX: This entire triage block is removed.
-            # The decision to proceed was already made by the more intelligent AnalysisStep.
-
             edl: List[AudioSegment] = []
             anchor_delay = coarse_map[0][1]
             edl.append(AudioSegment(start_s=0.0, end_s=0.0, delay_ms=anchor_delay))
@@ -371,8 +369,6 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
             temp_dir=ctx.temp_dir
         )
 
-        # This verdict is no longer possible after removing the triage check,
-        # but we can leave the handling here in case it's added back later.
         if result.verdict == CorrectionVerdict.UNIFORM:
             new_delay = result.data
             runner._log_message(f"[SteppingCorrection] Overriding delay for {source_key} with more accurate value: {new_delay} ms.")

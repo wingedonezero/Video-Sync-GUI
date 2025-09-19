@@ -72,6 +72,7 @@ class AppConfig:
             # Detection & Triage
             'detection_dbscan_epsilon_ms': 20.0,
             'detection_dbscan_min_samples': 2,
+            'drift_detection_r2_threshold': 0.90,
             'segment_triage_std_dev_ms': 50,
             # Coarse Scan
             'segment_coarse_chunk_s': 15,

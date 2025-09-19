@@ -5,6 +5,7 @@ from __future__ import annotations
 from vsg_core.orchestrator.steps.context import Context
 from ...io.runner import CommandRunner
 from ...correction.pal import run_pal_correction
+from ...correction.linear import run_linear_correction
 from ...correction.stepping import run_stepping_correction
 
 class AudioCorrectionStep:
@@ -22,7 +23,11 @@ class AudioCorrectionStep:
             runner._log_message('--- PAL Drift Audio Correction Phase ---')
             ctx = run_pal_correction(ctx, runner)
 
-        if ctx.segment_flags:
+        elif ctx.linear_drift_flags:
+            runner._log_message('--- Linear Drift Audio Correction Phase ---')
+            ctx = run_linear_correction(ctx, runner)
+
+        elif ctx.segment_flags:
             runner._log_message('--- Segmented (Stepping) Audio Correction Phase ---')
             ctx = run_stepping_correction(ctx, runner)
 
