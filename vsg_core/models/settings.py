@@ -24,6 +24,7 @@ class AppSettings:
     snap_starts_only: bool
     apply_dialog_norm_gain: bool
     disable_track_statistics_tags: bool
+    disable_header_compression: bool
     log_compact: bool
     log_autoscroll: bool
     log_error_tail: int
@@ -59,6 +60,7 @@ class AppSettings:
             snap_starts_only=bool(cfg['snap_starts_only']),
             apply_dialog_norm_gain=bool(cfg['apply_dialog_norm_gain']),
             disable_track_statistics_tags=bool(cfg['disable_track_statistics_tags']),
+            disable_header_compression=bool(cfg.get('disable_header_compression', True)),
             log_compact=bool(cfg['log_compact']),
             log_autoscroll=bool(cfg['log_autoscroll']),
             log_error_tail=int(cfg['log_error_tail']),

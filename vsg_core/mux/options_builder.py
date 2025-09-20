@@ -51,7 +51,8 @@ class MkvmergeOptionsBuilder:
             if (i == forced_sub_idx) and tr.type.value == 'subtitles':
                 tokens += ['--forced-display-flag', '0:yes']
 
-            tokens += ['--compression', '0:none']
+            if settings.disable_header_compression:
+                tokens += ['--compression', '0:none']
 
             if settings.apply_dialog_norm_gain and tr.type.value == 'audio':
                 cid = (tr.props.codec_id or '').upper()
@@ -80,8 +81,8 @@ class MkvmergeOptionsBuilder:
 
     def _effective_delay_ms(self, plan: MergePlan, item: PlanItem) -> int:
         """
-        Calculates the final sync delay for a track.
-        This logic is now correct for ALL tracks, including corrected ones.
+        [cite_start]Calculates the final sync delay for a track. [cite: 306]
+        [cite_start]This logic is now correct for ALL tracks, including corrected ones. [cite: 306]
         """
         tr = item.track
 

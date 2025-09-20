@@ -56,6 +56,7 @@ class AppConfig:
             'log_show_options_pretty': False,
             'log_show_options_json': False,
             'disable_track_statistics_tags': False,
+            'disable_header_compression': True,
             'archive_logs': True,
             'auto_apply_strict': False,
 
