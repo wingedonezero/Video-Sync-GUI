@@ -313,9 +313,48 @@ class SteppingCorrector:
                     self.log(f"    - Applying drift correction ({segment.drift_rate_ms_s:+.2f} ms/s) to segment {i}.")
                     tempo_ratio = 1000.0 / (1000.0 + segment.drift_rate_ms_s)
                     corrected_file = assembly_dir / f"segment_{i:03d}_corrected.flac"
-                    atempo_cmd = ['ffmpeg', '-y', '-nostdin', '-v', 'error', '-i', str(segment_file), '-af', f'atempo={tempo_ratio}', str(corrected_file)]
-                    if self.runner.run(atempo_cmd, self.tool_paths) is None:
-                        raise RuntimeError(f"Atempo correction failed for segment {i}")
+
+                    # --- MODIFICATION START ---
+                    resample_engine = self.config.get('segment_resample_engine', 'aresample')
+                    filter_chain = ''
+
+                    if resample_engine == 'rubberband':
+                        self.log(f"    - Using 'rubberband' engine for high-quality resampling.")
+                        rb_opts = [f'tempo={tempo_ratio}']
+
+                        pitch_correct_enabled = self.config.get('segment_rb_pitch_correct', False)
+                        if not pitch_correct_enabled:
+                            rb_opts.append(f'pitch={tempo_ratio}')
+
+                        transients = self.config.get('segment_rb_transients', 'crisp')
+                        rb_opts.append(f'transients={transients}')
+
+                        if self.config.get('segment_rb_smoother', True):
+                            rb_opts.append('smoother=on')
+
+                        if self.config.get('segment_rb_pitchq', True):
+                            rb_opts.append('pitchq=on')
+
+                        filter_chain = 'rubberband=' + ':'.join(rb_opts)
+
+                    elif resample_engine == 'atempo':
+                        self.log(f"    - Using 'atempo' engine for fast resampling.")
+                        filter_chain = f'atempo={tempo_ratio}'
+
+                    else: # Default to aresample
+                        self.log(f"    - Using 'aresample' engine for high-quality resampling.")
+                        new_sample_rate = sample_rate * tempo_ratio
+                        filter_chain = f'asetrate={new_sample_rate},aresample={sample_rate}'
+
+                    resample_cmd = ['ffmpeg', '-y', '-nostdin', '-v', 'error', '-i', str(segment_file), '-af', filter_chain, str(corrected_file)]
+
+                    if self.runner.run(resample_cmd, self.tool_paths) is None:
+                        error_msg = f"Resampling with '{resample_engine}' failed for segment {i}."
+                        if resample_engine == 'rubberband':
+                            error_msg += " (Ensure your FFmpeg build includes 'librubberband')."
+                        raise RuntimeError(error_msg)
+                    # --- MODIFICATION END ---
+
                     segment_file = corrected_file
 
                 segment_files.append(f"file '{segment_file.name}'")
@@ -325,7 +364,6 @@ class SteppingCorrector:
 
             concat_list_path.write_text('\n'.join(segment_files), encoding='utf-8')
 
-            # --- FIX: Add -map_metadata -1 to prevent FFmpeg from adding an ENCODER tag ---
             final_assembly_cmd = ['ffmpeg', '-y', '-v', 'error', '-f', 'concat', '-safe', '0', '-i', str(concat_list_path), '-map_metadata', '-1', '-c:a', 'flac', str(out_path)]
             if self.runner.run(final_assembly_cmd, self.tool_paths) is None:
                 raise RuntimeError("Final FFmpeg concat assembly failed.")
@@ -455,7 +493,7 @@ class SteppingCorrector:
             final_corrected_path = temp_dir / f"corrected_{source_key}.flac"
 
             if not self._assemble_from_segments_via_ffmpeg(target_pcm, edl, target_channels, target_layout, sample_rate, final_corrected_path, log_prefix="Final"):
-                 return CorrectionResult(CorrectionVerdict.FAILED, "Failed during final multichannel track assembly.")
+                return CorrectionResult(CorrectionVerdict.FAILED, "Failed during final multichannel track assembly.")
             del target_pcm; gc.collect()
 
             self.log(f"[SUCCESS] Enhanced stepping correction successful for '{Path(target_audio_path).name}'")

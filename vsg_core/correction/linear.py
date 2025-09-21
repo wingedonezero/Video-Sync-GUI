@@ -2,11 +2,30 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 import copy
+import json
+from typing import Tuple
 
 from ..orchestrator.steps.context import Context
 from ..io.runner import CommandRunner
 from ..models.enums import TrackType
 from ..models.media import StreamProps, Track
+
+def _get_sample_rate(file_path: str, runner: CommandRunner, tool_paths: dict) -> int:
+    """Helper to get the sample rate of the first audio stream."""
+    cmd = [
+        'ffprobe', '-v', 'error', '-select_streams', 'a:0',
+        '-show_entries', 'stream=sample_rate', '-of', 'json', str(file_path)
+    ]
+    out = runner.run(cmd, tool_paths)
+    if not out:
+        runner._log_message("[WARN] Could not probe sample rate, defaulting to 48000 Hz.")
+        return 48000
+    try:
+        stream_info = json.loads(out)['streams'][0]
+        return int(stream_info.get('sample_rate', 48000))
+    except (json.JSONDecodeError, IndexError, KeyError):
+        runner._log_message("[WARN] Failed to parse sample rate, defaulting to 48000 Hz.")
+        return 48000
 
 def run_linear_correction(ctx: Context, runner: CommandRunner) -> Context:
     """Corrects constant audio drift by resampling the audio speed."""
@@ -17,7 +36,7 @@ def run_linear_correction(ctx: Context, runner: CommandRunner) -> Context:
         target_item = next((item for item in ctx.extracted_items if item.track.source == source_key and item.track.type == TrackType.AUDIO and not item.is_preserved), None)
 
         if not target_item:
-            runner._log_message(f"[LinearCorrector] Could not find a target audio track for {source_key} in the layout. Skipping.")
+            runner._log_message(f"[LinearCorrector] Could not find a target audio track for {source_key} in the layout. [cite_start]Skipping.") [cite: 124]
             continue
 
         runner._log_message(f"[LinearCorrector] Applying drift correction to track from {source_key} (rate: {drift_rate_ms_s:.2f} ms/s)...")
@@ -28,21 +47,55 @@ def run_linear_correction(ctx: Context, runner: CommandRunner) -> Context:
         # Calculate the tempo multiplier. If drift is +1ms/s, the new duration is 1001ms, so tempo should be 1000/1001.
         tempo_ratio = 1000.0 / (1000.0 + drift_rate_ms_s)
 
-        # FFmpeg's atempo filter is limited to values between 0.5 and 100.0.
-        # This is fine, as our drift rates will be very small.
-        if not (0.5 <= tempo_ratio <= 100.0):
-             raise ValueError(f"Calculated tempo ratio {tempo_ratio:.4f} is outside ffmpeg's supported range.")
+        # --- MODIFICATION START: DYNAMIC RESAMPLING ENGINE ---
 
-        cmd = [
+        # Get sample rate, which is needed for the 'aresample' engine
+        sample_rate = _get_sample_rate(str(original_path), runner, ctx.tool_paths)
+
+        resample_engine = ctx.settings_dict.get('segment_resample_engine', 'aresample')
+        filter_chain = ''
+
+        if resample_engine == 'rubberband':
+            runner._log_message(f"    - Using 'rubberband' engine for high-quality resampling.")
+            rb_opts = [f'tempo={tempo_ratio}']
+
+            if not ctx.settings_dict.get('segment_rb_pitch_correct', False):
+                rb_opts.append(f'pitch={tempo_ratio}')
+
+            rb_opts.append(f"transients={ctx.settings_dict.get('segment_rb_transients', 'crisp')}")
+
+            if ctx.settings_dict.get('segment_rb_smoother', True):
+                rb_opts.append('smoother=on')
+
+            if ctx.settings_dict.get('segment_rb_pitchq', True):
+                rb_opts.append('pitchq=on')
+
+            filter_chain = 'rubberband=' + ':'.join(rb_opts)
+
+        elif resample_engine == 'atempo':
+            runner._log_message(f"    - Using 'atempo' engine for fast resampling.")
+            filter_chain = f'atempo={tempo_ratio}'
+
+        else: # Default to aresample
+            runner._log_message(f"    - Using 'aresample' engine for high-quality resampling.")
+            new_sample_rate = sample_rate * tempo_ratio
+            filter_chain = f'asetrate={new_sample_rate},aresample={sample_rate}'
+
+        resample_cmd = [
             'ffmpeg', '-y', '-nostdin', '-v', 'error',
             '-i', str(original_path),
-            '-af', f'atempo={tempo_ratio}',
+            '-af', filter_chain,
             '-c:a', 'flac',
             str(corrected_path)
         ]
 
-        if runner.run(cmd, ctx.tool_paths) is None:
-            raise RuntimeError(f"Linear drift correction failed for {original_path.name}.")
+        if runner.run(resample_cmd, ctx.tool_paths) is None:
+            error_msg = f"Linear drift correction with '{resample_engine}' failed for {original_path.name}."
+            if resample_engine == 'rubberband':
+                error_msg += " (Ensure your FFmpeg build includes 'librubberband')."
+            raise RuntimeError(error_msg)
+
+        # --- MODIFICATION END ---
 
         runner._log_message(f"[SUCCESS] Linear drift correction successful for '{original_path.name}'")
 

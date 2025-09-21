@@ -73,19 +73,27 @@ class AppConfig:
             # Detection & Triage
             'detection_dbscan_epsilon_ms': 20.0,
             'detection_dbscan_min_samples': 2,
-            'drift_detection_r2_threshold': 0.90, # Base R² for lossy codecs in main diagnosis
-            'drift_detection_r2_threshold_lossless': 0.95, # <-- NEW SETTING ADDED HERE
-            'drift_detection_slope_threshold_lossy': 0.7, # <-- NEW SETTING ADDED HERE
-            'drift_detection_slope_threshold_lossless': 0.2, # <-- NEW SETTING ADDED HERE
+            'drift_detection_r2_threshold': 0.90,
+            'drift_detection_r2_threshold_lossless': 0.95,
+            'drift_detection_slope_threshold_lossy': 0.7,
+            'drift_detection_slope_threshold_lossless': 0.2,
             'segment_triage_std_dev_ms': 50,
             # Segment Scan & Correction
             'segment_coarse_chunk_s': 15,
             'segment_coarse_step_s': 60,
             'segment_search_locality_s': 10,
-            'segment_drift_r2_threshold': 0.75, # <-- NEW SETTING ADDED HERE
-            'segment_drift_slope_threshold': 0.7, # <-- NEW SETTING ADDED HERE
-            'segment_drift_outlier_sensitivity': 1.5, # <-- NEW SETTING ADDED HERE
-            'segment_drift_scan_buffer_pct': 2.0, # <-- NEW SETTING ADDED HERE
+            'segment_drift_r2_threshold': 0.75,
+            'segment_drift_slope_threshold': 0.7,
+            'segment_drift_outlier_sensitivity': 1.5,
+            'segment_drift_scan_buffer_pct': 2.0,
+
+            # --- NEW: Resampling Engine Settings ---
+            'segment_resample_engine': 'aresample', # New default: aresample, atempo, rubberband
+            'segment_rb_pitch_correct': False,      # For rubberband: default to NO pitch correction
+            'segment_rb_transients': 'crisp',       # For rubberband: 'crisp', 'mixed', or 'smooth'
+            'segment_rb_smoother': True,            # For rubberband: phase smoothing for quality
+            'segment_rb_pitchq': True,              # For rubberband: high-quality pitch algorithm
+
             # Fine Scan & Confidence
             'segment_min_confidence_ratio': 5.0,
             'segment_fine_chunk_s': 2.0,
