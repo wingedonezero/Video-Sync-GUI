@@ -94,12 +94,7 @@ class JobPipeline:
                 raise RuntimeError('Internal error: mkvmerge tokens were not generated.')
 
             final_output_path = output_dir / Path(source1_file).name
-
-            # --- MODIFICATION START ---
-            # Always merge to a temporary file name first. This prevents thumbnailer race conditions
-            # and ensures the finalizer step has a clean source and destination.
             mkvmerge_output_path = ctx.temp_dir / f"temp_{final_output_path.name}"
-            # --- MODIFICATION END ---
 
             ctx.tokens.insert(0, str(mkvmerge_output_path))
             ctx.tokens.insert(0, '--output')
@@ -110,13 +105,12 @@ class JobPipeline:
                 raise RuntimeError('mkvmerge execution failed.')
 
             # --- MODIFICATION START ---
-            # Reworked finalization logic. If normalization is enabled, we ALWAYS run the
-            # finalizer, as it's the ffmpeg rebuild that creates the most compatible file.
+            # Reverted to the original, simple check for whether the finalizer is needed.
             normalize_enabled = self.config.get('post_mux_normalize_timestamps', False)
-            if normalize_enabled:
+
+            if normalize_enabled and check_if_rebasing_is_needed(mkvmerge_output_path, runner, self.tool_paths):
                 finalize_merged_file(mkvmerge_output_path, final_output_path, runner, self.config, self.tool_paths)
             else:
-                # If normalization is disabled, we just move the file.
                 shutil.move(mkvmerge_output_path, final_output_path)
             # --- MODIFICATION END ---
 

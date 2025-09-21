@@ -159,32 +159,27 @@ class SteppingCorrector:
         self.log(f"    - Found precise boundary at: {final_boundary_s:.3f}s")
         return final_boundary_s
 
+    # --- MODIFICATION START ---
     def _analyze_internal_drift(self, edl: List[AudioSegment], ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int, codec_name: str) -> List[AudioSegment]:
         self.log(f"  [SteppingCorrector] Stage 2.5: Analyzing segments for internal drift (Codec: {codec_name})...")
         final_edl = []
 
-        is_lossless = 'pcm' in codec_name or 'flac' in codec_name or 'truehd' in codec_name
         r_squared_threshold = self.config.get('segment_drift_r2_threshold', 0.75)
         slope_threshold = self.config.get('segment_drift_slope_threshold', 0.7)
         outlier_sensitivity = self.config.get('segment_drift_outlier_sensitivity', 1.5)
         scan_buffer_pct = self.config.get('segment_drift_scan_buffer_pct', 2.0)
-
         pcm_duration_s = len(analysis_pcm) / float(sample_rate)
 
         for i, current_segment in enumerate(edl):
-            segment_start_s_on_target_timeline = current_segment.start_s
-            segment_end_s_on_target_timeline = edl[i+1].start_s if i + 1 < len(edl) else pcm_duration_s
-
-            base_delay_s = current_segment.delay_ms / 1000.0
-            segment_start_s_on_ref_timeline = segment_start_s_on_target_timeline - base_delay_s
-            segment_end_s_on_ref_timeline = segment_end_s_on_target_timeline - base_delay_s
-            segment_duration_s = segment_end_s_on_ref_timeline - segment_start_s_on_ref_timeline
+            segment_start_s = current_segment.start_s
+            segment_end_s = edl[i+1].start_s if i + 1 < len(edl) else pcm_duration_s
+            segment_duration_s = segment_end_s - segment_start_s
 
             if segment_duration_s < 20.0:
                 final_edl.append(current_segment)
                 continue
 
-            self.log(f"    - Scanning segment from {segment_start_s_on_ref_timeline:.2f}s to {segment_end_s_on_ref_timeline:.2f}s (Reference Timeline)...")
+            self.log(f"    - Scanning segment from {segment_start_s:.2f}s to {segment_end_s:.2f}s (Target Timeline)...")
 
             scan_chunk_s = 5.0
             num_scans = max(5, int(segment_duration_s / 20.0))
@@ -192,24 +187,27 @@ class SteppingCorrector:
             locality_samples = int(self.config.get('segment_search_locality_s', 10) * sample_rate)
 
             offset = min(30.0, segment_duration_s * (scan_buffer_pct / 100.0))
-            scan_window_start = segment_start_s_on_ref_timeline + offset
-            scan_window_end = segment_end_s_on_ref_timeline - offset - scan_chunk_s
+            scan_window_start = segment_start_s + offset
+            scan_window_end = segment_end_s - offset - scan_chunk_s
 
             if scan_window_end <= scan_window_start:
                 final_edl.append(current_segment)
                 continue
 
-            scan_points_s = np.linspace(scan_window_start, scan_window_end, num=num_scans)
+            scan_points_s_target = np.linspace(scan_window_start, scan_window_end, num=num_scans)
 
             times, delays = [], []
-            for t_s in scan_points_s:
-                start_sample = int(t_s * sample_rate)
-                delay = self._get_delay_for_chunk(ref_pcm, analysis_pcm, start_sample, chunk_samples, sample_rate, locality_samples)
+            for t_s_target in scan_points_s_target:
+                base_delay_s = current_segment.delay_ms / 1000.0
+                t_s_ref = t_s_target - base_delay_s
+                start_sample_ref = int(t_s_ref * sample_rate)
+
+                delay = self._get_delay_for_chunk(ref_pcm, analysis_pcm, start_sample_ref, chunk_samples, sample_rate, locality_samples)
                 if delay is not None:
-                    times.append(t_s)
+                    times.append(t_s_ref)
                     delays.append(delay)
 
-            if len(times) < 6:
+            if len(times) < 4:
                 final_edl.append(current_segment)
                 continue
 
@@ -235,10 +233,19 @@ class SteppingCorrector:
 
             times_arr, delays_arr = np.array(filtered_times), np.array(filtered_delays)
 
-            correlation_matrix = np.corrcoef(times_arr, delays_arr)
-            r_squared = correlation_matrix[0, 1]**2
+            try:
+                correlation_matrix = np.corrcoef(times_arr, delays_arr)
+                if np.isnan(correlation_matrix).any():
+                    r_squared = 0.0
+                else:
+                    r_squared = correlation_matrix[0, 1]**2
 
-            slope, _ = np.polyfit(times_arr, delays_arr, 1)
+                if np.isnan(r_squared):
+                    r_squared = 0.0
+
+                slope, _ = np.polyfit(times_arr, delays_arr, 1)
+            except (np.linalg.LinAlgError, ValueError):
+                r_squared, slope = 0.0, 0.0
 
             if r_squared > r_squared_threshold and abs(slope) > slope_threshold:
                 self.log(f"      [DRIFT DETECTED] Found internal drift of {slope:+.2f} ms/s in segment (R²={r_squared:.2f}).")
@@ -249,6 +256,7 @@ class SteppingCorrector:
             final_edl.append(current_segment)
 
         return final_edl
+    # --- MODIFICATION END ---
 
     def _assemble_from_segments_via_ffmpeg(self, pcm_data: np.ndarray, edl: List[AudioSegment], channels: int, channel_layout: str, sample_rate: int, out_path: Path, log_prefix: str) -> bool:
         self.log(f"  [{log_prefix}] Assembling audio from {len(edl)} segment(s) via FFmpeg...")
@@ -572,20 +580,14 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
 
             target_item.extracted_path = corrected_path
             target_item.is_corrected = True
-
-            # --- MODIFICATION START ---
             target_item.track = Track(
                 source=target_item.track.source, id=target_item.track.id, type=target_item.track.type,
                 props=StreamProps(
                     codec_id="FLAC",
                     lang=original_props.lang,
-                    name=original_props.name # Carry over original name
+                    name=original_props.name
                 )
             )
-            # We no longer force `apply_track_name` to True. The original value
-            # from the user's selection in the dialog will be preserved.
-            # --- MODIFICATION END ---
-
             ctx.extracted_items.append(preserved_item)
 
         elif result.verdict == CorrectionVerdict.FAILED:
