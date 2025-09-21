@@ -9,7 +9,7 @@ from vsg_core.orchestrator.steps.context import Context
 from vsg_core.models.jobs import Delays
 from vsg_core.analysis.audio_corr import run_audio_correlation
 from vsg_core.analysis.drift_detection import diagnose_audio_issue
-from vsg_core.extraction.tracks import get_stream_info # <-- FIX: Added import
+from vsg_core.extraction.tracks import get_stream_info
 
 def _choose_final_delay(results: List[Dict[str, Any]], config: Dict, runner: CommandRunner, role_tag: str) -> Optional[int]:
     min_match_pct = float(config.get('min_match_pct', 5.0))
@@ -41,13 +41,11 @@ class AnalysisStep:
             runner._log_message(f"--- Analyzing {source_key} ---")
             tgt_lang = config.get('analysis_lang_others')
 
-            # --- FIX: Get full stream info to find the codec ---
             stream_info = get_stream_info(source_file, runner, ctx.tool_paths)
             if not stream_info:
                 runner._log_message(f"[WARN] Could not get stream info for {source_key}. Skipping.")
                 continue
 
-            # Find the track that will be used for analysis to get its codec and ID
             audio_tracks = [t for t in stream_info.get('tracks', []) if t.get('type') == 'audio']
             target_track_obj = None
             if not audio_tracks:
@@ -59,11 +57,10 @@ class AnalysisStep:
                         target_track_obj = track
                         break
             if not target_track_obj:
-                target_track_obj = audio_tracks[0] # Fallback to first track
+                target_track_obj = audio_tracks[0]
 
             target_track_id = target_track_obj.get('id')
             target_codec_id = target_track_obj.get('properties', {}).get('codec_id', 'unknown')
-            # --- End Fix ---
 
             if target_track_id is None:
                 runner._log_message(f"[WARN] No suitable audio track found in {source_key} for analysis. Skipping.")
@@ -89,7 +86,7 @@ class AnalysisStep:
                     config=config,
                     runner=runner,
                     tool_paths=ctx.tool_paths,
-                    codec_id=target_codec_id # <-- FIX: Pass codec to the diagnostic function
+                    codec_id=target_codec_id
                 )
 
                 analysis_track_key = f"{source_key}_{target_track_id}"
@@ -101,9 +98,11 @@ class AnalysisStep:
                 elif diagnosis == "STEPPING":
                     ctx.segment_flags[analysis_track_key] = { 'base_delay': delay_ms }
 
-        min_delay = min([0] + list(source_delays.values()))
-        global_shift = -min_delay if min_delay < 0 else 0
-        ctx.delays = Delays(source_delays_ms=source_delays, global_shift_ms=global_shift)
-        runner._log_message(f"[Delay] Global shift will be: +{global_shift} ms")
+        # --- MODIFICATION START ---
+        # The global_shift logic is removed entirely. Source 1 is now the immutable
+        # zero-point, and other tracks will have their direct delays applied.
+        ctx.delays = Delays(source_delays_ms=source_delays, global_shift_ms=0)
+        runner._log_message(f"[Delay] Source delays calculated. Source 1 is the zero-point reference.")
+        # --- MODIFICATION END ---
 
         return ctx

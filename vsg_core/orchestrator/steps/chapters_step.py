@@ -21,7 +21,11 @@ class ChaptersStep:
             ctx.chapters_xml = None
             return ctx
 
-        shift_ms = ctx.delays.global_shift_ms if ctx.delays else 0
+        # --- MODIFICATION START ---
+        # Chapters are part of Source 1 and should never be shifted under the new logic.
+        shift_ms = 0
+        # --- MODIFICATION END ---
+
         xml_path = process_chapters(
             source1_file, ctx.temp_dir, runner, ctx.tool_paths,
             ctx.settings_dict, shift_ms

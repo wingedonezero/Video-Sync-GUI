@@ -94,15 +94,12 @@ class JobPipeline:
                 raise RuntimeError('Internal error: mkvmerge tokens were not generated.')
 
             final_output_path = output_dir / Path(source1_file).name
-            mkvmerge_output_path = final_output_path
 
-            normalize_enabled = self.config.get('post_mux_normalize_timestamps', False)
-            temp_mux_path = ctx.temp_dir / final_output_path.name
-
-            # Use a temporary path for the initial merge if normalization is enabled,
-            # as the finalizer will create the actual final file.
-            if normalize_enabled:
-                mkvmerge_output_path = temp_mux_path
+            # --- MODIFICATION START ---
+            # Always merge to a temporary file name first. This prevents thumbnailer race conditions
+            # and ensures the finalizer step has a clean source and destination.
+            mkvmerge_output_path = ctx.temp_dir / f"temp_{final_output_path.name}"
+            # --- MODIFICATION END ---
 
             ctx.tokens.insert(0, str(mkvmerge_output_path))
             ctx.tokens.insert(0, '--output')
@@ -112,12 +109,16 @@ class JobPipeline:
             if not merge_ok:
                 raise RuntimeError('mkvmerge execution failed.')
 
-            if normalize_enabled and check_if_rebasing_is_needed(mkvmerge_output_path, runner, self.tool_paths):
-                # We merged to a temp path, now run finalization to create the final_output_path
+            # --- MODIFICATION START ---
+            # Reworked finalization logic. If normalization is enabled, we ALWAYS run the
+            # finalizer, as it's the ffmpeg rebuild that creates the most compatible file.
+            normalize_enabled = self.config.get('post_mux_normalize_timestamps', False)
+            if normalize_enabled:
                 finalize_merged_file(mkvmerge_output_path, final_output_path, runner, self.config, self.tool_paths)
-            elif normalize_enabled:
-                # Rebasing was not needed, so just move the temp merged file to the final destination
+            else:
+                # If normalization is disabled, we just move the file.
                 shutil.move(mkvmerge_output_path, final_output_path)
+            # --- MODIFICATION END ---
 
             log_to_all(f'[SUCCESS] Output file created: {final_output_path}')
             self.progress(1.0)
