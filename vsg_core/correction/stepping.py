@@ -314,7 +314,6 @@ class SteppingCorrector:
                     tempo_ratio = 1000.0 / (1000.0 + segment.drift_rate_ms_s)
                     corrected_file = assembly_dir / f"segment_{i:03d}_corrected.flac"
 
-                    # --- MODIFICATION START ---
                     resample_engine = self.config.get('segment_resample_engine', 'aresample')
                     filter_chain = ''
 
@@ -322,12 +321,10 @@ class SteppingCorrector:
                         self.log(f"    - Using 'rubberband' engine for high-quality resampling.")
                         rb_opts = [f'tempo={tempo_ratio}']
 
-                        pitch_correct_enabled = self.config.get('segment_rb_pitch_correct', False)
-                        if not pitch_correct_enabled:
+                        if not self.config.get('segment_rb_pitch_correct', False):
                             rb_opts.append(f'pitch={tempo_ratio}')
 
-                        transients = self.config.get('segment_rb_transients', 'crisp')
-                        rb_opts.append(f'transients={transients}')
+                        rb_opts.append(f"transients={self.config.get('segment_rb_transients', 'crisp')}")
 
                         if self.config.get('segment_rb_smoother', True):
                             rb_opts.append('smoother=on')
@@ -353,7 +350,6 @@ class SteppingCorrector:
                         if resample_engine == 'rubberband':
                             error_msg += " (Ensure your FFmpeg build includes 'librubberband')."
                         raise RuntimeError(error_msg)
-                    # --- MODIFICATION END ---
 
                     segment_file = corrected_file
 
@@ -576,15 +572,20 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
 
             target_item.extracted_path = corrected_path
             target_item.is_corrected = True
+
+            # --- MODIFICATION START ---
             target_item.track = Track(
                 source=target_item.track.source, id=target_item.track.id, type=target_item.track.type,
                 props=StreamProps(
                     codec_id="FLAC",
                     lang=original_props.lang,
-                    name=original_props.name
+                    name=original_props.name # Carry over original name
                 )
             )
-            target_item.apply_track_name = True
+            # We no longer force `apply_track_name` to True. The original value
+            # from the user's selection in the dialog will be preserved.
+            # --- MODIFICATION END ---
+
             ctx.extracted_items.append(preserved_item)
 
         elif result.verdict == CorrectionVerdict.FAILED:

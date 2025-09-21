@@ -36,7 +36,7 @@ def run_linear_correction(ctx: Context, runner: CommandRunner) -> Context:
         target_item = next((item for item in ctx.extracted_items if item.track.source == source_key and item.track.type == TrackType.AUDIO and not item.is_preserved), None)
 
         if not target_item:
-            runner._log_message(f"[LinearCorrector] Could not find a target audio track for {source_key} in the layout. [cite_start]Skipping.") [cite: 124]
+            runner._log_message(f"[LinearCorrector] Could not find a target audio track for {source_key} in the layout. Skipping.")
             continue
 
         runner._log_message(f"[LinearCorrector] Applying drift correction to track from {source_key} (rate: {drift_rate_ms_s:.2f} ms/s)...")
@@ -44,12 +44,7 @@ def run_linear_correction(ctx: Context, runner: CommandRunner) -> Context:
         original_path = target_item.extracted_path
         corrected_path = original_path.parent / f"drift_corrected_{original_path.stem}.flac"
 
-        # Calculate the tempo multiplier. If drift is +1ms/s, the new duration is 1001ms, so tempo should be 1000/1001.
         tempo_ratio = 1000.0 / (1000.0 + drift_rate_ms_s)
-
-        # --- MODIFICATION START: DYNAMIC RESAMPLING ENGINE ---
-
-        # Get sample rate, which is needed for the 'aresample' engine
         sample_rate = _get_sample_rate(str(original_path), runner, ctx.tool_paths)
 
         resample_engine = ctx.settings_dict.get('segment_resample_engine', 'aresample')
@@ -95,11 +90,8 @@ def run_linear_correction(ctx: Context, runner: CommandRunner) -> Context:
                 error_msg += " (Ensure your FFmpeg build includes 'librubberband')."
             raise RuntimeError(error_msg)
 
-        # --- MODIFICATION END ---
-
         runner._log_message(f"[SUCCESS] Linear drift correction successful for '{original_path.name}'")
 
-        # Preserve the original track for reference
         preserved_item = copy.deepcopy(target_item)
         preserved_item.is_preserved = True
         preserved_item.is_default = False
@@ -113,18 +105,20 @@ def run_linear_correction(ctx: Context, runner: CommandRunner) -> Context:
             )
         )
 
-        # Update the main track item to point to the new, corrected FLAC file
         target_item.extracted_path = corrected_path
         target_item.is_corrected = True
+
+        # --- MODIFICATION START ---
         target_item.track = Track(
             source=target_item.track.source, id=target_item.track.id, type=target_item.track.type,
             props=StreamProps(
                 codec_id="FLAC",
                 lang=original_props.lang,
-                name=f"{original_props.name} (Drift Corrected)" if original_props.name else "Drift Corrected"
+                name=original_props.name # Carry over original name
             )
         )
-        target_item.apply_track_name = True
+        # We no longer force apply_track_name to True. The user's original selection is preserved.
+        # --- MODIFICATION END ---
 
         ctx.extracted_items.append(preserved_item)
 
