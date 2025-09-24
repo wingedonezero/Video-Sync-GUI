@@ -1,72 +1,91 @@
 # vsg_qt/track_widget/logic.py
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-
-from PySide6.QtWidgets import QMenu, QWidgetAction
-from .helpers import compose_label_text, build_summary_text
+from typing import Dict, List, Any
 
 class TrackWidgetLogic:
-    """
-    Attaches behavior to the TrackWidget view.
-    The view is a TrackWidget (from ui.py) exposing the controls as attributes.
-    """
-    def __init__(self, view):
+    def __init__(self, view: "TrackWidget", track_data: Dict, available_sources: List[str]):
         self.v = view
-        self._menu = None
-        self._in_apply = False  # reentrancy guard
-        self._install_menu()
-        self.refresh_badges()
-        self.refresh_summary()
+        self.track_data = track_data
+        self.available_sources = available_sources
+        self.init_ui_state()
 
-    # ----- Menu -----
-    def _install_menu(self):
-        if self._menu is not None:
-            return
+    def init_ui_state(self):
+        """Sets the initial state of the UI based on track data."""
+        self.v.source_label.setText(f"Source: {self.track_data['source']}")
 
-        v = self.v
-        self._menu = QMenu(v)
-        container = v._build_menu_form()
-        act = QWidgetAction(self._menu)
-        act.setDefaultWidget(container)
-        self._menu.addAction(act)
-        v.btn.setMenu(self._menu)
+        is_subs = self.track_data.get('type') == 'subtitles'
+        is_external = self.track_data.get('source') == 'External'
 
-    def apply_state_from_menu(self):
-        if self._in_apply:
-            return
-        self._in_apply = True
-        try:
-            self.refresh_badges()
-            self.refresh_summary()
-        finally:
-            self._in_apply = False
+        # Show/hide controls based on track type
+        self.v.cb_forced.setVisible(is_subs)
+        self.v.style_editor_btn.setVisible(is_subs)
 
-    # ----- UI refresh -----
-    def refresh_badges(self):
-        self.v.label.setText(compose_label_text(self.v))
+        # Show the sync dropdown ONLY for external subtitles
+        self.v.sync_to_label.setVisible(is_subs and is_external)
+        self.v.sync_to_combo.setVisible(is_subs and is_external)
+        if is_subs and is_external:
+            self.populate_sync_sources()
+
+    def populate_sync_sources(self):
+        """Populates the dropdown with sources to sync an external sub against."""
+        combo = self.v.sync_to_combo
+        combo.blockSignals(True)
+        combo.clear()
+
+        # Add a blank default option
+        combo.addItem("Default (Source 1)", "Source 1")
+
+        for src in self.available_sources:
+             if src != "Source 1":
+                combo.addItem(src, src)
+
+        saved_sync_source = self.track_data.get('sync_to')
+        if saved_sync_source:
+            index = combo.findData(saved_sync_source)
+            if index != -1:
+                combo.setCurrentIndex(index)
+
+        combo.blockSignals(False)
 
     def refresh_summary(self):
-        txt = build_summary_text(self.v)
-        if txt:
-            self.v.summary.setText(txt)
-            self.v.summary.setVisible(True)
-        else:
-            self.v.summary.clear()
-            self.v.summary.setVisible(False)
+        """Updates the main summary label with all relevant track info."""
+        track_type = self.track_data.get('type', 'U')
+        track_id = self.track_data.get('id', 0)
+        description = self.track_data.get('description', 'N/A')
 
-    # ----- Public helpers used by TrackWidget -----
-    def get_config(self) -> dict:
-        v = self.v
+        summary_text = f"[{track_type[0].upper()}-{track_id}] {description}"
+        self.v.summary_label.setText(summary_text)
+
+    def refresh_badges(self):
+        """Updates the badge label based on the current settings."""
+        badges = []
+        if self.v.cb_default.isChecked():
+            badges.append("Default")
+        if self.track_data.get('type') == 'subtitles' and self.v.cb_forced.isChecked():
+            badges.append("Forced")
+        if self.track_data.get('user_modified_path'):
+            badges.append("Edited")
+        elif self.track_data.get('style_patch'):
+            badges.append("Styled")
+
+        self.v.badge_label.setText(" | ".join(badges))
+        self.v.badge_label.setVisible(bool(badges))
+
+    def get_config(self) -> Dict[str, Any]:
+        """Returns the current configuration from the widget's controls."""
+        is_subs = self.track_data.get('type') == 'subtitles'
+
         config = {
-            'is_default': v.cb_default.isChecked(),
-            'is_forced_display': v.cb_forced.isChecked(),
-            'apply_track_name': v.cb_name.isChecked(),
-            'convert_to_ass': v.cb_convert.isChecked(),
-            'rescale': v.cb_rescale.isChecked(),
-            'size_multiplier': v.size_multiplier.value() if v.track_type == 'subtitles' else 1.0
+            "is_default": self.v.cb_default.isChecked(),
+            "apply_track_name": self.v.cb_name.isChecked(),
+            "is_forced_display": self.v.cb_forced.isChecked() if is_subs else False,
+            "convert_to_ass": self.v.cb_convert.isChecked() if is_subs else False,
+            "rescale": self.v.cb_rescale.isChecked() if is_subs else False,
+            "size_multiplier": self.v.size_multiplier.value() if is_subs else 1.0,
+            "style_patch": self.track_data.get('style_patch'),
+            "user_modified_path": self.track_data.get('user_modified_path'),
+            "sync_to": self.v.sync_to_combo.currentData() if (is_subs and self.v.sync_to_combo.isVisible()) else None
         }
-
-        if hasattr(v, 'sync_to_combo') and v.sync_to_combo.isVisible():
-            config['sync_to'] = v.sync_to_combo.currentData()
 
         return config

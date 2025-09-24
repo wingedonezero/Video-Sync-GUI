@@ -1,80 +1,45 @@
 from __future__ import annotations
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QDialogButtonBox,
-    QCheckBox, QLabel, QDoubleSpinBox, QWidget
+    QDialog, QVBoxLayout, QDialogButtonBox,
+    QCheckBox, QDoubleSpinBox
 )
-from PySide6.QtCore import Qt
 from .logic import TrackSettingsLogic
 
 class TrackSettingsDialog(QDialog):
-    """
-    Small popup dialog to edit per-track options.
-    Public API preserved:
-      - __init__(track_type, codec_id, is_default, is_forced_display, apply_track_name, convert_to_ass, rescale, size_multiplier, parent)
-      - get_values() -> dict
-    """
-    def __init__(
-        self, *,
-        track_type: str,
-        codec_id: str,
-        is_default: bool,
-        is_forced_display: bool,
-        apply_track_name: bool,
-        convert_to_ass: bool,
-        rescale: bool,
-        size_multiplier: float,
-        parent: QWidget = None
-    ):
-        super().__init__(parent)
+    """Small popup dialog to edit per-track options."""
+    def __init__(self, track_type: str, codec_id: str, **kwargs):
+        super().__init__()
         self.setWindowTitle("Track Settings")
-        self.setMinimumWidth(360)
 
-        # ---- controls (public attributes kept for compatibility) ----
-        self.cb_default = QCheckBox("Default")
-        self.cb_forced = QCheckBox("Forced")
+        # --- UI Elements ---
+        # --- MODIFICATION: 'Forced' checkbox is now removed from this dialog ---
         self.cb_convert = QCheckBox("Convert to ASS (SRT only)")
         self.cb_rescale = QCheckBox("Rescale to video resolution")
         self.size_multiplier = QDoubleSpinBox()
-        self.size_multiplier.setRange(0.1, 5.0)
+        self.size_multiplier.setRange(0.1, 10.0)
         self.size_multiplier.setSingleStep(0.1)
+        self.size_multiplier.setDecimals(2)
+        self.size_multiplier.setPrefix("Size multiplier: ")
         self.size_multiplier.setSuffix("x")
-        self.cb_name = QCheckBox("Keep Name")
 
-        # ---- layout ----
-        vbox = QVBoxLayout(self)
+        # --- Logic ---
+        self._logic = TrackSettingsLogic(self)
 
-        vbox.addWidget(self.cb_default)
+        # --- Layout ---
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.cb_convert)
+        layout.addWidget(self.cb_rescale)
+        layout.addWidget(self.size_multiplier)
 
-        # Subtitle-only controls (visibility/enablement handled by logic)
-        vbox.addWidget(self.cb_forced)
-        vbox.addWidget(self.cb_convert)
-        vbox.addWidget(self.cb_rescale)
-
-        size_row = QHBoxLayout()
-        size_row.addWidget(QLabel("Size multiplier:"))
-        size_row.addWidget(self.size_multiplier, 1)
-        vbox.addLayout(size_row)
-
-        vbox.addWidget(self.cb_name)
-        vbox.addStretch(1)
-
-        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self)
+        btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         btns.accepted.connect(self.accept)
         btns.rejected.connect(self.reject)
-        vbox.addWidget(btns)
+        layout.addWidget(btns)
 
-        # ---- logic wiring ----
-        self._logic = TrackSettingsLogic(self)
+        # --- Initial State ---
+        self._logic.apply_initial_values(**kwargs)
         self._logic.init_for_type_and_codec(track_type, codec_id)
-        self._logic.apply_initial_values(
-            is_default=is_default,
-            is_forced_display=is_forced_display,
-            apply_track_name=apply_track_name,
-            convert_to_ass=convert_to_ass,
-            rescale=rescale,
-            size_multiplier=size_multiplier
-        )
 
-    # ---- public API ----
-    def get_values(self) -> dict:
+    def read_values(self) -> dict:
+        """Public method to retrieve the dialog's current values."""
         return self._logic.read_values()

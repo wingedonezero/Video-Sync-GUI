@@ -1,109 +1,114 @@
 # vsg_qt/track_widget/ui.py
+# -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import List
+from typing import Dict, List
+
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox,
-    QDoubleSpinBox, QToolButton, QWidget as QtWidget, QFormLayout, QPushButton, QComboBox
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QCheckBox, QDoubleSpinBox, QComboBox
 )
 from PySide6.QtCore import Qt
+
 from .logic import TrackWidgetLogic
+from vsg_qt.track_settings_dialog import TrackSettingsDialog
 
 class TrackWidget(QWidget):
-    """
-    Reusable row widget shown in ManualSelectionDialog's Final list.
-    """
-    def __init__(self, track_data: dict, available_sources: List[str] = None, parent=None):
+    """A self-contained widget for a single track in the final layout."""
+    def __init__(self, track_data: Dict, available_sources: List[str], parent=None):
         super().__init__(parent)
         self.track_data = track_data
-        self.track_type = track_data.get('type', 'unknown')
-        self.codec_id = track_data.get('codec_id', '')
-        self.source = track_data.get('source', 'N/A')
+        self.track_type = track_data.get('type')
+        self.codec_id = track_data.get('codec_id')
 
-        # ---------- Hidden state controls (single source of truth) ----------
+        # --- UI Elements ---
+        self.summary_label = QLabel("...")
+        self.summary_label.setStyleSheet("font-weight: bold;")
+        self.source_label = QLabel("...")
+        self.badge_label = QLabel("")
+        self.badge_label.setStyleSheet("color: #E0A800; font-weight: bold;")
+
+        # Quick-access controls
         self.cb_default = QCheckBox("Default")
         self.cb_forced = QCheckBox("Forced")
-        self.cb_convert = QCheckBox("Convert to ASS")
+        self.cb_name = QCheckBox("Set Name")
+
+        # Hidden controls whose state is managed by the settings dialog
+        self.cb_convert = QCheckBox("To ASS")
         self.cb_rescale = QCheckBox("Rescale")
-        self.size_multiplier = QDoubleSpinBox(); self.size_multiplier.setRange(0.1, 5.0); self.size_multiplier.setSingleStep(0.1); self.size_multiplier.setValue(1.0); self.size_multiplier.setSuffix("x")
-        self.cb_name = QCheckBox("Keep Name")
+        self.size_multiplier = QDoubleSpinBox()
+        self.size_multiplier.setRange(0.1, 10.0)
+        self.size_multiplier.setSingleStep(0.1)
+        self.size_multiplier.setDecimals(2)
+        self.size_multiplier.setPrefix("Size x")
 
-        is_subs = (self.track_type == 'subtitles')
-        self.cb_forced.setVisible(is_subs)
-        self.cb_convert.setVisible(is_subs)
-        self.cb_rescale.setVisible(is_subs)
-        self.size_multiplier.setVisible(is_subs)
-        self.cb_convert.setEnabled(is_subs and 'S_TEXT/UTF8' in (self.codec_id or '').upper())
-
-        # ---------- Visible layout ----------
-        root = QVBoxLayout(self)
-        root.setContentsMargins(5, 2, 5, 2); root.setSpacing(2)
-
-        row = QHBoxLayout(); row.setContentsMargins(0,0,0,0); row.setSpacing(8)
-        self.label = QLabel("")
-        self.label.setToolTip(f"Source: {self.source}, Path: {self.track_data.get('original_path', 'N/A')}")
-        row.addWidget(self.label, 1)
-
+        # Feature-specific controls
+        self.sync_to_label = QLabel("Sync to Source:")
         self.sync_to_combo = QComboBox()
-        self.sync_to_combo.setVisible(False)
-        if self.source == 'External' and available_sources:
-            self.sync_to_combo.addItem("No Sync", None)
-            for src_name in available_sources:
-                self.sync_to_combo.addItem(src_name, src_name)
-            self.sync_to_combo.setVisible(True)
-            row.addWidget(QLabel("Sync to:"))
-            row.addWidget(self.sync_to_combo)
-
-        row.addStretch()
-
         self.style_editor_btn = QPushButton("Style Editor...")
-        self.style_editor_btn.setVisible(is_subs)
-        editable_sub_codecs = ['S_TEXT/UTF8', 'S_TEXT/ASS', 'S_TEXT/SSA']
-        is_editable = any(codec in (self.codec_id or '').upper() for codec in editable_sub_codecs)
-        self.style_editor_btn.setEnabled(is_editable)
-        if not is_editable and is_subs:
-            self.style_editor_btn.setToolTip("Style editor is not available for image-based subtitles (e.g., PGS, VobSub).")
-        row.addWidget(self.style_editor_btn)
+        self.settings_btn = QPushButton("Settings...")
 
-        self.btn = QToolButton(self)
-        self.btn.setText("Settings…")
-        self.btn.setPopupMode(QToolButton.InstantPopup)
-        row.addWidget(self.btn, 0, Qt.AlignRight)
-        root.addLayout(row)
+        # --- Logic Controller ---
+        self.logic = TrackWidgetLogic(self, track_data, available_sources)
 
-        self.summary = QLabel("")
-        self.summary.setStyleSheet("color: #cfcfcf; font-size: 12px;")
-        self.summary.setVisible(False)
-        root.addWidget(self.summary)
+        # --- Layout ---
+        self._build_layout()
 
-        self._logic = TrackWidgetLogic(self)
+        # --- Initial State ---
+        self.logic.refresh_summary()
+        self.logic.refresh_badges()
 
-        self.cb_default.toggled.connect(self._logic.apply_state_from_menu)
-        self.cb_name.toggled.connect(self._logic.apply_state_from_menu)
-        if is_subs:
-            self.cb_forced.toggled.connect(self._logic.apply_state_from_menu)
-            self.cb_convert.toggled.connect(self._logic.apply_state_from_menu)
-            self.cb_rescale.toggled.connect(self._logic.apply_state_from_menu)
-            self.size_multiplier.valueChanged.connect(lambda _v: self._logic.apply_state_from_menu())
-        if self.sync_to_combo.isVisible():
-            self.sync_to_combo.currentIndexChanged.connect(self._logic.apply_state_from_menu)
+        # --- Connections ---
+        self.settings_btn.clicked.connect(self._open_settings_dialog)
+        self.cb_default.stateChanged.connect(self.logic.refresh_badges)
+        self.cb_forced.stateChanged.connect(self.logic.refresh_badges)
 
-    def _build_menu_form(self) -> QWidget:
-        container = QWidget(self)
-        form = QFormLayout(container); form.setContentsMargins(8,8,8,8)
-        form.addRow(self.cb_default)
-        if self.track_type == 'subtitles':
-            form.addRow(self.cb_forced)
-            form.addRow(self.cb_convert)
-            form.addRow(self.cb_rescale)
-            form.addRow("Size multiplier:", self.size_multiplier)
-        form.addRow(self.cb_name)
-        return container
+    def _build_layout(self):
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(5, 5, 5, 5)
+        top_row = QHBoxLayout()
+        top_row.addWidget(self.summary_label, 1)
+        top_row.addWidget(self.badge_label)
+        top_row.addWidget(self.source_label)
 
-    def refresh_badges(self):
-        self._logic.refresh_badges()
+        bottom_row = QHBoxLayout()
+        bottom_row.addStretch()
 
-    def refresh_summary(self):
-        self._logic.refresh_summary()
+        bottom_row.addWidget(self.sync_to_label)
+        bottom_row.addWidget(self.sync_to_combo)
+        bottom_row.addWidget(self.cb_default)
+        bottom_row.addWidget(self.cb_forced)
+        bottom_row.addWidget(self.cb_name)
+        bottom_row.addWidget(self.style_editor_btn)
+        bottom_row.addWidget(self.settings_btn)
 
-    def get_config(self) -> dict:
-        return self._logic.get_config()
+        root_layout.addLayout(top_row)
+        root_layout.addLayout(bottom_row)
+
+    def _open_settings_dialog(self):
+        """Open the detailed settings dialog and apply the results."""
+        current_config = self.logic.get_config()
+
+        # --- MODIFICATION: 'is_forced_display' is no longer passed to the dialog ---
+        dialog_config = {
+            'convert_to_ass': current_config.get('convert_to_ass', False),
+            'rescale': current_config.get('rescale', False),
+            'size_multiplier': current_config.get('size_multiplier', 1.0)
+        }
+
+        dialog = TrackSettingsDialog(
+            track_type=self.track_type,
+            codec_id=self.codec_id,
+            **dialog_config
+        )
+
+        if dialog.exec():
+            new_config = dialog.read_values()
+            # The 'Forced' checkbox is no longer in the dialog, so we don't update it from the result
+            self.cb_convert.setChecked(new_config.get('convert_to_ass', False))
+            self.cb_rescale.setChecked(new_config.get('rescale', False))
+            self.size_multiplier.setValue(new_config.get('size_multiplier', 1.0))
+            self.logic.refresh_badges()
+
+    def get_config(self) -> Dict[str, Any]:
+        """Public method to get the final configuration from the widget."""
+        return self.logic.get_config()

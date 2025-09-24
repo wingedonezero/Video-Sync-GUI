@@ -1,10 +1,165 @@
 # vsg_core/extraction/tracks.py
 # -*- coding: utf-8 -*-
 import json
+import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
 from ..io.runner import CommandRunner
+
+# --- Mappings and Helpers for Detailed Track Info ---
+
+_CODEC_ID_MAP = {
+    # Video
+    'V_MPEGH/ISO/HEVC': 'HEVC/H.265',
+    'V_MPEG4/ISO/AVC': 'AVC/H.264',
+    'V_MPEG1': 'MPEG-1',
+    'V_MPEG2': 'MPEG-2',
+    'V_VP9': 'VP9',
+    'V_AV1': 'AV1',
+    # Audio
+    'A_AC3': 'AC-3',
+    'A_EAC3': 'E-AC3 / DD+',
+    'A_DTS': 'DTS',
+    'A_TRUEHD': 'TrueHD',
+    'A_FLAC': 'FLAC',
+    'A_AAC': 'AAC',
+    'A_OPUS': 'Opus',
+    'A_VORBIS': 'Vorbis',
+    'A_PCM/INT/LIT': 'PCM',
+    'A_MS/ACM': 'MS-ACM',
+    # Subtitles
+    'S_HDMV/PGS': 'PGS',
+    'S_TEXT/UTF8': 'SRT',
+    'S_TEXT/ASS': 'ASS',
+    'S_TEXT/SSA': 'SSA',
+    'S_VOBSUB': 'VobSub',
+}
+
+def _get_channel_layout_str(props: Dict) -> Optional[str]:
+    """Gets a friendly channel layout string."""
+    if 'channel_layout' in props:
+        return props['channel_layout']
+    channels = props.get('audio_channels')
+    if channels:
+        return {1: 'Mono', 2: 'Stereo', 6: '5.1', 8: '7.1'}.get(channels)
+    return None
+
+def _parse_pcm_codec_name(name: str) -> Optional[str]:
+    """Parses an ffprobe pcm codec name like 'pcm_s24le' into a readable string."""
+    match = re.match(r"pcm_([suf])(\d+)([bl]e)?", name)
+    if not match:
+        return None
+
+    type_map = {'s': 'Signed', 'u': 'Unsigned', 'f': 'Floating Point'}
+    endian_map = {'le': 'Little Endian', 'be': 'Big Endian'}
+
+    parts = []
+    sample_type = type_map.get(match.group(1))
+    if sample_type:
+        parts.append(sample_type)
+
+    endian = endian_map.get(match.group(3), '')
+    if endian:
+        parts.append(endian)
+
+    return " ".join(parts) if parts else None
+
+
+def _build_track_description(track: Dict) -> str:
+    """Builds a rich, MediaInfo-like description string from combined track info."""
+    props = track.get('properties', {})
+    ttype = track.get('type')
+    codec_id = props.get('codec_id', '')
+    ffprobe_info = track.get('ffprobe_info', {})
+
+    # --- Base Codec Name ---
+    profile = ffprobe_info.get('profile', '')
+
+    if 'DTS-HD MA' in profile:
+        friendly_codec = 'DTS-HD MA'
+    elif 'DTS-HD HRA' in profile:
+        friendly_codec = 'DTS-HD HRA'
+    elif 'Atmos' in ffprobe_info.get('codec_long_name', ''):
+        friendly_codec = 'TrueHD / Atmos'
+    else:
+        if codec_id.startswith('V_MPEG') and codec_id not in _CODEC_ID_MAP:
+            friendly_codec = 'MPEG'
+        else:
+            friendly_codec = _CODEC_ID_MAP.get(codec_id, codec_id)
+
+    lang = props.get('language', 'und')
+    name = f" '{props.get('track_name')}'" if props.get('track_name') else ""
+
+    base_info = f"{friendly_codec} ({lang}){name}"
+    details = []
+
+    if ttype == 'video':
+        detail_order = []
+        if ffprobe_info.get('width') and ffprobe_info.get('height'):
+            detail_order.append(f"{ffprobe_info['width']}x{ffprobe_info['height']}")
+
+        if ffprobe_info.get('r_frame_rate', '0/1') != '0/1':
+            try:
+                num, den = map(int, ffprobe_info['r_frame_rate'].split('/'))
+                detail_order.append(f"{num/den:.3f} fps")
+            except (ValueError, ZeroDivisionError): pass
+
+        if ffprobe_info.get('bit_rate'):
+            try:
+                mbps = int(ffprobe_info['bit_rate']) / 1_000_000
+                detail_order.append(f"{mbps:.1f} Mb/s")
+            except (ValueError, TypeError): pass
+
+        if 'profile' in ffprobe_info:
+            profile_str = ffprobe_info['profile']
+            if 'level' in ffprobe_info:
+                level_str = str(ffprobe_info['level'])
+                if len(level_str) > 1:
+                    profile_str += f"@L{level_str[0]}.{level_str[1]}"
+                else:
+                    profile_str += f"@L{level_str}"
+            detail_order.append(profile_str)
+
+        color_transfer = ffprobe_info.get('color_transfer', '')
+        if color_transfer == 'smpte2084': detail_order.append('HDR')
+        elif color_transfer == 'arib-std-b67': detail_order.append('HLG')
+
+        side_data = ffprobe_info.get('side_data_list', [])
+        if any(s.get('side_data_type') == 'DOVI configuration record' for s in side_data):
+            detail_order.append('Dolby Vision')
+        details = detail_order
+
+    elif ttype == 'audio':
+        detail_order = []
+        if ffprobe_info.get('bit_rate'):
+            try:
+                kbps = int(ffprobe_info['bit_rate']) // 1000
+                detail_order.append(f"{kbps:,} kb/s")
+            except (ValueError, TypeError): pass
+
+        if props.get('audio_sampling_frequency'):
+            detail_order.append(f"{props['audio_sampling_frequency']} Hz")
+
+        if props.get('audio_bits_per_sample'):
+            detail_order.append(f"{props['audio_bits_per_sample']}-bit")
+
+        if props.get('audio_channels'):
+            detail_order.append(f"{props['audio_channels']} ch")
+
+        layout = _get_channel_layout_str(props)
+        if layout:
+            detail_order.append(layout)
+
+        if friendly_codec == 'PCM' and ffprobe_info.get('codec_name'):
+            pcm_details = _parse_pcm_codec_name(ffprobe_info['codec_name'])
+            if pcm_details:
+                base_info += f" ({pcm_details})"
+
+        details = detail_order
+
+    return f"{base_info} | {', '.join(details)}" if details else base_info
+
 
 def _pcm_codec_from_bit_depth(bit_depth):
     try:
@@ -25,13 +180,22 @@ def get_stream_info(mkv_path: str, runner: CommandRunner, tool_paths: dict) -> O
         runner._log_message('[ERROR] Failed to parse mkvmerge -J JSON output.')
         return None
 
+def _get_detailed_stream_info(filepath: str, runner: CommandRunner, tool_paths: dict) -> Dict[int, Dict]:
+    cmd = ['ffprobe', '-v', 'error', '-show_streams', '-of', 'json', str(filepath)]
+    out = runner.run(cmd, tool_paths)
+    if not out: return {}
+    try:
+        ffprobe_data = json.loads(out)
+        return {s['index']: s for s in ffprobe_data.get('streams', [])}
+    except json.JSONDecodeError:
+        runner._log_message('[WARN] Failed to parse ffprobe JSON output.')
+        return {}
+
 def _ext_for_codec(ttype: str, codec_id: str) -> str:
     cid = (codec_id or '').upper()
     if ttype == 'video':
-        # More specific IDs must be checked first
         if 'V_MPEGH/ISO/HEVC' in cid: return 'h265'
         if 'V_MPEG4/ISO/AVC' in cid:  return 'h264'
-        # Generic fallback for all other MPEG-1, MPEG-2, and MPEG-4 Part 2 variants
         if 'V_MPEG' in cid:         return 'mpg'
         if 'V_VP9' in cid:          return 'vp9'
         if 'V_AV1' in cid:          return 'av1'
@@ -82,7 +246,7 @@ def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: 
         record = {
             'id': tid, 'type': ttype, 'lang': props.get('language', 'und'),
             'name': props.get('track_name', ''), 'path': str(out_path),
-            'codec_id': codec, 'source': role # Standardize to 'source'
+            'codec_id': codec, 'source': role
         }
         tracks_to_extract.append(record)
 
@@ -101,7 +265,7 @@ def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: 
     for job in ffmpeg_jobs:
         copy_cmd = ['ffmpeg', '-y', '-v', 'error', '-nostdin', '-i', str(mkv), '-map', f"0:a:{job['idx']}", '-vn', '-sn', '-c:a', 'copy', job['out']]
         if runner.run(copy_cmd, tool_paths) is None:
-            runner._log_message(f"Stream copy refused for A_MS/ACM (track {job['tid']}). Falling back to {job['pcm']}.")
+            runner._log_message(f"Stream copy refused for A_MS/ACM (track {job['tid']}).\nFalling back to {job['pcm']}.")
             pcm_cmd = ['ffmpeg', '-y', '-v', 'error', '-nostdin', '-i', str(mkv), '-map', f"0:a:{job['idx']}", '-vn', '-sn', '-acodec', job['pcm'], job['out']]
             runner.run(pcm_cmd, tool_paths)
 
@@ -112,15 +276,36 @@ def get_track_info_for_dialog(sources: Dict[str, str], runner: CommandRunner, to
     for source_key, filepath in sources.items():
         if not filepath or not Path(filepath).exists():
             continue
-        info = get_stream_info(filepath, runner, tool_paths)
-        if not info or 'tracks' not in info:
+
+        mkvmerge_info = get_stream_info(filepath, runner, tool_paths)
+        if not mkvmerge_info or 'tracks' not in mkvmerge_info:
             continue
-        for track in info.get('tracks', []):
+
+        ffprobe_details = _get_detailed_stream_info(filepath, runner, tool_paths)
+
+        type_counters = {'video': 0, 'audio': 0, 'subtitles': 0}
+        ffprobe_streams_by_type = {
+            'video': sorted([s for s in ffprobe_details.values() if s.get('codec_type') == 'video'], key=lambda s: s['index']),
+            'audio': sorted([s for s in ffprobe_details.values() if s.get('codec_type') == 'audio'], key=lambda s: s['index']),
+            'subtitles': sorted([s for s in ffprobe_details.values() if s.get('codec_type') == 'subtitles'], key=lambda s: s['index'])
+        }
+
+        for track in mkvmerge_info.get('tracks', []):
+            track_type = track['type']
+            type_index = type_counters.get(track_type, 0)
+
+            if type_index < len(ffprobe_streams_by_type.get(track_type, [])):
+                track['ffprobe_info'] = ffprobe_streams_by_type[track_type][type_index]
+
+            type_counters[track_type] = type_index + 1
+
             props = track.get('properties', {}) or {}
             record = {
                 'source': source_key, 'original_path': filepath, 'id': track['id'],
                 'type': track['type'], 'codec_id': props.get('codec_id', 'N/A'),
-                'lang': props.get('language', 'und'), 'name': props.get('track_name', '')
+                'lang': props.get('language', 'und'), 'name': props.get('track_name', ''),
+                'description': _build_track_description(track)
             }
             all_tracks[source_key].append(record)
+
     return all_tracks

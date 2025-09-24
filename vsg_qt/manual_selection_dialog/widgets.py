@@ -19,9 +19,8 @@ class SourceList(QListWidget):
         self.setDefaultDropAction(Qt.CopyAction)
 
     def add_track_item(self, track: dict, guard_block: bool):
-        name_part = f" '{track['name']}'" if track.get('name') else ""
-        item_text = (f"[{track['type'][0].upper()}-{track['id']}] "
-                     f"{track.get('codec_id','')} ({track.get('lang','und')}){name_part}")
+        item_text = f"[{track['type'][0].upper()}-{track['id']}] {track.get('description', '')}"
+
         it = QListWidgetItem(item_text, self)
         it.setData(Qt.UserRole, track)
 
@@ -31,14 +30,12 @@ class SourceList(QListWidget):
             flags &= ~Qt.ItemIsEnabled
             it.setFlags(flags)
             it.setForeground(QColor('#888'))
-            it.setToolTip("Video from other sources is disabled. Only Source 1 video is allowed.")
+            it.setToolTip("Video from other sources is disabled.\nOnly Source 1 video is allowed.")
         return it
 
 
 class FinalList(QListWidget):
-    """
-    Final output list that accepts drops and renders TrackWidget rows.
-    """
+    """Final output list that accepts drops and renders TrackWidget rows."""
     def __init__(self, dialog: "ManualSelectionDialog", parent=None):
         super().__init__(parent)
         self.dialog = dialog
@@ -58,7 +55,7 @@ class FinalList(QListWidget):
                 track = it.data(Qt.UserRole)
                 if track and not self.dialog._logic.is_blocked_video(track):
                     self.add_track_widget(track)
-            event.accept()
+                    event.accept()
             return
         super().dropEvent(event)
 
@@ -79,11 +76,16 @@ class FinalList(QListWidget):
             if hasattr(widget, 'size_multiplier'): widget.size_multiplier.setValue(track_data.get('size_multiplier', 1.0))
             if 'S_TEXT/UTF8' in (getattr(widget, 'codec_id', '') or '').upper():
                 if hasattr(widget, 'cb_convert'): widget.cb_convert.setChecked(track_data.get('convert_to_ass', False))
-            if hasattr(widget, 'refresh_badges'):  widget.refresh_badges()
-            if hasattr(widget, 'refresh_summary'): widget.refresh_summary()
+            if hasattr(widget, 'logic'):
+                widget.logic.refresh_badges()
+                widget.logic.refresh_summary()
 
         if hasattr(widget, 'cb_default'):
-            widget.cb_default.clicked.connect(lambda checked, w=widget: self._enforce_single_default(checked, w))
+            widget.cb_default.clicked.connect(lambda checked, w=widget: self._enforce_single_default(w))
+
+        # --- MODIFICATION: Connect the 'Forced' checkbox to its enforcement logic ---
+        if hasattr(widget, 'cb_forced'):
+            widget.cb_forced.clicked.connect(self._enforce_single_forced)
 
         item.setSizeHint(widget.sizeHint())
         self.setItemWidget(item, widget)
@@ -121,14 +123,10 @@ class FinalList(QListWidget):
         elif act == act_copy: self.dialog._copy_styles(widget)
         elif act == act_paste: self.dialog._paste_styles(widget)
         elif act == act_default and hasattr(widget, 'cb_default'):
-            widget.cb_default.setChecked(True)
-            self.dialog._logic.normalize_single_default_for_type(
-                self._widgets_of_type(widget.track_type), widget.track_type,
-                force_default_if_none=False, prefer_widget=widget
-            )
+            self._enforce_single_default(widget, prefer=True)
         elif act_forced and act == act_forced and hasattr(widget, 'cb_forced'):
             widget.cb_forced.setChecked(not widget.cb_forced.isChecked())
-            self.dialog._logic.normalize_forced_subtitles(self._widgets_of_type('subtitles'))
+            self._enforce_single_forced()
         elif act == act_del:
             self.takeItem(self.row(item))
 
@@ -145,14 +143,16 @@ class FinalList(QListWidget):
     def _widgets_of_type(self, ttype: str):
         return [self.itemWidget(self.item(i)) for i in range(self.count()) if getattr(self.itemWidget(self.item(i)), 'track_type', None) == ttype]
 
-    def _enforce_single_default(self, checked, sender_widget):
-        if not checked: return
-        # --- FIX IS HERE ---
-        # The 'force_default_if_none' argument was missing.
-        # When manually clicking, we never want to force a default, so it's False.
+    def _enforce_single_default(self, sender_widget, prefer=False):
+        if prefer:
+            sender_widget.cb_default.setChecked(True)
         self.dialog._logic.normalize_single_default_for_type(
             self._widgets_of_type(sender_widget.track_type),
             sender_widget.track_type,
             force_default_if_none=False,
             prefer_widget=sender_widget
         )
+
+    def _enforce_single_forced(self):
+        """Helper method to call the normalization logic for forced subtitles."""
+        self.dialog._logic.normalize_forced_subtitles(self._widgets_of_type('subtitles'))

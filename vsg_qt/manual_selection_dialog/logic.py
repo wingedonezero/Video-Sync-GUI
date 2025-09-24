@@ -19,7 +19,6 @@ class ManualLogic:
         if not layout:
             return
 
-        # Create a lookup pool of available tracks
         pools = {}
         counters = {}
         for src_key, track_list in self.v.track_info.items():
@@ -28,7 +27,6 @@ class ManualLogic:
                 pools[key] = t
                 counters[(src_key, t['type'])] = counters.get((src_key, t['type']), 0) + 1
 
-        # Realize the layout against the available tracks
         realized_layout = []
         counters.clear()
         for prev_item in layout:
@@ -39,10 +37,9 @@ class ManualLogic:
             match = pools.get((src, ttype, idx))
             if match:
                 new_item = match.copy()
-                new_item.update(prev_item) # Apply saved settings
+                new_item.update(prev_item)
                 realized_layout.append(new_item)
 
-        # Add the widgets to the UI
         for track_data in realized_layout:
             if not self.is_blocked_video(track_data):
                 self.v.final_list.add_track_widget(track_data, preset=True)
@@ -53,10 +50,7 @@ class ManualLogic:
         for i in range(self.v.final_list.count()):
             widgets.append(self.v.final_list.itemWidget(self.v.final_list.item(i)))
 
-        # Final normalization before returning data
         self.normalize_single_default_for_type(widgets, 'audio', force_default_if_none=True)
-        # --- THE FIX IS HERE ---
-        # Ensure we DO NOT force a default for subtitles.
         self.normalize_single_default_for_type(widgets, 'subtitles', force_default_if_none=False)
         self.normalize_forced_subtitles(widgets)
 
@@ -70,7 +64,7 @@ class ManualLogic:
         out = []
         for w in widgets:
             td = dict(w.track_data)
-            cfg = w.get_config() # Get settings directly from the widget's logic
+            cfg = w.logic.get_config()
             td.update(cfg)
             out.append(td)
         return out
@@ -79,7 +73,6 @@ class ManualLogic:
         """Ensures only one 'Default' flag is set per track type."""
         first_default = None
 
-        # First pass: identify the preferred or first-found default
         for w in widgets:
             if w.track_type == ttype:
                 if prefer_widget and w is prefer_widget:
@@ -90,7 +83,6 @@ class ManualLogic:
                     first_default = w
                     break
 
-        # If no default was found, make the first track of that type the default, but only if forced.
         if not first_default and force_default_if_none:
             for w in widgets:
                 if w.track_type == ttype:
@@ -98,12 +90,10 @@ class ManualLogic:
                     first_default = w
                     break
 
-        # Second pass: unset all other defaults
         for w in widgets:
             if w.track_type == ttype and w is not first_default:
                 w.cb_default.setChecked(False)
-            w.refresh_badges()
-            w.refresh_summary()
+            w.logic.refresh_badges()
 
     def normalize_forced_subtitles(self, widgets: List[TrackWidget]):
         """Ensures at most one 'Forced' flag is set for subtitles."""
@@ -115,8 +105,6 @@ class ManualLogic:
                         first_forced = w
                     else:
                         w.cb_forced.setChecked(False)
-        # Refresh all subtitle widgets
         for w in widgets:
             if w.track_type == 'subtitles':
-                w.refresh_badges()
-                w.refresh_summary()
+                w.logic.refresh_badges()
