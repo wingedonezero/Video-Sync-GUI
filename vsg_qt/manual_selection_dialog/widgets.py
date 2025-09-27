@@ -73,7 +73,10 @@ class FinalList(QListWidget):
             if hasattr(widget, 'cb_forced'):       widget.cb_forced.setChecked(track_data.get('is_forced_display', False))
             if hasattr(widget, 'cb_name'):         widget.cb_name.setChecked(track_data.get('apply_track_name', False))
             if hasattr(widget, 'cb_rescale'):      widget.cb_rescale.setChecked(track_data.get('rescale', False))
-            if hasattr(widget, 'size_multiplier'): widget.size_multiplier.setValue(track_data.get('size_multiplier', 1.0))
+
+            # THE FIX: The redundant line that set the size_multiplier has been removed from here.
+            # The TrackWidget's own constructor now handles this correctly and safely.
+
             if 'S_TEXT/UTF8' in (getattr(widget, 'codec_id', '') or '').upper():
                 if hasattr(widget, 'cb_convert'): widget.cb_convert.setChecked(track_data.get('convert_to_ass', False))
             if hasattr(widget, 'logic'):
