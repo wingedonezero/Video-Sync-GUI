@@ -80,17 +80,23 @@ class MkvmergeOptionsBuilder:
         return -1
 
     def _effective_delay_ms(self, plan: MergePlan, item: PlanItem) -> int:
-        """Calculates the final sync delay for a track based on its source."""
+        """
+        Calculates the final sync delay for a track.
+
+        For Source 1 tracks: Use their original container delays to maintain internal sync.
+        For other sources: Use the calculated correlation delay (which already includes chain correction).
+        """
         tr = item.track
 
-        # Source 1 is the reference and is never delayed.
+        # Source 1 tracks get their original container delays
         if tr.source == "Source 1":
-            return 0
+            # Return the track's original container delay
+            # This maintains the internal sync between Source 1's tracks
+            return int(item.container_delay_ms)
 
-        # For all other sources (e.g., "Source 2", "External"), apply their direct delay.
+        # For all other sources (Source 2, Source 3, External, etc.)
+        # Use the delay calculated during analysis (which already includes the chain correction)
         sync_key = item.sync_to if tr.source == 'External' else tr.source
-        # --- FIX ---
         delay = plan.delays.source_delays_ms.get(sync_key, 0)
-        # --- END FIX ---
 
         return int(delay)

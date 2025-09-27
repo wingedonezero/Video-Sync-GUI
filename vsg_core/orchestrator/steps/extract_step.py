@@ -10,13 +10,47 @@ from vsg_core.orchestrator.steps.context import Context
 from vsg_core.models.jobs import PlanItem
 from vsg_core.models.media import Track, StreamProps
 from vsg_core.models.enums import TrackType
-from vsg_core.extraction.tracks import extract_tracks
+from vsg_core.extraction.tracks import extract_tracks, get_stream_info_with_delays
 
 class ExtractStep:
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
         if not ctx.and_merge:
             ctx.extracted_items = []
             return ctx
+
+        # --- NEW: Read container delays for all sources ---
+        runner._log_message("--- Reading Container Delays from Source Files ---")
+        for source_key, source_path in ctx.sources.items():
+            info = get_stream_info_with_delays(str(source_path), runner, ctx.tool_paths)
+            if info:
+                delays_for_source = {}
+                runner._log_message(f"[Container Delays] Reading delays from {source_key}:")
+
+                for track in info.get('tracks', []):
+                    tid = track.get('id')
+                    delay_ms = track.get('container_delay_ms', 0)
+                    delays_for_source[tid] = delay_ms
+
+                    # Only log non-zero delays
+                    if delay_ms != 0:
+                        track_type = track.get('type', 'unknown')
+                        props = track.get('properties', {})
+                        lang = props.get('language', 'und')
+                        name = props.get('track_name', '')
+
+                        desc = f"  Track {tid} ({track_type}"
+                        if lang != 'und':
+                            desc += f", {lang}"
+                        if name:
+                            desc += f", '{name}'"
+                        desc += f"): {delay_ms:+.1f}ms"
+                        runner._log_message(desc)
+
+                # Store in context
+                ctx.container_delays[source_key] = delays_for_source
+
+                if all(d == 0 for d in delays_for_source.values()):
+                    runner._log_message(f"  All tracks have zero container delay")
 
         # --- Part 1: Extract tracks from MKV sources ---
         all_extracted_tracks = []
@@ -56,7 +90,11 @@ class ExtractStep:
                         name=sel.get('name', '')
                     )
                 )
-                plan_item = PlanItem(track=track_model, extracted_path=temp_path)
+                plan_item = PlanItem(
+                    track=track_model,
+                    extracted_path=temp_path,
+                    container_delay_ms=0  # External files have no container delay
+                )
 
             else:
                 key = f"{source}_{sel['id']}"
@@ -75,19 +113,32 @@ class ExtractStep:
                         name=trk.get('name', '') or ''
                     )
                 )
-                plan_item = PlanItem(track=track_model, extracted_path=Path(trk['path']))
+
+                # NEW: Get the container delay for this track
+                container_delay = ctx.container_delays.get(source, {}).get(int(trk['id']), 0)
+
+                plan_item = PlanItem(
+                    track=track_model,
+                    extracted_path=Path(trk['path']),
+                    container_delay_ms=container_delay  # Store the container delay
+                )
 
             plan_item.is_default = bool(sel.get('is_default', False))
             plan_item.is_forced_display = bool(sel.get('is_forced_display', False))
             plan_item.apply_track_name = bool(sel.get('apply_track_name', False))
             plan_item.convert_to_ass = bool(sel.get('convert_to_ass', False))
             plan_item.rescale = bool(sel.get('rescale', False))
-            plan_item.size_multiplier = float(sel.get('size_multiplier', 1.0))
+
+            # Fix: Ensure size_multiplier defaults to 1.0 and handle None/empty values
+            size_mult = sel.get('size_multiplier')
+            if size_mult is None or size_mult == '' or size_mult == 0:
+                plan_item.size_multiplier = 1.0
+            else:
+                plan_item.size_multiplier = float(size_mult)
+
             plan_item.style_patch = sel.get('style_patch')
             plan_item.user_modified_path = sel.get('user_modified_path')
             plan_item.sync_to = sel.get('sync_to')
-
-            # (THE FIX IS HERE) Copy the user's selection from the layout into the final PlanItem.
             plan_item.correction_source = sel.get('correction_source')
 
             items.append(plan_item)

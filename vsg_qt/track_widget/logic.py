@@ -21,6 +21,16 @@ class TrackWidgetLogic:
         self.v.cb_forced.setVisible(is_subs)
         self.v.style_editor_btn.setVisible(is_subs)
 
+        # FIX: Initialize the size_multiplier to 1.0 if not already set
+        if is_subs:
+            # Ensure we have a valid default value
+            current_value = self.track_data.get('size_multiplier')
+            if current_value is None or current_value == 0 or current_value == '':
+                self.v.size_multiplier.setValue(1.0)
+                self.track_data['size_multiplier'] = 1.0
+            else:
+                self.v.size_multiplier.setValue(float(current_value))
+
         # Show the sync dropdown ONLY for external subtitles
         self.v.sync_to_label.setVisible(is_subs and is_external)
         self.v.sync_to_combo.setVisible(is_subs and is_external)
@@ -76,13 +86,24 @@ class TrackWidgetLogic:
         """Returns the current configuration from the widget's controls."""
         is_subs = self.track_data.get('type') == 'subtitles'
 
+        # FIX: Ensure size_multiplier is valid before returning
+        size_mult_value = 1.0
+        if is_subs:
+            try:
+                size_mult_value = float(self.v.size_multiplier.value())
+                # Additional safety check
+                if size_mult_value <= 0 or size_mult_value > 10:
+                    size_mult_value = 1.0
+            except (ValueError, TypeError):
+                size_mult_value = 1.0
+
         config = {
             "is_default": self.v.cb_default.isChecked(),
             "apply_track_name": self.v.cb_name.isChecked(),
             "is_forced_display": self.v.cb_forced.isChecked() if is_subs else False,
             "convert_to_ass": self.v.cb_convert.isChecked() if is_subs else False,
             "rescale": self.v.cb_rescale.isChecked() if is_subs else False,
-            "size_multiplier": self.v.size_multiplier.value() if is_subs else 1.0,
+            "size_multiplier": size_mult_value,
             "style_patch": self.track_data.get('style_patch'),
             "user_modified_path": self.track_data.get('user_modified_path'),
             "sync_to": self.v.sync_to_combo.currentData() if (is_subs and self.v.sync_to_combo.isVisible()) else None

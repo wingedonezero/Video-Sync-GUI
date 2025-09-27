@@ -31,8 +31,9 @@ class PlanItem:
     sync_to: Optional[str] = None
     is_preserved: bool = False
     is_corrected: bool = False
-    # --- FIX: Added missing field ---
     correction_source: Optional[str] = None
+    # NEW FIELD: Store the original container delay for this track
+    container_delay_ms: int = 0
 
 @dataclass(frozen=True)
 class MergePlan:

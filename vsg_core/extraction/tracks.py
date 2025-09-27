@@ -180,6 +180,35 @@ def get_stream_info(mkv_path: str, runner: CommandRunner, tool_paths: dict) -> O
         runner._log_message('[ERROR] Failed to parse mkvmerge -J JSON output.')
         return None
 
+def get_stream_info_with_delays(mkv_path: str, runner: CommandRunner, tool_paths: dict) -> Optional[Dict[str, Any]]:
+    """Get stream info including container delays from mkvmerge -J output."""
+    out = runner.run(['mkvmerge', '-J', str(mkv_path)], tool_paths)
+    if not out or not isinstance(out, str): return None
+    try:
+        info = json.loads(out)
+
+        # Extract container delays for each track
+        for track in info.get('tracks', []):
+            props = track.get('properties', {})
+
+            # The container delay is stored in the 'default_duration' field (in nanoseconds)
+            # But for audio/video sync, we actually want the 'minimum_timestamp' field
+            # which tells us when the track actually starts relative to container zero
+            min_timestamp = props.get('minimum_timestamp', 0)
+
+            # Convert from nanoseconds to milliseconds
+            if min_timestamp:
+                track['container_delay_ms'] = min_timestamp / 1_000_000
+            else:
+                # Some containers may use other delay mechanisms
+                # Check for explicit delay field
+                track['container_delay_ms'] = 0
+
+        return info
+    except json.JSONDecodeError:
+        runner._log_message('[ERROR] Failed to parse mkvmerge -J JSON output.')
+        return None
+
 def _get_detailed_stream_info(filepath: str, runner: CommandRunner, tool_paths: dict) -> Dict[int, Dict]:
     cmd = ['ffprobe', '-v', 'error', '-show_streams', '-of', 'json', str(filepath)]
     out = runner.run(cmd, tool_paths)
@@ -287,7 +316,7 @@ def get_track_info_for_dialog(sources: Dict[str, str], runner: CommandRunner, to
         ffprobe_streams_by_type = {
             'video': sorted([s for s in ffprobe_details.values() if s.get('codec_type') == 'video'], key=lambda s: s['index']),
             'audio': sorted([s for s in ffprobe_details.values() if s.get('codec_type') == 'audio'], key=lambda s: s['index']),
-            'subtitles': sorted([s for s in ffprobe_details.values() if s.get('codec_type') == 'subtitles'], key=lambda s: s['index'])
+            'subtitles': sorted([s for s in ffprobe_details.values() if s.get('codec_type') == 'subtitle'], key=lambda s: s['index'])
         }
 
         for track in mkvmerge_info.get('tracks', []):

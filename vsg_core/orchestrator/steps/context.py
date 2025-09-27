@@ -38,6 +38,14 @@ class Context:
     # Stores flags for tracks that need linear drift correction
     linear_drift_flags: Dict[str, Dict] = field(default_factory=dict)
 
+    # NEW FIELDS: Container delay tracking
+    # Store Source 1's reference audio container delay for chain calculation
+    source1_audio_container_delay_ms: int = 0
+
+    # Store all container delays by source and track ID for logging/reference
+    # Format: {source_key: {track_id: delay_ms}}
+    container_delays: Dict[str, Dict[int, int]] = field(default_factory=dict)
+
     # Results/summaries
     out_file: Optional[str] = None
     tokens: Optional[List[str]] = None

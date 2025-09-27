@@ -11,6 +11,11 @@ class ChaptersStep:
     Extracts/modifies chapter XML from Source 1.
     """
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
+        # Ensure ctx is not None
+        if ctx is None:
+            runner._log_message("[ERROR] Context is None in ChaptersStep")
+            raise RuntimeError("Context is None in ChaptersStep")
+
         if not ctx.and_merge:
             ctx.chapters_xml = None
             return ctx
@@ -21,10 +26,8 @@ class ChaptersStep:
             ctx.chapters_xml = None
             return ctx
 
-        # --- MODIFICATION START ---
         # Chapters are part of Source 1 and should never be shifted under the new logic.
         shift_ms = 0
-        # --- MODIFICATION END ---
 
         xml_path = process_chapters(
             source1_file, ctx.temp_dir, runner, ctx.tool_paths,

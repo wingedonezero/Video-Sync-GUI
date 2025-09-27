@@ -14,6 +14,11 @@ from vsg_core.subtitles.style_engine import StyleEngine
 
 class SubtitlesStep:
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
+        # Ensure ctx is valid
+        if ctx is None:
+            runner._log_message("[ERROR] Context is None in SubtitlesStep")
+            raise RuntimeError("Context is None in SubtitlesStep")
+
         if not ctx.and_merge or not ctx.extracted_items:
             return ctx
 
@@ -48,7 +53,14 @@ class SubtitlesStep:
             if item.rescale and source1_file:
                 rescale_subtitle(str(item.extracted_path), source1_file, runner, ctx.tool_paths)
 
-            if abs(float(item.size_multiplier) - 1.0) > 1e-6:
-                multiply_font_size(str(item.extracted_path), float(item.size_multiplier), runner)
+            # Safety check: Only apply size multiplier if it's significantly different from 1.0
+            # and within reasonable bounds (0.5 to 3.0)
+            size_mult = float(item.size_multiplier)
+            if abs(size_mult - 1.0) > 1e-6:
+                if 0.5 <= size_mult <= 3.0:
+                    multiply_font_size(str(item.extracted_path), size_mult, runner)
+                else:
+                    runner._log_message(f"[Font Size] WARNING: Ignoring unreasonable size multiplier {size_mult:.2f}x for track {item.track.id}. Using 1.0x instead.")
 
+        # IMPORTANT: Always return the context
         return ctx
