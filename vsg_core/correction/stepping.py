@@ -159,7 +159,6 @@ class SteppingCorrector:
         self.log(f"    - Found precise boundary at: {final_boundary_s:.3f}s")
         return final_boundary_s
 
-    # --- MODIFICATION START ---
     def _analyze_internal_drift(self, edl: List[AudioSegment], ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int, codec_name: str) -> List[AudioSegment]:
         self.log(f"  [SteppingCorrector] Stage 2.5: Analyzing segments for internal drift (Codec: {codec_name})...")
         final_edl = []
@@ -256,7 +255,6 @@ class SteppingCorrector:
             final_edl.append(current_segment)
 
         return final_edl
-    # --- MODIFICATION END ---
 
     def _assemble_from_segments_via_ffmpeg(self, pcm_data: np.ndarray, edl: List[AudioSegment], channels: int, channel_layout: str, sample_rate: int, out_path: Path, log_prefix: str) -> bool:
         self.log(f"  [{log_prefix}] Assembling audio from {len(edl)} segment(s) via FFmpeg...")
@@ -458,6 +456,15 @@ class SteppingCorrector:
                 edl.append(AudioSegment(start_s=boundary_s_target, end_s=boundary_s_target, delay_ms=delay_after))
 
             edl = sorted(list(set(edl)), key=lambda x: x.start_s)
+
+            # --- THE FIX IS HERE ---
+            # If, after scanning, we only have one segment, it means no boundaries were found.
+            # In this case, we should abort the complex correction and fall back to a simple delay.
+            if len(edl) <= 1:
+                self.log("  [SteppingCorrector] No significant sync boundaries were found with current settings.")
+                self.log("  [SteppingCorrector] Aborting correction and falling back to a uniform delay.")
+                return CorrectionResult(CorrectionVerdict.UNIFORM, base_delay_ms)
+            # --- END FIX ---
 
             edl = self._analyze_internal_drift(edl, ref_pcm, analysis_pcm, sample_rate, analysis_codec)
 
