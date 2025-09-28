@@ -1,3 +1,4 @@
+# vsg_core/extraction/attachments.py
 # -*- coding: utf-8 -*-
 from pathlib import Path
 from typing import List
@@ -15,10 +16,28 @@ def extract_attachments(mkv: str, temp_dir: Path, runner: CommandRunner, tool_pa
 
     for attachment in (info or {}).get('attachments', []):
         mime_type = attachment.get('content_type', '').lower()
+        file_name = attachment.get('file_name', '').lower()
 
-        # --- The New Filter Logic ---
-        # Only include attachments whose MIME type is a known font type.
-        is_font = mime_type.startswith(('font/', 'application/font-', 'application/x-font'))
+        # Comprehensive font detection covering all common cases
+        is_font = (
+            # Standard font MIME types
+            mime_type.startswith(('font/', 'application/font', 'application/x-font')) or
+            # TrueType fonts (multiple variations)
+            mime_type in ['application/x-truetype-font', 'application/truetype', 'font/ttf'] or
+            # OpenType fonts (multiple variations)
+            mime_type in ['application/vnd.ms-opentype', 'application/opentype', 'font/otf'] or
+            # WOFF fonts
+            mime_type in ['application/font-woff', 'font/woff', 'font/woff2'] or
+            # PostScript fonts
+            mime_type in ['application/postscript', 'application/x-font-type1'] or
+            # Generic binary (some MKVs use this for fonts)
+            (mime_type in ['application/octet-stream', 'binary/octet-stream'] and
+             file_name.endswith(('.ttf', '.otf', '.ttc', '.woff', '.woff2'))) or
+            # Any MIME with 'font' or 'truetype' or 'opentype' in it
+            any(x in mime_type for x in ['font', 'truetype', 'opentype']) or
+            # File extension fallback (most reliable)
+            file_name.endswith(('.ttf', '.otf', '.ttc', '.woff', '.woff2', '.eot', '.fon', '.fnt', '.pfb', '.pfa'))
+        )
 
         if is_font:
             font_count += 1

@@ -9,32 +9,11 @@ from vsg_core.io.runner import CommandRunner
 from vsg_core.models.enums import TrackType
 from vsg_core.models.jobs import PlanItem
 
-# --- Helper functions for formatters ---
-def _format_mastering_display(stream: Dict, temp_dir: Path) -> Optional[str]:
-    md = next((s for s in stream.get('side_data_list', []) if s.get('side_data_type') == 'Mastering display metadata'), None)
-    if not md or not all(k in md for k in ['red_x', 'green_x', 'blue_x', 'white_point_x', 'max_luminance']):
-        return None
-    return (f"G({md['green_x']},{md['green_y']})B({md['blue_x']},{md['blue_y']})R({md['red_x']},{md['red_y']})"
-            f"WP({md['white_point_x']},{md['white_point_y']})L({md['max_luminance']},{md['min_luminance']})")
-
-def _format_max_cll(stream: Dict, temp_dir: Path) -> Optional[str]:
-    cll = next((s for s in stream.get('side_data_list', []) if s.get('side_data_type') == 'Content light level metadata'), None)
-    if cll and 'max_content' in cll and 'max_average' in cll:
-        return f"{cll['max_content']},{cll['max_average']}"
-    return None
-
-# --- Main "Blueprint" of all metadata fields we will check AND FIX ---
-METADATA_CHECKS = [
-    {'type': TrackType.VIDEO, 'tool': 'mkvmerge', 'source_keys': ['properties', 'field_order'], 'propedit_key': 'field-order', 'formatter': lambda val, path: str(int(val))},
-    {'type': TrackType.VIDEO, 'tool': 'mkvmerge', 'source_keys': ['properties', 'stereo_mode'], 'propedit_key': 'stereo-mode', 'formatter': lambda val, path: str(int(val))},
-    {'type': TrackType.VIDEO, 'tool': 'ffprobe', 'source_keys': ['color_primaries'], 'propedit_key': 'colour-primaries', 'formatter': lambda val, path: val},
-    {'type': TrackType.VIDEO, 'tool': 'ffprobe', 'source_keys': ['color_transfer'], 'propedit_key': 'transfer-characteristics', 'formatter': lambda val, path: val},
-    {'type': TrackType.VIDEO, 'tool': 'ffprobe', 'source_keys': ['color_space'], 'propedit_key': 'matrix-coefficients', 'formatter': lambda val, path: val},
-    {'type': TrackType.VIDEO, 'tool': 'ffprobe', 'source_keys': [], 'propedit_key': 'mastering-display', 'formatter': _format_mastering_display},
-    {'type': TrackType.VIDEO, 'tool': 'ffprobe', 'source_keys': [], 'propedit_key': 'max-frame-light', 'formatter': _format_max_cll},
-]
-
 class FinalAuditor:
+    """
+    A SAFER version that only logs warnings instead of trying to "fix" things.
+    The original was too aggressive and could corrupt files.
+    """
     def __init__(self, ctx: Context, runner: CommandRunner):
         self.ctx = ctx
         self.runner = runner
@@ -44,200 +23,418 @@ class FinalAuditor:
         self._source_mkvmerge_cache: Dict[str, Optional[Dict]] = {}
 
     def run(self, final_mkv_path: Path):
-        final_mkvmerge_data = self._get_source_metadata(str(final_mkv_path), 'mkvmerge')
+        """
+        Comprehensive audit of the final file - checks everything but modifies nothing.
+        """
+        self.log("--- Post-Merge: Running Final Audit ---")
+
+        # Get metadata from the final file
+        final_mkvmerge_data = self._get_metadata(str(final_mkv_path), 'mkvmerge')
         if not final_mkvmerge_data or 'tracks' not in final_mkvmerge_data:
             self.log("[ERROR] Could not read metadata from final file. Aborting audit.")
             return
 
         final_tracks = final_mkvmerge_data.get('tracks', [])
         final_plan_items = self.ctx.extracted_items
-        patch_commands: List[str] = []
+        total_issues = 0
 
+        # Track count check
         if len(final_tracks) != len(final_plan_items):
             self.log(f"[WARNING] Track count mismatch! Plan expected {len(final_plan_items)}, but final file has {len(final_tracks)}.")
+            total_issues += 1
 
+        # Audit track flags
         self.log("--- Auditing Track Flags (Default/Forced) ---")
-        patch_commands.extend(self._audit_track_flags(final_tracks, final_plan_items))
+        flag_issues = self._audit_track_flags(final_tracks, final_plan_items)
+        total_issues += flag_issues
 
-        final_ffprobe_streams = self._get_source_metadata(str(final_mkv_path), 'ffprobe')
-        if final_ffprobe_streams:
+        # Get detailed ffprobe data for advanced checks
+        final_ffprobe_data = self._get_metadata(str(final_mkv_path), 'ffprobe')
+        if final_ffprobe_data:
+            final_streams = final_ffprobe_data.get('streams', [])
+
+            # Check HDR/DV/Color metadata
             self.log("--- Auditing Video Core Metadata (HDR, 3D, Color) ---")
-            patch_commands.extend(self._audit_video_metadata(final_ffprobe_streams.get('streams', []), final_tracks, final_plan_items))
-            self._audit_dolby_vision(final_ffprobe_streams.get('streams', []), final_plan_items)
-            self._audit_object_based_audio(final_ffprobe_streams.get('streams', []), final_plan_items)
+            video_issues = self._audit_video_metadata_detailed(final_streams, final_mkvmerge_data, final_plan_items)
+            total_issues += video_issues
 
+            # Check Dolby Vision
+            self.log("--- Auditing Dolby Vision Metadata ---")
+            dv_issues = self._audit_dolby_vision(final_streams, final_plan_items)
+            total_issues += dv_issues
+
+            # Check Object-Based Audio
+            self.log("--- Auditing Object-Based Audio (Atmos/DTS:X) ---")
+            audio_issues = self._audit_object_based_audio(final_streams, final_plan_items)
+            total_issues += audio_issues
+
+        # Check attachments
         self.log("--- Auditing Attachments ---")
         self._audit_attachments(final_mkvmerge_data.get('attachments', []))
 
-        if not patch_commands:
-            self.log("✅ Final audit passed. No patchable issues found.")
+        # Final summary
+        if total_issues == 0:
+            self.log("✅ Final audit passed. No issues found.")
         else:
-            self.log(f"Found {len(patch_commands) // 3} patchable discrepancies. Applying fixes...")
-            full_command = ['mkvpropedit', str(final_mkv_path)] + patch_commands
-            self.runner.run(full_command, self.tool_paths)
+            self.log(f"⚠️ Final audit found {total_issues} potential issue(s). Please review the warnings above.")
 
-    def _audit_track_flags(self, actual_tracks: List[Dict], plan_items: List[PlanItem]) -> List[str]:
-        commands = []
-        for i, plan_item in enumerate(plan_items):
-            if i >= len(actual_tracks): break
-            mkv_track_id = i + 1
-            actual_track = actual_tracks[i]
+    def _audit_track_flags(self, actual_tracks: List[Dict], plan_items: List[PlanItem]) -> int:
+        """
+        Compares expected vs actual flags and logs warnings.
+        Returns the number of issues found.
+        """
+        issues = 0
 
-            expected_default = plan_item.is_default
-            actual_default = actual_track['properties'].get('default_track', False)
-            if expected_default != actual_default:
-                self.log(f"  - Track {mkv_track_id}: Fixing Default flag (Plan: {expected_default}, Final: {actual_default})")
-                commands.extend(['--edit', f'track:{mkv_track_id}', '--set', f"flag-default={'1' if expected_default else '0'}"])
+        # Group tracks by type for proper default flag checking
+        video_tracks = [(i, t) for i, t in enumerate(actual_tracks) if t.get('type') == 'video']
+        audio_tracks = [(i, t) for i, t in enumerate(actual_tracks) if t.get('type') == 'audio']
+        subtitle_tracks = [(i, t) for i, t in enumerate(actual_tracks) if t.get('type') == 'subtitles']
 
-            if plan_item.track.type == TrackType.SUBTITLES:
-                expected_forced = plan_item.is_forced_display
-                actual_forced = actual_track['properties'].get('forced_track', False)
-                if expected_forced != actual_forced:
-                    self.log(f"  - Track {mkv_track_id}: Fixing Forced flag (Plan: {expected_forced}, Final: {actual_forced})")
-                    commands.extend(['--edit', f'track:{mkv_track_id}', '--set', f"flag-forced={'1' if expected_forced else '0'}"])
-        return commands
+        # Check if there's exactly one default per type (where it matters)
+        default_videos = sum(1 for _, t in video_tracks if t.get('properties', {}).get('default_track', False))
+        default_audios = sum(1 for _, t in audio_tracks if t.get('properties', {}).get('default_track', False))
+        default_subs = sum(1 for _, t in subtitle_tracks if t.get('properties', {}).get('default_track', False))
 
-    def _audit_video_metadata(self, actual_ffprobe: List[Dict], actual_mkvmerge: List[Dict], plan_items: List[PlanItem]) -> List[str]:
-        commands = []
-        video_items = [(i, item) for i, item in enumerate(plan_items) if item.track.type == TrackType.VIDEO]
+        if default_videos > 1:
+            self.log(f"[WARNING] Multiple default video tracks found ({default_videos}). Players may behave unexpectedly.")
+            issues += 1
 
-        for video_track_idx, (mkv_track_idx, plan_item) in enumerate(video_items):
-            mkv_prop_id = mkv_track_idx + 1
-            for check in METADATA_CHECKS:
-                if check['type'] != TrackType.VIDEO: continue
+        if default_audios == 0 and audio_tracks:
+            self.log("[WARNING] No default audio track set. Some players may not play audio automatically.")
+            issues += 1
+        elif default_audios > 1:
+            self.log(f"[WARNING] Multiple default audio tracks found ({default_audios}).")
+            issues += 1
 
-                tool = check['tool']
-                source_data = self._get_source_metadata(plan_item.track.source, tool)
-                if not source_data: continue
-                source_streams = source_data.get('tracks' if tool == 'mkvmerge' else 'streams', [])
+        if default_subs > 1:
+            self.log(f"[WARNING] Multiple default subtitle tracks found ({default_subs}).")
+            issues += 1
 
-                source_stream = self._find_source_stream(source_streams, plan_item, tool)
-                if not source_stream: continue
+        # Check forced flags on subtitles
+        forced_subs = sum(1 for _, t in subtitle_tracks if t.get('properties', {}).get('forced_track', False))
+        if forced_subs > 1:
+            self.log(f"[WARNING] Multiple forced subtitle tracks found ({forced_subs}). Only one should be forced.")
+            issues += 1
 
-                actual_streams = actual_mkvmerge if tool == 'mkvmerge' else actual_ffprobe
-                actual_stream = self._find_actual_stream_by_index(actual_streams, TrackType.VIDEO, video_track_idx)
-                if not actual_stream: continue
+        return issues
 
-                expected_val_source = self._get_nested_key(source_stream, check['source_keys']) if check['source_keys'] else source_stream
-                if expected_val_source is None: continue
+    def _audit_video_metadata_detailed(self, actual_streams: List[Dict], actual_mkvmerge_data: Dict, plan_items: List[PlanItem]) -> int:
+        """Comprehensive check of video metadata preservation."""
+        issues = 0
+        video_items = [item for item in plan_items if item.track.type == TrackType.VIDEO]
 
-                expected_val = check['formatter'](expected_val_source, self.ctx.temp_dir)
-                if expected_val is None: continue
+        for plan_item in video_items:
+            source_file = self.ctx.sources.get(plan_item.track.source)
+            if not source_file:
+                continue
 
-                actual_val_source = self._get_nested_key(actual_stream, check['source_keys']) if check['source_keys'] else actual_stream
-                actual_val = check['formatter'](actual_val_source, self.ctx.temp_dir)
+            # Get both mkvmerge and ffprobe data for the source
+            source_mkv_data = self._get_metadata(source_file, 'mkvmerge')
+            source_ffprobe_data = self._get_metadata(source_file, 'ffprobe')
+            if not source_ffprobe_data:
+                continue
 
-                if str(expected_val) != str(actual_val):
-                    self.log(f"  - Video Track {mkv_prop_id}: Patching '{check['propedit_key']}'")
-                    commands.extend(['--edit', f'track:v{video_track_idx + 1}', '--set', f"{check['propedit_key']}={expected_val}"])
-        return commands
+            source_video = next((s for s in source_ffprobe_data.get('streams', []) if s.get('codec_type') == 'video'), None)
+            actual_video = next((s for s in actual_streams if s.get('codec_type') == 'video'), None)
 
-    def _audit_attachments(self, actual_attachments: List[Dict]):
-        if not self.ctx.attachments:
-            self.log("✅ No attachments were planned. Check passed.")
-            return
-        expected_filenames = {Path(p).name for p in self.ctx.attachments}
-        actual_filenames = {a['file_name'] for a in actual_attachments}
-        missing = expected_filenames - actual_filenames
-        if missing:
-            for filename in missing:
-                self.log(f"[WARNING] Attachment '{filename}' was planned but is MISSING from the final file.")
-        else:
-            self.log("✅ All planned attachments are present.")
+            if not source_video or not actual_video:
+                continue
 
-    def _audit_dolby_vision(self, actual_streams: List[Dict], plan_items: List[PlanItem]):
-        self.log("--- Auditing Dolby Vision Metadata ---")
-        has_warned = False
-        video_items = [(i, item) for i, item in enumerate(plan_items) if item.track.type == TrackType.VIDEO]
-        for video_track_idx, (mkv_track_idx, plan_item) in enumerate(video_items):
-            mkv_prop_id = mkv_track_idx + 1
-            source_data = self._get_source_metadata(plan_item.track.source, 'ffprobe')
-            if not source_data: continue
-            source_stream = self._find_source_stream(source_data.get('streams', []), plan_item, 'ffprobe')
-            if not source_stream: continue
+            # Check resolution
+            if source_video.get('width') != actual_video.get('width') or source_video.get('height') != actual_video.get('height'):
+                self.log(f"[WARNING] Resolution mismatch! Source: {source_video.get('width')}x{source_video.get('height')}, "
+                        f"Output: {actual_video.get('width')}x{actual_video.get('height')}")
+                issues += 1
 
-            actual_stream = self._find_actual_stream_by_index(actual_streams, TrackType.VIDEO, video_track_idx)
-            if not actual_stream: continue
+            # Check interlacing/field order (CRITICAL for telecined content)
+            source_field_order = source_video.get('field_order', 'progressive')
+            actual_field_order = actual_video.get('field_order', 'progressive')
 
-            source_has_dv = any(s.get('side_data_type') == 'DOVI configuration record' for s in source_stream.get('side_data_list', []))
-            actual_has_dv = any(s.get('side_data_type') == 'DOVI configuration record' for s in actual_stream.get('side_data_list', []))
+            if source_field_order != actual_field_order:
+                self.log(f"[WARNING] Field order mismatch! Source: '{source_field_order}', Output: '{actual_field_order}'")
+                if source_field_order in ['tt', 'bb', 'tb', 'bt'] and actual_field_order == 'progressive':
+                    self.log("         CRITICAL: Interlaced content marked as progressive! This will cause playback issues.")
+                issues += 1
+
+            # Check for telecine patterns in codec level
+            source_codec_tag = source_video.get('codec_tag_string', '')
+            actual_codec_tag = actual_video.get('codec_tag_string', '')
+
+            # Check MKV-specific field order from mkvmerge data
+            if source_mkv_data:
+                source_mkv_video = next((t for t in source_mkv_data.get('tracks', []) if t.get('type') == 'video'), None)
+                actual_mkv_video = next((t for t in actual_mkvmerge_data.get('tracks', []) if t.get('type') == 'video'), None)
+
+                if source_mkv_video and actual_mkv_video:
+                    source_mkv_field = source_mkv_video.get('properties', {}).get('field_order')
+                    actual_mkv_field = actual_mkv_video.get('properties', {}).get('field_order')
+
+                    if source_mkv_field != actual_mkv_field:
+                        self.log(f"[WARNING] MKV field_order flag mismatch! Source: {source_mkv_field}, Output: {actual_mkv_field}")
+                        if source_mkv_field and not actual_mkv_field:
+                            self.log("         Field order information was lost! May cause deinterlacing issues.")
+                        issues += 1
+
+                    # Check stereo mode (3D)
+                    source_stereo = source_mkv_video.get('properties', {}).get('stereo_mode')
+                    actual_stereo = actual_mkv_video.get('properties', {}).get('stereo_mode')
+
+                    if source_stereo != actual_stereo:
+                        self.log(f"[WARNING] Stereo mode (3D) mismatch! Source: {source_stereo}, Output: {actual_stereo}")
+                        issues += 1
+
+            # Check HDR metadata in detail
+            source_color_transfer = source_video.get('color_transfer', '')
+            actual_color_transfer = actual_video.get('color_transfer', '')
+
+            if source_color_transfer and source_color_transfer != actual_color_transfer:
+                self.log(f"[WARNING] Color transfer mismatch! Source: '{source_color_transfer}', Output: '{actual_color_transfer}'")
+                if source_color_transfer == 'smpte2084':
+                    self.log("         HDR10 metadata was lost!")
+                elif source_color_transfer == 'arib-std-b67':
+                    self.log("         HLG metadata was lost!")
+                issues += 1
+
+            # Check color primaries
+            if source_video.get('color_primaries') != actual_video.get('color_primaries'):
+                self.log(f"[WARNING] Color primaries mismatch! Source: '{source_video.get('color_primaries')}', "
+                        f"Output: '{actual_video.get('color_primaries')}'")
+                issues += 1
+
+            # Check color space/matrix coefficients
+            if source_video.get('color_space') != actual_video.get('color_space'):
+                self.log(f"[WARNING] Color space mismatch! Source: '{source_video.get('color_space')}', "
+                        f"Output: '{actual_video.get('color_space')}'")
+                issues += 1
+
+            # Check pixel format (important for HDR)
+            if source_video.get('pix_fmt') != actual_video.get('pix_fmt'):
+                self.log(f"[WARNING] Pixel format mismatch! Source: '{source_video.get('pix_fmt')}', "
+                        f"Output: '{actual_video.get('pix_fmt')}'")
+                if 'yuv420p10' in source_video.get('pix_fmt', '') and 'yuv420p' in actual_video.get('pix_fmt', ''):
+                    self.log("         CRITICAL: 10-bit video downgraded to 8-bit!")
+                issues += 1
+
+            # Check color range (limited vs full)
+            if source_video.get('color_range') != actual_video.get('color_range'):
+                self.log(f"[WARNING] Color range mismatch! Source: '{source_video.get('color_range')}', "
+                        f"Output: '{actual_video.get('color_range')}'")
+                issues += 1
+
+            # Check chroma location
+            if source_video.get('chroma_location') != actual_video.get('chroma_location'):
+                self.log(f"[WARNING] Chroma location mismatch! Source: '{source_video.get('chroma_location')}', "
+                        f"Output: '{actual_video.get('chroma_location')}'")
+                issues += 1
+
+            # Check aspect ratios
+            source_dar = source_video.get('display_aspect_ratio')
+            actual_dar = actual_video.get('display_aspect_ratio')
+            if source_dar != actual_dar:
+                self.log(f"[WARNING] Display aspect ratio mismatch! Source: '{source_dar}', Output: '{actual_dar}'")
+                issues += 1
+
+            # Check frame rate (should match exactly)
+            source_fps = source_video.get('avg_frame_rate')
+            actual_fps = actual_video.get('avg_frame_rate')
+            if source_fps != actual_fps:
+                self.log(f"[WARNING] Frame rate mismatch! Source: '{source_fps}', Output: '{actual_fps}'")
+                issues += 1
+
+            # Check mastering display metadata
+            source_mastering = self._get_mastering_display(source_video)
+            actual_mastering = self._get_mastering_display(actual_video)
+
+            if source_mastering and not actual_mastering:
+                self.log("[WARNING] Mastering display metadata (HDR10) was lost during merge!")
+                self.log(f"         Lost data: {source_mastering}")
+                issues += 1
+            elif source_mastering and actual_mastering:
+                # Check if values match
+                for key in ['red_x', 'red_y', 'green_x', 'green_y', 'blue_x', 'blue_y',
+                           'white_point_x', 'white_point_y', 'max_luminance', 'min_luminance']:
+                    if source_mastering.get(key) != actual_mastering.get(key):
+                        self.log(f"[WARNING] Mastering display {key} mismatch!")
+                        issues += 1
+
+            # Check content light level
+            source_cll = self._get_content_light_level(source_video)
+            actual_cll = self._get_content_light_level(actual_video)
+
+            if source_cll and not actual_cll:
+                self.log("[WARNING] Content light level metadata (MaxCLL/MaxFALL) was lost during merge!")
+                self.log(f"         Lost data: MaxCLL={source_cll.get('max_content')}, MaxFALL={source_cll.get('max_average')}")
+                issues += 1
+            elif source_cll and actual_cll:
+                if source_cll.get('max_content') != actual_cll.get('max_content') or \
+                   source_cll.get('max_average') != actual_cll.get('max_average'):
+                    self.log(f"[WARNING] Content light level mismatch! "
+                            f"Source: MaxCLL={source_cll.get('max_content')}/MaxFALL={source_cll.get('max_average')}, "
+                            f"Output: MaxCLL={actual_cll.get('max_content')}/MaxFALL={actual_cll.get('max_average')}")
+                    issues += 1
+
+        if issues == 0:
+            self.log("✅ All video metadata preserved correctly.")
+
+        return issues
+
+    def _audit_dolby_vision(self, actual_streams: List[Dict], plan_items: List[PlanItem]) -> int:
+        """Detailed Dolby Vision metadata check."""
+        issues = 0
+        video_items = [item for item in plan_items if item.track.type == TrackType.VIDEO]
+
+        for plan_item in video_items:
+            source_file = self.ctx.sources.get(plan_item.track.source)
+            if not source_file:
+                continue
+
+            source_data = self._get_metadata(source_file, 'ffprobe')
+            if not source_data:
+                continue
+
+            source_video = next((s for s in source_data.get('streams', []) if s.get('codec_type') == 'video'), None)
+            actual_video = next((s for s in actual_streams if s.get('codec_type') == 'video'), None)
+
+            if not source_video or not actual_video:
+                continue
+
+            source_has_dv = self._has_dolby_vision(source_video)
+            actual_has_dv = self._has_dolby_vision(actual_video)
 
             if source_has_dv and not actual_has_dv:
-                self.log(f"[WARNING] Dolby Vision metadata was present in source for video track {mkv_prop_id} but appears MISSING from the final file.")
-                has_warned = True
-        if not has_warned:
-            self.log("✅ Dolby Vision metadata check passed.")
+                self.log("[WARNING] Dolby Vision metadata was present in source but is MISSING from the output!")
+                self.log("         This is a significant quality loss for compatible displays.")
+                issues += 1
+            elif source_has_dv and actual_has_dv:
+                self.log("✅ Dolby Vision metadata preserved successfully.")
 
-    def _audit_object_based_audio(self, actual_streams: List[Dict], plan_items: List[PlanItem]):
-        self.log("--- Auditing Object-Based Audio (Atmos/DTS:X) ---")
-        has_warned = False
-        audio_items = [(i, item) for i, item in enumerate(plan_items) if item.track.type == TrackType.AUDIO]
-        def _has_object_audio(stream: Dict) -> Optional[str]:
-            profile = stream.get('profile', '')
-            if 'Atmos' in profile: return "Dolby Atmos"
-            if 'DTS:X' in profile: return "DTS:X"
-            return None
+        if not any(self._has_dolby_vision(next((s for s in self._get_metadata(self.ctx.sources.get(item.track.source), 'ffprobe').get('streams', [])
+                                               if s.get('codec_type') == 'video'), {}))
+                  for item in video_items if item.track.type == TrackType.VIDEO and self.ctx.sources.get(item.track.source)):
+            self.log("✅ No Dolby Vision metadata to preserve.")
 
-        for audio_track_idx, (mkv_track_idx, plan_item) in enumerate(audio_items):
-            mkv_prop_id = mkv_track_idx + 1
-            source_data = self._get_source_metadata(plan_item.track.source, 'ffprobe')
-            if not source_data: continue
-            source_stream = self._find_source_stream(source_data.get('streams', []), plan_item, 'ffprobe')
-            if not source_stream: continue
+        return issues
 
-            actual_stream = self._find_actual_stream_by_index(actual_streams, TrackType.AUDIO, audio_track_idx)
-            if not actual_stream: continue
+    def _audit_object_based_audio(self, actual_streams: List[Dict], plan_items: List[PlanItem]) -> int:
+        """Detailed object-based audio check."""
+        issues = 0
+        audio_items = [item for item in plan_items if item.track.type == TrackType.AUDIO]
 
-            source_format = _has_object_audio(source_stream)
-            actual_format = _has_object_audio(actual_stream)
+        for plan_item in audio_items:
+            source_file = self.ctx.sources.get(plan_item.track.source)
+            if not source_file:
+                continue
 
-            if source_format and not actual_format:
-                self.log(f"[WARNING] {source_format} metadata was present in source for audio track {mkv_prop_id} but appears MISSING from the final file.")
-                has_warned = True
-        if not has_warned:
-            self.log("✅ Object-based audio check passed.")
+            source_data = self._get_metadata(source_file, 'ffprobe')
+            if not source_data:
+                continue
 
-    def _find_source_stream(self, source_streams: List[Dict], plan_item: PlanItem, tool: str) -> Optional[Dict]:
-        if tool == 'mkvmerge':
-            return next((s for s in source_streams if s.get('id') == plan_item.track.id), None)
-        elif tool == 'ffprobe':
-            type_streams = [s for s in source_streams if s.get('codec_type') == plan_item.track.type.value]
-            track_idx_of_type = plan_item.track.id
-            if track_idx_of_type < len(type_streams):
-                return type_streams[track_idx_of_type]
+            # Find the matching audio stream in source
+            source_audio_streams = [s for s in source_data.get('streams', []) if s.get('codec_type') == 'audio']
+            if plan_item.track.id < len(source_audio_streams):
+                source_audio = source_audio_streams[plan_item.track.id]
+            else:
+                continue
+
+            # Find corresponding stream in output
+            actual_audio_streams = [s for s in actual_streams if s.get('codec_type') == 'audio']
+            actual_audio = None
+            for i, item in enumerate([it for it in plan_items if it.track.type == TrackType.AUDIO]):
+                if item == plan_item and i < len(actual_audio_streams):
+                    actual_audio = actual_audio_streams[i]
+                    break
+
+            if not actual_audio:
+                continue
+
+            source_profile = source_audio.get('profile', '')
+            actual_profile = actual_audio.get('profile', '')
+
+            # Check for Atmos
+            if 'Atmos' in source_profile and 'Atmos' not in actual_profile:
+                self.log(f"[WARNING] Dolby Atmos metadata was lost for audio track from {plan_item.track.source}!")
+                issues += 1
+            elif 'Atmos' in source_profile and 'Atmos' in actual_profile:
+                self.log(f"✅ Dolby Atmos preserved for track from {plan_item.track.source}.")
+
+            # Check for DTS:X
+            if 'DTS:X' in source_profile and 'DTS:X' not in actual_profile:
+                self.log(f"[WARNING] DTS:X metadata was lost for audio track from {plan_item.track.source}!")
+                issues += 1
+            elif 'DTS:X' in source_profile and 'DTS:X' in actual_profile:
+                self.log(f"✅ DTS:X preserved for track from {plan_item.track.source}.")
+
+        if issues == 0:
+            self.log("✅ All object-based audio metadata preserved correctly.")
+
+        return issues
+
+    def _get_mastering_display(self, stream: Dict) -> Optional[Dict]:
+        """Extracts mastering display metadata from a stream."""
+        for side_data in stream.get('side_data_list', []):
+            if side_data.get('side_data_type') == 'Mastering display metadata':
+                return side_data
         return None
 
-    def _find_actual_stream_by_index(self, actual_streams: List[Dict], track_type: TrackType, type_index: int) -> Optional[Dict]:
-        """Finds the Nth stream of a given type in ffprobe's output."""
-        streams_of_type = [s for s in actual_streams if s.get('codec_type') == track_type.value]
-        if type_index < len(streams_of_type):
-            return streams_of_type[type_index]
+    def _get_content_light_level(self, stream: Dict) -> Optional[Dict]:
+        """Extracts content light level metadata from a stream."""
+        for side_data in stream.get('side_data_list', []):
+            if side_data.get('side_data_type') == 'Content light level metadata':
+                return side_data
         return None
 
-    def _get_source_metadata(self, source_key_or_path: str, tool: str) -> Optional[Dict]:
-        is_path = Path(source_key_or_path).is_file()
-        cache = self._source_ffprobe_cache if tool == 'ffprobe' else self._source_mkvmerge_cache
+    def _audit_attachments(self, actual_attachments: List[Dict]):
+        """Checks if expected attachments are present."""
+        if not self.ctx.attachments:
+            if not actual_attachments:
+                self.log("✅ No attachments were planned or found.")
+            else:
+                self.log(f"[INFO] File contains {len(actual_attachments)} attachment(s) (likely from source files).")
+            return
 
-        key = str(source_key_or_path)
-        if key not in cache:
-            path = Path(key) if is_path else self.ctx.sources.get(key)
-            cache[key] = self._gather_metadata(path, tool) if path and Path(path).exists() else None
-        return cache[key]
+        expected_count = len(self.ctx.attachments)
+        actual_count = len(actual_attachments)
 
-    def _gather_metadata(self, file_path: Path, tool: str) -> Optional[Dict]:
+        if actual_count < expected_count:
+            self.log(f"[WARNING] Expected {expected_count} attachments but only found {actual_count}.")
+            self.log("         Some fonts may be missing, which could affect subtitle rendering.")
+        else:
+            self.log(f"✅ Found {actual_count} attachment(s) as expected.")
+
+    def _has_hdr_metadata(self, stream: Dict) -> bool:
+        """Checks if a video stream has HDR metadata."""
+        # Check for HDR transfer characteristics
+        color_transfer = stream.get('color_transfer', '')
+        if color_transfer in ['smpte2084', 'arib-std-b67']:
+            return True
+
+        # Check for HDR side data
+        for side_data in stream.get('side_data_list', []):
+            if side_data.get('side_data_type') in ['Mastering display metadata', 'Content light level metadata']:
+                return True
+
+        return False
+
+    def _has_dolby_vision(self, stream: Dict) -> bool:
+        """Checks if a video stream has Dolby Vision metadata."""
+        for side_data in stream.get('side_data_list', []):
+            if 'DOVI configuration' in side_data.get('side_data_type', ''):
+                return True
+        return False
+
+    def _get_metadata(self, file_path: str, tool: str) -> Optional[Dict]:
+        """Gets metadata using either mkvmerge or ffprobe."""
         try:
-            if tool == 'mkvmerge': cmd = ['mkvmerge', '-J', str(file_path)]
-            elif tool == 'ffprobe': cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', '-show_format', str(file_path)]
-            else: return None
+            if tool == 'mkvmerge':
+                cmd = ['mkvmerge', '-J', str(file_path)]
+            elif tool == 'ffprobe':
+                cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json',
+                       '-show_streams', '-show_format', str(file_path)]
+            else:
+                return None
+
             out = self.runner.run(cmd, self.tool_paths)
             return json.loads(out) if out else None
         except (json.JSONDecodeError, Exception) as e:
-            self.log(f"[ERROR] Failed to gather {tool} metadata from '{file_path.name}': {e}")
+            self.log(f"[ERROR] Failed to get {tool} metadata: {e}")
             return None
-
-    def _get_nested_key(self, data: Dict, keys: List) -> Any:
-        for key in keys:
-            if isinstance(data, dict): data = data.get(key)
-            elif isinstance(data, list) and isinstance(key, int) and len(data) > key: data = data[key]
-            else: return None
-        return data
