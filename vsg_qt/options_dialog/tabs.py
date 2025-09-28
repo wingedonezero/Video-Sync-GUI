@@ -7,25 +7,25 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QLineEdit, QPushButton, QFileDialog, QLabel, QGroupBox, QVBoxLayout
 )
 
-# --- Helper functions (Unchanged) ---
+# --- Helper functions ---
 def _dir_input() -> QWidget:
     w = QWidget()
-    h = QHBoxLayout(w);
+    h = QHBoxLayout(w)
     h.setContentsMargins(0,0,0,0)
     le = QLineEdit()
     btn = QPushButton("Browse…")
-    h.addWidget(le);
+    h.addWidget(le)
     h.addWidget(btn)
     btn.clicked.connect(lambda: _browse_for_dir(le))
     return w
 
 def _file_input() -> QWidget:
     w = QWidget()
-    h = QHBoxLayout(w);
+    h = QHBoxLayout(w)
     h.setContentsMargins(0,0,0,0)
     le = QLineEdit()
     btn = QPushButton("Browse…")
-    h.addWidget(le);
+    h.addWidget(le)
     h.addWidget(btn)
     btn.clicked.connect(lambda: _browse_for_file(le))
     return w
@@ -59,7 +59,6 @@ class AnalysisTab(QWidget):
         self.widgets: Dict[str, QWidget] = {}
         main_layout = QVBoxLayout(self)
 
-        # Step 1: Audio Pre-Processing
         prep_group = QGroupBox("Step 1: Audio Pre-Processing")
         prep_layout = QFormLayout(prep_group)
         self.widgets['source_separation_model'] = QComboBox(); self.widgets['source_separation_model'].addItems(['None (Use Original Audio)', 'Demucs (Isolate Dialogue)']); self.widgets['source_separation_model'].setToolTip("Uses an AI model to separate dialogue from music/effects.\n(Requires external dependencies and is experimental).")
@@ -73,7 +72,6 @@ class AnalysisTab(QWidget):
         prep_layout.addRow(self.cutoff_container)
         main_layout.addWidget(prep_group)
 
-        # Step 2: Core Analysis Engine
         core_group = QGroupBox("Step 2: Core Analysis Engine")
         core_layout = QFormLayout(core_group)
         self.widgets['correlation_method'] = QComboBox(); self.widgets['correlation_method'].addItems(['Standard Correlation (SCC)', 'Phase Correlation (GCC-PHAT)', 'VideoDiff']); self.widgets['correlation_method'].setToolTip("The core algorithm used to find the time offset.\nGCC-PHAT is often faster and more robust against noise.")
@@ -88,7 +86,6 @@ class AnalysisTab(QWidget):
         core_layout.addRow("Minimum Accepted Chunks:", self.widgets['min_accepted_chunks'])
         main_layout.addWidget(core_group)
 
-        # Step 3: Advanced Filtering & Scan Controls
         adv_filter_group = QGroupBox("Step 3: Advanced Filtering & Scan Controls")
         adv_filter_layout = QFormLayout(adv_filter_group)
         self.widgets['scan_start_percentage'] = QDoubleSpinBox(); self.widgets['scan_start_percentage'].setRange(0.0, 99.0); self.widgets['scan_start_percentage'].setSuffix(" %"); self.widgets['scan_start_percentage'].setToolTip("Where to begin the analysis scan, as a percentage of the file's total duration.")
@@ -105,7 +102,6 @@ class AnalysisTab(QWidget):
         adv_filter_layout.addRow("Low-Pass Filter Taps:", self.widgets['filter_lowpass_taps'])
         main_layout.addWidget(adv_filter_group)
 
-        # Step 4: Audio Track Selection
         lang_group = QGroupBox("Step 4: Audio Track Selection")
         lang_layout = QFormLayout(lang_group)
         self.widgets['analysis_lang_source1'] = QLineEdit(); self.widgets['analysis_lang_source1'].setPlaceholderText("e.g., eng (blank = first audio track)"); self.widgets['analysis_lang_source1'].setToolTip("The 3-letter language code (e.g., eng, jpn) for the audio track to use from Source 1.\nLeave blank to use the first available audio track.")
@@ -114,7 +110,6 @@ class AnalysisTab(QWidget):
         lang_layout.addRow("Other Sources Language:", self.widgets['analysis_lang_others'])
         main_layout.addWidget(lang_group)
 
-        # Step 5: Advanced Tweaks & Diagnostics
         adv_group = QGroupBox("Step 5: Advanced Tweaks & Diagnostics")
         adv_layout = QVBoxLayout(adv_group)
         self.widgets['use_soxr'] = QCheckBox("Use High-Quality Resampling (SoXR)"); self.widgets['use_soxr'].setToolTip("Use the high-quality SoXR resampler library when decoding audio.\nSlower but more accurate than the default resampler.")
@@ -125,7 +120,6 @@ class AnalysisTab(QWidget):
         adv_layout.addWidget(self.widgets['log_audio_drift'])
         main_layout.addWidget(adv_group)
 
-        # Segmented Correction Group
         segment_group = QGroupBox("🔧 Segmented Audio Correction (Experimental & Advanced)")
         segment_layout = QFormLayout(segment_group)
         self.widgets['segmented_enabled'] = QCheckBox("Enable segmented audio correction"); self.widgets['segmented_enabled'].setToolTip("When enabled, detects audio with stepping sync issues and creates a corrected version.")
@@ -217,7 +211,6 @@ class AnalysisTab(QWidget):
         self.cutoff_container.setVisible(text == "Low-Pass Filter")
 
     def _update_rb_group_visibility(self, text: str):
-        """Shows the Rubberband settings group only when it's the selected engine."""
         self.rb_group.setVisible(text == 'rubberband')
 
 class ChaptersTab(QWidget):
@@ -257,15 +250,8 @@ class MergeBehaviorTab(QWidget):
         form2 = QFormLayout(post_merge_group)
         self.widgets['post_mux_normalize_timestamps'] = QCheckBox("Rebase timestamps to fix thumbnails (requires FFmpeg)"); self.widgets['post_mux_normalize_timestamps'].setToolTip("If a file's video track doesn't start at timestamp zero (due to a global shift),\nthis option will perform a fast, lossless remux with FFmpeg to fix it.\nThis resolves issues with thumbnail generation in most file managers.")
         self.widgets['post_mux_strip_tags'] = QCheckBox("Strip ENCODER tag added by FFmpeg (requires mkvpropedit)"); self.widgets['post_mux_strip_tags'].setToolTip("If the timestamp normalization step is run, FFmpeg will add an 'ENCODER' tag to the file.\nThis option will run a quick update with mkvpropedit to remove that tag for a cleaner file.")
-        self.widgets['post_mux_validate_metadata'] = QCheckBox("Validate and patch final metadata (requires mkvpropedit)")
-        self.widgets['post_mux_validate_metadata'].setToolTip(
-            "After merging, performs an audit of the final file's metadata (color space, HDR, interlacing, etc.)\n"
-            "and uses mkvpropedit to correct any discrepancies found against the original sources.\n"
-            "Ensures maximum compatibility and archival quality. (Recommended)"
-        )
         form2.addWidget(self.widgets['post_mux_normalize_timestamps'])
         form2.addWidget(self.widgets['post_mux_strip_tags'])
-        form2.addWidget(self.widgets['post_mux_validate_metadata'])
         main_layout.addWidget(post_merge_group)
         main_layout.addStretch(1)
 

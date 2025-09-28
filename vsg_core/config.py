@@ -63,7 +63,6 @@ class AppConfig:
             # --- Post-merge options ---
             'post_mux_normalize_timestamps': False,
             'post_mux_strip_tags': False,
-            'post_mux_validate_metadata': True, # <-- NEW SETTING
 
             # --- Enhanced Segmented Audio Correction ---
             'segmented_enabled': False,
@@ -88,12 +87,12 @@ class AppConfig:
             'segment_drift_outlier_sensitivity': 1.5,
             'segment_drift_scan_buffer_pct': 2.0,
 
-            # --- NEW: Resampling Engine Settings ---
-            'segment_resample_engine': 'aresample', # New default: aresample, atempo, rubberband
-            'segment_rb_pitch_correct': False,      # For rubberband: default to NO pitch correction
-            'segment_rb_transients': 'crisp',       # For rubberband: 'crisp', 'mixed', or 'smooth'
-            'segment_rb_smoother': True,            # For rubberband: phase smoothing for quality
-            'segment_rb_pitchq': True,              # For rubberband: high-quality pitch algorithm
+            # --- Resampling Engine Settings ---
+            'segment_resample_engine': 'aresample',
+            'segment_rb_pitch_correct': False,
+            'segment_rb_transients': 'crisp',
+            'segment_rb_smoother': True,
+            'segment_rb_pitchq': True,
 
             # Fine Scan & Confidence
             'segment_min_confidence_ratio': 5.0,
@@ -111,13 +110,15 @@ class AppConfig:
                 with open(self.settings_path, 'r', encoding='utf-8') as f:
                     loaded_settings = json.load(f)
 
+                if 'post_mux_validate_metadata' in loaded_settings:
+                    del loaded_settings['post_mux_validate_metadata']
+                    changed = True
                 if 'analysis_lang_ref' in loaded_settings and not loaded_settings.get('analysis_lang_source1'):
                     loaded_settings['analysis_lang_source1'] = loaded_settings['analysis_lang_ref']
                     changed = True
                 if 'analysis_lang_sec' in loaded_settings and not loaded_settings.get('analysis_lang_others'):
                     loaded_settings['analysis_lang_others'] = loaded_settings['analysis_lang_sec']
                     changed = True
-
                 for old_key in ['analysis_lang_ref', 'analysis_lang_sec', 'analysis_lang_ter']:
                     if old_key in loaded_settings:
                         del loaded_settings[old_key]

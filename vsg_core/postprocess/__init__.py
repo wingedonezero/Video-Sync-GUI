@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 
 from .finalizer import finalize_merged_file, check_if_rebasing_is_needed
-from .metadata_patcher import MetadataPatcher
+from .final_auditor import FinalAuditor
 
 __all__ = [
     'finalize_merged_file',
     'check_if_rebasing_is_needed',
-    'MetadataPatcher',
+    'FinalAuditor',
 ]

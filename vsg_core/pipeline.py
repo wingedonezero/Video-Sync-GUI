@@ -9,7 +9,7 @@ from typing import List, Dict, Any, Callable, Optional
 
 from .io.runner import CommandRunner
 from .orchestrator.pipeline import Orchestrator
-from .postprocess import finalize_merged_file, check_if_rebasing_is_needed, MetadataPatcher
+from .postprocess import finalize_merged_file, check_if_rebasing_is_needed, FinalAuditor
 
 class JobPipeline:
     def __init__(self, config: dict, log_callback: Callable[[str], None], progress_callback: Callable[[float], None]):
@@ -84,11 +84,7 @@ class JobPipeline:
             if not and_merge:
                 log_to_all('--- Analysis Complete (No Merge) ---')
                 self.progress(1.0)
-                return {
-                    'status': 'Analyzed',
-                    'delays': ctx.delays.source_delays_ms if ctx.delays else {},
-                    'name': Path(source1_file).name
-                }
+                return { 'status': 'Analyzed', 'delays': ctx.delays.source_delays_ms if ctx.delays else {}, 'name': Path(source1_file).name }
 
             if not ctx.tokens:
                 raise RuntimeError('Internal error: mkvmerge tokens were not generated.')
@@ -113,14 +109,13 @@ class JobPipeline:
 
             log_to_all(f'[SUCCESS] Output file created: {final_output_path}')
 
-            # --- METADATA VALIDATION STEP ---
-            if self.config.get('post_mux_validate_metadata', True):
-                log_to_all("--- Post-Merge: Validating Final Metadata ---")
-                try:
-                    patcher = MetadataPatcher(ctx, runner)
-                    patcher.run(final_output_path)
-                except Exception as patch_error:
-                    log_to_all(f"[ERROR] Metadata patching failed: {patch_error}")
+            # --- FINAL AUDIT STEP (MANDATORY) ---
+            log_to_all("--- Post-Merge: Running Final Audit ---")
+            try:
+                auditor = FinalAuditor(ctx, runner)
+                auditor.run(final_output_path)
+            except Exception as audit_error:
+                log_to_all(f"[ERROR] Final audit step failed: {audit_error}")
             # --- END ---
 
             self.progress(1.0)
