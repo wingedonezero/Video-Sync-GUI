@@ -9,7 +9,7 @@ from typing import List, Dict, Any, Callable, Optional
 
 from .io.runner import CommandRunner
 from .orchestrator.pipeline import Orchestrator
-from .postprocess import finalize_merged_file, check_if_rebasing_is_needed
+from .postprocess import finalize_merged_file, check_if_rebasing_is_needed, MetadataPatcher
 
 class JobPipeline:
     def __init__(self, config: dict, log_callback: Callable[[str], None], progress_callback: Callable[[float], None]):
@@ -104,17 +104,25 @@ class JobPipeline:
             if not merge_ok:
                 raise RuntimeError('mkvmerge execution failed.')
 
-            # --- MODIFICATION START ---
-            # Reverted to the original, simple check for whether the finalizer is needed.
             normalize_enabled = self.config.get('post_mux_normalize_timestamps', False)
 
             if normalize_enabled and check_if_rebasing_is_needed(mkvmerge_output_path, runner, self.tool_paths):
                 finalize_merged_file(mkvmerge_output_path, final_output_path, runner, self.config, self.tool_paths)
             else:
                 shutil.move(mkvmerge_output_path, final_output_path)
-            # --- MODIFICATION END ---
 
             log_to_all(f'[SUCCESS] Output file created: {final_output_path}')
+
+            # --- METADATA VALIDATION STEP ---
+            if self.config.get('post_mux_validate_metadata', True):
+                log_to_all("--- Post-Merge: Validating Final Metadata ---")
+                try:
+                    patcher = MetadataPatcher(ctx, runner)
+                    patcher.run(final_output_path)
+                except Exception as patch_error:
+                    log_to_all(f"[ERROR] Metadata patching failed: {patch_error}")
+            # --- END ---
+
             self.progress(1.0)
             return {
                 'status': 'Merged', 'output': str(final_output_path),

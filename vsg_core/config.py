@@ -63,6 +63,7 @@ class AppConfig:
             # --- Post-merge options ---
             'post_mux_normalize_timestamps': False,
             'post_mux_strip_tags': False,
+            'post_mux_validate_metadata': True, # <-- NEW SETTING
 
             # --- Enhanced Segmented Audio Correction ---
             'segmented_enabled': False,

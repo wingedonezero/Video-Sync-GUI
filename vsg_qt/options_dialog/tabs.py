@@ -10,19 +10,23 @@ from PySide6.QtWidgets import (
 # --- Helper functions (Unchanged) ---
 def _dir_input() -> QWidget:
     w = QWidget()
-    h = QHBoxLayout(w); h.setContentsMargins(0,0,0,0)
+    h = QHBoxLayout(w);
+    h.setContentsMargins(0,0,0,0)
     le = QLineEdit()
     btn = QPushButton("Browse…")
-    h.addWidget(le); h.addWidget(btn)
+    h.addWidget(le);
+    h.addWidget(btn)
     btn.clicked.connect(lambda: _browse_for_dir(le))
     return w
 
 def _file_input() -> QWidget:
     w = QWidget()
-    h = QHBoxLayout(w); h.setContentsMargins(0,0,0,0)
+    h = QHBoxLayout(w);
+    h.setContentsMargins(0,0,0,0)
     le = QLineEdit()
     btn = QPushButton("Browse…")
-    h.addWidget(le); h.addWidget(btn)
+    h.addWidget(le);
+    h.addWidget(btn)
     btn.clicked.connect(lambda: _browse_for_file(le))
     return w
 
@@ -159,7 +163,6 @@ class AnalysisTab(QWidget):
         self.widgets['segment_drift_outlier_sensitivity'] = QDoubleSpinBox(); self.widgets['segment_drift_outlier_sensitivity'].setRange(1.0, 3.0); self.widgets['segment_drift_outlier_sensitivity'].setDecimals(1); self.widgets['segment_drift_outlier_sensitivity'].setToolTip("How aggressively to reject inconsistent measurements before calculating drift. Lower is stricter.")
         self.widgets['segment_drift_scan_buffer_pct'] = QDoubleSpinBox(); self.widgets['segment_drift_scan_buffer_pct'].setRange(0.0, 10.0); self.widgets['segment_drift_scan_buffer_pct'].setSuffix(" %"); self.widgets['segment_drift_scan_buffer_pct'].setToolTip("Percentage of the start and end of a segment to ignore during drift scan.")
 
-        # --- MODIFICATION START ---
         self.widgets['segment_resample_engine'] = QComboBox()
         self.widgets['segment_resample_engine'].addItems(['aresample', 'atempo', 'rubberband'])
         self.widgets['segment_resample_engine'].setToolTip(
@@ -168,7 +171,6 @@ class AnalysisTab(QWidget):
             "- atempo: Fast, standard quality, no pitch correction.\n"
             "- rubberband: Slower, highest quality, preserves audio pitch."
         )
-        # --- MODIFICATION END ---
 
         segment_layout.addRow("Coarse Scan Chunk Duration:", self.widgets['segment_coarse_chunk_s'])
         segment_layout.addRow("Coarse Scan Step Size:", self.widgets['segment_coarse_step_s'])
@@ -177,32 +179,24 @@ class AnalysisTab(QWidget):
         segment_layout.addRow("Segment Slope Threshold:", self.widgets['segment_drift_slope_threshold'])
         segment_layout.addRow("Segment Outlier Sensitivity:", self.widgets['segment_drift_outlier_sensitivity'])
         segment_layout.addRow("Segment Scan Buffer:", self.widgets['segment_drift_scan_buffer_pct'])
-        segment_layout.addRow("Resample Engine:", self.widgets['segment_resample_engine']) # Add new widget to layout
+        segment_layout.addRow("Resample Engine:", self.widgets['segment_resample_engine'])
 
-        # --- NEW RUBBERBAND GROUPBOX ---
         self.rb_group = QGroupBox("Rubberband Settings")
         rb_layout = QFormLayout(self.rb_group)
-
         self.widgets['segment_rb_pitch_correct'] = QCheckBox("Enable Pitch Correction")
         self.widgets['segment_rb_pitch_correct'].setToolTip("When enabled, preserves the original audio pitch (slower).\nWhen disabled, acts as a high-quality resampler where pitch changes with speed (faster).")
-
         self.widgets['segment_rb_transients'] = QComboBox()
         self.widgets['segment_rb_transients'].addItems(['crisp', 'mixed', 'smooth'])
         self.widgets['segment_rb_transients'].setToolTip("How to handle transients (sharp sounds like consonants).\n'crisp' is usually best for dialogue.")
-
         self.widgets['segment_rb_smoother'] = QCheckBox("Enable Phase Smoothing (Higher Quality)")
         self.widgets['segment_rb_smoother'].setToolTip("Improves quality by smoothing phase shifts between processing windows.\nDisabling this can be slightly faster.")
-
         self.widgets['segment_rb_pitchq'] = QCheckBox("Enable High-Quality Pitch Algorithm")
         self.widgets['segment_rb_pitchq'].setToolTip("Uses a higher-quality, more CPU-intensive algorithm for pitch processing.")
-
         rb_layout.addRow(self.widgets['segment_rb_pitch_correct'])
         rb_layout.addRow("Transient Handling:", self.widgets['segment_rb_transients'])
         rb_layout.addRow(self.widgets['segment_rb_smoother'])
         rb_layout.addRow(self.widgets['segment_rb_pitchq'])
-
         segment_layout.addRow(self.rb_group)
-        # --- END NEW GROUPBOX ---
 
         segment_layout.addRow(QLabel("<b>Fine Scan & Confidence Tweaks</b>"))
         self.widgets['segment_min_confidence_ratio'] = QDoubleSpinBox(); self.widgets['segment_min_confidence_ratio'].setRange(2.0, 20.0); self.widgets['segment_min_confidence_ratio'].setDecimals(1); self.widgets['segment_min_confidence_ratio'].setToolTip("Minimum ratio of correlation peak to noise floor for a valid match.")
@@ -215,22 +209,16 @@ class AnalysisTab(QWidget):
 
         main_layout.addStretch(1)
         self.widgets['filtering_method'].currentTextChanged.connect(self._update_filter_options)
-
-        # --- NEW SIGNAL CONNECTION ---
         self.widgets['segment_resample_engine'].currentTextChanged.connect(self._update_rb_group_visibility)
         self._update_rb_group_visibility(self.widgets['segment_resample_engine'].currentText())
-        # --- END NEW CONNECTION ---
-
         self._update_filter_options(self.widgets['filtering_method'].currentText())
 
     def _update_filter_options(self, text: str):
         self.cutoff_container.setVisible(text == "Low-Pass Filter")
 
-    # --- NEW SLOT FUNCTION ---
     def _update_rb_group_visibility(self, text: str):
         """Shows the Rubberband settings group only when it's the selected engine."""
         self.rb_group.setVisible(text == 'rubberband')
-    # --- END NEW SLOT ---
 
 class ChaptersTab(QWidget):
     def __init__(self):
@@ -269,8 +257,15 @@ class MergeBehaviorTab(QWidget):
         form2 = QFormLayout(post_merge_group)
         self.widgets['post_mux_normalize_timestamps'] = QCheckBox("Rebase timestamps to fix thumbnails (requires FFmpeg)"); self.widgets['post_mux_normalize_timestamps'].setToolTip("If a file's video track doesn't start at timestamp zero (due to a global shift),\nthis option will perform a fast, lossless remux with FFmpeg to fix it.\nThis resolves issues with thumbnail generation in most file managers.")
         self.widgets['post_mux_strip_tags'] = QCheckBox("Strip ENCODER tag added by FFmpeg (requires mkvpropedit)"); self.widgets['post_mux_strip_tags'].setToolTip("If the timestamp normalization step is run, FFmpeg will add an 'ENCODER' tag to the file.\nThis option will run a quick update with mkvpropedit to remove that tag for a cleaner file.")
+        self.widgets['post_mux_validate_metadata'] = QCheckBox("Validate and patch final metadata (requires mkvpropedit)")
+        self.widgets['post_mux_validate_metadata'].setToolTip(
+            "After merging, performs an audit of the final file's metadata (color space, HDR, interlacing, etc.)\n"
+            "and uses mkvpropedit to correct any discrepancies found against the original sources.\n"
+            "Ensures maximum compatibility and archival quality. (Recommended)"
+        )
         form2.addWidget(self.widgets['post_mux_normalize_timestamps'])
         form2.addWidget(self.widgets['post_mux_strip_tags'])
+        form2.addWidget(self.widgets['post_mux_validate_metadata'])
         main_layout.addWidget(post_merge_group)
         main_layout.addStretch(1)
 
