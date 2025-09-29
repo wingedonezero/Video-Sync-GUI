@@ -49,9 +49,27 @@ class StorageTab(QWidget):
         self.widgets['temp_root'].setToolTip("The root directory for storing temporary files during processing (e.g., extracted tracks, logs).")
         self.widgets['videodiff_path'] = _file_input()
         self.widgets['videodiff_path'].setToolTip("Optional. The full path to the 'videodiff' executable if it's not in your system's PATH.")
+        self.widgets['subtile_ocr_path'] = _file_input()
+        self.widgets['subtile_ocr_path'].setToolTip("Optional. The full path to the 'subtile-ocr' executable if it's not in your system's PATH.")
+        self.widgets['subtile_ocr_char_blacklist'] = QLineEdit()
+        self.widgets['subtile_ocr_char_blacklist'].setToolTip("Optional. A string of characters to blacklist during the OCR process (e.g., '|/_~').")
         f.addRow('Output Directory:', self.widgets['output_folder'])
         f.addRow('Temporary Directory:', self.widgets['temp_root'])
         f.addRow('VideoDiff Path (optional):', self.widgets['videodiff_path'])
+        f.addRow('Subtitle OCR Path (optional):', self.widgets['subtile_ocr_path'])
+        f.addRow('OCR Character Blacklist (optional):', self.widgets['subtile_ocr_char_blacklist'])
+
+class SubtitleCleanupTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.widgets: Dict[str, QWidget] = {}
+        f = QFormLayout(self)
+        self.widgets['ocr_cleanup_enabled'] = QCheckBox("Enable post-OCR cleanup")
+        self.widgets['ocr_cleanup_enabled'].setToolTip("Automatically fix common OCR errors in subtitles after processing.")
+        self.widgets['ocr_cleanup_normalize_ellipsis'] = QCheckBox("Normalize ellipsis (...)")
+        self.widgets['ocr_cleanup_normalize_ellipsis'].setToolTip("Replace the Unicode ellipsis character '…' with three periods '...'.")
+        f.addRow(self.widgets['ocr_cleanup_enabled'])
+        f.addRow(self.widgets['ocr_cleanup_normalize_ellipsis'])
 
 class AnalysisTab(QWidget):
     def __init__(self):

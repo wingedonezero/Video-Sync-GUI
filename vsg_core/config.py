@@ -14,6 +14,10 @@ class AppConfig:
             'output_folder': str(self.script_dir / 'sync_output'),
             'temp_root': str(self.script_dir / 'temp_work'),
             'videodiff_path': '',
+            'subtile_ocr_path': '',
+            'subtile_ocr_char_blacklist': '',
+            'ocr_cleanup_enabled': True,
+            'ocr_cleanup_normalize_ellipsis': False,
 
             # --- Flexible Analysis Settings ---
             'source_separation_model': 'None (Use Original Audio)',

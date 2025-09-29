@@ -15,19 +15,34 @@ class MkvmergeOptionsBuilder:
         if settings.disable_track_statistics_tags:
             tokens += ['--disable-track-statistics-tags']
 
+        # Separate final tracks from preserved original tracks
         final_items = [item for item in plan.items if not item.is_preserved]
-        preserved_items = [item for item in plan.items if item.is_preserved]
+        preserved_audio = [item for item in plan.items if item.is_preserved and item.track.type == TrackType.AUDIO]
+        preserved_subs = [item for item in plan.items if item.is_preserved and item.track.type == TrackType.SUBTITLES]
 
-        last_audio_idx = -1
-        for i, item in enumerate(final_items):
-            if item.track.type == TrackType.AUDIO:
-                last_audio_idx = i
-
-        if preserved_items:
+        # Insert preserved audio tracks after the last main audio track
+        if preserved_audio:
+            last_audio_idx = -1
+            for i, item in enumerate(final_items):
+                if item.track.type == TrackType.AUDIO:
+                    last_audio_idx = i
+            # Correctly insert the list of preserved items
             if last_audio_idx != -1:
-                final_items.insert(last_audio_idx + 1, *preserved_items)
+                final_items[last_audio_idx + 1:last_audio_idx + 1] = preserved_audio
             else:
-                final_items.extend(preserved_items)
+                final_items.extend(preserved_audio)
+
+        # Insert preserved subtitle tracks after the last main subtitle track
+        if preserved_subs:
+            last_sub_idx = -1
+            for i, item in enumerate(final_items):
+                if item.track.type == TrackType.SUBTITLES:
+                    last_sub_idx = i
+            # Correctly insert the list of preserved items
+            if last_sub_idx != -1:
+                final_items[last_sub_idx + 1:last_sub_idx + 1] = preserved_subs
+            else:
+                final_items.extend(preserved_subs)
 
         default_audio_idx = self._first_index(final_items, kind='audio', predicate=lambda it: it.is_default)
         default_sub_idx = self._first_index(final_items, kind='subtitles', predicate=lambda it: it.is_default)

@@ -33,6 +33,8 @@ class TrackWidget(QWidget):
         self.cb_name = QCheckBox("Set Name")
 
         # Hidden controls whose state is managed by the settings dialog
+        self.cb_ocr = QCheckBox("Perform OCR")
+        self.cb_cleanup = QCheckBox("Perform Cleanup")
         self.cb_convert = QCheckBox("To ASS")
         self.cb_rescale = QCheckBox("Rescale")
         self.size_multiplier = QDoubleSpinBox()
@@ -88,27 +90,23 @@ class TrackWidget(QWidget):
         """Open the detailed settings dialog and apply the results."""
         current_config = self.logic.get_config()
 
-        # --- MODIFICATION: 'is_forced_display' is no longer passed to the dialog ---
-        dialog_config = {
-            'convert_to_ass': current_config.get('convert_to_ass', False),
-            'rescale': current_config.get('rescale', False),
-            'size_multiplier': current_config.get('size_multiplier', 1.0)
-        }
-
         dialog = TrackSettingsDialog(
             track_type=self.track_type,
             codec_id=self.codec_id,
-            **dialog_config
+            **current_config
         )
 
         if dialog.exec():
             new_config = dialog.read_values()
-            # The 'Forced' checkbox is no longer in the dialog, so we don't update it from the result
+            # Update the hidden controls on this widget
+            self.cb_ocr.setChecked(new_config.get('perform_ocr', False))
+            self.cb_cleanup.setChecked(new_config.get('perform_ocr_cleanup', False))
             self.cb_convert.setChecked(new_config.get('convert_to_ass', False))
             self.cb_rescale.setChecked(new_config.get('rescale', False))
             self.size_multiplier.setValue(new_config.get('size_multiplier', 1.0))
             self.logic.refresh_badges()
+            self.logic.refresh_summary()
 
     def get_config(self) -> Dict[str, Any]:
-        """Public method to get the final configuration from the widget."""
+        """Public method to get the final configuration from the widget's controls."""
         return self.logic.get_config()

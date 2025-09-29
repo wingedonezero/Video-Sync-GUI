@@ -32,6 +32,8 @@ class PlanItem:
     is_preserved: bool = False
     is_corrected: bool = False
     correction_source: Optional[str] = None
+    perform_ocr: bool = False
+    perform_ocr_cleanup: bool = False
     # NEW FIELD: Store the original container delay for this track
     container_delay_ms: int = 0
 

@@ -12,7 +12,8 @@ class TrackSettingsDialog(QDialog):
         self.setWindowTitle("Track Settings")
 
         # --- UI Elements ---
-        # --- MODIFICATION: 'Forced' checkbox is now removed from this dialog ---
+        self.cb_ocr = QCheckBox("Perform OCR")
+        self.cb_cleanup = QCheckBox("Perform Post-OCR Cleanup")
         self.cb_convert = QCheckBox("Convert to ASS (SRT only)")
         self.cb_rescale = QCheckBox("Rescale to video resolution")
         self.size_multiplier = QDoubleSpinBox()
@@ -27,6 +28,8 @@ class TrackSettingsDialog(QDialog):
 
         # --- Layout ---
         layout = QVBoxLayout(self)
+        layout.addWidget(self.cb_ocr)
+        layout.addWidget(self.cb_cleanup)
         layout.addWidget(self.cb_convert)
         layout.addWidget(self.cb_rescale)
         layout.addWidget(self.size_multiplier)
