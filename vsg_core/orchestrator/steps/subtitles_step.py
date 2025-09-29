@@ -91,9 +91,19 @@ class SubtitlesStep:
                                 runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
                             runner._log_message("------------------------")
 
+                    # --- Timing Fix Step (ONLY for OCR'd subtitles) ---
+                    if ctx.settings_dict.get('timing_fix_enabled', False):
+                        timing_report = fix_subtitle_timing(ocr_output_path, ctx.settings_dict, runner)
+                        if timing_report:
+                            runner._log_message("--- Subtitle Timing Report ---")
+                            for key, value in timing_report.items():
+                                runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
+                            runner._log_message("--------------------------")
+
                 else:
                     runner._log_message(f"[WARN] OCR failed for track {item.track.id}. Using original.")
 
+            # These transformations can apply to any subtitle (OCR'd or not)
             if item.convert_to_ass and item.extracted_path and item.extracted_path.suffix.lower() == '.srt':
                 new_path = convert_srt_to_ass(str(item.extracted_path), runner, ctx.tool_paths)
                 item.extracted_path = Path(new_path)
@@ -107,16 +117,6 @@ class SubtitlesStep:
                     multiply_font_size(str(item.extracted_path), size_mult, runner)
                 else:
                     runner._log_message(f"[Font Size] WARNING: Ignoring unreasonable size multiplier {size_mult:.2f}x for track {item.track.id}. Using 1.0x instead.")
-
-            # --- Timing Fix Step ---
-            if ctx.settings_dict.get('timing_fix_enabled', False) and item.extracted_path:
-                timing_report = fix_subtitle_timing(str(item.extracted_path), ctx.settings_dict, runner)
-                if timing_report:
-                    runner._log_message("--- Subtitle Timing Report ---")
-                    for key, value in timing_report.items():
-                        runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
-                    runner._log_message("--------------------------")
-
 
         if items_to_add:
             ctx.extracted_items.extend(items_to_add)
