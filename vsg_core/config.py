@@ -18,6 +18,7 @@ class AppConfig:
             'subtile_ocr_char_blacklist': '',
             'ocr_cleanup_enabled': True,
             'ocr_cleanup_normalize_ellipsis': False,
+            'ocr_cleanup_custom_wordlist_path': '',
 
             # --- Flexible Analysis Settings ---
             'source_separation_model': 'None (Use Original Audio)',

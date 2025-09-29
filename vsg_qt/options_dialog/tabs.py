@@ -34,8 +34,8 @@ def _browse_for_dir(line_edit: QLineEdit):
     path = QFileDialog.getExistingDirectory(None, "Select Directory", line_edit.text())
     if path: line_edit.setText(path)
 
-def _browse_for_file(line_edit: QLineEdit):
-    path, _ = QFileDialog.getOpenFileName(None, "Select File", line_edit.text())
+def _browse_for_file(line_edit: QLineEdit, nameFilter: str = "All Files (*)"):
+    path, _ = QFileDialog.getOpenFileName(None, "Select File", line_edit.text(), nameFilter)
     if path: line_edit.setText(path)
 
 class StorageTab(QWidget):
@@ -66,9 +66,15 @@ class SubtitleCleanupTab(QWidget):
         f = QFormLayout(self)
         self.widgets['ocr_cleanup_enabled'] = QCheckBox("Enable post-OCR cleanup")
         self.widgets['ocr_cleanup_enabled'].setToolTip("Automatically fix common OCR errors in subtitles after processing.")
+
+        self.widgets['ocr_cleanup_custom_wordlist_path'] = _file_input()
+        self.widgets['ocr_cleanup_custom_wordlist_path'].setToolTip("Optional. A path to a custom wordlist (.txt file, one word per line) to prevent OCR corrections on specific names or terms.")
+
         self.widgets['ocr_cleanup_normalize_ellipsis'] = QCheckBox("Normalize ellipsis (...)")
         self.widgets['ocr_cleanup_normalize_ellipsis'].setToolTip("Replace the Unicode ellipsis character '…' with three periods '...'.")
+
         f.addRow(self.widgets['ocr_cleanup_enabled'])
+        f.addRow("Custom Wordlist:", self.widgets['ocr_cleanup_custom_wordlist_path'])
         f.addRow(self.widgets['ocr_cleanup_normalize_ellipsis'])
 
 class AnalysisTab(QWidget):
