@@ -20,6 +20,15 @@ class AppConfig:
             'ocr_cleanup_normalize_ellipsis': False,
             'ocr_cleanup_custom_wordlist_path': '',
 
+            # --- Timing Fix Settings ---
+            'timing_fix_enabled': False,
+            'timing_fix_overlaps': True,
+            'timing_overlap_min_gap_ms': 1,
+            'timing_fix_short_durations': True,
+            'timing_min_duration_ms': 500,
+            'timing_fix_long_durations': True,
+            'timing_max_cps': 20.0,
+
             # --- Flexible Analysis Settings ---
             'source_separation_model': 'None (Use Original Audio)',
             'filtering_method': 'Dialogue Band-Pass Filter',

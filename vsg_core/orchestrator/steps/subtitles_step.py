@@ -15,6 +15,7 @@ from vsg_core.subtitles.style import multiply_font_size
 from vsg_core.subtitles.style_engine import StyleEngine
 from vsg_core.subtitles.ocr import run_ocr
 from vsg_core.subtitles.cleanup import run_cleanup
+from vsg_core.subtitles.timing import fix_subtitle_timing
 
 class SubtitlesStep:
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
@@ -106,6 +107,16 @@ class SubtitlesStep:
                     multiply_font_size(str(item.extracted_path), size_mult, runner)
                 else:
                     runner._log_message(f"[Font Size] WARNING: Ignoring unreasonable size multiplier {size_mult:.2f}x for track {item.track.id}. Using 1.0x instead.")
+
+            # --- Timing Fix Step ---
+            if ctx.settings_dict.get('timing_fix_enabled', False) and item.extracted_path:
+                timing_report = fix_subtitle_timing(str(item.extracted_path), ctx.settings_dict, runner)
+                if timing_report:
+                    runner._log_message("--- Subtitle Timing Report ---")
+                    for key, value in timing_report.items():
+                        runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
+                    runner._log_message("--------------------------")
+
 
         if items_to_add:
             ctx.extracted_items.extend(items_to_add)

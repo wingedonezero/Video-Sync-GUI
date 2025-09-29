@@ -77,6 +77,54 @@ class SubtitleCleanupTab(QWidget):
         f.addRow("Custom Wordlist:", self.widgets['ocr_cleanup_custom_wordlist_path'])
         f.addRow(self.widgets['ocr_cleanup_normalize_ellipsis'])
 
+class TimingTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.widgets: Dict[str, QWidget] = {}
+        main_layout = QVBoxLayout(self)
+
+        self.widgets['timing_fix_enabled'] = QCheckBox("Enable subtitle timing corrections")
+        self.widgets['timing_fix_enabled'].setToolTip("Apply automated timing fixes after OCR and text cleanup.")
+        main_layout.addWidget(self.widgets['timing_fix_enabled'])
+
+        # --- Overlaps Group ---
+        overlap_group = QGroupBox("Fix Overlapping Display Times")
+        overlap_layout = QFormLayout(overlap_group)
+        self.widgets['timing_fix_overlaps'] = QCheckBox("Enable")
+        self.widgets['timing_overlap_min_gap_ms'] = QSpinBox()
+        self.widgets['timing_overlap_min_gap_ms'].setRange(0, 1000)
+        self.widgets['timing_overlap_min_gap_ms'].setSuffix(" ms")
+        self.widgets['timing_overlap_min_gap_ms'].setToolTip("The minimum gap to enforce between two subtitles.")
+        overlap_layout.addRow(self.widgets['timing_fix_overlaps'])
+        overlap_layout.addRow("Minimum Gap:", self.widgets['timing_overlap_min_gap_ms'])
+        main_layout.addWidget(overlap_group)
+
+        # --- Short Durations Group ---
+        short_group = QGroupBox("Fix Short Display Times")
+        short_layout = QFormLayout(short_group)
+        self.widgets['timing_fix_short_durations'] = QCheckBox("Enable")
+        self.widgets['timing_min_duration_ms'] = QSpinBox()
+        self.widgets['timing_min_duration_ms'].setRange(100, 5000)
+        self.widgets['timing_min_duration_ms'].setSuffix(" ms")
+        self.widgets['timing_min_duration_ms'].setToolTip("Subtitles shorter than this duration will be extended.")
+        short_layout.addRow(self.widgets['timing_fix_short_durations'])
+        short_layout.addRow("Minimum Duration:", self.widgets['timing_min_duration_ms'])
+        main_layout.addWidget(short_group)
+
+        # --- Long Durations Group ---
+        long_group = QGroupBox("Fix Long Display Times (based on Reading Speed)")
+        long_layout = QFormLayout(long_group)
+        self.widgets['timing_fix_long_durations'] = QCheckBox("Enable")
+        self.widgets['timing_max_cps'] = QDoubleSpinBox()
+        self.widgets['timing_max_cps'].setRange(5.0, 100.0)
+        self.widgets['timing_max_cps'].setSuffix(" CPS")
+        self.widgets['timing_max_cps'].setToolTip("Maximum characters per second. Subtitles that stay on screen too long for their text length will be shortened.")
+        long_layout.addRow(self.widgets['timing_fix_long_durations'])
+        long_layout.addRow("Max Characters Per Second:", self.widgets['timing_max_cps'])
+        main_layout.addWidget(long_group)
+
+        main_layout.addStretch(1)
+
 class AnalysisTab(QWidget):
     def __init__(self):
         super().__init__()

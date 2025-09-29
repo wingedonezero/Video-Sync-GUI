@@ -1,10 +1,11 @@
+# vsg_qt/options_dialog/ui.py
 from __future__ import annotations
 from typing import Dict
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QTabWidget, QDialogButtonBox, QScrollArea, QWidget
 )
 from .logic import OptionsLogic
-from .tabs import StorageTab, AnalysisTab, ChaptersTab, MergeBehaviorTab, LoggingTab, SubtitleCleanupTab
+from .tabs import StorageTab, AnalysisTab, ChaptersTab, MergeBehaviorTab, LoggingTab, SubtitleCleanupTab, TimingTab
 
 def _wrap_scroll(widget: QWidget) -> QScrollArea:
     sa = QScrollArea()
@@ -42,11 +43,13 @@ class OptionsDialog(QDialog):
         self._merge_tab = MergeBehaviorTab()
         self._logging_tab = LoggingTab()
         self._cleanup_tab = SubtitleCleanupTab()
+        self._timing_tab = TimingTab()
 
         # Add tabs wrapped in scroll areas
         self.tabs.addTab(_wrap_scroll(self._storage_tab), 'Storage & Tools')
         self.tabs.addTab(_wrap_scroll(self._analysis_tab), 'Analysis')
         self.tabs.addTab(_wrap_scroll(self._chapters_tab), 'Chapters')
+        self.tabs.addTab(_wrap_scroll(self._timing_tab), 'Timing')
         self.tabs.addTab(_wrap_scroll(self._cleanup_tab), 'Subtitle Cleanup')
         self.tabs.addTab(_wrap_scroll(self._merge_tab), 'Merge Behavior')
         self.tabs.addTab(_wrap_scroll(self._logging_tab), 'Logging')
@@ -58,6 +61,7 @@ class OptionsDialog(QDialog):
         self.sections['merge'] = self._merge_tab.widgets
         self.sections['logging'] = self._logging_tab.widgets
         self.sections['cleanup'] = self._cleanup_tab.widgets
+        self.sections['timing'] = self._timing_tab.widgets
 
         # Save/Cancel
         btns = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
