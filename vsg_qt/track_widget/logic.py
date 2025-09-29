@@ -62,14 +62,17 @@ class TrackWidgetLogic:
 
         # Update the inline summary (which uses the 'source_label' widget for display)
         parts = []
-        if self.v.cb_ocr.isChecked(): parts.append("OCR")
-        if self.v.cb_cleanup.isChecked(): parts.append("Cleanup")
-        if self.v.cb_convert.isChecked(): parts.append("→ASS")
-        if self.v.cb_rescale.isChecked(): parts.append("Rescale")
+        # --- FIX: Only check subtitle-specific options for subtitles ---
+        if self.track_data.get('type') == 'subtitles':
+            if self.v.cb_ocr.isChecked(): parts.append("OCR")
+            if self.v.cb_cleanup.isChecked(): parts.append("Cleanup")
+            if self.v.cb_convert.isChecked(): parts.append("→ASS")
+            if self.v.cb_rescale.isChecked(): parts.append("Rescale")
 
-        size_mult = self.v.size_multiplier.value()
-        if abs(size_mult - 1.0) > 1e-6:
-            parts.append(f"{size_mult:.2f}x Size")
+            size_mult = self.v.size_multiplier.value()
+            if abs(size_mult - 1.0) > 1e-6:
+                parts.append(f"{size_mult:.2f}x Size")
+        # --- END FIX ---
 
         if not parts:
             self.v.source_label.setText("")
