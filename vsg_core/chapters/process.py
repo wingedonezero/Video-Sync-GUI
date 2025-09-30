@@ -28,6 +28,23 @@ def _fmt_ns_for_log(ns: int) -> str:
     mm, ss = divmod(rem, 60)
     return f'{hh:02d}:{mm:02d}:{ss:02d}.{ms:03d}'
 
+def _fmt_delta_for_log(delta_ns: int) -> str:
+    """
+    Formats a time delta for logging, intelligently choosing units.
+    Shows nanoseconds if < 1ms, otherwise shows milliseconds.
+    """
+    abs_delta = abs(delta_ns)
+
+    if abs_delta == 0:
+        return "0ns"
+    elif abs_delta < 1_000_000:  # Less than 1ms
+        sign = '+' if delta_ns > 0 else '-'
+        return f"{sign}{abs_delta}ns"
+    else:  # 1ms or more
+        delta_ms = round(abs_delta / 1_000_000)
+        sign = '+' if delta_ns > 0 else '-'
+        return f"{sign}{delta_ms}ms"
+
 def _get_xpath_and_nsmap(root: ET.Element) -> (Dict, str):
     """Detects if a namespace is used and returns the appropriate xpath prefix and nsmap."""
     if root.nsmap and None in root.nsmap:
@@ -248,18 +265,20 @@ def _snap_chapter_times_inplace(root, keyframes_ns: list[int], config: dict, run
             if node is not None and node.text:
                 original_ns = _parse_ns(node.text)
                 candidate_ns = pick_candidate(original_ns)
-                delta_ns = abs(original_ns - candidate_ns)
-                delta_ms = round(delta_ns / 1_000_000)
+                delta_ns = candidate_ns - original_ns  # Keep sign for direction
+                abs_delta_ns = abs(delta_ns)
 
-                if delta_ns == 0:
+                if abs_delta_ns == 0:
                     if tag == 'ChapterTimeStart': on_kf += 1
                     runner._log_message(f"  - Kept '{chapter_name}' ({_fmt_ns_for_log(original_ns)}) - already on keyframe.")
-                elif delta_ns <= threshold_ns:
+                elif abs_delta_ns <= threshold_ns:
                     node.text = _fmt_ns(candidate_ns)
                     if tag == 'ChapterTimeStart': moved += 1
-                    runner._log_message(f"  - Snapped '{chapter_name}' ({_fmt_ns_for_log(original_ns)}) -> {_fmt_ns_for_log(candidate_ns)} (moved by {delta_ms}ms)")
+                    delta_str = _fmt_delta_for_log(delta_ns)
+                    runner._log_message(f"  - Snapped '{chapter_name}' ({_fmt_ns_for_log(original_ns)}) -> {_fmt_ns_for_log(candidate_ns)} (moved by {delta_str})")
                 else:
                     if tag == 'ChapterTimeStart': too_far += 1
-                    runner._log_message(f"  - Skipped '{chapter_name}' ({_fmt_ns_for_log(original_ns)}) - nearest keyframe is {delta_ms}ms away (too far).")
+                    delta_str = _fmt_delta_for_log(delta_ns)
+                    runner._log_message(f"  - Skipped '{chapter_name}' ({_fmt_ns_for_log(original_ns)}) - nearest keyframe is {delta_str} away (exceeds threshold).")
 
     runner._log_message(f'[Chapters] Snap complete: {moved} moved, {on_kf} on keyframe, {too_far} skipped.')
