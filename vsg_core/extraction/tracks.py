@@ -190,18 +190,19 @@ def get_stream_info_with_delays(mkv_path: str, runner: CommandRunner, tool_paths
         # Extract container delays for each track
         for track in info.get('tracks', []):
             props = track.get('properties', {})
+            track_type = track.get('type', '')
 
-            # The container delay is stored in the 'default_duration' field (in nanoseconds)
-            # But for audio/video sync, we actually want the 'minimum_timestamp' field
-            # which tells us when the track actually starts relative to container zero
-            min_timestamp = props.get('minimum_timestamp', 0)
+            # ONLY read container delays for audio and video tracks
+            # Subtitles don't have meaningful container delays in MKV
+            if track_type in ['audio', 'video']:
+                min_timestamp = props.get('minimum_timestamp', 0)
 
-            # Convert from nanoseconds to milliseconds
-            if min_timestamp:
-                track['container_delay_ms'] = min_timestamp / 1_000_000
+                if min_timestamp:
+                    track['container_delay_ms'] = min_timestamp / 1_000_000
+                else:
+                    track['container_delay_ms'] = 0
             else:
-                # Some containers may use other delay mechanisms
-                # Check for explicit delay field
+                # Explicitly set subtitle delays to 0
                 track['container_delay_ms'] = 0
 
         return info

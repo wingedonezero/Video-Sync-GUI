@@ -149,7 +149,7 @@ class AnalysisStep:
                 elif diagnosis == "LINEAR_DRIFT":
                     ctx.linear_drift_flags[analysis_track_key] = details
                 elif diagnosis == "STEPPING":
-                    ctx.segment_flags[analysis_track_key] = { 'base_delay': int(final_delay_ms) }  # Ensure int here
+                    ctx.segment_flags[analysis_track_key] = { 'base_delay': int(final_delay_ms) }
 
         # Store the calculated delays
         ctx.delays = Delays(source_delays_ms=source_delays, global_shift_ms=0)

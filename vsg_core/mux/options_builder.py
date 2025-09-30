@@ -100,16 +100,20 @@ class MkvmergeOptionsBuilder:
 
         For Source 1 tracks: Use their original container delays to maintain internal sync.
         For other sources: Use the calculated correlation delay (which already includes chain correction).
+
+        Note: Subtitles should NEVER use container delays as these aren't meaningful timing offsets.
         """
         tr = item.track
 
         # Source 1 tracks get their original container delays
-        if tr.source == "Source 1":
+        # BUT: Only for audio/video, never for subtitles
+        if tr.source == "Source 1" and tr.type != TrackType.SUBTITLES:
             # Return the track's original container delay
             # This maintains the internal sync between Source 1's tracks
             return int(item.container_delay_ms)
 
         # For all other sources (Source 2, Source 3, External, etc.)
+        # OR for any subtitle tracks (even from Source 1)
         # Use the delay calculated during analysis (which already includes the chain correction)
         sync_key = item.sync_to if tr.source == 'External' else tr.source
         delay = plan.delays.source_delays_ms.get(sync_key, 0)

@@ -28,12 +28,12 @@ class ExtractStep:
 
                 for track in info.get('tracks', []):
                     tid = track.get('id')
+                    track_type = track.get('type', 'unknown')
                     delay_ms = track.get('container_delay_ms', 0)
                     delays_for_source[tid] = delay_ms
 
-                    # Only log non-zero delays
-                    if delay_ms != 0:
-                        track_type = track.get('type', 'unknown')
+                    # Only log non-zero delays for audio/video tracks
+                    if delay_ms != 0 and track_type in ['audio', 'video']:
                         props = track.get('properties', {})
                         lang = props.get('language', 'und')
                         name = props.get('track_name', '')
@@ -49,7 +49,9 @@ class ExtractStep:
                 # Store in context
                 ctx.container_delays[source_key] = delays_for_source
 
-                if all(d == 0 for d in delays_for_source.values()):
+                # Check if all delays are zero
+                non_zero_delays = [d for d in delays_for_source.values() if d != 0]
+                if not non_zero_delays:
                     runner._log_message(f"  All tracks have zero container delay")
 
         # --- Part 1: Extract tracks from MKV sources ---
