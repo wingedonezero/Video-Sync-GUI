@@ -22,28 +22,54 @@ def _fmt_ns(ns: int) -> str:
     return f'{hh:02d}:{mm:02d}:{ss:02d}.{frac:09d}'
 
 def _fmt_ns_for_log(ns: int) -> str:
-    ms = round(ns / 1_000_000)
-    total_s, ms = divmod(ms, 1000)
-    hh, rem = divmod(total_s, 3600)
-    mm, ss = divmod(rem, 60)
-    return f'{hh:02d}:{mm:02d}:{ss:02d}.{ms:03d}'
+    """
+    Format nanoseconds as HH:MM:SS.mmm.uuu.nnn for maximum clarity.
+    Example: 00:01:31.074.316.666
+    Shows: hours:minutes:seconds.milliseconds.microseconds.nanoseconds
+    """
+    ns = max(0, ns)
+    total_ns = ns
+
+    # Extract each component
+    total_us = total_ns // 1_000
+    remaining_ns = total_ns % 1_000
+
+    total_ms = total_us // 1_000
+    remaining_us = total_us % 1_000
+
+    total_s = total_ms // 1_000
+    remaining_ms = total_ms % 1_000
+
+    hh = total_s // 3600
+    mm = (total_s % 3600) // 60
+    ss = total_s % 60
+
+    # Format as HH:MM:SS.mmm.uuu.nnn
+    return f'{hh:02d}:{mm:02d}:{ss:02d}.{remaining_ms:03d}.{remaining_us:03d}.{remaining_ns:03d}'
 
 def _fmt_delta_for_log(delta_ns: int) -> str:
     """
-    Formats a time delta for logging, intelligently choosing units.
-    Shows nanoseconds if < 1ms, otherwise shows milliseconds.
+    Formats a time delta for logging with unit-adaptive display.
+
+    Returns:
+        - "0ns" if zero
+        - "+123ns" or "-123ns" if < 1 microsecond
+        - "+123.456µs" or "-123.456µs" if < 1 millisecond
+        - "+123.456ms" or "-123.456ms" if >= 1 millisecond
     """
     abs_delta = abs(delta_ns)
+    sign = '+' if delta_ns > 0 else '-'
 
     if abs_delta == 0:
         return "0ns"
-    elif abs_delta < 1_000_000:  # Less than 1ms
-        sign = '+' if delta_ns > 0 else '-'
+    elif abs_delta < 1_000:  # Less than 1 microsecond
         return f"{sign}{abs_delta}ns"
-    else:  # 1ms or more
-        delta_ms = round(abs_delta / 1_000_000)
-        sign = '+' if delta_ns > 0 else '-'
-        return f"{sign}{delta_ms}ms"
+    elif abs_delta < 1_000_000:  # Less than 1 millisecond
+        us_value = abs_delta / 1_000.0
+        return f"{sign}{us_value:.3f}µs"
+    else:  # 1 millisecond or more
+        ms_value = abs_delta / 1_000_000.0
+        return f"{sign}{ms_value:.3f}ms"
 
 def _get_xpath_and_nsmap(root: ET.Element) -> (Dict, str):
     """Detects if a namespace is used and returns the appropriate xpath prefix and nsmap."""
