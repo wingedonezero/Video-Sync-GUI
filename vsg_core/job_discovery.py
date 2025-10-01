@@ -9,6 +9,8 @@ def discover_jobs(sources: Dict[str, str]) -> List[Dict[str, Dict[str, str]]]:
     Discovers jobs based on a dictionary of source paths.
     'Source 1' is the reference for filename matching.
     Returns a list of job dictionaries, each with a 'sources' key.
+
+    NEW: Supports single-source (Source 1 only) for remux-only mode.
     """
     source1_path_str = sources.get("Source 1")
     if not source1_path_str:
@@ -28,8 +30,10 @@ def discover_jobs(sources: Dict[str, str]) -> List[Dict[str, Dict[str, str]]]:
             if path.is_file():
                 job_sources[key] = str(path)
                 has_other_sources = True
-        # A single job is only valid if it has at least one other source to sync against
-        return [{'sources': job_sources}] if has_other_sources else []
+
+        # CHANGE: Always return the job, even with only Source 1
+        # This enables remux-only mode for processing a single file
+        return [{'sources': job_sources}]
 
     # --- Batch (Folder) Mode ---
     if source1_path.is_dir():
@@ -47,8 +51,9 @@ def discover_jobs(sources: Dict[str, str]) -> List[Dict[str, Dict[str, str]]]:
                     job_sources[key] = str(match_file)
                     has_other_sources = True
 
-            if has_other_sources:
-                jobs.append({'sources': job_sources})
+            # CHANGE: Allow single-source batch jobs (remux-only mode)
+            # Always include the job, even if no matching files in other sources
+            jobs.append({'sources': job_sources})
 
         return jobs
 

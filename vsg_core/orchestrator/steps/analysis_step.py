@@ -31,6 +31,12 @@ class AnalysisStep:
         if not source1_file:
             raise ValueError("Context is missing Source 1 for analysis.")
 
+        # NEW: Skip analysis if only Source 1 (remux-only mode)
+        if len(ctx.sources) == 1:
+            runner._log_message("--- Analysis Phase: Skipped (Remux-only mode - no sync sources) ---")
+            ctx.delays = Delays(source_delays_ms={}, global_shift_ms=0)
+            return ctx
+
         config = ctx.settings_dict
         source_delays: Dict[str, int] = {}
 
