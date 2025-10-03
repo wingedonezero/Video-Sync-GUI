@@ -174,6 +174,12 @@ class SteppingCorrector:
             segment_end_s = edl[i+1].start_s if i + 1 < len(edl) else pcm_duration_s
             segment_duration_s = segment_end_s - segment_start_s
 
+            # FIX #5: Validate segment duration (minimum 1 second)
+            if segment_duration_s < 1.0:
+                self.log(f"    - Skipping segment from {segment_start_s:.2f}s to {segment_end_s:.2f}s: too short ({segment_duration_s:.2f}s)")
+                final_edl.append(current_segment)
+                continue
+
             if segment_duration_s < 20.0:
                 final_edl.append(current_segment)
                 continue
@@ -421,6 +427,10 @@ class SteppingCorrector:
             return False
 
     def run(self, ref_file_path: str, analysis_audio_path: str, target_audio_path: str, base_delay_ms: int, temp_dir: Path) -> CorrectionResult:
+        # FIX #7: Add explicit memory management with try/finally
+        ref_pcm = None
+        analysis_pcm = None
+
         try:
             ref_index, _ = get_audio_stream_info(ref_file_path, None, self.runner, self.tool_paths)
             analysis_index, _ = get_audio_stream_info(analysis_audio_path, None, self.runner, self.tool_paths)
@@ -457,19 +467,27 @@ class SteppingCorrector:
 
             edl = sorted(list(set(edl)), key=lambda x: x.start_s)
 
-            # --- THE FIX IS HERE ---
-            # If, after scanning, we only have one segment, it means no boundaries were found.
-            # In this case, we should abort the complex correction and fall back to a simple delay.
+            # FIX #1: Better handling of single-segment case
             if len(edl) <= 1:
-                self.log("  [SteppingCorrector] No significant sync boundaries were found with current settings.")
-                self.log("  [SteppingCorrector] Aborting correction and falling back to a uniform delay.")
-                return CorrectionResult(CorrectionVerdict.UNIFORM, base_delay_ms)
-            # --- END FIX ---
+                # Only one segment means no stepping was detected
+                # This is actually SUCCESS - the audio has uniform delay
+                refined_delay = edl[0].delay_ms if edl else base_delay_ms
+
+                self.log("  [SteppingCorrector] No stepping detected. Audio delay is uniform throughout.")
+                self.log(f"  [SteppingCorrector] Refined delay measurement: {refined_delay}ms")
+
+                # Check if the refined delay differs significantly from the base delay
+                if abs(refined_delay - base_delay_ms) > 5:
+                    self.log(f"  [SteppingCorrector] Refined delay differs from initial estimate by {abs(refined_delay - base_delay_ms)}ms")
+                    self.log(f"  [SteppingCorrector] Recommending use of refined value: {refined_delay}ms")
+
+                return CorrectionResult(CorrectionVerdict.UNIFORM, refined_delay)
 
             edl = self._analyze_internal_drift(edl, ref_pcm, analysis_pcm, sample_rate, analysis_codec)
 
             self.log("  [SteppingCorrector] Final Edit Decision List (EDL) for assembly created:")
-            for i, seg in enumerate(edl): self.log(f"    - Action {i+1}: At target time {seg.start_s:.3f}s, new total delay is {seg.delay_ms}ms, internal drift is {seg.drift_rate_ms_s:+.2f} ms/s")
+            for i, seg in enumerate(edl):
+                self.log(f"    - Action {i+1}: At target time {seg.start_s:.3f}s, new total delay is {seg.delay_ms}ms, internal drift is {seg.drift_rate_ms_s:+.2f} ms/s")
 
             return self._run_final_assembly(target_audio_path, edl=edl, temp_dir=temp_dir, ref_file_path=ref_file_path, analysis_pcm=analysis_pcm)
 
@@ -478,8 +496,17 @@ class SteppingCorrector:
             import traceback
             self.log(f"[DEBUG] Traceback: {traceback.format_exc()}")
             return CorrectionResult(CorrectionVerdict.FAILED, str(e))
+        finally:
+            # FIX #7: Explicit memory cleanup
+            if ref_pcm is not None:
+                del ref_pcm
+            if analysis_pcm is not None:
+                del analysis_pcm
+            gc.collect()
 
     def _run_final_assembly(self, target_audio_path: str, edl: List[AudioSegment], temp_dir: Path, ref_file_path: str, analysis_pcm: np.ndarray) -> CorrectionResult:
+        target_pcm = None
+
         try:
             target_index, _ = get_audio_stream_info(target_audio_path, None, self.runner, self.tool_paths)
             target_channels, target_layout, sample_rate = _get_audio_properties(target_audio_path, target_index, self.runner, self.tool_paths)
@@ -512,6 +539,11 @@ class SteppingCorrector:
         except Exception as e:
             self.log(f"[FATAL] Final Assembly failed: {e}")
             return CorrectionResult(CorrectionVerdict.FAILED, f"Final assembly failed: {e}")
+        finally:
+            # FIX #7: Cleanup in finally block
+            if target_pcm is not None:
+                del target_pcm
+            gc.collect()
 
 def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
     extracted_audio_map = {
@@ -565,7 +597,7 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
 
         if result.verdict == CorrectionVerdict.UNIFORM:
             new_delay = result.data
-            runner._log_message(f"[SteppingCorrection] Overriding delay for {source_key} with more accurate value: {new_delay} ms.")
+            runner._log_message(f"[SteppingCorrection] No stepping found. Using refined uniform delay for {source_key}: {new_delay} ms.")
             if ctx.delays and source_key in ctx.delays.source_delays_ms:
                 ctx.delays.source_delays_ms[source_key] = new_delay
 

@@ -11,8 +11,8 @@ from vsg_core.models.jobs import PlanItem
 
 class FinalAuditor:
     """
-    A SAFER version that only logs warnings instead of trying to "fix" things.
-    The original was too aggressive and could corrupt files.
+    Comprehensive post-merge validation that only logs warnings.
+    Does not attempt to fix issues - those indicate bugs in earlier pipeline steps.
     """
     def __init__(self, ctx: Context, runner: CommandRunner):
         self.ctx = ctx
@@ -26,7 +26,9 @@ class FinalAuditor:
         """
         Comprehensive audit of the final file - checks everything but modifies nothing.
         """
-        self.log("--- Post-Merge: Running Final Audit ---")
+        self.log("========================================")
+        self.log("=== POST-MERGE FINAL AUDIT STARTING ===")
+        self.log("========================================")
 
         # Get metadata from the final file
         final_mkvmerge_data = self._get_metadata(str(final_mkv_path), 'mkvmerge')
@@ -43,8 +45,8 @@ class FinalAuditor:
             self.log(f"[WARNING] Track count mismatch! Plan expected {len(final_plan_items)}, but final file has {len(final_tracks)}.")
             total_issues += 1
 
-        # Audit track flags
-        self.log("--- Auditing Track Flags (Default/Forced) ---")
+        # === EXISTING AUDITS ===
+        self.log("\n--- Auditing Track Flags (Default/Forced) ---")
         flag_issues = self._audit_track_flags(final_tracks, final_plan_items)
         total_issues += flag_issues
 
@@ -54,29 +56,545 @@ class FinalAuditor:
             final_streams = final_ffprobe_data.get('streams', [])
 
             # Check HDR/DV/Color metadata
-            self.log("--- Auditing Video Core Metadata (HDR, 3D, Color) ---")
+            self.log("\n--- Auditing Video Core Metadata (HDR, 3D, Color) ---")
             video_issues = self._audit_video_metadata_detailed(final_streams, final_mkvmerge_data, final_plan_items)
             total_issues += video_issues
 
             # Check Dolby Vision
-            self.log("--- Auditing Dolby Vision Metadata ---")
+            self.log("\n--- Auditing Dolby Vision Metadata ---")
             dv_issues = self._audit_dolby_vision(final_streams, final_plan_items)
             total_issues += dv_issues
 
             # Check Object-Based Audio
-            self.log("--- Auditing Object-Based Audio (Atmos/DTS:X) ---")
+            self.log("\n--- Auditing Object-Based Audio (Atmos/DTS:X) ---")
             audio_issues = self._audit_object_based_audio(final_streams, final_plan_items)
             total_issues += audio_issues
 
+            # === NEW AUDITS ===
+            self.log("\n--- Auditing Codec Integrity ---")
+            codec_issues = self._audit_codec_integrity(final_streams, final_plan_items)
+            total_issues += codec_issues
+
+            self.log("\n--- Auditing Audio Channel Layouts ---")
+            channel_issues = self._audit_audio_channels(final_streams, final_plan_items)
+            total_issues += channel_issues
+
+            self.log("\n--- Auditing Audio Quality Parameters ---")
+            quality_issues = self._audit_audio_quality_params(final_streams, final_plan_items)
+            total_issues += quality_issues
+
+        # More new checks that don't require ffprobe
+        self.log("\n--- Auditing Audio Sync Delays ---")
+        sync_issues = self._audit_audio_sync(final_mkv_path, final_mkvmerge_data)
+        total_issues += sync_issues
+
+        self.log("\n--- Auditing Subtitle Formats ---")
+        subtitle_issues = self._audit_subtitle_formats(final_mkvmerge_data, final_plan_items)
+        total_issues += subtitle_issues
+
+        self.log("\n--- Auditing Chapters ---")
+        chapter_issues = self._audit_chapters(final_mkv_path)
+        total_issues += chapter_issues
+
+        self.log("\n--- Auditing Track Order ---")
+        order_issues = self._audit_track_order(final_tracks, final_plan_items)
+        total_issues += order_issues
+
+        self.log("\n--- Auditing Language Tags ---")
+        lang_issues = self._audit_language_tags(final_tracks, final_plan_items)
+        total_issues += lang_issues
+
+        self.log("\n--- Auditing Track Names ---")
+        name_issues = self._audit_track_names(final_tracks, final_plan_items)
+        total_issues += name_issues
+
         # Check attachments
-        self.log("--- Auditing Attachments ---")
+        self.log("\n--- Auditing Attachments ---")
         self._audit_attachments(final_mkvmerge_data.get('attachments', []))
 
         # Final summary
+        self.log("\n========================================")
         if total_issues == 0:
-            self.log("✅ Final audit passed. No issues found.")
+            self.log("✅ FINAL AUDIT PASSED - NO ISSUES FOUND")
         else:
-            self.log(f"⚠️ Final audit found {total_issues} potential issue(s). Please review the warnings above.")
+            self.log(f"⚠️  FINAL AUDIT FOUND {total_issues} POTENTIAL ISSUE(S)")
+            self.log("    Please review the warnings above.")
+        self.log("========================================\n")
+
+    # ========================================================================
+    # NEW AUDIT METHODS
+    # ========================================================================
+
+    def _audit_audio_sync(self, final_mkv_path: Path, final_mkvmerge_data: Dict) -> int:
+        """
+        Verifies that audio sync delays in the final file match what was calculated.
+        This is CRITICAL because sync issues are the most noticeable defect.
+        """
+        issues = 0
+        final_tracks = final_mkvmerge_data.get('tracks', [])
+
+        if not self.ctx.delays:
+            self.log("✅ No delays were calculated (single source or analysis skipped).")
+            return 0
+
+        # Build a mapping of track index to plan item
+        audio_plan_items = [item for item in self.ctx.extracted_items if item.track.type == TrackType.AUDIO]
+
+        # Get audio tracks from final file
+        final_audio_tracks = [t for t in final_tracks if t.get('type') == 'audio']
+
+        if len(final_audio_tracks) != len(audio_plan_items):
+            self.log(f"[WARNING] Audio track count mismatch! Expected {len(audio_plan_items)}, got {len(final_audio_tracks)}.")
+            issues += 1
+            return issues
+
+        for i, (plan_item, final_track) in enumerate(zip(audio_plan_items, final_audio_tracks)):
+            # Calculate what the delay SHOULD be
+            expected_delay_ms = self._calculate_expected_delay(plan_item)
+
+            # Get actual delay from container
+            # In MKV, this is stored in codec_delay (in nanoseconds)
+            props = final_track.get('properties', {})
+
+            # Try to get the delay from various possible fields
+            actual_delay_ns = props.get('codec_delay', 0)
+            actual_delay_ms = actual_delay_ns / 1_000_000.0 if actual_delay_ns else 0.0
+
+            # Also check minimum_timestamp which might contain the delay
+            min_timestamp = props.get('minimum_timestamp', 0)
+            if min_timestamp and not actual_delay_ms:
+                actual_delay_ms = min_timestamp / 1_000_000.0
+
+            # Allow 1ms tolerance for floating point rounding
+            tolerance_ms = 1.0
+            diff_ms = abs(expected_delay_ms - actual_delay_ms)
+
+            if diff_ms > tolerance_ms:
+                source = plan_item.track.source
+                lang = plan_item.track.props.lang or 'und'
+                name = plan_item.track.props.name or f"Track {plan_item.track.id}"
+
+                self.log(f"[WARNING] Audio sync mismatch for '{name}' ({source}, {lang}):")
+                self.log(f"          Expected delay: {expected_delay_ms:+.1f}ms")
+                self.log(f"          Actual delay:   {actual_delay_ms:+.1f}ms")
+                self.log(f"          Difference:     {diff_ms:.1f}ms")
+                issues += 1
+            else:
+                source = plan_item.track.source
+                name = plan_item.track.props.name or f"Track {plan_item.track.id}"
+                self.log(f"  ✓ '{name}' ({source}): {actual_delay_ms:+.1f}ms (within tolerance)")
+
+        if issues == 0:
+            self.log("✅ All audio sync delays are correct.")
+
+        return issues
+
+    def _calculate_expected_delay(self, plan_item: PlanItem) -> float:
+        """
+        Calculates what the delay SHOULD be for a given track based on the pipeline logic.
+        This mirrors the logic in options_builder.py
+        """
+        tr = plan_item.track
+
+        # Source 1 tracks use their original container delays (except subtitles)
+        if tr.source == "Source 1" and tr.type != TrackType.SUBTITLES:
+            return float(plan_item.container_delay_ms)
+
+        # For other sources, use the calculated correlation delay
+        sync_key = plan_item.sync_to if tr.source == 'External' else tr.source
+        delay = self.ctx.delays.source_delays_ms.get(sync_key, 0)
+
+        return float(delay)
+
+    def _audit_codec_integrity(self, actual_streams: List[Dict], plan_items: List[PlanItem]) -> int:
+        """
+        Ensures codecs weren't accidentally transcoded during muxing.
+        Exceptions: FLAC tracks from audio correction are expected.
+        """
+        issues = 0
+
+        for i, plan_item in enumerate(plan_items):
+            if i >= len(actual_streams):
+                continue
+
+            actual_stream = actual_streams[i]
+            expected_codec = plan_item.track.props.codec_id.upper()
+            actual_codec = actual_stream.get('codec_name', '').upper()
+
+            # Skip if this is a corrected audio track (intentionally converted to FLAC)
+            if plan_item.is_corrected and 'FLAC' in expected_codec:
+                self.log(f"  ✓ Track {i}: Corrected audio (FLAC) as expected")
+                continue
+
+            # Map codec IDs to their common names for comparison
+            codec_map = {
+                'V_MPEGH/ISO/HEVC': 'HEVC',
+                'V_MPEG4/ISO/AVC': 'H264',
+                'A_AC3': 'AC3',
+                'A_EAC3': 'EAC3',
+                'A_DTS': 'DTS',
+                'A_TRUEHD': 'TRUEHD',
+                'A_FLAC': 'FLAC',
+                'A_AAC': 'AAC',
+                'A_OPUS': 'OPUS',
+                'A_PCM/INT/LIT': 'PCM',
+                'S_HDMV/PGS': 'HDMV_PGS',
+                'S_TEXT/UTF8': 'SUBRIP',
+                'S_TEXT/ASS': 'ASS',
+                'S_TEXT/SSA': 'SSA',
+            }
+
+            expected_normalized = codec_map.get(expected_codec, expected_codec)
+            actual_normalized = actual_codec
+
+            # Handle PCM variants
+            if 'PCM' in expected_normalized:
+                expected_normalized = 'PCM'
+            if actual_codec.startswith('PCM'):
+                actual_normalized = 'PCM'
+
+            if expected_normalized not in actual_normalized and actual_normalized not in expected_normalized:
+                track_name = plan_item.track.props.name or f"Track {i}"
+                self.log(f"[WARNING] Codec mismatch for '{track_name}':")
+                self.log(f"          Expected: {expected_codec}")
+                self.log(f"          Actual:   {actual_codec}")
+                issues += 1
+
+        if issues == 0:
+            self.log("✅ All codecs preserved correctly (no unintended transcoding).")
+
+        return issues
+
+    def _audit_audio_channels(self, actual_streams: List[Dict], plan_items: List[PlanItem]) -> int:
+        """
+        Verifies channel counts and layouts weren't altered during muxing.
+        Detects downmixing (7.1 → 5.1, stereo → mono, etc.)
+        """
+        issues = 0
+        audio_items = [item for item in plan_items if item.track.type == TrackType.AUDIO]
+
+        for plan_item in audio_items:
+            source_file = self.ctx.sources.get(plan_item.track.source)
+            if not source_file:
+                continue
+
+            source_data = self._get_metadata(source_file, 'ffprobe')
+            if not source_data:
+                continue
+
+            # Find the source audio stream
+            source_audio_streams = [s for s in source_data.get('streams', []) if s.get('codec_type') == 'audio']
+            if plan_item.track.id >= len(source_audio_streams):
+                continue
+
+            source_audio = source_audio_streams[plan_item.track.id]
+
+            # Find corresponding stream in output
+            actual_audio_streams = [s for s in actual_streams if s.get('codec_type') == 'audio']
+            actual_audio = None
+            audio_index = 0
+            for item in plan_items:
+                if item.track.type == TrackType.AUDIO:
+                    if item == plan_item and audio_index < len(actual_audio_streams):
+                        actual_audio = actual_audio_streams[audio_index]
+                        break
+                    audio_index += 1
+
+            if not actual_audio:
+                continue
+
+            # Compare channel counts
+            source_channels = source_audio.get('channels', 0)
+            actual_channels = actual_audio.get('channels', 0)
+
+            if source_channels != actual_channels:
+                track_name = plan_item.track.props.name or f"Track {plan_item.track.id}"
+                self.log(f"[WARNING] Channel count mismatch for '{track_name}' ({plan_item.track.source}):")
+                self.log(f"          Source: {source_channels} channels")
+                self.log(f"          Output: {actual_channels} channels")
+
+                if actual_channels < source_channels:
+                    self.log(f"          CRITICAL: Audio was downmixed!")
+
+                issues += 1
+            else:
+                # Also check channel layout if available
+                source_layout = source_audio.get('channel_layout', '')
+                actual_layout = actual_audio.get('channel_layout', '')
+
+                if source_layout and actual_layout and source_layout != actual_layout:
+                    track_name = plan_item.track.props.name or f"Track {plan_item.track.id}"
+                    self.log(f"[WARNING] Channel layout changed for '{track_name}':")
+                    self.log(f"          Source: {source_layout}")
+                    self.log(f"          Output: {actual_layout}")
+                    issues += 1
+
+        if issues == 0:
+            self.log("✅ All audio channel layouts preserved correctly.")
+
+        return issues
+
+    def _audit_audio_quality_params(self, actual_streams: List[Dict], plan_items: List[PlanItem]) -> int:
+        """
+        Checks for audio quality degradation (sample rate, bit depth changes).
+        """
+        issues = 0
+        audio_items = [item for item in plan_items if item.track.type == TrackType.AUDIO]
+
+        for plan_item in audio_items:
+            source_file = self.ctx.sources.get(plan_item.track.source)
+            if not source_file:
+                continue
+
+            source_data = self._get_metadata(source_file, 'ffprobe')
+            if not source_data:
+                continue
+
+            # Find the source audio stream
+            source_audio_streams = [s for s in source_data.get('streams', []) if s.get('codec_type') == 'audio']
+            if plan_item.track.id >= len(source_audio_streams):
+                continue
+
+            source_audio = source_audio_streams[plan_item.track.id]
+
+            # Find corresponding stream in output
+            actual_audio_streams = [s for s in actual_streams if s.get('codec_type') == 'audio']
+            actual_audio = None
+            audio_index = 0
+            for item in plan_items:
+                if item.track.type == TrackType.AUDIO:
+                    if item == plan_item and audio_index < len(actual_audio_streams):
+                        actual_audio = actual_audio_streams[audio_index]
+                        break
+                    audio_index += 1
+
+            if not actual_audio:
+                continue
+
+            track_name = plan_item.track.props.name or f"Track {plan_item.track.id}"
+
+            # Check sample rate
+            source_sample_rate = source_audio.get('sample_rate')
+            actual_sample_rate = actual_audio.get('sample_rate')
+
+            if source_sample_rate and actual_sample_rate:
+                source_rate = int(source_sample_rate)
+                actual_rate = int(actual_sample_rate)
+
+                if source_rate != actual_rate:
+                    self.log(f"[WARNING] Sample rate changed for '{track_name}' ({plan_item.track.source}):")
+                    self.log(f"          Source: {source_rate} Hz")
+                    self.log(f"          Output: {actual_rate} Hz")
+
+                    if actual_rate < source_rate:
+                        self.log(f"          CRITICAL: Audio was downsampled!")
+
+                    issues += 1
+
+            # Check bit depth (if available)
+            source_bits = source_audio.get('bits_per_raw_sample') or source_audio.get('bits_per_sample')
+            actual_bits = actual_audio.get('bits_per_raw_sample') or actual_audio.get('bits_per_sample')
+
+            if source_bits and actual_bits:
+                source_depth = int(source_bits)
+                actual_depth = int(actual_bits)
+
+                if source_depth != actual_depth:
+                    self.log(f"[WARNING] Bit depth changed for '{track_name}':")
+                    self.log(f"          Source: {source_depth}-bit")
+                    self.log(f"          Output: {actual_depth}-bit")
+
+                    if actual_depth < source_depth:
+                        self.log(f"          CRITICAL: Bit depth reduced!")
+
+                    issues += 1
+
+        if issues == 0:
+            self.log("✅ All audio quality parameters preserved correctly.")
+
+        return issues
+
+    def _audit_subtitle_formats(self, final_mkvmerge_data: Dict, plan_items: List[PlanItem]) -> int:
+        """
+        Validates subtitle conversions and OCR results.
+        """
+        issues = 0
+        subtitle_items = [item for item in plan_items if item.track.type == TrackType.SUBTITLES]
+        final_tracks = final_mkvmerge_data.get('tracks', [])
+
+        # Get subtitle tracks from final file
+        final_subtitle_tracks = [t for t in final_tracks if t.get('type') == 'subtitles']
+
+        for i, plan_item in enumerate(subtitle_items):
+            if i >= len(final_subtitle_tracks):
+                self.log(f"[WARNING] Subtitle track {i} missing from final file!")
+                issues += 1
+                continue
+
+            final_track = final_subtitle_tracks[i]
+            track_name = plan_item.track.props.name or f"Subtitle {i}"
+
+            # If OCR was performed, verify it resulted in a text format
+            if plan_item.perform_ocr:
+                codec_id = final_track.get('properties', {}).get('codec_id', '')
+                if 'TEXT' not in codec_id.upper():
+                    self.log(f"[WARNING] OCR track '{track_name}' is not in text format!")
+                    self.log(f"          Codec: {codec_id}")
+                    issues += 1
+                else:
+                    self.log(f"  ✓ OCR track '{track_name}' successfully converted to text")
+
+            # If ASS conversion was requested, verify format
+            if plan_item.convert_to_ass:
+                codec_id = final_track.get('properties', {}).get('codec_id', '')
+                if 'ASS' not in codec_id.upper() and 'SSA' not in codec_id.upper():
+                    self.log(f"[WARNING] Track '{track_name}' was not converted to ASS/SSA!")
+                    self.log(f"          Codec: {codec_id}")
+                    issues += 1
+                else:
+                    self.log(f"  ✓ Track '{track_name}' successfully converted to ASS")
+
+        if issues == 0:
+            self.log("✅ All subtitle formats are correct.")
+
+        return issues
+
+    def _audit_chapters(self, final_mkv_path: Path) -> int:
+        """
+        Verifies chapters were preserved correctly.
+        """
+        issues = 0
+
+        # Check if chapters were expected
+        if not self.ctx.chapters_xml:
+            self.log("✅ No chapters were processed (none expected).")
+            return 0
+
+        # Extract chapters from final file
+        try:
+            xml_content = self.runner.run(['mkvextract', str(final_mkv_path), 'chapters', '-'], self.tool_paths)
+
+            if not xml_content or 'No chapters found' in xml_content:
+                self.log("[WARNING] Chapters were processed but are MISSING from the final file!")
+                issues += 1
+            else:
+                # Count chapters
+                import re
+                chapter_count = len(re.findall(r'<ChapterAtom>', xml_content))
+                self.log(f"✅ Chapters preserved successfully ({chapter_count} chapter(s) found).")
+
+        except Exception as e:
+            self.log(f"[WARNING] Could not verify chapters: {e}")
+            issues += 1
+
+        return issues
+
+    def _audit_track_order(self, final_tracks: List[Dict], plan_items: List[PlanItem]) -> int:
+        """
+        Ensures tracks appear in the expected order (video → audio → subtitles).
+        Also verifies that preserved tracks appear after their main counterparts.
+        """
+        issues = 0
+
+        # Build expected order by type
+        type_order = []
+        for track in final_tracks:
+            track_type = track.get('type', 'unknown')
+            type_order.append(track_type)
+
+        # Check that video comes before audio
+        video_indices = [i for i, t in enumerate(type_order) if t == 'video']
+        audio_indices = [i for i, t in enumerate(type_order) if t == 'audio']
+        subtitle_indices = [i for i, t in enumerate(type_order) if t == 'subtitles']
+
+        if video_indices and audio_indices:
+            if max(video_indices) > min(audio_indices):
+                self.log("[WARNING] Track order issue: Audio tracks appear before some video tracks!")
+                issues += 1
+
+        if audio_indices and subtitle_indices:
+            if max(audio_indices) > min(subtitle_indices):
+                self.log("[WARNING] Track order issue: Subtitle tracks appear before some audio tracks!")
+                issues += 1
+
+        # Verify preserved tracks come after main tracks
+        for i, item in enumerate(plan_items):
+            if item.is_preserved:
+                # Find the main track (should be before this one)
+                main_track_found = False
+                for j in range(i):
+                    other_item = plan_items[j]
+                    if (other_item.track.source == item.track.source and
+                        other_item.track.type == item.track.type and
+                        not other_item.is_preserved):
+                        main_track_found = True
+                        break
+
+                if not main_track_found:
+                    track_name = item.track.props.name or f"Track {i}"
+                    self.log(f"[WARNING] Preserved track '{track_name}' appears without a main track before it!")
+                    issues += 1
+
+        if issues == 0:
+            self.log("✅ Track order is correct.")
+
+        return issues
+
+    def _audit_language_tags(self, final_tracks: List[Dict], plan_items: List[PlanItem]) -> int:
+        """
+        Verifies language tags were preserved correctly.
+        """
+        issues = 0
+
+        for i, item in enumerate(plan_items):
+            if i >= len(final_tracks):
+                continue
+
+            expected_lang = item.track.props.lang or 'und'
+            actual_lang = final_tracks[i].get('properties', {}).get('language', 'und')
+
+            if expected_lang != actual_lang:
+                track_name = item.track.props.name or f"Track {i}"
+                self.log(f"[WARNING] Language tag mismatch for '{track_name}':")
+                self.log(f"          Expected: '{expected_lang}'")
+                self.log(f"          Actual:   '{actual_lang}'")
+                issues += 1
+
+        if issues == 0:
+            self.log("✅ All language tags are correct.")
+
+        return issues
+
+    def _audit_track_names(self, final_tracks: List[Dict], plan_items: List[PlanItem]) -> int:
+        """
+        Verifies track names match expectations when apply_track_name is enabled.
+        """
+        issues = 0
+
+        for i, item in enumerate(plan_items):
+            if not item.apply_track_name:
+                continue
+
+            if i >= len(final_tracks):
+                continue
+
+            expected_name = item.track.props.name or ''
+            actual_name = final_tracks[i].get('properties', {}).get('track_name', '')
+
+            if expected_name and expected_name != actual_name:
+                self.log(f"[WARNING] Track name mismatch for track {i}:")
+                self.log(f"          Expected: '{expected_name}'")
+                self.log(f"          Actual:   '{actual_name}'")
+                issues += 1
+
+        if issues == 0:
+            self.log("✅ All track names are correct.")
+
+        return issues
+
+    # ========================================================================
+    # EXISTING AUDIT METHODS (PRESERVED EXACTLY AS-IS)
+    # ========================================================================
 
     def _audit_track_flags(self, actual_tracks: List[Dict], plan_items: List[PlanItem]) -> int:
         """
@@ -115,6 +633,9 @@ class FinalAuditor:
         if forced_subs > 1:
             self.log(f"[WARNING] Multiple forced subtitle tracks found ({forced_subs}). Only one should be forced.")
             issues += 1
+
+        if issues == 0:
+            self.log("✅ All track flags are correct.")
 
         return issues
 
@@ -423,7 +944,12 @@ class FinalAuditor:
         return False
 
     def _get_metadata(self, file_path: str, tool: str) -> Optional[Dict]:
-        """Gets metadata using either mkvmerge or ffprobe."""
+        """Gets metadata using either mkvmerge or ffprobe with caching."""
+        cache = self._source_mkvmerge_cache if tool == 'mkvmerge' else self._source_ffprobe_cache
+
+        if file_path in cache:
+            return cache[file_path]
+
         try:
             if tool == 'mkvmerge':
                 cmd = ['mkvmerge', '-J', str(file_path)]
@@ -434,7 +960,10 @@ class FinalAuditor:
                 return None
 
             out = self.runner.run(cmd, self.tool_paths)
-            return json.loads(out) if out else None
+            result = json.loads(out) if out else None
+            cache[file_path] = result
+            return result
         except (json.JSONDecodeError, Exception) as e:
             self.log(f"[ERROR] Failed to get {tool} metadata: {e}")
+            cache[file_path] = None
             return None

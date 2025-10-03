@@ -122,13 +122,12 @@ class AnalysisStep:
             if raw_delay_ms is None:
                 raise RuntimeError(f'Analysis for {source_key} failed to determine a reliable delay.')
 
-            # --- NEW: Apply the chain of corrections ---
+            # --- FIX #3: Use round() instead of int() for proper rounding ---
             # The correlation gives us the delay between the extracted audio tracks
             # But Source 1's audio was extracted without its container delay
             # So we need to add that container delay to get the true sync relative to Source 1 video
 
-            # Ensure we're working with integers for the final delay
-            final_delay_ms = int(raw_delay_ms + source1_audio_container_delay)
+            final_delay_ms = round(raw_delay_ms + source1_audio_container_delay)
 
             if source1_audio_container_delay != 0:
                 runner._log_message(f"[Delay Chain] {source_key} raw correlation: {raw_delay_ms:+d}ms")
@@ -155,7 +154,7 @@ class AnalysisStep:
                 elif diagnosis == "LINEAR_DRIFT":
                     ctx.linear_drift_flags[analysis_track_key] = details
                 elif diagnosis == "STEPPING":
-                    ctx.segment_flags[analysis_track_key] = { 'base_delay': int(final_delay_ms) }
+                    ctx.segment_flags[analysis_track_key] = { 'base_delay': final_delay_ms }
 
         # Store the calculated delays
         ctx.delays = Delays(source_delays_ms=source_delays, global_shift_ms=0)

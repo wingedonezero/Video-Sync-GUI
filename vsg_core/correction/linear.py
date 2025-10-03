@@ -92,6 +92,7 @@ def run_linear_correction(ctx: Context, runner: CommandRunner) -> Context:
 
         runner._log_message(f"[SUCCESS] Linear drift correction successful for '{original_path.name}'")
 
+        # Preserve the original track
         preserved_item = copy.deepcopy(target_item)
         preserved_item.is_preserved = True
         preserved_item.is_default = False
@@ -105,20 +106,20 @@ def run_linear_correction(ctx: Context, runner: CommandRunner) -> Context:
             )
         )
 
+        # Update the main track to point to corrected FLAC
         target_item.extracted_path = corrected_path
         target_item.is_corrected = True
 
-        # --- MODIFICATION START ---
+        # FIX #2: Properly indicate the track is corrected and ensure the name is applied
         target_item.track = Track(
             source=target_item.track.source, id=target_item.track.id, type=target_item.track.type,
             props=StreamProps(
                 codec_id="FLAC",
                 lang=original_props.lang,
-                name=original_props.name # Carry over original name
+                name=f"{original_props.name} (Drift Corrected)" if original_props.name else "Drift Corrected"
             )
         )
-        # We no longer force apply_track_name to True. The user's original selection is preserved.
-        # --- MODIFICATION END ---
+        target_item.apply_track_name = True
 
         ctx.extracted_items.append(preserved_item)
 
