@@ -40,7 +40,7 @@ class AnalysisStep:
         config = ctx.settings_dict
         source_delays: Dict[str, int] = {}
 
-        # --- NEW: First, get Source 1's container delays ---
+        # --- Step 1: Get Source 1's container delays for chain calculation ---
         runner._log_message("--- Getting Source 1 Container Delays for Analysis ---")
         source1_info = get_stream_info_with_delays(source1_file, runner, ctx.tool_paths)
         source1_container_delays = {}
@@ -78,12 +78,13 @@ class AnalysisStep:
                     runner._log_message(f"[Container Delay] Source 1 audio track {source1_audio_track_id} has container delay: {source1_audio_container_delay:+.1f}ms")
                     runner._log_message(f"[Container Delay] This will be added to all correlation results to maintain sync with Source 1 video")
 
-        # --- Now run correlation for other sources ---
+        # --- Step 2: Run correlation for other sources ---
+        runner._log_message("\n--- Running Audio Correlation Analysis ---")
         for source_key, source_file in sorted(ctx.sources.items()):
             if source_key == "Source 1":
                 continue
 
-            runner._log_message(f"--- Analyzing {source_key} ---")
+            runner._log_message(f"\n[Analyzing {source_key}]")
             tgt_lang = config.get('analysis_lang_others')
 
             stream_info = get_stream_info(source_file, runner, ctx.tool_paths)
@@ -122,11 +123,7 @@ class AnalysisStep:
             if raw_delay_ms is None:
                 raise RuntimeError(f'Analysis for {source_key} failed to determine a reliable delay.')
 
-            # --- FIX #3: Use round() instead of int() for proper rounding ---
-            # The correlation gives us the delay between the extracted audio tracks
-            # But Source 1's audio was extracted without its container delay
-            # So we need to add that container delay to get the true sync relative to Source 1 video
-
+            # Calculate final delay including container delay chain correction
             final_delay_ms = round(raw_delay_ms + source1_audio_container_delay)
 
             if source1_audio_container_delay != 0:
@@ -156,8 +153,52 @@ class AnalysisStep:
                 elif diagnosis == "STEPPING":
                     ctx.segment_flags[analysis_track_key] = { 'base_delay': final_delay_ms }
 
-        # Store the calculated delays
-        ctx.delays = Delays(source_delays_ms=source_delays, global_shift_ms=0)
-        runner._log_message(f"[Delay] Source delays calculated with container delay corrections applied.")
+        # --- Step 3: Calculate Global Shift to Handle Negative Delays ---
+        runner._log_message("\n--- Calculating Global Shift ---")
+
+        # We need to consider ALL delays, including Source 1's container delays
+        # to find the true most negative value
+        all_delays_to_check = list(source_delays.values())
+
+        # Also check Source 1's container delays (they will be used directly for Source 1 tracks)
+        if source1_container_delays:
+            all_delays_to_check.extend(source1_container_delays.values())
+
+        if all_delays_to_check:
+            # Find the most negative delay across ALL tracks
+            most_negative = min(all_delays_to_check)
+
+            if most_negative < 0:
+                # We need to shift everything to make all delays non-negative
+                global_shift_ms = abs(most_negative)
+                runner._log_message(f"[Delay] Most negative delay across all tracks: {most_negative}ms")
+                runner._log_message(f"[Delay] Applying lossless global shift: +{global_shift_ms}ms")
+
+                # Apply shift to all source delays (for non-Source 1 tracks)
+                runner._log_message(f"[Delay] Adjusted delays after global shift:")
+                for source_key in sorted(source_delays.keys()):
+                    original_delay = source_delays[source_key]
+                    source_delays[source_key] = original_delay + global_shift_ms
+                    runner._log_message(f"  - {source_key}: {original_delay:+d}ms → {source_delays[source_key]:+d}ms")
+
+                # Log how Source 1 tracks will be affected
+                if source1_container_delays:
+                    runner._log_message(f"[Delay] Source 1 container delays (will have +{global_shift_ms}ms added during mux):")
+                    for track_id, delay in sorted(source1_container_delays.items()):
+                        final_delay = delay + global_shift_ms
+                        runner._log_message(f"  - Track {track_id}: {delay:+d}ms → {final_delay:+d}ms")
+            else:
+                global_shift_ms = 0
+                runner._log_message(f"[Delay] All delays are non-negative. No global shift needed.")
+        else:
+            global_shift_ms = 0
+
+        # Store the calculated delays with global shift
+        ctx.delays = Delays(source_delays_ms=source_delays, global_shift_ms=global_shift_ms)
+
+        # Final summary
+        runner._log_message(f"\n[Delay] === FINAL DELAYS (Global Shift: +{global_shift_ms}ms) ===")
+        for source_key, delay_ms in sorted(source_delays.items()):
+            runner._log_message(f"  - {source_key}: {delay_ms:+d}ms")
 
         return ctx

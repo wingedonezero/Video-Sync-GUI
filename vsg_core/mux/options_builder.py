@@ -98,23 +98,39 @@ class MkvmergeOptionsBuilder:
         """
         Calculates the final sync delay for a track.
 
-        For Source 1 tracks: Use their original container delays to maintain internal sync.
-        For other sources: Use the calculated correlation delay (which already includes chain correction).
+        IMPORTANT: The delays in plan.delays.source_delays_ms already include:
+        1. The raw correlation delay
+        2. The Source 1 audio container delay (for chain correction)
+        3. The global shift (to eliminate negative delays)
 
-        Note: Subtitles should NEVER use container delays as these aren't meaningful timing offsets.
+        For Source 1 tracks:
+        - Each track has its own container delay (can be different per track)
+        - We add the global shift to maintain sync with everything else
+
+        For other sources:
+        - Use the pre-calculated delay from plan.delays (already includes global shift)
+
+        For subtitles:
+        - Never use container delays (they're not meaningful timing offsets)
         """
         tr = item.track
 
-        # Source 1 tracks get their original container delays
+        # Source 1 tracks get their original container delays PLUS global shift
         # BUT: Only for audio/video, never for subtitles
         if tr.source == "Source 1" and tr.type != TrackType.SUBTITLES:
-            # Return the track's original container delay
-            # This maintains the internal sync between Source 1's tracks
-            return int(item.container_delay_ms)
+            # Each Source 1 track may have a different container delay
+            # We preserve that individual delay and add the global shift
+            container_delay = int(item.container_delay_ms)
+            global_shift = plan.delays.global_shift_ms
+            final_delay = container_delay + global_shift
+
+            # This preserves Source 1's internal sync while shifting everything
+            # to eliminate negative delays from other sources
+            return final_delay
 
         # For all other sources (Source 2, Source 3, External, etc.)
         # OR for any subtitle tracks (even from Source 1)
-        # Use the delay calculated during analysis (which already includes the chain correction)
+        # Use the delay calculated during analysis (already includes global shift)
         sync_key = item.sync_to if tr.source == 'External' else tr.source
         delay = plan.delays.source_delays_ms.get(sync_key, 0)
 

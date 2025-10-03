@@ -9,6 +9,7 @@ from vsg_core.chapters.process import process_chapters
 class ChaptersStep:
     """
     Extracts/modifies chapter XML from Source 1.
+    Applies global shift to keep chapters in sync with shifted audio tracks.
     """
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
         # Ensure ctx is not None
@@ -26,8 +27,15 @@ class ChaptersStep:
             ctx.chapters_xml = None
             return ctx
 
-        # Chapters are part of Source 1 and should never be shifted under the new logic.
-        shift_ms = 0
+        # CRITICAL: Chapters must be shifted by the global shift amount
+        # This keeps them in sync when we had to shift all audio tracks to eliminate negative delays
+        shift_ms = ctx.delays.global_shift_ms if ctx.delays else 0
+
+        if shift_ms != 0:
+            runner._log_message(f"[Chapters] Applying global shift of +{shift_ms}ms to chapter timestamps")
+            runner._log_message(f"[Chapters] This keeps chapters in sync with the shifted audio tracks")
+        else:
+            runner._log_message("[Chapters] No global shift needed for chapters")
 
         xml_path = process_chapters(
             source1_file, ctx.temp_dir, runner, ctx.tool_paths,
