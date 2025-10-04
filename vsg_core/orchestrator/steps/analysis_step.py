@@ -179,14 +179,14 @@ class AnalysisStep:
                 for source_key in sorted(source_delays.keys()):
                     original_delay = source_delays[source_key]
                     source_delays[source_key] = original_delay + global_shift_ms
-                    runner._log_message(f"  - {source_key}: {original_delay:+d}ms → {source_delays[source_key]:+d}ms")
+                    runner._log_message(f"  - {source_key}: {original_delay:+.1f}ms → {source_delays[source_key]:+.1f}ms")
 
                 # Log how Source 1 tracks will be affected
                 if source1_container_delays:
                     runner._log_message(f"[Delay] Source 1 container delays (will have +{global_shift_ms}ms added during mux):")
                     for track_id, delay in sorted(source1_container_delays.items()):
                         final_delay = delay + global_shift_ms
-                        runner._log_message(f"  - Track {track_id}: {delay:+d}ms → {final_delay:+d}ms")
+                        runner._log_message(f"  - Track {track_id}: {delay:+.1f}ms → {final_delay:+.1f}ms")
             else:
                 global_shift_ms = 0
                 runner._log_message(f"[Delay] All delays are non-negative. No global shift needed.")

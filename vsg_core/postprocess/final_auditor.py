@@ -195,12 +195,15 @@ class FinalAuditor:
         This mirrors the logic in options_builder.py
         """
         tr = plan_item.track
+        global_shift = self.ctx.delays.global_shift_ms if self.ctx.delays else 0
 
-        # Source 1 tracks use their original container delays (except subtitles)
+        # Source 1 tracks use their original container delays PLUS the global shift
         if tr.source == "Source 1" and tr.type != TrackType.SUBTITLES:
-            return float(plan_item.container_delay_ms)
+            # --- THIS IS THE FIX ---
+            # The expected delay must include the global shift, just like in the muxer.
+            return float(plan_item.container_delay_ms + global_shift)
 
-        # For other sources, use the calculated correlation delay
+        # For other sources, the delay from the context already includes the global shift
         sync_key = plan_item.sync_to if tr.source == 'External' else tr.source
         delay = self.ctx.delays.source_delays_ms.get(sync_key, 0)
 
