@@ -46,6 +46,9 @@ class Context:
     # Format: {source_key: {track_id: delay_ms}}
     container_delays: Dict[str, Dict[int, int]] = field(default_factory=dict)
 
+    # A flag to determine if a global shift is necessary
+    global_shift_is_required: bool = False
+
     # Results/summaries
     out_file: Optional[str] = None
     tokens: Optional[List[str]] = None

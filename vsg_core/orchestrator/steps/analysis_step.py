@@ -31,6 +31,17 @@ class AnalysisStep:
         if not source1_file:
             raise ValueError("Context is missing Source 1 for analysis.")
 
+        # --- Part 1: Determine if a global shift is required ---
+        ctx.global_shift_is_required = any(
+            t.get('type') in ['audio', 'video'] and t.get('source') != 'Source 1'
+            for t in ctx.manual_layout
+        )
+        if ctx.global_shift_is_required:
+            runner._log_message("[INFO] Audio/video tracks from secondary sources are being merged. Global shift will be used if necessary.")
+        else:
+            runner._log_message("[INFO] No audio/video tracks from secondary sources. Global shift will not be applied.")
+
+
         # NEW: Skip analysis if only Source 1 (remux-only mode)
         if len(ctx.sources) == 1:
             runner._log_message("--- Analysis Phase: Skipped (Remux-only mode - no sync sources) ---")
@@ -160,42 +171,33 @@ class AnalysisStep:
         # --- Step 3: Calculate Global Shift to Handle Negative Delays ---
         runner._log_message("\n--- Calculating Global Shift ---")
 
-        # We need to consider ALL delays, including Source 1's container delays
-        # to find the true most negative value
         all_delays_to_check = list(source_delays.values())
 
-        # Also check Source 1's container delays (they will be used directly for Source 1 tracks)
         if source1_container_delays:
             all_delays_to_check.extend(source1_container_delays.values())
 
-        if all_delays_to_check:
-            # Find the most negative delay across ALL tracks
-            most_negative = min(all_delays_to_check)
+        most_negative = min(all_delays_to_check) if all_delays_to_check else 0
+        global_shift_ms = 0
 
-            if most_negative < 0:
-                # We need to shift everything to make all delays non-negative
-                global_shift_ms = abs(most_negative)
-                runner._log_message(f"[Delay] Most negative delay across all tracks: {most_negative}ms")
-                runner._log_message(f"[Delay] Applying lossless global shift: +{global_shift_ms}ms")
+        if most_negative < 0 and ctx.global_shift_is_required:
+            global_shift_ms = abs(most_negative)
+            runner._log_message(f"[Delay] Most negative delay across all tracks: {most_negative}ms")
+            runner._log_message(f"[Delay] Applying lossless global shift: +{global_shift_ms}ms")
+            runner._log_message(f"[Delay] Adjusted delays after global shift:")
+            for source_key in sorted(source_delays.keys()):
+                original_delay = source_delays[source_key]
+                source_delays[source_key] += global_shift_ms
+                runner._log_message(f"  - {source_key}: {original_delay:+.1f}ms → {source_delays[source_key]:+.1f}ms")
 
-                # Apply shift to all source delays (for all sources including Source 1)
-                runner._log_message(f"[Delay] Adjusted delays after global shift:")
-                for source_key in sorted(source_delays.keys()):
-                    original_delay = source_delays[source_key]
-                    source_delays[source_key] = original_delay + global_shift_ms
-                    runner._log_message(f"  - {source_key}: {original_delay:+.1f}ms → {source_delays[source_key]:+.1f}ms")
-
-                # Log how Source 1 tracks will be affected
-                if source1_container_delays:
-                    runner._log_message(f"[Delay] Source 1 container delays (will have +{global_shift_ms}ms added during mux):")
-                    for track_id, delay in sorted(source1_container_delays.items()):
-                        final_delay = delay + global_shift_ms
-                        runner._log_message(f"  - Track {track_id}: {delay:+.1f}ms → {final_delay:+.1f}ms")
-            else:
-                global_shift_ms = 0
-                runner._log_message(f"[Delay] All delays are non-negative. No global shift needed.")
+            if source1_container_delays:
+                runner._log_message(f"[Delay] Source 1 container delays (will have +{global_shift_ms}ms added during mux):")
+                for track_id, delay in sorted(source1_container_delays.items()):
+                    final_delay = delay + global_shift_ms
+                    runner._log_message(f"  - Track {track_id}: {delay:+.1f}ms → {final_delay:+.1f}ms")
+        elif most_negative < 0 and not ctx.global_shift_is_required:
+            runner._log_message(f"[Delay] Negative delays found ({most_negative}ms), but global shift is not required. Raw delays will be used.")
         else:
-            global_shift_ms = 0
+            runner._log_message(f"[Delay] All delays are non-negative. No global shift needed.")
 
         # Store the calculated delays with global shift
         ctx.delays = Delays(source_delays_ms=source_delays, global_shift_ms=global_shift_ms)
