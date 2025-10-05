@@ -153,6 +153,10 @@ class AnalysisStep:
                 elif diagnosis == "STEPPING":
                     ctx.segment_flags[analysis_track_key] = { 'base_delay': final_delay_ms }
 
+        # ✅ FIX: Initialize Source 1 with 0ms base delay so it gets the global shift
+        # This ensures Source 1 subtitles (which have no container delays) stay in sync
+        source_delays["Source 1"] = 0
+
         # --- Step 3: Calculate Global Shift to Handle Negative Delays ---
         runner._log_message("\n--- Calculating Global Shift ---")
 
@@ -174,7 +178,7 @@ class AnalysisStep:
                 runner._log_message(f"[Delay] Most negative delay across all tracks: {most_negative}ms")
                 runner._log_message(f"[Delay] Applying lossless global shift: +{global_shift_ms}ms")
 
-                # Apply shift to all source delays (for non-Source 1 tracks)
+                # Apply shift to all source delays (for all sources including Source 1)
                 runner._log_message(f"[Delay] Adjusted delays after global shift:")
                 for source_key in sorted(source_delays.keys()):
                     original_delay = source_delays[source_key]
