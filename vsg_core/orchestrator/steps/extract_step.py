@@ -144,6 +144,7 @@ class ExtractStep:
             plan_item.user_modified_path = sel.get('user_modified_path')
             plan_item.sync_to = sel.get('sync_to')
             plan_item.correction_source = sel.get('correction_source')
+            plan_item.custom_lang = sel.get('custom_lang', '')  # NEW: Preserve custom language
 
             items.append(plan_item)
 

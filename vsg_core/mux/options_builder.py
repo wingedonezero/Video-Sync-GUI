@@ -56,7 +56,10 @@ class MkvmergeOptionsBuilder:
             delay_ms = self._effective_delay_ms(plan, item)
             is_default = (i == first_video_idx) or (i == default_audio_idx) or (i == default_sub_idx)
 
-            tokens += ['--language', f"0:{tr.props.lang or 'und'}"]
+            # NEW: Use custom language if set, otherwise use original from track
+            lang_code = item.custom_lang if item.custom_lang else (tr.props.lang or 'und')
+
+            tokens += ['--language', f"0:{lang_code}"]
             if item.apply_track_name and (tr.props.name or '').strip():
                 tokens += ['--track-name', f"0:{tr.props.name}"]
 

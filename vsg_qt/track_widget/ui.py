@@ -104,6 +104,14 @@ class TrackWidget(QWidget):
             self.cb_convert.setChecked(new_config.get('convert_to_ass', False))
             self.cb_rescale.setChecked(new_config.get('rescale', False))
             self.size_multiplier.setValue(new_config.get('size_multiplier', 1.0))
+
+            # NEW: Store custom language in track_data
+            custom_lang = new_config.get('custom_lang', '')
+            if custom_lang:
+                self.track_data['custom_lang'] = custom_lang
+            elif 'custom_lang' in self.track_data:
+                del self.track_data['custom_lang']
+
             self.logic.refresh_badges()
             self.logic.refresh_summary()
 

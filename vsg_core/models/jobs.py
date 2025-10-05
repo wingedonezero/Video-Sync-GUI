@@ -34,8 +34,8 @@ class PlanItem:
     correction_source: Optional[str] = None
     perform_ocr: bool = False
     perform_ocr_cleanup: bool = False
-    # NEW FIELD: Store the original container delay for this track
     container_delay_ms: int = 0
+    custom_lang: str = ''  # NEW: Custom language override
 
 @dataclass(frozen=True)
 class MergePlan:

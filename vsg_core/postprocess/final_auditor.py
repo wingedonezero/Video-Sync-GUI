@@ -198,9 +198,10 @@ class FinalAuditor:
         global_shift = self.ctx.delays.global_shift_ms if self.ctx.delays else 0
 
         # Source 1 tracks use their original container delays PLUS the global shift
+        # BUT: Only for audio/video, never for subtitles
         if tr.source == "Source 1" and tr.type != TrackType.SUBTITLES:
-            # --- THIS IS THE FIX ---
-            # The expected delay must include the global shift, just like in the muxer.
+            # Each Source 1 track may have a different container delay
+            # We preserve that individual delay and add the global shift
             return float(plan_item.container_delay_ms + global_shift)
 
         # For other sources, the delay from the context already includes the global shift
@@ -213,6 +214,8 @@ class FinalAuditor:
         """
         Ensures codecs weren't accidentally transcoded during muxing.
         Exceptions: FLAC tracks from audio correction are expected.
+
+        FIXED: Improved codec matching to handle naming differences between mkvmerge and ffprobe.
         """
         issues = 0
 
@@ -229,44 +232,94 @@ class FinalAuditor:
                 self.log(f"  ✓ Track {i}: Corrected audio (FLAC) as expected")
                 continue
 
-            # Map codec IDs to their common names for comparison
-            codec_map = {
-                'V_MPEGH/ISO/HEVC': 'HEVC',
-                'V_MPEG4/ISO/AVC': 'H264',
-                'A_AC3': 'AC3',
-                'A_EAC3': 'EAC3',
-                'A_DTS': 'DTS',
-                'A_TRUEHD': 'TRUEHD',
-                'A_FLAC': 'FLAC',
-                'A_AAC': 'AAC',
-                'A_OPUS': 'OPUS',
-                'A_PCM/INT/LIT': 'PCM',
-                'S_HDMV/PGS': 'HDMV_PGS',
-                'S_TEXT/UTF8': 'SUBRIP',
-                'S_TEXT/ASS': 'ASS',
-                'S_TEXT/SSA': 'SSA',
-            }
+            # NEW: Improved codec matching logic
+            if self._codecs_match(expected_codec, actual_codec):
+                continue  # Codecs match, no issue
 
-            expected_normalized = codec_map.get(expected_codec, expected_codec)
-            actual_normalized = actual_codec
-
-            # Handle PCM variants
-            if 'PCM' in expected_normalized:
-                expected_normalized = 'PCM'
-            if actual_codec.startswith('PCM'):
-                actual_normalized = 'PCM'
-
-            if expected_normalized not in actual_normalized and actual_normalized not in expected_normalized:
-                track_name = plan_item.track.props.name or f"Track {i}"
-                self.log(f"[WARNING] Codec mismatch for '{track_name}':")
-                self.log(f"          Expected: {expected_codec}")
-                self.log(f"          Actual:   {actual_codec}")
-                issues += 1
+            track_name = plan_item.track.props.name or f"Track {i}"
+            self.log(f"[WARNING] Codec mismatch for '{track_name}':")
+            self.log(f"          Expected: {expected_codec}")
+            self.log(f"          Actual:   {actual_codec}")
+            issues += 1
 
         if issues == 0:
             self.log("✅ All codecs preserved correctly (no unintended transcoding).")
 
         return issues
+
+    def _codecs_match(self, mkv_codec: str, ffprobe_codec: str) -> bool:
+        """
+        Compares codec identifiers from different sources (mkvmerge vs ffprobe).
+        Returns True if they represent the same codec, even with different naming.
+        """
+        # Normalize both to uppercase for comparison
+        mkv = mkv_codec.upper()
+        ffp = ffprobe_codec.upper()
+
+        # Direct match
+        if mkv == ffp:
+            return True
+
+        # Create normalization mapping for common codecs
+        # Maps various representations to a canonical form
+        codec_map = {
+            # Video codecs
+            'V_MPEGH/ISO/HEVC': 'HEVC',
+            'HEVC': 'HEVC',
+            'V_MPEG4/ISO/AVC': 'H264',
+            'H264': 'H264',
+            'V_MPEG2': 'MPEG2',
+            'MPEG2VIDEO': 'MPEG2',
+            'V_MPEG1': 'MPEG1',
+            'MPEG1VIDEO': 'MPEG1',
+            'V_VP9': 'VP9',
+            'VP9': 'VP9',
+            'V_AV1': 'AV1',
+            'AV1': 'AV1',
+
+            # Audio codecs
+            'A_AC3': 'AC3',
+            'AC3': 'AC3',
+            'A_EAC3': 'EAC3',
+            'EAC3': 'EAC3',
+            'A_DTS': 'DTS',
+            'DTS': 'DTS',
+            'A_TRUEHD': 'TRUEHD',
+            'TRUEHD': 'TRUEHD',
+            'A_FLAC': 'FLAC',
+            'FLAC': 'FLAC',
+            'A_AAC': 'AAC',
+            'AAC': 'AAC',
+            'A_OPUS': 'OPUS',
+            'OPUS': 'OPUS',
+            'A_VORBIS': 'VORBIS',
+            'VORBIS': 'VORBIS',
+
+            # Subtitle codecs
+            'S_HDMV/PGS': 'PGS',
+            'HDMV_PGS_SUBTITLE': 'PGS',
+            'S_TEXT/UTF8': 'SRT',
+            'SUBRIP': 'SRT',
+            'S_TEXT/ASS': 'ASS',
+            'ASS': 'ASS',
+            'S_TEXT/SSA': 'SSA',
+            'SSA': 'SSA',
+        }
+
+        # Normalize both codecs
+        normalized_mkv = codec_map.get(mkv, mkv)
+        normalized_ffp = codec_map.get(ffp, ffp)
+
+        if normalized_mkv == normalized_ffp:
+            return True
+
+        # Handle PCM variants (all PCM types are compatible)
+        if 'PCM' in mkv or mkv.startswith('A_PCM'):
+            if ffp.startswith('PCM'):
+                return True
+
+        # No match found
+        return False
 
     def _audit_audio_channels(self, actual_streams: List[Dict], plan_items: List[PlanItem]) -> int:
         """
@@ -546,6 +599,7 @@ class FinalAuditor:
     def _audit_language_tags(self, final_tracks: List[Dict], plan_items: List[PlanItem]) -> int:
         """
         Verifies language tags were preserved correctly.
+        FIXED: Now respects custom language overrides.
         """
         issues = 0
 
@@ -553,7 +607,8 @@ class FinalAuditor:
             if i >= len(final_tracks):
                 continue
 
-            expected_lang = item.track.props.lang or 'und'
+            # NEW: Use custom language if set, otherwise use original
+            expected_lang = item.custom_lang if item.custom_lang else (item.track.props.lang or 'und')
             actual_lang = final_tracks[i].get('properties', {}).get('language', 'und')
 
             if expected_lang != actual_lang:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QDialogButtonBox,
-    QCheckBox, QDoubleSpinBox
+    QCheckBox, QDoubleSpinBox, QComboBox, QFormLayout, QGroupBox
 )
 from .logic import TrackSettingsLogic
 
@@ -10,8 +10,13 @@ class TrackSettingsDialog(QDialog):
     def __init__(self, track_type: str, codec_id: str, **kwargs):
         super().__init__()
         self.setWindowTitle("Track Settings")
+        self.setMinimumWidth(400)
 
         # --- UI Elements ---
+        # Language selector (for all track types)
+        self.lang_combo = QComboBox()
+
+        # Subtitle-specific controls
         self.cb_ocr = QCheckBox("Perform OCR")
         self.cb_cleanup = QCheckBox("Perform Post-OCR Cleanup")
         self.cb_convert = QCheckBox("Convert to ASS (SRT only)")
@@ -28,11 +33,22 @@ class TrackSettingsDialog(QDialog):
 
         # --- Layout ---
         layout = QVBoxLayout(self)
-        layout.addWidget(self.cb_ocr)
-        layout.addWidget(self.cb_cleanup)
-        layout.addWidget(self.cb_convert)
-        layout.addWidget(self.cb_rescale)
-        layout.addWidget(self.size_multiplier)
+
+        # Language section (always visible)
+        lang_group = QGroupBox("Language Settings")
+        lang_layout = QFormLayout(lang_group)
+        lang_layout.addRow("Language Code:", self.lang_combo)
+        layout.addWidget(lang_group)
+
+        # Subtitle section (conditionally visible)
+        self.subtitle_group = QGroupBox("Subtitle Options")
+        subtitle_layout = QVBoxLayout(self.subtitle_group)
+        subtitle_layout.addWidget(self.cb_ocr)
+        subtitle_layout.addWidget(self.cb_cleanup)
+        subtitle_layout.addWidget(self.cb_convert)
+        subtitle_layout.addWidget(self.cb_rescale)
+        subtitle_layout.addWidget(self.size_multiplier)
+        layout.addWidget(self.subtitle_group)
 
         btns = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         btns.accepted.connect(self.accept)

@@ -57,12 +57,20 @@ class TrackWidgetLogic:
         source = self.track_data.get('source')
         description = self.track_data.get('description', 'N/A')
 
-        summary_text = f"[{source}] [{track_type[0].upper()}-{track_id}] {description}"
+        # NEW: Show custom language if set, otherwise show original
+        original_lang = self.track_data.get('lang', 'und')
+        custom_lang = self.track_data.get('custom_lang', '')
+        display_lang = custom_lang if custom_lang else original_lang
+
+        # Show indicator if language was customized
+        lang_indicator = f" → {custom_lang}" if custom_lang and custom_lang != original_lang else ""
+
+        summary_text = f"[{source}] [{track_type[0].upper()}-{track_id}] {description}{lang_indicator}"
         self.v.summary_label.setText(summary_text)
 
         # Update the inline summary (which uses the 'source_label' widget for display)
         parts = []
-        # --- FIX: Only check subtitle-specific options for subtitles ---
+        # Only check subtitle-specific options for subtitles
         if self.track_data.get('type') == 'subtitles':
             if self.v.cb_ocr.isChecked(): parts.append("OCR")
             if self.v.cb_cleanup.isChecked(): parts.append("Cleanup")
@@ -72,7 +80,6 @@ class TrackWidgetLogic:
             size_mult = self.v.size_multiplier.value()
             if abs(size_mult - 1.0) > 1e-6:
                 parts.append(f"{size_mult:.2f}x Size")
-        # --- END FIX ---
 
         if not parts:
             self.v.source_label.setText("")
@@ -90,6 +97,12 @@ class TrackWidgetLogic:
             badges.append("Edited")
         elif self.track_data.get('style_patch'):
             badges.append("Styled")
+
+        # NEW: Add badge if language was customized
+        original_lang = self.track_data.get('lang', 'und')
+        custom_lang = self.track_data.get('custom_lang', '')
+        if custom_lang and custom_lang != original_lang:
+            badges.append(f"Lang: {custom_lang}")
 
         self.v.badge_label.setText(" | ".join(badges))
         self.v.badge_label.setVisible(bool(badges))
@@ -118,7 +131,8 @@ class TrackWidgetLogic:
             "size_multiplier": size_mult_value,
             "style_patch": self.track_data.get('style_patch'),
             "user_modified_path": self.track_data.get('user_modified_path'),
-            "sync_to": self.v.sync_to_combo.currentData() if (is_subs and self.v.sync_to_combo.isVisible()) else None
+            "sync_to": self.v.sync_to_combo.currentData() if (is_subs and self.v.sync_to_combo.isVisible()) else None,
+            "custom_lang": self.track_data.get('custom_lang', ''),  # NEW: Include custom language
         }
 
         return config
