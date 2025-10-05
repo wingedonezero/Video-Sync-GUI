@@ -6,16 +6,16 @@ from pathlib import Path
 import pysubs2
 from ..io.runner import CommandRunner
 
-def _scale_override_tags(text: str, scale_w: float, scale_h: float) -> str:
+def _scale_override_tags(text: str, scale: float, offset_x: float, offset_y: float) -> str:
     """
-    Scales all ASS override tags in subtitle text to match Aegisub's behavior.
-    X coordinates scale by scale_w, Y coordinates by scale_h.
+    Scales all ASS override tags using uniform scaling and adds border offsets.
+    Maintains aspect ratio like Aegisub's "Add Borders" resampling.
     """
 
-    def scale_value(val: str, scale_factor: float) -> str:
-        """Scale a numeric value and format it cleanly."""
+    def scale_value(val: str, scale_factor: float, offset: float = 0) -> str:
+        """Scale a numeric value, add offset, and format cleanly."""
         try:
-            scaled = float(val) * scale_factor
+            scaled = float(val) * scale_factor + offset
             return f"{scaled:.3f}".rstrip('0').rstrip('.')
         except ValueError:
             return val
@@ -30,28 +30,34 @@ def _scale_override_tags(text: str, scale_w: float, scale_h: float) -> str:
         scaled_parts = []
 
         for i, part in enumerate(parts):
-            # Tags that scale with WIDTH only
+            # Width/X measurements (no offset needed for size measurements)
             if tag_lower in ('fscx', 'bord', 'xbord'):
-                scaled_parts.append(scale_value(part, scale_w))
+                scaled_parts.append(scale_value(part, scale))
 
-            # Tags that scale with HEIGHT only
+            # Height/Y measurements (no offset needed for size measurements)
             elif tag_lower in ('fscy', 'ybord', 'yshad', 'fs', 'blur', 'pbo', 'shad'):
-                scaled_parts.append(scale_value(part, scale_h))
+                scaled_parts.append(scale_value(part, scale))
 
-            # Tags with (x, y) pairs
-            elif tag_lower in ('pos', 'org', 'clip') and i < 2:
-                scaled_parts.append(scale_value(part, scale_w if i == 0 else scale_h))
+            # Position tags (x, y) - need offsets
+            elif tag_lower in ('pos', 'org') and i < 2:
+                offset = offset_x if i == 0 else offset_y
+                scaled_parts.append(scale_value(part, scale, offset))
 
-            # move tag: (x1, y1, x2, y2, t1, t2)
+            # Clip rectangles - need offsets
+            elif tag_lower == 'clip' and i < 4:
+                offset = offset_x if i in [0, 2] else offset_y
+                scaled_parts.append(scale_value(part, scale, offset))
+
+            # move tag: (x1, y1, x2, y2, t1, t2) - positions need offsets
             elif tag_lower == 'move':
-                if i == 0 or i == 2:
-                    scaled_parts.append(scale_value(part, scale_w))
-                elif i == 1 or i == 3:
-                    scaled_parts.append(scale_value(part, scale_h))
-                else:
+                if i in [0, 2]:  # x coordinates
+                    scaled_parts.append(scale_value(part, scale, offset_x))
+                elif i in [1, 3]:  # y coordinates
+                    scaled_parts.append(scale_value(part, scale, offset_y))
+                else:  # time values
                     scaled_parts.append(part)
 
-            # DON'T scale: time values, edge blur, rotations, shearing, factors
+            # Time-based tags, factors, coefficients - don't scale
             else:
                 scaled_parts.append(part)
 
@@ -59,7 +65,6 @@ def _scale_override_tags(text: str, scale_w: float, scale_h: float) -> str:
 
     def process_override_block(block_content: str) -> str:
         """Process all tags within a single {...} block."""
-        # Match tags in format: \tag, \tag(args), or \tag123 (shorthand with number)
         tag_pattern = re.compile(r'\\([a-zA-Z]+)(\([^)]*\)|(?:\-?\d+(?:\.\d+)?))?')
 
         def replace_tag(match):
@@ -68,33 +73,30 @@ def _scale_override_tags(text: str, scale_w: float, scale_h: float) -> str:
             args_or_value = match.group(2)
 
             if args_or_value is None:
-                # Tag with no args or value (like \i or \b by itself)
                 return match.group(0)
 
             elif args_or_value.startswith('('):
-                # Tag with parentheses: \tag(args)
-                args = args_or_value[1:-1]  # Strip parentheses
+                # Tag with parentheses
+                args = args_or_value[1:-1]
                 scaled_args = scale_tag(tag_name, args)
                 return f'\\{tag_name}({scaled_args})'
 
             else:
-                # Shorthand format: \blur2, \fs50, etc.
+                # Shorthand format
                 value = args_or_value
 
-                # Check if this tag type should be scaled
+                # Only scale size measurements (not coefficients like \be, \fax, etc.)
                 if tag_lower in ('fs', 'blur', 'fscy', 'ybord', 'yshad', 'pbo', 'shad'):
-                    scaled = scale_value(value, scale_h)
+                    scaled = scale_value(value, scale)
                     return f'\\{tag_name}{scaled}'
                 elif tag_lower in ('fscx', 'bord', 'xbord'):
-                    scaled = scale_value(value, scale_w)
+                    scaled = scale_value(value, scale)
                     return f'\\{tag_name}{scaled}'
                 else:
-                    # Don't scale: \be, \fax, \fay, \frx, \fry, \frz, \b, \i, \an, etc.
                     return match.group(0)
 
         return tag_pattern.sub(replace_tag, block_content)
 
-    # Process each {...} block in the text
     def replace_block(match):
         block_content = match.group(1)
         scaled_content = process_override_block(block_content)
@@ -138,30 +140,40 @@ def rescale_subtitle(subtitle_path: str, video_path: str, runner: CommandRunner,
             runner._log_message(f'[Rescale] INFO: {sub_path.name} already matches video resolution ({to_w}x{to_h}).')
             return False
 
-        # 3. Calculate scaling factors
+        # 3. Calculate uniform scaling factor (Aegisub "Add Borders" style)
         scale_w = to_w / from_w
         scale_h = to_h / from_h
+        scale = min(scale_w, scale_h)  # Use smaller ratio to maintain aspect ratio
 
-        runner._log_message(f'[Rescale] Rescaling {sub_path.name} from {from_w}x{from_h} to {to_w}x{to_h} (W×{scale_w:.4f}, H×{scale_h:.4f}).')
+        # 4. Calculate effective size and border offsets
+        new_w = int(from_w * scale + 0.5)
+        new_h = int(from_h * scale + 0.5)
+        offset_x = (to_w - new_w) / 2
+        offset_y = (to_h - new_h) / 2
 
-        # 4. Update Script Info
+        runner._log_message(
+            f'[Rescale] Rescaling {sub_path.name} from {from_w}x{from_h} to {to_w}x{to_h} '
+            f'(scale: {scale:.4f}, borders: {offset_x:.1f}x, {offset_y:.1f}y).'
+        )
+
+        # 5. Update Script Info
         subs.info['PlayResX'] = str(to_w)
         subs.info['PlayResY'] = str(to_h)
 
-        # 5. Scale all Style definitions
+        # 6. Scale all Style definitions and add border offsets to margins
         for style in subs.styles.values():
-            style.fontsize = int(style.fontsize * scale_h + 0.5)  # Round to nearest
-            style.outline *= scale_h
-            style.shadow *= scale_h
-            style.marginl = int(style.marginl * scale_w + 0.5)
-            style.marginr = int(style.marginr * scale_w + 0.5)
-            style.marginv = int(style.marginv * scale_h + 0.5)
+            style.fontsize = int(style.fontsize * scale + 0.5)
+            style.outline *= scale
+            style.shadow *= scale
+            style.marginl = int(style.marginl * scale + offset_x + 0.5)
+            style.marginr = int(style.marginr * scale + offset_x + 0.5)
+            style.marginv = int(style.marginv * scale + offset_y + 0.5)
 
-        # 6. Scale all inline override tags for every event
+        # 7. Scale all inline override tags with offsets
         for line in subs:
-            line.text = _scale_override_tags(line.text, scale_w, scale_h)
+            line.text = _scale_override_tags(line.text, scale, offset_x, offset_y)
 
-        # 7. Save the rescaled subtitle file
+        # 8. Save the rescaled subtitle file
         subs.save(subtitle_path, encoding='utf-8')
 
         runner._log_message(f'[Rescale] Successfully rescaled to {to_w}x{to_h}.')
