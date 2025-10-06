@@ -171,17 +171,29 @@ class AnalysisStep:
         # --- Step 3: Calculate Global Shift to Handle Negative Delays ---
         runner._log_message("\n--- Calculating Global Shift ---")
 
-        all_delays_to_check = list(source_delays.values())
+        delays_to_consider = []
+        if ctx.global_shift_is_required:
+            runner._log_message("[Global Shift] Identifying delays from sources contributing audio/video tracks...")
+            # Collect delays only from sources that have audio/video in the layout
+            for item in ctx.manual_layout:
+                item_source = item.get('source')
+                item_type = item.get('type')
+                if item_type in ['audio', 'video']:
+                    if item_source in source_delays and source_delays[item_source] not in delays_to_consider:
+                        delays_to_consider.append(source_delays[item_source])
+                        runner._log_message(f"  - Considering delay from {item_source}: {source_delays[item_source]}ms")
 
-        if source1_container_delays:
-            all_delays_to_check.extend(source1_container_delays.values())
+            # Always include Source 1's container delays if shifting
+            if source1_container_delays:
+                delays_to_consider.extend(source1_container_delays.values())
+                runner._log_message("  - Considering all Source 1 container delays.")
 
-        most_negative = min(all_delays_to_check) if all_delays_to_check else 0
+        most_negative = min(delays_to_consider) if delays_to_consider else 0
         global_shift_ms = 0
 
-        if most_negative < 0 and ctx.global_shift_is_required:
+        if most_negative < 0: # No need to check ctx.global_shift_is_required again, it's implied by delays_to_consider
             global_shift_ms = abs(most_negative)
-            runner._log_message(f"[Delay] Most negative delay across all tracks: {most_negative}ms")
+            runner._log_message(f"[Delay] Most negative relevant delay: {most_negative}ms")
             runner._log_message(f"[Delay] Applying lossless global shift: +{global_shift_ms}ms")
             runner._log_message(f"[Delay] Adjusted delays after global shift:")
             for source_key in sorted(source_delays.keys()):
@@ -194,10 +206,9 @@ class AnalysisStep:
                 for track_id, delay in sorted(source1_container_delays.items()):
                     final_delay = delay + global_shift_ms
                     runner._log_message(f"  - Track {track_id}: {delay:+.1f}ms → {final_delay:+.1f}ms")
-        elif most_negative < 0 and not ctx.global_shift_is_required:
-            runner._log_message(f"[Delay] Negative delays found ({most_negative}ms), but global shift is not required. Raw delays will be used.")
         else:
-            runner._log_message(f"[Delay] All delays are non-negative. No global shift needed.")
+            runner._log_message(f"[Delay] All relevant delays are non-negative. No global shift needed.")
+
 
         # Store the calculated delays with global shift
         ctx.delays = Delays(source_delays_ms=source_delays, global_shift_ms=global_shift_ms)
