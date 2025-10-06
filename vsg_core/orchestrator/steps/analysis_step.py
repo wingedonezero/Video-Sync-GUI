@@ -62,6 +62,12 @@ class AnalysisStep:
                 delay_ms = track.get('container_delay_ms', 0)
                 source1_container_delays[tid] = delay_ms
 
+                # NEW: Log container delays for all track types for clarity
+                track_type = track.get('type')
+                if delay_ms != 0 and track_type in ['video', 'audio']:
+                    runner._log_message(f"[Container Delay] Source 1 {track_type} track {tid} has container delay: {delay_ms:+.1f}ms")
+
+
         # Find which audio track from Source 1 will be used for correlation
         source1_audio_track_id = None
         source1_audio_container_delay = 0
@@ -86,8 +92,8 @@ class AnalysisStep:
                 ctx.source1_audio_container_delay_ms = source1_audio_container_delay
 
                 if source1_audio_container_delay != 0:
-                    runner._log_message(f"[Container Delay] Source 1 audio track {source1_audio_track_id} has container delay: {source1_audio_container_delay:+.1f}ms")
-                    runner._log_message(f"[Container Delay] This will be added to all correlation results to maintain sync with Source 1 video")
+                    # This message is specific to the correlation process
+                    runner._log_message(f"[Container Delay] The delay of the analysis audio track ({source1_audio_container_delay:+.1f}ms) will be added to all correlation results.")
 
         # --- Step 2: Run correlation for other sources ---
         runner._log_message("\n--- Running Audio Correlation Analysis ---")
