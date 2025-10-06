@@ -33,13 +33,13 @@ class AnalysisStep:
 
         # --- Part 1: Determine if a global shift is required ---
         ctx.global_shift_is_required = any(
-            t.get('type') in ['audio', 'video'] and t.get('source') != 'Source 1'
+            t.get('type') == 'audio' and t.get('source') != 'Source 1'  # FIXED: Only audio matters
             for t in ctx.manual_layout
         )
         if ctx.global_shift_is_required:
-            runner._log_message("[INFO] Audio/video tracks from secondary sources are being merged. Global shift will be used if necessary.")
+            runner._log_message("[INFO] Audio tracks from secondary sources are being merged. Global shift will be used if necessary.")
         else:
-            runner._log_message("[INFO] No audio/video tracks from secondary sources. Global shift will not be applied.")
+            runner._log_message("[INFO] No audio tracks from secondary sources. Global shift will not be applied.")
 
 
         # NEW: Skip analysis if only Source 1 (remux-only mode)
@@ -179,20 +179,29 @@ class AnalysisStep:
 
         delays_to_consider = []
         if ctx.global_shift_is_required:
-            runner._log_message("[Global Shift] Identifying delays from sources contributing audio/video tracks...")
-            # Collect delays only from sources that have audio/video in the layout
+            runner._log_message("[Global Shift] Identifying delays from sources contributing audio tracks...")
+            # Collect delays only from sources that have audio in the layout
             for item in ctx.manual_layout:
                 item_source = item.get('source')
                 item_type = item.get('type')
-                if item_type in ['audio', 'video']:
+                if item_type == 'audio':  # FIXED: Only audio matters for sync
                     if item_source in source_delays and source_delays[item_source] not in delays_to_consider:
                         delays_to_consider.append(source_delays[item_source])
                         runner._log_message(f"  - Considering delay from {item_source}: {source_delays[item_source]}ms")
 
-            # Always include Source 1's container delays if shifting
-            if source1_container_delays:
-                delays_to_consider.extend(source1_container_delays.values())
-                runner._log_message("  - Considering all Source 1 container delays.")
+            # FIXED: Only include Source 1's AUDIO container delays (ignore video)
+            if source1_container_delays and source1_info:
+                audio_container_delays = []
+                for track in source1_info.get('tracks', []):
+                    if track.get('type') == 'audio':
+                        tid = track.get('id')
+                        delay = source1_container_delays.get(tid, 0)
+                        if delay != 0:
+                            audio_container_delays.append(delay)
+
+                if audio_container_delays:
+                    delays_to_consider.extend(audio_container_delays)
+                    runner._log_message("  - Considering Source 1 audio container delays (video delays ignored).")
 
         most_negative = min(delays_to_consider) if delays_to_consider else 0
         global_shift_ms = 0
@@ -209,9 +218,16 @@ class AnalysisStep:
 
             if source1_container_delays:
                 runner._log_message(f"[Delay] Source 1 container delays (will have +{global_shift_ms}ms added during mux):")
-                for track_id, delay in sorted(source1_container_delays.items()):
-                    final_delay = delay + global_shift_ms
-                    runner._log_message(f"  - Track {track_id}: {delay:+.1f}ms → {final_delay:+.1f}ms")
+                for track in source1_info.get('tracks', []):
+                    if track.get('type') in ['audio', 'video']:
+                        tid = track.get('id')
+                        delay = source1_container_delays.get(tid, 0)
+                        final_delay = delay + global_shift_ms
+                        track_type = track.get('type')
+
+                        # Add note for video to clarify it will be ignored
+                        note = " (will be ignored - video defines timeline)" if track_type == 'video' else ""
+                        runner._log_message(f"  - Track {tid} ({track_type}): {delay:+.1f}ms → {final_delay:+.1f}ms{note}")
         else:
             runner._log_message(f"[Delay] All relevant delays are non-negative. No global shift needed.")
 

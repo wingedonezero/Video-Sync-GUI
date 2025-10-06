@@ -101,40 +101,49 @@ class MkvmergeOptionsBuilder:
         """
         Calculates the final sync delay for a track.
 
-        IMPORTANT: The delays in plan.delays.source_delays_ms already include:
-        1. The raw correlation delay
-        2. The Source 1 audio container delay (for chain correction)
-        3. The global shift (to eliminate negative delays)
+        CRITICAL: Video container delays from the source MKV should be IGNORED.
+        Video defines the timeline and should only get the global shift.
 
-        For Source 1 tracks:
-        - Each track has its own container delay (can be different per track)
-        - We add the global shift to maintain sync with everything else
+        Source 1 VIDEO:
+        - Ignore original container delays (playback artifacts, not real timing)
+        - Only apply global shift to stay in sync with everything else
 
-        For other sources:
-        - Use the pre-calculated delay from plan.delays (already includes global shift)
+        Source 1 AUDIO:
+        - Each track has its own container delay (real timing offset)
+        - Preserve that delay and add global shift
+        - This maintains Source 1's internal audio/video sync
 
-        For subtitles:
-        - Never use container delays (they're not meaningful timing offsets)
+        Source 1 SUBTITLES:
+        - Use the correlation delay (which is 0 for Source 1 after initialization)
+        - This delay already includes the global shift
+
+        Other Sources (Source 2, Source 3, etc.):
+        - Use the pre-calculated correlation delay
+        - This delay already includes global shift from analysis
+
+        External Subtitles:
+        - Use the delay from the track they're synced to (sync_to field)
         """
         tr = item.track
 
-        # Source 1 tracks get their original container delays PLUS global shift
-        # BUT: Only for audio/video, never for subtitles
-        if tr.source == "Source 1" and tr.type != TrackType.SUBTITLES:
-            # Each Source 1 track may have a different container delay
-            # We preserve that individual delay and add the global shift
+        # Source 1 AUDIO: Preserve individual container delays + add global shift
+        if tr.source == "Source 1" and tr.type == TrackType.AUDIO:
             container_delay = int(item.container_delay_ms)
             global_shift = plan.delays.global_shift_ms
             final_delay = container_delay + global_shift
-
-            # This preserves Source 1's internal sync while shifting everything
-            # to eliminate negative delays from other sources
             return final_delay
 
-        # For all other sources (Source 2, Source 3, External, etc.)
-        # OR for any subtitle tracks (even from Source 1)
-        # Use the delay calculated during analysis (already includes global shift)
+        # Source 1 VIDEO: ONLY apply global shift (IGNORE container delays)
+        # Video defines the timeline - we don't preserve its container delays
+        if tr.source == "Source 1" and tr.type == TrackType.VIDEO:
+            return plan.delays.global_shift_ms
+
+        # All other tracks: Use the correlation delay from analysis
+        # This includes:
+        # - Source 1 subtitles (delay is 0 + global shift)
+        # - Audio/video from other sources (correlation delay + global shift)
+        # - Subtitles from other sources (correlation delay + global shift)
+        # - External subtitles (synced to a specific source)
         sync_key = item.sync_to if tr.source == 'External' else tr.source
         delay = plan.delays.source_delays_ms.get(sync_key, 0)
-
         return int(delay)
