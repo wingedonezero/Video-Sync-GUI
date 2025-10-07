@@ -3,6 +3,7 @@
 from typing import Dict, List
 from pathlib import Path
 
+from vsg_core.models.enums import TrackType
 from .base import BaseAuditor
 
 
@@ -11,7 +12,7 @@ class CodecIntegrityAuditor(BaseAuditor):
 
     def run(self, final_mkv_path: Path, final_mkvmerge_data: Dict, final_ffprobe_data=None) -> int:
         """
-        Verifies codecs match expectations.
+        Verifies codecs match expectations, accounting for intentional conversions.
         Returns the number of issues found.
         """
         if not final_ffprobe_data:
@@ -26,19 +27,32 @@ class CodecIntegrityAuditor(BaseAuditor):
                 continue
 
             actual_stream = actual_streams[i]
+
+            # Start with the original codec from the source file
             expected_codec = plan_item.track.props.codec_id.upper()
             actual_codec = actual_stream.get('codec_name', '').upper()
+            track_name = plan_item.track.props.name or f"Track {i}"
 
-            # Skip if this is a corrected audio track (intentionally converted to FLAC)
-            if plan_item.is_corrected and 'FLAC' in expected_codec:
-                self.log(f"  ✓ Track {i}: Corrected audio (FLAC) as expected")
-                continue
+            # --- THE FIX: Adjust the 'expected_codec' based on the processing plan ---
 
-            # Check if codecs match
+            # If audio was corrected (e.g., for drift), the new expected codec is FLAC
+            if plan_item.is_corrected:
+                expected_codec = 'FLAC'
+
+            # If subtitles were processed, determine the final expected format
+            if plan_item.track.type == TrackType.SUBTITLES:
+                # If OCR was performed, the intermediate format is SRT
+                if plan_item.perform_ocr:
+                    expected_codec = 'S_TEXT/UTF8'
+                # If it was then converted to ASS, that is the final expected format
+                if plan_item.convert_to_ass:
+                    expected_codec = 'S_TEXT/ASS'
+
+            # Now, perform the comparison with the true expected codec
             if self._codecs_match(expected_codec, actual_codec):
                 continue  # Codecs match, no issue
 
-            track_name = plan_item.track.props.name or f"Track {i}"
+            # If there's still a mismatch, it's a real warning
             self.log(f"[WARNING] Codec mismatch for '{track_name}':")
             self.log(f"          Expected: {expected_codec}")
             self.log(f"          Actual:   {actual_codec}")

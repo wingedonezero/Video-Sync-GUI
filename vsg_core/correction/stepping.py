@@ -617,10 +617,11 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
         )
 
         if result.verdict == CorrectionVerdict.UNIFORM:
+            # THE FIX: This block no longer modifies the context's delay.
+            # It only logs the finding.
             new_delay = result.data['delay']
-            runner._log_message(f"[SteppingCorrection] No stepping found. Using refined uniform delay for {source_key}: {new_delay} ms.")
-            if ctx.delays and source_key in ctx.delays.source_delays_ms:
-                ctx.delays.source_delays_ms[source_key] = new_delay
+            runner._log_message(f"[SteppingCorrection] No stepping found. Refined uniform delay is {new_delay} ms.")
+            runner._log_message(f"[SteppingCorrection] The globally-shifted delay from the main analysis will be used.")
 
         elif result.verdict == CorrectionVerdict.STEPPED:
             edl = result.data['edl']

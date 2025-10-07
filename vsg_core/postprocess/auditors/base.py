@@ -116,6 +116,8 @@ class BaseAuditor:
             'ASS': 'ASS',
             'S_TEXT/SSA': 'SSA',
             'SSA': 'SSA',
+            'S_VOBSUB': 'VOBSUB',
+            'DVD_SUBTITLE': 'VOBSUB', # THE FIX
         }
 
         # Normalize both codecs

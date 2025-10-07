@@ -31,21 +31,15 @@ class SubtitlesStep:
             if item.track.type != TrackType.SUBTITLES:
                 continue
 
-            # Handle user-modified files first, as they are the starting point.
-            if item.user_modified_path:
-                runner._log_message(f"[Subtitles] Using editor-modified file for track {item.track.id}.")
+            # --- Handle user-modified files ---
+            # If there's a style_patch, we DON'T want the temp file - just the patch
+            # If there's NO style_patch, then they manually edited the file, so use it
+            if item.user_modified_path and not item.style_patch:
+                runner._log_message(f"[Subtitles] Using manually edited file for track {item.track.id}.")
                 shutil.copy(item.user_modified_path, item.extracted_path)
-                if item.style_patch:
-                    runner._log_message(f"[Style] Applying patch to track {item.track.id}...")
-                    engine = StyleEngine(str(item.extracted_path))
-                    if engine.subs:
-                        for style_name, changes in item.style_patch.items():
-                            if style_name in engine.subs.styles:
-                                engine.update_style_attributes(style_name, changes)
-                        engine.save()
-                        runner._log_message("[Style] Patch applied successfully.")
-                    else:
-                        runner._log_message("[Style] WARNING: Could not load subtitle file to apply patch.")
+            elif item.user_modified_path and item.style_patch:
+                runner._log_message(f"[Subtitles] Ignoring temp preview file for track {item.track.id} (will apply style patch after conversion).")
+                # Don't copy the temp file - it was just for the style editor preview
 
             # --- OCR Step ---
             if item.perform_ocr and item.extracted_path:
@@ -103,14 +97,32 @@ class SubtitlesStep:
                 else:
                     runner._log_message(f"[WARN] OCR failed for track {item.track.id}. Using original.")
 
-            # These transformations can apply to any subtitle (OCR'd or not)
+            # --- Convert SRT to ASS (BEFORE applying style patches) ---
             if item.convert_to_ass and item.extracted_path and item.extracted_path.suffix.lower() == '.srt':
                 new_path = convert_srt_to_ass(str(item.extracted_path), runner, ctx.tool_paths)
                 item.extracted_path = Path(new_path)
 
+            # --- Apply Style Patch (AFTER conversion to ASS) ---
+            if item.style_patch and item.extracted_path:
+                if item.extracted_path.suffix.lower() in ['.ass', '.ssa']:
+                    runner._log_message(f"[Style] Applying style patch to track {item.track.id}...")
+                    engine = StyleEngine(str(item.extracted_path))
+                    if engine.subs:
+                        for style_name, changes in item.style_patch.items():
+                            if style_name in engine.subs.styles:
+                                engine.update_style_attributes(style_name, changes)
+                        engine.save()
+                        runner._log_message("[Style] Patch applied successfully.")
+                    else:
+                        runner._log_message("[Style] WARNING: Could not load subtitle file to apply patch.")
+                else:
+                    runner._log_message(f"[Style] WARNING: Cannot apply style patch to {item.extracted_path.suffix} file. Patch requires ASS/SSA format.")
+
+            # --- Rescale ---
             if item.rescale and source1_file:
                 rescale_subtitle(str(item.extracted_path), source1_file, runner, ctx.tool_paths)
 
+            # --- Font Size Multiplier ---
             size_mult = float(item.size_multiplier)
             if abs(size_mult - 1.0) > 1e-6:
                 if 0.5 <= size_mult <= 3.0:
