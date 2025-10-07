@@ -10,6 +10,7 @@ from typing import Dict, Optional
 
 from vsg_core.orchestrator.steps.context import Context
 from vsg_core.io.runner import CommandRunner
+from vsg_core.models.enums import TrackType
 
 from .auditors import (
     TrackFlagsAuditor,
@@ -58,8 +59,52 @@ class FinalAuditor:
             return
 
         final_tracks = final_mkvmerge_data.get('tracks', [])
-        final_plan_items = self.ctx.extracted_items
+
+        # --- FIX: Conditionally re-sort the plan items IN THE CONTEXT ---
+        # This ensures all sub-auditors use the same order as the muxer.
+        has_preserved_tracks = any(item.is_preserved for item in self.ctx.extracted_items)
+
+        if has_preserved_tracks:
+            self.log("[INFO] Preserved tracks found. Re-sorting audit plan to match final mux order.")
+
+            original_plan_items = self.ctx.extracted_items
+
+            # Separate final tracks from preserved original tracks
+            final_items = [item for item in original_plan_items if not item.is_preserved]
+            preserved_audio = [item for item in original_plan_items if item.is_preserved and item.track.type == TrackType.AUDIO]
+            preserved_subs = [item for item in original_plan_items if item.is_preserved and item.track.type == TrackType.SUBTITLES]
+
+            # Insert preserved audio tracks after the last main audio track
+            if preserved_audio:
+                last_audio_idx = -1
+                for i, item in enumerate(final_items):
+                    if item.track.type == TrackType.AUDIO:
+                        last_audio_idx = i
+                if last_audio_idx != -1:
+                    final_items[last_audio_idx + 1:last_audio_idx + 1] = preserved_audio
+                else:
+                    final_items.extend(preserved_audio)
+
+            # Insert preserved subtitle tracks after the last main subtitle track
+            if preserved_subs:
+                last_sub_idx = -1
+                for i, item in enumerate(final_items):
+                    if item.track.type == TrackType.SUBTITLES:
+                        last_sub_idx = i
+                if last_sub_idx != -1:
+                    final_items[last_sub_idx + 1:last_sub_idx + 1] = preserved_subs
+                else:
+                    final_items.extend(preserved_subs)
+
+            # ** THE CRITICAL CHANGE IS HERE **
+            # Overwrite the context's list so all sub-auditors see the correct order.
+            self.ctx.extracted_items = final_items
+        # --- END FIX ---
+
         total_issues = 0
+
+        # Now, the 'final_plan_items' variable used by the rest of the checks is correctly sourced
+        final_plan_items = self.ctx.extracted_items
 
         # Track count check
         if len(final_tracks) != len(final_plan_items):
@@ -70,7 +115,8 @@ class FinalAuditor:
         final_ffprobe_data = self._get_metadata(str(final_mkv_path), 'ffprobe')
 
         # === RUN ALL AUDIT MODULES ===
-        # The order matters for logical grouping in the output
+        # (The rest of this function is unchanged, as the sub-auditors will now
+        # automatically pull the corrected list from `self.ctx`)
 
         self.log("\n--- Auditing Track Flags (Default/Forced) ---")
         auditor = TrackFlagsAuditor(self.ctx, self.runner)

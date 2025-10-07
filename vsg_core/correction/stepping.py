@@ -174,7 +174,6 @@ class SteppingCorrector:
             segment_end_s = edl[i+1].start_s if i + 1 < len(edl) else pcm_duration_s
             segment_duration_s = segment_end_s - segment_start_s
 
-            # FIX #5: Validate segment duration (minimum 1 second)
             if segment_duration_s < 1.0:
                 self.log(f"    - Skipping segment from {segment_start_s:.2f}s to {segment_end_s:.2f}s: too short ({segment_duration_s:.2f}s)")
                 final_edl.append(current_segment)
@@ -287,7 +286,16 @@ class SteppingCorrector:
                         silence_samples = int(silence_duration_s * sample_rate) * channels
                         silence_pcm = np.zeros(silence_samples, dtype=np.int32)
 
-                        encode_cmd = ['ffmpeg', '-y', '-v', 'error', '-nostdin', '-f', 's32le', '-ar', str(sample_rate), '-ac', str(channels), '-channel_layout', channel_layout, '-i', '-', '-c:a', 'flac', str(silence_file)]
+                        encode_cmd = [
+                            'ffmpeg', '-y', '-v', 'error', '-nostdin',
+                            '-f', 's32le', '-ar', str(sample_rate), '-ac', str(channels),
+                            '-channel_layout', channel_layout, '-i', '-',
+                            '-map_metadata', '-1',
+                            '-map_metadata:s:a', '-1',
+                            '-fflags', '+bitexact',
+                            '-c:a', 'flac',
+                            str(silence_file)
+                        ]
                         if self.runner.run(encode_cmd, self.tool_paths, is_binary=True, input_data=silence_pcm.tobytes()) is not None:
                             segment_files.append(f"file '{silence_file.name}'")
                     else:
@@ -317,7 +325,16 @@ class SteppingCorrector:
 
                 segment_file = assembly_dir / f"segment_{i:03d}.flac"
 
-                encode_cmd = ['ffmpeg', '-y', '-v', 'error', '-nostdin', '-f', 's32le', '-ar', str(sample_rate), '-ac', str(channels), '-channel_layout', channel_layout, '-i', '-', '-c:a', 'flac', str(segment_file)]
+                encode_cmd = [
+                    'ffmpeg', '-y', '-v', 'error', '-nostdin',
+                    '-f', 's32le', '-ar', str(sample_rate), '-ac', str(channels),
+                    '-channel_layout', channel_layout, '-i', '-',
+                    '-map_metadata', '-1',
+                    '-map_metadata:s:a', '-1',
+                    '-fflags', '+bitexact',
+                    '-c:a', 'flac',
+                    str(segment_file)
+                ]
                 if self.runner.run(encode_cmd, self.tool_paths, is_binary=True, input_data=chunk_to_process.tobytes()) is None:
                     raise RuntimeError(f"Failed to encode segment {i}")
 
@@ -355,7 +372,15 @@ class SteppingCorrector:
                         new_sample_rate = sample_rate * tempo_ratio
                         filter_chain = f'asetrate={new_sample_rate},aresample={sample_rate}'
 
-                    resample_cmd = ['ffmpeg', '-y', '-nostdin', '-v', 'error', '-i', str(segment_file), '-af', filter_chain, str(corrected_file)]
+                    resample_cmd = [
+                        'ffmpeg', '-y', '-nostdin', '-v', 'error',
+                        '-i', str(segment_file),
+                        '-af', filter_chain,
+                        '-map_metadata', '-1',
+                        '-map_metadata:s:a', '-1',
+                        '-fflags', '+bitexact',
+                        str(corrected_file)
+                    ]
 
                     if self.runner.run(resample_cmd, self.tool_paths) is None:
                         error_msg = f"Resampling with '{resample_engine}' failed for segment {i}."
@@ -372,7 +397,15 @@ class SteppingCorrector:
 
             concat_list_path.write_text('\n'.join(segment_files), encoding='utf-8')
 
-            final_assembly_cmd = ['ffmpeg', '-y', '-v', 'error', '-f', 'concat', '-safe', '0', '-i', str(concat_list_path), '-map_metadata', '-1', '-c:a', 'flac', str(out_path)]
+            final_assembly_cmd = [
+                'ffmpeg', '-y', '-v', 'error',
+                '-f', 'concat', '-safe', '0', '-i', str(concat_list_path),
+                '-map_metadata', '-1',
+                '-map_metadata:s:a', '-1',
+                '-fflags', '+bitexact',
+                '-c:a', 'flac',
+                str(out_path)
+            ]
             if self.runner.run(final_assembly_cmd, self.tool_paths) is None:
                 raise RuntimeError("Final FFmpeg concat assembly failed.")
 
@@ -426,8 +459,7 @@ class SteppingCorrector:
             self.log(f"  [QA] FAILED with exception: {e}")
             return False
 
-    def run(self, ref_file_path: str, analysis_audio_path: str, target_audio_path: str, base_delay_ms: int, temp_dir: Path) -> CorrectionResult:
-        # FIX #7: Add explicit memory management with try/finally
+    def run(self, ref_file_path: str, analysis_audio_path: str, base_delay_ms: int) -> CorrectionResult:
         ref_pcm = None
         analysis_pcm = None
 
@@ -435,7 +467,7 @@ class SteppingCorrector:
             ref_index, _ = get_audio_stream_info(ref_file_path, None, self.runner, self.tool_paths)
             analysis_index, _ = get_audio_stream_info(analysis_audio_path, None, self.runner, self.tool_paths)
             if ref_index is None or analysis_index is None:
-                return CorrectionResult(CorrectionVerdict.FAILED, "Could not find audio streams for analysis.")
+                return CorrectionResult(CorrectionVerdict.FAILED, {'error': "Could not find audio streams for analysis."})
             _, _, sample_rate = _get_audio_properties(analysis_audio_path, analysis_index, self.runner, self.tool_paths)
 
             analysis_codec = self._get_codec_id(analysis_audio_path)
@@ -443,11 +475,11 @@ class SteppingCorrector:
             ref_pcm = self._decode_to_memory(ref_file_path, ref_index, sample_rate)
             analysis_pcm = self._decode_to_memory(analysis_audio_path, analysis_index, sample_rate)
             if ref_pcm is None or analysis_pcm is None:
-                return CorrectionResult(CorrectionVerdict.FAILED, "Failed to decode one or more audio tracks.")
+                return CorrectionResult(CorrectionVerdict.FAILED, {'error': "Failed to decode one or more audio tracks."})
 
             coarse_map = self._perform_coarse_scan(ref_pcm, analysis_pcm, sample_rate)
             if not coarse_map:
-                return CorrectionResult(CorrectionVerdict.FAILED, "Coarse scan did not find any reliable sync points.")
+                return CorrectionResult(CorrectionVerdict.FAILED, {'error': "Coarse scan did not find any reliable sync points."})
 
             edl: List[AudioSegment] = []
             anchor_delay = coarse_map[0][1]
@@ -467,21 +499,14 @@ class SteppingCorrector:
 
             edl = sorted(list(set(edl)), key=lambda x: x.start_s)
 
-            # FIX #1: Better handling of single-segment case
             if len(edl) <= 1:
-                # Only one segment means no stepping was detected
-                # This is actually SUCCESS - the audio has uniform delay
                 refined_delay = edl[0].delay_ms if edl else base_delay_ms
-
                 self.log("  [SteppingCorrector] No stepping detected. Audio delay is uniform throughout.")
                 self.log(f"  [SteppingCorrector] Refined delay measurement: {refined_delay}ms")
-
-                # Check if the refined delay differs significantly from the base delay
                 if abs(refined_delay - base_delay_ms) > 5:
                     self.log(f"  [SteppingCorrector] Refined delay differs from initial estimate by {abs(refined_delay - base_delay_ms)}ms")
                     self.log(f"  [SteppingCorrector] Recommending use of refined value: {refined_delay}ms")
-
-                return CorrectionResult(CorrectionVerdict.UNIFORM, refined_delay)
+                return CorrectionResult(CorrectionVerdict.UNIFORM, {'delay': refined_delay})
 
             edl = self._analyze_internal_drift(edl, ref_pcm, analysis_pcm, sample_rate, analysis_codec)
 
@@ -489,58 +514,57 @@ class SteppingCorrector:
             for i, seg in enumerate(edl):
                 self.log(f"    - Action {i+1}: At target time {seg.start_s:.3f}s, new total delay is {seg.delay_ms}ms, internal drift is {seg.drift_rate_ms_s:+.2f} ms/s")
 
-            return self._run_final_assembly(target_audio_path, edl=edl, temp_dir=temp_dir, ref_file_path=ref_file_path, analysis_pcm=analysis_pcm)
+            # --- QA Check ---
+            self.log("  [SteppingCorrector] Assembling temporary QA track...")
+            qa_track_path = Path(analysis_audio_path).parent / "qa_track.flac"
+            if not self._assemble_from_segments_via_ffmpeg(analysis_pcm, edl, 1, 'mono', sample_rate, qa_track_path, log_prefix="QA"):
+                return CorrectionResult(CorrectionVerdict.FAILED, {'error': "Failed during QA track assembly."})
+
+            if not self._qa_check(str(qa_track_path), ref_file_path, edl[0].delay_ms):
+                return CorrectionResult(CorrectionVerdict.FAILED, {'error': "Corrected track failed QA check."})
+
+            # If QA passes, the EDL is good. Return it.
+            return CorrectionResult(CorrectionVerdict.STEPPED, {'edl': edl})
 
         except Exception as e:
             self.log(f"[FATAL] SteppingCorrector failed with exception: {e}")
             import traceback
             self.log(f"[DEBUG] Traceback: {traceback.format_exc()}")
-            return CorrectionResult(CorrectionVerdict.FAILED, str(e))
+            return CorrectionResult(CorrectionVerdict.FAILED, {'error': str(e)})
         finally:
-            # FIX #7: Explicit memory cleanup
-            if ref_pcm is not None:
-                del ref_pcm
-            if analysis_pcm is not None:
-                del analysis_pcm
+            if ref_pcm is not None: del ref_pcm
+            if analysis_pcm is not None: del analysis_pcm
             gc.collect()
 
-    def _run_final_assembly(self, target_audio_path: str, edl: List[AudioSegment], temp_dir: Path, ref_file_path: str, analysis_pcm: np.ndarray) -> CorrectionResult:
+    def apply_plan_to_file(self, target_audio_path: str, edl: List[AudioSegment], temp_dir: Path) -> Optional[Path]:
+        """Applies a pre-generated EDL to a given audio file."""
         target_pcm = None
-
         try:
             target_index, _ = get_audio_stream_info(target_audio_path, None, self.runner, self.tool_paths)
+            if target_index is None:
+                self.log(f"[ERROR] Could not find audio stream in {target_audio_path}")
+                return None
+
             target_channels, target_layout, sample_rate = _get_audio_properties(target_audio_path, target_index, self.runner, self.tool_paths)
 
-            self.log("  [SteppingCorrector] Stage 3: Assembling temporary QA track...")
-            qa_track_path = temp_dir / "qa_track.flac"
-
-            if not self._assemble_from_segments_via_ffmpeg(analysis_pcm, edl, 1, 'mono', sample_rate, qa_track_path, log_prefix="QA"):
-                return CorrectionResult(CorrectionVerdict.FAILED, "Failed during QA track assembly.")
-            del analysis_pcm; gc.collect()
-
-            if not self._qa_check(str(qa_track_path), ref_file_path, edl[0].delay_ms):
-                return CorrectionResult(CorrectionVerdict.FAILED, "Corrected track failed QA check.")
-
-            self.log("  [SteppingCorrector] Assembling final corrected track...")
+            self.log(f"  [SteppingCorrector] Applying correction plan to '{Path(target_audio_path).name}'...")
             self.log(f"    - Decoding final target audio track ({target_layout})...")
             target_pcm = self._decode_to_memory(target_audio_path, target_index, sample_rate, target_channels)
             if target_pcm is None:
-                return CorrectionResult(CorrectionVerdict.FAILED, "Failed to decode target audio for final assembly.")
+                return None
 
-            source_key = Path(target_audio_path).stem.split('_track_')[0]
-            final_corrected_path = temp_dir / f"corrected_{source_key}.flac"
+            corrected_path = temp_dir / f"corrected_{Path(target_audio_path).stem}.flac"
 
-            if not self._assemble_from_segments_via_ffmpeg(target_pcm, edl, target_channels, target_layout, sample_rate, final_corrected_path, log_prefix="Final"):
-                return CorrectionResult(CorrectionVerdict.FAILED, "Failed during final multichannel track assembly.")
-            del target_pcm; gc.collect()
+            if not self._assemble_from_segments_via_ffmpeg(target_pcm, edl, target_channels, target_layout, sample_rate, corrected_path, log_prefix="Final"):
+                return None
 
-            self.log(f"[SUCCESS] Enhanced stepping correction successful for '{Path(target_audio_path).name}'")
-            return CorrectionResult(CorrectionVerdict.STEPPED, final_corrected_path)
+            self.log(f"[SUCCESS] Stepping correction applied successfully for '{Path(target_audio_path).name}'")
+            return corrected_path
+
         except Exception as e:
-            self.log(f"[FATAL] Final Assembly failed: {e}")
-            return CorrectionResult(CorrectionVerdict.FAILED, f"Final assembly failed: {e}")
+            self.log(f"[FATAL] Assembly failed for {target_audio_path}: {e}")
+            return None
         finally:
-            # FIX #7: Cleanup in finally block
             if target_pcm is not None:
                 del target_pcm
             gc.collect()
@@ -563,13 +587,11 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
             if item.track.source == source_key and item.track.type == TrackType.AUDIO and not item.is_preserved
         ]
 
-        if len(target_items) != 1:
-            runner._log_message(f"[SteppingCorrection] Skipping {source_key}: Expected 1 audio track to correct, found {len(target_items)}.")
+        if not target_items:
+            runner._log_message(f"[SteppingCorrection] Skipping {source_key}: No audio tracks found in layout to correct.")
             continue
 
-        target_item = target_items[0]
         analysis_item = extracted_audio_map.get(analysis_track_key)
-
         if not analysis_item:
             runner._log_message(f"[SteppingCorrection] Analysis track {analysis_track_key} not in layout. Extracting internally...")
             source_container_path = ctx.sources.get(source_key)
@@ -587,50 +609,58 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
         else:
             analysis_track_path = str(analysis_item.extracted_path)
 
+        # Run analysis once to get the correction plan (EDL)
         result: CorrectionResult = corrector.run(
             ref_file_path=ref_file_path,
             analysis_audio_path=analysis_track_path,
-            target_audio_path=str(target_item.extracted_path),
-            base_delay_ms=base_delay_ms,
-            temp_dir=ctx.temp_dir
+            base_delay_ms=base_delay_ms
         )
 
         if result.verdict == CorrectionVerdict.UNIFORM:
-            new_delay = result.data
+            new_delay = result.data['delay']
             runner._log_message(f"[SteppingCorrection] No stepping found. Using refined uniform delay for {source_key}: {new_delay} ms.")
             if ctx.delays and source_key in ctx.delays.source_delays_ms:
                 ctx.delays.source_delays_ms[source_key] = new_delay
 
         elif result.verdict == CorrectionVerdict.STEPPED:
-            corrected_path = result.data
+            edl = result.data['edl']
+            runner._log_message(f"[SteppingCorrection] Analysis successful. Applying correction plan to {len(target_items)} audio track(s) from {source_key}.")
 
-            preserved_item = copy.deepcopy(target_item)
-            preserved_item.is_preserved = True
-            preserved_item.is_default = False
-            original_props = preserved_item.track.props
-            preserved_item.track = Track(
-                source=preserved_item.track.source, id=preserved_item.track.id, type=preserved_item.track.type,
-                props=StreamProps(
-                    codec_id=original_props.codec_id,
-                    lang=original_props.lang,
-                    name=f"{original_props.name} (Original)" if original_props.name else "Original"
-                )
-            )
+            for target_item in target_items:
+                corrected_path = corrector.apply_plan_to_file(str(target_item.extracted_path), edl, ctx.temp_dir)
 
-            target_item.extracted_path = corrected_path
-            target_item.is_corrected = True
-            target_item.track = Track(
-                source=target_item.track.source, id=target_item.track.id, type=target_item.track.type,
-                props=StreamProps(
-                    codec_id="FLAC",
-                    lang=original_props.lang,
-                    name=original_props.name
-                )
-            )
-            ctx.extracted_items.append(preserved_item)
+                if corrected_path:
+                    # Preserve the original track
+                    preserved_item = copy.deepcopy(target_item)
+                    preserved_item.is_preserved = True
+                    preserved_item.is_default = False
+                    original_props = preserved_item.track.props
+                    preserved_item.track = Track(
+                        source=preserved_item.track.source, id=preserved_item.track.id, type=preserved_item.track.type,
+                        props=StreamProps(
+                            codec_id=original_props.codec_id,
+                            lang=original_props.lang,
+                            name=f"{original_props.name} (Original)" if original_props.name else "Original"
+                        )
+                    )
+
+                    # Update the main track to point to corrected FLAC
+                    target_item.extracted_path = corrected_path
+                    target_item.is_corrected = True
+                    target_item.track = Track(
+                        source=target_item.track.source, id=target_item.track.id, type=target_item.track.type,
+                        props=StreamProps(
+                            codec_id="FLAC",
+                            lang=original_props.lang,
+                            name=original_props.name
+                        )
+                    )
+                    ctx.extracted_items.append(preserved_item)
+                else:
+                    runner._log_message(f"[ERROR] Failed to apply correction plan to {target_item.extracted_path.name}. Keeping original.")
 
         elif result.verdict == CorrectionVerdict.FAILED:
-            error_message = result.data
+            error_message = result.data.get('error', 'Unknown error')
             raise RuntimeError(f"Stepping correction for {source_key} failed: {error_message}")
 
     return ctx
