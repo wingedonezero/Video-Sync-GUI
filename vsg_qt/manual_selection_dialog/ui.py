@@ -298,5 +298,5 @@ class ManualSelectionDialog(QDialog):
         if editor.exec():
             widget.track_data['style_patch'] = editor.get_style_patch()
             self.edited_widget = widget
-            widget.refresh_badges()
-            widget.refresh_summary()
+            widget.logic.refresh_badges()
+            widget.logic.refresh_summary()
