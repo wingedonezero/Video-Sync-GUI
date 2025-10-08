@@ -32,22 +32,25 @@ class SubtitleFormatsAuditor(BaseAuditor):
         final_tracks = final_mkvmerge_data.get('tracks', [])
         final_subtitle_tracks = [t for t in final_tracks if t.get('type') == 'subtitles']
 
-        for i, plan_item in enumerate(subtitle_items):
-            if i >= len(final_subtitle_tracks):
-                self.log(f"[WARNING] Subtitle track {i} missing from final file!")
+        final_subtitle_idx = 0
+        for plan_item in subtitle_items:
+            if final_subtitle_idx >= len(final_subtitle_tracks):
+                self.log(f"[WARNING] Subtitle track for '{plan_item.track.props.name}' missing from final file!")
                 issues += 1
                 continue
 
-            final_track = final_subtitle_tracks[i]
-            track_name = plan_item.track.props.name or f"Subtitle {i}"
+            final_track = final_subtitle_tracks[final_subtitle_idx]
+            track_name = plan_item.track.props.name or f"Subtitle {final_subtitle_idx}"
 
-            # Check 1: OCR conversion
-            if plan_item.perform_ocr:
-                issues += self._verify_ocr(final_track, track_name)
+            # --- THE FIX: Skip OCR checks for preserved tracks ---
+            if not plan_item.is_preserved:
+                # Check 1: OCR conversion
+                if plan_item.perform_ocr:
+                    issues += self._verify_ocr(final_track, track_name)
 
-            # Check 2: ASS conversion
-            if plan_item.convert_to_ass:
-                issues += self._verify_ass_conversion(final_track, track_name)
+                # Check 2: ASS conversion
+                if plan_item.convert_to_ass:
+                    issues += self._verify_ass_conversion(final_track, track_name)
 
             # Check 3: Rescaling (requires reading the actual subtitle file)
             if plan_item.rescale and plan_item.extracted_path:
@@ -56,6 +59,8 @@ class SubtitleFormatsAuditor(BaseAuditor):
             # Check 4: Font size multiplier
             if abs(plan_item.size_multiplier - 1.0) > 0.01 and plan_item.extracted_path:
                 issues += self._verify_font_size(plan_item, track_name)
+
+            final_subtitle_idx += 1
 
         if issues == 0:
             self.log("✅ All subtitle processing verified correctly.")

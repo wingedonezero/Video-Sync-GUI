@@ -41,12 +41,18 @@ class CodecIntegrityAuditor(BaseAuditor):
 
             # If subtitles were processed, determine the final expected format
             if plan_item.track.type == TrackType.SUBTITLES:
-                # If OCR was performed, the intermediate format is SRT
-                if plan_item.perform_ocr:
-                    expected_codec = 'S_TEXT/UTF8'
-                # If it was then converted to ASS, that is the final expected format
-                if plan_item.convert_to_ass:
-                    expected_codec = 'S_TEXT/ASS'
+                if plan_item.is_preserved:
+                    # This is a preserved original, so the expected codec IS the original codec.
+                    # No change is needed to expected_codec.
+                    pass
+                else:
+                    # This is the main, processed track.
+                    # If OCR was performed, the intermediate format is SRT
+                    if plan_item.perform_ocr:
+                        expected_codec = 'S_TEXT/UTF8'
+                    # If it was then converted to ASS, that is the final expected format
+                    if plan_item.convert_to_ass:
+                        expected_codec = 'S_TEXT/ASS'
 
             # Now, perform the comparison with the true expected codec
             if self._codecs_match(expected_codec, actual_codec):
