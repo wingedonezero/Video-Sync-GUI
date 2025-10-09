@@ -160,7 +160,29 @@ class MainController:
         if is_batch and self.v.archive_logs_check.isChecked() and output_dir:
             QTimer.singleShot(0, lambda: self._archive_logs_for_batch(output_dir))
 
-        QMessageBox.information(self.v, "Batch Complete", f"Finished processing {len(all_results)} jobs.")
+        successful_jobs = 0
+        jobs_with_warnings = 0
+        failed_jobs = 0
+        for result in all_results:
+            if result.get('status') == 'Failed':
+                failed_jobs += 1
+            elif result.get('issues', 0) > 0:
+                jobs_with_warnings += 1
+            else:
+                successful_jobs += 1
+
+        summary_message = "\n--- Batch Summary ---\n"
+        summary_message += f"  - Successful jobs: {successful_jobs}\n"
+        summary_message += f"  - Jobs with warnings: {jobs_with_warnings}\n"
+        summary_message += f"  - Failed jobs: {failed_jobs}\n"
+        self.append_log(summary_message)
+
+        if failed_jobs > 0:
+            QMessageBox.critical(self.v, "Batch Complete", f"Finished processing {len(all_results)} jobs with {failed_jobs} failure(s).")
+        elif jobs_with_warnings > 0:
+            QMessageBox.warning(self.v, "Batch Complete", f"Finished processing {len(all_results)} jobs with {jobs_with_warnings} job(s) having warnings.")
+        else:
+            QMessageBox.information(self.v, "Batch Complete", f"Finished processing {len(all_results)} jobs successfully.")
 
         # FIX: Cleanup is now called here, after all jobs are finished.
         self.layout_manager.cleanup_all()

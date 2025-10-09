@@ -84,7 +84,7 @@ class JobPipeline:
             if not and_merge:
                 log_to_all('--- Analysis Complete (No Merge) ---')
                 self.progress(1.0)
-                return { 'status': 'Analyzed', 'delays': ctx.delays.source_delays_ms if ctx.delays else {}, 'name': Path(source1_file).name }
+                return { 'status': 'Analyzed', 'delays': ctx.delays.source_delays_ms if ctx.delays else {}, 'name': Path(source1_file).name, 'issues': 0 }
 
             if not ctx.tokens:
                 raise RuntimeError('Internal error: mkvmerge tokens were not generated.')
@@ -111,9 +111,10 @@ class JobPipeline:
 
             # --- FINAL AUDIT STEP (MANDATORY) ---
             log_to_all("--- Post-Merge: Running Final Audit ---")
+            issues = 0
             try:
                 auditor = FinalAuditor(ctx, runner)
-                auditor.run(final_output_path)
+                issues = auditor.run(final_output_path)
             except Exception as audit_error:
                 log_to_all(f"[ERROR] Final audit step failed: {audit_error}")
             # --- END ---
@@ -122,12 +123,13 @@ class JobPipeline:
             return {
                 'status': 'Merged', 'output': str(final_output_path),
                 'delays': ctx.delays.source_delays_ms if ctx.delays else {},
-                'name': Path(source1_file).name
+                'name': Path(source1_file).name,
+                'issues': issues
             }
 
         except Exception as e:
             log_to_all(f'[FATAL ERROR] Job failed: {e}')
-            return {'status': 'Failed', 'error': str(e), 'name': Path(source1_file).name}
+            return {'status': 'Failed', 'error': str(e), 'name': Path(source1_file).name, 'issues': 0}
         finally:
             if ctx_temp_dir and ctx_temp_dir.exists():
                 shutil.rmtree(ctx_temp_dir, ignore_errors=True)

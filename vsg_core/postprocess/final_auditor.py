@@ -206,6 +206,7 @@ class FinalAuditor:
             self.log(f"⚠️  FINAL AUDIT FOUND {total_issues} POTENTIAL ISSUE(S)")
             self.log("    Please review the warnings above.")
         self.log("========================================\n")
+        return total_issues
 
     def _get_metadata(self, file_path: str, tool: str) -> Optional[Dict]:
         """Gets metadata using either mkvmerge or ffprobe."""
