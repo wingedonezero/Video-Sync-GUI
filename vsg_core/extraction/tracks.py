@@ -252,6 +252,10 @@ def _ext_for_codec(ttype: str, codec_id: str) -> str:
 
 def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: dict, role: str,
                    specific_tracks: Optional[List[int]] = None) -> List[Dict[str, Any]]:
+    """
+    Extract tracks from MKV with enhanced error detection.
+    NOW REPORTS: Which source, which specific track failed, with full details.
+    """
     info = get_stream_info(mkv, runner, tool_paths)
     if not info:
         raise ValueError(f'Could not get stream info for extraction from {mkv}')
@@ -285,19 +289,161 @@ def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: 
             record['path'] = str(out_path)
             bit_depth = props.get('audio_bits_per_sample') or props.get('bit_depth')
             pcm_codec = _pcm_codec_from_bit_depth(bit_depth)
-            ffmpeg_jobs.append({'idx': audio_idx, 'tid': tid, 'out': str(out_path), 'pcm': pcm_codec})
+            ffmpeg_jobs.append({'idx': audio_idx, 'tid': tid, 'out': str(out_path), 'pcm': pcm_codec, 'name': record['name']})
         else:
             specs.append(f'{tid}:{out_path}')
 
+    # === ENHANCED: Extraction with detailed per-track error reporting ===
     if specs:
-        runner.run(['mkvextract', str(mkv), 'tracks'] + specs, tool_paths)
+        runner._log_message(f"[{role}] Extracting {len(specs)} track(s) with mkvextract...")
+        result = runner.run(['mkvextract', str(mkv), 'tracks'] + specs, tool_paths)
 
+        if result is None:
+            runner._log_message(f"[{role}] [ERROR] mkvextract command failed!")
+
+            # Check which tracks succeeded/failed
+            failed_tracks = []
+            successful_tracks = []
+
+            for spec in specs:
+                tid = int(spec.split(':')[0])
+                out_path = Path(spec.split(':', 1)[1])
+                track_info = next((t for t in tracks_to_extract if t['id'] == tid), None)
+
+                if not track_info:
+                    continue
+
+                track_name = track_info.get('name') or f"Track {tid}"
+                track_type = track_info['type'].capitalize()
+                track_lang = track_info.get('lang', 'und')
+                track_codec = track_info.get('codec_id', 'unknown')
+
+                if out_path.exists() and out_path.stat().st_size > 0:
+                    file_size_mb = out_path.stat().st_size / (1024 * 1024)
+                    successful_tracks.append(
+                        f"  ✓ {track_name} (ID {tid}, {track_type}, {track_lang}, {track_codec}) [{file_size_mb:.1f} MB]"
+                    )
+                else:
+                    status = "not created" if not out_path.exists() else "empty (0 bytes)"
+                    failed_tracks.append(
+                        f"  ✗ {track_name} (ID {tid}, {track_type}, {track_lang}, {track_codec}) - {status}"
+                    )
+
+            # Build detailed error message
+            error_msg = f"\n{'='*80}\n"
+            error_msg += f"EXTRACTION FAILED\n"
+            error_msg += f"{'='*80}\n"
+            error_msg += f"Source: {role}\n"
+            error_msg += f"File: {Path(mkv).name}\n"
+            error_msg += f"Full Path: {mkv}\n"
+            error_msg += f"{'='*80}\n\n"
+
+            if successful_tracks:
+                error_msg += f"Successfully extracted ({len(successful_tracks)} tracks):\n"
+                error_msg += "\n".join(successful_tracks) + "\n\n"
+
+            if failed_tracks:
+                error_msg += f"❌ FAILED to extract ({len(failed_tracks)} tracks):\n"
+                error_msg += "\n".join(failed_tracks) + "\n\n"
+                error_msg += "⚠️  The track(s) marked with ✗ above failed to extract.\n"
+                error_msg += "    These specific tracks have issues and need investigation.\n\n"
+            else:
+                error_msg += "⚠️  All tracks appear extracted, but mkvextract returned an error.\n"
+                error_msg += "    This may indicate a warning or non-fatal issue.\n\n"
+
+            error_msg += "Possible causes:\n"
+            error_msg += "  • Corrupted track data in the source file\n"
+            error_msg += "  • Insufficient disk space in temp directory\n"
+            error_msg += "  • Insufficient read/write permissions\n"
+            error_msg += "  • Unsupported codec or malformed stream data\n"
+            error_msg += "  • Hardware/storage errors (bad sectors)\n"
+            error_msg += "  • File system issues (FAT32 4GB limit, etc.)\n\n"
+
+            error_msg += "Troubleshooting:\n"
+            error_msg += f"  1. Verify source integrity: mkvmerge -i \"{mkv}\"\n\n"
+            error_msg += f"  2. Try extracting failed track(s) manually:\n"
+            if failed_tracks:
+                for track_line in failed_tracks[:3]:
+                    tid = track_line.split('ID ')[1].split(',')[0]
+                    error_msg += f"     mkvextract \"{mkv}\" tracks {tid}:test_track_{tid}.bin\n"
+            error_msg += f"\n  3. Check disk space in: {temp_dir}\n\n"
+            error_msg += f"  4. Try playing source file to check for corruption\n\n"
+            error_msg += f"  5. Check log file for detailed mkvextract error messages\n"
+            error_msg += f"{'='*80}\n"
+
+            raise RuntimeError(error_msg)
+
+        runner._log_message(f"[{role}] ✓ Successfully extracted {len(specs)} track(s)")
+
+        # Post-extraction verification
+        verification_failed = []
+        for spec in specs:
+            tid = int(spec.split(':')[0])
+            out_path = Path(spec.split(':', 1)[1])
+            track_info = next((t for t in tracks_to_extract if t['id'] == tid), None)
+
+            if not out_path.exists():
+                track_name = track_info.get('name', f"Track {tid}") if track_info else f"Track {tid}"
+                verification_failed.append(f"  • {track_name} (ID {tid}): File not created")
+            elif out_path.stat().st_size == 0:
+                track_name = track_info.get('name', f"Track {tid}") if track_info else f"Track {tid}"
+                verification_failed.append(f"  • {track_name} (ID {tid}): File is empty (0 bytes)")
+
+        if verification_failed:
+            error_msg = f"\n{'='*80}\n"
+            error_msg += f"POST-EXTRACTION VERIFICATION FAILED\n"
+            error_msg += f"{'='*80}\n"
+            error_msg += f"Source: {role}\n"
+            error_msg += f"File: {Path(mkv).name}\n"
+            error_msg += f"{'='*80}\n\n"
+            error_msg += "Tracks failed verification:\n"
+            error_msg += "\n".join(verification_failed)
+            error_msg += "\n\nmkvextract reported success but some files are missing/empty.\n"
+            error_msg += "This may indicate:\n"
+            error_msg += "  • A bug in mkvextract\n"
+            error_msg += "  • Filesystem issues (delayed writes, caching)\n"
+            error_msg += "  • Antivirus interference\n"
+            error_msg += "  • Disk I/O errors\n"
+            error_msg += f"{'='*80}\n"
+            raise RuntimeError(error_msg)
+
+    # Handle A_MS/ACM audio with ffmpeg
     for job in ffmpeg_jobs:
-        copy_cmd = ['ffmpeg', '-y', '-v', 'error', '-nostdin', '-i', str(mkv), '-map', f"0:a:{job['idx']}", '-vn', '-sn', '-c:a', 'copy', job['out']]
+        track_name = job.get('name') or f"Track {job['tid']}"
+
+        runner._log_message(f"[{role}] Extracting A_MS/ACM track '{track_name}' (ID {job['tid']})...")
+
+        copy_cmd = ['ffmpeg', '-y', '-v', 'error', '-nostdin', '-i', str(mkv),
+                    '-map', f"0:a:{job['idx']}", '-vn', '-sn', '-c:a', 'copy', job['out']]
         if runner.run(copy_cmd, tool_paths) is None:
-            runner._log_message(f"Stream copy refused for A_MS/ACM (track {job['tid']}).\nFalling back to {job['pcm']}.")
-            pcm_cmd = ['ffmpeg', '-y', '-v', 'error', '-nostdin', '-i', str(mkv), '-map', f"0:a:{job['idx']}", '-vn', '-sn', '-acodec', job['pcm'], job['out']]
-            runner.run(pcm_cmd, tool_paths)
+            runner._log_message(f"[{role}] Stream copy refused. Falling back to PCM ({job['pcm']})...")
+
+            pcm_cmd = ['ffmpeg', '-y', '-v', 'error', '-nostdin', '-i', str(mkv),
+                       '-map', f"0:a:{job['idx']}", '-vn', '-sn', '-acodec', job['pcm'], job['out']]
+            if runner.run(pcm_cmd, tool_paths) is None:
+                error_msg = f"\n{'='*80}\n"
+                error_msg += f"A_MS/ACM AUDIO EXTRACTION FAILED\n"
+                error_msg += f"{'='*80}\n"
+                error_msg += f"Source: {role}\n"
+                error_msg += f"File: {Path(mkv).name}\n"
+                error_msg += f"Track: {track_name} (ID {job['tid']})\n"
+                error_msg += f"Codec: A_MS/ACM\n"
+                error_msg += f"{'='*80}\n\n"
+                error_msg += "Both stream copy and PCM conversion failed.\n\n"
+                error_msg += "This track may:\n"
+                error_msg += "  • Use an unsupported ACM codec variant\n"
+                error_msg += "  • Be corrupted or have malformed headers\n"
+                error_msg += "  • Require specific codec drivers\n\n"
+                error_msg += "Troubleshooting:\n"
+                error_msg += f"  1. Try playing this audio track in VLC\n"
+                error_msg += f"  2. Try: mkvextract \"{mkv}\" tracks {job['tid']}:test.wav\n"
+                error_msg += f"  3. Consider remuxing the source file\n"
+                error_msg += f"{'='*80}\n"
+                raise RuntimeError(error_msg)
+
+            runner._log_message(f"[{role}] ✓ Converted to {job['pcm']}")
+        else:
+            runner._log_message(f"[{role}] ✓ Extracted successfully")
 
     return tracks_to_extract
 
