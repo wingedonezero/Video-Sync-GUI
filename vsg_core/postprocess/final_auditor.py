@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Final Audit Orchestrator - Coordinates all post-merge validation checks.
-Each specific audit is handled by a dedicated module in the auditors/ folder.
+Enhanced with drift correction and global shift auditors.
 """
 import json
 from pathlib import Path
@@ -27,6 +27,8 @@ from .auditors import (
     LanguageTagsAuditor,
     TrackNamesAuditor,
     AttachmentsAuditor,
+    DriftCorrectionAuditor,
+    GlobalShiftAuditor,
 )
 
 
@@ -34,13 +36,11 @@ class FinalAuditor:
     """
     Comprehensive post-merge validation orchestrator.
     Runs all audit modules and aggregates results.
-    Only logs warnings - does not attempt fixes (those indicate pipeline bugs).
     """
     def __init__(self, ctx: Context, runner: CommandRunner):
         self.ctx = ctx
         self.runner = runner
         self.log = runner._log_message
-        # Shared caches for all auditors (performance optimization)
         self._shared_ffprobe_cache: Dict[str, Optional[Dict]] = {}
         self._shared_mkvmerge_cache: Dict[str, Optional[Dict]] = {}
 
@@ -52,7 +52,6 @@ class FinalAuditor:
         self.log("=== POST-MERGE FINAL AUDIT STARTING ===")
         self.log("========================================")
 
-        # Get metadata from the final file
         final_mkvmerge_data = self._get_metadata(str(final_mkv_path), 'mkvmerge')
         if not final_mkvmerge_data or 'tracks' not in final_mkvmerge_data:
             self.log("[ERROR] Could not read metadata from final file. Aborting audit.")
@@ -60,8 +59,6 @@ class FinalAuditor:
 
         final_tracks = final_mkvmerge_data.get('tracks', [])
 
-        # --- FIX: Conditionally re-sort the plan items IN THE CONTEXT ---
-        # This ensures all sub-auditors use the same order as the muxer.
         has_preserved_tracks = any(item.is_preserved for item in self.ctx.extracted_items)
 
         if has_preserved_tracks:
@@ -69,12 +66,10 @@ class FinalAuditor:
 
             original_plan_items = self.ctx.extracted_items
 
-            # Separate final tracks from preserved original tracks
             final_items = [item for item in original_plan_items if not item.is_preserved]
             preserved_audio = [item for item in original_plan_items if item.is_preserved and item.track.type == TrackType.AUDIO]
             preserved_subs = [item for item in original_plan_items if item.is_preserved and item.track.type == TrackType.SUBTITLES]
 
-            # Insert preserved audio tracks after the last main audio track
             if preserved_audio:
                 last_audio_idx = -1
                 for i, item in enumerate(final_items):
@@ -85,7 +80,6 @@ class FinalAuditor:
                 else:
                     final_items.extend(preserved_audio)
 
-            # Insert preserved subtitle tracks after the last main subtitle track
             if preserved_subs:
                 last_sub_idx = -1
                 for i, item in enumerate(final_items):
@@ -96,27 +90,17 @@ class FinalAuditor:
                 else:
                     final_items.extend(preserved_subs)
 
-            # ** THE CRITICAL CHANGE IS HERE **
-            # Overwrite the context's list so all sub-auditors see the correct order.
             self.ctx.extracted_items = final_items
-        # --- END FIX ---
 
         total_issues = 0
 
-        # Now, the 'final_plan_items' variable used by the rest of the checks is correctly sourced
         final_plan_items = self.ctx.extracted_items
 
-        # Track count check
         if len(final_tracks) != len(final_plan_items):
             self.log(f"[WARNING] Track count mismatch! Plan expected {len(final_plan_items)}, but final file has {len(final_tracks)}.")
             total_issues += 1
 
-        # Get detailed ffprobe data for advanced checks
         final_ffprobe_data = self._get_metadata(str(final_mkv_path), 'ffprobe')
-
-        # === RUN ALL AUDIT MODULES ===
-        # (The rest of this function is unchanged, as the sub-auditors will now
-        # automatically pull the corrected list from `self.ctx`)
 
         self.log("\n--- Auditing Track Flags (Default/Forced) ---")
         auditor = TrackFlagsAuditor(self.ctx, self.runner)
@@ -161,6 +145,18 @@ class FinalAuditor:
             auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
             total_issues += auditor.run(final_mkv_path, final_mkvmerge_data, final_ffprobe_data)
 
+        self.log("\n--- Auditing Drift Corrections ---")
+        auditor = DriftCorrectionAuditor(self.ctx, self.runner)
+        auditor._source_ffprobe_cache = self._shared_ffprobe_cache
+        auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
+        total_issues += auditor.run(final_mkv_path, final_mkvmerge_data, final_ffprobe_data)
+
+        self.log("\n--- Auditing Global Shift ---")
+        auditor = GlobalShiftAuditor(self.ctx, self.runner)
+        auditor._source_ffprobe_cache = self._shared_ffprobe_cache
+        auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
+        total_issues += auditor.run(final_mkv_path, final_mkvmerge_data, final_ffprobe_data)
+
         self.log("\n--- Auditing Audio Sync Delays ---")
         auditor = AudioSyncAuditor(self.ctx, self.runner)
         auditor._source_ffprobe_cache = self._shared_ffprobe_cache
@@ -203,7 +199,6 @@ class FinalAuditor:
         auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
         total_issues += auditor.run(final_mkv_path, final_mkvmerge_data, final_ffprobe_data)
 
-        # Final summary
         self.log("\n========================================")
         if total_issues == 0:
             self.log("✅ FINAL AUDIT PASSED - NO ISSUES FOUND")

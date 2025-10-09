@@ -15,6 +15,8 @@ from .track_order import TrackOrderAuditor
 from .language_tags import LanguageTagsAuditor
 from .track_names import TrackNamesAuditor
 from .attachments import AttachmentsAuditor
+from .drift_correction import DriftCorrectionAuditor
+from .global_shift import GlobalShiftAuditor
 
 __all__ = [
     'TrackFlagsAuditor',
@@ -31,4 +33,6 @@ __all__ = [
     'LanguageTagsAuditor',
     'TrackNamesAuditor',
     'AttachmentsAuditor',
+    'DriftCorrectionAuditor',
+    'GlobalShiftAuditor',
 ]

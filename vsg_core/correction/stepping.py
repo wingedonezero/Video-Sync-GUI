@@ -617,8 +617,6 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
         )
 
         if result.verdict == CorrectionVerdict.UNIFORM:
-            # THE FIX: This block no longer modifies the context's delay.
-            # It only logs the finding.
             new_delay = result.data['delay']
             runner._log_message(f"[SteppingCorrection] No stepping found. Refined uniform delay is {new_delay} ms.")
             runner._log_message(f"[SteppingCorrection] The globally-shifted delay from the main analysis will be used.")
@@ -648,14 +646,16 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
                     # Update the main track to point to corrected FLAC
                     target_item.extracted_path = corrected_path
                     target_item.is_corrected = True
+                    target_item.container_delay_ms = 0  # FIXED: New FLAC has no container delay
                     target_item.track = Track(
                         source=target_item.track.source, id=target_item.track.id, type=target_item.track.type,
                         props=StreamProps(
                             codec_id="FLAC",
                             lang=original_props.lang,
-                            name=original_props.name
+                            name=f"{original_props.name} (Stepping Corrected)" if original_props.name else "Stepping Corrected"  # FIXED: Clearer name
                         )
                     )
+                    target_item.apply_track_name = True
                     ctx.extracted_items.append(preserved_item)
                 else:
                     runner._log_message(f"[ERROR] Failed to apply correction plan to {target_item.extracted_path.name}. Keeping original.")

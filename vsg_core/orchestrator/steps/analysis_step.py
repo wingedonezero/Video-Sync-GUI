@@ -33,7 +33,7 @@ class AnalysisStep:
 
         # --- Part 1: Determine if a global shift is required ---
         ctx.global_shift_is_required = any(
-            t.get('type') == 'audio' and t.get('source') != 'Source 1'  # FIXED: Only audio matters
+            t.get('type') == 'audio' and t.get('source') != 'Source 1'
             for t in ctx.manual_layout
         )
         if ctx.global_shift_is_required:
@@ -62,7 +62,6 @@ class AnalysisStep:
                 delay_ms = track.get('container_delay_ms', 0)
                 source1_container_delays[tid] = delay_ms
 
-                # NEW: Log container delays for all track types for clarity
                 track_type = track.get('type')
                 if delay_ms != 0 and track_type in ['video', 'audio']:
                     runner._log_message(f"[Container Delay] Source 1 {track_type} track {tid} has container delay: {delay_ms:+.1f}ms")
@@ -77,14 +76,12 @@ class AnalysisStep:
             audio_tracks = [t for t in source1_info.get('tracks', []) if t.get('type') == 'audio']
 
             if ref_lang:
-                # Find track with matching language
                 for track in audio_tracks:
                     if (track.get('properties', {}).get('language', '') or '').strip().lower() == ref_lang:
                         source1_audio_track_id = track.get('id')
                         break
 
             if source1_audio_track_id is None and audio_tracks:
-                # Fallback to first audio track
                 source1_audio_track_id = audio_tracks[0].get('id')
 
             if source1_audio_track_id is not None:
@@ -92,7 +89,6 @@ class AnalysisStep:
                 ctx.source1_audio_container_delay_ms = source1_audio_container_delay
 
                 if source1_audio_container_delay != 0:
-                    # This message is specific to the correlation process
                     runner._log_message(f"[Container Delay] The delay of the analysis audio track ({source1_audio_container_delay:+.1f}ms) will be added to all correlation results.")
 
         # --- Step 2: Run correlation for other sources ---
@@ -138,7 +134,31 @@ class AnalysisStep:
 
             raw_delay_ms = _choose_final_delay(results, config, runner, source_key)
             if raw_delay_ms is None:
-                raise RuntimeError(f'Analysis for {source_key} failed to determine a reliable delay.')
+                # ENHANCED ERROR MESSAGE
+                accepted_count = len([r for r in results if r.get('accepted', False)])
+                min_required = config.get('min_accepted_chunks', 3)
+                total_chunks = len(results)
+
+                raise RuntimeError(
+                    f'Analysis failed for {source_key}: Could not determine a reliable delay.\n'
+                    f'  - Accepted chunks: {accepted_count}\n'
+                    f'  - Minimum required: {min_required}\n'
+                    f'  - Total chunks scanned: {total_chunks}\n'
+                    f'  - Match threshold: {config.get("min_match_pct", 5.0)}%\n'
+                    f'\n'
+                    f'Possible causes:\n'
+                    f'  - Audio quality is too poor for reliable correlation\n'
+                    f'  - Audio tracks are not from the same source material\n'
+                    f'  - Excessive noise or compression artifacts\n'
+                    f'  - Wrong language tracks selected for analysis\n'
+                    f'\n'
+                    f'Solutions:\n'
+                    f'  - Try lowering the "Minimum Match %" threshold in settings\n'
+                    f'  - Increase "Chunk Count" for more sample points\n'
+                    f'  - Try selecting different audio tracks (check language settings)\n'
+                    f'  - Use VideoDiff mode instead of Audio Correlation\n'
+                    f'  - Check that both files are from the same video source'
+                )
 
             # Calculate final delay including container delay chain correction
             final_delay_ms = round(raw_delay_ms + source1_audio_container_delay)
@@ -170,8 +190,7 @@ class AnalysisStep:
                 elif diagnosis == "STEPPING":
                     ctx.segment_flags[analysis_track_key] = { 'base_delay': final_delay_ms }
 
-        # ✅ FIX: Initialize Source 1 with 0ms base delay so it gets the global shift
-        # This ensures Source 1 subtitles (which have no container delays) stay in sync
+        # Initialize Source 1 with 0ms base delay so it gets the global shift
         source_delays["Source 1"] = 0
 
         # --- Step 3: Calculate Global Shift to Handle Negative Delays ---
@@ -180,16 +199,14 @@ class AnalysisStep:
         delays_to_consider = []
         if ctx.global_shift_is_required:
             runner._log_message("[Global Shift] Identifying delays from sources contributing audio tracks...")
-            # Collect delays only from sources that have audio in the layout
             for item in ctx.manual_layout:
                 item_source = item.get('source')
                 item_type = item.get('type')
-                if item_type == 'audio':  # FIXED: Only audio matters for sync
+                if item_type == 'audio':
                     if item_source in source_delays and source_delays[item_source] not in delays_to_consider:
                         delays_to_consider.append(source_delays[item_source])
                         runner._log_message(f"  - Considering delay from {item_source}: {source_delays[item_source]}ms")
 
-            # FIXED: Only include Source 1's AUDIO container delays (ignore video)
             if source1_container_delays and source1_info:
                 audio_container_delays = []
                 for track in source1_info.get('tracks', []):
@@ -206,7 +223,7 @@ class AnalysisStep:
         most_negative = min(delays_to_consider) if delays_to_consider else 0
         global_shift_ms = 0
 
-        if most_negative < 0: # No need to check ctx.global_shift_is_required again, it's implied by delays_to_consider
+        if most_negative < 0:
             global_shift_ms = abs(most_negative)
             runner._log_message(f"[Delay] Most negative relevant delay: {most_negative}ms")
             runner._log_message(f"[Delay] Applying lossless global shift: +{global_shift_ms}ms")
@@ -225,7 +242,6 @@ class AnalysisStep:
                         final_delay = delay + global_shift_ms
                         track_type = track.get('type')
 
-                        # Add note for video to clarify it will be ignored
                         note = " (will be ignored - video defines timeline)" if track_type == 'video' else ""
                         runner._log_message(f"  - Track {tid} ({track_type}): {delay:+.1f}ms → {final_delay:+.1f}ms{note}")
         else:
