@@ -18,19 +18,36 @@ class ExtractStep:
             ctx.extracted_items = []
             return ctx
 
-        # --- NEW: Read container delays for all sources ---
+        # --- Read container delays for all sources ---
         runner._log_message("--- Reading Container Delays from Source Files ---")
+
+        # This will hold the video delay for Source 1 to calculate relative audio delays
+        source1_video_delay_ms = 0
+
         for source_key, source_path in ctx.sources.items():
             info = get_stream_info_with_delays(str(source_path), runner, ctx.tool_paths)
             if info:
                 delays_for_source = {}
                 runner._log_message(f"[Container Delays] Reading delays from {source_key}:")
 
+                # If this is Source 1, find the video track's delay first
+                if source_key == 'Source 1':
+                    for track in info.get('tracks', []):
+                        if track.get('type') == 'video':
+                            source1_video_delay_ms = track.get('container_delay_ms', 0)
+                            break
+
                 for track in info.get('tracks', []):
                     tid = track.get('id')
                     track_type = track.get('type', 'unknown')
                     delay_ms = track.get('container_delay_ms', 0)
-                    delays_for_source[tid] = delay_ms
+
+                    # For Source 1 audio tracks, calculate the delay relative to the video.
+                    # For all other tracks, use the absolute delay.
+                    if source_key == 'Source 1' and track_type == 'audio':
+                        delays_for_source[tid] = delay_ms - source1_video_delay_ms
+                    else:
+                        delays_for_source[tid] = delay_ms
 
                     # Only log non-zero delays for audio/video tracks
                     if delay_ms != 0 and track_type in ['audio', 'video']:
@@ -116,7 +133,7 @@ class ExtractStep:
                     )
                 )
 
-                # NEW: Get the container delay for this track
+                # Get the container delay for this track
                 container_delay = ctx.container_delays.get(source, {}).get(int(trk['id']), 0)
 
                 plan_item = PlanItem(
@@ -144,7 +161,7 @@ class ExtractStep:
             plan_item.user_modified_path = sel.get('user_modified_path')
             plan_item.sync_to = sel.get('sync_to')
             plan_item.correction_source = sel.get('correction_source')
-            plan_item.custom_lang = sel.get('custom_lang', '')  # NEW: Preserve custom language
+            plan_item.custom_lang = sel.get('custom_lang', '')  # Preserve custom language
 
             items.append(plan_item)
 
