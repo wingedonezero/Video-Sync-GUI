@@ -1,6 +1,6 @@
 # vsg_core/postprocess/auditors/audio_channels.py
 # -*- coding: utf-8 -*-
-from typing import Dict
+from typing import Dict, Optional
 from pathlib import Path
 
 from vsg_core.models.enums import TrackType
@@ -27,16 +27,26 @@ class AudioChannelsAuditor(BaseAuditor):
             if not source_file:
                 continue
 
-            source_data = self._get_metadata(source_file, 'ffprobe')
-            if not source_data:
+            # Get both mkvmerge and ffprobe data for the source
+            source_mkv_data = self._get_metadata(source_file, 'mkvmerge')
+            source_ffprobe_data = self._get_metadata(source_file, 'ffprobe')
+            if not source_mkv_data or not source_ffprobe_data:
                 continue
 
-            # Find the source audio stream
-            source_audio_streams = [s for s in source_data.get('streams', []) if s.get('codec_type') == 'audio']
-            if plan_item.track.id >= len(source_audio_streams):
+            # Map the mkvmerge track ID to the ffprobe audio stream index
+            audio_stream_index = self._get_audio_stream_index_from_track_id(
+                source_mkv_data, plan_item.track.id
+            )
+            if audio_stream_index is None:
                 continue
 
-            source_audio = source_audio_streams[plan_item.track.id]
+            # Find the source audio stream using the correct index
+            source_audio_streams = [s for s in source_ffprobe_data.get('streams', [])
+                                  if s.get('codec_type') == 'audio']
+            if audio_stream_index >= len(source_audio_streams):
+                continue
+
+            source_audio = source_audio_streams[audio_stream_index]
 
             # Find corresponding stream in output
             actual_audio_streams = [s for s in actual_streams if s.get('codec_type') == 'audio']
@@ -64,7 +74,6 @@ class AudioChannelsAuditor(BaseAuditor):
 
                 if actual_channels < source_channels:
                     self.log(f"          CRITICAL: Audio was downmixed!")
-
                 issues += 1
             else:
                 # Also check channel layout if available
@@ -82,3 +91,25 @@ class AudioChannelsAuditor(BaseAuditor):
             self.log("✅ All audio channel layouts preserved correctly.")
 
         return issues
+
+    def _get_audio_stream_index_from_track_id(self, mkv_data: Dict, track_id: int) -> Optional[int]:
+        """
+        Maps an mkvmerge track ID to the corresponding audio stream index in ffprobe output.
+
+        This is needed because mkvmerge track IDs can be non-sequential and include all track types,
+        while ffprobe audio streams are indexed sequentially within their type.
+
+        Args:
+            mkv_data: mkvmerge -J output
+            track_id: The mkvmerge track ID to find
+
+        Returns:
+            The 0-based audio stream index, or None if not found
+        """
+        audio_counter = 0
+        for track in mkv_data.get('tracks', []):
+            if track['type'] == 'audio':
+                if track['id'] == track_id:
+                    return audio_counter
+                audio_counter += 1
+        return None
