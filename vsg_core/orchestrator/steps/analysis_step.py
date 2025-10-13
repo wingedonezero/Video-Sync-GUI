@@ -217,12 +217,30 @@ class AnalysisStep:
                     )
 
                     if source_has_audio_in_layout:
-                        ctx.segment_flags[analysis_track_key] = { 'base_delay': final_delay_ms }
+                        # *** THE FIX IS HERE ***
+                        # If stepping is detected, override the mode-based delay with the first segment's delay.
+                        first_accepted_chunk = next((r for r in results if r.get('accepted')), None)
+                        if first_accepted_chunk:
+                            initial_delay_ms = first_accepted_chunk['delay']
+                            final_delay_ms_for_stepping = round(initial_delay_ms + source1_audio_container_delay)
+
+                            runner._log_message(f"[Stepping Override] Stepping detected. Overriding delay for {source_key}.")
+                            runner._log_message(f"[Stepping Override] Using first segment's delay: {initial_delay_ms}ms")
+                            runner._log_message(f"[Stepping Override] Final delay for correction: {final_delay_ms_for_stepping}ms")
+
+                            # Update the main delay for this source and the base delay for the correction step
+                            source_delays[source_key] = final_delay_ms_for_stepping
+                            ctx.segment_flags[analysis_track_key] = { 'base_delay': final_delay_ms_for_stepping }
+                        else:
+                            # Fallback if something went wrong, though it shouldn't happen if diagnosis is STEPPING
+                            ctx.segment_flags[analysis_track_key] = { 'base_delay': final_delay_ms }
+
                     else:
                         runner._log_message(
                             f"[Stepping Detected] Stepping detected in {source_key}, but no audio tracks "
                             f"from this source are being used. Skipping stepping correction for {source_key}."
                         )
+
 
         # Initialize Source 1 with 0ms base delay so it gets the global shift
         source_delays["Source 1"] = 0
