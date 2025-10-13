@@ -234,18 +234,25 @@ class StepValidator:
                 "Merge planning failed: No mkvmerge command tokens generated"
             )
 
-        # NOTE: We don't check for '--output' here because it's added by the pipeline
-        # after this validation step runs
-
         errors = []
+        path_flags = {'--chapters', '--attach-file'}
+        in_parens = False
+
         for i, token in enumerate(ctx.tokens):
-            token_path = Path(token)
-            if (not token.startswith('-') and
-                token not in ['(', ')'] and
-                token_path.suffix and
-                i > 0):
-                # This looks like an input file path
-                if not token_path.exists():
+            if token == '(':
+                in_parens = True
+                continue
+            if token == ')':
+                in_parens = False
+                continue
+
+            prev_token = ctx.tokens[i - 1] if i > 0 else ''
+
+            is_path_argument = prev_token in path_flags
+            is_input_file = in_parens
+
+            if is_path_argument or is_input_file:
+                if not Path(token).exists():
                     errors.append(f"Input file missing from mux command: {token}")
 
         if errors:
