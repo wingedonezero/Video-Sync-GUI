@@ -41,7 +41,6 @@ class AnalysisStep:
         else:
             runner._log_message("[INFO] No audio tracks from secondary sources. Global shift will not be applied.")
 
-
         # NEW: Skip analysis if only Source 1 (remux-only mode)
         if len(ctx.sources) == 1:
             runner._log_message("--- Analysis Phase: Skipped (Remux-only mode - no sync sources) ---")
@@ -65,7 +64,6 @@ class AnalysisStep:
                 track_type = track.get('type')
                 if delay_ms != 0 and track_type in ['video', 'audio']:
                     runner._log_message(f"[Container Delay] Source 1 {track_type} track {tid} has container delay: {delay_ms:+.1f}ms")
-
 
         # Find which audio track from Source 1 will be used for correlation
         source1_audio_track_id = None
@@ -183,12 +181,48 @@ class AnalysisStep:
 
                 analysis_track_key = f"{source_key}_{target_track_id}"
 
+                # FIX 1: Only add to drift flags if this source has audio tracks being used
                 if diagnosis == "PAL_DRIFT":
-                    ctx.pal_drift_flags[analysis_track_key] = details
+                    source_has_audio_in_layout = any(
+                        item.get('source') == source_key and item.get('type') == 'audio'
+                        for item in ctx.manual_layout
+                    )
+
+                    if source_has_audio_in_layout:
+                        ctx.pal_drift_flags[analysis_track_key] = details
+                    else:
+                        runner._log_message(
+                            f"[PAL Drift Detected] PAL drift detected in {source_key}, but no audio tracks "
+                            f"from this source are being used. Skipping PAL correction for {source_key}."
+                        )
+
                 elif diagnosis == "LINEAR_DRIFT":
-                    ctx.linear_drift_flags[analysis_track_key] = details
+                    source_has_audio_in_layout = any(
+                        item.get('source') == source_key and item.get('type') == 'audio'
+                        for item in ctx.manual_layout
+                    )
+
+                    if source_has_audio_in_layout:
+                        ctx.linear_drift_flags[analysis_track_key] = details
+                    else:
+                        runner._log_message(
+                            f"[Linear Drift Detected] Linear drift detected in {source_key}, but no audio tracks "
+                            f"from this source are being used. Skipping linear drift correction for {source_key}."
+                        )
+
                 elif diagnosis == "STEPPING":
-                    ctx.segment_flags[analysis_track_key] = { 'base_delay': final_delay_ms }
+                    source_has_audio_in_layout = any(
+                        item.get('source') == source_key and item.get('type') == 'audio'
+                        for item in ctx.manual_layout
+                    )
+
+                    if source_has_audio_in_layout:
+                        ctx.segment_flags[analysis_track_key] = { 'base_delay': final_delay_ms }
+                    else:
+                        runner._log_message(
+                            f"[Stepping Detected] Stepping detected in {source_key}, but no audio tracks "
+                            f"from this source are being used. Skipping stepping correction for {source_key}."
+                        )
 
         # Initialize Source 1 with 0ms base delay so it gets the global shift
         source_delays["Source 1"] = 0
@@ -246,7 +280,6 @@ class AnalysisStep:
                         runner._log_message(f"  - Track {tid} ({track_type}): {delay:+.1f}ms → {final_delay:+.1f}ms{note}")
         else:
             runner._log_message(f"[Delay] All relevant delays are non-negative. No global shift needed.")
-
 
         # Store the calculated delays with global shift
         ctx.delays = Delays(source_delays_ms=source_delays, global_shift_ms=global_shift_ms)

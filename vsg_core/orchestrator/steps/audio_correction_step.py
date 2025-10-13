@@ -49,12 +49,25 @@ class AudioCorrectionStep:
         for analysis_key in ctx.pal_drift_flags:
             source_key = analysis_key.split('_')[0]
 
-            corrected_items = [
+            # FIX 2: Check if this source has audio tracks that need correction
+            audio_tracks_from_source = [
                 item for item in ctx.extracted_items
                 if (item.track.source == source_key and
                     item.track.type == TrackType.AUDIO and
-                    item.is_corrected and
                     not item.is_preserved)
+            ]
+
+            if not audio_tracks_from_source:
+                # No audio tracks from this source - validation passes
+                runner._log_message(
+                    f"[Validation] PAL correction skipped for {source_key}: "
+                    f"No audio tracks from this source in layout."
+                )
+                continue
+
+            corrected_items = [
+                item for item in audio_tracks_from_source
+                if item.is_corrected
             ]
 
             if not corrected_items:
@@ -80,12 +93,25 @@ class AudioCorrectionStep:
         for analysis_key in ctx.linear_drift_flags:
             source_key = analysis_key.split('_')[0]
 
-            corrected_items = [
+            # FIX 2: Check if this source has audio tracks that need correction
+            audio_tracks_from_source = [
                 item for item in ctx.extracted_items
                 if (item.track.source == source_key and
                     item.track.type == TrackType.AUDIO and
-                    item.is_corrected and
                     not item.is_preserved)
+            ]
+
+            if not audio_tracks_from_source:
+                # No audio tracks from this source - validation passes
+                runner._log_message(
+                    f"[Validation] Linear drift correction skipped for {source_key}: "
+                    f"No audio tracks from this source in layout."
+                )
+                continue
+
+            corrected_items = [
+                item for item in audio_tracks_from_source
+                if item.is_corrected
             ]
 
             if not corrected_items:
@@ -111,12 +137,25 @@ class AudioCorrectionStep:
         for analysis_key in ctx.segment_flags:
             source_key = analysis_key.split('_')[0]
 
-            corrected_items = [
+            # FIX 2: Check if this source has audio tracks that need correction
+            audio_tracks_from_source = [
                 item for item in ctx.extracted_items
                 if (item.track.source == source_key and
                     item.track.type == TrackType.AUDIO and
-                    item.is_corrected and
                     not item.is_preserved)
+            ]
+
+            if not audio_tracks_from_source:
+                # No audio tracks from this source - validation passes
+                runner._log_message(
+                    f"[Validation] Stepping correction skipped for {source_key}: "
+                    f"No audio tracks from this source in layout."
+                )
+                continue
+
+            corrected_items = [
+                item for item in audio_tracks_from_source
+                if item.is_corrected
             ]
 
             if not corrected_items:
