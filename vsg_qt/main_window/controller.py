@@ -163,6 +163,8 @@ class MainController:
         successful_jobs = 0
         jobs_with_warnings = 0
         failed_jobs = 0
+        stepping_jobs = []  # NEW: Track jobs with stepping
+
         for result in all_results:
             if result.get('status') == 'Failed':
                 failed_jobs += 1
@@ -171,14 +173,42 @@ class MainController:
             else:
                 successful_jobs += 1
 
+            # NEW: Track jobs that used stepping correction
+            if result.get('stepping_sources'):
+                job_name = result.get('name', 'Unknown')
+                stepping_sources = result.get('stepping_sources', [])
+                stepping_jobs.append({
+                    'name': job_name,
+                    'sources': stepping_sources
+                })
+
         summary_message = "\n--- Batch Summary ---\n"
         summary_message += f"  - Successful jobs: {successful_jobs}\n"
         summary_message += f"  - Jobs with warnings: {jobs_with_warnings}\n"
         summary_message += f"  - Failed jobs: {failed_jobs}\n"
+
+        # NEW: Add stepping detection summary
+        if stepping_jobs:
+            summary_message += f"\n⚠️  Jobs with Stepping Correction ({len(stepping_jobs)}):\n"
+            summary_message += "  (Manual review recommended to verify sync quality)\n"
+            for job_info in stepping_jobs:
+                sources_str = ', '.join(job_info['sources'])
+                summary_message += f"  • {job_info['name']} - Sources: {sources_str}\n"
+
         self.append_log(summary_message)
 
         if failed_jobs > 0:
             QMessageBox.critical(self.v, "Batch Complete", f"Finished processing {len(all_results)} jobs with {failed_jobs} failure(s).")
+        elif stepping_jobs:
+            # NEW: Show warning if any jobs used stepping
+            stepping_count = len(stepping_jobs)
+            msg = (
+                f"Finished processing {len(all_results)} jobs successfully.\n\n"
+                f"⚠️  Note: {stepping_count} job(s) used stepping correction.\n"
+                f"Please review these jobs to verify sync quality.\n\n"
+                f"See log for details."
+            )
+            QMessageBox.warning(self.v, "Batch Complete - Review Required", msg)
         elif jobs_with_warnings > 0:
             QMessageBox.warning(self.v, "Batch Complete", f"Finished processing {len(all_results)} jobs with {jobs_with_warnings} job(s) having warnings.")
         else:

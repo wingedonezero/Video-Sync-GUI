@@ -84,7 +84,13 @@ class JobPipeline:
             if not and_merge:
                 log_to_all('--- Analysis Complete (No Merge) ---')
                 self.progress(1.0)
-                return { 'status': 'Analyzed', 'delays': ctx.delays.source_delays_ms if ctx.delays else {}, 'name': Path(source1_file).name, 'issues': 0 }
+                return {
+                    'status': 'Analyzed',
+                    'delays': ctx.delays.source_delays_ms if ctx.delays else {},
+                    'name': Path(source1_file).name,
+                    'issues': 0,
+                    'stepping_sources': getattr(ctx, 'stepping_sources', [])  # NEW
+                }
 
             if not ctx.tokens:
                 raise RuntimeError('Internal error: mkvmerge tokens were not generated.')
@@ -121,15 +127,23 @@ class JobPipeline:
 
             self.progress(1.0)
             return {
-                'status': 'Merged', 'output': str(final_output_path),
+                'status': 'Merged',
+                'output': str(final_output_path),
                 'delays': ctx.delays.source_delays_ms if ctx.delays else {},
                 'name': Path(source1_file).name,
-                'issues': issues
+                'issues': issues,
+                'stepping_sources': getattr(ctx, 'stepping_sources', [])  # NEW
             }
 
         except Exception as e:
             log_to_all(f'[FATAL ERROR] Job failed: {e}')
-            return {'status': 'Failed', 'error': str(e), 'name': Path(source1_file).name, 'issues': 0}
+            return {
+                'status': 'Failed',
+                'error': str(e),
+                'name': Path(source1_file).name,
+                'issues': 0,
+                'stepping_sources': []  # NEW
+            }
         finally:
             if ctx_temp_dir and ctx_temp_dir.exists():
                 shutil.rmtree(ctx_temp_dir, ignore_errors=True)

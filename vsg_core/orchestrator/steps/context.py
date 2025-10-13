@@ -49,6 +49,9 @@ class Context:
     # A flag to determine if a global shift is necessary
     global_shift_is_required: bool = False
 
+    # NEW: Track which sources had stepping detected (for final report)
+    stepping_sources: List[str] = field(default_factory=list)
+
     # Results/summaries
     out_file: Optional[str] = None
     tokens: Optional[List[str]] = None

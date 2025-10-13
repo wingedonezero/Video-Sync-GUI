@@ -11,6 +11,51 @@ from vsg_core.analysis.audio_corr import run_audio_correlation
 from vsg_core.analysis.drift_detection import diagnose_audio_issue
 from vsg_core.extraction.tracks import get_stream_info, get_stream_info_with_delays
 
+def _find_first_stable_segment_delay(results: List[Dict[str, Any]], runner: CommandRunner) -> Optional[int]:
+    """
+    Find the delay from the first stable segment of chunks.
+
+    This function identifies consecutive accepted chunks that share the same delay value
+    and returns the delay from the first such stable group.
+
+    Args:
+        results: List of correlation results with 'delay', 'accepted', and 'start' keys
+        runner: CommandRunner for logging
+
+    Returns:
+        The delay value from the first stable segment, or None if no stable segment found
+    """
+    accepted = [r for r in results if r.get('accepted', False)]
+    if len(accepted) < 3:
+        return None
+
+    # Group consecutive chunks with the same delay (within 1ms tolerance)
+    segments = []
+    current_segment = {'delay': accepted[0]['delay'], 'count': 1, 'start_time': accepted[0]['start']}
+
+    for i in range(1, len(accepted)):
+        if abs(accepted[i]['delay'] - current_segment['delay']) <= 1:
+            # Same segment continues
+            current_segment['count'] += 1
+        else:
+            # New segment starts
+            segments.append(current_segment)
+            current_segment = {'delay': accepted[i]['delay'], 'count': 1, 'start_time': accepted[i]['start']}
+
+    # Don't forget the last segment
+    segments.append(current_segment)
+
+    # Return the delay from the first segment (which has the earliest start time)
+    if segments:
+        first_segment = segments[0]
+        runner._log_message(
+            f"[Stepping] First stable segment: {first_segment['count']} chunks at {first_segment['delay']}ms "
+            f"(starting at {first_segment['start_time']:.1f}s)"
+        )
+        return first_segment['delay']
+
+    return None
+
 def _choose_final_delay(results: List[Dict[str, Any]], config: Dict, runner: CommandRunner, role_tag: str) -> Optional[int]:
     min_match_pct = float(config.get('min_match_pct', 5.0))
     min_accepted_chunks = int(config.get('min_accepted_chunks', 3))
@@ -68,9 +113,25 @@ class AnalysisStep:
         # Find which audio track from Source 1 will be used for correlation
         source1_audio_track_id = None
         source1_audio_container_delay = 0
+        source1_video_container_delay = 0
 
         ref_lang = config.get('analysis_lang_source1')
         if source1_info:
+            # Get video track delay first
+            video_tracks = [t for t in source1_info.get('tracks', []) if t.get('type') == 'video']
+            if video_tracks:
+                video_track_id = video_tracks[0].get('id')
+                source1_video_container_delay = source1_container_delays.get(video_track_id, 0)
+
+            # CRITICAL FIX: Convert ALL Source 1 audio tracks to relative delays
+            # This ensures they're stored correctly for later use in extraction/mux
+            for track in source1_info.get('tracks', []):
+                if track.get('type') == 'audio':
+                    tid = track.get('id')
+                    absolute_delay = source1_container_delays.get(tid, 0)
+                    relative_delay = absolute_delay - source1_video_container_delay
+                    source1_container_delays[tid] = relative_delay  # Update with relative delay
+
             audio_tracks = [t for t in source1_info.get('tracks', []) if t.get('type') == 'audio']
 
             if ref_lang:
@@ -83,14 +144,23 @@ class AnalysisStep:
                 source1_audio_track_id = audio_tracks[0].get('id')
 
             if source1_audio_track_id is not None:
+                # Now get the relative delay (already corrected in the dict)
                 source1_audio_container_delay = source1_container_delays.get(source1_audio_track_id, 0)
                 ctx.source1_audio_container_delay_ms = source1_audio_container_delay
 
                 if source1_audio_container_delay != 0:
-                    runner._log_message(f"[Container Delay] The delay of the analysis audio track ({source1_audio_container_delay:+.1f}ms) will be added to all correlation results.")
+                    runner._log_message(
+                        f"[Container Delay] Audio track {source1_audio_track_id} relative delay (audio relative to video): "
+                        f"{source1_audio_container_delay:+.1f}ms. "
+                        f"This will be added to all correlation results."
+                    )
 
         # --- Step 2: Run correlation for other sources ---
         runner._log_message("\n--- Running Audio Correlation Analysis ---")
+
+        # Track which sources have stepping for final report
+        stepping_sources = []
+
         for source_key, source_file in sorted(ctx.sources.items()):
             if source_key == "Source 1":
                 continue
@@ -130,33 +200,64 @@ class AnalysisStep:
                 role_tag=source_key
             )
 
-            raw_delay_ms = _choose_final_delay(results, config, runner, source_key)
-            if raw_delay_ms is None:
-                # ENHANCED ERROR MESSAGE
-                accepted_count = len([r for r in results if r.get('accepted', False)])
-                min_required = config.get('min_accepted_chunks', 3)
-                total_chunks = len(results)
+            # --- CRITICAL FIX: Detect stepping BEFORE calculating mode delay ---
+            diagnosis = None
+            details = {}
+            stepping_override_delay = None
 
-                raise RuntimeError(
-                    f'Analysis failed for {source_key}: Could not determine a reliable delay.\n'
-                    f'  - Accepted chunks: {accepted_count}\n'
-                    f'  - Minimum required: {min_required}\n'
-                    f'  - Total chunks scanned: {total_chunks}\n'
-                    f'  - Match threshold: {config.get("min_match_pct", 5.0)}%\n'
-                    f'\n'
-                    f'Possible causes:\n'
-                    f'  - Audio quality is too poor for reliable correlation\n'
-                    f'  - Audio tracks are not from the same source material\n'
-                    f'  - Excessive noise or compression artifacts\n'
-                    f'  - Wrong language tracks selected for analysis\n'
-                    f'\n'
-                    f'Solutions:\n'
-                    f'  - Try lowering the "Minimum Match %" threshold in settings\n'
-                    f'  - Increase "Chunk Count" for more sample points\n'
-                    f'  - Try selecting different audio tracks (check language settings)\n'
-                    f'  - Use VideoDiff mode instead of Audio Correlation\n'
-                    f'  - Check that both files are from the same video source'
+            if config.get('segmented_enabled', False):
+                diagnosis, details = diagnose_audio_issue(
+                    video_path=source1_file,
+                    chunks=results,
+                    config=config,
+                    runner=runner,
+                    tool_paths=ctx.tool_paths,
+                    codec_id=target_codec_id
                 )
+
+                # If stepping detected, find the first segment's delay IMMEDIATELY
+                # APPLY THIS REGARDLESS of whether audio tracks are being used
+                if diagnosis == "STEPPING":
+                    stepping_sources.append(source_key)  # Track for final report
+                    first_segment_delay = _find_first_stable_segment_delay(results, runner)
+                    if first_segment_delay is not None:
+                        stepping_override_delay = first_segment_delay
+                        runner._log_message(f"[Stepping Detected] Found stepping in {source_key}")
+                        runner._log_message(f"[Stepping Override] Using first segment's delay: {stepping_override_delay}ms")
+                        runner._log_message(f"[Stepping Override] This delay will be used for ALL tracks (audio + subtitles) from {source_key}")
+
+            # Use stepping override if available, otherwise calculate mode
+            if stepping_override_delay is not None:
+                raw_delay_ms = stepping_override_delay
+                runner._log_message(f"{source_key.capitalize()} delay determined: {raw_delay_ms:+d} ms (first segment, stepping corrected).")
+            else:
+                raw_delay_ms = _choose_final_delay(results, config, runner, source_key)
+                if raw_delay_ms is None:
+                    # ENHANCED ERROR MESSAGE
+                    accepted_count = len([r for r in results if r.get('accepted', False)])
+                    min_required = config.get('min_accepted_chunks', 3)
+                    total_chunks = len(results)
+
+                    raise RuntimeError(
+                        f'Analysis failed for {source_key}: Could not determine a reliable delay.\n'
+                        f'  - Accepted chunks: {accepted_count}\n'
+                        f'  - Minimum required: {min_required}\n'
+                        f'  - Total chunks scanned: {total_chunks}\n'
+                        f'  - Match threshold: {config.get("min_match_pct", 5.0)}%\n'
+                        f'\n'
+                        f'Possible causes:\n'
+                        f'  - Audio quality is too poor for reliable correlation\n'
+                        f'  - Audio tracks are not from the same source material\n'
+                        f'  - Excessive noise or compression artifacts\n'
+                        f'  - Wrong language tracks selected for analysis\n'
+                        f'\n'
+                        f'Solutions:\n'
+                        f'  - Try lowering the "Minimum Match %" threshold in settings\n'
+                        f'  - Increase "Chunk Count" for more sample points\n'
+                        f'  - Try selecting different audio tracks (check language settings)\n'
+                        f'  - Use VideoDiff mode instead of Audio Correlation\n'
+                        f'  - Check that both files are from the same video source'
+                    )
 
             # Calculate final delay including container delay chain correction
             final_delay_ms = round(raw_delay_ms + source1_audio_container_delay)
@@ -168,20 +269,10 @@ class AnalysisStep:
 
             source_delays[source_key] = final_delay_ms
 
-            # --- Drift detection uses the raw correlation results ---
-            if config.get('segmented_enabled', False):
-                diagnosis, details = diagnose_audio_issue(
-                    video_path=source1_file,
-                    chunks=results,
-                    config=config,
-                    runner=runner,
-                    tool_paths=ctx.tool_paths,
-                    codec_id=target_codec_id
-                )
-
+            # --- Handle drift detection flags ---
+            if diagnosis:
                 analysis_track_key = f"{source_key}_{target_track_id}"
 
-                # FIX 1: Only add to drift flags if this source has audio tracks being used
                 if diagnosis == "PAL_DRIFT":
                     source_has_audio_in_layout = any(
                         item.get('source') == source_key and item.get('type') == 'audio'
@@ -217,30 +308,19 @@ class AnalysisStep:
                     )
 
                     if source_has_audio_in_layout:
-                        # *** THE FIX IS HERE ***
-                        # If stepping is detected, override the mode-based delay with the first segment's delay.
-                        first_accepted_chunk = next((r for r in results if r.get('accepted')), None)
-                        if first_accepted_chunk:
-                            initial_delay_ms = first_accepted_chunk['delay']
-                            final_delay_ms_for_stepping = round(initial_delay_ms + source1_audio_container_delay)
-
-                            runner._log_message(f"[Stepping Override] Stepping detected. Overriding delay for {source_key}.")
-                            runner._log_message(f"[Stepping Override] Using first segment's delay: {initial_delay_ms}ms")
-                            runner._log_message(f"[Stepping Override] Final delay for correction: {final_delay_ms_for_stepping}ms")
-
-                            # Update the main delay for this source and the base delay for the correction step
-                            source_delays[source_key] = final_delay_ms_for_stepping
-                            ctx.segment_flags[analysis_track_key] = { 'base_delay': final_delay_ms_for_stepping }
-                        else:
-                            # Fallback if something went wrong, though it shouldn't happen if diagnosis is STEPPING
-                            ctx.segment_flags[analysis_track_key] = { 'base_delay': final_delay_ms }
-
+                        # Store stepping correction info with the corrected delay
+                        ctx.segment_flags[analysis_track_key] = { 'base_delay': final_delay_ms }
+                        runner._log_message(
+                            f"[Stepping] Stepping correction will be applied to audio tracks from {source_key}."
+                        )
                     else:
                         runner._log_message(
                             f"[Stepping Detected] Stepping detected in {source_key}, but no audio tracks "
-                            f"from this source are being used. Skipping stepping correction for {source_key}."
+                            f"from this source are being used. Subtitle sync will still use first segment delay."
                         )
 
+        # Store stepping sources in context for final report
+        ctx.stepping_sources = stepping_sources
 
         # Initialize Source 1 with 0ms base delay so it gets the global shift
         source_delays["Source 1"] = 0
