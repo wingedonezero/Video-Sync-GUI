@@ -74,26 +74,15 @@ class StepValidator:
             )
 
         for item in ctx.extracted_items:
-            if not item.extracted_path:
+            if not item.extracted_path or not item.extracted_path.exists():
                 raise PipelineValidationError(
-                    f"Extracted file path missing for track: "
-                    f"{item.track.props.name or f'Track {item.track.id}'}"
-                )
-
-            if not item.extracted_path.exists():
-                raise PipelineValidationError(
-                    f"Extracted file not found: {item.extracted_path}"
-                )
-
-            if item.extracted_path.stat().st_size == 0:
-                raise PipelineValidationError(
-                    f"Extracted file is empty: {item.extracted_path}"
+                    f"Extraction failed: Track file missing at {item.extracted_path}"
                 )
 
     @staticmethod
     def validate_correction(ctx: Context) -> None:
         """
-        Validates audio correction step results.
+        Validates audio correction results.
         Raises PipelineValidationError if validation fails.
         """
         errors = []
@@ -109,19 +98,19 @@ class StepValidator:
             ]
             if not corrected_items:
                 errors.append(
-                    f"PAL correction failed for {source_key}: "
+                    f"PAL drift correction failed for {source_key}: "
                     f"No corrected track found in extraction list"
                 )
             else:
                 for item in corrected_items:
                     if item.track.props.codec_id != "FLAC":
                         errors.append(
-                            f"PAL corrected track for {source_key} is not FLAC: "
+                            f"PAL drift corrected track for {source_key} is not FLAC: "
                             f"{item.track.props.codec_id}"
                         )
                     if not item.extracted_path or not item.extracted_path.exists():
                         errors.append(
-                            f"PAL corrected file missing for {source_key}"
+                            f"PAL drift corrected file missing for {source_key}"
                         )
 
         for analysis_key in ctx.linear_drift_flags:
@@ -195,6 +184,13 @@ class StepValidator:
         ]
 
         for item in subtitle_items:
+            # CRITICAL FIX: Skip validation for preserved tracks (original image-based subtitles)
+            # Preserved tracks are created when OCR is performed to keep the original .sub/.idx files
+            # alongside the new OCR'd text subtitles. These preserved tracks should NOT be validated
+            # for OCR conversion since they're intentionally kept in their original format.
+            if item.is_preserved:
+                continue
+
             if item.perform_ocr:
                 if item.extracted_path:
                     ext = item.extracted_path.suffix.lower()

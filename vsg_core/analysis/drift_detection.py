@@ -61,14 +61,41 @@ def diagnose_audio_issue(
     delays_reshaped = delays.reshape(-1, 1)
     db = DBSCAN(eps=epsilon_ms, min_samples=min_samples).fit(delays_reshaped)
     unique_clusters = set(label for label in db.labels_ if label != -1)
+
     if len(unique_clusters) > 1:
-        runner._log_message(f"[Stepping Detected] Found {len(unique_clusters)} distinct timing clusters.")
-        return "STEPPING", {}
+        # CRITICAL FIX: Verify each cluster has enough chunks before declaring stepping
+        # False positives occur when only 1-2 chunks differ at the end (credits, etc.)
+        cluster_sizes = {}
+        for i, label in enumerate(db.labels_):
+            if label != -1:  # Ignore noise points
+                cluster_sizes[label] = cluster_sizes.get(label, 0) + 1
+
+        # Get the smallest cluster size
+        min_cluster_size = min(cluster_sizes.values()) if cluster_sizes else 0
+
+        # SAFEGUARD #1: Require at least 3 chunks in EVERY cluster to be confident it's real stepping
+        # Real stepping episodes span multiple chunks; 1-2 chunk differences are usually noise/credits
+        MIN_CHUNKS_PER_SEGMENT = 3
+
+        if min_cluster_size >= MIN_CHUNKS_PER_SEGMENT:
+            runner._log_message(
+                f"[Stepping Detected] Found {len(unique_clusters)} distinct timing clusters "
+                f"(smallest has {min_cluster_size} chunks)."
+            )
+            return "STEPPING", {"clusters": len(unique_clusters), "min_cluster_size": min_cluster_size}
+        else:
+            # Not enough evidence - likely end credits or brief scene change
+            runner._log_message(
+                f"[Stepping] Found {len(unique_clusters)} timing clusters, but smallest cluster "
+                f"has only {min_cluster_size} chunks (need {MIN_CHUNKS_PER_SEGMENT}+). "
+                f"Likely end credits or brief scene change - treating as uniform delay."
+            )
+            # Fall through to check for linear drift instead
 
     # --- Test 3: Check for General Linear Drift (Now Codec-Aware) ---
     slope, intercept = np.polyfit(times, delays, 1)
 
-    # <-- FIX: Use new settings from config -->
+    # Use new settings from config
     codec_name_lower = (codec_id or '').lower()
     is_lossless = 'pcm' in codec_name_lower or 'flac' in codec_name_lower or 'truehd' in codec_name_lower
 

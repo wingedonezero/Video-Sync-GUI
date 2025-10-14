@@ -48,18 +48,46 @@ class SubtitlesStep:
                 if ocr_output_path:
                     ocr_file = Path(ocr_output_path)
                     if not ocr_file.exists():
-                        raise RuntimeError(
-                            f"OCR failed for track {item.track.id}: "
-                            f"Output file was not created at {ocr_output_path}"
+                        # OCR tool didn't create output file - this is a critical failure
+                        runner._log_message(
+                            f"[OCR] ERROR: Output file was not created at {ocr_output_path}. "
+                            f"OCR completely failed for track {item.track.id}."
                         )
-                    # FIXED: Changed from == 0 to < 50 to allow for minimal SRT headers
-                    if ocr_file.stat().st_size < 50:
-                        raise RuntimeError(
-                            f"OCR failed for track {item.track.id}: "
-                            f"Output file is nearly empty at {ocr_output_path} "
-                            f"(size: {ocr_file.stat().st_size} bytes)"
+                        runner._log_message(
+                            f"[OCR] WARNING: Keeping original image-based subtitle for track {item.track.id} "
+                            f"({item.track.props.name or 'Unnamed'})."
                         )
+                        # Don't raise - just skip OCR for this track and keep original
+                        item.perform_ocr = False
+                        continue
 
+                    # Check if OCR produced meaningful output
+                    file_size = ocr_file.stat().st_size
+                    if file_size < 50:
+                        # OCR produced an empty or nearly-empty file
+                        runner._log_message(
+                            f"[OCR] WARNING: OCR output is nearly empty for track {item.track.id} "
+                            f"({item.track.props.name or 'Unnamed'}). "
+                            f"File size: {file_size} bytes."
+                        )
+                        runner._log_message(
+                            f"[OCR] This likely means the subtitle track is empty or contains no recognizable text."
+                        )
+                        runner._log_message(
+                            f"[OCR] Keeping original image-based subtitle instead."
+                        )
+                        # Don't raise - just skip OCR for this track and keep original
+                        item.perform_ocr = False
+
+                        # Clean up the empty OCR file
+                        try:
+                            ocr_file.unlink()
+                        except Exception as e:
+                            runner._log_message(f"[OCR] Note: Could not delete empty OCR file: {e}")
+
+                        continue
+
+                    # OCR succeeded - proceed with processing
                     preserved_item = copy.deepcopy(item)
                     preserved_item.is_preserved = True
                     original_props = preserved_item.track.props
@@ -100,11 +128,18 @@ class SubtitlesStep:
                             runner._log_message("--------------------------")
 
                 else:
-                    raise RuntimeError(
-                        f"OCR failed for track {item.track.id} "
+                    # run_ocr returned None - complete failure
+                    runner._log_message(
+                        f"[OCR] ERROR: OCR tool failed for track {item.track.id} "
                         f"({item.track.props.name or 'Unnamed'}). "
                         f"Check that subtile-ocr is installed and the IDX/SUB files are valid."
                     )
+                    runner._log_message(
+                        f"[OCR] WARNING: Keeping original image-based subtitle for track {item.track.id}."
+                    )
+                    # Don't raise - just skip OCR for this track
+                    item.perform_ocr = False
+                    continue
 
             if item.convert_to_ass and item.extracted_path and item.extracted_path.suffix.lower() == '.srt':
                 new_path = convert_srt_to_ass(str(item.extracted_path), runner, ctx.tool_paths)
