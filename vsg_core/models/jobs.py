@@ -35,7 +35,8 @@ class PlanItem:
     perform_ocr: bool = False
     perform_ocr_cleanup: bool = False
     container_delay_ms: int = 0
-    custom_lang: str = ''  # NEW: Custom language override
+    custom_lang: str = ''
+    aspect_ratio: Optional[str] = None  # NEW: Store original aspect ratio (e.g., "109:60")
 
 @dataclass(frozen=True)
 class MergePlan:

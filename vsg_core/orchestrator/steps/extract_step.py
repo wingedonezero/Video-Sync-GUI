@@ -71,6 +71,36 @@ class ExtractStep:
                 if not non_zero_delays:
                     runner._log_message(f"  All tracks have zero container delay")
 
+        # --- Read aspect ratios from ffprobe for all sources ---
+        runner._log_message("--- Reading Aspect Ratios from Source Files ---")
+        source_aspect_ratios: Dict[str, Dict[int, str]] = {}
+
+        for source_key, source_path in ctx.sources.items():
+            # Use ffprobe to get display_aspect_ratio
+            import json
+            cmd = ['ffprobe', '-v', 'error', '-show_streams', '-of', 'json', str(source_path)]
+            ffprobe_out = runner.run(cmd, ctx.tool_paths)
+
+            if ffprobe_out:
+                try:
+                    ffprobe_data = json.loads(ffprobe_out)
+                    aspect_ratios_for_source = {}
+
+                    for stream in ffprobe_data.get('streams', []):
+                        if stream.get('codec_type') == 'video':
+                            dar = stream.get('display_aspect_ratio')
+                            stream_index = stream.get('index', 0)
+
+                            if dar:
+                                # Match stream index to mkvmerge track ID (usually the same)
+                                aspect_ratios_for_source[stream_index] = dar
+                                runner._log_message(f"[{source_key}] Video track {stream_index} aspect ratio: {dar}")
+
+                    source_aspect_ratios[source_key] = aspect_ratios_for_source
+                except json.JSONDecodeError:
+                    runner._log_message(f"[WARNING] Could not parse ffprobe output for {source_key}")
+                    source_aspect_ratios[source_key] = {}
+
         # --- Part 1: Extract tracks from MKV sources ---
         all_extracted_tracks = []
         for source_key, source_path in ctx.sources.items():
@@ -112,7 +142,8 @@ class ExtractStep:
                 plan_item = PlanItem(
                     track=track_model,
                     extracted_path=temp_path,
-                    container_delay_ms=0  # External files have no container delay
+                    container_delay_ms=0,  # External files have no container delay
+                    aspect_ratio=None  # External subtitles have no aspect ratio
                 )
 
             else:
@@ -136,10 +167,16 @@ class ExtractStep:
                 # Get the container delay for this track
                 container_delay = ctx.container_delays.get(source, {}).get(int(trk['id']), 0)
 
+                # Get the aspect ratio for video tracks
+                aspect_ratio = None
+                if track_model.type == TrackType.VIDEO:
+                    aspect_ratio = source_aspect_ratios.get(source, {}).get(int(trk['id']))
+
                 plan_item = PlanItem(
                     track=track_model,
                     extracted_path=Path(trk['path']),
-                    container_delay_ms=container_delay  # Store the container delay
+                    container_delay_ms=container_delay,
+                    aspect_ratio=aspect_ratio  # Store the original aspect ratio
                 )
 
             plan_item.is_default = bool(sel.get('is_default', False))

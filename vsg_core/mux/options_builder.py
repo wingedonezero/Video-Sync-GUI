@@ -77,6 +77,10 @@ class MkvmergeOptionsBuilder:
                 if 'AC3' in cid or 'EAC3' in cid:
                     tokens += ['--remove-dialog-normalization-gain', '0']
 
+            # NEW: Preserve original aspect ratio for video tracks
+            if tr.type == TrackType.VIDEO and item.aspect_ratio:
+                tokens += ['--aspect-ratio', f"0:{item.aspect_ratio}"]
+
             if not item.extracted_path:
                 raise ValueError(f"Plan item at index {i} ('{tr.props.name}') missing extracted_path")
 

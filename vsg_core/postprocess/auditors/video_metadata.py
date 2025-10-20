@@ -125,9 +125,10 @@ class VideoMetadataAuditor(BaseAuditor):
             elif source_chroma and actual_chroma:
                 self.log(f"  ✓ Chroma subsampling preserved: {actual_chroma}")
 
-            # Check aspect ratios
+            # Check aspect ratios - must match exactly
             source_dar = source_video.get('display_aspect_ratio')
             actual_dar = actual_video.get('display_aspect_ratio')
+
             if source_dar != actual_dar:
                 self.log(f"[WARNING] Display aspect ratio mismatch! Source: '{source_dar}', Output: '{actual_dar}'")
                 issues += 1
