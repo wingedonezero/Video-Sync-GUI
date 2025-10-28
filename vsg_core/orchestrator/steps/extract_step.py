@@ -18,6 +18,23 @@ class ExtractStep:
             ctx.extracted_items = []
             return ctx
 
+        # CRITICAL FIX: Filter out video tracks from secondary sources BEFORE extraction
+        # Video tracks are only allowed from Source 1
+        filtered_layout = []
+        for item in ctx.manual_layout:
+            source = item.get('source', '')
+            track_type = item.get('type', '')
+
+            # Block video tracks from any source except Source 1
+            if track_type == 'video' and source != 'Source 1':
+                runner._log_message(f"[WARNING] Skipping video track from {source} (ID {item.get('id')}). Video is only allowed from Source 1.")
+                continue
+
+            filtered_layout.append(item)
+
+        # Update the context with the filtered layout
+        ctx.manual_layout = filtered_layout
+
         # --- Read container delays for all sources ---
         runner._log_message("--- Reading Container Delays from Source Files ---")
 

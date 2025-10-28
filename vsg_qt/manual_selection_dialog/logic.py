@@ -41,8 +41,10 @@ class ManualLogic:
                 realized_layout.append(new_item)
 
         for track_data in realized_layout:
-            if not self.is_blocked_video(track_data):
-                self.v.final_list.add_track_widget(track_data, preset=True)
+            # CRITICAL FIX: Filter out video tracks from secondary sources
+            if self.is_blocked_video(track_data):
+                continue
+            self.v.final_list.add_track_widget(track_data, preset=True)
 
     def get_final_layout_and_attachments(self) -> tuple[List[Dict], List[str]]:
         """Builds the layout from widgets and gets selected attachment sources."""

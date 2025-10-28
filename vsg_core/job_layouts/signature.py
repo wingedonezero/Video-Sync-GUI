@@ -57,6 +57,9 @@ class EnhancedSignatureGenerator:
         """
         Generates a detailed, order-sensitive signature of the file structure.
         This is used for exact compatibility checking.
+
+        CRITICAL FIX: Now includes track IDs to prevent layouts from being applied
+        to files where tracks are in different orders.
         """
         structure = {}
         for source_key, tracks in sorted(track_info.items()):
@@ -65,6 +68,7 @@ class EnhancedSignatureGenerator:
                 track_type = track.get('type')
                 if track_type in source_structure:
                     source_structure[track_type].append({
+                        'id': track.get('id'),  # ADDED: Track ID for exact matching
                         'codec_id': track.get('codec_id', ''),
                         'lang': track.get('lang', 'und'),
                     })
