@@ -271,6 +271,75 @@ class AnalysisTab(QWidget):
         segment_layout.addRow("Min. Correlation Confidence:", self.widgets['segment_min_confidence_ratio'])
         segment_layout.addRow("Fine Scan Chunk Duration:", self.widgets['segment_fine_chunk_s'])
         segment_layout.addRow("Fine Scan Iterations:", self.widgets['segment_fine_iterations'])
+
+        segment_layout.addRow(QLabel("<b>Intelligent Gap Handling</b>"))
+        self.widgets['segment_gap_handling_mode'] = QComboBox()
+        self.widgets['segment_gap_handling_mode'].addItems(['auto', 'always_stretch', 'always_silence'])
+        self.widgets['segment_gap_handling_mode'].setToolTip(
+            "How to handle gaps between segments:\n"
+            "- auto: Smart classification (tiny=stretch, large=silence)\n"
+            "- always_stretch: Force time-stretching for all gaps\n"
+            "- always_silence: Force silence insertion/removal (old behavior)"
+        )
+
+        self.widgets['segment_gap_tiny_threshold_ms'] = QSpinBox()
+        self.widgets['segment_gap_tiny_threshold_ms'].setRange(10, 100)
+        self.widgets['segment_gap_tiny_threshold_ms'].setSuffix(" ms")
+        self.widgets['segment_gap_tiny_threshold_ms'].setToolTip(
+            "Gaps smaller than this are considered 'tiny' (frame-level).\n"
+            "These will use time-stretching to avoid audible pops."
+        )
+
+        self.widgets['segment_gap_small_threshold_ms'] = QSpinBox()
+        self.widgets['segment_gap_small_threshold_ms'].setRange(50, 500)
+        self.widgets['segment_gap_small_threshold_ms'].setSuffix(" ms")
+        self.widgets['segment_gap_small_threshold_ms'].setToolTip(
+            "Gaps between tiny and this threshold are 'small'.\n"
+            "Reserved for future crossfade implementation."
+        )
+
+        self.widgets['segment_gap_medium_threshold_ms'] = QSpinBox()
+        self.widgets['segment_gap_medium_threshold_ms'].setRange(200, 2000)
+        self.widgets['segment_gap_medium_threshold_ms'].setSuffix(" ms")
+        self.widgets['segment_gap_medium_threshold_ms'].setToolTip(
+            "Gaps between small and this threshold are 'medium'.\n"
+            "Reserved for future faded silence implementation."
+        )
+
+        self.widgets['segment_stretch_window_s'] = QDoubleSpinBox()
+        self.widgets['segment_stretch_window_s'].setRange(1.0, 15.0)
+        self.widgets['segment_stretch_window_s'].setSuffix(" s")
+        self.widgets['segment_stretch_window_s'].setDecimals(1)
+        self.widgets['segment_stretch_window_s'].setToolTip(
+            "Duration of the audio window to time-stretch.\n"
+            "Larger windows make stretching less noticeable but affect more audio."
+        )
+
+        self.widgets['segment_stretch_min_window_s'] = QDoubleSpinBox()
+        self.widgets['segment_stretch_min_window_s'].setRange(0.5, 10.0)
+        self.widgets['segment_stretch_min_window_s'].setSuffix(" s")
+        self.widgets['segment_stretch_min_window_s'].setDecimals(1)
+        self.widgets['segment_stretch_min_window_s'].setToolTip(
+            "Minimum window size for time-stretching.\n"
+            "If segment is shorter than this, falls back to silence."
+        )
+
+        self.widgets['segment_crossfade_duration_ms'] = QSpinBox()
+        self.widgets['segment_crossfade_duration_ms'].setRange(5, 100)
+        self.widgets['segment_crossfade_duration_ms'].setSuffix(" ms")
+        self.widgets['segment_crossfade_duration_ms'].setToolTip(
+            "Duration of crossfade for small gaps.\n"
+            "(Not yet implemented - reserved for future use)"
+        )
+
+        segment_layout.addRow("Gap Handling Mode:", self.widgets['segment_gap_handling_mode'])
+        segment_layout.addRow("Tiny Gap Threshold:", self.widgets['segment_gap_tiny_threshold_ms'])
+        segment_layout.addRow("Small Gap Threshold:", self.widgets['segment_gap_small_threshold_ms'])
+        segment_layout.addRow("Medium Gap Threshold:", self.widgets['segment_gap_medium_threshold_ms'])
+        segment_layout.addRow("Time-Stretch Window:", self.widgets['segment_stretch_window_s'])
+        segment_layout.addRow("Min Stretch Window:", self.widgets['segment_stretch_min_window_s'])
+        segment_layout.addRow("Crossfade Duration:", self.widgets['segment_crossfade_duration_ms'])
+
         main_layout.addWidget(segment_group)
 
         main_layout.addStretch(1)
