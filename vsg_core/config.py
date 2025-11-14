@@ -50,6 +50,7 @@ class AppConfig:
             'scan_chunk_count': 10,
             'scan_chunk_duration': 15,
             'min_match_pct': 5.0,
+            'delay_selection_mode': 'Mode (Most Common)',
             'videodiff_error_min': 0.0,
             'videodiff_error_max': 100.0,
             'use_soxr': False,

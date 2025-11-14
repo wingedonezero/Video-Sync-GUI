@@ -151,11 +151,13 @@ class AnalysisTab(QWidget):
         self.widgets['scan_chunk_duration'] = QSpinBox(); self.widgets['scan_chunk_duration'].setRange(1, 120); self.widgets['scan_chunk_duration'].setToolTip("The length (in seconds) of each individual audio segment to be analyzed.")
         self.widgets['min_match_pct'] = QDoubleSpinBox(); self.widgets['min_match_pct'].setRange(0.1, 100.0); self.widgets['min_match_pct'].setDecimals(1); self.widgets['min_match_pct'].setSingleStep(1.0); self.widgets['min_match_pct'].setToolTip("The minimum correlation score for an audio chunk to be considered a valid match.")
         self.widgets['min_accepted_chunks'] = QSpinBox(); self.widgets['min_accepted_chunks'].setRange(1, 100); self.widgets['min_accepted_chunks'].setToolTip("The minimum number of valid chunks required for the analysis to be considered successful.")
+        self.widgets['delay_selection_mode'] = QComboBox(); self.widgets['delay_selection_mode'].addItems(['Mode (Most Common)', 'First Stable', 'Average']); self.widgets['delay_selection_mode'].setToolTip("How to choose the final delay from multiple chunk measurements:\n\n• Mode (Most Common) - Picks the delay that appears most frequently (Default)\n  Best for: Files with stable sync throughout most of the duration\n\n• First Stable - Uses the delay from the first accepted chunk\n  Best for: Files where sync changes mid-file (stepping issues)\n\n• Average - Calculates the mean of all delay measurements\n  Best for: Files with small variations around a central value")
         core_layout.addRow("Correlation Method:", self.widgets['correlation_method'])
         core_layout.addRow("Number of Chunks:", self.widgets['scan_chunk_count'])
         core_layout.addRow("Duration of Chunks (s):", self.widgets['scan_chunk_duration'])
         core_layout.addRow("Minimum Match Confidence (%):", self.widgets['min_match_pct'])
         core_layout.addRow("Minimum Accepted Chunks:", self.widgets['min_accepted_chunks'])
+        core_layout.addRow("Delay Selection Method:", self.widgets['delay_selection_mode'])
         main_layout.addWidget(core_group)
 
         adv_filter_group = QGroupBox("Step 3: Advanced Filtering & Scan Controls")

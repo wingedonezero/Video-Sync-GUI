@@ -59,15 +59,27 @@ def _find_first_stable_segment_delay(results: List[Dict[str, Any]], runner: Comm
 def _choose_final_delay(results: List[Dict[str, Any]], config: Dict, runner: CommandRunner, role_tag: str) -> Optional[int]:
     min_match_pct = float(config.get('min_match_pct', 5.0))
     min_accepted_chunks = int(config.get('min_accepted_chunks', 3))
+    delay_mode = config.get('delay_selection_mode', 'Mode (Most Common)')
 
     accepted = [r for r in results if r.get('accepted', False)]
     if len(accepted) < min_accepted_chunks:
         runner._log_message(f"[ERROR] Analysis failed: Only {len(accepted)} chunks were accepted.")
         return None
 
-    counts = Counter(r['delay'] for r in accepted)
-    winner = counts.most_common(1)[0][0]
-    runner._log_message(f"{role_tag.capitalize()} delay determined: {winner:+d} ms (mode).")
+    delays = [r['delay'] for r in accepted]
+
+    if delay_mode == 'First Stable':
+        winner = delays[0]
+        method_label = "first stable"
+    elif delay_mode == 'Average':
+        winner = round(sum(delays) / len(delays))
+        method_label = "average"
+    else:  # Mode (Most Common) - default
+        counts = Counter(delays)
+        winner = counts.most_common(1)[0][0]
+        method_label = "mode"
+
+    runner._log_message(f"{role_tag.capitalize()} delay determined: {winner:+d} ms ({method_label}).")
     return winner
 
 class AnalysisStep:
