@@ -112,6 +112,15 @@ class AppConfig:
             'segment_min_confidence_ratio': 5.0,
             'segment_fine_chunk_s': 2.0,
             'segment_fine_iterations': 10,
+
+            # --- Intelligent Gap Handling ---
+            'segment_gap_handling_mode': 'auto',  # 'auto', 'always_stretch', 'always_silence'
+            'segment_gap_tiny_threshold_ms': 50,  # Below this: time-stretch (frame-level)
+            'segment_gap_small_threshold_ms': 200,  # Below this: crossfade option
+            'segment_gap_medium_threshold_ms': 500,  # Below this: faded silence
+            'segment_stretch_window_s': 5.0,  # Window size for time-stretching
+            'segment_stretch_min_window_s': 2.0,  # Minimum window size
+            'segment_crossfade_duration_ms': 20,  # Crossfade length for small gaps
         }
         self.settings = self.defaults.copy()
         self.load()

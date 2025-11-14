@@ -26,6 +26,13 @@ class CorrectionVerdict(Enum):
     STEPPED = auto()
     FAILED = auto()
 
+class GapHandlingStrategy(Enum):
+    """Strategy for handling gaps between segments."""
+    TIME_STRETCH = auto()    # Stretch audio window to absorb gap
+    CROSSFADE = auto()       # Crossfade between segments
+    SILENCE = auto()         # Insert/remove silence (current behavior)
+    FADED_SILENCE = auto()   # Silence with fade in/out
+
 @dataclass
 class CorrectionResult:
     verdict: CorrectionVerdict
@@ -38,6 +45,15 @@ class AudioSegment:
     end_s: float
     delay_ms: int
     drift_rate_ms_s: float = 0.0
+
+@dataclass
+class GapClassification:
+    """Classification result for a gap between segments."""
+    gap_ms: float
+    strategy: GapHandlingStrategy
+    stretch_window_s: Optional[float] = None
+    crossfade_duration_ms: Optional[float] = None
+    reason: str = ""
 
 def _get_audio_properties(file_path: str, stream_index: int, runner: CommandRunner, tool_paths: dict) -> Tuple[int, str, int]:
     cmd = [ 'ffprobe', '-v', 'error', '-select_streams', f'a:{stream_index}', '-show_entries', 'stream=channels,channel_layout,sample_rate', '-of', 'json', str(file_path) ]
@@ -57,6 +73,268 @@ class SteppingCorrector:
         self.tool_paths = tool_paths
         self.config = config
         self.log = runner._log_message
+
+    def _classify_gap(self, gap_ms: float, segment_duration_s: float) -> GapClassification:
+        """
+        Classify a gap and determine the best correction strategy.
+
+        Args:
+            gap_ms: Gap size in milliseconds (positive = insert, negative = remove)
+            segment_duration_s: Duration of the segment preceding this gap
+
+        Returns:
+            GapClassification with recommended strategy and parameters
+        """
+        abs_gap = abs(gap_ms)
+
+        # Get thresholds from config
+        tiny_threshold = self.config.get('segment_gap_tiny_threshold_ms', 50)
+        small_threshold = self.config.get('segment_gap_small_threshold_ms', 200)
+        medium_threshold = self.config.get('segment_gap_medium_threshold_ms', 500)
+
+        # Get mode override
+        mode = self.config.get('segment_gap_handling_mode', 'auto')
+
+        # Force mode if specified
+        if mode == 'always_stretch' and abs_gap < medium_threshold:
+            window_s = self.config.get('segment_stretch_window_s', 5.0)
+            min_window_s = self.config.get('segment_stretch_min_window_s', 2.0)
+            actual_window_s = min(window_s, max(min_window_s, segment_duration_s * 0.9))
+            return GapClassification(
+                gap_ms=gap_ms,
+                strategy=GapHandlingStrategy.TIME_STRETCH,
+                stretch_window_s=actual_window_s,
+                reason=f"Force mode: always_stretch"
+            )
+        elif mode == 'always_silence':
+            return GapClassification(
+                gap_ms=gap_ms,
+                strategy=GapHandlingStrategy.SILENCE,
+                reason=f"Force mode: always_silence"
+            )
+
+        # Auto mode - classify by gap size
+        if abs_gap < tiny_threshold:
+            # Tiny gaps: Time-stretch (frame-level corrections)
+            window_s = self.config.get('segment_stretch_window_s', 5.0)
+            min_window_s = self.config.get('segment_stretch_min_window_s', 2.0)
+
+            # Don't make window larger than 90% of segment duration
+            actual_window_s = min(window_s, max(min_window_s, segment_duration_s * 0.9))
+
+            if actual_window_s < min_window_s:
+                # Segment too short for time-stretching, fall back to silence
+                return GapClassification(
+                    gap_ms=gap_ms,
+                    strategy=GapHandlingStrategy.SILENCE,
+                    reason=f"Segment too short ({segment_duration_s:.1f}s) for time-stretch"
+                )
+
+            return GapClassification(
+                gap_ms=gap_ms,
+                strategy=GapHandlingStrategy.TIME_STRETCH,
+                stretch_window_s=actual_window_s,
+                reason=f"Tiny gap ({abs_gap:.1f}ms) - frame-level correction"
+            )
+
+        elif abs_gap < small_threshold:
+            # Small gaps: Crossfade option
+            crossfade_ms = self.config.get('segment_crossfade_duration_ms', 20)
+            return GapClassification(
+                gap_ms=gap_ms,
+                strategy=GapHandlingStrategy.CROSSFADE,
+                crossfade_duration_ms=crossfade_ms,
+                reason=f"Small gap ({abs_gap:.1f}ms) - crossfade recommended"
+            )
+
+        elif abs_gap < medium_threshold:
+            # Medium gaps: Faded silence
+            return GapClassification(
+                gap_ms=gap_ms,
+                strategy=GapHandlingStrategy.FADED_SILENCE,
+                reason=f"Medium gap ({abs_gap:.1f}ms) - faded silence"
+            )
+
+        else:
+            # Large gaps: Pure silence (current behavior)
+            return GapClassification(
+                gap_ms=gap_ms,
+                strategy=GapHandlingStrategy.SILENCE,
+                reason=f"Large gap ({abs_gap:.1f}ms) - pure silence/removal"
+            )
+
+    def _apply_stretch_correction(
+        self,
+        pcm_data: np.ndarray,
+        segment_start_s: float,
+        segment_end_s: float,
+        gap_ms: float,
+        stretch_window_s: float,
+        sample_rate: int,
+        channels: int,
+        channel_layout: str,
+        assembly_dir: Path,
+        segment_index: int
+    ) -> Optional[Path]:
+        """
+        Apply time-stretch correction to absorb a gap.
+
+        Args:
+            pcm_data: Full PCM audio data
+            segment_start_s: Start time of the segment
+            segment_end_s: End time of the segment
+            gap_ms: Gap to absorb (positive = needs stretching, negative = needs compression)
+            stretch_window_s: Window size to stretch (from end of segment backwards)
+            sample_rate: Audio sample rate
+            channels: Number of audio channels
+            channel_layout: Channel layout string
+            assembly_dir: Directory for temporary files
+            segment_index: Index for file naming
+
+        Returns:
+            Path to the stretched segment file, or None on failure
+        """
+        # Calculate the actual window to stretch (from the end of segment backwards)
+        window_end_s = segment_end_s
+        window_start_s = max(segment_start_s, segment_end_s - stretch_window_s)
+        actual_window_s = window_end_s - window_start_s
+
+        if actual_window_s < 0.1:
+            self.log(f"    [WARN] Window too small ({actual_window_s:.2f}s), skipping stretch")
+            return None
+
+        # Calculate stretch ratio
+        # Positive gap means we need to slow down (stretch) to create more time
+        original_duration_ms = actual_window_s * 1000.0
+        target_duration_ms = original_duration_ms + gap_ms
+        tempo_ratio = target_duration_ms / original_duration_ms
+
+        # Sanity check - don't stretch more than 10%
+        if abs(tempo_ratio - 1.0) > 0.10:
+            self.log(f"    [WARN] Stretch ratio too extreme ({tempo_ratio:.4f}), falling back to silence")
+            return None
+
+        self.log(f"    - Time-stretching {actual_window_s:.2f}s window by {tempo_ratio:.4f}x to absorb {gap_ms:+.1f}ms gap")
+
+        # Extract the window to stretch
+        window_start_sample = int(window_start_s * sample_rate) * channels
+        window_end_sample = int(window_end_s * sample_rate) * channels
+
+        if window_end_sample > len(pcm_data):
+            window_end_sample = len(pcm_data)
+
+        window_pcm = pcm_data[window_start_sample:window_end_sample]
+
+        if window_pcm.size == 0:
+            self.log(f"    [WARN] Empty window, skipping stretch")
+            return None
+
+        # Encode window to temp file
+        window_file = assembly_dir / f"stretch_window_{segment_index:03d}.flac"
+        encode_cmd = [
+            'ffmpeg', '-y', '-v', 'error', '-nostdin',
+            '-f', 's32le', '-ar', str(sample_rate), '-ac', str(channels),
+            '-channel_layout', channel_layout, '-i', '-',
+            '-map_metadata', '-1',
+            '-map_metadata:s:a', '-1',
+            '-fflags', '+bitexact',
+            '-c:a', 'flac',
+            str(window_file)
+        ]
+
+        if self.runner.run(encode_cmd, self.tool_paths, is_binary=True, input_data=window_pcm.tobytes()) is None:
+            self.log(f"    [ERROR] Failed to encode stretch window")
+            return None
+
+        # Apply time-stretch using configured engine
+        stretched_file = assembly_dir / f"stretch_window_{segment_index:03d}_stretched.flac"
+        resample_engine = self.config.get('segment_resample_engine', 'rubberband')
+
+        filter_chain = ''
+        if resample_engine == 'rubberband':
+            rb_opts = [f'tempo={tempo_ratio}']
+            if not self.config.get('segment_rb_pitch_correct', False):
+                rb_opts.append(f'pitch={tempo_ratio}')
+            rb_opts.append(f"transients={self.config.get('segment_rb_transients', 'crisp')}")
+            if self.config.get('segment_rb_smoother', True):
+                rb_opts.append('smoother=on')
+            if self.config.get('segment_rb_pitchq', True):
+                rb_opts.append('pitchq=on')
+            filter_chain = 'rubberband=' + ':'.join(rb_opts)
+
+        elif resample_engine == 'atempo':
+            filter_chain = f'atempo={tempo_ratio}'
+
+        else:  # Default to aresample
+            new_sample_rate = sample_rate * tempo_ratio
+            filter_chain = f'asetrate={new_sample_rate},aresample={sample_rate}'
+
+        resample_cmd = [
+            'ffmpeg', '-y', '-nostdin', '-v', 'error',
+            '-i', str(window_file),
+            '-af', filter_chain,
+            '-map_metadata', '-1',
+            '-map_metadata:s:a', '-1',
+            '-fflags', '+bitexact',
+            str(stretched_file)
+        ]
+
+        if self.runner.run(resample_cmd, self.tool_paths) is None:
+            error_msg = f"Time-stretching with '{resample_engine}' failed"
+            if resample_engine == 'rubberband':
+                error_msg += " (Ensure your FFmpeg build includes 'librubberband')"
+            self.log(f"    [ERROR] {error_msg}")
+            return None
+
+        # If the window doesn't cover the entire segment, we need to combine unstretched + stretched parts
+        if window_start_s > segment_start_s:
+            # Extract unstretched beginning
+            unstretched_start_sample = int(segment_start_s * sample_rate) * channels
+            unstretched_end_sample = int(window_start_s * sample_rate) * channels
+            unstretched_pcm = pcm_data[unstretched_start_sample:unstretched_end_sample]
+
+            if unstretched_pcm.size > 0:
+                # Encode unstretched part
+                unstretched_file = assembly_dir / f"stretch_unstretched_{segment_index:03d}.flac"
+                encode_cmd = [
+                    'ffmpeg', '-y', '-v', 'error', '-nostdin',
+                    '-f', 's32le', '-ar', str(sample_rate), '-ac', str(channels),
+                    '-channel_layout', channel_layout, '-i', '-',
+                    '-map_metadata', '-1',
+                    '-map_metadata:s:a', '-1',
+                    '-fflags', '+bitexact',
+                    '-c:a', 'flac',
+                    str(unstretched_file)
+                ]
+                if self.runner.run(encode_cmd, self.tool_paths, is_binary=True, input_data=unstretched_pcm.tobytes()) is None:
+                    self.log(f"    [ERROR] Failed to encode unstretched part")
+                    return None
+
+                # Concatenate unstretched + stretched
+                combined_file = assembly_dir / f"stretch_combined_{segment_index:03d}.flac"
+                concat_list = assembly_dir / f"stretch_concat_{segment_index:03d}.txt"
+                concat_list.write_text(
+                    f"file '{unstretched_file.name}'\nfile '{stretched_file.name}'",
+                    encoding='utf-8'
+                )
+
+                concat_cmd = [
+                    'ffmpeg', '-y', '-v', 'error',
+                    '-f', 'concat', '-safe', '0', '-i', str(concat_list),
+                    '-map_metadata', '-1',
+                    '-map_metadata:s:a', '-1',
+                    '-fflags', '+bitexact',
+                    '-c:a', 'flac',
+                    str(combined_file)
+                ]
+                if self.runner.run(concat_cmd, self.tool_paths) is None:
+                    self.log(f"    [ERROR] Failed to concatenate stretched parts")
+                    return None
+
+                return combined_file
+
+        # Window covers entire segment, just return stretched version
+        return stretched_file
 
     def _get_codec_id(self, file_path: str) -> str:
         """Uses ffprobe to get the codec name for a given audio file."""
@@ -275,39 +553,108 @@ class SteppingCorrector:
         try:
             pcm_duration_s = len(pcm_data) / float(sample_rate * channels)
 
+            # Track segments that need time-stretch correction (processed before gap)
+            segments_to_stretch = {}
+
+            # First pass: classify all gaps and identify segments that need stretching
             for i, segment in enumerate(edl):
-                silence_to_add_ms = segment.delay_ms - current_base_delay
-                if abs(silence_to_add_ms) > 10:
-                    if silence_to_add_ms > 0:
-                        self.log(f"    - At {segment.start_s:.3f}s: Inserting {silence_to_add_ms}ms of pure silence.")
-                        silence_duration_s = silence_to_add_ms / 1000.0
-                        silence_file = assembly_dir / f"silence_{i:03d}.flac"
+                gap_ms = segment.delay_ms - current_base_delay
 
-                        silence_samples = int(silence_duration_s * sample_rate) * channels
-                        silence_pcm = np.zeros(silence_samples, dtype=np.int32)
+                if abs(gap_ms) > 10:
+                    # Calculate segment duration for classification
+                    segment_start_s_on_timeline = segment.start_s
+                    segment_end_s_on_timeline = edl[i+1].start_s if i + 1 < len(edl) else pcm_duration_s
+                    segment_duration_s = segment_end_s_on_timeline - segment_start_s_on_timeline
 
-                        encode_cmd = [
-                            'ffmpeg', '-y', '-v', 'error', '-nostdin',
-                            '-f', 's32le', '-ar', str(sample_rate), '-ac', str(channels),
-                            '-channel_layout', channel_layout, '-i', '-',
-                            '-map_metadata', '-1',
-                            '-map_metadata:s:a', '-1',
-                            '-fflags', '+bitexact',
-                            '-c:a', 'flac',
-                            str(silence_file)
-                        ]
-                        if self.runner.run(encode_cmd, self.tool_paths, is_binary=True, input_data=silence_pcm.tobytes()) is not None:
-                            segment_files.append(f"file '{silence_file.name}'")
-                    else:
-                        self.log(f"    - At {segment.start_s:.3f}s: Removing {-silence_to_add_ms}ms of audio.")
+                    # Classify this gap
+                    classification = self._classify_gap(gap_ms, segment_duration_s)
+
+                    self.log(f"    - Gap at {segment.start_s:.3f}s: {gap_ms:+.1f}ms → Strategy: {classification.strategy.name}")
+                    self.log(f"      Reason: {classification.reason}")
+
+                    # If time-stretch strategy, mark the PREVIOUS segment for stretching
+                    if classification.strategy == GapHandlingStrategy.TIME_STRETCH and i > 0:
+                        # Store stretch info for the previous segment
+                        segments_to_stretch[i-1] = classification
+
+                current_base_delay = segment.delay_ms
+
+            # Reset for second pass
+            current_base_delay = base_delay_ms
+
+            # Second pass: process segments with smart gap handling
+            for i, segment in enumerate(edl):
+                gap_ms = segment.delay_ms - current_base_delay
+                needs_stretch = i in segments_to_stretch
+
+                # Handle gap insertion/removal based on strategy
+                if abs(gap_ms) > 10:
+                    segment_start_s_on_timeline = segment.start_s
+                    segment_end_s_on_timeline = edl[i+1].start_s if i + 1 < len(edl) else pcm_duration_s
+                    segment_duration_s = segment_end_s_on_timeline - segment_start_s_on_timeline
+
+                    classification = self._classify_gap(gap_ms, segment_duration_s)
+
+                    if classification.strategy == GapHandlingStrategy.TIME_STRETCH:
+                        # Time-stretch will be handled when processing the segment
+                        # The gap will be absorbed into the stretched segment, so no silence needed
+                        pass
+
+                    elif classification.strategy == GapHandlingStrategy.SILENCE:
+                        # Original behavior: pure silence insertion/removal
+                        if gap_ms > 0:
+                            self.log(f"    - At {segment.start_s:.3f}s: Inserting {gap_ms}ms of pure silence.")
+                            silence_duration_s = gap_ms / 1000.0
+                            silence_file = assembly_dir / f"silence_{i:03d}.flac"
+
+                            silence_samples = int(silence_duration_s * sample_rate) * channels
+                            silence_pcm = np.zeros(silence_samples, dtype=np.int32)
+
+                            encode_cmd = [
+                                'ffmpeg', '-y', '-v', 'error', '-nostdin',
+                                '-f', 's32le', '-ar', str(sample_rate), '-ac', str(channels),
+                                '-channel_layout', channel_layout, '-i', '-',
+                                '-map_metadata', '-1',
+                                '-map_metadata:s:a', '-1',
+                                '-fflags', '+bitexact',
+                                '-c:a', 'flac',
+                                str(silence_file)
+                            ]
+                            if self.runner.run(encode_cmd, self.tool_paths, is_binary=True, input_data=silence_pcm.tobytes()) is not None:
+                                segment_files.append(f"file '{silence_file.name}'")
+                        else:
+                            self.log(f"    - At {segment.start_s:.3f}s: Removing {-gap_ms}ms of audio.")
+
+                    elif classification.strategy in [GapHandlingStrategy.CROSSFADE, GapHandlingStrategy.FADED_SILENCE]:
+                        # TODO: Implement crossfade and faded silence
+                        # For now, fall back to regular silence
+                        self.log(f"    - {classification.strategy.name} not yet implemented, using SILENCE")
+                        if gap_ms > 0:
+                            silence_duration_s = gap_ms / 1000.0
+                            silence_file = assembly_dir / f"silence_{i:03d}.flac"
+                            silence_samples = int(silence_duration_s * sample_rate) * channels
+                            silence_pcm = np.zeros(silence_samples, dtype=np.int32)
+                            encode_cmd = [
+                                'ffmpeg', '-y', '-v', 'error', '-nostdin',
+                                '-f', 's32le', '-ar', str(sample_rate), '-ac', str(channels),
+                                '-channel_layout', channel_layout, '-i', '-',
+                                '-map_metadata', '-1', '-map_metadata:s:a', '-1',
+                                '-fflags', '+bitexact', '-c:a', 'flac',
+                                str(silence_file)
+                            ]
+                            if self.runner.run(encode_cmd, self.tool_paths, is_binary=True, input_data=silence_pcm.tobytes()) is not None:
+                                segment_files.append(f"file '{silence_file.name}'")
+                        else:
+                            self.log(f"    - At {segment.start_s:.3f}s: Removing {-gap_ms}ms of audio.")
 
                 current_base_delay = segment.delay_ms
 
                 segment_start_s_on_target_timeline = segment.start_s
                 segment_end_s_on_target_timeline = edl[i+1].start_s if i + 1 < len(edl) else pcm_duration_s
 
-                if silence_to_add_ms < 0:
-                    segment_start_s_on_target_timeline += abs(silence_to_add_ms) / 1000.0
+                # Only adjust start time if we're removing audio (and NOT using time-stretch)
+                if gap_ms < 0 and not needs_stretch:
+                    segment_start_s_on_target_timeline += abs(gap_ms) / 1000.0
 
                 if segment_end_s_on_target_timeline <= segment_start_s_on_target_timeline:
                     continue
@@ -337,6 +684,31 @@ class SteppingCorrector:
                 ]
                 if self.runner.run(encode_cmd, self.tool_paths, is_binary=True, input_data=chunk_to_process.tobytes()) is None:
                     raise RuntimeError(f"Failed to encode segment {i}")
+
+                # Apply time-stretch correction if needed (to absorb gap after this segment)
+                if needs_stretch:
+                    classification = segments_to_stretch[i]
+                    next_gap_ms = edl[i+1].delay_ms - segment.delay_ms  # Gap after this segment
+
+                    stretched_file = self._apply_stretch_correction(
+                        pcm_data=pcm_data,
+                        segment_start_s=segment_start_s_on_target_timeline,
+                        segment_end_s=segment_end_s_on_target_timeline,
+                        gap_ms=next_gap_ms,
+                        stretch_window_s=classification.stretch_window_s,
+                        sample_rate=sample_rate,
+                        channels=channels,
+                        channel_layout=channel_layout,
+                        assembly_dir=assembly_dir,
+                        segment_index=i
+                    )
+
+                    if stretched_file is not None:
+                        # Replace segment file with stretched version
+                        segment_file = stretched_file
+                    else:
+                        # Stretch failed, will fall back to silence insertion on next iteration
+                        self.log(f"    [WARN] Time-stretch failed for segment {i}, gap will use fallback method")
 
                 if abs(segment.drift_rate_ms_s) > 0.5:
                     self.log(f"    - Applying drift correction ({segment.drift_rate_ms_s:+.2f} ms/s) to segment {i}.")
