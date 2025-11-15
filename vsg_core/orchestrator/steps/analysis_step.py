@@ -69,8 +69,16 @@ def _choose_final_delay(results: List[Dict[str, Any]], config: Dict, runner: Com
     delays = [r['delay'] for r in accepted]
 
     if delay_mode == 'First Stable':
-        winner = delays[0]
-        method_label = "first stable"
+        # Use proper stability detection to find first stable segment
+        winner = _find_first_stable_segment_delay(results, runner)
+        if winner is None:
+            # Fallback to mode if no stable segment found
+            runner._log_message(f"[WARNING] No stable segment found, falling back to mode.")
+            counts = Counter(delays)
+            winner = counts.most_common(1)[0][0]
+            method_label = "mode (fallback)"
+        else:
+            method_label = "first stable"
     elif delay_mode == 'Average':
         winner = round(sum(delays) / len(delays))
         method_label = "average"
