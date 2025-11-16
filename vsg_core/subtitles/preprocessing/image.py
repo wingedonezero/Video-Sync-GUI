@@ -32,23 +32,47 @@ class ImagePreprocessor:
         """
         Preprocess subtitle image for OCR.
 
+        Minimal preprocessing to match VobSub-ML-OCR approach.
+        The images from the parser should already be clean RGB images.
+
         Args:
-            image: Input PIL Image (RGBA)
+            image: Input PIL Image (RGB or RGBA)
 
         Returns:
             List of preprocessed PIL Images (one per line if multi-line)
         """
-        # Step 1: Convert to grayscale with white background
-        grayscale = self._invert_colors(image)
+        # Save debug image FIRST (the raw extracted image)
+        if self.debug_dir:
+            import os
+            os.makedirs(self.debug_dir, exist_ok=True)
+            debug_path = os.path.join(self.debug_dir, f'raw_extracted_{self.debug_counter}.png')
+            image.save(debug_path)
 
-        # Step 2: Scale to target DPI
-        if self.scale_enabled:
-            scaled = self._scale_image(grayscale)
+        # Minimal preprocessing: just ensure it's RGB and optionally scale
+        # VobSub-ML-OCR does NO preprocessing - feeds images directly to OCR
+
+        # Convert to RGB if needed (should already be RGB from parser)
+        if image.mode == 'RGBA':
+            # Composite onto white background
+            background = Image.new('RGB', image.size, (255, 255, 255))
+            background.paste(image, mask=image.split()[3])
+            processed = background
+        elif image.mode != 'RGB':
+            processed = image.convert('RGB')
         else:
-            scaled = grayscale
+            processed = image
 
-        # DISABLE binarization - let Tesseract handle it
-        # DISABLE line segmentation - PSM 7 expects single line anyway
+        # Optional: Scale for better OCR (Tesseract likes larger text)
+        if self.scale_enabled:
+            scaled = self._scale_image(processed)
+        else:
+            scaled = processed
+
+        # Save debug image AFTER scaling
+        if self.debug_dir:
+            debug_path = os.path.join(self.debug_dir, f'preprocessed_{self.debug_counter}.png')
+            scaled.save(debug_path)
+            self.debug_counter += 1
 
         # Return as single image
         return [scaled]

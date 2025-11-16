@@ -373,16 +373,20 @@ class VobSubParser:
         VobSub images are interlaced like old TV broadcasts:
         - Top field: even lines (0, 2, 4, 6...)
         - Bottom field: odd lines (1, 3, 5, 7...)
+
+        Uses float array with normalized 0-1 RGB values (matches VobSub-ML-OCR).
         """
         try:
-            # Create RGB image (VobSub subtitles are always opaque)
-            img_array = np.zeros((height, width, 3), dtype=np.uint8)
+            # Create float array (matches VobSub-ML-OCR approach)
+            # Default np.zeros() creates float64 array with 0-1 range
+            img_array = np.zeros((height, width, 3))
 
-            # Get background color and fill image
+            # Get background color and fill image with normalized values
             bg_idx = colors[0] if 0 < len(colors) else 0
             if bg_idx < len(self.palette):
                 bg_r, bg_g, bg_b, _ = self.palette[bg_idx]
-                img_array[:, :] = [bg_r, bg_g, bg_b]
+                # Convert 0-255 to 0-1 range
+                img_array[:, :] = [bg_r / 255.0, bg_g / 255.0, bg_b / 255.0]
 
             # Decode top field (even lines: 0, 2, 4, ...)
             self._decode_field(
@@ -400,8 +404,9 @@ class VobSubParser:
                 colors=colors, alphas=alphas
             )
 
-            # Convert to PIL Image
-            image = Image.fromarray(img_array, 'RGB')
+            # Convert to PIL Image (convert from 0-1 float to 0-255 uint8)
+            img_uint8 = (img_array * 255).astype(np.uint8)
+            image = Image.fromarray(img_uint8, 'RGB')
             return image
 
         except Exception:
@@ -413,9 +418,11 @@ class VobSubParser:
         """
         Decode one interlaced field using nibble-based RLE.
 
+        This implementation matches VobSub-ML-OCR's generate_fast_bitmap exactly.
+
         Args:
             data: Packet data containing RLE codes
-            img: Image array to draw into
+            img: Image array to draw into (float array with 0-1 values)
             start_y: Starting line (0 for top field, 1 for bottom field)
             y_increment: Line increment (2 for interlaced)
             data_addr: Offset in data where field RLE starts
@@ -428,12 +435,18 @@ class VobSubParser:
         pos = 0
         only_half = False
 
-        # Get background color for comparison
+        # Get background color index for comparison
         bg_idx = colors[0] if 0 < len(colors) else 0
-        if bg_idx < len(self.palette):
-            bg_color = tuple(self.palette[bg_idx][:3])
-        else:
-            bg_color = (0, 0, 0)
+
+        # Pre-calculate normalized colors (0-1 range)
+        color_values = []
+        for i in range(4):
+            palette_idx = colors[i] if i < len(colors) else 0
+            if palette_idx < len(self.palette):
+                r, g, b, _ = self.palette[palette_idx]
+                color_values.append([r / 255.0, g / 255.0, b / 255.0])
+            else:
+                color_values.append([0.0, 0.0, 0.0])
 
         while y < height and data_addr + pos + 2 < len(data):
             # Decode one RLE code
@@ -446,28 +459,30 @@ class VobSubParser:
                 # Special case: fill rest of line with this color
                 run_length = width - x
 
-            # Get color from palette
-            palette_idx = colors[color_idx] if color_idx < len(colors) else 0
-            if palette_idx < len(self.palette):
-                r, g, b, _ = self.palette[palette_idx]
-                pixel_color = (r, g, b)
-            else:
-                pixel_color = bg_color
+            # Get the color for this run
+            pixel_color = color_values[color_idx] if color_idx < len(color_values) else color_values[0]
+            is_background = (color_idx == 0)  # First color is always background
 
-            # Draw pixels
+            # Draw pixels (matches VobSub-ML-OCR logic exactly)
             for i in range(run_length):
-                if x >= width:
-                    # Line wrap - advance to next line in this field
+                # Check if we need to wrap to next line
+                if x >= width - 1:
+                    # Draw the last pixel of the line if it's not background
+                    if y < height and x < width and not is_background:
+                        img[y, x] = pixel_color
+
+                    # Handle nibble alignment
                     if only_half:
-                        # Nibble boundary: skip half byte
                         pos += 1
                         only_half = False
+
+                    # Wrap to next line
                     x = 0
-                    y += y_increment  # Increment by 2 for interlaced!
+                    y += y_increment
                     break
 
-                # Set pixel (skip if background color)
-                if y < height and pixel_color != bg_color:
+                # Draw pixel if not background color
+                if y < height and not is_background:
                     img[y, x] = pixel_color
 
                 x += 1
