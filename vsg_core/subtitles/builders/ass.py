@@ -69,7 +69,7 @@ class ASSBuilder:
         y: int,
         width: int,
         height: int,
-        preserve_position: bool = True
+        preserve_position: bool = False  # Changed default to False
     ) -> None:
         """
         Add a subtitle event with positioning.
@@ -78,16 +78,17 @@ class ASSBuilder:
             start_ms: Start time in milliseconds
             end_ms: End time in milliseconds
             text: Subtitle text
-            x: X position of subtitle
-            y: Y position of subtitle
+            x: X position of subtitle (ignored if preserve_position=False)
+            y: Y position of subtitle (ignored if preserve_position=False)
             width: Width of subtitle
             height: Height of subtitle
-            preserve_position: If True, use \\pos tag for exact positioning
+            preserve_position: If True, use \\pos tag for exact positioning (default: False)
         """
         if not text or not text.strip():
             return
 
-        # Calculate position for \pos tag
+        # Most apps output to SRT with no positioning, so use default positioning
+        # Custom positioning can cause issues with players and isn't always accurate
         if preserve_position:
             # Use top-left corner directly (no offset needed)
             # Alignment 7 = top left, so \pos() positions the top-left of the text
@@ -98,6 +99,7 @@ class ASSBuilder:
             # This ensures \pos(x,y) places the text exactly where it was in the original
             text_with_pos = f"{{\\an7\\pos({pos_x},{pos_y})}}{text}"
         else:
+            # Use default positioning (bottom center)
             text_with_pos = text
 
         # Create event

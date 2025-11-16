@@ -32,15 +32,17 @@ class ImagePreprocessor:
         """
         Preprocess subtitle image for OCR.
 
-        Implements subtile-ocr approach:
-        1. Background normalization (black text on white background)
-        2. Line segmentation for PSM 7 (single line mode)
+        Simplified robust approach:
+        1. Convert to RGB
+        2. Invert colors (white text -> black text)
+        3. Add border padding
+        4. Scale for better recognition
 
         Args:
             image: Input PIL Image (RGB or RGBA)
 
         Returns:
-            List of preprocessed PIL Images (one per line)
+            List with single preprocessed PIL Image (PSM 6 handles multi-line)
         """
         # Save debug image FIRST (the raw extracted image)
         if self.debug_dir:
@@ -60,30 +62,27 @@ class ImagePreprocessor:
         else:
             rgb_image = image
 
-        # Step 2: Normalize background (subtile-ocr approach)
+        # Step 2: Normalize background (invert if needed)
         # Tesseract expects BLACK text on WHITE background
-        # VobSub subtitles are typically white/colored text on dark/transparent background
-        # So we need to INVERT the image
         normalized = self._normalize_background(rgb_image)
 
-        # Step 3: Scale for better OCR (Tesseract likes larger text)
+        # Step 3: Add border padding (helps Tesseract with edge detection)
+        padded = self._add_border(normalized, padding=10)
+
+        # Step 4: Scale for better OCR (Tesseract likes larger text)
         if self.scale_enabled:
-            scaled = self._scale_image(normalized)
+            scaled = self._scale_image(padded)
         else:
-            scaled = normalized
+            scaled = padded
 
-        # Step 4: Segment into lines (subtile-ocr approach)
-        # Using PSM 7 (single line) on each line separately improves accuracy
-        lines = self._segment_lines(scaled)
-
-        # Save debug images
+        # Save debug image
         if self.debug_dir:
-            for i, line in enumerate(lines):
-                debug_path = os.path.join(self.debug_dir, f'preprocessed_{self.debug_counter}_line{i}.png')
-                line.save(debug_path)
+            debug_path = os.path.join(self.debug_dir, f'preprocessed_{self.debug_counter}.png')
+            scaled.save(debug_path)
             self.debug_counter += 1
 
-        return lines
+        # Return as single image (PSM 6 handles multi-line subtitles)
+        return [scaled]
 
     def _normalize_background(self, image: Image.Image) -> Image.Image:
         """
@@ -91,34 +90,62 @@ class ImagePreprocessor:
 
         VobSub subtitles typically have white/colored text on dark background.
         Tesseract 4.0+ expects black text on white background.
-        This is the key preprocessing step from subtile-ocr.
 
         Args:
             image: RGB image
 
         Returns:
-            Normalized RGB image with inverted colors
+            Normalized RGB image with inverted colors if needed
         """
-        # Convert to grayscale to determine brightness
+        # Convert to grayscale for analysis
         gray = image.convert('L')
         gray_array = np.array(gray)
 
-        # Calculate average brightness (excluding pure white/black)
-        mask = (gray_array > 10) & (gray_array < 245)
-        if mask.any():
-            avg_brightness = np.mean(gray_array[mask])
-        else:
-            avg_brightness = np.mean(gray_array)
+        # Find non-white pixels (potential text)
+        # White background is typically 240-255, so anything < 230 is content
+        content_mask = gray_array < 230
 
-        # If text is bright (white text on dark background), invert the image
-        # Threshold: if average brightness of content is > 127, it's light text
-        if avg_brightness > 127:
+        if not content_mask.any():
+            # No content found, return as-is
+            return image
+
+        # Calculate average brightness of content pixels only
+        content_brightness = np.mean(gray_array[content_mask])
+
+        # If content is bright (white/light text), invert the image
+        # Threshold: if average content brightness > 127, it's light text on dark background
+        if content_brightness > 127:
             # Invert the image (white text -> black text, dark bg -> white bg)
             inverted = ImageOps.invert(image.convert('RGB'))
             return inverted
         else:
             # Already black text on white background
             return image
+
+    def _add_border(self, image: Image.Image, padding: int = 10) -> Image.Image:
+        """
+        Add white border padding around image.
+
+        Helps Tesseract with edge detection and prevents text being cut off.
+
+        Args:
+            image: Input image
+            padding: Border size in pixels
+
+        Returns:
+            Image with white border
+        """
+        # Create new image with padding
+        new_width = image.width + (padding * 2)
+        new_height = image.height + (padding * 2)
+
+        # Create white background
+        padded = Image.new('RGB', (new_width, new_height), (255, 255, 255))
+
+        # Paste original image in center
+        padded.paste(image, (padding, padding))
+
+        return padded
 
     def _get_content_bbox(self, mask: np.ndarray) -> tuple:
         """Get bounding box of content (where mask is True)."""

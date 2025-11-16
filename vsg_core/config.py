@@ -17,14 +17,14 @@ class AppConfig:
 
             # --- OCR Settings (New Native Implementation) ---
             'ocr_engine': 'tesseract',
-            'ocr_tesseract_psm': 7,                # Page segmentation mode (7 = single line, best with line segmentation)
+            'ocr_tesseract_psm': 6,                # Page segmentation mode (6 = uniform block, 7 = single line)
             'ocr_tesseract_oem': 1,                # OCR engine mode (1 = LSTM neural net)
             'ocr_preprocessing_scale': True,        # Enable image upscaling
             'ocr_preprocessing_denoise': False,     # Enable denoising
             'ocr_target_dpi': 300,                  # Target DPI for upscaling
             'ocr_min_confidence': 0,                # Minimum word confidence (0-100, 0 = accept all)
             'ocr_output_format': 'ass',             # Output format (always ASS for positioning)
-            'ocr_preserve_positioning': True,       # Add \pos tags to preserve subtitle positions
+            'ocr_preserve_positioning': False,      # Add \pos tags to preserve subtitle positions
             'ocr_whitelist_chars': '',              # Limit to specific characters (empty = all)
 
             # OCR Cleanup Settings
