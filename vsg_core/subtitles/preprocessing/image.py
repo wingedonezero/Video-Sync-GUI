@@ -63,6 +63,9 @@ class ImagePreprocessor:
         Convert subtitle image to black text on white background.
         VobSub typically has white/colored text on transparent background.
         Tesseract expects black text on white background.
+
+        CRITICAL: Only process pixels with HIGH alpha values to avoid
+        OCRing borders, outlines, and shadows which cause gibberish output.
         """
         # Convert to RGBA if needed
         if image.mode != 'RGBA':
@@ -74,12 +77,36 @@ class ImagePreprocessor:
         # Extract alpha channel
         alpha = img_array[:, :, 3]
 
-        # Create new RGB image
+        # Create new RGB image (white background)
         rgb_array = np.ones((img_array.shape[0], img_array.shape[1], 3), dtype=np.uint8) * 255
 
-        # Where alpha > 0 (text exists), invert the color to black
-        # Where alpha == 0 (transparent), keep white
-        mask = alpha > 128
+        # CRITICAL FIX: Use high alpha threshold to only capture main text pixels
+        # This excludes borders (alpha ~180-240), outlines, and shadows
+        # which were causing gibberish output (dashes, underscores, etc.)
+        #
+        # VobSub text structure:
+        # - Main text: alpha = 255 (or very close to 255), bright colors (white/yellow)
+        # - Outline/border: alpha = 180-240, often dark  <- We want to SKIP these
+        # - Shadow: alpha = 100-180          <- We want to SKIP these
+        #
+        # Strategy: Use BOTH high alpha AND bright color to filter out borders
+        alpha_mask = alpha >= 250  # Very high alpha (main text only)
+
+        if alpha_mask.any():
+            # Additional filter: Only keep bright pixels (white/yellow text)
+            # Dark borders/outlines will be filtered out
+            # Calculate brightness for all pixels
+            brightness = (0.299 * img_array[:, :, 0] +
+                         0.587 * img_array[:, :, 1] +
+                         0.114 * img_array[:, :, 2])
+
+            # Combine: high alpha AND bright color (brightness > 180)
+            # This filters out dark outlines/borders
+            brightness_mask = brightness > 180
+            mask = alpha_mask & brightness_mask
+
+        else:
+            mask = alpha_mask
 
         if mask.any():
             # Get the text pixels
