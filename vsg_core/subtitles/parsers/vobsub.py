@@ -204,34 +204,19 @@ class VobSubParser:
             if ctrl_offset >= len(packet_data):
                 return None
 
-            # Parse control sequence
-            x, y, width, height, colors, alphas = self._parse_control_sequence(packet_data, ctrl_offset)
+            # Parse control sequence (now returns field addresses too)
+            x, y, width, height, colors, alphas, top_field_addr, bottom_field_addr = \
+                self._parse_control_sequence(packet_data, ctrl_offset)
 
             if width == 0 or height == 0:
                 return None
 
-            # Decode RLE pixel data
-            pixel_data_1 = packet_data[2:ctrl_offset]
-
-            # Find second field offset (interlaced)
-            second_field_offset = None
-            ctrl_pos = ctrl_offset
-            while ctrl_pos + 1 < len(packet_data):
-                cmd = packet_data[ctrl_pos]
-                if cmd == 0x01:  # Start display
-                    ctrl_pos += 1
-                elif cmd == 0x05:  # Set pixel addresses
-                    if ctrl_pos + 5 <= len(packet_data):
-                        second_field_offset = struct.unpack('>H', packet_data[ctrl_pos+3:ctrl_pos+5])[0]
-                        break
-                    ctrl_pos += 5
-                elif cmd == 0xFF:  # End
-                    break
-                else:
-                    ctrl_pos += 1
-
-            # Decode image
-            image = self._decode_rle_image(pixel_data_1, width, height, colors, alphas)
+            # Decode interlaced image with field addresses
+            image = self._decode_rle_image(
+                packet_data, width, height,
+                colors, alphas,
+                top_field_addr, bottom_field_addr
+            )
 
             if image is None:
                 return None
@@ -249,11 +234,79 @@ class VobSubParser:
         except Exception:
             return None
 
-    def _parse_control_sequence(self, packet_data: bytes, ctrl_offset: int) -> Tuple[int, int, int, int, List[int], List[int]]:
-        """Parse control sequence to get position, size, and colors."""
+    @staticmethod
+    def _decode_rle(index: int, data: bytes, only_half: bool) -> Tuple[int, int, int, bool, bool]:
+        """
+        Decode VobSub nibble-based RLE encoding.
+
+        VobSub uses variable-length RLE with 4 modes based on run length:
+        - Mode 1 (2-bit): 1-3 pixels
+        - Mode 2 (4-bit): 4-15 pixels
+        - Mode 3 (8-bit): 16-63 pixels
+        - Mode 4 (14-bit): 64+ pixels
+
+        Returns:
+            (bytes_consumed, run_length, color_index, only_half, rest_of_line)
+        """
+        rest_of_line = False
+        b1 = data[index]
+        b2 = data[index + 1]
+
+        # Handle nibble alignment (when previous code ended on half-byte boundary)
+        if only_half:
+            b3 = data[index + 2]
+            b1 = ((b1 & 0x0F) << 4) | ((b2 & 0xF0) >> 4)
+            b2 = ((b2 & 0x0F) << 4) | ((b3 & 0xF0) >> 4)
+
+        # Mode 4: 14-bit run (pattern: 00LLLLLL LLLLLLCC)
+        # Used for runs of 64+ pixels
+        if b1 >> 2 == 0:
+            run_length = (b1 << 6) | (b2 >> 2)
+            color = b2 & 0x03
+            if run_length == 0:
+                # Special case: fill rest of line
+                rest_of_line = True
+                if only_half:
+                    only_half = False
+                    return 3, run_length, color, only_half, rest_of_line
+            return 2, run_length, color, only_half, rest_of_line
+
+        # Mode 3: 8-bit run (pattern: 0000LLLL LLCCXXXX)
+        # Used for runs of 16-63 pixels
+        if b1 >> 4 == 0:
+            run_length = (b1 << 2) | (b2 >> 6)
+            color = (b2 & 0x30) >> 4
+            if only_half:
+                only_half = False
+                return 2, run_length, color, only_half, rest_of_line
+            only_half = True
+            return 1, run_length, color, only_half, rest_of_line
+
+        # Mode 2: 4-bit run (pattern: 00LLLLCC)
+        # Used for runs of 4-15 pixels
+        if b1 >> 6 == 0:
+            run_length = b1 >> 2
+            color = b1 & 0x03
+            return 1, run_length, color, only_half, rest_of_line
+
+        # Mode 1: 2-bit run (pattern: LLCCXXXX)
+        # Used for runs of 1-3 pixels
+        run_length = b1 >> 6
+        color = (b1 & 0x30) >> 4
+
+        if only_half:
+            only_half = False
+            return 1, run_length, color, only_half, rest_of_line
+        only_half = True
+        return 0, run_length, color, only_half, rest_of_line
+
+    def _parse_control_sequence(self, packet_data: bytes, ctrl_offset: int) -> Tuple[int, int, int, int, List[int], List[int], int, int]:
+        """Parse control sequence to get position, size, colors, and field addresses."""
         x, y, width, height = 0, 0, 0, 0
         colors = [0, 1, 2, 3]
         alphas = [15, 15, 15, 15]
+        top_field_addr = 4  # Default offset (skip packet header)
+        bottom_field_addr = 4
 
         pos = ctrl_offset
         while pos + 1 < len(packet_data):
@@ -297,7 +350,11 @@ class VobSubParser:
                     width = x2 - x + 1
                     height = y2 - y + 1
                     pos += 6
-            elif cmd == 0x06:  # Set pixel data addresses
+            elif cmd == 0x06:  # Set pixel data addresses (for interlaced fields)
+                if pos + 4 <= len(packet_data):
+                    # Extract addresses for top field (even lines) and bottom field (odd lines)
+                    top_field_addr = struct.unpack('>H', packet_data[pos:pos+2])[0]
+                    bottom_field_addr = struct.unpack('>H', packet_data[pos+2:pos+4])[0]
                 pos += 4
             elif cmd == 0xFF:  # End of control sequence
                 break
@@ -305,84 +362,112 @@ class VobSubParser:
                 # Unknown command, try to skip
                 pos += 1
 
-        return x, y, width, height, colors, alphas
+        return x, y, width, height, colors, alphas, top_field_addr, bottom_field_addr
 
-    def _decode_rle_image(self, data: bytes, width: int, height: int, colors: List[int], alphas: List[int]) -> Optional[Image.Image]:
-        """Decode RLE-compressed subtitle image."""
+    def _decode_rle_image(self, packet_data: bytes, width: int, height: int,
+                          colors: List[int], alphas: List[int],
+                          top_field_addr: int, bottom_field_addr: int) -> Optional[Image.Image]:
+        """
+        Decode interlaced RLE subtitle image.
+
+        VobSub images are interlaced like old TV broadcasts:
+        - Top field: even lines (0, 2, 4, 6...)
+        - Bottom field: odd lines (1, 3, 5, 7...)
+        """
         try:
-            # Create RGBA image
-            img_array = np.zeros((height, width, 4), dtype=np.uint8)
+            # Create RGB image (VobSub subtitles are always opaque)
+            img_array = np.zeros((height, width, 3), dtype=np.uint8)
 
-            # Decode RLE data
-            pos = 0
-            row = 0
-            col = 0
+            # Get background color and fill image
+            bg_idx = colors[0] if 0 < len(colors) else 0
+            if bg_idx < len(self.palette):
+                bg_r, bg_g, bg_b, _ = self.palette[bg_idx]
+                img_array[:, :] = [bg_r, bg_g, bg_b]
 
-            while pos < len(data) and row < height:
-                if col >= width:
-                    col = 0
-                    row += 1
-                    continue
+            # Decode top field (even lines: 0, 2, 4, ...)
+            self._decode_field(
+                packet_data, img_array,
+                start_y=0, y_increment=2,
+                data_addr=top_field_addr,
+                colors=colors, alphas=alphas
+            )
 
-                # Read RLE code
-                if pos >= len(data):
-                    break
-
-                byte = data[pos]
-                pos += 1
-
-                # Decode RLE nibbles
-                if byte != 0:
-                    # Non-zero byte: extract color and length
-                    color_idx = (byte >> 6) & 0x03
-                    length = byte & 0x3F
-
-                    if length == 0:
-                        # Extended length
-                        if pos < len(data):
-                            length = data[pos] & 0x3F
-                            pos += 1
-                        else:
-                            length = width - col
-                else:
-                    # Zero byte: check next
-                    if pos < len(data):
-                        next_byte = data[pos]
-                        pos += 1
-
-                        if next_byte == 0:
-                            # End of line
-                            col = 0
-                            row += 1
-                            continue
-                        else:
-                            color_idx = (next_byte >> 6) & 0x03
-                            length = next_byte & 0x3F
-                    else:
-                        break
-
-                # Apply color to pixels
-                if length > 0:
-                    # Get RGBA color from palette
-                    palette_idx = colors[color_idx] if color_idx < len(colors) else 0
-                    alpha_val = alphas[color_idx] if color_idx < len(alphas) else 15
-
-                    if palette_idx < len(self.palette):
-                        r, g, b, _ = self.palette[palette_idx]
-                        a = int((alpha_val / 15.0) * 255)
-
-                        # Fill pixels
-                        end_col = min(col + length, width)
-                        actual_length = end_col - col
-
-                        if row < height and col < width:
-                            img_array[row, col:end_col] = [r, g, b, a]
-
-                        col += actual_length
+            # Decode bottom field (odd lines: 1, 3, 5, ...)
+            self._decode_field(
+                packet_data, img_array,
+                start_y=1, y_increment=2,
+                data_addr=bottom_field_addr,
+                colors=colors, alphas=alphas
+            )
 
             # Convert to PIL Image
-            image = Image.fromarray(img_array, 'RGBA')
+            image = Image.fromarray(img_array, 'RGB')
             return image
 
         except Exception:
             return None
+
+    def _decode_field(self, data: bytes, img: np.ndarray,
+                      start_y: int, y_increment: int, data_addr: int,
+                      colors: List[int], alphas: List[int]):
+        """
+        Decode one interlaced field using nibble-based RLE.
+
+        Args:
+            data: Packet data containing RLE codes
+            img: Image array to draw into
+            start_y: Starting line (0 for top field, 1 for bottom field)
+            y_increment: Line increment (2 for interlaced)
+            data_addr: Offset in data where field RLE starts
+            colors: 4-color palette indices
+            alphas: 4-alpha values (unused, kept for compatibility)
+        """
+        height, width = img.shape[:2]
+        y = start_y
+        x = 0
+        pos = 0
+        only_half = False
+
+        # Get background color for comparison
+        bg_idx = colors[0] if 0 < len(colors) else 0
+        if bg_idx < len(self.palette):
+            bg_color = tuple(self.palette[bg_idx][:3])
+        else:
+            bg_color = (0, 0, 0)
+
+        while y < height and data_addr + pos + 2 < len(data):
+            # Decode one RLE code
+            consumed, run_length, color_idx, only_half, rest_of_line = \
+                self._decode_rle(data_addr + pos, data, only_half)
+
+            pos += consumed
+
+            if rest_of_line:
+                # Special case: fill rest of line with this color
+                run_length = width - x
+
+            # Get color from palette
+            palette_idx = colors[color_idx] if color_idx < len(colors) else 0
+            if palette_idx < len(self.palette):
+                r, g, b, _ = self.palette[palette_idx]
+                pixel_color = (r, g, b)
+            else:
+                pixel_color = bg_color
+
+            # Draw pixels
+            for i in range(run_length):
+                if x >= width:
+                    # Line wrap - advance to next line in this field
+                    if only_half:
+                        # Nibble boundary: skip half byte
+                        pos += 1
+                        only_half = False
+                    x = 0
+                    y += y_increment  # Increment by 2 for interlaced!
+                    break
+
+                # Set pixel (skip if background color)
+                if y < height and pixel_color != bg_color:
+                    img[y, x] = pixel_color
+
+                x += 1
