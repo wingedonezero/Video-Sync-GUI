@@ -73,7 +73,10 @@ def run_vobsub_ocr(
         ocr_config = config.copy()
         ocr_config['ocr_lang'] = lang
 
-        preprocessor = ImagePreprocessor(ocr_config)
+        # Enable debug output
+        debug_dir = idx_file.parent / 'ocr_debug'
+        preprocessor = ImagePreprocessor(ocr_config, debug_dir=str(debug_dir))
+        runner._log_message(f"[OCR] Debug images will be saved to: {debug_dir}")
 
         try:
             ocr_engine = TesseractEngine(ocr_config)

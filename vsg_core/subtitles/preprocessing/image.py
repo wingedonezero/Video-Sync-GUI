@@ -14,16 +14,19 @@ import numpy as np
 class ImagePreprocessor:
     """Preprocesses subtitle images for optimal OCR accuracy."""
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, debug_dir: str = None):
         """
         Initialize preprocessor with configuration.
 
         Args:
             config: Configuration dictionary with preprocessing settings
+            debug_dir: Optional directory to save debug images
         """
         self.target_dpi = config.get('ocr_target_dpi', 300)
         self.scale_enabled = config.get('ocr_preprocessing_scale', True)
         self.denoise_enabled = config.get('ocr_preprocessing_denoise', False)
+        self.debug_dir = debug_dir
+        self.debug_counter = 0
 
     def preprocess(self, image: Image.Image) -> List[Image.Image]:
         """
@@ -35,82 +38,52 @@ class ImagePreprocessor:
         Returns:
             List of preprocessed PIL Images (one per line if multi-line)
         """
-        # Step 1: Convert to black text on white background
-        inverted = self._invert_colors(image)
+        # Step 1: Convert to grayscale with white background
+        grayscale = self._invert_colors(image)
 
         # Step 2: Scale to target DPI
         if self.scale_enabled:
-            scaled = self._scale_image(inverted)
+            scaled = self._scale_image(grayscale)
         else:
-            scaled = inverted
+            scaled = grayscale
 
-        # Step 3: Denoise (optional)
-        if self.denoise_enabled:
-            denoised = self._denoise(scaled)
-        else:
-            denoised = scaled
+        # DISABLE binarization - let Tesseract handle it
+        # DISABLE line segmentation - PSM 7 expects single line anyway
 
-        # Step 4: Binarize
-        binary = self._binarize(denoised)
-
-        # Step 5: Segment into lines
-        lines = self._segment_lines(binary)
-
-        return lines if lines else [binary]
+        # Return as single image
+        return [scaled]
 
     def _invert_colors(self, image: Image.Image) -> Image.Image:
         """
-        Convert subtitle image to black text on white background.
+        Convert subtitle image to grayscale.
 
-        VobSub uses a 4-color palette with RGBA values:
-        - Text: Bright colors (white/yellow) with high alpha
-        - Outline: Dark colors (black) with medium-high alpha
-        - Shadow: Dark colors (black) with medium alpha
-
-        CORRECT APPROACH: Use RGB luminance + alpha threshold
-        - Convert RGB to grayscale luminance
-        - Keep only pixels that are BOTH bright (high luminance) AND opaque (high alpha)
-        - This filters out dark outlines/shadows that cause gibberish OCR
+        SIMPLE APPROACH: Just use PIL's built-in RGB to grayscale conversion
+        with alpha compositing. Let Tesseract handle the rest.
         """
         # Convert to RGBA if needed
         if image.mode != 'RGBA':
             image = image.convert('RGBA')
 
-        # Get numpy array
-        img_array = np.array(image)
+        # Create a white background image
+        background = Image.new('RGB', image.size, (255, 255, 255))
 
-        # Extract RGB and alpha channels
-        r = img_array[:, :, 0].astype(np.float32)
-        g = img_array[:, :, 1].astype(np.float32)
-        b = img_array[:, :, 2].astype(np.float32)
-        alpha = img_array[:, :, 3]
+        # Composite the subtitle onto white background using its alpha channel
+        # This handles transparency properly
+        background.paste(image, mask=image.split()[3])  # Use alpha as mask
 
-        # Convert RGB to luminance (grayscale)
-        # ITU-R BT.601 formula: Y = 0.299*R + 0.587*G + 0.114*B
-        luminance = (0.299 * r + 0.587 * g + 0.114 * b).astype(np.uint8)
+        # Convert to grayscale
+        grayscale = background.convert('L')
 
-        # Create white background
-        output = np.full_like(luminance, 255, dtype=np.uint8)
+        # Save debug image if enabled
+        if self.debug_dir:
+            import os
+            os.makedirs(self.debug_dir, exist_ok=True)
+            debug_path = os.path.join(self.debug_dir, f'step1_grayscale_{self.debug_counter}.png')
+            grayscale.save(debug_path)
+            self.debug_counter += 1
 
-        # Keep only pixels that are BOTH:
-        # 1. Bright (luminance > 180) - text is usually white/yellow
-        # 2. Opaque (alpha > 200) - fully visible
-        # This combination filters out dark outlines and shadows
-        text_mask = (luminance > 180) & (alpha > 200)
-
-        # Invert luminance for text pixels: bright text → black
-        output[text_mask] = 255 - luminance[text_mask]
-
-        # Convert to RGB PIL Image
-        rgb_array = np.stack([output, output, output], axis=2)
-        result = Image.fromarray(rgb_array, 'RGB')
-
-        # Crop to content (remove excess white space)
-        bbox = self._get_content_bbox(text_mask)
-        if bbox:
-            result = result.crop(bbox)
-
-        return result
+        # Convert back to RGB for consistency
+        return grayscale.convert('RGB')
 
     def _get_content_bbox(self, mask: np.ndarray) -> tuple:
         """Get bounding box of content (where mask is True)."""
