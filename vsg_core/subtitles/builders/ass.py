@@ -144,13 +144,14 @@ class ASSBuilder:
         alignment_num = 1 + h_align + (v_align * 3)
 
         # Convert to pysubs2 Alignment enum
+        # Note: pysubs2 uses LEFT/CENTER/RIGHT for middle row, not CENTER_LEFT/etc
         alignment_map = {
             1: Alignment.BOTTOM_LEFT,
             2: Alignment.BOTTOM_CENTER,
             3: Alignment.BOTTOM_RIGHT,
-            4: Alignment.CENTER_LEFT,
-            5: Alignment.CENTER,
-            6: Alignment.CENTER_RIGHT,
+            4: Alignment.LEFT,        # Middle left
+            5: Alignment.CENTER,      # Middle center
+            6: Alignment.RIGHT,       # Middle right
             7: Alignment.TOP_LEFT,
             8: Alignment.TOP_CENTER,
             9: Alignment.TOP_RIGHT,
