@@ -13,7 +13,6 @@ from vsg_core.subtitles.convert import convert_srt_to_ass
 from vsg_core.subtitles.rescale import rescale_subtitle
 from vsg_core.subtitles.style import multiply_font_size
 from vsg_core.subtitles.style_engine import StyleEngine
-from vsg_core.subtitles.ocr import run_ocr
 from vsg_core.subtitles.ocr_vobsub import run_vobsub_ocr
 from vsg_core.subtitles.cleanup import run_cleanup
 from vsg_core.subtitles.timing import fix_subtitle_timing

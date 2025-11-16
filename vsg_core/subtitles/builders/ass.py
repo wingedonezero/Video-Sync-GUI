@@ -36,25 +36,25 @@ class ASSBuilder:
         default_style = SSAStyle(
             fontname='Arial',
             fontsize=20,
-            primary_color=pysubs2.Color(255, 255, 255, 0),     # White
-            secondary_color=pysubs2.Color(255, 0, 0, 0),       # Red
-            outline_color=pysubs2.Color(0, 0, 0, 0),           # Black outline
-            back_color=pysubs2.Color(0, 0, 0, 128),            # Semi-transparent black
+            primarycolor=pysubs2.Color(255, 255, 255, 0),     # White
+            secondarycolor=pysubs2.Color(255, 0, 0, 0),       # Red
+            outlinecolor=pysubs2.Color(0, 0, 0, 0),           # Black outline
+            backcolor=pysubs2.Color(0, 0, 0, 128),            # Semi-transparent black
             bold=False,
             italic=False,
             underline=False,
-            strike_out=False,
-            scale_x=100.0,
-            scale_y=100.0,
+            strikeout=False,
+            scalex=100.0,
+            scaley=100.0,
             spacing=0.0,
             angle=0.0,
-            border_style=1,
+            borderstyle=1,
             outline=2.0,
             shadow=2.0,
             alignment=Alignment.BOTTOM_CENTER,
-            margin_l=10,
-            margin_r=10,
-            margin_v=10,
+            marginl=10,
+            marginr=10,
+            marginv=10,
             encoding=1
         )
 
