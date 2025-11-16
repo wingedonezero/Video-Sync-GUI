@@ -273,6 +273,58 @@ class AnalysisTab(QWidget):
         segment_layout.addRow("Min. Correlation Confidence:", self.widgets['segment_min_confidence_ratio'])
         segment_layout.addRow("Fine Scan Chunk Duration:", self.widgets['segment_fine_chunk_s'])
         segment_layout.addRow("Fine Scan Iterations:", self.widgets['segment_fine_iterations'])
+
+        segment_layout.addRow(QLabel("<b>Stepping Correction Enhancements</b>"))
+        self.widgets['stepping_min_cluster_size'] = QSpinBox()
+        self.widgets['stepping_min_cluster_size'].setRange(1, 10)
+        self.widgets['stepping_min_cluster_size'].setToolTip(
+            "Minimum number of chunks required per timing cluster to qualify as real stepping.\n"
+            "Default: 3 (safe). Lower to 2 or 1 for edge cases like end credits with brief timing changes.\n"
+            "Higher values reduce false positives but may miss legitimate stepping at file boundaries."
+        )
+
+        self.widgets['stepping_fill_mode'] = QComboBox()
+        self.widgets['stepping_fill_mode'].addItems(['auto', 'silence', 'content'])
+        self.widgets['stepping_fill_mode'].setToolTip(
+            "How to fill gaps when delay increases:\n"
+            "• auto: Intelligently decides between content and silence based on correlation analysis (Recommended)\n"
+            "• silence: Always insert pure silence (traditional behavior, safe)\n"
+            "• content: Always extract content from reference audio (use if Source 1 is complete)"
+        )
+
+        self.widgets['stepping_diagnostics_verbose'] = QCheckBox("Enable detailed cluster diagnostics")
+        self.widgets['stepping_diagnostics_verbose'].setToolTip(
+            "When enabled, logs detailed cluster composition, transition patterns, and likely causes.\n"
+            "Helps understand what's causing stepping: reel changes, commercials, scene edits, etc.\n"
+            "Recommended: Keep enabled for debugging stepping issues."
+        )
+
+        self.widgets['stepping_content_correlation_threshold'] = QDoubleSpinBox()
+        self.widgets['stepping_content_correlation_threshold'].setRange(0.1, 1.0)
+        self.widgets['stepping_content_correlation_threshold'].setDecimals(2)
+        self.widgets['stepping_content_correlation_threshold'].setSingleStep(0.05)
+        self.widgets['stepping_content_correlation_threshold'].setToolTip(
+            "In 'auto' mode, correlation threshold for determining if content should be extracted.\n"
+            "Lower = more aggressive content extraction. Higher = more conservative (prefers silence).\n"
+            "Default: 0.5. Try 0.3-0.4 if you know reference has missing content."
+        )
+
+        self.widgets['stepping_content_search_window_s'] = QDoubleSpinBox()
+        self.widgets['stepping_content_search_window_s'].setRange(1.0, 30.0)
+        self.widgets['stepping_content_search_window_s'].setSuffix(" s")
+        self.widgets['stepping_content_search_window_s'].setDecimals(1)
+        self.widgets['stepping_content_search_window_s'].setToolTip(
+            "Time window (in seconds) to search for matching content around stepping boundaries.\n"
+            "Larger windows = more thorough search but slower processing.\n"
+            "Default: 5.0 seconds is usually sufficient."
+        )
+
+        segment_layout.addRow("Min. Cluster Size:", self.widgets['stepping_min_cluster_size'])
+        segment_layout.addRow("Gap Fill Mode:", self.widgets['stepping_fill_mode'])
+        segment_layout.addRow(self.widgets['stepping_diagnostics_verbose'])
+        segment_layout.addRow("Content Correlation Threshold:", self.widgets['stepping_content_correlation_threshold'])
+        segment_layout.addRow("Content Search Window:", self.widgets['stepping_content_search_window_s'])
+
         main_layout.addWidget(segment_group)
 
         main_layout.addStretch(1)
