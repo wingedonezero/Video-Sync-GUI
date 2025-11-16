@@ -47,11 +47,72 @@ class TesseractEngine:
             import tesserocr
             self.tesserocr = tesserocr
             self.api = None  # Will be created when needed
+
+            # Try to detect tessdata path
+            self.tessdata_path = self._find_tessdata_path()
+
         except ImportError:
             raise ImportError(
                 "tesserocr not installed. Please install: pip install tesserocr\n"
                 "Note: This requires Tesseract OCR to be installed on your system."
             )
+
+    def _find_tessdata_path(self) -> Optional[str]:
+        """
+        Try to find the tessdata directory.
+        Returns None to use tesserocr's default path detection.
+        """
+        import os
+        import subprocess
+        from pathlib import Path
+
+        # First, check TESSDATA_PREFIX environment variable
+        tessdata_prefix = os.environ.get('TESSDATA_PREFIX')
+        if tessdata_prefix:
+            tessdata = Path(tessdata_prefix)
+            if tessdata.exists():
+                return str(tessdata)
+
+        # Try to get tessdata path from tesseract command
+        try:
+            result = subprocess.run(
+                ['tesseract', '--print-parameters'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+
+            # Look for tessdata path in output
+            for line in result.stdout.split('\n'):
+                if 'tessdata' in line.lower() and 'prefix' in line.lower():
+                    # Extract path from line
+                    parts = line.split()
+                    for part in parts:
+                        if 'tessdata' in part:
+                            p = Path(part)
+                            if p.exists():
+                                return str(p)
+        except Exception:
+            pass
+
+        # Common installation paths to check
+        common_paths = [
+            '/usr/share/tesseract-ocr/4.00/tessdata',
+            '/usr/share/tesseract-ocr/5/tessdata',
+            '/usr/share/tessdata',
+            '/usr/local/share/tessdata',
+            '/opt/homebrew/share/tessdata',  # macOS Homebrew
+            'C:\\Program Files\\Tesseract-OCR\\tessdata',  # Windows
+            'C:\\Program Files (x86)\\Tesseract-OCR\\tessdata',
+        ]
+
+        for path in common_paths:
+            p = Path(path)
+            if p.exists() and (p / 'eng.traineddata').exists():
+                return str(p)
+
+        # Return None to use tesserocr's default detection
+        return None
 
     def recognize(self, image: Image.Image) -> OCRResult:
         """
@@ -65,11 +126,21 @@ class TesseractEngine:
         """
         # Create API instance if needed
         if self.api is None:
-            self.api = self.tesserocr.PyTessBaseAPI(
-                lang=self.lang,
-                psm=self.psm,
-                oem=self.oem
-            )
+            # Initialize API with or without explicit path
+            if self.tessdata_path:
+                self.api = self.tesserocr.PyTessBaseAPI(
+                    path=self.tessdata_path,
+                    lang=self.lang,
+                    psm=self.psm,
+                    oem=self.oem
+                )
+            else:
+                # Let tesserocr auto-detect
+                self.api = self.tesserocr.PyTessBaseAPI(
+                    lang=self.lang,
+                    psm=self.psm,
+                    oem=self.oem
+                )
 
             # Set character whitelist if specified
             if self.whitelist:

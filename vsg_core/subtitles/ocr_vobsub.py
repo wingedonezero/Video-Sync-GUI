@@ -77,8 +77,22 @@ def run_vobsub_ocr(
 
         try:
             ocr_engine = TesseractEngine(ocr_config)
+
+            # Log tessdata path being used
+            if hasattr(ocr_engine, 'tessdata_path') and ocr_engine.tessdata_path:
+                runner._log_message(f"[OCR] Using tessdata path: {ocr_engine.tessdata_path}")
+            else:
+                runner._log_message("[OCR] Using tesserocr auto-detected tessdata path")
+
+            # Log OCR settings
+            runner._log_message(f"[OCR] Settings: PSM={ocr_engine.psm}, OEM={ocr_engine.oem}, Lang={ocr_engine.lang}")
+
         except ImportError as e:
             runner._log_message(f"[OCR] ERROR: {str(e)}")
+            return None
+        except Exception as e:
+            runner._log_message(f"[OCR] ERROR: Failed to initialize Tesseract: {str(e)}")
+            runner._log_message("[OCR] Make sure Tesseract OCR and language data are installed.")
             return None
 
         # Step 3: Initialize ASS builder
