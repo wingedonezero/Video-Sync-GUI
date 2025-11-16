@@ -163,12 +163,17 @@ class SteppingCorrector:
         self,
         ref_pcm: np.ndarray,
         analysis_pcm: np.ndarray,
-        boundary_s: float,
+        boundary_s_target: float,
         gap_duration_ms: float,
-        sample_rate: int
+        sample_rate: int,
+        current_delay_ms: float
     ) -> Tuple[Optional[np.ndarray], float, str]:
         """
         Attempts to extract matching content from reference audio to fill a gap.
+
+        Args:
+            boundary_s_target: Position on the TARGET timeline (where the gap will be inserted)
+            current_delay_ms: The current delay BEFORE the jump (to convert to reference timeline)
 
         Returns:
             Tuple of (extracted_pcm, correlation_score, fill_type)
@@ -183,31 +188,45 @@ class SteppingCorrector:
             return None, 0.0, 'silence'
 
         gap_samples = int((gap_duration_ms / 1000.0) * sample_rate)
-        boundary_sample = int(boundary_s * sample_rate)
 
-        # Define search window in reference audio around the boundary
+        # CRITICAL FIX: Convert target timeline position to reference timeline position
+        # The boundary_s_target is on the target (analysis) timeline, but we need to extract
+        # from the reference timeline. The current delay tells us the offset.
+        # Positive delay means target is EARLY, so reference position is EARLIER in time.
+        boundary_s_ref = boundary_s_target - (current_delay_ms / 1000.0)
+
+        # Safeguard: Ensure reference position doesn't go negative
+        if boundary_s_ref < 0:
+            self.log(f"      [Smart Fill] WARNING: Reference position would be negative ({boundary_s_ref:.3f}s), clamping to 0.0s")
+            boundary_s_ref = 0.0
+
+        boundary_sample_ref = int(boundary_s_ref * sample_rate)
+
+        self.log(f"      [Smart Fill] Target boundary: {boundary_s_target:.3f}s, Current delay: {current_delay_ms:+.0f}ms → Reference position: {boundary_s_ref:.3f}s")
+
+        # Define search window in reference audio around the reference position
         search_window_samples = int(search_window_s * sample_rate)
-        search_start = max(0, boundary_sample - search_window_samples)
-        search_end = min(len(ref_pcm), boundary_sample + search_window_samples + gap_samples)
+        search_start = max(0, boundary_sample_ref - search_window_samples)
+        search_end = min(len(ref_pcm), boundary_sample_ref + search_window_samples + gap_samples)
 
         if search_end - search_start < gap_samples:
             self.log(f"      [Smart Fill] Insufficient reference audio for content search.")
             return None, 0.0, 'silence'
 
         # Try to find best matching content in reference
-        # First, check if there's content at the exact boundary position
-        if boundary_sample + gap_samples <= len(ref_pcm):
-            candidate_content = ref_pcm[boundary_sample:boundary_sample + gap_samples]
+        # Extract from the REFERENCE timeline position
+        if boundary_sample_ref + gap_samples <= len(ref_pcm):
+            candidate_content = ref_pcm[boundary_sample_ref:boundary_sample_ref + gap_samples]
 
             # Check if this is actual content (not silence)
             content_std = np.std(candidate_content)
             if content_std < 1e-6:
-                self.log(f"      [Smart Fill] Reference has silence at boundary → using silence fill")
+                self.log(f"      [Smart Fill] Reference has silence at position → using silence fill")
                 return None, 0.0, 'silence'
 
             # In 'content' mode, always use reference content if available
             if fill_mode == 'content':
-                self.log(f"      [Smart Fill] Extracting content from reference (forced mode)")
+                self.log(f"      [Smart Fill] Extracting {gap_duration_ms:.0f}ms from reference at {boundary_s_ref:.3f}s (forced mode)")
                 return candidate_content, 1.0, 'content'
 
             # In 'auto' mode, correlate to verify it's a good match
@@ -216,9 +235,10 @@ class SteppingCorrector:
                 # Normalize candidate for correlation
                 candidate_norm = (candidate_content - np.mean(candidate_content)) / (content_std + 1e-9)
 
-                # Search in analysis audio near the boundary
-                analysis_search_start = max(0, boundary_sample - search_window_samples)
-                analysis_search_end = min(len(analysis_pcm), boundary_sample + search_window_samples)
+                # Search in analysis audio near the boundary (on TARGET timeline)
+                boundary_sample_target = int(boundary_s_target * sample_rate)
+                analysis_search_start = max(0, boundary_sample_target - search_window_samples)
+                analysis_search_end = min(len(analysis_pcm), boundary_sample_target + search_window_samples)
                 analysis_search_region = analysis_pcm[analysis_search_start:analysis_search_end]
 
                 if len(analysis_search_region) > gap_samples:
@@ -236,7 +256,7 @@ class SteppingCorrector:
                             self.log(f"      [Smart Fill] Content correlation: {normalized_corr:.3f} (threshold: {correlation_threshold:.3f})")
 
                             if normalized_corr < correlation_threshold:
-                                # Good match - this content is NOT in analysis, so we should add it
+                                # Low correlation - this content is NOT in analysis, so we should add it
                                 self.log(f"      [Smart Fill] Content appears to be missing from analysis → extracting from reference")
                                 return candidate_content, normalized_corr, 'content'
                             else:
@@ -246,7 +266,7 @@ class SteppingCorrector:
 
             # Default to using content if we can't determine otherwise
             if fill_mode == 'auto':
-                self.log(f"      [Smart Fill] Using reference content (auto mode, unable to verify)")
+                self.log(f"      [Smart Fill] Using reference content at {boundary_s_ref:.3f}s (auto mode, unable to verify)")
                 return candidate_content, 0.5, 'content'
 
         # If we get here, use silence
@@ -380,9 +400,10 @@ class SteppingCorrector:
                             fill_content, corr_score, fill_type = self._extract_content_from_reference(
                                 ref_pcm=ref_pcm,
                                 analysis_pcm=pcm_data,
-                                boundary_s=segment.start_s,
+                                boundary_s_target=segment.start_s,
                                 gap_duration_ms=silence_to_add_ms,
-                                sample_rate=sample_rate
+                                sample_rate=sample_rate,
+                                current_delay_ms=current_base_delay
                             )
 
                         if fill_content is not None and fill_type == 'content':
