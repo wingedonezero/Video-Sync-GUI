@@ -87,9 +87,6 @@ class ASSBuilder:
         if not text or not text.strip():
             return
 
-        # Calculate alignment based on position
-        alignment = self._calculate_alignment(x, y, width, height)
-
         # Calculate position for \pos tag
         if preserve_position:
             # Calculate center point of subtitle
@@ -102,6 +99,8 @@ class ASSBuilder:
             text_with_pos = text
 
         # Create event
+        # Note: We use \pos tags for positioning, so alignment is less important
+        # but we set it to 2 (bottom center) as a reasonable default
         event = SSAEvent(
             start=start_ms,
             end=end_ms,
@@ -110,54 +109,6 @@ class ASSBuilder:
         )
 
         self.subs.events.append(event)
-
-    def _calculate_alignment(self, x: int, y: int, width: int, height: int) -> Alignment:
-        """
-        Calculate alignment tag based on position.
-
-        Returns alignment (1-9, numpad style):
-        7 8 9
-        4 5 6
-        1 2 3
-        """
-        # Calculate center point
-        center_x = x + (width // 2)
-        center_y = y + (height // 2)
-
-        # Determine horizontal alignment
-        if center_x < self.frame_width * 0.33:
-            h_align = 0  # Left (1, 4, 7)
-        elif center_x < self.frame_width * 0.67:
-            h_align = 1  # Center (2, 5, 8)
-        else:
-            h_align = 2  # Right (3, 6, 9)
-
-        # Determine vertical alignment
-        if center_y < self.frame_height * 0.33:
-            v_align = 2  # Top (7, 8, 9)
-        elif center_y < self.frame_height * 0.67:
-            v_align = 1  # Middle (4, 5, 6)
-        else:
-            v_align = 0  # Bottom (1, 2, 3)
-
-        # Calculate alignment number (1-9)
-        alignment_num = 1 + h_align + (v_align * 3)
-
-        # Convert to pysubs2 Alignment enum
-        # Note: pysubs2 uses LEFT/CENTER/RIGHT for middle row, not CENTER_LEFT/etc
-        alignment_map = {
-            1: Alignment.BOTTOM_LEFT,
-            2: Alignment.BOTTOM_CENTER,
-            3: Alignment.BOTTOM_RIGHT,
-            4: Alignment.LEFT,        # Middle left
-            5: Alignment.CENTER,      # Middle center
-            6: Alignment.RIGHT,       # Middle right
-            7: Alignment.TOP_LEFT,
-            8: Alignment.TOP_CENTER,
-            9: Alignment.TOP_RIGHT,
-        }
-
-        return alignment_map.get(alignment_num, Alignment.BOTTOM_CENTER)
 
     def save(self, output_path: str) -> None:
         """
