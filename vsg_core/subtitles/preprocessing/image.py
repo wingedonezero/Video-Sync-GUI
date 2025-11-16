@@ -61,10 +61,16 @@ class ImagePreprocessor:
     def _invert_colors(self, image: Image.Image) -> Image.Image:
         """
         Convert subtitle image to black text on white background.
-        VobSub uses a 4-color palette system. We use the alpha channel
-        directly as the image data: high alpha = text, low alpha = background.
 
-        SIMPLE APPROACH: Use alpha channel only, invert it to get black-on-white.
+        VobSub uses a 4-color palette with RGBA values:
+        - Text: Bright colors (white/yellow) with high alpha
+        - Outline: Dark colors (black) with medium-high alpha
+        - Shadow: Dark colors (black) with medium alpha
+
+        CORRECT APPROACH: Use RGB luminance + alpha threshold
+        - Convert RGB to grayscale luminance
+        - Keep only pixels that are BOTH bright (high luminance) AND opaque (high alpha)
+        - This filters out dark outlines/shadows that cause gibberish OCR
         """
         # Convert to RGBA if needed
         if image.mode != 'RGBA':
@@ -73,24 +79,34 @@ class ImagePreprocessor:
         # Get numpy array
         img_array = np.array(image)
 
-        # Extract alpha channel (this contains the subtitle data)
+        # Extract RGB and alpha channels
+        r = img_array[:, :, 0].astype(np.float32)
+        g = img_array[:, :, 1].astype(np.float32)
+        b = img_array[:, :, 2].astype(np.float32)
         alpha = img_array[:, :, 3]
 
-        # Invert alpha to create grayscale image
-        # Alpha 255 (opaque text) → 0 (black)
-        # Alpha 0 (transparent) → 255 (white)
-        inverted = 255 - alpha
+        # Convert RGB to luminance (grayscale)
+        # ITU-R BT.601 formula: Y = 0.299*R + 0.587*G + 0.114*B
+        luminance = (0.299 * r + 0.587 * g + 0.114 * b).astype(np.uint8)
 
-        # Create RGB image from inverted alpha
-        rgb_array = np.stack([inverted, inverted, inverted], axis=2)
+        # Create white background
+        output = np.full_like(luminance, 255, dtype=np.uint8)
 
-        # Convert to PIL Image
-        result = Image.fromarray(rgb_array.astype(np.uint8), 'RGB')
+        # Keep only pixels that are BOTH:
+        # 1. Bright (luminance > 180) - text is usually white/yellow
+        # 2. Opaque (alpha > 200) - fully visible
+        # This combination filters out dark outlines and shadows
+        text_mask = (luminance > 180) & (alpha > 200)
+
+        # Invert luminance for text pixels: bright text → black
+        output[text_mask] = 255 - luminance[text_mask]
+
+        # Convert to RGB PIL Image
+        rgb_array = np.stack([output, output, output], axis=2)
+        result = Image.fromarray(rgb_array, 'RGB')
 
         # Crop to content (remove excess white space)
-        # Find bounding box of non-white pixels
-        mask = alpha > 0  # Any non-transparent pixel
-        bbox = self._get_content_bbox(mask)
+        bbox = self._get_content_bbox(text_mask)
         if bbox:
             result = result.crop(bbox)
 
