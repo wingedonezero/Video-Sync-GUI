@@ -14,6 +14,7 @@ from vsg_core.subtitles.rescale import rescale_subtitle
 from vsg_core.subtitles.style import multiply_font_size
 from vsg_core.subtitles.style_engine import StyleEngine
 from vsg_core.subtitles.ocr import run_ocr
+from vsg_core.subtitles.ocr_vobsub import run_vobsub_ocr
 from vsg_core.subtitles.cleanup import run_cleanup
 from vsg_core.subtitles.timing import fix_subtitle_timing
 
@@ -38,11 +39,14 @@ class SubtitlesStep:
                 runner._log_message(f"[Subtitles] Ignoring temp preview file for track {item.track.id} (will apply style patch after conversion).")
 
             if item.perform_ocr and item.extracted_path:
-                ocr_output_path = run_ocr(
-                    str(item.extracted_path.with_suffix('.idx')),
+                # Use new native VobSub OCR implementation
+                idx_path = str(item.extracted_path.with_suffix('.idx'))
+                runner._log_message(f"[OCR] Using native VobSub OCR implementation")
+
+                ocr_output_path = run_vobsub_ocr(
+                    idx_path,
                     item.track.props.lang,
                     runner,
-                    ctx.tool_paths,
                     ctx.settings_dict
                 )
                 if ocr_output_path:
@@ -105,7 +109,7 @@ class SubtitlesStep:
                     item.track = Track(
                         source=item.track.source, id=item.track.id, type=item.track.type,
                         props=StreamProps(
-                            codec_id="S_TEXT/UTF8",
+                            codec_id="S_TEXT/ASS",  # Changed to ASS since new OCR outputs ASS
                             lang=original_props.lang,
                             name=original_props.name
                         )
@@ -142,8 +146,10 @@ class SubtitlesStep:
                     continue
 
             if item.convert_to_ass and item.extracted_path and item.extracted_path.suffix.lower() == '.srt':
-                new_path = convert_srt_to_ass(str(item.extracted_path), runner, ctx.tool_paths)
-                item.extracted_path = Path(new_path)
+                # Only convert SRT to ASS if it's not already ASS from OCR
+                if not (item.perform_ocr and item.extracted_path.suffix.lower() == '.ass'):
+                    new_path = convert_srt_to_ass(str(item.extracted_path), runner, ctx.tool_paths)
+                    item.extracted_path = Path(new_path)
 
             if item.style_patch and item.extracted_path:
                 if item.extracted_path.suffix.lower() in ['.ass', '.ssa']:
