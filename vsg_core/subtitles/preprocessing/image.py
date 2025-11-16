@@ -32,14 +32,18 @@ class ImagePreprocessor:
         """
         Preprocess subtitle image for OCR.
 
-        Uses line segmentation + PSM 7 for best results (81% success rate).
-        Each line processed separately improves accuracy.
+        MINIMAL APPROACH matching VobSub-ML-OCR:
+        - NO inversion (images are already correct from parser)
+        - NO segmentation (let Tesseract handle multi-line)
+        - ONLY scaling (Tesseract needs larger text)
+
+        VobSub-ML-OCR does ZERO preprocessing and gets better results.
 
         Args:
             image: Input PIL Image (RGB or RGBA)
 
         Returns:
-            List of preprocessed PIL Images (one per line)
+            List with single PIL Image
         """
         # Save debug image FIRST (the raw extracted image)
         if self.debug_dir:
@@ -59,30 +63,20 @@ class ImagePreprocessor:
         else:
             rgb_image = image
 
-        # Step 2: Normalize background (invert if needed)
-        # Tesseract expects BLACK text on WHITE background
-        normalized = self._normalize_background(rgb_image)
-
-        # Step 3: Scale FIRST before segmentation (helps with line detection)
+        # Step 2: Scale ONLY (Tesseract likes larger text)
         if self.scale_enabled:
-            scaled = self._scale_image(normalized)
+            scaled = self._scale_image(rgb_image)
         else:
-            scaled = normalized
+            scaled = rgb_image
 
-        # Step 4: Add border padding to scaled image (smaller padding for line segments)
-        padded = self._add_border(scaled, padding=3)
-
-        # Step 5: Segment into lines (critical for PSM 7)
-        lines = self._segment_lines(padded)
-
-        # Save debug images
+        # Save debug image
         if self.debug_dir:
-            for i, line in enumerate(lines):
-                debug_path = os.path.join(self.debug_dir, f'preprocessed_{self.debug_counter}_line{i}.png')
-                line.save(debug_path)
+            debug_path = os.path.join(self.debug_dir, f'preprocessed_{self.debug_counter}.png')
+            scaled.save(debug_path)
             self.debug_counter += 1
 
-        return lines
+        # Return as single image - NO segmentation, NO inversion, NO border
+        return [scaled]
 
     def _normalize_background(self, image: Image.Image) -> Image.Image:
         """

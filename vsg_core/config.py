@@ -17,7 +17,7 @@ class AppConfig:
 
             # --- OCR Settings (New Native Implementation) ---
             'ocr_engine': 'tesseract',
-            'ocr_tesseract_psm': 7,                # Page segmentation mode (7 = single line, works with line segmentation)
+            'ocr_tesseract_psm': 3,                # Page segmentation mode (3 = fully automatic, best for unknown layout)
             'ocr_tesseract_oem': 1,                # OCR engine mode (1 = LSTM neural net)
             'ocr_preprocessing_scale': True,        # Enable image upscaling
             'ocr_preprocessing_denoise': False,     # Enable denoising
