@@ -1,0 +1,131 @@
+# vsg_core/subtitles/engines/tesseract.py
+# -*- coding: utf-8 -*-
+"""
+Tesseract OCR engine integration using tesserocr.
+Direct C++ API binding for better performance and control.
+"""
+
+from __future__ import annotations
+from dataclasses import dataclass
+from typing import List, Optional
+from PIL import Image
+
+
+@dataclass
+class WordInfo:
+    """Information about a single recognized word."""
+    text: str
+    confidence: float  # 0-100
+
+
+@dataclass
+class OCRResult:
+    """Result of OCR processing."""
+    text: str
+    confidence: float      # Average confidence 0-100
+    words: List[WordInfo]
+
+
+class TesseractEngine:
+    """Tesseract OCR engine wrapper using tesserocr."""
+
+    def __init__(self, config: dict):
+        """
+        Initialize Tesseract engine.
+
+        Args:
+            config: Configuration dictionary
+        """
+        self.lang = config.get('ocr_lang', 'eng')
+        self.psm = config.get('ocr_tesseract_psm', 7)  # Single line mode
+        self.oem = config.get('ocr_tesseract_oem', 1)  # LSTM mode
+        self.whitelist = config.get('ocr_whitelist_chars', '')
+        self.min_confidence = config.get('ocr_min_confidence', 0)
+
+        # Initialize tesserocr API
+        try:
+            import tesserocr
+            self.tesserocr = tesserocr
+            self.api = None  # Will be created when needed
+        except ImportError:
+            raise ImportError(
+                "tesserocr not installed. Please install: pip install tesserocr\n"
+                "Note: This requires Tesseract OCR to be installed on your system."
+            )
+
+    def recognize(self, image: Image.Image) -> OCRResult:
+        """
+        Perform OCR on an image.
+
+        Args:
+            image: PIL Image to recognize
+
+        Returns:
+            OCRResult with text and confidence
+        """
+        # Create API instance if needed
+        if self.api is None:
+            self.api = self.tesserocr.PyTessBaseAPI(
+                lang=self.lang,
+                psm=self.psm,
+                oem=self.oem
+            )
+
+            # Set character whitelist if specified
+            if self.whitelist:
+                self.api.SetVariable('tessedit_char_whitelist', self.whitelist)
+
+        # Set the image
+        self.api.SetImage(image)
+
+        # Perform OCR
+        text = self.api.GetUTF8Text()
+
+        # Get confidence scores
+        try:
+            # Get word-level confidence
+            word_confidences = self.api.AllWordConfidences()
+
+            # Get words
+            words_text = text.split()
+
+            # Create word info list
+            words = []
+            for i, word_text in enumerate(words_text):
+                if i < len(word_confidences):
+                    confidence = word_confidences[i]
+                else:
+                    confidence = 0
+
+                # Filter by minimum confidence
+                if confidence >= self.min_confidence:
+                    words.append(WordInfo(text=word_text, confidence=confidence))
+
+            # Calculate average confidence
+            if word_confidences:
+                avg_confidence = sum(word_confidences) / len(word_confidences)
+            else:
+                avg_confidence = 0.0
+
+            # Reconstruct text from filtered words
+            filtered_text = ' '.join(w.text for w in words)
+
+        except Exception:
+            # Fallback if confidence extraction fails
+            words = [WordInfo(text=text.strip(), confidence=0.0)]
+            avg_confidence = 0.0
+            filtered_text = text.strip()
+
+        return OCRResult(
+            text=filtered_text.strip(),
+            confidence=avg_confidence,
+            words=words
+        )
+
+    def __del__(self):
+        """Clean up Tesseract API."""
+        if hasattr(self, 'api') and self.api is not None:
+            try:
+                self.api.End()
+            except Exception:
+                pass
