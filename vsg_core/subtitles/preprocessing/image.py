@@ -59,20 +59,23 @@ class ImagePreprocessor:
         else:
             rgb_image = image
 
-        # Step 2: Normalize background (invert if needed)
-        # Tesseract expects BLACK text on WHITE background
-        normalized = self._normalize_background(rgb_image)
+        # Step 2: Auto-crop transparent/background pixels (like SubtitleEdit)
+        cropped = self._auto_crop(rgb_image)
 
-        # Step 3: Scale FIRST before segmentation (helps with line detection)
+        # Step 3: Normalize background (invert if needed)
+        # Tesseract expects BLACK text on WHITE background
+        normalized = self._normalize_background(cropped)
+
+        # Step 4: Scale FIRST before segmentation (helps with line detection)
         if self.scale_enabled:
             scaled = self._scale_image(normalized)
         else:
             scaled = normalized
 
-        # Step 4: Add border padding to scaled image (smaller padding for line segments)
+        # Step 5: Add border padding to scaled image (smaller padding for line segments)
         padded = self._add_border(scaled, padding=3)
 
-        # Step 5: Segment into lines (critical for PSM 7)
+        # Step 6: Segment into lines (critical for PSM 7)
         lines = self._segment_lines(padded)
 
         # Save debug images
@@ -121,6 +124,41 @@ class ImagePreprocessor:
         else:
             # Already black text on white background
             return image
+
+    def _auto_crop(self, image: Image.Image) -> Image.Image:
+        """
+        Auto-crop transparent/background pixels (SubtitleEdit preprocessing).
+
+        Removes extra padding around subtitle text for cleaner OCR input.
+
+        Args:
+            image: Input RGB image
+
+        Returns:
+            Cropped image
+        """
+        # Convert to grayscale for analysis
+        gray = image.convert('L')
+        gray_array = np.array(gray)
+
+        # Find non-white pixels (content)
+        # Background is typically near-white (230-255)
+        content_mask = gray_array < 230
+
+        if not content_mask.any():
+            # No content, return original
+            return image
+
+        # Get bounding box of content
+        bbox = self._get_content_bbox(content_mask)
+        if bbox is None:
+            return image
+
+        # Crop to content with small padding
+        left, top, right, bottom = bbox
+        cropped = image.crop((left, top, right, bottom))
+
+        return cropped
 
     def _add_border(self, image: Image.Image, padding: int = 10) -> Image.Image:
         """
