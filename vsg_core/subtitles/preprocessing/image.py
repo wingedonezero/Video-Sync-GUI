@@ -32,14 +32,15 @@ class ImagePreprocessor:
         """
         Preprocess subtitle image for OCR.
 
-        Minimal preprocessing to match VobSub-ML-OCR approach.
-        The images from the parser should already be clean RGB images.
+        Implements subtile-ocr approach:
+        1. Background normalization (black text on white background)
+        2. Line segmentation for PSM 7 (single line mode)
 
         Args:
             image: Input PIL Image (RGB or RGBA)
 
         Returns:
-            List of preprocessed PIL Images (one per line if multi-line)
+            List of preprocessed PIL Images (one per line)
         """
         # Save debug image FIRST (the raw extracted image)
         if self.debug_dir:
@@ -48,66 +49,76 @@ class ImagePreprocessor:
             debug_path = os.path.join(self.debug_dir, f'raw_extracted_{self.debug_counter}.png')
             image.save(debug_path)
 
-        # Minimal preprocessing: just ensure it's RGB and optionally scale
-        # VobSub-ML-OCR does NO preprocessing - feeds images directly to OCR
-
-        # Convert to RGB if needed (should already be RGB from parser)
+        # Step 1: Convert to RGB if needed
         if image.mode == 'RGBA':
             # Composite onto white background
             background = Image.new('RGB', image.size, (255, 255, 255))
             background.paste(image, mask=image.split()[3])
-            processed = background
+            rgb_image = background
         elif image.mode != 'RGB':
-            processed = image.convert('RGB')
+            rgb_image = image.convert('RGB')
         else:
-            processed = image
+            rgb_image = image
 
-        # Optional: Scale for better OCR (Tesseract likes larger text)
+        # Step 2: Normalize background (subtile-ocr approach)
+        # Tesseract expects BLACK text on WHITE background
+        # VobSub subtitles are typically white/colored text on dark/transparent background
+        # So we need to INVERT the image
+        normalized = self._normalize_background(rgb_image)
+
+        # Step 3: Scale for better OCR (Tesseract likes larger text)
         if self.scale_enabled:
-            scaled = self._scale_image(processed)
+            scaled = self._scale_image(normalized)
         else:
-            scaled = processed
+            scaled = normalized
 
-        # Save debug image AFTER scaling
+        # Step 4: Segment into lines (subtile-ocr approach)
+        # Using PSM 7 (single line) on each line separately improves accuracy
+        lines = self._segment_lines(scaled)
+
+        # Save debug images
         if self.debug_dir:
-            debug_path = os.path.join(self.debug_dir, f'preprocessed_{self.debug_counter}.png')
-            scaled.save(debug_path)
+            for i, line in enumerate(lines):
+                debug_path = os.path.join(self.debug_dir, f'preprocessed_{self.debug_counter}_line{i}.png')
+                line.save(debug_path)
             self.debug_counter += 1
 
-        # Return as single image
-        return [scaled]
+        return lines
 
-    def _invert_colors(self, image: Image.Image) -> Image.Image:
+    def _normalize_background(self, image: Image.Image) -> Image.Image:
         """
-        Convert subtitle image to grayscale.
+        Normalize background for Tesseract (black text on white background).
 
-        SIMPLE APPROACH: Just use PIL's built-in RGB to grayscale conversion
-        with alpha compositing. Let Tesseract handle the rest.
+        VobSub subtitles typically have white/colored text on dark background.
+        Tesseract 4.0+ expects black text on white background.
+        This is the key preprocessing step from subtile-ocr.
+
+        Args:
+            image: RGB image
+
+        Returns:
+            Normalized RGB image with inverted colors
         """
-        # Convert to RGBA if needed
-        if image.mode != 'RGBA':
-            image = image.convert('RGBA')
+        # Convert to grayscale to determine brightness
+        gray = image.convert('L')
+        gray_array = np.array(gray)
 
-        # Create a white background image
-        background = Image.new('RGB', image.size, (255, 255, 255))
+        # Calculate average brightness (excluding pure white/black)
+        mask = (gray_array > 10) & (gray_array < 245)
+        if mask.any():
+            avg_brightness = np.mean(gray_array[mask])
+        else:
+            avg_brightness = np.mean(gray_array)
 
-        # Composite the subtitle onto white background using its alpha channel
-        # This handles transparency properly
-        background.paste(image, mask=image.split()[3])  # Use alpha as mask
-
-        # Convert to grayscale
-        grayscale = background.convert('L')
-
-        # Save debug image if enabled
-        if self.debug_dir:
-            import os
-            os.makedirs(self.debug_dir, exist_ok=True)
-            debug_path = os.path.join(self.debug_dir, f'step1_grayscale_{self.debug_counter}.png')
-            grayscale.save(debug_path)
-            self.debug_counter += 1
-
-        # Convert back to RGB for consistency
-        return grayscale.convert('RGB')
+        # If text is bright (white text on dark background), invert the image
+        # Threshold: if average brightness of content is > 127, it's light text
+        if avg_brightness > 127:
+            # Invert the image (white text -> black text, dark bg -> white bg)
+            inverted = ImageOps.invert(image.convert('RGB'))
+            return inverted
+        else:
+            # Already black text on white background
+            return image
 
     def _get_content_bbox(self, mask: np.ndarray) -> tuple:
         """Get bounding box of content (where mask is True)."""

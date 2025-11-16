@@ -335,20 +335,28 @@ class VobSubParser:
                     pos += 2
             elif cmd == 0x05:  # Set display area (x1, y1, x2, y2)
                 if pos + 6 <= len(packet_data):
-                    coords = struct.unpack('>HHH', packet_data[pos:pos+6])[0:2]
-                    x1 = (coords[0] >> 4) & 0x0FFF
-                    x2 = ((coords[0] & 0x000F) << 8) | ((coords[1] >> 8) & 0x00FF)
-                    y1 = (coords[1] & 0x00FF) | ((coords[0] & 0x0F00) >> 4)
-
-                    # Parse as two 12-bit pairs
+                    # Extract 6 bytes containing 4 x 12-bit coordinates
+                    # Format: X1(12bit) X2(12bit) Y1(12bit) Y2(12bit) packed into 6 bytes
+                    # Based on VobSub-ML-OCR implementation
                     area_data = packet_data[pos:pos+6]
-                    x = ((area_data[0] << 4) | (area_data[1] >> 4)) & 0xFFF
-                    x2 = (((area_data[1] & 0x0F) << 8) | area_data[2]) & 0xFFF
-                    y = ((area_data[3] << 4) | (area_data[4] >> 4)) & 0xFFF
-                    y2 = (((area_data[4] & 0x0F) << 8) | area_data[5]) & 0xFFF
 
-                    width = x2 - x + 1
-                    height = y2 - y + 1
+                    # starting_x: bytes 0-1, right-shift 4 bits (upper 12 bits)
+                    starting_x = ((area_data[0] << 8) | area_data[1]) >> 4
+
+                    # ending_x: lower 4 bits of byte 1, shift left 8, combine with byte 2
+                    ending_x = ((area_data[1] & 0x0F) << 8) | area_data[2]
+
+                    # starting_y: bytes 3-4, right-shift 4 bits
+                    starting_y = ((area_data[3] << 8) | area_data[4]) >> 4
+
+                    # ending_y: lower 4 bits of byte 4, shift left 8, combine with byte 5
+                    ending_y = ((area_data[4] & 0x0F) << 8) | area_data[5]
+
+                    # Set position and dimensions
+                    x = starting_x
+                    y = starting_y
+                    width = ending_x - starting_x + 1
+                    height = ending_y - starting_y + 1
                     pos += 6
             elif cmd == 0x06:  # Set pixel data addresses (for interlaced fields)
                 if pos + 4 <= len(packet_data):
