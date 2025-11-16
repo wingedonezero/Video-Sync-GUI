@@ -61,11 +61,10 @@ class ImagePreprocessor:
     def _invert_colors(self, image: Image.Image) -> Image.Image:
         """
         Convert subtitle image to black text on white background.
-        VobSub typically has white/colored text on transparent background.
-        Tesseract expects black text on white background.
+        VobSub uses a 4-color palette system. We use the alpha channel
+        directly as the image data: high alpha = text, low alpha = background.
 
-        CRITICAL: Only process pixels with HIGH alpha values to avoid
-        OCRing borders, outlines, and shadows which cause gibberish output.
+        SIMPLE APPROACH: Use alpha channel only, invert it to get black-on-white.
         """
         # Convert to RGBA if needed
         if image.mode != 'RGBA':
@@ -74,60 +73,23 @@ class ImagePreprocessor:
         # Get numpy array
         img_array = np.array(image)
 
-        # Extract alpha channel
+        # Extract alpha channel (this contains the subtitle data)
         alpha = img_array[:, :, 3]
 
-        # Create new RGB image (white background)
-        rgb_array = np.ones((img_array.shape[0], img_array.shape[1], 3), dtype=np.uint8) * 255
+        # Invert alpha to create grayscale image
+        # Alpha 255 (opaque text) → 0 (black)
+        # Alpha 0 (transparent) → 255 (white)
+        inverted = 255 - alpha
 
-        # CRITICAL FIX: Use high alpha threshold to only capture main text pixels
-        # This excludes borders (alpha ~180-240), outlines, and shadows
-        # which were causing gibberish output (dashes, underscores, etc.)
-        #
-        # VobSub text structure:
-        # - Main text: alpha = 255 (or very close to 255), bright colors (white/yellow)
-        # - Outline/border: alpha = 180-240, often dark  <- We want to SKIP these
-        # - Shadow: alpha = 100-180          <- We want to SKIP these
-        #
-        # Strategy: Use BOTH high alpha AND bright color to filter out borders
-        alpha_mask = alpha >= 250  # Very high alpha (main text only)
+        # Create RGB image from inverted alpha
+        rgb_array = np.stack([inverted, inverted, inverted], axis=2)
 
-        if alpha_mask.any():
-            # Additional filter: Only keep bright pixels (white/yellow text)
-            # Dark borders/outlines will be filtered out
-            # Calculate brightness for all pixels
-            brightness = (0.299 * img_array[:, :, 0] +
-                         0.587 * img_array[:, :, 1] +
-                         0.114 * img_array[:, :, 2])
-
-            # Combine: high alpha AND bright color (brightness > 180)
-            # This filters out dark outlines/borders
-            brightness_mask = brightness > 180
-            mask = alpha_mask & brightness_mask
-
-        else:
-            mask = alpha_mask
-
-        if mask.any():
-            # Get the text pixels
-            text_pixels = img_array[mask]
-
-            # Convert to grayscale and invert
-            # Use luminance formula: 0.299*R + 0.587*G + 0.114*B
-            gray = (0.299 * text_pixels[:, 0] +
-                    0.587 * text_pixels[:, 1] +
-                    0.114 * text_pixels[:, 2])
-
-            # Invert: white text becomes black
-            inverted_gray = 255 - gray
-
-            # Apply to all RGB channels
-            rgb_array[mask] = np.column_stack([inverted_gray, inverted_gray, inverted_gray])
-
-        # Convert back to PIL Image
-        result = Image.fromarray(rgb_array, 'RGB')
+        # Convert to PIL Image
+        result = Image.fromarray(rgb_array.astype(np.uint8), 'RGB')
 
         # Crop to content (remove excess white space)
+        # Find bounding box of non-white pixels
+        mask = alpha > 0  # Any non-transparent pixel
         bbox = self._get_content_bbox(mask)
         if bbox:
             result = result.crop(bbox)

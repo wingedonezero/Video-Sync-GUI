@@ -89,18 +89,18 @@ class ASSBuilder:
 
         # Calculate position for \pos tag
         if preserve_position:
-            # Calculate center point of subtitle
-            pos_x = x + (width // 2)
-            pos_y = y + (height // 2)
+            # Use top-left corner directly (no offset needed)
+            # Alignment 7 = top left, so \pos() positions the top-left of the text
+            pos_x = x
+            pos_y = y
 
-            # Apply positioning tag
-            text_with_pos = f"{{\\pos({pos_x},{pos_y})}}{text}"
+            # Apply positioning with alignment 7 (top-left)
+            # This ensures \pos(x,y) places the text exactly where it was in the original
+            text_with_pos = f"{{\\an7\\pos({pos_x},{pos_y})}}{text}"
         else:
             text_with_pos = text
 
         # Create event
-        # Note: We use \pos tags for positioning, so alignment is less important
-        # but we set it to 2 (bottom center) as a reasonable default
         event = SSAEvent(
             start=start_ms,
             end=end_ms,
