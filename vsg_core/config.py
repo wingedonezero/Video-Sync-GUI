@@ -113,6 +113,13 @@ class AppConfig:
             'segment_min_confidence_ratio': 5.0,
             'segment_fine_chunk_s': 2.0,
             'segment_fine_iterations': 10,
+
+            # --- Stepping Correction Enhancements ---
+            'stepping_min_cluster_size': 3,  # Minimum chunks per cluster to qualify as stepping
+            'stepping_fill_mode': 'auto',  # 'auto', 'silence', or 'content' - how to fill delay gaps
+            'stepping_diagnostics_verbose': True,  # Enable detailed cluster composition reports
+            'stepping_content_correlation_threshold': 0.5,  # Min correlation for content extraction
+            'stepping_content_search_window_s': 5.0,  # Search window for finding matching content
         }
         self.settings = self.defaults.copy()
         self.load()

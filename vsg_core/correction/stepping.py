@@ -159,6 +159,99 @@ class SteppingCorrector:
         self.log(f"    - Found precise boundary at: {final_boundary_s:.3f}s")
         return final_boundary_s
 
+    def _extract_content_from_reference(
+        self,
+        ref_pcm: np.ndarray,
+        analysis_pcm: np.ndarray,
+        boundary_s: float,
+        gap_duration_ms: float,
+        sample_rate: int
+    ) -> Tuple[Optional[np.ndarray], float, str]:
+        """
+        Attempts to extract matching content from reference audio to fill a gap.
+
+        Returns:
+            Tuple of (extracted_pcm, correlation_score, fill_type)
+            fill_type: 'content' if good match found, 'silence' otherwise
+        """
+        fill_mode = self.config.get('stepping_fill_mode', 'auto')
+        correlation_threshold = self.config.get('stepping_content_correlation_threshold', 0.5)
+        search_window_s = self.config.get('stepping_content_search_window_s', 5.0)
+
+        # Force silence mode if configured
+        if fill_mode == 'silence':
+            return None, 0.0, 'silence'
+
+        gap_samples = int((gap_duration_ms / 1000.0) * sample_rate)
+        boundary_sample = int(boundary_s * sample_rate)
+
+        # Define search window in reference audio around the boundary
+        search_window_samples = int(search_window_s * sample_rate)
+        search_start = max(0, boundary_sample - search_window_samples)
+        search_end = min(len(ref_pcm), boundary_sample + search_window_samples + gap_samples)
+
+        if search_end - search_start < gap_samples:
+            self.log(f"      [Smart Fill] Insufficient reference audio for content search.")
+            return None, 0.0, 'silence'
+
+        # Try to find best matching content in reference
+        # First, check if there's content at the exact boundary position
+        if boundary_sample + gap_samples <= len(ref_pcm):
+            candidate_content = ref_pcm[boundary_sample:boundary_sample + gap_samples]
+
+            # Check if this is actual content (not silence)
+            content_std = np.std(candidate_content)
+            if content_std < 1e-6:
+                self.log(f"      [Smart Fill] Reference has silence at boundary → using silence fill")
+                return None, 0.0, 'silence'
+
+            # In 'content' mode, always use reference content if available
+            if fill_mode == 'content':
+                self.log(f"      [Smart Fill] Extracting content from reference (forced mode)")
+                return candidate_content, 1.0, 'content'
+
+            # In 'auto' mode, correlate to verify it's a good match
+            # Look for where this content might appear in the analysis audio
+            if len(analysis_pcm) > gap_samples:
+                # Normalize candidate for correlation
+                candidate_norm = (candidate_content - np.mean(candidate_content)) / (content_std + 1e-9)
+
+                # Search in analysis audio near the boundary
+                analysis_search_start = max(0, boundary_sample - search_window_samples)
+                analysis_search_end = min(len(analysis_pcm), boundary_sample + search_window_samples)
+                analysis_search_region = analysis_pcm[analysis_search_start:analysis_search_end]
+
+                if len(analysis_search_region) > gap_samples:
+                    analysis_std = np.std(analysis_search_region)
+                    if analysis_std > 1e-6:
+                        analysis_norm = (analysis_search_region - np.mean(analysis_search_region)) / (analysis_std + 1e-9)
+
+                        # Correlate to find if this content exists in analysis
+                        corr = correlate(candidate_norm, analysis_norm, mode='valid', method='fft')
+
+                        if len(corr) > 0:
+                            max_corr = np.max(np.abs(corr))
+                            normalized_corr = max_corr / len(candidate_norm)
+
+                            self.log(f"      [Smart Fill] Content correlation: {normalized_corr:.3f} (threshold: {correlation_threshold:.3f})")
+
+                            if normalized_corr < correlation_threshold:
+                                # Good match - this content is NOT in analysis, so we should add it
+                                self.log(f"      [Smart Fill] Content appears to be missing from analysis → extracting from reference")
+                                return candidate_content, normalized_corr, 'content'
+                            else:
+                                # High correlation means content already exists in analysis
+                                self.log(f"      [Smart Fill] Content already exists in analysis → using silence")
+                                return None, normalized_corr, 'silence'
+
+            # Default to using content if we can't determine otherwise
+            if fill_mode == 'auto':
+                self.log(f"      [Smart Fill] Using reference content (auto mode, unable to verify)")
+                return candidate_content, 0.5, 'content'
+
+        # If we get here, use silence
+        return None, 0.0, 'silence'
+
     def _analyze_internal_drift(self, edl: List[AudioSegment], ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int, codec_name: str) -> List[AudioSegment]:
         self.log(f"  [SteppingCorrector] Stage 2.5: Analyzing segments for internal drift (Codec: {codec_name})...")
         final_edl = []
@@ -261,7 +354,7 @@ class SteppingCorrector:
 
         return final_edl
 
-    def _assemble_from_segments_via_ffmpeg(self, pcm_data: np.ndarray, edl: List[AudioSegment], channels: int, channel_layout: str, sample_rate: int, out_path: Path, log_prefix: str) -> bool:
+    def _assemble_from_segments_via_ffmpeg(self, pcm_data: np.ndarray, edl: List[AudioSegment], channels: int, channel_layout: str, sample_rate: int, out_path: Path, log_prefix: str, ref_pcm: Optional[np.ndarray] = None) -> bool:
         self.log(f"  [{log_prefix}] Assembling audio from {len(edl)} segment(s) via FFmpeg...")
 
         assembly_dir = out_path.parent / f"assembly_{out_path.stem}"
@@ -279,25 +372,68 @@ class SteppingCorrector:
                 silence_to_add_ms = segment.delay_ms - current_base_delay
                 if abs(silence_to_add_ms) > 10:
                     if silence_to_add_ms > 0:
-                        self.log(f"    - At {segment.start_s:.3f}s: Inserting {silence_to_add_ms}ms of pure silence.")
-                        silence_duration_s = silence_to_add_ms / 1000.0
-                        silence_file = assembly_dir / f"silence_{i:03d}.flac"
+                        # Try Smart Fill if reference audio is available
+                        fill_content = None
+                        fill_type = 'silence'
 
-                        silence_samples = int(silence_duration_s * sample_rate) * channels
-                        silence_pcm = np.zeros(silence_samples, dtype=np.int32)
+                        if ref_pcm is not None:
+                            fill_content, corr_score, fill_type = self._extract_content_from_reference(
+                                ref_pcm=ref_pcm,
+                                analysis_pcm=pcm_data,
+                                boundary_s=segment.start_s,
+                                gap_duration_ms=silence_to_add_ms,
+                                sample_rate=sample_rate
+                            )
 
-                        encode_cmd = [
-                            'ffmpeg', '-y', '-v', 'error', '-nostdin',
-                            '-f', 's32le', '-ar', str(sample_rate), '-ac', str(channels),
-                            '-channel_layout', channel_layout, '-i', '-',
-                            '-map_metadata', '-1',
-                            '-map_metadata:s:a', '-1',
-                            '-fflags', '+bitexact',
-                            '-c:a', 'flac',
-                            str(silence_file)
-                        ]
-                        if self.runner.run(encode_cmd, self.tool_paths, is_binary=True, input_data=silence_pcm.tobytes()) is not None:
-                            segment_files.append(f"file '{silence_file.name}'")
+                        if fill_content is not None and fill_type == 'content':
+                            # Use extracted content from reference
+                            self.log(f"    - At {segment.start_s:.3f}s: Inserting {silence_to_add_ms}ms of CONTENT from reference (Smart Fill, correlation={corr_score:.3f}).")
+                            content_file = assembly_dir / f"content_{i:03d}.flac"
+
+                            # Convert mono ref_pcm to match target channels if needed
+                            if channels == 1:
+                                content_to_encode = fill_content
+                            else:
+                                # Duplicate mono to all channels
+                                content_mono = fill_content
+                                content_interleaved = np.zeros(len(content_mono) * channels, dtype=np.int32)
+                                for ch in range(channels):
+                                    content_interleaved[ch::channels] = content_mono
+                                content_to_encode = content_interleaved
+
+                            encode_cmd = [
+                                'ffmpeg', '-y', '-v', 'error', '-nostdin',
+                                '-f', 's32le', '-ar', str(sample_rate), '-ac', str(channels),
+                                '-channel_layout', channel_layout, '-i', '-',
+                                '-map_metadata', '-1',
+                                '-map_metadata:s:a', '-1',
+                                '-fflags', '+bitexact',
+                                '-c:a', 'flac',
+                                str(content_file)
+                            ]
+                            if self.runner.run(encode_cmd, self.tool_paths, is_binary=True, input_data=content_to_encode.tobytes()) is not None:
+                                segment_files.append(f"file '{content_file.name}'")
+                        else:
+                            # Use silence (traditional approach)
+                            self.log(f"    - At {segment.start_s:.3f}s: Inserting {silence_to_add_ms}ms of silence.")
+                            silence_duration_s = silence_to_add_ms / 1000.0
+                            silence_file = assembly_dir / f"silence_{i:03d}.flac"
+
+                            silence_samples = int(silence_duration_s * sample_rate) * channels
+                            silence_pcm = np.zeros(silence_samples, dtype=np.int32)
+
+                            encode_cmd = [
+                                'ffmpeg', '-y', '-v', 'error', '-nostdin',
+                                '-f', 's32le', '-ar', str(sample_rate), '-ac', str(channels),
+                                '-channel_layout', channel_layout, '-i', '-',
+                                '-map_metadata', '-1',
+                                '-map_metadata:s:a', '-1',
+                                '-fflags', '+bitexact',
+                                '-c:a', 'flac',
+                                str(silence_file)
+                            ]
+                            if self.runner.run(encode_cmd, self.tool_paths, is_binary=True, input_data=silence_pcm.tobytes()) is not None:
+                                segment_files.append(f"file '{silence_file.name}'")
                     else:
                         self.log(f"    - At {segment.start_s:.3f}s: Removing {-silence_to_add_ms}ms of audio.")
 
@@ -517,7 +653,7 @@ class SteppingCorrector:
             # --- QA Check ---
             self.log("  [SteppingCorrector] Assembling temporary QA track...")
             qa_track_path = Path(analysis_audio_path).parent / "qa_track.flac"
-            if not self._assemble_from_segments_via_ffmpeg(analysis_pcm, edl, 1, 'mono', sample_rate, qa_track_path, log_prefix="QA"):
+            if not self._assemble_from_segments_via_ffmpeg(analysis_pcm, edl, 1, 'mono', sample_rate, qa_track_path, log_prefix="QA", ref_pcm=ref_pcm):
                 return CorrectionResult(CorrectionVerdict.FAILED, {'error': "Failed during QA track assembly."})
 
             if not self._qa_check(str(qa_track_path), ref_file_path, edl[0].delay_ms):
@@ -536,9 +672,10 @@ class SteppingCorrector:
             if analysis_pcm is not None: del analysis_pcm
             gc.collect()
 
-    def apply_plan_to_file(self, target_audio_path: str, edl: List[AudioSegment], temp_dir: Path) -> Optional[Path]:
+    def apply_plan_to_file(self, target_audio_path: str, edl: List[AudioSegment], temp_dir: Path, ref_file_path: Optional[str] = None) -> Optional[Path]:
         """Applies a pre-generated EDL to a given audio file."""
         target_pcm = None
+        ref_pcm = None
         try:
             target_index, _ = get_audio_stream_info(target_audio_path, None, self.runner, self.tool_paths)
             if target_index is None:
@@ -546,6 +683,15 @@ class SteppingCorrector:
                 return None
 
             target_channels, target_layout, sample_rate = _get_audio_properties(target_audio_path, target_index, self.runner, self.tool_paths)
+
+            # Decode reference audio for Smart Fill if provided
+            if ref_file_path:
+                self.log(f"  [SteppingCorrector] Decoding reference audio for Smart Fill capability...")
+                ref_index, _ = get_audio_stream_info(ref_file_path, None, self.runner, self.tool_paths)
+                if ref_index is not None:
+                    ref_pcm = self._decode_to_memory(ref_file_path, ref_index, sample_rate)
+                    if ref_pcm is None:
+                        self.log(f"  [WARNING] Failed to decode reference audio, Smart Fill will be disabled")
 
             self.log(f"  [SteppingCorrector] Applying correction plan to '{Path(target_audio_path).name}'...")
             self.log(f"    - Decoding final target audio track ({target_layout})...")
@@ -555,7 +701,7 @@ class SteppingCorrector:
 
             corrected_path = temp_dir / f"corrected_{Path(target_audio_path).stem}.flac"
 
-            if not self._assemble_from_segments_via_ffmpeg(target_pcm, edl, target_channels, target_layout, sample_rate, corrected_path, log_prefix="Final"):
+            if not self._assemble_from_segments_via_ffmpeg(target_pcm, edl, target_channels, target_layout, sample_rate, corrected_path, log_prefix="Final", ref_pcm=ref_pcm):
                 return None
 
             self.log(f"[SUCCESS] Stepping correction applied successfully for '{Path(target_audio_path).name}'")
@@ -567,6 +713,8 @@ class SteppingCorrector:
         finally:
             if target_pcm is not None:
                 del target_pcm
+            if ref_pcm is not None:
+                del ref_pcm
             gc.collect()
 
 def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
@@ -626,7 +774,7 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
             runner._log_message(f"[SteppingCorrection] Analysis successful. Applying correction plan to {len(target_items)} audio track(s) from {source_key}.")
 
             for target_item in target_items:
-                corrected_path = corrector.apply_plan_to_file(str(target_item.extracted_path), edl, ctx.temp_dir)
+                corrected_path = corrector.apply_plan_to_file(str(target_item.extracted_path), edl, ctx.temp_dir, ref_file_path=ref_file_path)
 
                 if corrected_path:
                     # Preserve the original track

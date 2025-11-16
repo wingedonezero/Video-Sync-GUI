@@ -328,8 +328,11 @@ class AnalysisStep:
                     )
 
                     if source_has_audio_in_layout:
-                        # Store stepping correction info with the corrected delay
-                        ctx.segment_flags[analysis_track_key] = { 'base_delay': final_delay_ms }
+                        # Store stepping correction info with the corrected delay and cluster diagnostics
+                        ctx.segment_flags[analysis_track_key] = {
+                            'base_delay': final_delay_ms,
+                            'cluster_details': details.get('cluster_details', [])
+                        }
                         runner._log_message(
                             f"[Stepping] Stepping correction will be applied to audio tracks from {source_key}."
                         )
