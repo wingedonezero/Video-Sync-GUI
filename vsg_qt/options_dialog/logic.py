@@ -14,12 +14,22 @@ class OptionsLogic:
     def load_from_config(self, cfg: Dict[str, Any]):
         for section in self.dlg.sections.values():
             for key, widget in section.items():
-                self._set_widget_val(widget, cfg.get(key))
+                value = cfg.get(key)
+                # Special handling for OCR OEM mode (convert int to text)
+                if key == 'ocr_tesseract_oem' and isinstance(value, int):
+                    oem_map = {0: 'Legacy', 1: 'LSTM (Recommended)', 2: 'Legacy+LSTM', 3: 'Default'}
+                    value = oem_map.get(value, 'LSTM (Recommended)')  # Default to LSTM
+                self._set_widget_val(widget, value)
 
     def save_to_config(self, cfg: Dict[str, Any]):
         for section in self.dlg.sections.values():
             for key, widget in section.items():
-                cfg[key] = self._get_widget_val(widget)
+                value = self._get_widget_val(widget)
+                # Special handling for OCR OEM mode (convert text to int)
+                if key == 'ocr_tesseract_oem':
+                    oem_map = {'Legacy': 0, 'LSTM (Recommended)': 1, 'Legacy+LSTM': 2, 'Default': 3}
+                    value = oem_map.get(value, 1)  # Default to LSTM
+                cfg[key] = value
 
     # --- widget helpers copied from previous OptionsDialog (kept behavior) ---
     def _get_widget_val(self, widget):

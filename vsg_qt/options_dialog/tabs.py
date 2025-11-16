@@ -49,15 +49,21 @@ class StorageTab(QWidget):
         self.widgets['temp_root'].setToolTip("The root directory for storing temporary files during processing (e.g., extracted tracks, logs).")
         self.widgets['videodiff_path'] = _file_input()
         self.widgets['videodiff_path'].setToolTip("Optional. The full path to the 'videodiff' executable if it's not in your system's PATH.")
+        # Legacy OCR settings (deprecated, kept for compatibility)
         self.widgets['subtile_ocr_path'] = _file_input()
-        self.widgets['subtile_ocr_path'].setToolTip("Optional. The full path to the 'subtile-ocr' executable if it's not in your system's PATH.")
+        self.widgets['subtile_ocr_path'].setToolTip("DEPRECATED: The new native OCR system doesn't use this. See OCR tab for new settings.")
         self.widgets['subtile_ocr_char_blacklist'] = QLineEdit()
-        self.widgets['subtile_ocr_char_blacklist'].setToolTip("Optional. A string of characters to blacklist during the OCR process (e.g., '|/_~').")
+        self.widgets['subtile_ocr_char_blacklist'].setToolTip("DEPRECATED: Use 'OCR Character Whitelist' in the OCR tab instead.")
+
         f.addRow('Output Directory:', self.widgets['output_folder'])
         f.addRow('Temporary Directory:', self.widgets['temp_root'])
         f.addRow('VideoDiff Path (optional):', self.widgets['videodiff_path'])
-        f.addRow('Subtitle OCR Path (optional):', self.widgets['subtile_ocr_path'])
-        f.addRow('OCR Character Blacklist (optional):', self.widgets['subtile_ocr_char_blacklist'])
+
+        # Add deprecated settings in a dimmed section
+        deprecated_label = QLabel("<i>Legacy OCR Settings (Deprecated - Use OCR Tab)</i>")
+        f.addRow(deprecated_label)
+        f.addRow('Subtitle OCR Path (old):', self.widgets['subtile_ocr_path'])
+        f.addRow('OCR Character Blacklist (old):', self.widgets['subtile_ocr_char_blacklist'])
 
 class SubtitleCleanupTab(QWidget):
     def __init__(self):
@@ -348,3 +354,124 @@ class LoggingTab(QWidget):
         f.addRow('Error Tail:', self.widgets['log_error_tail'])
         f.addRow(self.widgets['log_show_options_pretty'])
         f.addRow(self.widgets['log_show_options_json'])
+
+class OCRTab(QWidget):
+    """OCR (Optical Character Recognition) settings for VobSub subtitles."""
+    def __init__(self):
+        super().__init__()
+        self.widgets: Dict[str, QWidget] = {}
+        main_layout = QVBoxLayout(self)
+
+        # Info label
+        info_label = QLabel(
+            "<b>Native VobSub OCR System</b><br>"
+            "Uses Tesseract OCR with optimized preprocessing for accurate subtitle recognition.<br>"
+            "Preserves subtitle positioning in ASS format."
+        )
+        info_label.setWordWrap(True)
+        main_layout.addWidget(info_label)
+
+        # --- Engine Settings ---
+        engine_group = QGroupBox("OCR Engine Configuration")
+        engine_layout = QFormLayout(engine_group)
+
+        self.widgets['ocr_tesseract_psm'] = QSpinBox()
+        self.widgets['ocr_tesseract_psm'].setRange(0, 13)
+        self.widgets['ocr_tesseract_psm'].setToolTip(
+            "Tesseract Page Segmentation Mode:\n"
+            "7 = Single text line (RECOMMENDED for subtitles)\n"
+            "6 = Single uniform block of text\n"
+            "3 = Fully automatic"
+        )
+
+        self.widgets['ocr_tesseract_oem'] = QComboBox()
+        self.widgets['ocr_tesseract_oem'].addItems(['Legacy', 'LSTM (Recommended)', 'Legacy+LSTM', 'Default'])
+        self.widgets['ocr_tesseract_oem'].setCurrentIndex(1)  # LSTM
+        self.widgets['ocr_tesseract_oem'].setToolTip(
+            "OCR Engine Mode:\n"
+            "• LSTM: Neural network-based, most accurate (recommended)\n"
+            "• Legacy: Traditional Tesseract engine\n"
+            "• Legacy+LSTM: Combined approach\n"
+            "• Default: Let Tesseract decide"
+        )
+
+        self.widgets['ocr_whitelist_chars'] = QLineEdit()
+        self.widgets['ocr_whitelist_chars'].setPlaceholderText("Leave empty for all English characters")
+        self.widgets['ocr_whitelist_chars'].setToolTip(
+            "Limit OCR to specific characters. Improves accuracy if you know what characters to expect.\n"
+            "Example: ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:;!?'-\n"
+            "Leave empty to allow all characters."
+        )
+
+        engine_layout.addRow("Page Segmentation Mode (PSM):", self.widgets['ocr_tesseract_psm'])
+        engine_layout.addRow("OCR Engine Mode:", self.widgets['ocr_tesseract_oem'])
+        engine_layout.addRow("Character Whitelist (optional):", self.widgets['ocr_whitelist_chars'])
+        main_layout.addWidget(engine_group)
+
+        # --- Preprocessing Settings ---
+        preproc_group = QGroupBox("Image Preprocessing")
+        preproc_layout = QFormLayout(preproc_group)
+
+        self.widgets['ocr_preprocessing_scale'] = QCheckBox("Enable upscaling to target DPI")
+        self.widgets['ocr_preprocessing_scale'].setToolTip(
+            "Upscale subtitle images to improve OCR accuracy.\n"
+            "Tesseract works best at 300+ DPI. DVD subtitles are typically low resolution."
+        )
+
+        self.widgets['ocr_target_dpi'] = QSpinBox()
+        self.widgets['ocr_target_dpi'].setRange(150, 600)
+        self.widgets['ocr_target_dpi'].setSuffix(" DPI")
+        self.widgets['ocr_target_dpi'].setToolTip(
+            "Target DPI for image upscaling.\n"
+            "300 DPI is optimal for Tesseract accuracy.\n"
+            "Higher values increase processing time."
+        )
+
+        self.widgets['ocr_preprocessing_denoise'] = QCheckBox("Enable denoising filter")
+        self.widgets['ocr_preprocessing_denoise'].setToolTip(
+            "Apply light Gaussian blur to reduce MPEG compression artifacts.\n"
+            "Usually not needed for clean DVD/Blu-ray subtitles."
+        )
+
+        preproc_layout.addRow(self.widgets['ocr_preprocessing_scale'])
+        preproc_layout.addRow("Target DPI:", self.widgets['ocr_target_dpi'])
+        preproc_layout.addRow(self.widgets['ocr_preprocessing_denoise'])
+        main_layout.addWidget(preproc_group)
+
+        # --- Output Settings ---
+        output_group = QGroupBox("Output & Quality")
+        output_layout = QFormLayout(output_group)
+
+        self.widgets['ocr_preserve_positioning'] = QCheckBox("Preserve subtitle positioning in ASS")
+        self.widgets['ocr_preserve_positioning'].setToolTip(
+            "Add \\pos(x,y) tags to ASS output to maintain original subtitle positions.\n"
+            "This ensures subtitles appear in the same location as the original VobSub."
+        )
+
+        self.widgets['ocr_min_confidence'] = QSpinBox()
+        self.widgets['ocr_min_confidence'].setRange(0, 100)
+        self.widgets['ocr_min_confidence'].setSuffix(" %")
+        self.widgets['ocr_min_confidence'].setToolTip(
+            "Minimum confidence threshold for OCR words (0-100).\n"
+            "0 = Accept all recognized text (recommended)\n"
+            "Higher values filter out uncertain results but may lose valid text."
+        )
+
+        output_layout.addRow(self.widgets['ocr_preserve_positioning'])
+        output_layout.addRow("Minimum Confidence:", self.widgets['ocr_min_confidence'])
+        main_layout.addWidget(output_group)
+
+        # Requirements note
+        req_label = QLabel(
+            "<b>Requirements:</b><br>"
+            "• Tesseract OCR 4.0+ must be installed on your system<br>"
+            "• Python package: tesserocr (pip install tesserocr)<br>"
+            "• English language data (tesseract-ocr-eng)<br>"
+            "<br>"
+            "See OCR_SETUP.md in the repository for installation instructions."
+        )
+        req_label.setWordWrap(True)
+        req_label.setStyleSheet("QLabel { background-color: #f0f0f0; padding: 8px; border-radius: 4px; }")
+        main_layout.addWidget(req_label)
+
+        main_layout.addStretch(1)
