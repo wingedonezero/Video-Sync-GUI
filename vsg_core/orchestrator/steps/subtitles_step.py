@@ -16,6 +16,7 @@ from vsg_core.subtitles.style_engine import StyleEngine
 from vsg_core.subtitles.ocr import run_ocr
 from vsg_core.subtitles.cleanup import run_cleanup
 from vsg_core.subtitles.timing import fix_subtitle_timing
+from vsg_core.subtitles.stepping_adjust import apply_stepping_to_subtitles
 
 class SubtitlesStep:
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
@@ -111,6 +112,21 @@ class SubtitlesStep:
                         )
                     )
 
+                    # Apply stepping correction to subtitle timestamps (if applicable)
+                    if ctx.settings_dict.get('stepping_adjust_subtitles', True):
+                        source_key = item.track.source
+                        if source_key in ctx.stepping_edls:
+                            stepping_report = apply_stepping_to_subtitles(
+                                str(item.extracted_path),
+                                ctx.stepping_edls[source_key],
+                                runner
+                            )
+                            if stepping_report and 'error' not in stepping_report:
+                                runner._log_message("--- Stepping Adjustment Report ---")
+                                for key, value in stepping_report.items():
+                                    runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
+                                runner._log_message("--------------------------------")
+
                     if item.perform_ocr_cleanup:
                         report = run_cleanup(ocr_output_path, ctx.settings_dict, runner)
                         if report:
@@ -140,6 +156,23 @@ class SubtitlesStep:
                     # Don't raise - just skip OCR for this track
                     item.perform_ocr = False
                     continue
+
+            # Apply stepping correction to subtitle timestamps for non-OCR subtitles
+            # (OCR subtitles already handled above)
+            if not item.perform_ocr and item.extracted_path:
+                if ctx.settings_dict.get('stepping_adjust_subtitles', True):
+                    source_key = item.track.source
+                    if source_key in ctx.stepping_edls:
+                        stepping_report = apply_stepping_to_subtitles(
+                            str(item.extracted_path),
+                            ctx.stepping_edls[source_key],
+                            runner
+                        )
+                        if stepping_report and 'error' not in stepping_report:
+                            runner._log_message("--- Stepping Adjustment Report ---")
+                            for key, value in stepping_report.items():
+                                runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
+                            runner._log_message("--------------------------------")
 
             if item.convert_to_ass and item.extracted_path and item.extracted_path.suffix.lower() == '.srt':
                 new_path = convert_srt_to_ass(str(item.extracted_path), runner, ctx.tool_paths)

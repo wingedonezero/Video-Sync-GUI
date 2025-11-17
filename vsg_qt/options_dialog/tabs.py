@@ -345,6 +345,17 @@ class AnalysisTab(QWidget):
         segment_layout.addRow("Content Correlation Threshold:", self.widgets['stepping_content_correlation_threshold'])
         segment_layout.addRow("Content Search Window:", self.widgets['stepping_content_search_window_s'])
 
+        # --- Section 6: Subtitle Adjustment ---
+        segment_layout.addRow(QLabel("<b>Section 6: Subtitle Adjustment</b>"))
+        self.widgets['stepping_adjust_subtitles'] = QCheckBox("Adjust subtitle timestamps for stepped sources")
+        self.widgets['stepping_adjust_subtitles'].setToolTip(
+            "When enabled, subtitle timestamps from stepped sources are automatically adjusted to match\n"
+            "the audio corrections (insertions/removals). This keeps subtitles in sync with the corrected audio.\n\n"
+            "Recommended: Keep enabled unless troubleshooting subtitle timing issues.\n"
+            "Only applies when stepping correction is enabled and detected for a source."
+        )
+        segment_layout.addRow(self.widgets['stepping_adjust_subtitles'])
+
         main_layout.addWidget(segment_group)
 
         main_layout.addStretch(1)
