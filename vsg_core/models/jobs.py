@@ -37,6 +37,7 @@ class PlanItem:
     container_delay_ms: int = 0
     custom_lang: str = ''
     aspect_ratio: Optional[str] = None  # NEW: Store original aspect ratio (e.g., "109:60")
+    stepping_adjusted: bool = False  # True if subtitle timestamps were adjusted for stepping corrections
 
 @dataclass(frozen=True)
 class MergePlan:

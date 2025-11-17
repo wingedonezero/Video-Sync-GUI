@@ -148,6 +148,14 @@ class MkvmergeOptionsBuilder:
         # - Audio/video from other sources (correlation delay + global shift)
         # - Subtitles from other sources (correlation delay + global shift)
         # - External subtitles (synced to a specific source)
+
+        # SPECIAL CASE: Subtitles with stepping-adjusted timestamps
+        # If subtitle timestamps were already adjusted for stepping corrections,
+        # the base delay + stepping offsets are baked into the subtitle file.
+        # Don't apply additional delay via mkvmerge to avoid double-applying.
+        if tr.type == TrackType.SUBTITLES and item.stepping_adjusted:
+            return 0
+
         sync_key = item.sync_to if tr.source == 'External' else tr.source
         delay = plan.delays.source_delays_ms.get(sync_key, 0)
         return int(delay)

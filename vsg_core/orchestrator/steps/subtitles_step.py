@@ -126,6 +126,8 @@ class SubtitlesStep:
                                 for key, value in stepping_report.items():
                                     runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
                                 runner._log_message("--------------------------------")
+                                # Mark that timestamps have been adjusted (so mux doesn't double-apply delay)
+                                item.stepping_adjusted = True
 
                     if item.perform_ocr_cleanup:
                         report = run_cleanup(ocr_output_path, ctx.settings_dict, runner)
@@ -173,6 +175,8 @@ class SubtitlesStep:
                             for key, value in stepping_report.items():
                                 runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
                             runner._log_message("--------------------------------")
+                            # Mark that timestamps have been adjusted (so mux doesn't double-apply delay)
+                            item.stepping_adjusted = True
 
             if item.convert_to_ass and item.extracted_path and item.extracted_path.suffix.lower() == '.srt':
                 new_path = convert_srt_to_ass(str(item.extracted_path), runner, ctx.tool_paths)
