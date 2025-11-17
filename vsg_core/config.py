@@ -122,6 +122,7 @@ class AppConfig:
             'stepping_content_search_window_s': 5.0,  # Search window for finding matching content (for auto/content modes)
             'stepping_scan_start_percentage': 5.0,  # Independent scan start for stepping correction
             'stepping_scan_end_percentage': 99.0,  # Independent scan end for stepping correction (higher to catch end boundaries)
+            'stepping_adjust_subtitles': True,  # Adjust subtitle timestamps to match stepped audio corrections
         }
         self.settings = self.defaults.copy()
         self.load()

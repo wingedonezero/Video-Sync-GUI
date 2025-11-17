@@ -796,6 +796,9 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
             edl = result.data['edl']
             runner._log_message(f"[SteppingCorrection] Analysis successful. Applying correction plan to {len(target_items)} audio track(s) from {source_key}.")
 
+            # Store EDL in context for subtitle adjustment
+            ctx.stepping_edls[source_key] = edl
+
             for target_item in target_items:
                 corrected_path = corrector.apply_plan_to_file(str(target_item.extracted_path), edl, ctx.temp_dir, ref_file_path=ref_file_path)
 
