@@ -116,10 +116,12 @@ class AppConfig:
 
             # --- Stepping Correction Enhancements ---
             'stepping_min_cluster_size': 3,  # Minimum chunks per cluster to qualify as stepping
-            'stepping_fill_mode': 'auto',  # 'auto', 'silence', or 'content' - how to fill delay gaps
+            'stepping_fill_mode': 'silence',  # 'auto', 'silence', or 'content' - how to fill delay gaps
             'stepping_diagnostics_verbose': True,  # Enable detailed cluster composition reports
-            'stepping_content_correlation_threshold': 0.5,  # Min correlation for content extraction
-            'stepping_content_search_window_s': 5.0,  # Search window for finding matching content
+            'stepping_content_correlation_threshold': 0.5,  # Min correlation for content extraction (for auto/content modes)
+            'stepping_content_search_window_s': 5.0,  # Search window for finding matching content (for auto/content modes)
+            'stepping_scan_start_percentage': 5.0,  # Independent scan start for stepping correction
+            'stepping_scan_end_percentage': 99.0,  # Independent scan end for stepping correction (higher to catch end boundaries)
         }
         self.settings = self.defaults.copy()
         self.load()

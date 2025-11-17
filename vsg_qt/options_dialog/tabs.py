@@ -284,12 +284,12 @@ class AnalysisTab(QWidget):
         )
 
         self.widgets['stepping_fill_mode'] = QComboBox()
-        self.widgets['stepping_fill_mode'].addItems(['auto', 'silence', 'content'])
+        self.widgets['stepping_fill_mode'].addItems(['silence', 'auto', 'content'])
         self.widgets['stepping_fill_mode'].setToolTip(
             "How to fill gaps when delay increases:\n"
-            "• auto: Intelligently decides between content and silence based on correlation analysis (Recommended)\n"
-            "• silence: Always insert pure silence (traditional behavior, safe)\n"
-            "• content: Always extract content from reference audio (use if Source 1 is complete)"
+            "• silence: Always insert pure silence (RECOMMENDED - safe and professional)\n"
+            "• auto: Intelligently decides between content and silence based on correlation analysis (experimental)\n"
+            "• content: Always extract content from reference audio (experimental, may cause audio artifacts)"
         )
 
         self.widgets['stepping_diagnostics_verbose'] = QCheckBox("Enable detailed cluster diagnostics")
@@ -319,11 +319,33 @@ class AnalysisTab(QWidget):
             "Default: 5.0 seconds is usually sufficient."
         )
 
+        self.widgets['stepping_scan_start_percentage'] = QDoubleSpinBox()
+        self.widgets['stepping_scan_start_percentage'].setRange(0.0, 99.0)
+        self.widgets['stepping_scan_start_percentage'].setSuffix(" %")
+        self.widgets['stepping_scan_start_percentage'].setDecimals(1)
+        self.widgets['stepping_scan_start_percentage'].setToolTip(
+            "Where to begin stepping correction coarse scan (independent from main analysis scan).\n"
+            "Usually same as main analysis start (5%), but can be adjusted separately.\n"
+            "Default: 5.0%"
+        )
+
+        self.widgets['stepping_scan_end_percentage'] = QDoubleSpinBox()
+        self.widgets['stepping_scan_end_percentage'].setRange(1.0, 100.0)
+        self.widgets['stepping_scan_end_percentage'].setSuffix(" %")
+        self.widgets['stepping_scan_end_percentage'].setDecimals(1)
+        self.widgets['stepping_scan_end_percentage'].setToolTip(
+            "Where to end stepping correction coarse scan (independent from main analysis scan).\n"
+            "Set higher than main analysis (e.g., 99%) to catch stepping at file end.\n"
+            "Default: 99.0%"
+        )
+
         segment_layout.addRow("Min. Cluster Size:", self.widgets['stepping_min_cluster_size'])
         segment_layout.addRow("Gap Fill Mode:", self.widgets['stepping_fill_mode'])
         segment_layout.addRow(self.widgets['stepping_diagnostics_verbose'])
         segment_layout.addRow("Content Correlation Threshold:", self.widgets['stepping_content_correlation_threshold'])
         segment_layout.addRow("Content Search Window:", self.widgets['stepping_content_search_window_s'])
+        segment_layout.addRow("Stepping Scan Start:", self.widgets['stepping_scan_start_percentage'])
+        segment_layout.addRow("Stepping Scan End:", self.widgets['stepping_scan_end_percentage'])
 
         main_layout.addWidget(segment_group)
 

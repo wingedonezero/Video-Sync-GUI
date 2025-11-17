@@ -118,8 +118,10 @@ class SteppingCorrector:
         coarse_map = []
         num_samples = min(len(ref_pcm), len(analysis_pcm))
         duration_s = len(ref_pcm) / float(sample_rate)
-        start_pct = self.config.get('scan_start_percentage', 5.0)
-        end_pct = self.config.get('scan_end_percentage', 95.0)
+
+        # Use stepping-specific scan ranges (independent from main analysis settings)
+        start_pct = self.config.get('stepping_scan_start_percentage', 5.0)
+        end_pct = self.config.get('stepping_scan_end_percentage', 99.0)
         scan_start_s = duration_s * (start_pct / 100.0)
         scan_end_s = duration_s * (end_pct / 100.0)
         start_offset_samples = int(scan_start_s * sample_rate)
