@@ -73,6 +73,8 @@ class SteppingCorrector:
             element_size = np.dtype(np.int32).itemsize
             aligned_size = (len(pcm_bytes) // element_size) * element_size
             if aligned_size != len(pcm_bytes):
+                trimmed_bytes = len(pcm_bytes) - aligned_size
+                self.log(f"[BUFFER ALIGNMENT] Trimmed {trimmed_bytes} bytes from {Path(file_path).name} (likely Opus/other codec)")
                 pcm_bytes = pcm_bytes[:aligned_size]
             return np.frombuffer(pcm_bytes, dtype=np.int32)
         self.log(f"[ERROR] SteppingCorrector failed to decode audio stream {stream_index} from '{Path(file_path).name}'")

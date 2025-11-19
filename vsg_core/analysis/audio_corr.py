@@ -75,6 +75,9 @@ def _decode_to_memory(file_path: str, a_index: int, out_sr: int, use_soxr: bool,
     element_size = np.dtype(np.float32).itemsize
     aligned_size = (len(pcm_bytes) // element_size) * element_size
     if aligned_size != len(pcm_bytes):
+        trimmed_bytes = len(pcm_bytes) - aligned_size
+        if hasattr(runner, '_log_message'):
+            runner._log_message(f"[BUFFER ALIGNMENT] Trimmed {trimmed_bytes} bytes from {Path(file_path).name} (likely Opus/other codec)")
         pcm_bytes = pcm_bytes[:aligned_size]
 
     return np.frombuffer(pcm_bytes, dtype=np.float32)
