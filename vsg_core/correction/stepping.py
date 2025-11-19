@@ -67,7 +67,14 @@ class SteppingCorrector:
     def _decode_to_memory(self, file_path: str, stream_index: int, sample_rate: int, channels: int = 1) -> Optional[np.ndarray]:
         cmd = [ 'ffmpeg', '-nostdin', '-v', 'error', '-i', str(file_path), '-map', f'0:a:{stream_index}', '-ac', str(channels), '-ar', str(sample_rate), '-f', 's32le', '-' ]
         pcm_bytes = self.runner.run(cmd, self.tool_paths, is_binary=True)
-        if pcm_bytes: return np.frombuffer(pcm_bytes, dtype=np.int32)
+        if pcm_bytes:
+            # Ensure buffer size is a multiple of element size (4 bytes for int32)
+            # This fixes issues with Opus and other codecs that may produce unaligned output
+            element_size = np.dtype(np.int32).itemsize
+            aligned_size = (len(pcm_bytes) // element_size) * element_size
+            if aligned_size != len(pcm_bytes):
+                pcm_bytes = pcm_bytes[:aligned_size]
+            return np.frombuffer(pcm_bytes, dtype=np.int32)
         self.log(f"[ERROR] SteppingCorrector failed to decode audio stream {stream_index} from '{Path(file_path).name}'")
         return None
 

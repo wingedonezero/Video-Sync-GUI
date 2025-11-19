@@ -69,6 +69,14 @@ def _decode_to_memory(file_path: str, a_index: int, out_sr: int, use_soxr: bool,
     pcm_bytes = runner.run(cmd, tool_paths, is_binary=True)
     if not pcm_bytes or not isinstance(pcm_bytes, bytes):
         raise RuntimeError(f'ffmpeg decode failed for {Path(file_path).name}')
+
+    # Ensure buffer size is a multiple of element size (4 bytes for float32)
+    # This fixes issues with Opus and other codecs that may produce unaligned output
+    element_size = np.dtype(np.float32).itemsize
+    aligned_size = (len(pcm_bytes) // element_size) * element_size
+    if aligned_size != len(pcm_bytes):
+        pcm_bytes = pcm_bytes[:aligned_size]
+
     return np.frombuffer(pcm_bytes, dtype=np.float32)
 
 def _apply_bandpass(waveform: np.ndarray, sr: int, lowcut: float, highcut: float, order: int) -> np.ndarray:
