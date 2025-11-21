@@ -40,7 +40,7 @@ class SubtitlesStep:
 
             if item.perform_ocr and item.extracted_path:
                 ocr_output_path = run_ocr(
-                    str(item.extracted_path.with_suffix('.idx')),
+                    str(item.extracted_path),
                     item.track.props.lang,
                     runner,
                     ctx.tool_paths,
@@ -150,7 +150,7 @@ class SubtitlesStep:
                     runner._log_message(
                         f"[OCR] ERROR: OCR tool failed for track {item.track.id} "
                         f"({item.track.props.name or 'Unnamed'}). "
-                        f"Check that subtile-ocr is installed and the IDX/SUB files are valid."
+                        f"Check that OCR tools (subtile-ocr or Tesseract) are installed and subtitle files are valid."
                     )
                     runner._log_message(
                         f"[OCR] WARNING: Keeping original image-based subtitle for track {item.track.id}."
