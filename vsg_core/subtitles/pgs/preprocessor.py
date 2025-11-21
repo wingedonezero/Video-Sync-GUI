@@ -219,6 +219,7 @@ def preprocess_for_ocr(img: Image.Image, settings: PreprocessSettings) -> Image.
     Apply complete preprocessing pipeline for OCR optimization.
 
     Processing order (important!):
+    0. Convert transparent background to white (Tesseract doesn't handle transparency)
     1. Color replacements (yellow -> white)
     2. Contrast enhancement
     3. Add margin
@@ -233,6 +234,17 @@ def preprocess_for_ocr(img: Image.Image, settings: PreprocessSettings) -> Image.
     Returns:
         Preprocessed image ready for OCR
     """
+    # Step 0: Convert transparent background to black
+    # Tesseract doesn't handle RGBA well, needs solid background
+    # Use BLACK background so white text with black outline is visible
+    # (white on white would be invisible!)
+    if img.mode == 'RGBA':
+        # Create black background
+        background = Image.new('RGB', img.size, (0, 0, 0))
+        # Paste image on black background using alpha channel as mask
+        background.paste(img, mask=img.split()[3])
+        img = background
+
     # Step 1: Color replacements
     if settings.yellow_to_white:
         img = replace_yellow_with_white(img)

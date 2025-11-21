@@ -26,10 +26,10 @@ class AppConfig:
             'pgs_add_margin': 10,
             'pgs_invert_colors': False,
             'pgs_yellow_to_white': True,
-            'pgs_binarize': True,
+            'pgs_binarize': False,  # Disabled - causes issues with outlined text
             'pgs_binarize_threshold': 200,
             'pgs_scale_percent': 100,
-            'pgs_enhance_contrast': 1.5,
+            'pgs_enhance_contrast': 1.0,  # Disabled - let Tesseract handle it
 
             'ocr_cleanup_enabled': True,
             'ocr_cleanup_normalize_ellipsis': False,
