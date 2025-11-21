@@ -132,7 +132,8 @@ def extract_pgs_subtitles(
     from_matroska: bool = False,
     tesseract_path: Optional[str] = None,
     preprocess_settings: Optional[PreprocessSettings] = None,
-    log_callback=None
+    log_callback=None,
+    save_debug_images: bool = False
 ) -> Optional[str]:
     """
     Extract and OCR PGS subtitles from .sup file.
@@ -225,6 +226,17 @@ def extract_pgs_subtitles(
 
                 # Preprocess for OCR
                 processed = preprocess_for_ocr(image, preprocess_settings)
+
+                # Save debug images if requested
+                if save_debug_images:
+                    debug_dir = Path(sup_path).parent / "pgs_debug"
+                    debug_dir.mkdir(exist_ok=True)
+                    try:
+                        image.save(debug_dir / f"sub_{i+1:04d}_original.png")
+                        processed.save(debug_dir / f"sub_{i+1:04d}_processed.png")
+                        log(f"[PGS OCR] Debug images saved to {debug_dir}")
+                    except Exception as e:
+                        log(f"[PGS OCR] Warning: Could not save debug images: {e}")
 
                 # Run OCR
                 text = run_ocr_with_postprocessing(

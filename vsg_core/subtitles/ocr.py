@@ -115,7 +115,8 @@ def run_pgs_ocr(
             from_matroska=False,
             tesseract_path=tesseract_path,
             preprocess_settings=preprocess_settings,
-            log_callback=runner._log_message
+            log_callback=runner._log_message,
+            save_debug_images=True  # Enable debug images for now
         )
 
         if result and Path(result).exists():

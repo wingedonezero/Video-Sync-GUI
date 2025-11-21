@@ -81,11 +81,11 @@ def run_tesseract_ocr(
     Returns:
         Extracted text string (empty string if OCR fails)
     """
-    # Find tesseract
-    if tesseract_path is None:
+    # Find tesseract (handle empty string as None)
+    if not tesseract_path:
         tesseract_path = find_tesseract()
 
-    if tesseract_path is None:
+    if not tesseract_path:
         raise FileNotFoundError("Tesseract not found. Please install Tesseract OCR.")
 
     # Save image to temporary file
@@ -120,6 +120,14 @@ def run_tesseract_ocr(
             timeout=30
         )
 
+        # Check if tesseract failed
+        if result.returncode != 0:
+            error_msg = result.stderr.strip() if result.stderr else "Unknown error"
+            print(f"[Tesseract] ERROR: Command failed with exit code {result.returncode}")
+            print(f"[Tesseract] Command: {' '.join(cmd)}")
+            print(f"[Tesseract] Error output: {error_msg}")
+            return ""
+
         # Read hOCR output
         hocr_file = output_base + '.hocr'
         if os.path.exists(hocr_file):
@@ -138,13 +146,19 @@ def run_tesseract_ocr(
             return text
         else:
             # hOCR file not created, possibly error
+            print(f"[Tesseract] ERROR: hOCR file not created at {hocr_file}")
+            print(f"[Tesseract] Stdout: {result.stdout}")
+            print(f"[Tesseract] Stderr: {result.stderr}")
             return ""
 
     except subprocess.TimeoutExpired:
+        print(f"[Tesseract] ERROR: Command timed out after 30 seconds")
         return ""
     except Exception as e:
         # Log error but don't crash
-        print(f"Tesseract OCR error: {e}")
+        print(f"[Tesseract] ERROR: Exception occurred: {e}")
+        import traceback
+        traceback.print_exc()
         return ""
     finally:
         # Clean up input file
