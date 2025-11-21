@@ -20,13 +20,14 @@ def decompress_rle(
 ) -> Image.Image:
     """
     Decompress RLE-encoded PGS bitmap and convert to PIL Image.
+    Exactly matches SubtitleEdit's DecodeImage implementation.
 
-    RLE encoding patterns from SubtitleEdit:
+    RLE encoding patterns:
         - 0xNN (non-zero): Single pixel with palette index NN
         - 0x00 0x00: End of line, move to next row
-        - 0x00 0xNN: NN transparent pixels
+        - 0x00 0xNN: NN transparent pixels (NN < 0x40)
         - 0x00 0x4N 0xNN: Long transparent run ((N-0x40) << 8) + NN pixels
-        - 0x00 0x8N 0xCC: N-0x80 pixels of color CC
+        - 0x00 0x8N 0xCC: (N-0x80) pixels of color CC
         - 0x00 0xCN 0xNN 0xCC: Long run ((N-0xC0) << 8) + NN pixels of color CC
 
     Args:
@@ -53,11 +54,21 @@ def decompress_rle(
     if 0 not in palette_rgba:
         palette_rgba[0] = (0, 0, 0, 0)
 
-    index = 0
-    x = 0
-    y = 0
+    # Use linear offset like SubtitleEdit
+    ofs = 0  # Linear pixel offset
+    xpos = 0  # Current x position in line
+    index = 0  # Buffer index
 
-    while index < len(buffer) and y < height:
+    def put_pixel(offset: int, color: tuple):
+        """Set pixel at linear offset"""
+        if offset < width * height:
+            y = offset // width
+            x = offset % width
+            if y < height and x < width:
+                pixels[x, y] = color
+
+    # Process RLE data
+    while index < len(buffer):
         b = buffer[index]
         index += 1
 
@@ -67,9 +78,12 @@ def decompress_rle(
             index += 1
 
             if b == 0:
-                # 0x00 0x00: End of line
-                x = 0
-                y += 1
+                # 0x00 0x00: End of line - move to next line boundary
+                # This matches SubtitleEdit's logic exactly
+                ofs = (ofs // width) * width  # Start of current line
+                if xpos < width:
+                    ofs += width  # Move to next line if current not complete
+                xpos = 0
 
             elif (b & 0xC0) == 0x40:
                 # 0x00 0x4N 0xNN: Long transparent run
@@ -78,12 +92,9 @@ def decompress_rle(
                     index += 1
                     color = palette_rgba.get(0, (0, 0, 0, 0))
                     for _ in range(size):
-                        if x < width and y < height:
-                            pixels[x, y] = color
-                            x += 1
-                            if x >= width:
-                                x = 0
-                                y += 1
+                        put_pixel(ofs, color)
+                        ofs += 1
+                        xpos += 1
 
             elif (b & 0xC0) == 0x80:
                 # 0x00 0x8N 0xCC: Medium run of color
@@ -93,12 +104,9 @@ def decompress_rle(
                     index += 1
                     color = palette_rgba.get(color_index, (0, 0, 0, 0))
                     for _ in range(size):
-                        if x < width and y < height:
-                            pixels[x, y] = color
-                            x += 1
-                            if x >= width:
-                                x = 0
-                                y += 1
+                        put_pixel(ofs, color)
+                        ofs += 1
+                        xpos += 1
 
             elif (b & 0xC0) == 0xC0:
                 # 0x00 0xCN 0xNN 0xCC: Long run of color
@@ -109,34 +117,25 @@ def decompress_rle(
                     index += 1
                     color = palette_rgba.get(color_index, (0, 0, 0, 0))
                     for _ in range(size):
-                        if x < width and y < height:
-                            pixels[x, y] = color
-                            x += 1
-                            if x >= width:
-                                x = 0
-                                y += 1
+                        put_pixel(ofs, color)
+                        ofs += 1
+                        xpos += 1
 
             else:
                 # 0x00 0xNN: Short transparent run
                 size = b
                 color = palette_rgba.get(0, (0, 0, 0, 0))
                 for _ in range(size):
-                    if x < width and y < height:
-                        pixels[x, y] = color
-                        x += 1
-                        if x >= width:
-                            x = 0
-                            y += 1
+                    put_pixel(ofs, color)
+                    ofs += 1
+                    xpos += 1
 
         else:
             # Single pixel with palette index b
             color = palette_rgba.get(b, (0, 0, 0, 0))
-            if x < width and y < height:
-                pixels[x, y] = color
-                x += 1
-                if x >= width:
-                    x = 0
-                    y += 1
+            put_pixel(ofs, color)
+            ofs += 1
+            xpos += 1
 
     return img
 
