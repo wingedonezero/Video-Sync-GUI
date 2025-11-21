@@ -30,6 +30,7 @@ class AppConfig:
             'pgs_binarize_threshold': 200,
             'pgs_scale_percent': 100,
             'pgs_enhance_contrast': 1.0,  # Disabled - let Tesseract handle it
+            'pgs_font_size': 0,  # 0 = auto-calculate from image height, otherwise use specified size
 
             'ocr_cleanup_enabled': True,
             'ocr_cleanup_normalize_ellipsis': False,

@@ -255,7 +255,8 @@ def run_ocr_with_postprocessing(
     image: Image.Image,
     lang: str = 'eng',
     psm: int = 6,
-    tesseract_path: Optional[str] = None
+    tesseract_path: Optional[str] = None,
+    config: Optional[str] = None
 ) -> str:
     """
     Run OCR with automatic post-processing.
@@ -265,9 +266,10 @@ def run_ocr_with_postprocessing(
         lang: Language code
         psm: Page segmentation mode
         tesseract_path: Path to tesseract executable
+        config: Additional Tesseract config options
 
     Returns:
         Cleaned OCR text
     """
-    raw_text = run_tesseract_ocr(image, lang, psm, tesseract_path=tesseract_path)
+    raw_text = run_tesseract_ocr(image, lang, psm, tesseract_path=tesseract_path, config=config)
     return postprocess_text(raw_text)

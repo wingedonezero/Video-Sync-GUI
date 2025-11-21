@@ -89,7 +89,8 @@ def generate_ass_output(
     subtitles: List[SubtitleEntry],
     video_width: int,
     video_height: int,
-    output_path: str
+    output_path: str,
+    font_size: int = 52
 ) -> None:
     """
     Generate ASS subtitle file with positioning.
@@ -99,6 +100,7 @@ def generate_ass_output(
         video_width: Video width for PlayResX
         video_height: Video height for PlayResY
         output_path: Output .ass file path
+        font_size: Font size for subtitles (default 52, suitable for 1080p)
     """
     lines = [
         "[Script Info]",
@@ -109,7 +111,7 @@ def generate_ass_output(
         "",
         "[V4+ Styles]",
         "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-        "Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1",
+        f"Style: Default,Arial,{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,10,1",
         "",
         "[Events]",
         "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
@@ -132,6 +134,7 @@ def extract_pgs_subtitles(
     from_matroska: bool = False,
     tesseract_path: Optional[str] = None,
     preprocess_settings: Optional[PreprocessSettings] = None,
+    font_size: Optional[int] = None,
     log_callback=None,
     save_debug_images: bool = False
 ) -> Optional[str]:
@@ -198,6 +201,7 @@ def extract_pgs_subtitles(
 
         # Step 2: Process each subtitle
         subtitles: List[SubtitleEntry] = []
+        image_heights: List[int] = []  # Track heights for font size calculation
 
         for i, pcs in enumerate(compositions):
             if not pcs.has_complete_data():
@@ -223,6 +227,7 @@ def extract_pgs_subtitles(
 
                 # Store image dimensions
                 img_width, img_height = image.size
+                image_heights.append(img_height)  # Track for font size calculation
 
                 # Preprocess for OCR
                 processed = preprocess_for_ocr(image, preprocess_settings)
@@ -241,12 +246,16 @@ def extract_pgs_subtitles(
                 # Run OCR - Try multiple PSM modes if first fails
                 text = ""
 
+                # Tesseract config for better subtitle recognition
+                tesseract_config = "preserve_interword_spaces=1"
+
                 # Try PSM 7 first (single text line - best for subtitles)
                 text = run_ocr_with_postprocessing(
                     processed,
                     lang=lang,
                     psm=7,  # Single text line
-                    tesseract_path=tesseract_path
+                    tesseract_path=tesseract_path,
+                    config=tesseract_config
                 )
 
                 # If PSM 7 failed, try PSM 6 (uniform block)
@@ -255,7 +264,8 @@ def extract_pgs_subtitles(
                         processed,
                         lang=lang,
                         psm=6,  # Uniform block
-                        tesseract_path=tesseract_path
+                        tesseract_path=tesseract_path,
+                        config=tesseract_config
                     )
 
                 # If still no text, try PSM 3 (fully automatic)
@@ -264,7 +274,8 @@ def extract_pgs_subtitles(
                         processed,
                         lang=lang,
                         psm=3,  # Fully automatic
-                        tesseract_path=tesseract_path
+                        tesseract_path=tesseract_path,
+                        config=tesseract_config
                     )
 
                 if not text.strip():
@@ -302,9 +313,25 @@ def extract_pgs_subtitles(
             log("[PGS OCR] ERROR: No subtitles successfully OCR'd")
             return None
 
-        # Step 3: Generate ASS output
+        # Step 3: Calculate font size
+        if font_size is None:
+            # Calculate from median image height
+            if image_heights:
+                sorted_heights = sorted(image_heights)
+                median_height = sorted_heights[len(sorted_heights) // 2]
+                # Use median height as font size, with bounds
+                calculated_font_size = max(30, min(80, int(median_height * 1.2)))
+                log(f"[PGS OCR] Calculated font size: {calculated_font_size} (median height: {median_height}px)")
+            else:
+                calculated_font_size = 52  # Default for 1080p
+                log(f"[PGS OCR] Using default font size: {calculated_font_size}")
+        else:
+            calculated_font_size = font_size
+            log(f"[PGS OCR] Using configured font size: {calculated_font_size}")
+
+        # Step 4: Generate ASS output
         log(f"[PGS OCR] Generating ASS file: {output_file}")
-        generate_ass_output(subtitles, video_width, video_height, output_file)
+        generate_ass_output(subtitles, video_width, video_height, output_file, calculated_font_size)
 
         log(f"[PGS OCR] Successfully created {output_file} with {len(subtitles)} subtitles")
         return output_file

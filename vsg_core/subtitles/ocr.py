@@ -92,6 +92,10 @@ def run_pgs_ocr(
         # Get tesseract path from config if specified
         tesseract_path = config.get('tesseract_path')
 
+        # Get font size from config (0 = auto-calculate)
+        font_size_config = config.get('pgs_font_size', 0)
+        font_size = None if font_size_config == 0 else font_size_config
+
         # Create preprocessing settings from config
         preprocess_settings = PreprocessSettings(
             crop_transparent=config.get('pgs_crop_transparent', True),
@@ -115,6 +119,7 @@ def run_pgs_ocr(
             from_matroska=False,
             tesseract_path=tesseract_path,
             preprocess_settings=preprocess_settings,
+            font_size=font_size,
             log_callback=runner._log_message,
             save_debug_images=True  # Enable debug images for now
         )

@@ -125,6 +125,13 @@ class StorageTab(QWidget):
         self.widgets['pgs_enhance_contrast'].setToolTip("Contrast enhancement factor (1.0 = no change, 1.5 = default)")
         pgs_layout.addRow('Contrast Enhancement:', self.widgets['pgs_enhance_contrast'])
 
+        self.widgets['pgs_font_size'] = QSpinBox()
+        self.widgets['pgs_font_size'].setRange(0, 120)
+        self.widgets['pgs_font_size'].setValue(0)
+        self.widgets['pgs_font_size'].setSpecialValueText("Auto")
+        self.widgets['pgs_font_size'].setToolTip("Font size in ASS output (0 = auto-calculate from image height, typical: 30-60 for 1080p)")
+        pgs_layout.addRow('Font Size:', self.widgets['pgs_font_size'])
+
         self.widgets['pgs_add_margin'] = QSpinBox()
         self.widgets['pgs_add_margin'].setRange(0, 50)
         self.widgets['pgs_add_margin'].setValue(10)
