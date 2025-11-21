@@ -238,13 +238,34 @@ def extract_pgs_subtitles(
                     except Exception as e:
                         log(f"[PGS OCR] Warning: Could not save debug images: {e}")
 
-                # Run OCR
+                # Run OCR - Try multiple PSM modes if first fails
+                text = ""
+
+                # Try PSM 7 first (single text line - best for subtitles)
                 text = run_ocr_with_postprocessing(
                     processed,
                     lang=lang,
-                    psm=6,  # Uniform block of text (best for subtitles)
+                    psm=7,  # Single text line
                     tesseract_path=tesseract_path
                 )
+
+                # If PSM 7 failed, try PSM 6 (uniform block)
+                if not text.strip():
+                    text = run_ocr_with_postprocessing(
+                        processed,
+                        lang=lang,
+                        psm=6,  # Uniform block
+                        tesseract_path=tesseract_path
+                    )
+
+                # If still no text, try PSM 3 (fully automatic)
+                if not text.strip():
+                    text = run_ocr_with_postprocessing(
+                        processed,
+                        lang=lang,
+                        psm=3,  # Fully automatic
+                        tesseract_path=tesseract_path
+                    )
 
                 if not text.strip():
                     log(f"[PGS OCR] Warning: No text extracted from subtitle {i+1}")

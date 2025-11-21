@@ -98,6 +98,7 @@ def run_tesseract_ocr(
         output_base = tempfile.mktemp()
 
         # Build command
+        # Try plain text output first (simpler, more reliable)
         cmd = [
             tesseract_path,
             input_file,
@@ -105,7 +106,7 @@ def run_tesseract_ocr(
             '-l', lang,
             '--psm', str(psm),
             '--oem', str(oem),
-            'hocr'  # Output in hOCR format (HTML with positioning)
+            # Note: no output format means stdout/txt file
         ]
 
         # Add additional config if provided
@@ -128,25 +129,22 @@ def run_tesseract_ocr(
             print(f"[Tesseract] Error output: {error_msg}")
             return ""
 
-        # Read hOCR output
-        hocr_file = output_base + '.hocr'
-        if os.path.exists(hocr_file):
-            with open(hocr_file, 'r', encoding='utf-8') as f:
-                hocr_content = f.read()
-
-            # Parse hOCR to extract text
-            text = parse_hocr(hocr_content)
+        # Read plain text output
+        txt_file = output_base + '.txt'
+        if os.path.exists(txt_file):
+            with open(txt_file, 'r', encoding='utf-8') as f:
+                text = f.read().strip()
 
             # Clean up output file
             try:
-                os.unlink(hocr_file)
+                os.unlink(txt_file)
             except:
                 pass
 
             return text
         else:
-            # hOCR file not created, possibly error
-            print(f"[Tesseract] ERROR: hOCR file not created at {hocr_file}")
+            # Output file not created, possibly error
+            print(f"[Tesseract] ERROR: Output file not created at {txt_file}")
             print(f"[Tesseract] Stdout: {result.stdout}")
             print(f"[Tesseract] Stderr: {result.stderr}")
             return ""
