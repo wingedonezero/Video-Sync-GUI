@@ -16,6 +16,21 @@ class AppConfig:
             'videodiff_path': '',
             'subtile_ocr_path': '',
             'subtile_ocr_char_blacklist': '',
+
+            # --- PGS OCR Settings ---
+            'tesseract_path': '',
+            'pgs_video_width': 1920,
+            'pgs_video_height': 1080,
+            'pgs_crop_transparent': True,
+            'pgs_crop_max': 20,
+            'pgs_add_margin': 10,
+            'pgs_invert_colors': False,
+            'pgs_yellow_to_white': True,
+            'pgs_binarize': True,
+            'pgs_binarize_threshold': 200,
+            'pgs_scale_percent': 100,
+            'pgs_enhance_contrast': 1.5,
+
             'ocr_cleanup_enabled': True,
             'ocr_cleanup_normalize_ellipsis': False,
             'ocr_cleanup_custom_wordlist_path': '',

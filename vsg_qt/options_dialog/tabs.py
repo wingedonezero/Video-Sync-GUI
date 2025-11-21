@@ -42,22 +42,98 @@ class StorageTab(QWidget):
     def __init__(self):
         super().__init__()
         self.widgets: Dict[str, QWidget] = {}
-        f = QFormLayout(self)
+        main_layout = QVBoxLayout(self)
+
+        # --- Paths Group ---
+        paths_group = QGroupBox("File Paths")
+        f = QFormLayout(paths_group)
         self.widgets['output_folder'] = _dir_input()
         self.widgets['output_folder'].setToolTip("The default directory where final merged files will be saved.")
         self.widgets['temp_root'] = _dir_input()
         self.widgets['temp_root'].setToolTip("The root directory for storing temporary files during processing (e.g., extracted tracks, logs).")
         self.widgets['videodiff_path'] = _file_input()
         self.widgets['videodiff_path'].setToolTip("Optional. The full path to the 'videodiff' executable if it's not in your system's PATH.")
+        f.addRow('Output Directory:', self.widgets['output_folder'])
+        f.addRow('Temporary Directory:', self.widgets['temp_root'])
+        f.addRow('VideoDiff Path (optional):', self.widgets['videodiff_path'])
+        main_layout.addWidget(paths_group)
+
+        # --- VobSub OCR Group ---
+        vobsub_group = QGroupBox("VobSub OCR (IDX/SUB)")
+        vobsub_layout = QFormLayout(vobsub_group)
         self.widgets['subtile_ocr_path'] = _file_input()
         self.widgets['subtile_ocr_path'].setToolTip("Optional. The full path to the 'subtile-ocr' executable if it's not in your system's PATH.")
         self.widgets['subtile_ocr_char_blacklist'] = QLineEdit()
         self.widgets['subtile_ocr_char_blacklist'].setToolTip("Optional. A string of characters to blacklist during the OCR process (e.g., '|/_~').")
-        f.addRow('Output Directory:', self.widgets['output_folder'])
-        f.addRow('Temporary Directory:', self.widgets['temp_root'])
-        f.addRow('VideoDiff Path (optional):', self.widgets['videodiff_path'])
-        f.addRow('Subtitle OCR Path (optional):', self.widgets['subtile_ocr_path'])
-        f.addRow('OCR Character Blacklist (optional):', self.widgets['subtile_ocr_char_blacklist'])
+        vobsub_layout.addRow('Subtitle OCR Path (optional):', self.widgets['subtile_ocr_path'])
+        vobsub_layout.addRow('OCR Character Blacklist (optional):', self.widgets['subtile_ocr_char_blacklist'])
+        main_layout.addWidget(vobsub_group)
+
+        # --- PGS OCR Group ---
+        pgs_group = QGroupBox("PGS OCR (Blu-ray SUP)")
+        pgs_layout = QFormLayout(pgs_group)
+
+        self.widgets['tesseract_path'] = _file_input()
+        self.widgets['tesseract_path'].setToolTip("Optional. Path to Tesseract OCR executable. Leave blank for auto-detection.")
+        pgs_layout.addRow('Tesseract Path (optional):', self.widgets['tesseract_path'])
+
+        # Video dimensions
+        dim_widget = QWidget()
+        dim_layout = QHBoxLayout(dim_widget)
+        dim_layout.setContentsMargins(0, 0, 0, 0)
+        self.widgets['pgs_video_width'] = QSpinBox()
+        self.widgets['pgs_video_width'].setRange(320, 7680)
+        self.widgets['pgs_video_width'].setValue(1920)
+        self.widgets['pgs_video_width'].setToolTip("Video width for subtitle positioning (default: 1920)")
+        self.widgets['pgs_video_height'] = QSpinBox()
+        self.widgets['pgs_video_height'].setRange(240, 4320)
+        self.widgets['pgs_video_height'].setValue(1080)
+        self.widgets['pgs_video_height'].setToolTip("Video height for subtitle positioning (default: 1080)")
+        dim_layout.addWidget(QLabel("Width:"))
+        dim_layout.addWidget(self.widgets['pgs_video_width'])
+        dim_layout.addWidget(QLabel("Height:"))
+        dim_layout.addWidget(self.widgets['pgs_video_height'])
+        dim_layout.addStretch()
+        pgs_layout.addRow('Video Dimensions:', dim_widget)
+
+        # Preprocessing options
+        self.widgets['pgs_crop_transparent'] = QCheckBox("Crop transparent borders")
+        self.widgets['pgs_crop_transparent'].setChecked(True)
+        self.widgets['pgs_crop_transparent'].setToolTip("Remove transparent borders from subtitle images before OCR")
+        pgs_layout.addRow(self.widgets['pgs_crop_transparent'])
+
+        self.widgets['pgs_yellow_to_white'] = QCheckBox("Convert yellow text to white")
+        self.widgets['pgs_yellow_to_white'].setChecked(True)
+        self.widgets['pgs_yellow_to_white'].setToolTip("Yellow subtitles are common, OCR works better with white text")
+        pgs_layout.addRow(self.widgets['pgs_yellow_to_white'])
+
+        self.widgets['pgs_binarize'] = QCheckBox("Binarize image (black & white)")
+        self.widgets['pgs_binarize'].setChecked(True)
+        self.widgets['pgs_binarize'].setToolTip("Convert to high-contrast black and white for optimal OCR")
+        pgs_layout.addRow(self.widgets['pgs_binarize'])
+
+        self.widgets['pgs_binarize_threshold'] = QSpinBox()
+        self.widgets['pgs_binarize_threshold'].setRange(100, 255)
+        self.widgets['pgs_binarize_threshold'].setValue(200)
+        self.widgets['pgs_binarize_threshold'].setToolTip("Brightness threshold for binarization (100-255, default: 200)")
+        pgs_layout.addRow('  Binarize Threshold:', self.widgets['pgs_binarize_threshold'])
+
+        self.widgets['pgs_enhance_contrast'] = QDoubleSpinBox()
+        self.widgets['pgs_enhance_contrast'].setRange(1.0, 3.0)
+        self.widgets['pgs_enhance_contrast'].setValue(1.5)
+        self.widgets['pgs_enhance_contrast'].setSingleStep(0.1)
+        self.widgets['pgs_enhance_contrast'].setToolTip("Contrast enhancement factor (1.0 = no change, 1.5 = default)")
+        pgs_layout.addRow('Contrast Enhancement:', self.widgets['pgs_enhance_contrast'])
+
+        self.widgets['pgs_add_margin'] = QSpinBox()
+        self.widgets['pgs_add_margin'].setRange(0, 50)
+        self.widgets['pgs_add_margin'].setValue(10)
+        self.widgets['pgs_add_margin'].setSuffix(" px")
+        self.widgets['pgs_add_margin'].setToolTip("Add white margin around text (pixels, default: 10)")
+        pgs_layout.addRow('Add Margin:', self.widgets['pgs_add_margin'])
+
+        main_layout.addWidget(pgs_group)
+        main_layout.addStretch(1)
 
 class SubtitleCleanupTab(QWidget):
     def __init__(self):
