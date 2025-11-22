@@ -79,7 +79,17 @@ class JobQueueLogic:
         """Retrieves and caches track info for a job."""
         if 'track_info' not in job or job['track_info'] is None:
             try:
-                job['track_info'] = get_track_info_for_dialog(job['sources'], self.runner, self.tool_paths)
+                # Pass subtitle folder info if available in job data
+                subtitle_folder_path = job.get('subtitle_folder_path')
+                subtitle_folder_sync_source = job.get('subtitle_folder_sync_source', 'Source 1')
+
+                job['track_info'] = get_track_info_for_dialog(
+                    job['sources'],
+                    self.runner,
+                    self.tool_paths,
+                    subtitle_folder_path=subtitle_folder_path,
+                    subtitle_folder_sync_source=subtitle_folder_sync_source
+                )
             except Exception as e:
                 QMessageBox.critical(self.v, "Error Analyzing Tracks", f"Could not analyze tracks for {Path(job['sources']['Source 1']).name}:\n{e}")
                 return None

@@ -447,7 +447,97 @@ def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: 
 
     return tracks_to_extract
 
-def get_track_info_for_dialog(sources: Dict[str, str], runner: CommandRunner, tool_paths: dict) -> Dict[str, List[Dict]]:
+
+def scan_subtitle_folder(folder_path: str, runner: CommandRunner, tool_paths: dict) -> List[Dict]:
+    """
+    Scans a folder for subtitle files and extracts metadata using ffprobe.
+
+    Args:
+        folder_path: Path to folder containing subtitle files
+        runner: CommandRunner instance for executing ffprobe
+        tool_paths: Dict containing paths to tools (ffprobe)
+
+    Returns:
+        List of subtitle track dictionaries with metadata
+    """
+    subtitle_tracks = []
+    folder = Path(folder_path)
+
+    if not folder.exists() or not folder.is_dir():
+        return subtitle_tracks
+
+    # Codec mapping from ffprobe codec names to MKV codec IDs
+    codec_id_map = {
+        'subrip': 'S_TEXT/UTF8',
+        'srt': 'S_TEXT/UTF8',
+        'ass': 'S_TEXT/ASS',
+        'ssa': 'S_TEXT/SSA',
+        'hdmv_pgs_subtitle': 'S_HDMV/PGS',
+        'pgssub': 'S_HDMV/PGS',
+    }
+
+    # Scan for subtitle files
+    subtitle_extensions = {'.srt', '.ass', '.ssa', '.sup'}
+    subtitle_files = sorted([f for f in folder.iterdir() if f.is_file() and f.suffix.lower() in subtitle_extensions])
+
+    for sub_file in subtitle_files:
+        file_path = str(sub_file)
+
+        # Use ffprobe to get codec info
+        try:
+            ffprobe_path = tool_paths.get('ffprobe', 'ffprobe')
+            result = runner.run_command(
+                [ffprobe_path, '-v', 'quiet', '-print_format', 'json',
+                 '-show_streams', '-show_format', file_path],
+                capture_output=True
+            )
+
+            if result.returncode == 0 and result.stdout:
+                data = json.loads(result.stdout)
+                streams = data.get('streams', [])
+
+                if streams:
+                    info = streams[0]
+                    codec_name = info.get('codec_name', '').lower()
+                    codec_id = codec_id_map.get(codec_name, f'S_TEXT/{codec_name.upper()}')
+
+                    # Build track record similar to external subtitles
+                    track_data = {
+                        'source': 'Subtitle Folder',
+                        'original_path': file_path,
+                        'id': 0,
+                        'type': 'subtitles',
+                        'codec_id': codec_id,
+                        'lang': data.get('format', {}).get('tags', {}).get('language', 'und'),
+                        'name': sub_file.stem,  # Filename without extension
+                        'description': f"{_CODEC_ID_MAP.get(codec_id, codec_id)} (und) '{sub_file.stem}'"
+                    }
+                    subtitle_tracks.append(track_data)
+        except Exception as e:
+            # Log error but continue processing other files
+            runner._log_message(f"Warning: Could not process subtitle file {file_path}: {e}")
+            continue
+
+    return subtitle_tracks
+
+
+def get_track_info_for_dialog(
+    sources: Dict[str, str],
+    runner: CommandRunner,
+    tool_paths: dict,
+    subtitle_folder_path: Optional[str] = None,
+    subtitle_folder_sync_source: str = "Source 1"
+) -> Dict[str, List[Dict]]:
+    """
+    Get track information for all sources, including optional subtitle folder.
+
+    Args:
+        sources: Dict of source paths
+        runner: CommandRunner instance
+        tool_paths: Dict of tool paths
+        subtitle_folder_path: Optional path to subtitle folder for this job
+        subtitle_folder_sync_source: Source to sync subtitle delays to
+    """
     all_tracks: Dict[str, List[Dict]] = {key: [] for key in sources}
     for source_key, filepath in sources.items():
         if not filepath or not Path(filepath).exists():
@@ -483,5 +573,18 @@ def get_track_info_for_dialog(sources: Dict[str, str], runner: CommandRunner, to
                 'description': _build_track_description(track)
             }
             all_tracks[source_key].append(record)
+
+    # Add subtitle folder tracks if provided
+    if subtitle_folder_path:
+        subtitle_tracks = scan_subtitle_folder(subtitle_folder_path, runner, tool_paths)
+        if subtitle_tracks:
+            # Add sync source information to each subtitle track
+            for track in subtitle_tracks:
+                track['sync_to_source'] = subtitle_folder_sync_source
+
+            # Add to all_tracks under 'Subtitle Folder' key
+            if 'Subtitle Folder' not in all_tracks:
+                all_tracks['Subtitle Folder'] = []
+            all_tracks['Subtitle Folder'].extend(subtitle_tracks)
 
     return all_tracks

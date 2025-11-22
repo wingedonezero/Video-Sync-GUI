@@ -14,6 +14,7 @@ class TrackWidgetLogic:
         """Sets the initial state of the UI based on track data."""
         is_subs = self.track_data.get('type') == 'subtitles'
         is_external = self.track_data.get('source') == 'External'
+        is_subtitle_folder = self.track_data.get('source') == 'Subtitle Folder'
 
         # Show/hide controls based on track type
         self.v.cb_forced.setVisible(is_subs)
@@ -28,10 +29,11 @@ class TrackWidgetLogic:
             self.v.cb_convert.setChecked(self.track_data.get('convert_to_ass', False))
             self.v.cb_rescale.setChecked(self.track_data.get('rescale', False))
 
-        # Show the sync dropdown ONLY for external subtitles
-        self.v.sync_to_label.setVisible(is_subs and is_external)
-        self.v.sync_to_combo.setVisible(is_subs and is_external)
-        if is_subs and is_external:
+        # Show the sync dropdown for external subtitles and subtitle folder subtitles
+        show_sync_dropdown = is_subs and (is_external or is_subtitle_folder)
+        self.v.sync_to_label.setVisible(show_sync_dropdown)
+        self.v.sync_to_combo.setVisible(show_sync_dropdown)
+        if show_sync_dropdown:
             self.populate_sync_sources()
 
     def populate_sync_sources(self):
@@ -43,7 +45,9 @@ class TrackWidgetLogic:
         for src in self.available_sources:
              if src != "Source 1":
                 combo.addItem(src, src)
-        saved_sync_source = self.track_data.get('sync_to')
+
+        # Check both 'sync_to' (saved by user) and 'sync_to_source' (from subtitle folder default)
+        saved_sync_source = self.track_data.get('sync_to') or self.track_data.get('sync_to_source')
         if saved_sync_source:
             index = combo.findData(saved_sync_source)
             if index != -1:
