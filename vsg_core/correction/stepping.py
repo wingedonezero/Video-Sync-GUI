@@ -629,6 +629,71 @@ class SteppingCorrector:
             if assembly_dir.exists():
                 shutil.rmtree(assembly_dir, ignore_errors=True)
 
+    def _filter_coarse_map_by_clusters(
+        self,
+        coarse_map: List[Tuple[float, int]],
+        diagnosis_details: Dict,
+        sample_rate: int
+    ) -> List[Tuple[float, int]]:
+        """
+        Filters coarse_map to remove entries that fall within invalid clusters.
+        Applies fallback strategy for filtered regions.
+
+        Returns filtered coarse_map.
+        """
+        correction_mode = diagnosis_details.get('correction_mode', 'full')
+
+        # If not in filtered mode, return original map
+        if correction_mode != 'filtered':
+            return coarse_map
+
+        valid_clusters = diagnosis_details.get('valid_clusters', {})
+        invalid_clusters = diagnosis_details.get('invalid_clusters', {})
+        validation_results = diagnosis_details.get('validation_results', {})
+        fallback_mode = diagnosis_details.get('fallback_mode', 'nearest')
+
+        if not invalid_clusters:
+            # No filtering needed
+            return coarse_map
+
+        self.log(f"  [Filtered Stepping] Filtering coarse map: {len(invalid_clusters)} invalid cluster(s) detected")
+        self.log(f"  [Filtered Stepping] Fallback mode: {fallback_mode}")
+
+        # Build a list of time ranges for invalid clusters
+        invalid_time_ranges = []
+        for label, members in invalid_clusters.items():
+            if label in validation_results:
+                time_range = validation_results[label]['time_range']
+                invalid_time_ranges.append(time_range)
+                self.log(f"    - Invalid cluster {label+1}: {time_range[0]:.1f}s - {time_range[1]:.1f}s will be filtered")
+
+        # Filter coarse_map entries
+        filtered_map = []
+        skipped_count = 0
+
+        for timestamp_s, delay in coarse_map:
+            # Check if this timestamp falls within any invalid cluster
+            in_invalid_cluster = any(
+                start <= timestamp_s <= end
+                for start, end in invalid_time_ranges
+            )
+
+            if not in_invalid_cluster:
+                filtered_map.append((timestamp_s, delay))
+            else:
+                skipped_count += 1
+
+        self.log(f"  [Filtered Stepping] Filtered {skipped_count} coarse scan points from invalid clusters")
+        self.log(f"  [Filtered Stepping] Retained {len(filtered_map)} coarse scan points from valid clusters")
+
+        # Apply fallback strategy if needed
+        if fallback_mode == 'nearest' and skipped_count > 0:
+            self.log(f"  [Filtered Stepping] Note: Boundaries will only be detected between valid clusters")
+        elif fallback_mode == 'skip':
+            self.log(f"  [Filtered Stepping] Skipped regions will maintain original timing (no correction)")
+
+        return filtered_map
+
     def _qa_check(self, corrected_path: str, ref_file_path: str, base_delay: int) -> bool:
         self.log("  [SteppingCorrector] Performing rigorous QA check on corrected audio map...")
         qa_config = self.config.copy()
@@ -670,7 +735,7 @@ class SteppingCorrector:
             self.log(f"  [QA] FAILED with exception: {e}")
             return False
 
-    def run(self, ref_file_path: str, analysis_audio_path: str, base_delay_ms: int) -> CorrectionResult:
+    def run(self, ref_file_path: str, analysis_audio_path: str, base_delay_ms: int, diagnosis_details: Optional[Dict] = None) -> CorrectionResult:
         ref_pcm = None
         analysis_pcm = None
 
@@ -691,6 +756,12 @@ class SteppingCorrector:
             coarse_map = self._perform_coarse_scan(ref_pcm, analysis_pcm, sample_rate)
             if not coarse_map:
                 return CorrectionResult(CorrectionVerdict.FAILED, {'error': "Coarse scan did not find any reliable sync points."})
+
+            # Apply cluster filtering if diagnosis details are provided
+            if diagnosis_details:
+                coarse_map = self._filter_coarse_map_by_clusters(coarse_map, diagnosis_details, sample_rate)
+                if not coarse_map:
+                    return CorrectionResult(CorrectionVerdict.FAILED, {'error': "After filtering invalid clusters, no reliable sync points remain."})
 
             edl: List[AudioSegment] = []
             anchor_delay = coarse_map[0][1]
@@ -833,10 +904,20 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
             analysis_track_path = str(analysis_item.extracted_path)
 
         # Run analysis once to get the correction plan (EDL)
+        # Pass diagnosis details for filtered stepping support
+        diagnosis_details = {
+            'valid_clusters': flag_info.get('valid_clusters', {}),
+            'invalid_clusters': flag_info.get('invalid_clusters', {}),
+            'validation_results': flag_info.get('validation_results', {}),
+            'correction_mode': flag_info.get('correction_mode', 'full'),
+            'fallback_mode': flag_info.get('fallback_mode', 'nearest')
+        }
+
         result: CorrectionResult = corrector.run(
             ref_file_path=ref_file_path,
             analysis_audio_path=analysis_track_path,
-            base_delay_ms=base_delay_ms
+            base_delay_ms=base_delay_ms,
+            diagnosis_details=diagnosis_details if flag_info.get('correction_mode') else None
         )
 
         if result.verdict == CorrectionVerdict.UNIFORM:

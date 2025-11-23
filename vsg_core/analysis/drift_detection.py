@@ -170,6 +170,153 @@ def _get_video_framerate(video_path: str, runner: CommandRunner, tool_paths: dic
     except (ValueError, ZeroDivisionError):
         return 0.0
 
+def _get_quality_thresholds(config: Dict) -> Dict[str, Any]:
+    """
+    Returns quality validation thresholds based on the selected quality mode.
+    Modes: 'strict', 'normal', 'lenient', 'custom'
+    """
+    quality_mode = config.get('stepping_quality_mode', 'normal')
+
+    # Preset modes
+    presets = {
+        'strict': {
+            'min_chunks_per_cluster': 3,
+            'min_cluster_percentage': 10.0,
+            'min_cluster_duration_s': 30.0,
+            'min_match_quality_pct': 90.0,
+            'min_total_clusters': 3
+        },
+        'normal': {
+            'min_chunks_per_cluster': 3,
+            'min_cluster_percentage': 5.0,
+            'min_cluster_duration_s': 20.0,
+            'min_match_quality_pct': 85.0,
+            'min_total_clusters': 2
+        },
+        'lenient': {
+            'min_chunks_per_cluster': 2,
+            'min_cluster_percentage': 3.0,
+            'min_cluster_duration_s': 10.0,
+            'min_match_quality_pct': 75.0,
+            'min_total_clusters': 2
+        }
+    }
+
+    # If custom mode, use user-configured values
+    if quality_mode == 'custom':
+        return {
+            'min_chunks_per_cluster': config.get('stepping_min_chunks_per_cluster', 3),
+            'min_cluster_percentage': config.get('stepping_min_cluster_percentage', 5.0),
+            'min_cluster_duration_s': config.get('stepping_min_cluster_duration_s', 20.0),
+            'min_match_quality_pct': config.get('stepping_min_match_quality_pct', 85.0),
+            'min_total_clusters': config.get('stepping_min_total_clusters', 2)
+        }
+
+    # Return preset or default to normal
+    return presets.get(quality_mode, presets['normal'])
+
+def _validate_cluster(
+    cluster_label: int,
+    cluster_members: List[int],
+    accepted_chunks: List[Dict[str, Any]],
+    total_chunks: int,
+    thresholds: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Validates a single cluster against quality thresholds.
+    Returns a dict with validation results and reasons.
+    """
+    # Get cluster data
+    cluster_size = len(cluster_members)
+    cluster_percentage = (cluster_size / total_chunks * 100.0) if total_chunks > 0 else 0.0
+
+    # Calculate duration
+    chunk_times = [accepted_chunks[i]['start'] for i in cluster_members]
+    min_time = min(chunk_times)
+    max_time = max(chunk_times)
+    # Get the chunk duration from the first chunk (assumes uniform chunk duration)
+    chunk_duration = accepted_chunks[0].get('duration', 15.0) if accepted_chunks else 15.0
+    cluster_duration_s = (max_time - min_time) + chunk_duration
+
+    # Calculate match quality
+    match_qualities = [accepted_chunks[i].get('match', 0.0) for i in cluster_members]
+    avg_match_quality = np.mean(match_qualities) if match_qualities else 0.0
+    min_match_quality = min(match_qualities) if match_qualities else 0.0
+
+    # Perform validation checks
+    checks = {
+        'chunks': {
+            'passed': cluster_size >= thresholds['min_chunks_per_cluster'],
+            'value': cluster_size,
+            'threshold': thresholds['min_chunks_per_cluster'],
+            'label': 'Chunks'
+        },
+        'percentage': {
+            'passed': cluster_percentage >= thresholds['min_cluster_percentage'],
+            'value': cluster_percentage,
+            'threshold': thresholds['min_cluster_percentage'],
+            'label': 'Percentage'
+        },
+        'duration': {
+            'passed': cluster_duration_s >= thresholds['min_cluster_duration_s'],
+            'value': cluster_duration_s,
+            'threshold': thresholds['min_cluster_duration_s'],
+            'label': 'Duration'
+        },
+        'match_quality': {
+            'passed': avg_match_quality >= thresholds['min_match_quality_pct'],
+            'value': avg_match_quality,
+            'threshold': thresholds['min_match_quality_pct'],
+            'label': 'Match quality'
+        }
+    }
+
+    # Overall validation
+    all_passed = all(check['passed'] for check in checks.values())
+    passed_count = sum(1 for check in checks.values() if check['passed'])
+    total_checks = len(checks)
+
+    return {
+        'valid': all_passed,
+        'checks': checks,
+        'passed_count': passed_count,
+        'total_checks': total_checks,
+        'cluster_size': cluster_size,
+        'cluster_percentage': cluster_percentage,
+        'cluster_duration_s': cluster_duration_s,
+        'avg_match_quality': avg_match_quality,
+        'min_match_quality': min_match_quality,
+        'time_range': (min_time, max_time + chunk_duration)
+    }
+
+def _filter_clusters(
+    cluster_members: Dict[int, List[int]],
+    accepted_chunks: List[Dict[str, Any]],
+    delays: np.ndarray,
+    thresholds: Dict[str, Any],
+    runner: CommandRunner,
+    config: Dict
+) -> tuple:
+    """
+    Filters clusters based on quality validation.
+    Returns (valid_clusters, invalid_clusters, validation_results)
+    """
+    total_chunks = len(accepted_chunks)
+    valid_clusters = {}
+    invalid_clusters = {}
+    validation_results = {}
+
+    for label, members in cluster_members.items():
+        validation = _validate_cluster(label, members, accepted_chunks, total_chunks, thresholds)
+        validation_results[label] = validation
+
+        if validation['valid']:
+            valid_clusters[label] = members
+        else:
+            invalid_clusters[label] = members
+
+    return valid_clusters, invalid_clusters, validation_results
+
 def diagnose_audio_issue(
     video_path: str,
     chunks: List[Dict[str, Any]],
@@ -207,8 +354,7 @@ def diagnose_audio_issue(
     unique_clusters = set(label for label in db.labels_ if label != -1)
 
     if len(unique_clusters) > 1:
-        # CRITICAL FIX: Verify each cluster has enough chunks before declaring stepping
-        # False positives occur when only 1-2 chunks differ at the end (credits, etc.)
+        # Build cluster membership data
         cluster_sizes = {}
         cluster_members = {}  # Track which chunks belong to each cluster
         for i, label in enumerate(db.labels_):
@@ -218,36 +364,162 @@ def diagnose_audio_issue(
                     cluster_members[label] = []
                 cluster_members[label].append(i)
 
-        # Get the smallest cluster size
-        min_cluster_size = min(cluster_sizes.values()) if cluster_sizes else 0
+        # Get correction mode and quality thresholds
+        correction_mode = config.get('stepping_correction_mode', 'full')
+        quality_mode = config.get('stepping_quality_mode', 'normal')
 
-        # CONFIGURABLE SAFEGUARD: Require minimum chunks per cluster (default 3)
-        # Real stepping episodes span multiple chunks; 1-2 chunk differences are usually noise/credits
-        MIN_CHUNKS_PER_SEGMENT = config.get('stepping_min_cluster_size', 3)
+        # Check if stepping correction is disabled
+        if correction_mode == 'disabled':
+            runner._log_message(
+                f"[Stepping] Found {len(unique_clusters)} timing clusters, but stepping correction is disabled."
+            )
+            return "UNIFORM", {}
 
-        # Build detailed cluster composition for diagnostics
+        # Get quality thresholds based on mode
+        thresholds = _get_quality_thresholds(config)
+
+        # Log detection
+        runner._log_message(f"[Stepping Detection] Found {len(unique_clusters)} timing clusters")
+        runner._log_message(f"[Stepping] Correction mode: {correction_mode}, Quality mode: {quality_mode}")
+
+        # Perform cluster filtering/validation
+        valid_clusters, invalid_clusters, validation_results = _filter_clusters(
+            cluster_members, accepted_chunks, delays, thresholds, runner, config
+        )
+
+        # Log validation results with enhanced diagnostics
+        runner._log_message(f"[Quality Validation - Mode: {quality_mode}]")
+        for label in sorted(cluster_members.keys()):
+            validation = validation_results[label]
+            members = cluster_members[label]
+
+            # Get cluster delay info
+            cluster_delays = [delays[i] for i in members]
+            mean_delay = np.mean(cluster_delays)
+
+            # Get time range
+            time_start, time_end = validation['time_range']
+
+            # Log cluster info
+            status = "ACCEPTED" if validation['valid'] else "FILTERED OUT"
+            status_symbol = "✓" if validation['valid'] else "✗"
+
+            runner._log_message(
+                f"  Cluster {label+1} (@{time_start:.1f}s - {time_end:.1f}s): {mean_delay:+.0f}ms"
+            )
+
+            # Log each validation check
+            for check_name, check_data in validation['checks'].items():
+                check_symbol = "✓" if check_data['passed'] else "✗"
+                value = check_data['value']
+                threshold = check_data['threshold']
+                label_text = check_data['label']
+
+                if check_name == 'percentage':
+                    runner._log_message(
+                        f"    {check_symbol} {label_text}: {value:.1f}% (need {threshold:.1f}%+)"
+                    )
+                elif check_name == 'duration':
+                    runner._log_message(
+                        f"    {check_symbol} {label_text}: {value:.1f}s (need {threshold:.1f}s+)"
+                    )
+                elif check_name == 'match_quality':
+                    runner._log_message(
+                        f"    {check_symbol} {label_text}: {value:.1f}% (need {threshold:.1f}%+)"
+                    )
+                else:  # chunks
+                    runner._log_message(
+                        f"    {check_symbol} {label_text}: {int(value)} (need {int(threshold)}+)"
+                    )
+
+            runner._log_message(
+                f"    → STATUS: {status} ({validation['passed_count']}/{validation['total_checks']} checks passed)"
+            )
+
+        # Build detailed cluster composition for diagnostics (for all clusters)
         cluster_details = _build_cluster_diagnostics(
             accepted_chunks, db.labels_, cluster_members, delays, runner, config
         )
 
-        if min_cluster_size >= MIN_CHUNKS_PER_SEGMENT:
+        # Decide whether to accept stepping based on correction mode
+        if correction_mode == 'full' or correction_mode == 'strict':
+            # Full/Strict mode: Reject if ANY cluster is invalid
+            if len(invalid_clusters) > 0:
+                runner._log_message(
+                    f"[Stepping Rejected] {len(invalid_clusters)}/{len(cluster_members)} clusters failed validation in '{correction_mode}' mode."
+                )
+                runner._log_message(
+                    f"  → Treating as uniform delay. Switch to 'filtered' mode to use valid clusters only."
+                )
+                return "UNIFORM", {}
+
+            # Also check minimum total clusters requirement
+            if len(valid_clusters) < thresholds['min_total_clusters']:
+                runner._log_message(
+                    f"[Stepping Rejected] Only {len(valid_clusters)} clusters (need {thresholds['min_total_clusters']}+)."
+                )
+                return "UNIFORM", {}
+
+            # All clusters passed - accept stepping
             runner._log_message(
-                f"[Stepping Detected] Found {len(unique_clusters)} distinct timing clusters "
-                f"(smallest has {min_cluster_size} chunks)."
+                f"[Stepping Accepted] All {len(valid_clusters)} clusters passed validation."
             )
             return "STEPPING", {
-                "clusters": len(unique_clusters),
-                "min_cluster_size": min_cluster_size,
-                "cluster_details": cluster_details
+                "clusters": len(valid_clusters),
+                "cluster_details": cluster_details,
+                "valid_clusters": valid_clusters,
+                "invalid_clusters": invalid_clusters,
+                "validation_results": validation_results,
+                "correction_mode": correction_mode
             }
-        else:
-            # Not enough evidence - likely end credits or brief scene change
+
+        elif correction_mode == 'filtered':
+            # Filtered mode: Use only valid clusters, filter out invalid ones
+            if len(valid_clusters) < thresholds['min_total_clusters']:
+                runner._log_message(
+                    f"[Filtered Stepping Rejected] Only {len(valid_clusters)} valid clusters (need {thresholds['min_total_clusters']}+)."
+                )
+                return "UNIFORM", {}
+
+            # Check fallback mode
+            fallback_mode = config.get('stepping_filtered_fallback', 'nearest')
+            if fallback_mode == 'reject' and len(invalid_clusters) > 0:
+                runner._log_message(
+                    f"[Filtered Stepping Rejected] Fallback mode is 'reject' and {len(invalid_clusters)} clusters were filtered."
+                )
+                return "UNIFORM", {}
+
+            # Accept filtered stepping
             runner._log_message(
-                f"[Stepping] Found {len(unique_clusters)} timing clusters, but smallest cluster "
-                f"has only {min_cluster_size} chunks (need {MIN_CHUNKS_PER_SEGMENT}+). "
-                f"Likely end credits or brief scene change - treating as uniform delay."
+                f"[Filtered Stepping Accepted] Using {len(valid_clusters)}/{len(cluster_members)} valid clusters (filtered {len(invalid_clusters)})."
             )
-            # Fall through to check for linear drift instead
+            if len(invalid_clusters) > 0:
+                runner._log_message(
+                    f"  → Filtered regions will use fallback mode: '{fallback_mode}'"
+                )
+
+            return "STEPPING", {
+                "clusters": len(valid_clusters),
+                "cluster_details": cluster_details,
+                "valid_clusters": valid_clusters,
+                "invalid_clusters": invalid_clusters,
+                "validation_results": validation_results,
+                "correction_mode": correction_mode,
+                "fallback_mode": fallback_mode
+            }
+
+        else:
+            # Unknown mode - fall back to legacy behavior
+            min_cluster_size = min(cluster_sizes.values()) if cluster_sizes else 0
+            MIN_CHUNKS_PER_SEGMENT = config.get('stepping_min_cluster_size', 3)
+
+            if min_cluster_size >= MIN_CHUNKS_PER_SEGMENT:
+                return "STEPPING", {
+                    "clusters": len(unique_clusters),
+                    "cluster_details": cluster_details
+                }
+            else:
+                return "UNIFORM", {}
 
     # --- Test 3: Check for General Linear Drift (Now Codec-Aware) ---
     slope, intercept = np.polyfit(times, delays, 1)

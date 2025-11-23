@@ -125,6 +125,21 @@ class AppConfig:
             'stepping_adjust_subtitles': True,  # Adjust subtitle timestamps to match stepped audio corrections
             'stepping_adjust_subtitles_no_audio': True,  # Apply stepping to subtitles when no audio is merged (uses correlation-based EDL)
             'stepping_boundary_mode': 'start',  # How to handle subs spanning boundaries: 'start', 'majority', 'midpoint'
+
+            # --- Filtered Stepping Correction (New) ---
+            'stepping_correction_mode': 'full',  # 'full', 'filtered', 'strict', 'disabled'
+            'stepping_quality_mode': 'normal',  # 'strict', 'normal', 'lenient', 'custom'
+
+            # Quality Validation Thresholds (for 'custom' mode)
+            'stepping_min_chunks_per_cluster': 3,  # Minimum chunks required per cluster
+            'stepping_min_cluster_percentage': 5.0,  # Min % of total chunks a cluster must represent
+            'stepping_min_cluster_duration_s': 20.0,  # Min duration in seconds
+            'stepping_min_match_quality_pct': 85.0,  # Min average match quality percentage
+            'stepping_min_total_clusters': 2,  # Minimum number of total clusters required
+
+            # Filtered Region Handling
+            'stepping_filtered_fallback': 'nearest',  # 'nearest', 'interpolate', 'uniform', 'skip', 'reject'
+            'stepping_filtered_transition_s': 1.0,  # Crossfade duration when transitioning (for interpolate mode)
         }
         self.settings = self.defaults.copy()
         self.load()
