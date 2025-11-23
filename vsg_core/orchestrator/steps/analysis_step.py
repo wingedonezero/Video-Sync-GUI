@@ -235,16 +235,24 @@ class AnalysisStep:
                     codec_id=target_codec_id
                 )
 
-                # If stepping detected, find the first segment's delay IMMEDIATELY
-                # APPLY THIS REGARDLESS of whether audio tracks are being used
+                # If stepping detected, respect the delay_selection_mode setting
                 if diagnosis == "STEPPING":
                     stepping_sources.append(source_key)  # Track for final report
-                    first_segment_delay = _find_first_stable_segment_delay(results, runner)
-                    if first_segment_delay is not None:
-                        stepping_override_delay = first_segment_delay
+                    delay_mode = config.get('delay_selection_mode', 'Mode (Most Common)')
+
+                    # Only use first segment if user explicitly chose 'First Stable' mode
+                    if delay_mode == 'First Stable':
+                        first_segment_delay = _find_first_stable_segment_delay(results, runner)
+                        if first_segment_delay is not None:
+                            stepping_override_delay = first_segment_delay
+                            runner._log_message(f"[Stepping Detected] Found stepping in {source_key}")
+                            runner._log_message(f"[Stepping Override] Using first segment's delay: {stepping_override_delay}ms (delay_selection_mode='First Stable')")
+                            runner._log_message(f"[Stepping Override] This delay will be used for ALL tracks (audio + subtitles) from {source_key}")
+                    else:
+                        # For 'Mode (Most Common)' or 'Average', use normal delay selection
                         runner._log_message(f"[Stepping Detected] Found stepping in {source_key}")
-                        runner._log_message(f"[Stepping Override] Using first segment's delay: {stepping_override_delay}ms")
-                        runner._log_message(f"[Stepping Override] This delay will be used for ALL tracks (audio + subtitles) from {source_key}")
+                        runner._log_message(f"[Stepping] Will use delay_selection_mode='{delay_mode}' instead of first segment")
+                        # Don't set stepping_override_delay - let normal flow handle it
 
             # Use stepping override if available, otherwise calculate mode
             if stepping_override_delay is not None:
