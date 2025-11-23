@@ -8,3 +8,10 @@ Text File.txt
 docs/ARCHITECTURE.odt
 
 .todo.txt.kate-swp
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
