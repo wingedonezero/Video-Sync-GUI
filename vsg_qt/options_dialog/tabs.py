@@ -356,6 +356,21 @@ class AnalysisTab(QWidget):
         )
         segment_layout.addRow(self.widgets['stepping_adjust_subtitles'])
 
+        self.widgets['stepping_adjust_subtitles_no_audio'] = QCheckBox("Apply stepping to subtitles when no audio is merged")
+        self.widgets['stepping_adjust_subtitles_no_audio'].setToolTip(
+            "When enabled, applies stepping correction to subtitles even when no audio tracks from that source\n"
+            "are being merged. Uses correlation results to generate a simplified timing adjustment map.\n\n"
+            "This is useful for subtitle-only merges where the source has stepped delays but you're not merging audio.\n\n"
+            "How it works:\n"
+            "  - Detects stepped delays from audio correlation analysis\n"
+            "  - Generates timing regions from correlation chunks (e.g., 0-156s: +18ms, 156-843s: -9925ms)\n"
+            "  - Applies appropriate delay to each subtitle based on its timestamp\n\n"
+            "Note: Less precise than full audio stepping correction, but usually sufficient for subtitles.\n"
+            "Recommended: Enable if you're merging subtitles from sources with variable sync offsets.\n"
+            "Only applies when stepping is detected during correlation analysis."
+        )
+        segment_layout.addRow(self.widgets['stepping_adjust_subtitles_no_audio'])
+
         main_layout.addWidget(segment_group)
 
         main_layout.addStretch(1)
