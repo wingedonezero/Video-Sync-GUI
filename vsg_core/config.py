@@ -123,6 +123,7 @@ class AppConfig:
             'stepping_scan_start_percentage': 5.0,  # Independent scan start for stepping correction
             'stepping_scan_end_percentage': 99.0,  # Independent scan end for stepping correction (higher to catch end boundaries)
             'stepping_adjust_subtitles': True,  # Adjust subtitle timestamps to match stepped audio corrections
+            'stepping_adjust_subtitles_no_audio': True,  # Apply stepping to subtitles when no audio is merged (uses correlation-based EDL)
         }
         self.settings = self.defaults.copy()
         self.load()
