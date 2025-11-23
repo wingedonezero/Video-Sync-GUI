@@ -6,10 +6,11 @@ from pathlib import Path
 import pysubs2
 from ..io.runner import CommandRunner
 
-def _scale_override_tags(text: str, scale: float, offset_x: float, offset_y: float) -> str:
+def _scale_override_tags(text: str, scale: float, scale_h: float, offset_x: float, offset_y: float) -> str:
     """
     Scales all ASS override tags using uniform scaling and adds border offsets.
     Maintains aspect ratio like Aegisub's "Add Borders" resampling.
+    Uses vertical scaling (scale_h) for font sizes to match Aegisub behavior.
     """
 
     def scale_value(val: str, scale_factor: float, offset: float = 0) -> str:
@@ -34,9 +35,9 @@ def _scale_override_tags(text: str, scale: float, offset_x: float, offset_y: flo
             if tag_lower in ('fscx', 'bord', 'xbord'):
                 scaled_parts.append(scale_value(part, scale))
 
-            # Height/Y measurements (no offset needed for size measurements)
+            # Height/Y measurements and font size (use vertical scaling, no offset for size measurements)
             elif tag_lower in ('fscy', 'ybord', 'yshad', 'fs', 'blur', 'pbo', 'shad'):
-                scaled_parts.append(scale_value(part, scale))
+                scaled_parts.append(scale_value(part, scale_h))
 
             # Position tags (x, y) - need offsets
             elif tag_lower in ('pos', 'org') and i < 2:
@@ -85,9 +86,9 @@ def _scale_override_tags(text: str, scale: float, offset_x: float, offset_y: flo
                 # Shorthand format
                 value = args_or_value
 
-                # Only scale size measurements (not coefficients like \be, \fax, etc.)
+                # Scale size measurements (use vertical scaling for font/outline/shadow)
                 if tag_lower in ('fs', 'blur', 'fscy', 'ybord', 'yshad', 'pbo', 'shad'):
-                    scaled = scale_value(value, scale)
+                    scaled = scale_value(value, scale_h)
                     return f'\\{tag_name}{scaled}'
                 elif tag_lower in ('fscx', 'bord', 'xbord'):
                     scaled = scale_value(value, scale)
@@ -153,25 +154,28 @@ def rescale_subtitle(subtitle_path: str, video_path: str, runner: CommandRunner,
 
         runner._log_message(
             f'[Rescale] Rescaling {sub_path.name} from {from_w}x{from_h} to {to_w}x{to_h} '
-            f'(scale: {scale:.4f}, borders: {offset_x:.1f}x, {offset_y:.1f}y).'
+            f'(uniform scale: {scale:.4f}, font scale: {scale_h:.4f}, borders: {offset_x:.1f}x, {offset_y:.1f}y).'
         )
 
         # 5. Update Script Info
         subs.info['PlayResX'] = str(to_w)
         subs.info['PlayResY'] = str(to_h)
 
-        # 6. Scale all Style definitions and add border offsets to margins
+        # 6. Scale all Style definitions (margins scale without offsets as they're edge-relative)
         for style in subs.styles.values():
-            style.fontsize = int(style.fontsize * scale + 0.5)
-            style.outline *= scale
-            style.shadow *= scale
-            style.marginl = int(style.marginl * scale + offset_x + 0.5)
-            style.marginr = int(style.marginr * scale + offset_x + 0.5)
-            style.marginv = int(style.marginv * scale + offset_y + 0.5)
+            # Use vertical scaling for font size (Aegisub convention)
+            style.fontsize = int(style.fontsize * scale_h + 0.5)
+            style.outline *= scale_h
+            style.shadow *= scale_h
+            # Margins are edge-relative, so they scale without offsets
+            # (offsets only apply to absolute coordinates like \pos tags)
+            style.marginl = int(style.marginl * scale + 0.5)
+            style.marginr = int(style.marginr * scale + 0.5)
+            style.marginv = int(style.marginv * scale + 0.5)
 
         # 7. Scale all inline override tags with offsets
         for line in subs:
-            line.text = _scale_override_tags(line.text, scale, offset_x, offset_y)
+            line.text = _scale_override_tags(line.text, scale, scale_h, offset_x, offset_y)
 
         # 8. Save the rescaled subtitle file
         subs.save(subtitle_path, encoding='utf-8')
