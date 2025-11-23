@@ -39,6 +39,49 @@ class AudioSegment:
     delay_ms: int
     drift_rate_ms_s: float = 0.0
 
+def generate_edl_from_correlation(chunks: List[Dict], config: Dict, runner: CommandRunner) -> List[AudioSegment]:
+    """
+    Generate a simplified EDL from correlation chunks for subtitle adjustment.
+    Used when stepping is detected but no audio correction is needed.
+
+    Args:
+        chunks: List of correlation chunk results with 'delay', 'accepted', and 'start' keys
+        config: Configuration dictionary
+        runner: CommandRunner for logging
+
+    Returns:
+        List of AudioSegment objects representing delay regions
+    """
+    accepted = [c for c in chunks if c.get('accepted', False)]
+    if not accepted:
+        runner._log_message("[EDL Generation] No accepted chunks available for EDL generation")
+        return []
+
+    # Group consecutive chunks by delay (within tolerance)
+    tolerance_ms = config.get('segment_triage_std_dev_ms', 50)
+    edl = []
+    current_delay = accepted[0]['delay']
+    edl.append(AudioSegment(start_s=0.0, end_s=0.0, delay_ms=current_delay))
+
+    runner._log_message(f"[EDL Generation] Starting with delay: {current_delay}ms")
+
+    for chunk in accepted[1:]:
+        delay_diff = abs(chunk['delay'] - current_delay)
+        if delay_diff > tolerance_ms:
+            # Delay change detected - add new segment
+            boundary_time_s = chunk['start']  # Chunk start time in seconds
+            current_delay = chunk['delay']
+            edl.append(AudioSegment(
+                start_s=boundary_time_s,
+                end_s=boundary_time_s,
+                delay_ms=current_delay,
+                drift_rate_ms_s=0.0  # No drift analysis for subtitle-only
+            ))
+            runner._log_message(f"[EDL Generation] Delay change at {boundary_time_s:.1f}s → {current_delay}ms")
+
+    runner._log_message(f"[EDL Generation] Generated EDL with {len(edl)} segment(s)")
+    return edl
+
 def _get_audio_properties(file_path: str, stream_index: int, runner: CommandRunner, tool_paths: dict) -> Tuple[int, str, int]:
     cmd = [ 'ffprobe', '-v', 'error', '-select_streams', f'a:{stream_index}', '-show_entries', 'stream=channels,channel_layout,sample_rate', '-of', 'json', str(file_path) ]
     out = runner.run(cmd, tool_paths)
