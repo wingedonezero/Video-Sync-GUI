@@ -210,6 +210,91 @@ class AnalysisTab(QWidget):
 
         # --- Section 2: Stepping & Drift Detection ---
         segment_layout.addRow(QLabel("<b>Section 2: Stepping & Drift Detection</b>"))
+
+        # Stepping Correction Mode
+        self.widgets['stepping_correction_mode'] = QComboBox()
+        self.widgets['stepping_correction_mode'].addItems(['full', 'filtered', 'strict', 'disabled'])
+        self.widgets['stepping_correction_mode'].setToolTip(
+            "Stepping Correction Strategy:\n"
+            "• full (Current): Use all detected clusters, reject if any fail validation\n"
+            "• filtered (Recommended): Filter out unreliable clusters, use only stable ones\n"
+            "• strict: Like 'full' but with stricter validation requirements\n"
+            "• disabled: Skip stepping correction entirely"
+        )
+
+        # Quality Mode
+        self.widgets['stepping_quality_mode'] = QComboBox()
+        self.widgets['stepping_quality_mode'].addItems(['strict', 'normal', 'lenient', 'custom'])
+        self.widgets['stepping_quality_mode'].setToolTip(
+            "Quality Validation Preset:\n"
+            "• strict: High thresholds (3+ chunks, 10%+ of total, 30s+ duration, 90%+ match)\n"
+            "• normal: Balanced thresholds (3+ chunks, 5%+ of total, 20s+ duration, 85%+ match)\n"
+            "• lenient: Low thresholds (2+ chunks, 3%+ of total, 10s+ duration, 75%+ match)\n"
+            "• custom: Manually configure all thresholds below"
+        )
+
+        # Filtered Fallback Mode
+        self.widgets['stepping_filtered_fallback'] = QComboBox()
+        self.widgets['stepping_filtered_fallback'].addItems(['nearest', 'interpolate', 'uniform', 'skip', 'reject'])
+        self.widgets['stepping_filtered_fallback'].setToolTip(
+            "How to handle filtered clusters (for 'filtered' correction mode):\n"
+            "• nearest: Use closest valid cluster's delay (recommended)\n"
+            "• interpolate: Smooth transition between valid clusters\n"
+            "• uniform: Use overall median delay for filtered regions\n"
+            "• skip: No correction in filtered regions (keep original timing)\n"
+            "• reject: Reject entire correction if any cluster is filtered"
+        )
+
+        segment_layout.addRow("Correction Mode:", self.widgets['stepping_correction_mode'])
+        segment_layout.addRow("Quality Mode:", self.widgets['stepping_quality_mode'])
+        segment_layout.addRow("Filtered Fallback:", self.widgets['stepping_filtered_fallback'])
+
+        # Add separator
+        separator = QLabel()
+        separator.setFixedHeight(10)
+        segment_layout.addRow(separator)
+
+        # Advanced thresholds (shown when quality_mode == 'custom')
+        segment_layout.addRow(QLabel("<b>Custom Quality Thresholds (for 'custom' mode)</b>"))
+
+        self.widgets['stepping_min_chunks_per_cluster'] = QSpinBox()
+        self.widgets['stepping_min_chunks_per_cluster'].setRange(1, 20)
+        self.widgets['stepping_min_chunks_per_cluster'].setToolTip("Minimum chunks required per cluster")
+
+        self.widgets['stepping_min_cluster_percentage'] = QDoubleSpinBox()
+        self.widgets['stepping_min_cluster_percentage'].setRange(0.0, 50.0)
+        self.widgets['stepping_min_cluster_percentage'].setSuffix(" %")
+        self.widgets['stepping_min_cluster_percentage'].setDecimals(1)
+        self.widgets['stepping_min_cluster_percentage'].setToolTip("Minimum percentage of total chunks a cluster must represent")
+
+        self.widgets['stepping_min_cluster_duration_s'] = QDoubleSpinBox()
+        self.widgets['stepping_min_cluster_duration_s'].setRange(0.0, 120.0)
+        self.widgets['stepping_min_cluster_duration_s'].setSuffix(" s")
+        self.widgets['stepping_min_cluster_duration_s'].setDecimals(1)
+        self.widgets['stepping_min_cluster_duration_s'].setToolTip("Minimum duration in seconds for a cluster")
+
+        self.widgets['stepping_min_match_quality_pct'] = QDoubleSpinBox()
+        self.widgets['stepping_min_match_quality_pct'].setRange(50.0, 100.0)
+        self.widgets['stepping_min_match_quality_pct'].setSuffix(" %")
+        self.widgets['stepping_min_match_quality_pct'].setDecimals(1)
+        self.widgets['stepping_min_match_quality_pct'].setToolTip("Minimum average match quality percentage")
+
+        self.widgets['stepping_min_total_clusters'] = QSpinBox()
+        self.widgets['stepping_min_total_clusters'].setRange(1, 10)
+        self.widgets['stepping_min_total_clusters'].setToolTip("Minimum number of total clusters required")
+
+        segment_layout.addRow("Min Chunks/Cluster:", self.widgets['stepping_min_chunks_per_cluster'])
+        segment_layout.addRow("Min Cluster %:", self.widgets['stepping_min_cluster_percentage'])
+        segment_layout.addRow("Min Cluster Duration:", self.widgets['stepping_min_cluster_duration_s'])
+        segment_layout.addRow("Min Match Quality:", self.widgets['stepping_min_match_quality_pct'])
+        segment_layout.addRow("Min Total Clusters:", self.widgets['stepping_min_total_clusters'])
+
+        # Add separator
+        separator2 = QLabel()
+        separator2.setFixedHeight(10)
+        segment_layout.addRow(separator2)
+
+        segment_layout.addRow(QLabel("<b>Legacy Settings</b>"))
         self.widgets['detection_dbscan_epsilon_ms'] = QDoubleSpinBox(); self.widgets['detection_dbscan_epsilon_ms'].setRange(5.0, 100.0); self.widgets['detection_dbscan_epsilon_ms'].setSuffix(" ms"); self.widgets['detection_dbscan_epsilon_ms'].setToolTip("Stability Tolerance: The maximum time difference for delays to be considered part of the same sync group.")
         self.widgets['detection_dbscan_min_samples'] = QSpinBox(); self.widgets['detection_dbscan_min_samples'].setRange(2, 10); self.widgets['detection_dbscan_min_samples'].setToolTip("Cluster Size: The minimum number of similar chunks needed to form a stable sync group.")
         self.widgets['stepping_min_cluster_size'] = QSpinBox()
