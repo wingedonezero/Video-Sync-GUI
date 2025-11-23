@@ -732,8 +732,21 @@ class SteppingCorrector:
 
         return filtered_map
 
-    def _qa_check(self, corrected_path: str, ref_file_path: str, base_delay: int) -> bool:
+    def _qa_check(self, corrected_path: str, ref_file_path: str, base_delay: int, diagnosis_details: Optional[Dict] = None) -> bool:
         self.log("  [SteppingCorrector] Performing rigorous QA check on corrected audio map...")
+
+        # Check if we're using skip mode with filtered clusters
+        skip_mode_active = False
+        if diagnosis_details:
+            correction_mode = diagnosis_details.get('correction_mode', 'full')
+            fallback_mode = diagnosis_details.get('fallback_mode', 'nearest')
+            invalid_clusters = diagnosis_details.get('invalid_clusters', {})
+
+            if correction_mode == 'filtered' and fallback_mode == 'skip' and invalid_clusters:
+                skip_mode_active = True
+                self.log(f"  [QA] Note: 'skip' fallback mode is active with {len(invalid_clusters)} filtered cluster(s).")
+                self.log(f"  [QA] Filtered regions retain original timing, so delay stability check will be relaxed.")
+
         qa_config = self.config.copy()
         qa_threshold = self.config.get('segmented_qa_threshold', 85.0)
         qa_scan_chunks = self.config.get('segment_qa_chunk_count', 30)
@@ -761,12 +774,29 @@ class SteppingCorrector:
 
             delays = [r['delay'] for r in accepted]
             median_delay = np.median(delays)
-            if abs(median_delay - base_delay) > 20:
+
+            # For skip mode, use a more lenient median check since we expect different delays
+            median_tolerance = 100 if skip_mode_active else 20
+
+            if abs(median_delay - base_delay) > median_tolerance:
                 self.log(f"  [QA] FAILED: Median delay ({median_delay:.1f}ms) does not match base delay ({base_delay}ms).")
                 return False
-            if np.std(delays) > 15:
-                self.log(f"  [QA] FAILED: Delay is unstable (Std Dev = {np.std(delays):.1f}ms).")
-                return False
+
+            # For skip mode, relax or skip the std dev check
+            std_dev = np.std(delays)
+            if skip_mode_active:
+                # Very lenient std dev check for skip mode (only fail if extremely unstable)
+                if std_dev > 500:
+                    self.log(f"  [QA] FAILED: Delay is extremely unstable (Std Dev = {std_dev:.1f}ms).")
+                    return False
+                else:
+                    self.log(f"  [QA] Delay std dev = {std_dev:.1f}ms (acceptable for 'skip' mode with filtered regions).")
+            else:
+                # Normal strict std dev check
+                if std_dev > 15:
+                    self.log(f"  [QA] FAILED: Delay is unstable (Std Dev = {std_dev:.1f}ms).")
+                    return False
+
             self.log("  [QA] PASSED: Timing map is verified and correct.")
             return True
         except Exception as e:
@@ -840,7 +870,7 @@ class SteppingCorrector:
             if not self._assemble_from_segments_via_ffmpeg(analysis_pcm, edl, 1, 'mono', sample_rate, qa_track_path, log_prefix="QA", ref_pcm=ref_pcm):
                 return CorrectionResult(CorrectionVerdict.FAILED, {'error': "Failed during QA track assembly."})
 
-            if not self._qa_check(str(qa_track_path), ref_file_path, edl[0].delay_ms):
+            if not self._qa_check(str(qa_track_path), ref_file_path, edl[0].delay_ms, diagnosis_details):
                 return CorrectionResult(CorrectionVerdict.FAILED, {'error': "Corrected track failed QA check."})
 
             # If QA passes, the EDL is good. Return it.

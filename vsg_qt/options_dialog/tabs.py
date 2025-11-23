@@ -215,34 +215,75 @@ class AnalysisTab(QWidget):
         self.widgets['stepping_correction_mode'] = QComboBox()
         self.widgets['stepping_correction_mode'].addItems(['full', 'filtered', 'strict', 'disabled'])
         self.widgets['stepping_correction_mode'].setToolTip(
-            "Stepping Correction Strategy:\n"
-            "• full (Current): Use all detected clusters, reject if any fail validation\n"
-            "• filtered (Recommended): Filter out unreliable clusters, use only stable ones\n"
-            "• strict: Like 'full' but with stricter validation requirements\n"
-            "• disabled: Skip stepping correction entirely"
+            "CORRECTION STRATEGY: Controls how detected timing clusters are used\n\n"
+            "• full (Current Default): All-or-nothing mode\n"
+            "  - Uses ALL detected clusters for correction\n"
+            "  - Rejects entire stepping correction if ANY cluster fails validation\n"
+            "  - Use when: All clusters are reliable (no small/brief clusters)\n\n"
+            "• filtered (Recommended for Problem Files): Smart filtering mode\n"
+            "  - Automatically filters out unreliable clusters (too small, brief, low match)\n"
+            "  - Uses ONLY stable clusters for correction\n"
+            "  - Handles filtered regions per 'Filtered Fallback' setting below\n"
+            "  - Use when: You have small/unreliable clusters causing issues\n\n"
+            "• strict: Extra strict all-or-nothing mode\n"
+            "  - Like 'full' but with stricter validation thresholds\n"
+            "  - Use when: High-quality sources, want maximum confidence\n\n"
+            "• disabled: Skip stepping correction entirely\n"
+            "  - Use when: No stepping present or you want to disable this feature"
         )
 
         # Quality Mode
         self.widgets['stepping_quality_mode'] = QComboBox()
         self.widgets['stepping_quality_mode'].addItems(['strict', 'normal', 'lenient', 'custom'])
         self.widgets['stepping_quality_mode'].setToolTip(
-            "Quality Validation Preset:\n"
-            "• strict: High thresholds (3+ chunks, 10%+ of total, 30s+ duration, 90%+ match)\n"
-            "• normal: Balanced thresholds (3+ chunks, 5%+ of total, 20s+ duration, 85%+ match)\n"
-            "• lenient: Low thresholds (2+ chunks, 3%+ of total, 10s+ duration, 75%+ match)\n"
-            "• custom: Manually configure all thresholds below"
+            "QUALITY VALIDATION THRESHOLDS: Controls what makes a cluster 'valid'\n\n"
+            "A cluster must pass ALL these checks to be considered valid:\n"
+            "1. Minimum chunks (how many correlation chunks in the cluster)\n"
+            "2. Minimum percentage (% of total chunks the cluster represents)\n"
+            "3. Minimum duration (time span in seconds)\n"
+            "4. Minimum match quality (average correlation match %)\n\n"
+            "• strict: Very conservative (prevents false positives)\n"
+            "  - 3+ chunks, 10%+ of total, 30+ seconds, 90%+ match quality\n"
+            "  - Use when: High-quality Blu-ray sources\n\n"
+            "• normal (Default): Balanced validation\n"
+            "  - 3+ chunks, 5%+ of total, 20+ seconds, 85%+ match quality\n"
+            "  - Use when: Most DVD/BD sources, general use\n\n"
+            "• lenient: Permissive (catches edge cases)\n"
+            "  - 2+ chunks, 3%+ of total, 10+ seconds, 75%+ match quality\n"
+            "  - Use when: Brief stepping at file boundaries, low-quality sources\n\n"
+            "• custom: Manually configure each threshold below\n"
+            "  - Use when: You know exactly what thresholds you need"
         )
 
         # Filtered Fallback Mode
         self.widgets['stepping_filtered_fallback'] = QComboBox()
         self.widgets['stepping_filtered_fallback'].addItems(['nearest', 'interpolate', 'uniform', 'skip', 'reject'])
         self.widgets['stepping_filtered_fallback'].setToolTip(
-            "How to handle filtered clusters (for 'filtered' correction mode):\n"
-            "• nearest: Use closest valid cluster's delay (recommended)\n"
+            "FILTERED REGION HANDLING: What to do with time regions from invalid clusters\n"
+            "(Only applies when Correction Mode = 'filtered')\n\n"
+            "• nearest (Recommended): Use closest valid cluster's delay\n"
+            "  - Filtered regions get the delay from the nearest stable cluster\n"
+            "  - Creates a clean corrected track with stable timing\n"
+            "  - QA check: Normal (expects stable delays)\n"
+            "  - Use when: You want reliable correction without bad clusters\n\n"
             "• interpolate: Smooth transition between valid clusters\n"
+            "  - Gradually transitions delay values between surrounding clusters\n"
+            "  - Experimental, may not work well with large delay differences\n"
+            "  - QA check: Normal\n\n"
             "• uniform: Use overall median delay for filtered regions\n"
-            "• skip: No correction in filtered regions (keep original timing)\n"
-            "• reject: Reject entire correction if any cluster is filtered"
+            "  - Filtered regions use the median delay of all accepted chunks\n"
+            "  - Conservative approach\n"
+            "  - QA check: Normal\n\n"
+            "• skip: Keep original (possibly wrong) timing in filtered regions\n"
+            "  - Filtered regions are NOT corrected - they keep original delays\n"
+            "  - Results in mixed delays in the corrected track\n"
+            "  - QA check: Relaxed (allows high std deviation)\n"
+            "  - ⚠️ WARNING: May result in audible timing jumps!\n"
+            "  - Use when: You only want to fix specific regions, not all\n\n"
+            "• reject: All-or-nothing (reject if any cluster filtered)\n"
+            "  - If ANY cluster is filtered, reject entire stepping correction\n"
+            "  - Equivalent to 'full' correction mode\n"
+            "  - Use when: You want filtering validation but all-or-nothing behavior"
         )
 
         segment_layout.addRow("Correction Mode:", self.widgets['stepping_correction_mode'])
