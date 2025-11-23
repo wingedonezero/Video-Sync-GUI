@@ -371,6 +371,27 @@ class AnalysisTab(QWidget):
         )
         segment_layout.addRow(self.widgets['stepping_adjust_subtitles_no_audio'])
 
+        self.widgets['stepping_boundary_mode'] = QComboBox()
+        self.widgets['stepping_boundary_mode'].addItems(['start', 'majority', 'midpoint'])
+        self.widgets['stepping_boundary_mode'].setToolTip(
+            "How to handle subtitles that span across stepping boundaries:\n\n"
+            "• Start Time (default):\n"
+            "  Uses the subtitle's start timestamp to determine which delay region it belongs to.\n"
+            "  Fast and simple. Works well for short subtitles (2-3 seconds).\n\n"
+            "• Majority Duration:\n"
+            "  Calculates which delay region the subtitle spends the most time in.\n"
+            "  More accurate for long subtitles or song lyrics that span boundaries.\n"
+            "  Example: A 10-second subtitle spanning a boundary at 5 seconds gets the delay\n"
+            "  of whichever region it occupies for more than 5 seconds.\n\n"
+            "• Midpoint:\n"
+            "  Uses the middle timestamp of the subtitle: (start + end) / 2.\n"
+            "  Simple compromise between start-only and duration-based.\n"
+            "  Better than start-only for moderately long subtitles.\n\n"
+            "Note: This only affects subtitle timing adjustment, not audio stepping correction.\n"
+            "Recommended: Use 'start' for typical dialogue, 'majority' for songs/karaoke."
+        )
+        segment_layout.addRow("Boundary Spanning Mode:", self.widgets['stepping_boundary_mode'])
+
         main_layout.addWidget(segment_group)
 
         main_layout.addStretch(1)

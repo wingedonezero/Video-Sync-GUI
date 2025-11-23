@@ -124,6 +124,7 @@ class AppConfig:
             'stepping_scan_end_percentage': 99.0,  # Independent scan end for stepping correction (higher to catch end boundaries)
             'stepping_adjust_subtitles': True,  # Adjust subtitle timestamps to match stepped audio corrections
             'stepping_adjust_subtitles_no_audio': True,  # Apply stepping to subtitles when no audio is merged (uses correlation-based EDL)
+            'stepping_boundary_mode': 'start',  # How to handle subs spanning boundaries: 'start', 'majority', 'midpoint'
         }
         self.settings = self.defaults.copy()
         self.load()

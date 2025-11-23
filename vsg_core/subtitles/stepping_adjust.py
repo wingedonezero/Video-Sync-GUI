@@ -12,7 +12,7 @@ from pathlib import Path
 import pysubs2
 
 
-def apply_stepping_to_subtitles(subtitle_path: str, edl: List, runner) -> dict:
+def apply_stepping_to_subtitles(subtitle_path: str, edl: List, runner, config: dict = None) -> dict:
     """
     Apply stepping correction EDL (Edit Decision List) to subtitle timestamps.
 
@@ -23,6 +23,7 @@ def apply_stepping_to_subtitles(subtitle_path: str, edl: List, runner) -> dict:
         subtitle_path: Path to the subtitle file
         edl: List of AudioSegment objects from stepping correction
         runner: Runner object for logging
+        config: Configuration dictionary (optional, for boundary mode setting)
 
     Returns:
         dict: Report with statistics about the adjustment
@@ -60,18 +61,30 @@ def apply_stepping_to_subtitles(subtitle_path: str, edl: List, runner) -> dict:
         # Sort EDL by start time (should already be sorted, but just in case)
         sorted_edl = sorted(edl, key=lambda seg: seg.start_s)
 
+        # Get boundary mode from config (default to 'start')
+        boundary_mode = 'start'
+        if config:
+            boundary_mode = config.get('stepping_boundary_mode', 'start')
+
         # Counters for report
         adjusted_count = 0
         max_adjustment_ms = 0
+        spanning_count = 0  # Count subs that span boundaries
 
         # Process each subtitle
         for event in subs:
             # Get original timestamps (pysubs2 uses milliseconds)
             original_start_ms = event.start
             original_end_ms = event.end
+            original_start_s = original_start_ms / 1000.0
+            original_end_s = original_end_ms / 1000.0
 
-            # Calculate cumulative offset at this subtitle's start time
-            offset_ms = _get_offset_at_time(original_start_ms / 1000.0, sorted_edl)
+            # Calculate cumulative offset based on boundary mode
+            offset_ms = _get_offset_at_time(original_start_s, original_end_s, sorted_edl, boundary_mode)
+
+            # Check if this subtitle spans a boundary (for stats)
+            if _spans_boundary(original_start_s, original_end_s, sorted_edl):
+                spanning_count += 1
 
             # Apply offset
             if offset_ms != 0:
@@ -88,13 +101,19 @@ def apply_stepping_to_subtitles(subtitle_path: str, edl: List, runner) -> dict:
             'total_subtitles': len(subs),
             'adjusted_count': adjusted_count,
             'max_adjustment_ms': max_adjustment_ms,
-            'edl_segments': len(sorted_edl)
+            'edl_segments': len(sorted_edl),
+            'spanning_boundaries': spanning_count,
+            'boundary_mode': boundary_mode
         }
 
         runner._log_message(
-            f"[SteppingAdjust] Adjusted {adjusted_count}/{len(subs)} subtitles. "
+            f"[SteppingAdjust] Adjusted {adjusted_count}/{len(subs)} subtitles using '{boundary_mode}' mode. "
             f"Max adjustment: {max_adjustment_ms:+d}ms"
         )
+        if spanning_count > 0:
+            runner._log_message(
+                f"[SteppingAdjust] {spanning_count} subtitle(s) span stepping boundaries"
+            )
 
         return report
 
@@ -103,32 +122,109 @@ def apply_stepping_to_subtitles(subtitle_path: str, edl: List, runner) -> dict:
         return {'error': str(e)}
 
 
-def _get_offset_at_time(time_s: float, edl: List) -> int:
+def _spans_boundary(start_s: float, end_s: float, edl: List) -> bool:
     """
-    Calculate the cumulative offset (in milliseconds) at a given time.
-
-    The EDL defines delay changes at specific points. We find which segment
-    the given time falls into and return that segment's delay.
+    Check if a subtitle spans across a stepping boundary.
 
     Args:
-        time_s: Time in seconds
+        start_s: Subtitle start time in seconds
+        end_s: Subtitle end time in seconds
         edl: Sorted list of AudioSegment objects
+
+    Returns:
+        bool: True if subtitle spans a boundary
+    """
+    if len(edl) <= 1:
+        return False
+
+    # Check if any boundary falls within [start_s, end_s]
+    for segment in edl[1:]:  # Skip first segment (always at 0.0s)
+        if start_s < segment.start_s < end_s:
+            return True
+    return False
+
+
+def _get_offset_at_time(start_s: float, end_s: float, edl: List, mode: str = 'start') -> int:
+    """
+    Calculate the cumulative offset (in milliseconds) for a subtitle.
+
+    The EDL defines delay changes at specific points. The mode determines how
+    to handle subtitles that span multiple delay regions.
+
+    Args:
+        start_s: Subtitle start time in seconds
+        end_s: Subtitle end time in seconds
+        edl: Sorted list of AudioSegment objects
+        mode: Boundary spanning mode - 'start', 'majority', or 'midpoint'
 
     Returns:
         int: Cumulative offset in milliseconds
     """
-    # If time is before first segment, no offset
-    if time_s < edl[0].start_s:
-        return 0
+    # Helper function to get delay at a specific time
+    def get_delay_at_time(time_s: float) -> int:
+        if time_s < edl[0].start_s:
+            return 0
 
-    # Find the appropriate segment
-    # We want the last segment whose start_s <= time_s
-    current_offset = 0
-    for segment in edl:
-        if segment.start_s <= time_s:
-            current_offset = segment.delay_ms
+        current_offset = 0
+        for segment in edl:
+            if segment.start_s <= time_s:
+                current_offset = segment.delay_ms
+            else:
+                break
+        return current_offset
+
+    if mode == 'start':
+        # Use start time only (original behavior)
+        return get_delay_at_time(start_s)
+
+    elif mode == 'midpoint':
+        # Use the middle timestamp
+        midpoint_s = (start_s + end_s) / 2.0
+        return get_delay_at_time(midpoint_s)
+
+    elif mode == 'majority':
+        # Calculate which region the subtitle spends the most time in
+        duration = end_s - start_s
+        if duration <= 0:
+            return get_delay_at_time(start_s)
+
+        # Track duration in each delay region
+        region_durations = {}
+
+        # Build a list of all relevant boundaries
+        boundaries = [seg.start_s for seg in edl] + [end_s]
+        boundaries = sorted(set([b for b in boundaries if start_s <= b <= end_s]))
+
+        # If no boundaries within subtitle range, it's entirely in one region
+        if not boundaries or (len(boundaries) == 1 and boundaries[0] == end_s):
+            return get_delay_at_time(start_s)
+
+        # Calculate duration in each region
+        current_time = start_s
+        for boundary in boundaries:
+            if boundary <= start_s:
+                continue
+
+            # Find which delay applies to this region
+            region_delay = get_delay_at_time(current_time)
+
+            # Calculate duration in this region
+            segment_duration = min(boundary, end_s) - current_time
+
+            if region_delay not in region_durations:
+                region_durations[region_delay] = 0
+            region_durations[region_delay] += segment_duration
+
+            current_time = boundary
+            if current_time >= end_s:
+                break
+
+        # Return the delay with the most duration
+        if region_durations:
+            return max(region_durations.items(), key=lambda x: x[1])[0]
         else:
-            # We've passed the time, use previous segment's delay
-            break
+            return get_delay_at_time(start_s)
 
-    return current_offset
+    else:
+        # Unknown mode, default to start
+        return get_delay_at_time(start_s)
