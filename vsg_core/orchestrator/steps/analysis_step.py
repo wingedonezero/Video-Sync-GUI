@@ -235,16 +235,33 @@ class AnalysisStep:
                     codec_id=target_codec_id
                 )
 
-                # If stepping detected, find the first segment's delay IMMEDIATELY
-                # APPLY THIS REGARDLESS of whether audio tracks are being used
+                # If stepping detected, use first segment ONLY if stepping correction will actually run
                 if diagnosis == "STEPPING":
                     stepping_sources.append(source_key)  # Track for final report
-                    first_segment_delay = _find_first_stable_segment_delay(results, runner)
-                    if first_segment_delay is not None:
-                        stepping_override_delay = first_segment_delay
+
+                    # Check if any audio tracks from this source are being merged
+                    has_audio_from_source = any(
+                        t.get('type') == 'audio' and t.get('source') == source_key
+                        for t in ctx.manual_layout
+                    )
+
+                    if has_audio_from_source:
+                        # Stepping correction will run, so use first segment delay
+                        first_segment_delay = _find_first_stable_segment_delay(results, runner)
+                        if first_segment_delay is not None:
+                            stepping_override_delay = first_segment_delay
+                            runner._log_message(f"[Stepping Detected] Found stepping in {source_key}")
+                            runner._log_message(f"[Stepping Override] Using first segment's delay: {stepping_override_delay}ms")
+                            runner._log_message(f"[Stepping Override] This delay will be used for ALL tracks (audio + subtitles) from {source_key}")
+                            runner._log_message(f"[Stepping Override] Stepping correction will be applied to audio tracks during processing")
+                    else:
+                        # No audio tracks from this source - stepping correction won't run
+                        # Use normal delay selection mode instead
+                        delay_mode = config.get('delay_selection_mode', 'Mode (Most Common)')
                         runner._log_message(f"[Stepping Detected] Found stepping in {source_key}")
-                        runner._log_message(f"[Stepping Override] Using first segment's delay: {stepping_override_delay}ms")
-                        runner._log_message(f"[Stepping Override] This delay will be used for ALL tracks (audio + subtitles) from {source_key}")
+                        runner._log_message(f"[Stepping] No audio tracks from this source are being merged")
+                        runner._log_message(f"[Stepping] Using delay_selection_mode='{delay_mode}' instead of first segment (stepping correction won't run)")
+                        # Don't set stepping_override_delay - let normal flow handle it
 
             # Use stepping override if available, otherwise calculate mode
             if stepping_override_delay is not None:
