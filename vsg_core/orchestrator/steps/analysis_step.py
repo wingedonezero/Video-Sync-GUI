@@ -354,10 +354,24 @@ class AnalysisStep:
                             f"[Stepping] Stepping correction will be applied to audio tracks from {source_key}."
                         )
                     else:
+                        # No audio tracks from this source - but subtitles still need stepping correction
                         runner._log_message(
                             f"[Stepping Detected] Stepping detected in {source_key}, but no audio tracks "
-                            f"from this source are being used. Subtitle sync will still use first segment delay."
+                            f"from this source are being used."
                         )
+
+                        # Generate simplified EDL for subtitle adjustment
+                        from vsg_core.correction.stepping import generate_edl_from_correlation
+                        edl = generate_edl_from_correlation(results, config, runner)
+                        if edl:
+                            ctx.stepping_edls[source_key] = edl
+                            runner._log_message(
+                                f"[Stepping] Generated EDL with {len(edl)} segment(s) for subtitle adjustment:"
+                            )
+                            for i, seg in enumerate(edl):
+                                runner._log_message(
+                                    f"  - Segment {i+1}: @{seg.start_s:.1f}s → delay={seg.delay_ms:+d}ms"
+                                )
 
         # Store stepping sources in context for final report
         ctx.stepping_sources = stepping_sources
