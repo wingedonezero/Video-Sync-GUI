@@ -119,7 +119,8 @@ class SubtitlesStep:
                             stepping_report = apply_stepping_to_subtitles(
                                 str(item.extracted_path),
                                 ctx.stepping_edls[source_key],
-                                runner
+                                runner,
+                                ctx.settings_dict
                             )
                             if stepping_report and 'error' not in stepping_report:
                                 runner._log_message("--- Stepping Adjustment Report ---")
@@ -168,7 +169,8 @@ class SubtitlesStep:
                         stepping_report = apply_stepping_to_subtitles(
                             str(item.extracted_path),
                             ctx.stepping_edls[source_key],
-                            runner
+                            runner,
+                            ctx.settings_dict
                         )
                         if stepping_report and 'error' not in stepping_report:
                             runner._log_message("--- Stepping Adjustment Report ---")
