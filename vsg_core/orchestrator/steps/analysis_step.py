@@ -368,7 +368,17 @@ class AnalysisStep:
                         # Generate simplified EDL for subtitle adjustment if enabled
                         if config.get('stepping_adjust_subtitles_no_audio', True):
                             from vsg_core.correction.stepping import generate_edl_from_correlation
-                            edl = generate_edl_from_correlation(results, config, runner)
+
+                            # Pass diagnosis details for filtered stepping support
+                            diagnosis_details = {
+                                'valid_clusters': details.get('valid_clusters', {}),
+                                'invalid_clusters': details.get('invalid_clusters', {}),
+                                'validation_results': details.get('validation_results', {}),
+                                'correction_mode': details.get('correction_mode', 'full'),
+                                'fallback_mode': details.get('fallback_mode', 'nearest')
+                            }
+
+                            edl = generate_edl_from_correlation(results, config, runner, diagnosis_details)
                             if edl:
                                 ctx.stepping_edls[source_key] = edl
                                 runner._log_message(

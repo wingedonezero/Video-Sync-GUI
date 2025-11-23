@@ -39,7 +39,7 @@ class AudioSegment:
     delay_ms: int
     drift_rate_ms_s: float = 0.0
 
-def generate_edl_from_correlation(chunks: List[Dict], config: Dict, runner: CommandRunner) -> List[AudioSegment]:
+def generate_edl_from_correlation(chunks: List[Dict], config: Dict, runner: CommandRunner, diagnosis_details: Optional[Dict] = None) -> List[AudioSegment]:
     """
     Generate a simplified EDL from correlation chunks for subtitle adjustment.
     Used when stepping is detected but no audio correction is needed.
@@ -48,6 +48,7 @@ def generate_edl_from_correlation(chunks: List[Dict], config: Dict, runner: Comm
         chunks: List of correlation chunk results with 'delay', 'accepted', and 'start' keys
         config: Configuration dictionary
         runner: CommandRunner for logging
+        diagnosis_details: Optional diagnosis details with filtered cluster information
 
     Returns:
         List of AudioSegment objects representing delay regions
@@ -56,6 +57,43 @@ def generate_edl_from_correlation(chunks: List[Dict], config: Dict, runner: Comm
     if not accepted:
         runner._log_message("[EDL Generation] No accepted chunks available for EDL generation")
         return []
+
+    # Apply cluster filtering if diagnosis details are provided
+    if diagnosis_details:
+        correction_mode = diagnosis_details.get('correction_mode', 'full')
+        if correction_mode == 'filtered':
+            invalid_clusters = diagnosis_details.get('invalid_clusters', {})
+            validation_results = diagnosis_details.get('validation_results', {})
+
+            if invalid_clusters:
+                # Build list of invalid time ranges
+                invalid_time_ranges = []
+                for label in invalid_clusters.keys():
+                    if label in validation_results:
+                        time_range = validation_results[label]['time_range']
+                        invalid_time_ranges.append(time_range)
+
+                # Filter out chunks that fall within invalid clusters
+                filtered_accepted = []
+                filtered_count = 0
+                for chunk in accepted:
+                    chunk_time = chunk['start']
+                    in_invalid_cluster = any(
+                        start <= chunk_time <= end
+                        for start, end in invalid_time_ranges
+                    )
+                    if not in_invalid_cluster:
+                        filtered_accepted.append(chunk)
+                    else:
+                        filtered_count += 1
+
+                runner._log_message(f"[EDL Generation] Filtered {filtered_count} chunks from invalid clusters")
+                runner._log_message(f"[EDL Generation] Using {len(filtered_accepted)} chunks from valid clusters only")
+                accepted = filtered_accepted
+
+                if not accepted:
+                    runner._log_message("[EDL Generation] No chunks remaining after filtering")
+                    return []
 
     # Group consecutive chunks by delay (within tolerance)
     tolerance_ms = config.get('segment_triage_std_dev_ms', 50)
