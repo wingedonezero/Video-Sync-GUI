@@ -199,17 +199,12 @@ class AnalysisTab(QWidget):
         main_layout.addWidget(adv_group)
 
         self.widgets['filtering_method'].currentTextChanged.connect(self._update_filter_options)
-        self.widgets['segment_resample_engine'].currentTextChanged.connect(self._update_rb_group_visibility)
         self.widgets['delay_selection_mode'].currentTextChanged.connect(self._update_first_stable_options)
-        self._update_rb_group_visibility(self.widgets['segment_resample_engine'].currentText())
         self._update_filter_options(self.widgets['filtering_method'].currentText())
         self._update_first_stable_options(self.widgets['delay_selection_mode'].currentText())
 
     def _update_filter_options(self, text: str):
         self.cutoff_container.setVisible(text == "Low-Pass Filter")
-
-    def _update_rb_group_visibility(self, text: str):
-        self.rb_group.setVisible(text == 'rubberband')
 
     def _update_first_stable_options(self, text: str):
         is_first_stable = (text == "First Stable")
@@ -679,6 +674,10 @@ class SteppingTab(QWidget):
         )
 
         segment_layout.addRow(self.widgets['stepping_diagnostics_verbose'])
+
+        # Connect signal handlers
+        self.widgets['segment_resample_engine'].currentTextChanged.connect(self._update_rb_group_visibility)
+        self._update_rb_group_visibility(self.widgets['segment_resample_engine'].currentText())
 
         main_layout.addWidget(segment_group)
 
