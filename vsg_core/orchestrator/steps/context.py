@@ -52,6 +52,9 @@ class Context:
     # NEW: Track which sources had stepping detected (for final report)
     stepping_sources: List[str] = field(default_factory=list)
 
+    # NEW: Track sources where stepping was detected but correction is disabled
+    stepping_detected_disabled: List[str] = field(default_factory=list)
+
     # Store EDLs (Edit Decision Lists) for stepping correction by source
     # Format: {source_key: List[AudioSegment]}
     stepping_edls: Dict[str, List[Any]] = field(default_factory=dict)

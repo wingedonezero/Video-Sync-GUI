@@ -164,6 +164,7 @@ class MainController:
         jobs_with_warnings = 0
         failed_jobs = 0
         stepping_jobs = []  # NEW: Track jobs with stepping
+        stepping_detected_disabled_jobs = []  # NEW: Track jobs with stepping detected but disabled
 
         for result in all_results:
             if result.get('status') == 'Failed':
@@ -182,6 +183,15 @@ class MainController:
                     'sources': stepping_sources
                 })
 
+            # NEW: Track jobs with stepping detected but correction disabled
+            if result.get('stepping_detected_disabled'):
+                job_name = result.get('name', 'Unknown')
+                detected_sources = result.get('stepping_detected_disabled', [])
+                stepping_detected_disabled_jobs.append({
+                    'name': job_name,
+                    'sources': detected_sources
+                })
+
         summary_message = "\n--- Batch Summary ---\n"
         summary_message += f"  - Successful jobs: {successful_jobs}\n"
         summary_message += f"  - Jobs with warnings: {jobs_with_warnings}\n"
@@ -195,19 +205,37 @@ class MainController:
                 sources_str = ', '.join(job_info['sources'])
                 summary_message += f"  • {job_info['name']} - Sources: {sources_str}\n"
 
+        # NEW: Add stepping detected but disabled warning
+        if stepping_detected_disabled_jobs:
+            summary_message += f"\n⚠️  Jobs with Stepping Detected (Correction Disabled) ({len(stepping_detected_disabled_jobs)}):\n"
+            summary_message += "  ⚠️  These files have timing inconsistencies but stepping correction is disabled.\n"
+            summary_message += "  ⚠️  MANUAL REVIEW REQUIRED - Check sync quality carefully!\n"
+            summary_message += "  💡 Tip: Enable 'Stepping Correction' in settings for automatic correction.\n"
+            for job_info in stepping_detected_disabled_jobs:
+                sources_str = ', '.join(job_info['sources'])
+                summary_message += f"  • {job_info['name']} - Sources: {sources_str}\n"
+
         self.append_log(summary_message)
 
         if failed_jobs > 0:
             QMessageBox.critical(self.v, "Batch Complete", f"Finished processing {len(all_results)} jobs with {failed_jobs} failure(s).")
-        elif stepping_jobs:
-            # NEW: Show warning if any jobs used stepping
-            stepping_count = len(stepping_jobs)
-            msg = (
-                f"Finished processing {len(all_results)} jobs successfully.\n\n"
-                f"⚠️  Note: {stepping_count} job(s) used stepping correction.\n"
-                f"Please review these jobs to verify sync quality.\n\n"
-                f"See log for details."
-            )
+        elif stepping_jobs or stepping_detected_disabled_jobs:
+            # NEW: Show warning if any jobs used stepping or detected stepping without correction
+            msg_parts = [f"Finished processing {len(all_results)} jobs successfully.\n"]
+
+            if stepping_jobs:
+                stepping_count = len(stepping_jobs)
+                msg_parts.append(f"\n⚠️  Note: {stepping_count} job(s) used stepping correction.")
+                msg_parts.append("Please review these jobs to verify sync quality.")
+
+            if stepping_detected_disabled_jobs:
+                detected_count = len(stepping_detected_disabled_jobs)
+                msg_parts.append(f"\n⚠️  WARNING: {detected_count} job(s) have stepping detected but correction is DISABLED!")
+                msg_parts.append("These files may have inconsistent timing throughout.")
+                msg_parts.append("MANUAL REVIEW REQUIRED!")
+
+            msg_parts.append("\nSee log for details.")
+            msg = '\n'.join(msg_parts)
             QMessageBox.warning(self.v, "Batch Complete - Review Required", msg)
         elif jobs_with_warnings > 0:
             QMessageBox.warning(self.v, "Batch Complete", f"Finished processing {len(all_results)} jobs with {jobs_with_warnings} job(s) having warnings.")

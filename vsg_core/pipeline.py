@@ -89,7 +89,8 @@ class JobPipeline:
                     'delays': ctx.delays.source_delays_ms if ctx.delays else {},
                     'name': Path(source1_file).name,
                     'issues': 0,
-                    'stepping_sources': getattr(ctx, 'stepping_sources', [])  # NEW
+                    'stepping_sources': getattr(ctx, 'stepping_sources', []),  # NEW
+                    'stepping_detected_disabled': getattr(ctx, 'stepping_detected_disabled', [])  # NEW
                 }
 
             if not ctx.tokens:
@@ -132,7 +133,8 @@ class JobPipeline:
                 'delays': ctx.delays.source_delays_ms if ctx.delays else {},
                 'name': Path(source1_file).name,
                 'issues': issues,
-                'stepping_sources': getattr(ctx, 'stepping_sources', [])  # NEW
+                'stepping_sources': getattr(ctx, 'stepping_sources', []),  # NEW
+                'stepping_detected_disabled': getattr(ctx, 'stepping_detected_disabled', [])  # NEW
             }
 
         except Exception as e:
@@ -142,7 +144,8 @@ class JobPipeline:
                 'error': str(e),
                 'name': Path(source1_file).name,
                 'issues': 0,
-                'stepping_sources': []  # NEW
+                'stepping_sources': [],  # NEW
+                'stepping_detected_disabled': []  # NEW
             }
         finally:
             if ctx_temp_dir and ctx_temp_dir.exists():

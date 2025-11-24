@@ -251,19 +251,22 @@ class AnalysisStep:
             diagnosis = None
             details = {}
             stepping_override_delay = None
+            stepping_enabled = config.get('segmented_enabled', False)
 
-            if config.get('segmented_enabled', False):
-                diagnosis, details = diagnose_audio_issue(
-                    video_path=source1_file,
-                    chunks=results,
-                    config=config,
-                    runner=runner,
-                    tool_paths=ctx.tool_paths,
-                    codec_id=target_codec_id
-                )
+            # ALWAYS run diagnosis to detect stepping (even if correction is disabled)
+            diagnosis, details = diagnose_audio_issue(
+                video_path=source1_file,
+                chunks=results,
+                config=config,
+                runner=runner,
+                tool_paths=ctx.tool_paths,
+                codec_id=target_codec_id
+            )
 
-                # If stepping detected, use first segment ONLY if stepping correction will actually run
-                if diagnosis == "STEPPING":
+            # If stepping detected, handle based on whether correction is enabled
+            if diagnosis == "STEPPING":
+                if stepping_enabled:
+                    # Stepping correction is ENABLED - proceed with correction logic
                     stepping_sources.append(source_key)  # Track for final report
 
                     # Check if any audio tracks from this source are being merged
@@ -294,6 +297,15 @@ class AnalysisStep:
                         runner._log_message(f"[Stepping] No audio tracks from this source are being merged")
                         runner._log_message(f"[Stepping] Using delay_selection_mode='{delay_mode}' instead of first segment (stepping correction won't run)")
                         # Don't set stepping_override_delay - let normal flow handle it
+                else:
+                    # Stepping correction is DISABLED - just warn the user
+                    ctx.stepping_detected_disabled.append(source_key)  # Track for warning
+                    runner._log_message(f"⚠️  [Stepping Detected] Found stepping in {source_key}")
+                    runner._log_message(f"⚠️  [Stepping Disabled] Stepping correction is disabled - timing may be inconsistent")
+                    runner._log_message(f"⚠️  [Recommendation] Enable 'Stepping Correction' in settings if you want automatic correction")
+                    runner._log_message(f"⚠️  [Manual Review] You should manually review this file's sync quality")
+                    # Use normal delay selection mode
+                    # Don't set stepping_override_delay - let normal flow handle it
 
             # Use stepping override if available, otherwise calculate mode
             if stepping_override_delay is not None:
