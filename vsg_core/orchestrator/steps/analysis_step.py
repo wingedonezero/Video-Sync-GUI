@@ -11,22 +11,26 @@ from vsg_core.analysis.audio_corr import run_audio_correlation
 from vsg_core.analysis.drift_detection import diagnose_audio_issue
 from vsg_core.extraction.tracks import get_stream_info, get_stream_info_with_delays
 
-def _find_first_stable_segment_delay(results: List[Dict[str, Any]], runner: CommandRunner) -> Optional[int]:
+def _find_first_stable_segment_delay(results: List[Dict[str, Any]], runner: CommandRunner, config: Dict) -> Optional[int]:
     """
     Find the delay from the first stable segment of chunks.
 
     This function identifies consecutive accepted chunks that share the same delay value
-    and returns the delay from the first such stable group.
+    and returns the delay from the first such stable group that meets stability criteria.
 
     Args:
         results: List of correlation results with 'delay', 'accepted', and 'start' keys
         runner: CommandRunner for logging
+        config: Configuration dictionary with 'first_stable_min_chunks' and 'first_stable_skip_unstable'
 
     Returns:
         The delay value from the first stable segment, or None if no stable segment found
     """
+    min_chunks = int(config.get('first_stable_min_chunks', 3))
+    skip_unstable = config.get('first_stable_skip_unstable', True)
+
     accepted = [r for r in results if r.get('accepted', False)]
-    if len(accepted) < 3:
+    if len(accepted) < min_chunks:
         return None
 
     # Group consecutive chunks with the same delay (within 1ms tolerance)
@@ -45,14 +49,37 @@ def _find_first_stable_segment_delay(results: List[Dict[str, Any]], runner: Comm
     # Don't forget the last segment
     segments.append(current_segment)
 
-    # Return the delay from the first segment (which has the earliest start time)
-    if segments:
-        first_segment = segments[0]
+    # Find the first stable segment based on configuration
+    if skip_unstable:
+        # Skip segments that don't meet minimum chunk count
+        for segment in segments:
+            if segment['count'] >= min_chunks:
+                runner._log_message(
+                    f"[First Stable] Found stable segment: {segment['count']} chunks at {segment['delay']}ms "
+                    f"(starting at {segment['start_time']:.1f}s)"
+                )
+                return segment['delay']
+
+        # No segment met the minimum chunk count
         runner._log_message(
-            f"[Stepping] First stable segment: {first_segment['count']} chunks at {first_segment['delay']}ms "
-            f"(starting at {first_segment['start_time']:.1f}s)"
+            f"[First Stable] No segment found with minimum {min_chunks} chunks. "
+            f"Largest segment: {max((s['count'] for s in segments), default=0)} chunks"
         )
-        return first_segment['delay']
+        return None
+    else:
+        # Use the first segment regardless of chunk count
+        if segments:
+            first_segment = segments[0]
+            if first_segment['count'] < min_chunks:
+                runner._log_message(
+                    f"[First Stable] Warning: First segment has only {first_segment['count']} chunks "
+                    f"(minimum: {min_chunks}), but using it anyway (skip_unstable=False)"
+                )
+            runner._log_message(
+                f"[First Stable] Using first segment: {first_segment['count']} chunks at {first_segment['delay']}ms "
+                f"(starting at {first_segment['start_time']:.1f}s)"
+            )
+            return first_segment['delay']
 
     return None
 
@@ -70,7 +97,7 @@ def _choose_final_delay(results: List[Dict[str, Any]], config: Dict, runner: Com
 
     if delay_mode == 'First Stable':
         # Use proper stability detection to find first stable segment
-        winner = _find_first_stable_segment_delay(results, runner)
+        winner = _find_first_stable_segment_delay(results, runner, config)
         if winner is None:
             # Fallback to mode if no stable segment found
             runner._log_message(f"[WARNING] No stable segment found, falling back to mode.")
@@ -247,7 +274,7 @@ class AnalysisStep:
 
                     if has_audio_from_source:
                         # Stepping correction will run, so use first segment delay
-                        first_segment_delay = _find_first_stable_segment_delay(results, runner)
+                        first_segment_delay = _find_first_stable_segment_delay(results, runner, config)
                         if first_segment_delay is not None:
                             stepping_override_delay = first_segment_delay
                             runner._log_message(f"[Stepping Detected] Found stepping in {source_key}")
