@@ -118,6 +118,8 @@ class AppConfig:
 
             # --- Stepping Correction Enhancements ---
             'stepping_min_cluster_size': 3,  # Minimum chunks per cluster to qualify as stepping
+            'stepping_first_stable_min_chunks': 3,  # Min chunks for first stable segment (stepping delay selection)
+            'stepping_first_stable_skip_unstable': True,  # Skip unstable segments when detecting stepping delay
             'stepping_fill_mode': 'silence',  # 'auto', 'silence', or 'content' - how to fill delay gaps
             'stepping_diagnostics_verbose': True,  # Enable detailed cluster composition reports
             'stepping_content_correlation_threshold': 0.5,  # Min correlation for content extraction (for auto/content modes)

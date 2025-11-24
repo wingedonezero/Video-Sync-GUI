@@ -294,6 +294,34 @@ class AnalysisTab(QWidget):
         segment_layout.addRow("Quality Mode:", self.widgets['stepping_quality_mode'])
         segment_layout.addRow("Filtered Fallback:", self.widgets['stepping_filtered_fallback'])
 
+        # First Stable Delay Selection (for stepping)
+        self.widgets['stepping_first_stable_min_chunks'] = QSpinBox()
+        self.widgets['stepping_first_stable_min_chunks'].setRange(1, 100)
+        self.widgets['stepping_first_stable_min_chunks'].setToolTip(
+            "[Stepping Delay Selection]\n\n"
+            "Minimum consecutive chunks required for a segment to be considered 'stable'\n"
+            "when determining the base delay for stepping correction.\n\n"
+            "Higher values = more strict (avoids false positives at file start)\n"
+            "Lower values = more lenient (may catch brief stable periods)\n\n"
+            "Note: This is separate from 'First Stable' delay selection mode in Analysis.\n"
+            "Default: 3 chunks"
+        )
+
+        self.widgets['stepping_first_stable_skip_unstable'] = QCheckBox()
+        self.widgets['stepping_first_stable_skip_unstable'].setToolTip(
+            "[Stepping Delay Selection]\n\n"
+            "When enabled, skips segments that don't meet the minimum chunk count\n"
+            "and looks for the next stable segment.\n\n"
+            "Useful for avoiding offset beginnings (e.g., 2 chunks at wrong delay\n"
+            "before the rest of the file stabilizes).\n\n"
+            "When disabled, always uses the very first segment regardless of size.\n\n"
+            "Note: This is separate from 'First Stable' delay selection mode in Analysis.\n"
+            "Default: Enabled"
+        )
+
+        segment_layout.addRow("  ↳ First Stable Min Chunks:", self.widgets['stepping_first_stable_min_chunks'])
+        segment_layout.addRow("  ↳ First Stable Skip Unstable:", self.widgets['stepping_first_stable_skip_unstable'])
+
         # Add separator
         separator = QLabel()
         separator.setFixedHeight(10)

@@ -274,8 +274,11 @@ class AnalysisStep:
 
                     if has_audio_from_source:
                         # Stepping correction will run, so use first segment delay
-                        # Use hardcoded stability criteria (separate from First Stable delay selection mode)
-                        stepping_config = {'first_stable_min_chunks': 3, 'first_stable_skip_unstable': True}
+                        # Use stepping-specific stability criteria (separate from First Stable delay selection mode)
+                        stepping_config = {
+                            'first_stable_min_chunks': config.get('stepping_first_stable_min_chunks', 3),
+                            'first_stable_skip_unstable': config.get('stepping_first_stable_skip_unstable', True)
+                        }
                         first_segment_delay = _find_first_stable_segment_delay(results, runner, stepping_config)
                         if first_segment_delay is not None:
                             stepping_override_delay = first_segment_delay
