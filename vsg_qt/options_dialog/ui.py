@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QTabWidget, QDialogButtonBox, QScrollArea, QWidget
 )
 from .logic import OptionsLogic
-from .tabs import StorageTab, AnalysisTab, ChaptersTab, MergeBehaviorTab, LoggingTab, SubtitleCleanupTab, TimingTab
+from .tabs import StorageTab, AnalysisTab, SteppingTab, ChaptersTab, MergeBehaviorTab, LoggingTab, SubtitleCleanupTab, TimingTab
 
 def _wrap_scroll(widget: QWidget) -> QScrollArea:
     sa = QScrollArea()
@@ -39,6 +39,7 @@ class OptionsDialog(QDialog):
         # Instantiate tabs (each exposes .widgets: Dict[key, widget])
         self._storage_tab = StorageTab()
         self._analysis_tab = AnalysisTab()
+        self._stepping_tab = SteppingTab()
         self._chapters_tab = ChaptersTab()
         self._merge_tab = MergeBehaviorTab()
         self._logging_tab = LoggingTab()
@@ -48,6 +49,7 @@ class OptionsDialog(QDialog):
         # Add tabs wrapped in scroll areas
         self.tabs.addTab(_wrap_scroll(self._storage_tab), 'Storage & Tools')
         self.tabs.addTab(_wrap_scroll(self._analysis_tab), 'Analysis')
+        self.tabs.addTab(_wrap_scroll(self._stepping_tab), 'Stepping Correction')
         self.tabs.addTab(_wrap_scroll(self._chapters_tab), 'Chapters')
         self.tabs.addTab(_wrap_scroll(self._timing_tab), 'Timing')
         self.tabs.addTab(_wrap_scroll(self._cleanup_tab), 'Subtitle Cleanup')
@@ -57,6 +59,7 @@ class OptionsDialog(QDialog):
         # Collect widget maps by logical section name
         self.sections['storage'] = self._storage_tab.widgets
         self.sections['analysis'] = self._analysis_tab.widgets
+        self.sections['stepping'] = self._stepping_tab.widgets
         self.sections['chapters'] = self._chapters_tab.widgets
         self.sections['merge'] = self._merge_tab.widgets
         self.sections['logging'] = self._logging_tab.widgets
