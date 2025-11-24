@@ -151,9 +151,9 @@ class AnalysisTab(QWidget):
         self.widgets['scan_chunk_duration'] = QSpinBox(); self.widgets['scan_chunk_duration'].setRange(1, 120); self.widgets['scan_chunk_duration'].setToolTip("The length (in seconds) of each individual audio segment to be analyzed.")
         self.widgets['min_match_pct'] = QDoubleSpinBox(); self.widgets['min_match_pct'].setRange(0.1, 100.0); self.widgets['min_match_pct'].setDecimals(1); self.widgets['min_match_pct'].setSingleStep(1.0); self.widgets['min_match_pct'].setToolTip("The minimum correlation score for an audio chunk to be considered a valid match.")
         self.widgets['min_accepted_chunks'] = QSpinBox(); self.widgets['min_accepted_chunks'].setRange(1, 100); self.widgets['min_accepted_chunks'].setToolTip("The minimum number of valid chunks required for the analysis to be considered successful.")
-        self.widgets['delay_selection_mode'] = QComboBox(); self.widgets['delay_selection_mode'].addItems(['Mode (Most Common)', 'First Stable', 'Average']); self.widgets['delay_selection_mode'].setToolTip("How to choose the final delay from multiple chunk measurements:\n\n• Mode (Most Common) - Picks the delay that appears most frequently (Default)\n  Best for: Files with stable sync throughout most of the duration\n\n• First Stable - Uses the delay from the first stable segment\n  Best for: Files where sync changes mid-file (stepping issues)\n  Configure stability criteria below\n\n• Average - Calculates the mean of all delay measurements\n  Best for: Files with small variations around a central value")
-        self.widgets['first_stable_min_chunks'] = QSpinBox(); self.widgets['first_stable_min_chunks'].setRange(1, 100); self.widgets['first_stable_min_chunks'].setToolTip("Minimum number of consecutive chunks with the same delay required\nfor a segment to be considered 'stable'.\n\nHigher values = more strict (avoids false positives at file start)\nLower values = more lenient (may catch brief stable periods)\n\nRecommended: 3-5 chunks")
-        self.widgets['first_stable_skip_unstable'] = QCheckBox(); self.widgets['first_stable_skip_unstable'].setToolTip("When enabled, skips segments that don't meet the minimum chunk count\nand looks for the next stable segment.\n\nUseful for avoiding offset beginnings (e.g., 2 chunks at wrong delay\nbefore the rest of the file stabilizes).\n\nWhen disabled, always uses the very first segment regardless of size.")
+        self.widgets['delay_selection_mode'] = QComboBox(); self.widgets['delay_selection_mode'].addItems(['Mode (Most Common)', 'First Stable', 'Average']); self.widgets['delay_selection_mode'].setToolTip("How to choose the final delay from multiple chunk measurements:\n\n• Mode (Most Common) - Picks the delay that appears most frequently (Default)\n  Best for: Files with stable sync throughout most of the duration\n\n• First Stable - Uses the delay from the first stable segment\n  Best for: Files where sync changes mid-file due to authoring issues\n  (Note: For stepping correction, use the Segmented Audio settings instead)\n\n• Average - Calculates the mean of all delay measurements\n  Best for: Files with small variations around a central value")
+        self.widgets['first_stable_min_chunks'] = QSpinBox(); self.widgets['first_stable_min_chunks'].setRange(1, 100); self.widgets['first_stable_min_chunks'].setToolTip("[First Stable mode only]\n\nMinimum number of consecutive chunks with the same delay required\nfor a segment to be considered 'stable'.\n\nHigher values = more strict (avoids false positives at file start)\nLower values = more lenient (may catch brief stable periods)\n\nRecommended: 3-5 chunks")
+        self.widgets['first_stable_skip_unstable'] = QCheckBox(); self.widgets['first_stable_skip_unstable'].setToolTip("[First Stable mode only]\n\nWhen enabled, skips segments that don't meet the minimum chunk count\nand looks for the next stable segment.\n\nUseful for avoiding offset beginnings (e.g., 2 chunks at wrong delay\nbefore the rest of the file stabilizes).\n\nWhen disabled, always uses the very first segment regardless of size.")
         core_layout.addRow("Correlation Method:", self.widgets['correlation_method'])
         core_layout.addRow("Number of Chunks:", self.widgets['scan_chunk_count'])
         core_layout.addRow("Duration of Chunks (s):", self.widgets['scan_chunk_duration'])
@@ -527,14 +527,21 @@ class AnalysisTab(QWidget):
         main_layout.addStretch(1)
         self.widgets['filtering_method'].currentTextChanged.connect(self._update_filter_options)
         self.widgets['segment_resample_engine'].currentTextChanged.connect(self._update_rb_group_visibility)
+        self.widgets['delay_selection_mode'].currentTextChanged.connect(self._update_first_stable_options)
         self._update_rb_group_visibility(self.widgets['segment_resample_engine'].currentText())
         self._update_filter_options(self.widgets['filtering_method'].currentText())
+        self._update_first_stable_options(self.widgets['delay_selection_mode'].currentText())
 
     def _update_filter_options(self, text: str):
         self.cutoff_container.setVisible(text == "Low-Pass Filter")
 
     def _update_rb_group_visibility(self, text: str):
         self.rb_group.setVisible(text == 'rubberband')
+
+    def _update_first_stable_options(self, text: str):
+        is_first_stable = (text == "First Stable")
+        self.widgets['first_stable_min_chunks'].setEnabled(is_first_stable)
+        self.widgets['first_stable_skip_unstable'].setEnabled(is_first_stable)
 
 class ChaptersTab(QWidget):
     def __init__(self):
