@@ -198,6 +198,30 @@ class AnalysisTab(QWidget):
         adv_layout.addWidget(self.widgets['log_audio_drift'])
         main_layout.addWidget(adv_group)
 
+        self.widgets['filtering_method'].currentTextChanged.connect(self._update_filter_options)
+        self.widgets['segment_resample_engine'].currentTextChanged.connect(self._update_rb_group_visibility)
+        self.widgets['delay_selection_mode'].currentTextChanged.connect(self._update_first_stable_options)
+        self._update_rb_group_visibility(self.widgets['segment_resample_engine'].currentText())
+        self._update_filter_options(self.widgets['filtering_method'].currentText())
+        self._update_first_stable_options(self.widgets['delay_selection_mode'].currentText())
+
+    def _update_filter_options(self, text: str):
+        self.cutoff_container.setVisible(text == "Low-Pass Filter")
+
+    def _update_rb_group_visibility(self, text: str):
+        self.rb_group.setVisible(text == 'rubberband')
+
+    def _update_first_stable_options(self, text: str):
+        is_first_stable = (text == "First Stable")
+        self.widgets['first_stable_min_chunks'].setEnabled(is_first_stable)
+        self.widgets['first_stable_skip_unstable'].setEnabled(is_first_stable)
+
+class SteppingTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.widgets: Dict[str, QWidget] = {}
+        main_layout = QVBoxLayout(self)
+
         segment_group = QGroupBox("🔧 Segmented Audio Correction (Experimental & Advanced)")
         segment_layout = QFormLayout(segment_group)
         self.widgets['segmented_enabled'] = QCheckBox("Enable segmented audio correction"); self.widgets['segmented_enabled'].setToolTip("When enabled, detects audio with stepping sync issues and creates a corrected version.")
@@ -370,13 +394,6 @@ class AnalysisTab(QWidget):
         segment_layout.addRow(QLabel("<b>Legacy Settings</b>"))
         self.widgets['detection_dbscan_epsilon_ms'] = QDoubleSpinBox(); self.widgets['detection_dbscan_epsilon_ms'].setRange(5.0, 100.0); self.widgets['detection_dbscan_epsilon_ms'].setSuffix(" ms"); self.widgets['detection_dbscan_epsilon_ms'].setToolTip("Stability Tolerance: The maximum time difference for delays to be considered part of the same sync group.")
         self.widgets['detection_dbscan_min_samples'] = QSpinBox(); self.widgets['detection_dbscan_min_samples'].setRange(2, 10); self.widgets['detection_dbscan_min_samples'].setToolTip("Cluster Size: The minimum number of similar chunks needed to form a stable sync group.")
-        self.widgets['stepping_min_cluster_size'] = QSpinBox()
-        self.widgets['stepping_min_cluster_size'].setRange(1, 10)
-        self.widgets['stepping_min_cluster_size'].setToolTip(
-            "Minimum number of chunks required per timing cluster to qualify as real stepping.\n"
-            "Default: 3 (safe). Lower to 2 or 1 for edge cases like end credits with brief timing changes.\n"
-            "Higher values reduce false positives but may miss legitimate stepping at file boundaries."
-        )
         self.widgets['segment_triage_std_dev_ms'] = QSpinBox(); self.widgets['segment_triage_std_dev_ms'].setRange(10, 200); self.widgets['segment_triage_std_dev_ms'].setSuffix(" ms"); self.widgets['segment_triage_std_dev_ms'].setToolTip("If the standard deviation of delays is below this, correction is skipped.")
         self.widgets['drift_detection_r2_threshold'] = QDoubleSpinBox(); self.widgets['drift_detection_r2_threshold'].setRange(0.5, 1.0); self.widgets['drift_detection_r2_threshold'].setDecimals(2); self.widgets['drift_detection_r2_threshold'].setToolTip("For lossy codecs, how closely the drift must fit a straight line (R-squared value).")
         self.widgets['drift_detection_r2_threshold_lossless'] = QDoubleSpinBox(); self.widgets['drift_detection_r2_threshold_lossless'].setRange(0.5, 1.0); self.widgets['drift_detection_r2_threshold_lossless'].setDecimals(2); self.widgets['drift_detection_r2_threshold_lossless'].setToolTip("For lossless codecs, how closely the drift must fit a straight line (R-squared value).")
@@ -390,7 +407,6 @@ class AnalysisTab(QWidget):
         )
         segment_layout.addRow("DBSCAN Epsilon (Stability):", self.widgets['detection_dbscan_epsilon_ms'])
         segment_layout.addRow("DBSCAN Min Samples (Size):", self.widgets['detection_dbscan_min_samples'])
-        segment_layout.addRow("Min. Cluster Size:", self.widgets['stepping_min_cluster_size'])
         segment_layout.addRow("Triage Stability Threshold:", self.widgets['segment_triage_std_dev_ms'])
         segment_layout.addRow("Lossy R² Threshold:", self.widgets['drift_detection_r2_threshold'])
         segment_layout.addRow("Lossless R² Threshold:", self.widgets['drift_detection_r2_threshold_lossless'])
@@ -552,24 +568,10 @@ class AnalysisTab(QWidget):
 
         main_layout.addWidget(segment_group)
 
-        main_layout.addStretch(1)
-        self.widgets['filtering_method'].currentTextChanged.connect(self._update_filter_options)
-        self.widgets['segment_resample_engine'].currentTextChanged.connect(self._update_rb_group_visibility)
-        self.widgets['delay_selection_mode'].currentTextChanged.connect(self._update_first_stable_options)
-        self._update_rb_group_visibility(self.widgets['segment_resample_engine'].currentText())
-        self._update_filter_options(self.widgets['filtering_method'].currentText())
-        self._update_first_stable_options(self.widgets['delay_selection_mode'].currentText())
-
-    def _update_filter_options(self, text: str):
-        self.cutoff_container.setVisible(text == "Low-Pass Filter")
 
     def _update_rb_group_visibility(self, text: str):
         self.rb_group.setVisible(text == 'rubberband')
 
-    def _update_first_stable_options(self, text: str):
-        is_first_stable = (text == "First Stable")
-        self.widgets['first_stable_min_chunks'].setEnabled(is_first_stable)
-        self.widgets['first_stable_skip_unstable'].setEnabled(is_first_stable)
 
 class ChaptersTab(QWidget):
     def __init__(self):
