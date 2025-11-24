@@ -84,7 +84,6 @@ class AppConfig:
             # --- Enhanced Segmented Audio Correction ---
             'segmented_enabled': False,
             'segmented_qa_threshold': 85.0,
-            'segment_scan_offset_s': 15.0,
             'segment_qa_chunk_count': 30,
             'segment_qa_min_accepted_chunks': 28,
             # Detection & Triage
@@ -117,7 +116,6 @@ class AppConfig:
             'segment_fine_iterations': 10,
 
             # --- Stepping Correction Enhancements ---
-            'stepping_min_cluster_size': 3,  # Minimum chunks per cluster to qualify as stepping
             'stepping_first_stable_min_chunks': 3,  # Min chunks for first stable segment (stepping delay selection)
             'stepping_first_stable_skip_unstable': True,  # Skip unstable segments when detecting stepping delay
             'stepping_fill_mode': 'silence',  # 'auto', 'silence', or 'content' - how to fill delay gaps
@@ -143,7 +141,6 @@ class AppConfig:
 
             # Filtered Region Handling
             'stepping_filtered_fallback': 'nearest',  # 'nearest', 'interpolate', 'uniform', 'skip', 'reject'
-            'stepping_filtered_transition_s': 1.0,  # Crossfade duration when transitioning (for interpolate mode)
         }
         self.settings = self.defaults.copy()
         self.load()

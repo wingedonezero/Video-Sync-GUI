@@ -511,7 +511,7 @@ def diagnose_audio_issue(
         else:
             # Unknown mode - fall back to legacy behavior
             min_cluster_size = min(cluster_sizes.values()) if cluster_sizes else 0
-            MIN_CHUNKS_PER_SEGMENT = config.get('stepping_min_cluster_size', 3)
+            MIN_CHUNKS_PER_SEGMENT = config.get('stepping_min_chunks_per_cluster', 3)
 
             if min_cluster_size >= MIN_CHUNKS_PER_SEGMENT:
                 return "STEPPING", {
