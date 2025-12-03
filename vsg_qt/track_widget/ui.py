@@ -112,6 +112,13 @@ class TrackWidget(QWidget):
             elif 'custom_lang' in self.track_data:
                 del self.track_data['custom_lang']
 
+            # NEW: Store custom name in track_data
+            custom_name = new_config.get('custom_name', '')
+            if custom_name:
+                self.track_data['custom_name'] = custom_name
+            elif 'custom_name' in self.track_data:
+                del self.track_data['custom_name']
+
             self.logic.refresh_badges()
             self.logic.refresh_summary()
 

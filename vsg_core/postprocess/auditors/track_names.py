@@ -7,7 +7,7 @@ from .base import BaseAuditor
 
 
 class TrackNamesAuditor(BaseAuditor):
-    """Verifies track names match expectations when apply_track_name is enabled."""
+    """Verifies track names match expectations when custom names or apply_track_name is enabled."""
 
     def run(self, final_mkv_path: Path, final_mkvmerge_data: Dict, final_ffprobe_data=None) -> int:
         """
@@ -19,13 +19,19 @@ class TrackNamesAuditor(BaseAuditor):
         plan_items = self.ctx.extracted_items
 
         for i, item in enumerate(plan_items):
-            if not item.apply_track_name:
+            # Skip if neither custom_name nor apply_track_name is set
+            if not item.custom_name and not item.apply_track_name:
                 continue
 
             if i >= len(final_tracks):
                 continue
 
-            expected_name = item.track.props.name or ''
+            # NEW: Check custom_name first, then fall back to apply_track_name behavior
+            if item.custom_name:
+                expected_name = item.custom_name
+            else:
+                expected_name = item.track.props.name or ''
+
             actual_name = final_tracks[i].get('properties', {}).get('track_name', '')
 
             if expected_name and expected_name != actual_name:

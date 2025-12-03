@@ -216,6 +216,7 @@ class ExtractStep:
             plan_item.sync_to = sel.get('sync_to')
             plan_item.correction_source = sel.get('correction_source')
             plan_item.custom_lang = sel.get('custom_lang', '')  # Preserve custom language
+            plan_item.custom_name = sel.get('custom_name', '')  # Preserve custom name
 
             items.append(plan_item)
 

@@ -71,6 +71,7 @@ class TrackSettingsLogic:
         self,
         *,
         custom_lang: str = "",
+        custom_name: str = "",
         perform_ocr: bool = False,
         perform_ocr_cleanup: bool = False,
         convert_to_ass: bool = False,
@@ -84,6 +85,9 @@ class TrackSettingsLogic:
             index = self.v.lang_combo.findData(custom_lang)
             if index >= 0:
                 self.v.lang_combo.setCurrentIndex(index)
+
+        # Set custom track name
+        self.v.custom_name_input.setText(custom_name)
 
         # Set subtitle options
         self.v.cb_ocr.setChecked(bool(perform_ocr))
@@ -99,6 +103,7 @@ class TrackSettingsLogic:
 
         return {
             "custom_lang": selected_lang if selected_lang else "",
+            "custom_name": self.v.custom_name_input.text().strip(),
             "perform_ocr": self.v.cb_ocr.isChecked(),
             "perform_ocr_cleanup": self.v.cb_cleanup.isChecked(),
             "convert_to_ass": self.v.cb_convert.isChecked(),
