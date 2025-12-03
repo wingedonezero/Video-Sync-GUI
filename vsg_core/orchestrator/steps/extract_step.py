@@ -175,6 +175,41 @@ class ExtractStep:
             for t in all_extracted_tracks
         }
 
+        # --- Check extracted video files for embedded color metadata ---
+        runner._log_message("--- Checking Extracted Video Files for Color Metadata ---")
+        extracted_color_metadata: Dict[str, Dict[str, Any]] = {}
+
+        for key, trk in extracted_map.items():
+            if trk.get('type') == 'video':
+                extracted_path = trk.get('path')
+                if extracted_path:
+                    # Probe the extracted file to see if color metadata is in the bitstream
+                    cmd = ['ffprobe', '-v', 'error', '-show_streams', '-of', 'json', str(extracted_path)]
+                    ffprobe_out = runner.run(cmd, ctx.tool_paths)
+
+                    if ffprobe_out:
+                        try:
+                            ffprobe_data = json.loads(ffprobe_out)
+                            for stream in ffprobe_data.get('streams', []):
+                                if stream.get('codec_type') == 'video':
+                                    # Check if color metadata exists in the extracted bitstream
+                                    color_info = {}
+                                    color_attrs = ['color_transfer', 'color_primaries', 'color_space', 'color_range']
+
+                                    for attr in color_attrs:
+                                        value = stream.get(attr)
+                                        if value:
+                                            color_info[attr] = value
+
+                                    if color_info:
+                                        extracted_color_metadata[key] = color_info
+                                        runner._log_message(f"  ✓ [{key}] Color metadata found in bitstream: {color_info}")
+                                    else:
+                                        runner._log_message(f"  ⚠ [{key}] No color metadata in bitstream - will apply from container")
+                                    break
+                        except json.JSONDecodeError:
+                            pass
+
         # --- Part 2: Build the final PlanItem list ---
         items: List[PlanItem] = []
         for sel in ctx.manual_layout:
@@ -228,14 +263,21 @@ class ExtractStep:
                 color_metadata = None
                 if track_model.type == TrackType.VIDEO:
                     aspect_ratio = source_aspect_ratios.get(source, {}).get(int(trk['id']))
-                    color_metadata = source_color_metadata.get(source, {}).get(int(trk['id']))
+
+                    # Only store color metadata if it's NOT already in the extracted bitstream
+                    # This avoids double-application and lets mkvmerge read from bitstream when possible
+                    extracted_key = f"{source}_{trk['id']}"
+                    if extracted_key not in extracted_color_metadata:
+                        # Color metadata is NOT in bitstream, need to apply from source container
+                        color_metadata = source_color_metadata.get(source, {}).get(int(trk['id']))
+                    # else: Color metadata IS in bitstream, don't store (mkvmerge will read it)
 
                 plan_item = PlanItem(
                     track=track_model,
                     extracted_path=Path(trk['path']),
                     container_delay_ms=container_delay,
                     aspect_ratio=aspect_ratio,  # Store the original aspect ratio
-                    color_metadata=color_metadata  # Store the original color metadata
+                    color_metadata=color_metadata  # Only set if NOT in bitstream
                 )
 
             plan_item.is_default = bool(sel.get('is_default', False))
