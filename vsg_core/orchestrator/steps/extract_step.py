@@ -118,6 +118,45 @@ class ExtractStep:
                     runner._log_message(f"[WARNING] Could not parse ffprobe output for {source_key}")
                     source_aspect_ratios[source_key] = {}
 
+        # --- Read color metadata from ffprobe for all sources ---
+        runner._log_message("--- Reading Color Metadata from Source Files ---")
+        source_color_metadata: Dict[str, Dict[int, Dict[str, Any]]] = {}
+
+        for source_key, source_path in ctx.sources.items():
+            # Use ffprobe to get color metadata
+            cmd = ['ffprobe', '-v', 'error', '-show_streams', '-of', 'json', str(source_path)]
+            ffprobe_out = runner.run(cmd, ctx.tool_paths)
+
+            if ffprobe_out:
+                try:
+                    ffprobe_data = json.loads(ffprobe_out)
+                    color_metadata_for_source = {}
+
+                    for stream in ffprobe_data.get('streams', []):
+                        if stream.get('codec_type') == 'video':
+                            stream_index = stream.get('index', 0)
+
+                            # Collect all color-related metadata
+                            color_info = {}
+                            color_attrs = [
+                                'color_transfer', 'color_primaries', 'color_space',
+                                'color_range', 'chroma_location', 'pix_fmt'
+                            ]
+
+                            for attr in color_attrs:
+                                value = stream.get(attr)
+                                if value:
+                                    color_info[attr] = value
+
+                            if color_info:
+                                color_metadata_for_source[stream_index] = color_info
+                                runner._log_message(f"[{source_key}] Video track {stream_index} color metadata: {color_info}")
+
+                    source_color_metadata[source_key] = color_metadata_for_source
+                except json.JSONDecodeError:
+                    runner._log_message(f"[WARNING] Could not parse ffprobe output for {source_key}")
+                    source_color_metadata[source_key] = {}
+
         # --- Part 1: Extract tracks from MKV sources ---
         all_extracted_tracks = []
         for source_key, source_path in ctx.sources.items():
@@ -184,16 +223,19 @@ class ExtractStep:
                 # Get the container delay for this track
                 container_delay = ctx.container_delays.get(source, {}).get(int(trk['id']), 0)
 
-                # Get the aspect ratio for video tracks
+                # Get the aspect ratio and color metadata for video tracks
                 aspect_ratio = None
+                color_metadata = None
                 if track_model.type == TrackType.VIDEO:
                     aspect_ratio = source_aspect_ratios.get(source, {}).get(int(trk['id']))
+                    color_metadata = source_color_metadata.get(source, {}).get(int(trk['id']))
 
                 plan_item = PlanItem(
                     track=track_model,
                     extracted_path=Path(trk['path']),
                     container_delay_ms=container_delay,
-                    aspect_ratio=aspect_ratio  # Store the original aspect ratio
+                    aspect_ratio=aspect_ratio,  # Store the original aspect ratio
+                    color_metadata=color_metadata  # Store the original color metadata
                 )
 
             plan_item.is_default = bool(sel.get('is_default', False))

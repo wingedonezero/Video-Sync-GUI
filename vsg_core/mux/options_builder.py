@@ -1,10 +1,60 @@
 # vsg_core/mux/options_builder.py
 # -*- coding: utf-8 -*-
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 from ..models.jobs import MergePlan, PlanItem
 from ..models.settings import AppSettings
 from ..models.enums import TrackType
+
+# Mapping from ffprobe string values to Matroska numeric codes
+COLOR_TRANSFER_MAP = {
+    'bt709': '1',
+    'bt470m': '4',
+    'bt470bg': '5',
+    'smpte170m': '6',
+    'smpte240m': '7',
+    'linear': '8',
+    'log100': '9',
+    'log316': '10',
+    'iec61966-2-4': '11',
+    'bt1361e': '12',
+    'iec61966-2-1': '13',
+    'bt2020-10': '14',
+    'bt2020-12': '15',
+    'smpte2084': '16',  # HDR10
+    'smpte428': '17',
+    'arib-std-b67': '18',  # HLG
+}
+
+COLOR_PRIMARIES_MAP = {
+    'bt709': '1',
+    'bt470m': '4',
+    'bt470bg': '5',
+    'smpte170m': '6',
+    'smpte240m': '7',
+    'film': '8',
+    'bt2020': '9',
+    'smpte428': '10',
+    'smpte431': '11',
+    'smpte432': '12',
+    'ebu3213': '22',
+}
+
+COLOR_MATRIX_MAP = {
+    'gbr': '0',
+    'bt709': '1',
+    'fcc': '4',
+    'bt470bg': '5',
+    'smpte170m': '6',
+    'smpte240m': '7',
+    'ycgco': '8',
+    'bt2020nc': '9',
+    'bt2020c': '10',
+    'smpte2085': '11',
+    'chroma-derived-nc': '12',
+    'chroma-derived-c': '13',
+    'ictcp': '14',
+}
 
 class MkvmergeOptionsBuilder:
     def build(self, plan: MergePlan, settings: AppSettings) -> List[str]:
@@ -84,6 +134,34 @@ class MkvmergeOptionsBuilder:
             # NEW: Preserve original aspect ratio for video tracks
             if tr.type == TrackType.VIDEO and item.aspect_ratio:
                 tokens += ['--aspect-ratio', f"0:{item.aspect_ratio}"]
+
+            # NEW: Preserve color metadata for video tracks
+            if tr.type == TrackType.VIDEO and item.color_metadata:
+                color = item.color_metadata
+
+                # Apply color transfer characteristics (e.g., bt709, smpte2084 for HDR10)
+                if 'color_transfer' in color:
+                    transfer_value = COLOR_TRANSFER_MAP.get(color['color_transfer'])
+                    if transfer_value:
+                        tokens += ['--colour-transfer-characteristics', f"0:{transfer_value}"]
+
+                # Apply color primaries (e.g., bt709, bt2020)
+                if 'color_primaries' in color:
+                    primaries_value = COLOR_PRIMARIES_MAP.get(color['color_primaries'])
+                    if primaries_value:
+                        tokens += ['--colour-primaries', f"0:{primaries_value}"]
+
+                # Apply color matrix/space (e.g., bt709, bt2020nc)
+                if 'color_space' in color:
+                    matrix_value = COLOR_MATRIX_MAP.get(color['color_space'])
+                    if matrix_value:
+                        tokens += ['--colour-matrix-coefficients', f"0:{matrix_value}"]
+
+                # Apply color range (e.g., tv/limited, pc/full)
+                if 'color_range' in color:
+                    # Convert ffprobe's "tv"/"pc" to mkvmerge's "0"/"1"
+                    range_value = '0' if color['color_range'] in ['tv', 'limited'] else '1'
+                    tokens += ['--colour-range', f"0:{range_value}"]
 
             if not item.extracted_path:
                 raise ValueError(f"Plan item at index {i} ('{tr.props.name}') missing extracted_path")

@@ -38,6 +38,7 @@ class PlanItem:
     custom_lang: str = ''
     custom_name: str = ''  # NEW: Custom track name set by user
     aspect_ratio: Optional[str] = None  # NEW: Store original aspect ratio (e.g., "109:60")
+    color_metadata: Optional[Dict[str, Any]] = None  # NEW: Store video color metadata for preservation
     stepping_adjusted: bool = False  # True if subtitle timestamps were adjusted for stepping corrections
 
 @dataclass(frozen=True)
