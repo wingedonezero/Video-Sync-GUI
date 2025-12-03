@@ -175,40 +175,115 @@ class ExtractStep:
             for t in all_extracted_tracks
         }
 
+        # --- Detect MakeMKV sources for smart color metadata handling ---
+        runner._log_message("--- Detecting Source Authoring Tool ---")
+        makemkv_sources = set()
+
+        for source_key, source_path in ctx.sources.items():
+            # Check if source was created by MakeMKV
+            cmd = ['mkvmerge', '-J', str(source_path)]
+            mkvmerge_out = runner.run(cmd, ctx.tool_paths)
+
+            if mkvmerge_out:
+                try:
+                    mkvmerge_data = json.loads(mkvmerge_out)
+                    writing_app = mkvmerge_data.get('container', {}).get('properties', {}).get('writing_application', '')
+
+                    if 'makemkv' in writing_app.lower():
+                        makemkv_sources.add(source_key)
+                        runner._log_message(f"  [{source_key}] MakeMKV source detected: {writing_app}")
+                    else:
+                        runner._log_message(f"  [{source_key}] Authoring tool: {writing_app if writing_app else 'Unknown'}")
+                except json.JSONDecodeError:
+                    pass
+
         # --- Check extracted video files for embedded color metadata ---
-        runner._log_message("--- Checking Extracted Video Files for Color Metadata ---")
+        runner._log_message("--- Analyzing Color Metadata (Codec-Aware + MakeMKV Detection) ---")
         extracted_color_metadata: Dict[str, Dict[str, Any]] = {}
+
+        # Codecs that rarely have proper color metadata in bitstream
+        LIMITED_CODECS = {'V_MPEG2', 'V_MPEG1', 'V_MS/VFW/FOURCC', 'V_REAL'}
 
         for key, trk in extracted_map.items():
             if trk.get('type') == 'video':
+                source = trk.get('source')
+                track_id = trk.get('id')
+                codec_id = trk.get('codec_id', '')
                 extracted_path = trk.get('path')
-                if extracted_path:
-                    # Probe the extracted file to see if color metadata is in the bitstream
-                    cmd = ['ffprobe', '-v', 'error', '-show_streams', '-of', 'json', str(extracted_path)]
-                    ffprobe_out = runner.run(cmd, ctx.tool_paths)
 
-                    if ffprobe_out:
-                        try:
-                            ffprobe_data = json.loads(ffprobe_out)
-                            for stream in ffprobe_data.get('streams', []):
-                                if stream.get('codec_type') == 'video':
-                                    # Check if color metadata exists in the extracted bitstream
-                                    color_info = {}
-                                    color_attrs = ['color_transfer', 'color_primaries', 'color_space', 'color_range']
+                if not extracted_path:
+                    continue
 
+                # Get container metadata for this track
+                container_color = source_color_metadata.get(source, {}).get(int(track_id), {})
+
+                # Probe the extracted file to see if color metadata is in the bitstream
+                cmd = ['ffprobe', '-v', 'error', '-show_streams', '-of', 'json', str(extracted_path)]
+                ffprobe_out = runner.run(cmd, ctx.tool_paths)
+
+                if ffprobe_out:
+                    try:
+                        ffprobe_data = json.loads(ffprobe_out)
+                        for stream in ffprobe_data.get('streams', []):
+                            if stream.get('codec_type') == 'video':
+                                # Check if color metadata exists in the extracted bitstream
+                                bitstream_color = {}
+                                color_attrs = ['color_transfer', 'color_primaries', 'color_space', 'color_range']
+
+                                for attr in color_attrs:
+                                    value = stream.get(attr)
+                                    if value:
+                                        bitstream_color[attr] = value
+
+                                # Codec-aware decision logic
+                                runner._log_message(f"\n  [{key}] Codec: {codec_id}")
+                                runner._log_message(f"        Container: {container_color if container_color else 'No color metadata'}")
+                                runner._log_message(f"        Bitstream: {bitstream_color if bitstream_color else 'No color metadata'}")
+
+                                # Check if codec is limited (old format)
+                                if codec_id in LIMITED_CODECS:
+                                    runner._log_message(f"        → Old codec - trusting container (MakeMKV likely corrected)")
+                                    extracted_color_metadata[key] = {}  # Mark as "don't trust bitstream"
+
+                                # Modern codec - check for conflicts
+                                elif bitstream_color and container_color:
+                                    conflicts = []
                                     for attr in color_attrs:
-                                        value = stream.get(attr)
-                                        if value:
-                                            color_info[attr] = value
+                                        container_val = container_color.get(attr)
+                                        bitstream_val = bitstream_color.get(attr)
+                                        if container_val and bitstream_val and container_val != bitstream_val:
+                                            conflicts.append(f"{attr}[C:{container_val}≠B:{bitstream_val}]")
 
-                                    if color_info:
-                                        extracted_color_metadata[key] = color_info
-                                        runner._log_message(f"  ✓ [{key}] Color metadata found in bitstream: {color_info}")
+                                    if conflicts:
+                                        runner._log_message(f"        ⚠️ CONFLICT: {', '.join(conflicts)}")
+                                        if source in makemkv_sources:
+                                            runner._log_message(f"        → MakeMKV source - trusting container (likely corrected)")
+                                            extracted_color_metadata[key] = {}  # Mark as "apply container"
+                                        else:
+                                            runner._log_message(f"        → Non-MakeMKV - trusting bitstream (will render as-is)")
+                                            extracted_color_metadata[key] = bitstream_color  # Mark as "has bitstream"
                                     else:
-                                        runner._log_message(f"  ⚠ [{key}] No color metadata in bitstream - will apply from container")
-                                    break
-                        except json.JSONDecodeError:
-                            pass
+                                        runner._log_message(f"        ✓ Match - trusting bitstream")
+                                        extracted_color_metadata[key] = bitstream_color  # Mark as "has bitstream"
+
+                                # Bitstream missing, container has it
+                                elif not bitstream_color and container_color:
+                                    runner._log_message(f"        → Missing from bitstream - will apply container")
+                                    # Don't add to extracted_color_metadata - will apply container
+
+                                # Bitstream has it, container doesn't
+                                elif bitstream_color and not container_color:
+                                    runner._log_message(f"        ✓ Bitstream has metadata - will use it")
+                                    extracted_color_metadata[key] = bitstream_color  # Mark as "has bitstream"
+
+                                # Both missing
+                                else:
+                                    runner._log_message(f"        ⚠️ No color metadata in either - auditor will warn")
+                                    extracted_color_metadata[key] = {}  # Mark as checked
+
+                                break
+                    except json.JSONDecodeError:
+                        pass
 
         # --- Part 2: Build the final PlanItem list ---
         items: List[PlanItem] = []
