@@ -104,6 +104,13 @@ class TrackWidgetLogic:
         if custom_lang and custom_lang != original_lang:
             badges.append(f"Lang: {custom_lang}")
 
+        # NEW: Add badge if custom name is set
+        custom_name = self.track_data.get('custom_name', '')
+        if custom_name:
+            # Truncate long names for badge display
+            display_name = custom_name if len(custom_name) <= 20 else custom_name[:17] + "..."
+            badges.append(f"Name: {display_name}")
+
         self.v.badge_label.setText(" | ".join(badges))
         self.v.badge_label.setVisible(bool(badges))
 
@@ -133,6 +140,7 @@ class TrackWidgetLogic:
             "user_modified_path": self.track_data.get('user_modified_path'),
             "sync_to": self.v.sync_to_combo.currentData() if (is_subs and self.v.sync_to_combo.isVisible()) else None,
             "custom_lang": self.track_data.get('custom_lang', ''),  # NEW: Include custom language
+            "custom_name": self.track_data.get('custom_name', ''),  # NEW: Include custom name
         }
 
         return config

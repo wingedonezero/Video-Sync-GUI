@@ -62,7 +62,9 @@ def realize_plan_from_manual_layout(
                 apply_track_name=bool(sel.get('apply_track_name', False)),
                 convert_to_ass=bool(sel.get('convert_to_ass', False)),
                 rescale=bool(sel.get('rescale', False)),
-                size_multiplier=float(sel.get('size_multiplier', 1.0))
+                size_multiplier=float(sel.get('size_multiplier', 1.0)),
+                custom_lang=sel.get('custom_lang', ''),
+                custom_name=sel.get('custom_name', '')
             )
         )
     return realized

@@ -36,6 +36,7 @@ class PlanItem:
     perform_ocr_cleanup: bool = False
     container_delay_ms: int = 0
     custom_lang: str = ''
+    custom_name: str = ''  # NEW: Custom track name set by user
     aspect_ratio: Optional[str] = None  # NEW: Store original aspect ratio (e.g., "109:60")
     stepping_adjusted: bool = False  # True if subtitle timestamps were adjusted for stepping corrections
 

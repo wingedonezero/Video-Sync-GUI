@@ -60,7 +60,11 @@ class MkvmergeOptionsBuilder:
             lang_code = item.custom_lang if item.custom_lang else (tr.props.lang or 'und')
 
             tokens += ['--language', f"0:{lang_code}"]
-            if item.apply_track_name and (tr.props.name or '').strip():
+
+            # NEW: Use custom name if set, otherwise fall back to apply_track_name behavior
+            if item.custom_name:
+                tokens += ['--track-name', f"0:{item.custom_name}"]
+            elif item.apply_track_name and (tr.props.name or '').strip():
                 tokens += ['--track-name', f"0:{tr.props.name}"]
 
             tokens += ['--sync', f"0:{delay_ms:+d}"]

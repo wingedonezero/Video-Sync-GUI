@@ -1,7 +1,7 @@
 from __future__ import annotations
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QDialogButtonBox,
-    QCheckBox, QDoubleSpinBox, QComboBox, QFormLayout, QGroupBox
+    QCheckBox, QDoubleSpinBox, QComboBox, QFormLayout, QGroupBox, QLineEdit
 )
 from .logic import TrackSettingsLogic
 
@@ -15,6 +15,9 @@ class TrackSettingsDialog(QDialog):
         # --- UI Elements ---
         # Language selector (for all track types)
         self.lang_combo = QComboBox()
+
+        # Custom track name (for all track types)
+        self.custom_name_input = QLineEdit()
 
         # Subtitle-specific controls
         self.cb_ocr = QCheckBox("Perform OCR")
@@ -39,6 +42,12 @@ class TrackSettingsDialog(QDialog):
         lang_layout = QFormLayout(lang_group)
         lang_layout.addRow("Language Code:", self.lang_combo)
         layout.addWidget(lang_group)
+
+        # Track name section (always visible)
+        name_group = QGroupBox("Track Name")
+        name_layout = QFormLayout(name_group)
+        name_layout.addRow("Custom Name:", self.custom_name_input)
+        layout.addWidget(name_group)
 
         # Subtitle section (conditionally visible)
         self.subtitle_group = QGroupBox("Subtitle Options")
