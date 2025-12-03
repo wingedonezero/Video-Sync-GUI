@@ -175,10 +175,63 @@ class ExtractStep:
             for t in all_extracted_tracks
         }
 
-        # --- Simplified: Always apply container color metadata if available ---
+        # --- Check extracted video files for color metadata ---
+        runner._log_message("--- Checking Extracted Video Files for Color Metadata ---")
+        extracted_color_metadata: Dict[str, Dict[str, Any]] = {}
+
+        for track in all_extracted_tracks:
+            if track.get('type') != 'video':
+                continue
+
+            extracted_path = Path(track['path'])
+            if not extracted_path.exists():
+                continue
+
+            # Probe the extracted file for color metadata
+            import json
+            cmd = ['ffprobe', '-v', 'error', '-show_streams', '-of', 'json', str(extracted_path)]
+            ffprobe_out = runner.run(cmd, ctx.tool_paths)
+
+            if ffprobe_out:
+                try:
+                    ffprobe_data = json.loads(ffprobe_out)
+                    for stream in ffprobe_data.get('streams', []):
+                        if stream.get('codec_type') == 'video':
+                            color_info = {}
+                            color_attrs = [
+                                'color_transfer', 'color_primaries', 'color_space',
+                                'color_range', 'chroma_location', 'pix_fmt'
+                            ]
+
+                            for attr in color_attrs:
+                                value = stream.get(attr)
+                                if value:
+                                    color_info[attr] = value
+
+                            if color_info:
+                                extracted_key = f"{track['source']}_{track['id']}"
+                                extracted_color_metadata[extracted_key] = color_info
+                                runner._log_message(f"[{track['source']}] Extracted track {track['id']} has color metadata: {color_info}")
+                            break
+                except json.JSONDecodeError:
+                    pass
+
+        # --- Compare container vs extracted metadata ---
         runner._log_message("--- Color Metadata Preservation Strategy ---")
-        runner._log_message("    mkvmerge cannot read color metadata from raw H.264/HEVC bitstreams")
-        runner._log_message("    → Will apply container metadata to all tracks that have it")
+        for source_key in ctx.sources.keys():
+            container_meta = source_color_metadata.get(source_key, {})
+            for track_id, container_color in container_meta.items():
+                extracted_key = f"{source_key}_{track_id}"
+                extracted_color = extracted_color_metadata.get(extracted_key, {})
+
+                if not extracted_color:
+                    runner._log_message(f"[{source_key}] Track {track_id}: Bitstream has NO color metadata → Will apply from container")
+                elif extracted_color != container_color:
+                    runner._log_message(f"[{source_key}] Track {track_id}: Bitstream metadata DIFFERS from container → Will apply from container")
+                    runner._log_message(f"    Container: {container_color}")
+                    runner._log_message(f"    Bitstream: {extracted_color}")
+                else:
+                    runner._log_message(f"[{source_key}] Track {track_id}: Bitstream and container match → mkvmerge will read from bitstream")
 
         # --- Part 2: Build the final PlanItem list ---
         items: List[PlanItem] = []
@@ -233,9 +286,19 @@ class ExtractStep:
                 color_metadata = None
                 if track_model.type == TrackType.VIDEO:
                     aspect_ratio = source_aspect_ratios.get(source, {}).get(int(trk['id']))
-                    # Always apply container color metadata when available
-                    # mkvmerge cannot read color metadata from raw H.264/HEVC bitstreams
-                    color_metadata = source_color_metadata.get(source, {}).get(int(trk['id']))
+
+                    # Only apply container color metadata if extracted bitstream needs correction
+                    extracted_key = f"{source}_{trk['id']}"
+                    container_color = source_color_metadata.get(source, {}).get(int(trk['id']))
+                    extracted_color = extracted_color_metadata.get(extracted_key, {})
+
+                    # Apply container metadata if:
+                    # 1. Bitstream has no metadata, OR
+                    # 2. Bitstream metadata differs from container
+                    if container_color:
+                        if not extracted_color or extracted_color != container_color:
+                            color_metadata = container_color
+                        # else: Bitstream matches container, mkvmerge will read from bitstream
 
                 plan_item = PlanItem(
                     track=track_model,
