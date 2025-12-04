@@ -167,16 +167,15 @@ class MkvmergeOptionsBuilder:
 
                 # Apply chroma location/siting
                 if 'chroma_location' in color:
-                    # Map ffprobe chroma_location to mkvmerge chroma-siting values
-                    # ffprobe: left, center, topleft, top, bottomleft, bottom
-                    # mkvmerge: 0=unspecified, 1=left, 2=center, 3=topleft
+                    # Map ffprobe chroma_location to mkvmerge chroma-siting hori,vert values
+                    # mkvmerge format: 0=unspecified, 1=left/top, 2=center/half
                     chroma_map = {
-                        'left': '1',
-                        'center': '2',
-                        'topleft': '3',
-                        'top': '4',
-                        'bottomleft': '5',
-                        'bottom': '6'
+                        'left': '1,2',          # left-aligned horizontally, center vertically
+                        'center': '2,2',        # centered both ways
+                        'topleft': '1,1',       # top-left corner
+                        'top': '2,1',           # centered horizontally, top vertically
+                        'bottomleft': '1,2',    # left horizontally, bottom vertically (using center for now)
+                        'bottom': '2,2'         # centered horizontally, bottom vertically (using center for now)
                     }
                     chroma_value = chroma_map.get(color['chroma_location'])
                     if chroma_value:
