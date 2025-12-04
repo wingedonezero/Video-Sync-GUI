@@ -180,6 +180,31 @@ class MkvmergeOptionsBuilder:
                     if chroma_value:
                         tokens += ['--chroma-siting', f"0:{chroma_value}"]
 
+                # Apply pixel format (chroma subsampling + bit depth)
+                if 'pix_fmt' in color:
+                    # Map pixel formats to chroma subsample + bit depth
+                    # yuv420p = 4:2:0 (1,1 subsample) + 8-bit
+                    # yuv422p = 4:2:2 (1,0 subsample) + 8-bit
+                    # yuv444p = 4:4:4 (0,0 subsample) + 8-bit
+                    # yuv420p10le = 4:2:0 + 10-bit
+                    pix_fmt = color['pix_fmt']
+
+                    # Determine chroma subsampling
+                    if '420' in pix_fmt:
+                        tokens += ['--chroma-subsample', '0:1,1']  # 4:2:0
+                    elif '422' in pix_fmt:
+                        tokens += ['--chroma-subsample', '0:1,0']  # 4:2:2
+                    elif '444' in pix_fmt:
+                        tokens += ['--chroma-subsample', '0:0,0']  # 4:4:4
+
+                    # Determine bit depth
+                    if '10' in pix_fmt:
+                        tokens += ['--color-bits-per-channel', '0:10']
+                    elif '12' in pix_fmt:
+                        tokens += ['--color-bits-per-channel', '0:12']
+                    else:
+                        tokens += ['--color-bits-per-channel', '0:8']
+
             if not item.extracted_path:
                 raise ValueError(f"Plan item at index {i} ('{tr.props.name}') missing extracted_path")
 
