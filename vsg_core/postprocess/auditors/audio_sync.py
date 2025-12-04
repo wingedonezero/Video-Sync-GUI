@@ -57,6 +57,10 @@ class AudioSyncAuditor(BaseAuditor):
         """
         Primary verification: Check codec_delay in container metadata.
         This is what mkvmerge's --sync option sets.
+
+        Note: With large delays (>5000ms), mkvmerge may not properly set container
+        metadata fields, even though packet timestamps are correct. In such cases,
+        packet timestamp verification is more reliable.
         """
         issues = 0
         props = final_track.get('properties', {})
@@ -77,6 +81,13 @@ class AudioSyncAuditor(BaseAuditor):
         source = plan_item.track.source
         lang = plan_item.track.props.lang or 'und'
         name = plan_item.track.props.name or f"Track {plan_item.track.id}"
+
+        # Skip metadata check if expected delay is large (>5000ms)
+        # With large delays, mkvmerge doesn't reliably set container metadata,
+        # but packet timestamps are still correct. Rely on packet verification instead.
+        if abs(expected_delay_ms) > 5000:
+            self.log(f"  ⓘ '{name}' ({source}) has large delay ({expected_delay_ms:+.1f}ms) - skipping metadata check, will verify packet timestamps")
+            return 0
 
         if diff_ms > tolerance_ms:
             self.log(f"[WARNING] Audio sync mismatch (metadata) for '{name}' ({source}, {lang}):")
