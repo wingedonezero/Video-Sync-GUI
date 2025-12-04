@@ -45,14 +45,26 @@ class BaseAuditor:
         try:
             if tool == 'mkvmerge':
                 cmd = ['mkvmerge', '-J', str(file_path)]
+                out = self.runner.run(cmd, self.tool_paths)
+                result = json.loads(out) if out else None
+                cache[file_path] = result
+                return result
             elif tool == 'ffprobe':
                 # Check if file has large timestamp offsets that require enhanced probing
-                # First get mkvmerge data to detect delays (use cached if available)
+                # First get mkvmerge data to detect delays (use cached if available, or fetch it)
                 mkv_data = None
                 if file_path in self._source_mkvmerge_cache:
                     mkv_data = self._source_mkvmerge_cache[file_path]
                 else:
-                    mkv_data = self._get_metadata(file_path, 'mkvmerge')
+                    # Fetch mkvmerge data directly without recursion
+                    try:
+                        mkv_cmd = ['mkvmerge', '-J', str(file_path)]
+                        mkv_out = self.runner.run(mkv_cmd, self.tool_paths)
+                        if mkv_out:
+                            mkv_data = json.loads(mkv_out)
+                            self._source_mkvmerge_cache[file_path] = mkv_data
+                    except (json.JSONDecodeError, Exception):
+                        self._source_mkvmerge_cache[file_path] = None
 
                 max_delay_ms = 0
                 if mkv_data:
@@ -74,13 +86,12 @@ class BaseAuditor:
                     cmd += ['-analyzeduration', '30000M', '-probesize', '100M']
 
                 cmd += ['-show_streams', '-show_format', str(file_path)]
+                out = self.runner.run(cmd, self.tool_paths)
+                result = json.loads(out) if out else None
+                cache[file_path] = result
+                return result
             else:
                 return None
-
-            out = self.runner.run(cmd, self.tool_paths)
-            result = json.loads(out) if out else None
-            cache[file_path] = result
-            return result
         except (json.JSONDecodeError, Exception) as e:
             self.log(f"[ERROR] Failed to get {tool} metadata: {e}")
             cache[file_path] = None
