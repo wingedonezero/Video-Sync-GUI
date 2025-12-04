@@ -175,68 +175,10 @@ class ExtractStep:
             for t in all_extracted_tracks
         }
 
-        # --- Check extracted bitstream for color metadata ---
-        runner._log_message("--- Checking Extracted Bitstream for Color Metadata ---")
-        extracted_color_metadata: Dict[str, Dict[str, Any]] = {}
-
-        # Only check Source 1 video tracks (where video comes from)
-        for track in all_extracted_tracks:
-            if track.get('source') != 'Source 1' or track.get('type') != 'video':
-                continue
-
-            extracted_path = Path(track['path'])
-            if not extracted_path.exists():
-                continue
-
-            # Probe the extracted bitstream for color metadata
-            import json
-            cmd = ['ffprobe', '-v', 'error', '-show_streams', '-of', 'json', str(extracted_path)]
-            ffprobe_out = runner.run(cmd, ctx.tool_paths)
-
-            if ffprobe_out:
-                try:
-                    ffprobe_data = json.loads(ffprobe_out)
-                    for stream in ffprobe_data.get('streams', []):
-                        if stream.get('codec_type') == 'video':
-                            color_info = {}
-                            color_attrs = [
-                                'color_transfer', 'color_primaries', 'color_space',
-                                'color_range', 'chroma_location', 'pix_fmt'
-                            ]
-
-                            for attr in color_attrs:
-                                value = stream.get(attr)
-                                if value:
-                                    color_info[attr] = value
-
-                            extracted_key = f"{track['source']}_{track['id']}"
-                            extracted_color_metadata[extracted_key] = color_info
-                            if color_info:
-                                runner._log_message(f"[Source 1] Extracted bitstream has: {color_info}")
-                            else:
-                                runner._log_message(f"[Source 1] Extracted bitstream has NO color metadata")
-                            break
-                except json.JSONDecodeError:
-                    pass
-
-        # --- Compare and decide what to apply ---
+        # --- Color Metadata Preservation Strategy ---
         runner._log_message("--- Color Metadata Preservation Strategy ---")
-        container_meta = source_color_metadata.get('Source 1', {})
-        for track_id, container_color in container_meta.items():
-            extracted_key = f"Source 1_{track_id}"
-            extracted_color = extracted_color_metadata.get(extracted_key, {})
-
-            # Check if any values are missing or different in bitstream
-            missing_fields = []
-            for attr in ['color_transfer', 'color_primaries', 'color_space', 'color_range', 'chroma_location', 'pix_fmt']:
-                if attr in container_color:
-                    if attr not in extracted_color or extracted_color[attr] != container_color[attr]:
-                        missing_fields.append(attr)
-
-            if missing_fields:
-                runner._log_message(f"[Source 1] Track {track_id}: Bitstream missing/differs on {missing_fields} → Will apply container metadata")
-            else:
-                runner._log_message(f"[Source 1] Track {track_id}: Bitstream has all metadata → mkvmerge will read from bitstream")
+        runner._log_message("    Like mkvtoolnix GUI: explicitly apply Source 1 container color metadata via flags")
+        runner._log_message("    mkvmerge parses VUI but doesn't auto-apply to output container")
 
         # --- Part 2: Build the final PlanItem list ---
         items: List[PlanItem] = []
@@ -292,24 +234,10 @@ class ExtractStep:
                 if track_model.type == TrackType.VIDEO:
                     aspect_ratio = source_aspect_ratios.get(source, {}).get(int(trk['id']))
 
-                    # Only apply container color metadata if bitstream is missing values (Source 1 only)
+                    # Always apply Source 1 container color metadata (like mkvtoolnix GUI does)
+                    # mkvmerge parses VUI but doesn't auto-apply to container
                     if source == 'Source 1':
-                        extracted_key = f"{source}_{trk['id']}"
-                        container_color = source_color_metadata.get(source, {}).get(int(trk['id']))
-                        extracted_color = extracted_color_metadata.get(extracted_key, {})
-
-                        if container_color:
-                            # Only include fields that are missing or different in bitstream
-                            missing_fields = {}
-                            for attr in ['color_transfer', 'color_primaries', 'color_space', 'color_range', 'chroma_location', 'pix_fmt']:
-                                if attr in container_color:
-                                    if attr not in extracted_color or extracted_color[attr] != container_color[attr]:
-                                        missing_fields[attr] = container_color[attr]
-
-                            # Only apply the specific missing/different fields
-                            if missing_fields:
-                                color_metadata = missing_fields
-                            # else: Bitstream has all metadata, mkvmerge will read from it
+                        color_metadata = source_color_metadata.get(source, {}).get(int(trk['id']))
 
                 plan_item = PlanItem(
                     track=track_model,
