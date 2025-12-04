@@ -299,17 +299,16 @@ class ExtractStep:
                         extracted_color = extracted_color_metadata.get(extracted_key, {})
 
                         if container_color:
-                            # Check if any fields are missing or different in bitstream
-                            has_missing = False
+                            # Only include fields that are missing or different in bitstream
+                            missing_fields = {}
                             for attr in ['color_transfer', 'color_primaries', 'color_space', 'color_range', 'chroma_location', 'pix_fmt']:
                                 if attr in container_color:
                                     if attr not in extracted_color or extracted_color[attr] != container_color[attr]:
-                                        has_missing = True
-                                        break
+                                        missing_fields[attr] = container_color[attr]
 
-                            # Only apply if bitstream is missing/different
-                            if has_missing:
-                                color_metadata = container_color
+                            # Only apply the specific missing/different fields
+                            if missing_fields:
+                                color_metadata = missing_fields
                             # else: Bitstream has all metadata, mkvmerge will read from it
 
                 plan_item = PlanItem(
