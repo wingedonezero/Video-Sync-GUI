@@ -159,9 +159,26 @@ class MkvmergeOptionsBuilder:
 
                 # Apply color range (e.g., tv/limited, pc/full)
                 if 'color_range' in color:
-                    # Convert ffprobe's "tv"/"pc" to mkvmerge's "0"/"1"
-                    range_value = '0' if color['color_range'] in ['tv', 'limited'] else '1'
+                    # Convert ffprobe's "tv"/"pc" to mkvmerge's "1"/"2" (0=unspecified)
+                    range_value = '1' if color['color_range'] in ['tv', 'limited'] else '2'
                     tokens += ['--colour-range', f"0:{range_value}"]
+
+                # Apply chroma location/siting
+                if 'chroma_location' in color:
+                    # Map ffprobe chroma_location to mkvmerge chroma-siting values
+                    # ffprobe: left, center, topleft, top, bottomleft, bottom
+                    # mkvmerge: 0=unspecified, 1=left, 2=center, 3=topleft
+                    chroma_map = {
+                        'left': '1',
+                        'center': '2',
+                        'topleft': '3',
+                        'top': '4',
+                        'bottomleft': '5',
+                        'bottom': '6'
+                    }
+                    chroma_value = chroma_map.get(color['chroma_location'])
+                    if chroma_value:
+                        tokens += ['--chroma-siting', f"0:{chroma_value}"]
 
             if not item.extracted_path:
                 raise ValueError(f"Plan item at index {i} ('{tr.props.name}') missing extracted_path")
