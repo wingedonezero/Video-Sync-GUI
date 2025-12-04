@@ -132,9 +132,8 @@ class MkvmergeOptionsBuilder:
                     tokens += ['--remove-dialog-normalization-gain', '0']
 
             # NEW: Preserve original aspect ratio for video tracks
-            # TEMPORARILY DISABLED FOR TESTING - checking if this blocks color metadata auto-detection
-            # if tr.type == TrackType.VIDEO and item.aspect_ratio:
-            #     tokens += ['--aspect-ratio', f"0:{item.aspect_ratio}"]
+            if tr.type == TrackType.VIDEO and item.aspect_ratio:
+                tokens += ['--aspect-ratio', f"0:{item.aspect_ratio}"]
 
             # NEW: Preserve color metadata for video tracks
             if tr.type == TrackType.VIDEO and item.color_metadata:
