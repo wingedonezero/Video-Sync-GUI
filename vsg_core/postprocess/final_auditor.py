@@ -213,18 +213,25 @@ class FinalAuditor:
         try:
             if tool == 'mkvmerge':
                 cmd = ['mkvmerge', '-J', str(file_path)]
+                out = self.runner.run(cmd, self.ctx.tool_paths)
+                return json.loads(out) if out else None
             elif tool == 'ffprobe':
                 # Check if file has large timestamp offsets that require enhanced probing
                 # First get mkvmerge data to detect delays
-                mkv_data = self._get_metadata(file_path, 'mkvmerge') if tool == 'ffprobe' else None
                 max_delay_ms = 0
-
-                if mkv_data:
-                    for track in mkv_data.get('tracks', []):
-                        min_ts = track.get('properties', {}).get('minimum_timestamp', 0)
-                        if min_ts:
-                            delay_ms = min_ts / 1_000_000  # Convert nanoseconds to milliseconds
-                            max_delay_ms = max(max_delay_ms, delay_ms)
+                try:
+                    mkv_cmd = ['mkvmerge', '-J', str(file_path)]
+                    mkv_out = self.runner.run(mkv_cmd, self.ctx.tool_paths)
+                    if mkv_out:
+                        mkv_data = json.loads(mkv_out)
+                        for track in mkv_data.get('tracks', []):
+                            min_ts = track.get('properties', {}).get('minimum_timestamp', 0)
+                            if min_ts:
+                                delay_ms = min_ts / 1_000_000  # Convert nanoseconds to milliseconds
+                                max_delay_ms = max(max_delay_ms, delay_ms)
+                except (json.JSONDecodeError, Exception):
+                    # If we can't read mkvmerge data, just proceed with normal ffprobe
+                    pass
 
                 # Build ffprobe command
                 cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json']
@@ -232,17 +239,16 @@ class FinalAuditor:
                 # If any track has a delay > 5000ms, use enhanced probe parameters
                 # This prevents ffprobe from failing to detect metadata due to large timestamp offsets
                 if max_delay_ms > 5000:
-                    self.log(f"[INFO] Detected large timestamp offset ({max_delay_ms:.0f}ms). Using enhanced ffprobe parameters for accurate metadata detection.")
+                    self.log(f"[INFO] Detected large timestamp offset ({max_delay_ms:.0f}ms) in final output. Using enhanced ffprobe parameters for accurate metadata detection.")
                     # analyzeduration: 30 seconds (30000M microseconds) - matches typical correlation window
                     # probesize: 100MB - sufficient for most video streams
                     cmd += ['-analyzeduration', '30000M', '-probesize', '100M']
 
                 cmd += ['-show_streams', '-show_format', str(file_path)]
+                out = self.runner.run(cmd, self.ctx.tool_paths)
+                return json.loads(out) if out else None
             else:
                 return None
-
-            out = self.runner.run(cmd, self.ctx.tool_paths)
-            return json.loads(out) if out else None
         except (json.JSONDecodeError, Exception) as e:
             self.log(f"[ERROR] Failed to get {tool} metadata: {e}")
             return None
