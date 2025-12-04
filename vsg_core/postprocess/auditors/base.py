@@ -36,7 +36,7 @@ class BaseAuditor:
     # ========================================================================
 
     def _get_metadata(self, file_path: str, tool: str) -> Optional[Dict]:
-        """Gets metadata using either mkvmerge or ffprobe with caching."""
+        """Gets metadata using either mkvmerge or ffprobe with caching and enhanced probing for large delays."""
         cache = self._source_mkvmerge_cache if tool == 'mkvmerge' else self._source_ffprobe_cache
 
         if file_path in cache:
@@ -46,8 +46,34 @@ class BaseAuditor:
             if tool == 'mkvmerge':
                 cmd = ['mkvmerge', '-J', str(file_path)]
             elif tool == 'ffprobe':
-                cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json',
-                       '-show_streams', '-show_format', str(file_path)]
+                # Check if file has large timestamp offsets that require enhanced probing
+                # First get mkvmerge data to detect delays (use cached if available)
+                mkv_data = None
+                if file_path in self._source_mkvmerge_cache:
+                    mkv_data = self._source_mkvmerge_cache[file_path]
+                else:
+                    mkv_data = self._get_metadata(file_path, 'mkvmerge')
+
+                max_delay_ms = 0
+                if mkv_data:
+                    for track in mkv_data.get('tracks', []):
+                        min_ts = track.get('properties', {}).get('minimum_timestamp', 0)
+                        if min_ts:
+                            delay_ms = min_ts / 1_000_000  # Convert nanoseconds to milliseconds
+                            max_delay_ms = max(max_delay_ms, delay_ms)
+
+                # Build ffprobe command
+                cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json']
+
+                # If any track has a delay > 5000ms, use enhanced probe parameters
+                # This prevents ffprobe from failing to detect metadata due to large timestamp offsets
+                if max_delay_ms > 5000:
+                    self.log(f"[INFO] Detected large timestamp offset ({max_delay_ms:.0f}ms) in {Path(file_path).name}. Using enhanced ffprobe parameters.")
+                    # analyzeduration: 30 seconds (30000M microseconds) - matches typical correlation window
+                    # probesize: 100MB - sufficient for most video streams
+                    cmd += ['-analyzeduration', '30000M', '-probesize', '100M']
+
+                cmd += ['-show_streams', '-show_format', str(file_path)]
             else:
                 return None
 
