@@ -209,13 +209,35 @@ class FinalAuditor:
         return total_issues
 
     def _get_metadata(self, file_path: str, tool: str) -> Optional[Dict]:
-        """Gets metadata using either mkvmerge or ffprobe."""
+        """Gets metadata using either mkvmerge or ffprobe with enhanced probing for large delays."""
         try:
             if tool == 'mkvmerge':
                 cmd = ['mkvmerge', '-J', str(file_path)]
             elif tool == 'ffprobe':
-                cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json',
-                       '-show_streams', '-show_format', str(file_path)]
+                # Check if file has large timestamp offsets that require enhanced probing
+                # First get mkvmerge data to detect delays
+                mkv_data = self._get_metadata(file_path, 'mkvmerge') if tool == 'ffprobe' else None
+                max_delay_ms = 0
+
+                if mkv_data:
+                    for track in mkv_data.get('tracks', []):
+                        min_ts = track.get('properties', {}).get('minimum_timestamp', 0)
+                        if min_ts:
+                            delay_ms = min_ts / 1_000_000  # Convert nanoseconds to milliseconds
+                            max_delay_ms = max(max_delay_ms, delay_ms)
+
+                # Build ffprobe command
+                cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json']
+
+                # If any track has a delay > 5000ms, use enhanced probe parameters
+                # This prevents ffprobe from failing to detect metadata due to large timestamp offsets
+                if max_delay_ms > 5000:
+                    self.log(f"[INFO] Detected large timestamp offset ({max_delay_ms:.0f}ms). Using enhanced ffprobe parameters for accurate metadata detection.")
+                    # analyzeduration: 30 seconds (30000M microseconds) - matches typical correlation window
+                    # probesize: 100MB - sufficient for most video streams
+                    cmd += ['-analyzeduration', '30000M', '-probesize', '100M']
+
+                cmd += ['-show_streams', '-show_format', str(file_path)]
             else:
                 return None
 
