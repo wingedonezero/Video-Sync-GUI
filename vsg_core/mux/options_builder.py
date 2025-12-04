@@ -138,6 +138,8 @@ class MkvmergeOptionsBuilder:
             # NEW: Preserve color metadata for video tracks
             if tr.type == TrackType.VIDEO and item.color_metadata:
                 color = item.color_metadata
+                # Debug: log what color metadata we're applying
+                print(f"[DEBUG] Applying color metadata: {color}")
 
                 # Apply color transfer characteristics (e.g., bt709, smpte2084 for HDR10)
                 if 'color_transfer' in color:
