@@ -27,6 +27,14 @@ class AudioSyncAuditor(BaseAuditor):
             self.log("✅ No delays were calculated (single source or analysis skipped).")
             return 0
 
+        # Get sync mode from context (with fallback to default)
+        sync_mode = getattr(self.ctx, 'sync_mode', 'positive_only')
+        self.log(f"[SYNC MODE] Validating delays for mode: {sync_mode}")
+
+        # In allow_negative mode, negative delays are expected and correct
+        if sync_mode == 'allow_negative':
+            self.log(f"[SYNC MODE] Negative delays are allowed in this mode - validation adjusted accordingly.")
+
         # Build a mapping of track index to plan item
         audio_plan_items = [item for item in self.ctx.extracted_items if item.track.type == TrackType.AUDIO]
 
@@ -90,10 +98,20 @@ class AudioSyncAuditor(BaseAuditor):
             return 0
 
         if diff_ms > tolerance_ms:
+            # Get sync mode for context
+            sync_mode = getattr(self.ctx, 'sync_mode', 'positive_only')
+
             self.log(f"[WARNING] Audio sync mismatch (metadata) for '{name}' ({source}, {lang}):")
             self.log(f"          Expected delay: {expected_delay_ms:+.1f}ms")
             self.log(f"          Actual delay:   {actual_delay_ms:+.1f}ms")
             self.log(f"          Difference:     {diff_ms:.1f}ms")
+            self.log(f"          Sync mode:      {sync_mode}")
+
+            # Provide helpful context based on sync mode
+            if sync_mode == 'allow_negative' and expected_delay_ms < 0 and actual_delay_ms >= 0:
+                self.log(f"          NOTE: Expected negative delay in allow_negative mode, but got positive.")
+                self.log(f"          This may indicate a muxing issue or chain correction problem.")
+
             issues += 1
         else:
             self.log(f"  ✓ '{name}' ({source}) metadata: {actual_delay_ms:+.1f}ms")
@@ -148,11 +166,21 @@ class AudioSyncAuditor(BaseAuditor):
             name = plan_item.track.props.name or f"Track {plan_item.track.id}"
 
             if diff_ms > tolerance_ms:
+                # Get sync mode for context
+                sync_mode = getattr(self.ctx, 'sync_mode', 'positive_only')
+
                 self.log(f"[WARNING] Audio sync mismatch (packet timestamp) for '{name}' ({source}):")
                 self.log(f"          Expected first packet at: {expected_delay_ms:+.1f}ms")
                 self.log(f"          Actual first packet at:  {first_pts_ms:+.1f}ms")
                 self.log(f"          Difference:              {diff_ms:.1f}ms")
+                self.log(f"          Sync mode:               {sync_mode}")
                 self.log(f"          → Stream data may not be properly delayed!")
+
+                # Provide helpful context based on sync mode
+                if sync_mode == 'allow_negative' and expected_delay_ms < 0 and first_pts_ms >= 0:
+                    self.log(f"          NOTE: Expected negative delay in allow_negative mode, but got positive.")
+                    self.log(f"          This may indicate a muxing issue or chain correction problem.")
+
                 issues += 1
             else:
                 self.log(f"  ✓ '{name}' ({source}) first packet: {first_pts_ms:+.1f}ms")

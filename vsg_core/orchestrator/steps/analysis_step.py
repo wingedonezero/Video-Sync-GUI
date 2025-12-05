@@ -133,18 +133,29 @@ class AnalysisStep:
             for t in ctx.manual_layout
         )
 
+        # Store sync mode in context for auditor
+        ctx.sync_mode = sync_mode
+
         # Determine if global shift should be applied based on sync mode
+        runner._log_message("=" * 60)
+        runner._log_message(f"=== TIMING SYNC MODE: {sync_mode.upper()} ===")
+        runner._log_message("=" * 60)
+
         if sync_mode == 'allow_negative':
             # Mode 2: Force allow negatives even with secondary audio
             ctx.global_shift_is_required = False
-            runner._log_message(f"[INFO] Sync Mode: '{sync_mode}' - Negative delays are allowed.")
+            runner._log_message(f"[SYNC MODE] Negative delays are ALLOWED (no global shift).")
+            runner._log_message(f"[SYNC MODE] Source 1 remains reference (delay = 0).")
+            runner._log_message(f"[SYNC MODE] Secondary sources can have negative delays.")
         elif sync_mode == 'positive_only':
             # Mode 1: Default behavior - only apply global shift if secondary audio exists
             ctx.global_shift_is_required = has_secondary_audio
             if ctx.global_shift_is_required:
-                runner._log_message(f"[INFO] Sync Mode: '{sync_mode}' - Audio tracks from secondary sources are being merged. Global shift will be used if necessary.")
+                runner._log_message(f"[SYNC MODE] Positive-only mode - global shift will eliminate negative delays.")
+                runner._log_message(f"[SYNC MODE] All tracks will be shifted to be non-negative.")
             else:
-                runner._log_message(f"[INFO] Sync Mode: '{sync_mode}' - No audio tracks from secondary sources. Global shift will not be applied.")
+                runner._log_message(f"[SYNC MODE] Positive-only mode (but no secondary audio detected).")
+                runner._log_message(f"[SYNC MODE] Global shift will not be applied (subtitle-only exception).")
         else:
             # Unknown mode - fallback to default (positive_only)
             runner._log_message(f"[WARNING] Unknown sync_mode '{sync_mode}', falling back to 'positive_only'.")
@@ -518,8 +529,13 @@ class AnalysisStep:
         ctx.delays = Delays(source_delays_ms=source_delays, global_shift_ms=global_shift_ms)
 
         # Final summary
-        runner._log_message(f"\n[Delay] === FINAL DELAYS (Global Shift: +{global_shift_ms}ms) ===")
+        runner._log_message(f"\n[Delay] === FINAL DELAYS (Sync Mode: {sync_mode.upper()}, Global Shift: +{global_shift_ms}ms) ===")
         for source_key, delay_ms in sorted(source_delays.items()):
             runner._log_message(f"  - {source_key}: {delay_ms:+d}ms")
+
+        if sync_mode == 'allow_negative' and global_shift_ms == 0:
+            runner._log_message(f"\n[INFO] Negative delays retained (allow_negative mode). Secondary sources may have negative delays.")
+        elif global_shift_ms > 0:
+            runner._log_message(f"\n[INFO] All delays shifted by +{global_shift_ms}ms to eliminate negatives.")
 
         return ctx
