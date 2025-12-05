@@ -77,6 +77,9 @@ class AppConfig:
             'archive_logs': True,
             'auto_apply_strict': False,
 
+            # --- Timing Sync Mode ---
+            'sync_mode': 'positive_only',
+
             # --- Post-merge options ---
             'post_mux_normalize_timestamps': False,
             'post_mux_strip_tags': False,
