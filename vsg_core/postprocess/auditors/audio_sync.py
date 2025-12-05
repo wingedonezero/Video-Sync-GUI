@@ -1,6 +1,7 @@
 # vsg_core/postprocess/auditors/audio_sync.py
 # -*- coding: utf-8 -*-
 import json
+import math
 from typing import Dict, Optional
 from pathlib import Path
 
@@ -82,13 +83,72 @@ class AudioSyncAuditor(BaseAuditor):
         if min_timestamp and not actual_delay_ms:
             actual_delay_ms = min_timestamp / 1_000_000.0
 
-        # Allow 1ms tolerance for floating point rounding
-        tolerance_ms = 1.0
-        diff_ms = abs(expected_delay_ms - actual_delay_ms)
-
         source = plan_item.track.source
         lang = plan_item.track.props.lang or 'und'
         name = plan_item.track.props.name or f"Track {plan_item.track.id}"
+
+        # Get codec info for frame boundary calculations
+        codec_id = plan_item.track.props.codec_id or ''
+        sync_mode = getattr(self.ctx, 'sync_mode', 'positive_only')
+
+        # Allow 1ms tolerance for floating point rounding (default)
+        tolerance_ms = 1.0
+
+        # Special handling for negative delays in allow_negative mode
+        # mkvmerge cuts frames, so we need to calculate what the ACTUAL delay will be
+        if sync_mode == 'allow_negative' and expected_delay_ms < 0:
+            # Determine codec frame size
+            frame_size_ms = None
+            if 'AC3' in codec_id.upper() or 'EAC3' in codec_id.upper():
+                # AC3/EAC3: 32ms frames (1536 samples @ 48kHz)
+                frame_size_ms = 32.0
+            elif 'DTS' in codec_id.upper():
+                # DTS: varies, typically 10-21ms, use 10.67ms for DTS Core (512 samples @ 48kHz)
+                frame_size_ms = 10.67
+            elif 'TRUEHD' in codec_id.upper() or 'MLP' in codec_id.upper():
+                # TrueHD: typically 0.83ms frames (40 samples @ 48kHz)
+                frame_size_ms = 0.83
+
+            if frame_size_ms:
+                # Calculate what mkvmerge will actually do:
+                # 1. Calculate frames to cut: abs(delay) / frame_size
+                # 2. mkvmerge rounds UP (uses ceil) to be conservative
+                frames_to_cut = math.ceil(abs(expected_delay_ms) / frame_size_ms)
+                frames_cut_ms = frames_to_cut * frame_size_ms
+
+                # 3. Actual delay after cutting = original_delay + frames_cut
+                # (cutting frames makes audio start later, so it's additive)
+                calculated_actual_delay = expected_delay_ms + frames_cut_ms
+
+                self.log(f"  ⓘ '{name}' ({source}) negative delay calculation (codec: {codec_id}):")
+                self.log(f"     Requested delay: {expected_delay_ms:+.1f}ms")
+                self.log(f"     Frame size: {frame_size_ms:.2f}ms")
+                self.log(f"     Frames to cut: {frames_to_cut}")
+                self.log(f"     Frames cut: {frames_cut_ms:.1f}ms")
+                self.log(f"     Calculated actual delay: {calculated_actual_delay:+.1f}ms")
+
+                # Now compare against the calculated value, not the requested value
+                diff_ms = abs(calculated_actual_delay - actual_delay_ms)
+                tolerance_ms = 2.0  # Allow 2ms tolerance for rounding
+
+                if diff_ms <= tolerance_ms:
+                    self.log(f"  ✓ '{name}' ({source}) metadata: {actual_delay_ms:+.1f}ms (matches calculated {calculated_actual_delay:+.1f}ms)")
+                    return 0
+                else:
+                    self.log(f"[WARNING] Audio sync mismatch (metadata) for '{name}' ({source}, {lang}):")
+                    self.log(f"          Expected delay: {expected_delay_ms:+.1f}ms (requested)")
+                    self.log(f"          Calculated delay: {calculated_actual_delay:+.1f}ms (after frame cutting)")
+                    self.log(f"          Actual delay:   {actual_delay_ms:+.1f}ms")
+                    self.log(f"          Difference:     {diff_ms:.1f}ms")
+                    self.log(f"          Sync mode:      {sync_mode}")
+                    return 1
+            else:
+                # Unknown codec frame size, use generous tolerance
+                tolerance_ms = 100.0
+                self.log(f"  ⓘ '{name}' ({source}) has negative delay with unknown frame size (codec: {codec_id})")
+                self.log(f"     Using generous tolerance: ±{tolerance_ms:.0f}ms")
+
+        diff_ms = abs(expected_delay_ms - actual_delay_ms)
 
         # Skip metadata check if expected delay is large (>5000ms)
         # With large delays, mkvmerge doesn't reliably set container metadata,
@@ -155,24 +215,66 @@ class AudioSyncAuditor(BaseAuditor):
 
             first_pts_ms = float(first_pts) * 1000.0
 
-            # The first packet should be at approximately the expected delay
-            # Allow more tolerance here (10ms) because:
-            # - Codec delays might be rounded differently
-            # - Frame boundaries affect exact timing
-            tolerance_ms = 10.0
-            diff_ms = abs(expected_delay_ms - first_pts_ms)
-
             source = plan_item.track.source
             name = plan_item.track.props.name or f"Track {plan_item.track.id}"
 
-            if diff_ms > tolerance_ms:
-                # Get sync mode for context
-                sync_mode = getattr(self.ctx, 'sync_mode', 'positive_only')
+            # Get codec info and sync mode
+            codec_id = plan_item.track.props.codec_id or ''
+            sync_mode = getattr(self.ctx, 'sync_mode', 'positive_only')
 
+            # The first packet should be at approximately the expected delay
+            # Allow more tolerance here (10ms default) because:
+            # - Codec delays might be rounded differently
+            # - Frame boundaries affect exact timing
+            tolerance_ms = 10.0
+
+            # Special handling for negative delays in allow_negative mode
+            # mkvmerge cuts frames, so we need to calculate what the ACTUAL delay will be
+            if sync_mode == 'allow_negative' and expected_delay_ms < 0:
+                # Determine codec frame size
+                frame_size_ms = None
+                if 'AC3' in codec_id.upper() or 'EAC3' in codec_id.upper():
+                    frame_size_ms = 32.0
+                elif 'DTS' in codec_id.upper():
+                    frame_size_ms = 10.67
+                elif 'TRUEHD' in codec_id.upper() or 'MLP' in codec_id.upper():
+                    frame_size_ms = 0.83
+
+                if frame_size_ms:
+                    # Calculate what mkvmerge will actually do
+                    frames_to_cut = math.ceil(abs(expected_delay_ms) / frame_size_ms)
+                    frames_cut_ms = frames_to_cut * frame_size_ms
+                    calculated_actual_delay = expected_delay_ms + frames_cut_ms
+
+                    # Compare against calculated value
+                    diff_ms = abs(calculated_actual_delay - first_pts_ms)
+                    tolerance_ms = 2.0
+
+                    if diff_ms <= tolerance_ms:
+                        self.log(f"  ✓ '{name}' ({source}) first packet: {first_pts_ms:+.1f}ms (matches calculated {calculated_actual_delay:+.1f}ms)")
+                        return 0
+                    else:
+                        self.log(f"[WARNING] Audio sync mismatch (packet timestamp) for '{name}' ({source}):")
+                        self.log(f"          Expected delay: {expected_delay_ms:+.1f}ms (requested)")
+                        self.log(f"          Calculated delay: {calculated_actual_delay:+.1f}ms (after frame cutting)")
+                        self.log(f"          Actual first packet at:  {first_pts_ms:+.1f}ms")
+                        self.log(f"          Difference:              {diff_ms:.1f}ms")
+                        self.log(f"          Tolerance used:          ±{tolerance_ms:.0f}ms")
+                        self.log(f"          Sync mode:               {sync_mode}")
+                        self.log(f"          → Stream data may not be properly delayed!")
+                        return 1
+                else:
+                    # Unknown codec frame size
+                    tolerance_ms = 100.0
+
+            diff_ms = abs(expected_delay_ms - first_pts_ms)
+
+            if diff_ms > tolerance_ms:
                 self.log(f"[WARNING] Audio sync mismatch (packet timestamp) for '{name}' ({source}):")
                 self.log(f"          Expected first packet at: {expected_delay_ms:+.1f}ms")
                 self.log(f"          Actual first packet at:  {first_pts_ms:+.1f}ms")
                 self.log(f"          Difference:              {diff_ms:.1f}ms")
+                self.log(f"          Tolerance used:          ±{tolerance_ms:.0f}ms")
                 self.log(f"          Sync mode:               {sync_mode}")
                 self.log(f"          → Stream data may not be properly delayed!")
 
