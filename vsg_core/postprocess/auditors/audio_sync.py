@@ -82,13 +82,39 @@ class AudioSyncAuditor(BaseAuditor):
         if min_timestamp and not actual_delay_ms:
             actual_delay_ms = min_timestamp / 1_000_000.0
 
-        # Allow 1ms tolerance for floating point rounding
-        tolerance_ms = 1.0
-        diff_ms = abs(expected_delay_ms - actual_delay_ms)
-
         source = plan_item.track.source
         lang = plan_item.track.props.lang or 'und'
         name = plan_item.track.props.name or f"Track {plan_item.track.id}"
+
+        # Get codec info for frame boundary calculations
+        codec_id = plan_item.track.props.codec_id or ''
+        sync_mode = getattr(self.ctx, 'sync_mode', 'positive_only')
+
+        # Allow 1ms tolerance for floating point rounding (default)
+        tolerance_ms = 1.0
+
+        # Special handling for negative delays in allow_negative mode
+        # Codecs must cut at frame boundaries, so exact delays are impossible
+        if sync_mode == 'allow_negative' and expected_delay_ms < 0:
+            # Determine codec frame size for tolerance calculation
+            if 'AC3' in codec_id.upper() or 'EAC3' in codec_id.upper():
+                # AC3/EAC3: 32ms frames (1536 samples @ 48kHz)
+                frame_size_ms = 32.0
+                tolerance_ms = frame_size_ms * 2  # Allow 2 frames of tolerance (64ms)
+            elif 'DTS' in codec_id.upper():
+                # DTS: varies, but typically ~10-20ms
+                tolerance_ms = 40.0
+            elif 'TRUEHD' in codec_id.upper() or 'MLP' in codec_id.upper():
+                # TrueHD: typically small frames
+                tolerance_ms = 20.0
+            else:
+                # Generic tolerance for other codecs with negative delays
+                tolerance_ms = 64.0
+
+            self.log(f"  ⓘ '{name}' ({source}) has negative delay in allow_negative mode (codec: {codec_id})")
+            self.log(f"     Using relaxed tolerance: ±{tolerance_ms:.0f}ms (codec frame boundaries)")
+
+        diff_ms = abs(expected_delay_ms - actual_delay_ms)
 
         # Skip metadata check if expected delay is large (>5000ms)
         # With large delays, mkvmerge doesn't reliably set container metadata,
@@ -155,24 +181,45 @@ class AudioSyncAuditor(BaseAuditor):
 
             first_pts_ms = float(first_pts) * 1000.0
 
-            # The first packet should be at approximately the expected delay
-            # Allow more tolerance here (10ms) because:
-            # - Codec delays might be rounded differently
-            # - Frame boundaries affect exact timing
-            tolerance_ms = 10.0
-            diff_ms = abs(expected_delay_ms - first_pts_ms)
-
             source = plan_item.track.source
             name = plan_item.track.props.name or f"Track {plan_item.track.id}"
 
-            if diff_ms > tolerance_ms:
-                # Get sync mode for context
-                sync_mode = getattr(self.ctx, 'sync_mode', 'positive_only')
+            # Get codec info and sync mode
+            codec_id = plan_item.track.props.codec_id or ''
+            sync_mode = getattr(self.ctx, 'sync_mode', 'positive_only')
 
+            # The first packet should be at approximately the expected delay
+            # Allow more tolerance here (10ms default) because:
+            # - Codec delays might be rounded differently
+            # - Frame boundaries affect exact timing
+            tolerance_ms = 10.0
+
+            # Special handling for negative delays in allow_negative mode
+            # Codecs must cut at frame boundaries, so exact delays are impossible
+            if sync_mode == 'allow_negative' and expected_delay_ms < 0:
+                # Determine codec frame size for tolerance calculation
+                if 'AC3' in codec_id.upper() or 'EAC3' in codec_id.upper():
+                    # AC3/EAC3: 32ms frames (1536 samples @ 48kHz)
+                    frame_size_ms = 32.0
+                    tolerance_ms = frame_size_ms * 2  # Allow 2 frames of tolerance (64ms)
+                elif 'DTS' in codec_id.upper():
+                    # DTS: varies, but typically ~10-20ms
+                    tolerance_ms = 40.0
+                elif 'TRUEHD' in codec_id.upper() or 'MLP' in codec_id.upper():
+                    # TrueHD: typically small frames
+                    tolerance_ms = 20.0
+                else:
+                    # Generic tolerance for other codecs with negative delays
+                    tolerance_ms = 64.0
+
+            diff_ms = abs(expected_delay_ms - first_pts_ms)
+
+            if diff_ms > tolerance_ms:
                 self.log(f"[WARNING] Audio sync mismatch (packet timestamp) for '{name}' ({source}):")
                 self.log(f"          Expected first packet at: {expected_delay_ms:+.1f}ms")
                 self.log(f"          Actual first packet at:  {first_pts_ms:+.1f}ms")
                 self.log(f"          Difference:              {diff_ms:.1f}ms")
+                self.log(f"          Tolerance used:          ±{tolerance_ms:.0f}ms")
                 self.log(f"          Sync mode:               {sync_mode}")
                 self.log(f"          → Stream data may not be properly delayed!")
 
