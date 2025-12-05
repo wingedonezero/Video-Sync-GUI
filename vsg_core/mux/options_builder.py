@@ -50,21 +50,10 @@ class MkvmergeOptionsBuilder:
         forced_sub_idx = self._first_index(final_items, kind='subtitles', predicate=lambda it: it.is_forced_display)
 
         order_entries: List[str] = []
-
-        # Log sync mode for debugging
-        sync_mode = self.config.get('sync_mode', 'positive_only')
-        self.log(f"\n[MUX] Applying delays (sync_mode: {sync_mode}, global_shift: {plan.delays.global_shift_ms}ms):")
-
         for i, item in enumerate(final_items):
             tr = item.track
 
             delay_ms = self._effective_delay_ms(plan, item)
-
-            # Log delay being applied for debugging
-            if tr.type.value in ['audio', 'video']:
-                track_name = tr.props.name or f"Track {tr.id}"
-                self.log(f"  → {tr.type.value.capitalize()} '{track_name}' ({tr.source}): {delay_ms:+d}ms")
-
             is_default = (i == first_video_idx) or (i == default_audio_idx) or (i == default_sub_idx)
 
             # NEW: Use custom language if set, otherwise use original from track

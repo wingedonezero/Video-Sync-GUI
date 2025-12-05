@@ -34,6 +34,7 @@ class AppSettings:
     log_show_options_json: bool
     archive_logs: bool
     auto_apply_strict: bool
+    sync_mode: str
 
     @classmethod
     def from_config(cls, cfg: dict) -> "AppSettings":
@@ -70,4 +71,5 @@ class AppSettings:
             log_show_options_json=bool(cfg['log_show_options_json']),
             archive_logs=bool(cfg['archive_logs']),
             auto_apply_strict=bool(cfg.get('auto_apply_strict', False)),
+            sync_mode=str(cfg.get('sync_mode', 'positive_only')),
         )
