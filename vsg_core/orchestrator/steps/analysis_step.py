@@ -124,14 +124,31 @@ class AnalysisStep:
             raise ValueError("Context is missing Source 1 for analysis.")
 
         # --- Part 1: Determine if a global shift is required ---
-        ctx.global_shift_is_required = any(
+        config = ctx.settings_dict
+        sync_mode = config.get('sync_mode', 'positive_only')
+
+        # Check if there are audio tracks from secondary sources
+        has_secondary_audio = any(
             t.get('type') == 'audio' and t.get('source') != 'Source 1'
             for t in ctx.manual_layout
         )
-        if ctx.global_shift_is_required:
-            runner._log_message("[INFO] Audio tracks from secondary sources are being merged. Global shift will be used if necessary.")
+
+        # Determine if global shift should be applied based on sync mode
+        if sync_mode == 'allow_negative':
+            # Mode 2: Force allow negatives even with secondary audio
+            ctx.global_shift_is_required = False
+            runner._log_message(f"[INFO] Sync Mode: '{sync_mode}' - Negative delays are allowed.")
+        elif sync_mode == 'positive_only':
+            # Mode 1: Default behavior - only apply global shift if secondary audio exists
+            ctx.global_shift_is_required = has_secondary_audio
+            if ctx.global_shift_is_required:
+                runner._log_message(f"[INFO] Sync Mode: '{sync_mode}' - Audio tracks from secondary sources are being merged. Global shift will be used if necessary.")
+            else:
+                runner._log_message(f"[INFO] Sync Mode: '{sync_mode}' - No audio tracks from secondary sources. Global shift will not be applied.")
         else:
-            runner._log_message("[INFO] No audio tracks from secondary sources. Global shift will not be applied.")
+            # Unknown mode - fallback to default (positive_only)
+            runner._log_message(f"[WARNING] Unknown sync_mode '{sync_mode}', falling back to 'positive_only'.")
+            ctx.global_shift_is_required = has_secondary_audio
 
         # NEW: Skip analysis if only Source 1 (remux-only mode)
         if len(ctx.sources) == 1:
@@ -139,7 +156,6 @@ class AnalysisStep:
             ctx.delays = Delays(source_delays_ms={}, global_shift_ms=0)
             return ctx
 
-        config = ctx.settings_dict
         source_delays: Dict[str, int] = {}
 
         # --- Step 1: Get Source 1's container delays for chain calculation ---

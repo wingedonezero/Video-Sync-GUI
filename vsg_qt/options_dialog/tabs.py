@@ -188,7 +188,25 @@ class AnalysisTab(QWidget):
         lang_layout.addRow("Other Sources Language:", self.widgets['analysis_lang_others'])
         main_layout.addWidget(lang_group)
 
-        adv_group = QGroupBox("Step 5: Advanced Tweaks & Diagnostics")
+        timing_mode_group = QGroupBox("Step 5: Timing Sync Mode")
+        timing_mode_layout = QFormLayout(timing_mode_group)
+        self.widgets['sync_mode'] = QComboBox()
+        self.widgets['sync_mode'].addItems(['positive_only', 'allow_negative'])
+        self.widgets['sync_mode'].setToolTip(
+            "Controls how timing delays are applied:\n\n"
+            "• positive_only (Default): Shifts all tracks to eliminate negative delays.\n"
+            "  Source 1 remains the reference timeline. Best for standard merges.\n"
+            "  Exception: When only subtitles (no audio) from other sources are merged,\n"
+            "  negative delays are automatically allowed.\n\n"
+            "• allow_negative: Allows negative delays for secondary sources.\n"
+            "  Source 1 remains the reference (delay = 0). Useful when merging early\n"
+            "  releases (e.g., JPN Blu-ray + web audio) that will be remuxed later\n"
+            "  with a US Blu-ray in positive_only mode to add lossless audio."
+        )
+        timing_mode_layout.addRow("Sync Mode:", self.widgets['sync_mode'])
+        main_layout.addWidget(timing_mode_group)
+
+        adv_group = QGroupBox("Step 6: Advanced Tweaks & Diagnostics")
         adv_layout = QVBoxLayout(adv_group)
         self.widgets['use_soxr'] = QCheckBox("Use High-Quality Resampling (SoXR)"); self.widgets['use_soxr'].setToolTip("Use the high-quality SoXR resampler library when decoding audio.\nSlower but more accurate than the default resampler.")
         self.widgets['audio_peak_fit'] = QCheckBox("Enable Sub-Sample Peak Fitting (SCC only)"); self.widgets['audio_peak_fit'].setToolTip("For Standard Correlation (SCC), use parabolic interpolation to find a more precise, sub-sample peak.\nMay improve accuracy slightly.")
