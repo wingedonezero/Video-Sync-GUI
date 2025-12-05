@@ -49,6 +49,9 @@ class Context:
     # A flag to determine if a global shift is necessary
     global_shift_is_required: bool = False
 
+    # Timing sync mode ('positive_only', 'allow_negative', or 'preserve_existing')
+    sync_mode: str = 'positive_only'
+
     # NEW: Track which sources had stepping detected (for final report)
     stepping_sources: List[str] = field(default_factory=list)
 
