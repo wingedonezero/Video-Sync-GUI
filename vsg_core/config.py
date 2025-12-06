@@ -79,6 +79,7 @@ class AppConfig:
 
             # --- Timing Sync Mode ---
             'sync_mode': 'positive_only',
+            'analysis_track_id_source1': '',  # Manual track ID for Mode 3 correlation baseline
 
             # --- Post-merge options ---
             'post_mux_normalize_timestamps': False,

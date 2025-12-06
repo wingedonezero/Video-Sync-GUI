@@ -221,14 +221,36 @@ class AnalysisStep:
 
             audio_tracks = [t for t in source1_info.get('tracks', []) if t.get('type') == 'audio']
 
-            if ref_lang:
+            # Check for manual track ID selection (primarily for Mode 3)
+            manual_track_id = config.get('analysis_track_id_source1', '').strip()
+            if manual_track_id:
+                try:
+                    manual_id = int(manual_track_id)
+                    # Verify this track exists and is audio
+                    for track in audio_tracks:
+                        if track.get('id') == manual_id:
+                            source1_audio_track_id = manual_id
+                            runner._log_message(f"[Track Selection] Using manually specified track ID: {manual_id}")
+                            if sync_mode == 'preserve_existing':
+                                runner._log_message(f"[Mode 3] This track will be the correlation baseline for all secondary sources.")
+                            break
+                    if source1_audio_track_id is None:
+                        runner._log_message(f"[WARNING] Manual track ID {manual_id} not found in Source 1 audio tracks. Falling back to language matching.")
+                except ValueError:
+                    runner._log_message(f"[WARNING] Invalid track ID '{manual_track_id}'. Falling back to language matching.")
+
+            # Fall back to language matching if manual ID not set or invalid
+            if source1_audio_track_id is None and ref_lang:
                 for track in audio_tracks:
                     if (track.get('properties', {}).get('language', '') or '').strip().lower() == ref_lang:
                         source1_audio_track_id = track.get('id')
+                        runner._log_message(f"[Track Selection] Using language-matched track ID: {source1_audio_track_id} ({ref_lang})")
                         break
 
+            # Final fallback: use first audio track
             if source1_audio_track_id is None and audio_tracks:
                 source1_audio_track_id = audio_tracks[0].get('id')
+                runner._log_message(f"[Track Selection] Using first audio track ID: {source1_audio_track_id}")
 
             if source1_audio_track_id is not None:
                 # Now get the relative delay (already corrected in the dict)

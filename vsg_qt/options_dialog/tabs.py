@@ -209,6 +209,19 @@ class AnalysisTab(QWidget):
             "  ⚠️ Requires extensive testing - use with caution!"
         )
         timing_mode_layout.addRow("Sync Mode:", self.widgets['sync_mode'])
+
+        # Mode 3: Manual track ID selection for correlation baseline
+        self.widgets['analysis_track_id_source1'] = QLineEdit()
+        self.widgets['analysis_track_id_source1'].setPlaceholderText("e.g., 2 (leave empty to use language)")
+        self.widgets['analysis_track_id_source1'].setToolTip(
+            "Mode 3 Only: Specify which Source 1 audio track ID to use as the correlation baseline.\n\n"
+            "Use this when Source 1 has multiple tracks with the same language and you need\n"
+            "to ensure all secondary sources correlate against the same authoritative reference.\n\n"
+            "Example: If Source 1 has JPN BD audio (track 2) and JPN web audio (track 3),\n"
+            "set this to '2' to correlate against the BD audio.\n\n"
+            "If empty, will use the first track matching 'Analysis Language (Source 1)'."
+        )
+        timing_mode_layout.addRow("Correlation Track ID:", self.widgets['analysis_track_id_source1'])
         main_layout.addWidget(timing_mode_group)
 
         adv_group = QGroupBox("Step 6: Advanced Tweaks & Diagnostics")
