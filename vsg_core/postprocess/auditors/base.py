@@ -176,14 +176,31 @@ class BaseAuditor:
         """
         Calculates what the delay SHOULD be for a given track based on the pipeline logic.
         This mirrors the logic in options_builder.py
+
+        Mode 1 & 2 (positive_only, allow_negative):
+        - Source 1 AUDIO: container_delay + global_shift (relative to video)
+        - Source 1 VIDEO: global_shift ONLY (container delays ignored)
+
+        Mode 3 (preserve_existing):
+        - Source 1 AUDIO: container_delay + global_shift (absolute)
+        - Source 1 VIDEO: container_delay + global_shift (preserve existing)
         """
         tr = plan_item.track
         global_shift = self.ctx.delays.global_shift_ms if self.ctx.delays else 0
+        sync_mode = getattr(self.ctx, 'sync_mode', 'positive_only')
 
-        # Source 1 tracks use their original container delays PLUS the global shift
-        # BUT: Only for audio/video, never for subtitles
-        if tr.source == "Source 1" and tr.type != TrackType.SUBTITLES:
+        # Source 1 AUDIO: Always use container_delay + global_shift
+        if tr.source == "Source 1" and tr.type == TrackType.AUDIO:
             return float(plan_item.container_delay_ms + global_shift)
+
+        # Source 1 VIDEO: Mode-dependent behavior
+        if tr.source == "Source 1" and tr.type == TrackType.VIDEO:
+            if sync_mode == 'preserve_existing':
+                # Mode 3: Preserve video container delay + add additional shift
+                return float(plan_item.container_delay_ms + global_shift)
+            else:
+                # Mode 1 & 2: ONLY apply global shift (ignore container delays)
+                return float(global_shift)
 
         # For other sources, the delay from the context already includes the global shift
         sync_key = plan_item.sync_to if tr.source == 'External' else tr.source

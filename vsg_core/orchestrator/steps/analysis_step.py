@@ -147,6 +147,13 @@ class AnalysisStep:
             runner._log_message(f"[SYNC MODE] Negative delays are ALLOWED (no global shift).")
             runner._log_message(f"[SYNC MODE] Source 1 remains reference (delay = 0).")
             runner._log_message(f"[SYNC MODE] Secondary sources can have negative delays.")
+        elif sync_mode == 'preserve_existing':
+            # Mode 3: Preserve all Source 1 delays
+            ctx.global_shift_is_required = False  # Don't use normal global shift logic
+            runner._log_message(f"[SYNC MODE] Preserve existing delays mode (ADVANCED).")
+            runner._log_message(f"[SYNC MODE] Source 1 delays will be kept as-is (including video).")
+            runner._log_message(f"[SYNC MODE] Additional global shift only if new sources more negative than video.")
+            runner._log_message(f"[SYNC MODE] ⚠️ This mode requires Source 1 to be pre-processed!")
         elif sync_mode == 'positive_only':
             # Mode 1: Default behavior - only apply global shift if secondary audio exists
             ctx.global_shift_is_required = has_secondary_audio
@@ -197,14 +204,20 @@ class AnalysisStep:
                 video_track_id = video_tracks[0].get('id')
                 source1_video_container_delay = source1_container_delays.get(video_track_id, 0)
 
-            # CRITICAL FIX: Convert ALL Source 1 audio tracks to relative delays
-            # This ensures they're stored correctly for later use in extraction/mux
-            for track in source1_info.get('tracks', []):
-                if track.get('type') == 'audio':
-                    tid = track.get('id')
-                    absolute_delay = source1_container_delays.get(tid, 0)
-                    relative_delay = absolute_delay - source1_video_container_delay
-                    source1_container_delays[tid] = relative_delay  # Update with relative delay
+            # Convert Source 1 audio tracks to relative delays (Mode 1 & 2 only)
+            # Mode 3 preserves absolute delays
+            if sync_mode != 'preserve_existing':
+                # Modes 1 & 2: Convert ALL Source 1 audio tracks to relative delays
+                # This ensures they're stored correctly for later use in extraction/mux
+                for track in source1_info.get('tracks', []):
+                    if track.get('type') == 'audio':
+                        tid = track.get('id')
+                        absolute_delay = source1_container_delays.get(tid, 0)
+                        relative_delay = absolute_delay - source1_video_container_delay
+                        source1_container_delays[tid] = relative_delay  # Update with relative delay
+            else:
+                # Mode 3: Keep absolute delays as-is (already read from container)
+                pass
 
             audio_tracks = [t for t in source1_info.get('tracks', []) if t.get('type') == 'audio']
 
@@ -468,14 +481,73 @@ class AnalysisStep:
         # Store stepping sources in context for final report
         ctx.stepping_sources = stepping_sources
 
-        # Initialize Source 1 with 0ms base delay so it gets the global shift
-        source_delays["Source 1"] = 0
+        # Initialize Source 1 delay based on sync mode
+        if sync_mode == 'preserve_existing':
+            # Mode 3: Use Source 1 video delay as baseline (preserve existing delays)
+            source_delays["Source 1"] = ctx.source1_video_absolute_delay_ms
+            runner._log_message(f"\n[Mode 3] Source 1 baseline: {ctx.source1_video_absolute_delay_ms:+d}ms (from video track)")
+
+            # Warn if Source 1 has no delays
+            if ctx.source1_video_absolute_delay_ms == 0:
+                runner._log_message(f"⚠️  [Mode 3 Warning] Source 1 video has 0ms delay!")
+                runner._log_message(f"⚠️  [Mode 3 Warning] This mode is designed for pre-processed files with existing delays.")
+                runner._log_message(f"⚠️  [Mode 3 Warning] Consider using 'positive_only' mode instead.")
+        else:
+            # Mode 1 & 2: Source 1 gets 0ms base delay so it receives the global shift
+            source_delays["Source 1"] = 0
 
         # --- Step 3: Calculate Global Shift to Handle Negative Delays ---
         runner._log_message("\n--- Calculating Global Shift ---")
 
         delays_to_consider = []
-        if ctx.global_shift_is_required:
+
+        # Mode 3: Different logic for additional shift calculation
+        if sync_mode == 'preserve_existing':
+            # Mode 3: Check if additional shift is needed
+            # Only shift if new sources are more negative than Source 1 video delay
+            runner._log_message("[Mode 3] Checking if additional global shift is needed...")
+            runner._log_message(f"[Mode 3] Source 1 video delay (baseline): {ctx.source1_video_absolute_delay_ms:+d}ms")
+
+            # Collect all delays including Source 1's video delay
+            all_delays = [ctx.source1_video_absolute_delay_ms]
+            for source_key in sorted(source_delays.keys()):
+                if source_key != "Source 1":
+                    all_delays.append(source_delays[source_key])
+                    runner._log_message(f"[Mode 3]   {source_key}: {source_delays[source_key]:+d}ms")
+
+            # Also consider Source 1 audio container delays
+            if source1_container_delays and source1_info:
+                for track in source1_info.get('tracks', []):
+                    if track.get('type') == 'audio':
+                        tid = track.get('id')
+                        # Get absolute delay (Mode 3 keeps them absolute)
+                        absolute_audio_delay = source1_container_delays.get(tid, 0)
+                        if absolute_audio_delay != 0:
+                            all_delays.append(absolute_audio_delay)
+                            runner._log_message(f"[Mode 3]   Source 1 audio track {tid}: {absolute_audio_delay:+d}ms")
+
+            most_negative = min(all_delays)
+            global_shift_ms = 0
+
+            if most_negative < ctx.source1_video_absolute_delay_ms:
+                # New sources are more negative than video - apply additional shift
+                additional_shift = abs(most_negative)
+                global_shift_ms = additional_shift
+                runner._log_message(f"[Mode 3] Most negative delay: {most_negative:+d}ms")
+                runner._log_message(f"[Mode 3] This is more negative than video ({ctx.source1_video_absolute_delay_ms:+d}ms)")
+                runner._log_message(f"[Mode 3] Applying additional global shift: +{additional_shift}ms")
+                runner._log_message(f"[Mode 3] Adjusted delays after additional shift:")
+
+                # Apply additional shift to ALL sources (including Source 1)
+                for source_key in sorted(source_delays.keys()):
+                    original_delay = source_delays[source_key]
+                    source_delays[source_key] += additional_shift
+                    runner._log_message(f"  - {source_key}: {original_delay:+d}ms → {source_delays[source_key]:+d}ms")
+            else:
+                runner._log_message(f"[Mode 3] Most negative delay: {most_negative:+d}ms")
+                runner._log_message(f"[Mode 3] No additional shift needed (all delays >= video delay)")
+
+        elif ctx.global_shift_is_required:
             runner._log_message("[Global Shift] Identifying delays from sources contributing audio tracks...")
             for item in ctx.manual_layout:
                 item_source = item.get('source')

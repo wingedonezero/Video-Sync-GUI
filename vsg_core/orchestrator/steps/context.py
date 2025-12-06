@@ -52,6 +52,10 @@ class Context:
     # Timing sync mode ('positive_only', 'allow_negative', or 'preserve_existing')
     sync_mode: str = 'positive_only'
 
+    # Mode 3 (preserve_existing): Store absolute video delay from Source 1
+    # This is used as the baseline when checking if additional global shift is needed
+    source1_video_absolute_delay_ms: int = 0
+
     # NEW: Track which sources had stepping detected (for final report)
     stepping_sources: List[str] = field(default_factory=list)
 

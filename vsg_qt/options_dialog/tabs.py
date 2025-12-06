@@ -191,7 +191,7 @@ class AnalysisTab(QWidget):
         timing_mode_group = QGroupBox("Step 5: Timing Sync Mode")
         timing_mode_layout = QFormLayout(timing_mode_group)
         self.widgets['sync_mode'] = QComboBox()
-        self.widgets['sync_mode'].addItems(['positive_only', 'allow_negative'])
+        self.widgets['sync_mode'].addItems(['positive_only', 'allow_negative', 'preserve_existing'])
         self.widgets['sync_mode'].setToolTip(
             "Controls how timing delays are applied:\n\n"
             "• positive_only (Default): Shifts all tracks to eliminate negative delays.\n"
@@ -201,7 +201,12 @@ class AnalysisTab(QWidget):
             "• allow_negative: Allows negative delays for secondary sources.\n"
             "  Source 1 remains the reference (delay = 0). Useful when merging early\n"
             "  releases (e.g., JPN Blu-ray + web audio) that will be remuxed later\n"
-            "  with a US Blu-ray in positive_only mode to add lossless audio."
+            "  with a US Blu-ray in positive_only mode to add lossless audio.\n\n"
+            "• preserve_existing (ADVANCED): For merging into already-processed files.\n"
+            "  Maintains all existing Source 1 delays (video + audio with their relative timings).\n"
+            "  Applies additional global shift only if new sources are more negative than\n"
+            "  current video delay. Use when adding tracks to previous Mode 1 merges.\n"
+            "  ⚠️ Requires extensive testing - use with caution!"
         )
         timing_mode_layout.addRow("Sync Mode:", self.widgets['sync_mode'])
         main_layout.addWidget(timing_mode_group)

@@ -10,6 +10,9 @@ class MkvmergeOptionsBuilder:
     def build(self, plan: MergePlan, settings: AppSettings) -> List[str]:
         tokens: List[str] = []
 
+        # Store settings for access in _effective_delay_ms
+        self._settings = settings
+
         if plan.chapters_xml:
             tokens += ['--chapters', str(plan.chapters_xml)]
         if settings.disable_track_statistics_tags:
@@ -109,17 +112,21 @@ class MkvmergeOptionsBuilder:
         """
         Calculates the final sync delay for a track.
 
-        CRITICAL: Video container delays from the source MKV should be IGNORED.
-        Video defines the timeline and should only get the global shift.
+        Mode 1 & 2 (positive_only, allow_negative):
+        - Video container delays from Source 1 are IGNORED
+        - Video defines the timeline and should only get the global shift
+
+        Mode 3 (preserve_existing):
+        - ALL Source 1 delays are preserved (including video)
+        - Merging into pre-processed files that have existing delays
 
         Source 1 VIDEO:
-        - Ignore original container delays (playback artifacts, not real timing)
-        - Only apply global shift to stay in sync with everything else
+        - Mode 1 & 2: Ignore container delays, only apply global shift
+        - Mode 3: Preserve container delays + add global shift
 
         Source 1 AUDIO:
-        - Each track has its own container delay (real timing offset)
-        - Preserve that delay and add global shift
-        - This maintains Source 1's internal audio/video sync
+        - All modes: Preserve container delay + add global shift
+        - Mode 3: Container delays are absolute (not relative to video)
 
         Source 1 SUBTITLES:
         - Use the correlation delay (which is 0 for Source 1 after initialization)
@@ -133,6 +140,7 @@ class MkvmergeOptionsBuilder:
         - Use the delay from the track they're synced to (sync_to field)
         """
         tr = item.track
+        sync_mode = getattr(self._settings, 'sync_mode', 'positive_only')
 
         # Source 1 AUDIO: Preserve individual container delays + add global shift
         if tr.source == "Source 1" and tr.type == TrackType.AUDIO:
@@ -141,10 +149,18 @@ class MkvmergeOptionsBuilder:
             final_delay = container_delay + global_shift
             return final_delay
 
-        # Source 1 VIDEO: ONLY apply global shift (IGNORE container delays)
-        # Video defines the timeline - we don't preserve its container delays
+        # Source 1 VIDEO: Behavior depends on sync mode
         if tr.source == "Source 1" and tr.type == TrackType.VIDEO:
-            return plan.delays.global_shift_ms
+            if sync_mode == 'preserve_existing':
+                # Mode 3: Preserve video container delay + add additional global shift
+                container_delay = int(item.container_delay_ms)
+                global_shift = plan.delays.global_shift_ms
+                final_delay = container_delay + global_shift
+                return final_delay
+            else:
+                # Mode 1 & 2: ONLY apply global shift (IGNORE container delays)
+                # Video defines the timeline - we don't preserve its container delays
+                return plan.delays.global_shift_ms
 
         # All other tracks: Use the correlation delay from analysis
         # This includes:

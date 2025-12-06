@@ -47,11 +47,18 @@ class ExtractStep:
                 delays_for_source = {}
                 runner._log_message(f"[Container Delays] Reading delays from {source_key}:")
 
+                # Check sync mode
+                sync_mode = ctx.settings_dict.get('sync_mode', 'positive_only')
+
                 # If this is Source 1, find the video track's delay first
                 if source_key == 'Source 1':
                     for track in info.get('tracks', []):
                         if track.get('type') == 'video':
                             source1_video_delay_ms = track.get('container_delay_ms', 0)
+                            # Mode 3: Store video absolute delay in context
+                            if sync_mode == 'preserve_existing':
+                                ctx.source1_video_absolute_delay_ms = source1_video_delay_ms
+                                runner._log_message(f"[Mode 3] Source 1 video absolute delay: {source1_video_delay_ms:+.1f}ms")
                             break
 
                 for track in info.get('tracks', []):
@@ -59,10 +66,15 @@ class ExtractStep:
                     track_type = track.get('type', 'unknown')
                     delay_ms = track.get('container_delay_ms', 0)
 
-                    # For Source 1 audio tracks, calculate the delay relative to the video.
-                    # For all other tracks, use the absolute delay.
+                    # Mode 3: Store ABSOLUTE delays for all Source 1 tracks
+                    # Modes 1 & 2: Calculate Source 1 audio relative to video
                     if source_key == 'Source 1' and track_type == 'audio':
-                        delays_for_source[tid] = delay_ms - source1_video_delay_ms
+                        if sync_mode == 'preserve_existing':
+                            # Mode 3: Store absolute delay as-is
+                            delays_for_source[tid] = delay_ms
+                        else:
+                            # Modes 1 & 2: Store relative to video
+                            delays_for_source[tid] = delay_ms - source1_video_delay_ms
                     else:
                         delays_for_source[tid] = delay_ms
 
