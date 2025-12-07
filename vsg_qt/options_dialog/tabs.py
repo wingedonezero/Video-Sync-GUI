@@ -519,6 +519,59 @@ class SteppingTab(QWidget):
         segment_layout.addRow(QLabel("<i>Fine Scan:</i>"))
         segment_layout.addRow("  Chunk Duration:", self.widgets['segment_fine_chunk_s'])
         segment_layout.addRow("  Iterations:", self.widgets['segment_fine_iterations'])
+
+        # Silence-aware boundary snapping
+        segment_layout.addRow(QLabel("<i>Silence-Aware Boundary Snapping:</i>"))
+
+        self.widgets['stepping_snap_to_silence'] = QCheckBox("Enable boundary snapping to silence zones")
+        self.widgets['stepping_snap_to_silence'].setToolTip(
+            "Intelligently adjusts boundary placement to silence zones instead of mid-speech.\n"
+            "When enabled, searches for silence regions near detected boundaries and snaps to them.\n"
+            "Significantly improves audio quality by avoiding cuts in the middle of dialogue/music.\n"
+            "Recommended: Keep enabled unless debugging.\n"
+            "Default: Enabled"
+        )
+
+        self.widgets['stepping_silence_search_window_s'] = QDoubleSpinBox()
+        self.widgets['stepping_silence_search_window_s'].setRange(0.5, 10.0)
+        self.widgets['stepping_silence_search_window_s'].setSuffix(" s")
+        self.widgets['stepping_silence_search_window_s'].setDecimals(1)
+        self.widgets['stepping_silence_search_window_s'].setToolTip(
+            "Search window in seconds (±N seconds from detected boundary).\n"
+            "Larger = more flexibility in finding silence, but may move boundary further\n"
+            "Smaller = keeps boundary closer to original detection\n"
+            "Default: 3.0s"
+        )
+
+        self.widgets['stepping_silence_threshold_db'] = QDoubleSpinBox()
+        self.widgets['stepping_silence_threshold_db'].setRange(-60.0, -20.0)
+        self.widgets['stepping_silence_threshold_db'].setSuffix(" dB")
+        self.widgets['stepping_silence_threshold_db'].setDecimals(1)
+        self.widgets['stepping_silence_threshold_db'].setToolTip(
+            "Audio level threshold in dB to consider as 'silence'.\n"
+            "More negative = stricter (quieter required)\n"
+            "Less negative = more lenient (includes quieter dialogue)\n"
+            "Typical values: -50 dB (very quiet), -40 dB (quiet), -30 dB (soft)\n"
+            "Default: -40.0 dB"
+        )
+
+        self.widgets['stepping_silence_min_duration_ms'] = QDoubleSpinBox()
+        self.widgets['stepping_silence_min_duration_ms'].setRange(50.0, 1000.0)
+        self.widgets['stepping_silence_min_duration_ms'].setSuffix(" ms")
+        self.widgets['stepping_silence_min_duration_ms'].setDecimals(0)
+        self.widgets['stepping_silence_min_duration_ms'].setToolTip(
+            "Minimum silence duration to be considered for boundary snapping.\n"
+            "Prevents snapping to very brief quiet moments (like pauses between words).\n"
+            "Larger = requires longer silence zones (more conservative)\n"
+            "Smaller = can use brief pauses (more aggressive)\n"
+            "Default: 100 ms"
+        )
+
+        segment_layout.addRow(self.widgets['stepping_snap_to_silence'])
+        segment_layout.addRow("    Search Window:", self.widgets['stepping_silence_search_window_s'])
+        segment_layout.addRow("    Silence Threshold:", self.widgets['stepping_silence_threshold_db'])
+        segment_layout.addRow("    Min Silence Duration:", self.widgets['stepping_silence_min_duration_ms'])
+
         segment_layout.addRow(QLabel("<i>Quality Assurance:</i>"))
         segment_layout.addRow("  QA Threshold:", self.widgets['segmented_qa_threshold'])
         segment_layout.addRow("  QA Chunk Count:", self.widgets['segment_qa_chunk_count'])
