@@ -248,10 +248,22 @@ class SteppingCorrector:
             else: low += chunk_samples
 
         initial_boundary_s = high / sample_rate
-        self.log(f"    - Found precise boundary at: {initial_boundary_s:.3f}s")
+        self.log(f"    - Found precise boundary at: {initial_boundary_s:.3f}s (reference timeline)")
 
         # Apply silence-aware boundary snapping if enabled
-        final_boundary_s = self._snap_boundary_to_silence(analysis_pcm, sample_rate, initial_boundary_s)
+        # CRITICAL: Convert boundary to target timeline before checking for silence in target audio
+        # Reference timeline position needs delay offset to get target timeline position
+        initial_boundary_target_s = initial_boundary_s + (delay_before / 1000.0)
+
+        snapped_boundary_target_s = self._snap_boundary_to_silence(
+            analysis_pcm, sample_rate, initial_boundary_target_s
+        )
+
+        # Convert snapped boundary back to reference timeline
+        final_boundary_s = snapped_boundary_target_s - (delay_before / 1000.0)
+
+        if abs(snapped_boundary_target_s - initial_boundary_target_s) > 0.001:
+            self.log(f"    - Snapped boundary on reference timeline: {initial_boundary_s:.3f}s → {final_boundary_s:.3f}s")
 
         return final_boundary_s
 
@@ -364,7 +376,7 @@ class SteppingCorrector:
         )
 
         if not silence_zones:
-            self.log(f"    - [Silence Snap] No silence zones found within ±{search_window_s}s window")
+            self.log(f"    - [Silence Snap] No silence zones found within ±{search_window_s}s window (target timeline)")
             return boundary_s
 
         # Find the silence zone that best contains or is closest to the boundary
@@ -406,11 +418,11 @@ class SteppingCorrector:
             offset = snap_point - boundary_s
 
             if is_inside:
-                self.log(f"    - [Silence Snap] Boundary is already in silence zone [{zone_start:.3f}s - {zone_end:.3f}s, {avg_db:.1f}dB]")
+                self.log(f"    - [Silence Snap] Boundary is already in silence zone [{zone_start:.3f}s - {zone_end:.3f}s, {avg_db:.1f}dB] (target timeline)")
                 self.log(f"    - [Silence Snap] Keeping boundary at {boundary_s:.3f}s (inside silence)")
             else:
-                self.log(f"    - [Silence Snap] Found silence zone [{zone_start:.3f}s - {zone_end:.3f}s, {avg_db:.1f}dB]")
-                self.log(f"    - [Silence Snap] Snapping boundary: {boundary_s:.3f}s → {snap_point:.3f}s (offset: {offset:+.3f}s)")
+                self.log(f"    - [Silence Snap] Found silence zone [{zone_start:.3f}s - {zone_end:.3f}s, {avg_db:.1f}dB] (target timeline)")
+                self.log(f"    - [Silence Snap] Snapping boundary on target timeline: {boundary_s:.3f}s → {snap_point:.3f}s (offset: {offset:+.3f}s)")
                 return snap_point
 
         return boundary_s
