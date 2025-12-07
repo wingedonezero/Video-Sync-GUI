@@ -131,6 +131,12 @@ class AppConfig:
             'stepping_adjust_subtitles_no_audio': True,  # Apply stepping to subtitles when no audio is merged (uses correlation-based EDL)
             'stepping_boundary_mode': 'start',  # How to handle subs spanning boundaries: 'start', 'majority', 'midpoint'
 
+            # --- Silence-Aware Boundary Snapping ---
+            'stepping_snap_to_silence': True,  # Enable boundary snapping to silence zones
+            'stepping_silence_search_window_s': 3.0,  # Search window in seconds (±N seconds from detected boundary)
+            'stepping_silence_threshold_db': -40.0,  # Audio level in dB to consider as silence
+            'stepping_silence_min_duration_ms': 100.0,  # Minimum silence duration to be considered for snapping
+
             # --- Filtered Stepping Correction (New) ---
             'stepping_correction_mode': 'full',  # 'full', 'filtered', 'strict', 'disabled'
             'stepping_quality_mode': 'normal',  # 'strict', 'normal', 'lenient', 'custom'

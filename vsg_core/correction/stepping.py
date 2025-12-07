@@ -247,9 +247,173 @@ class SteppingCorrector:
                 else: high = mid
             else: low += chunk_samples
 
-        final_boundary_s = high / sample_rate
-        self.log(f"    - Found precise boundary at: {final_boundary_s:.3f}s")
+        initial_boundary_s = high / sample_rate
+        self.log(f"    - Found precise boundary at: {initial_boundary_s:.3f}s")
+
+        # Apply silence-aware boundary snapping if enabled
+        final_boundary_s = self._snap_boundary_to_silence(analysis_pcm, sample_rate, initial_boundary_s)
+
         return final_boundary_s
+
+    def _find_silence_zones(self, pcm: np.ndarray, sample_rate: int, start_s: float, end_s: float, threshold_db: float, min_duration_ms: float) -> List[Tuple[float, float, float]]:
+        """
+        Find silence zones in audio within a time window.
+
+        Args:
+            pcm: Audio PCM data (mono, int32)
+            sample_rate: Sample rate in Hz
+            start_s: Start of search window in seconds
+            end_s: End of search window in seconds
+            threshold_db: Silence threshold in dB
+            min_duration_ms: Minimum silence duration in milliseconds
+
+        Returns:
+            List of tuples (start_s, end_s, avg_db) for each silence zone
+        """
+        start_sample = max(0, int(start_s * sample_rate))
+        end_sample = min(len(pcm), int(end_s * sample_rate))
+
+        if end_sample <= start_sample:
+            return []
+
+        # Window size for RMS calculation (50ms windows)
+        window_size = int(0.05 * sample_rate)
+        if window_size < 1:
+            window_size = 1
+
+        min_silence_samples = int((min_duration_ms / 1000.0) * sample_rate)
+
+        silence_zones = []
+        current_silence_start = None
+        current_silence_db_values = []
+
+        # Scan through the region in windows
+        for sample_pos in range(start_sample, end_sample, window_size):
+            window_end = min(sample_pos + window_size, end_sample)
+            window = pcm[sample_pos:window_end]
+
+            if len(window) == 0:
+                continue
+
+            # Calculate RMS amplitude
+            rms = np.sqrt(np.mean(window.astype(np.float64) ** 2))
+
+            # Convert to dB (with safeguard against log(0))
+            if rms > 1e-10:
+                db = 20 * np.log10(rms / 2147483648.0)  # int32 max = 2^31
+            else:
+                db = -96.0  # Very quiet
+
+            is_silence = db < threshold_db
+
+            if is_silence:
+                if current_silence_start is None:
+                    current_silence_start = sample_pos / sample_rate
+                    current_silence_db_values = [db]
+                else:
+                    current_silence_db_values.append(db)
+            else:
+                if current_silence_start is not None:
+                    # End of silence zone
+                    silence_end = sample_pos / sample_rate
+                    silence_duration_samples = (silence_end - current_silence_start) * sample_rate
+
+                    if silence_duration_samples >= min_silence_samples:
+                        avg_db = np.mean(current_silence_db_values)
+                        silence_zones.append((current_silence_start, silence_end, avg_db))
+
+                    current_silence_start = None
+                    current_silence_db_values = []
+
+        # Check if we're still in a silence zone at the end
+        if current_silence_start is not None:
+            silence_end = end_sample / sample_rate
+            silence_duration_samples = (silence_end - current_silence_start) * sample_rate
+            if silence_duration_samples >= min_silence_samples:
+                avg_db = np.mean(current_silence_db_values)
+                silence_zones.append((current_silence_start, silence_end, avg_db))
+
+        return silence_zones
+
+    def _snap_boundary_to_silence(self, analysis_pcm: np.ndarray, sample_rate: int, boundary_s: float) -> float:
+        """
+        Attempt to snap a boundary to a nearby silence zone.
+
+        Args:
+            analysis_pcm: Target audio PCM data
+            sample_rate: Sample rate in Hz
+            boundary_s: Original boundary position in seconds
+
+        Returns:
+            New boundary position (or original if no suitable silence found)
+        """
+        if not self.config.get('stepping_snap_to_silence', True):
+            return boundary_s
+
+        search_window_s = self.config.get('stepping_silence_search_window_s', 3.0)
+        threshold_db = self.config.get('stepping_silence_threshold_db', -40.0)
+        min_duration_ms = self.config.get('stepping_silence_min_duration_ms', 100.0)
+
+        # Search for silence zones around the boundary
+        search_start = max(0, boundary_s - search_window_s)
+        search_end = boundary_s + search_window_s
+
+        silence_zones = self._find_silence_zones(
+            analysis_pcm, sample_rate, search_start, search_end,
+            threshold_db, min_duration_ms
+        )
+
+        if not silence_zones:
+            self.log(f"    - [Silence Snap] No silence zones found within ±{search_window_s}s window")
+            return boundary_s
+
+        # Find the silence zone that best contains or is closest to the boundary
+        best_zone = None
+        best_score = float('inf')
+
+        for zone_start, zone_end, avg_db in silence_zones:
+            zone_center = (zone_start + zone_end) / 2.0
+            zone_duration = zone_end - zone_start
+
+            # Check if boundary is within this zone
+            if zone_start <= boundary_s <= zone_end:
+                # Boundary is inside this silence zone - prefer using it
+                # Score by how centered the boundary is (prefer center of silence)
+                distance_from_center = abs(boundary_s - zone_center)
+                score = distance_from_center / zone_duration
+
+                if score < best_score:
+                    best_score = score
+                    best_zone = (zone_start, zone_end, zone_center, avg_db, True)
+            else:
+                # Boundary is outside - measure distance to nearest edge
+                if boundary_s < zone_start:
+                    distance = zone_start - boundary_s
+                    snap_point = zone_start
+                else:
+                    distance = boundary_s - zone_end
+                    snap_point = zone_end
+
+                # Prefer closer zones, and prefer longer/quieter zones
+                score = distance - (zone_duration * 0.1) + (avg_db / 100.0)
+
+                if score < best_score:
+                    best_score = score
+                    best_zone = (zone_start, zone_end, snap_point, avg_db, False)
+
+        if best_zone:
+            zone_start, zone_end, snap_point, avg_db, is_inside = best_zone
+            offset = snap_point - boundary_s
+
+            if is_inside:
+                self.log(f"    - [Silence Snap] Boundary is already in silence zone [{zone_start:.3f}s - {zone_end:.3f}s, {avg_db:.1f}dB]")
+                self.log(f"    - [Silence Snap] Keeping boundary at {boundary_s:.3f}s (inside silence)")
+            else:
+                self.log(f"    - [Silence Snap] Found silence zone [{zone_start:.3f}s - {zone_end:.3f}s, {avg_db:.1f}dB]")
+                self.log(f"    - [Silence Snap] Snapping boundary: {boundary_s:.3f}s → {snap_point:.3f}s (offset: {offset:+.3f}s)")
+                return snap_point
+
+        return boundary_s
 
     def _extract_content_from_reference(
         self,
