@@ -396,18 +396,15 @@ class SteppingCorrector:
 
                 if score < best_score:
                     best_score = score
-                    best_zone = (zone_start, zone_end, zone_center, avg_db, True)
+                    best_zone = (zone_start, zone_end, boundary_s, avg_db, True)
             else:
-                # Boundary is outside - measure distance to nearest edge
-                if boundary_s < zone_start:
-                    distance = zone_start - boundary_s
-                    snap_point = zone_start
-                else:
-                    distance = boundary_s - zone_end
-                    snap_point = zone_end
+                # Boundary is outside - snap to CENTER of silence zone (not edge!)
+                # This ensures we're safely in the middle of silence, avoiding abrupt starts/ends
+                distance_to_center = abs(boundary_s - zone_center)
+                snap_point = zone_center
 
                 # Prefer closer zones, and prefer longer/quieter zones
-                score = distance - (zone_duration * 0.1) + (avg_db / 100.0)
+                score = distance_to_center - (zone_duration * 0.1) + (avg_db / 100.0)
 
                 if score < best_score:
                     best_score = score
@@ -415,6 +412,7 @@ class SteppingCorrector:
 
         if best_zone:
             zone_start, zone_end, snap_point, avg_db, is_inside = best_zone
+            zone_center = (zone_start + zone_end) / 2.0
             offset = snap_point - boundary_s
 
             if is_inside:
@@ -422,7 +420,7 @@ class SteppingCorrector:
                 self.log(f"    - [Silence Snap] Keeping boundary at {boundary_s:.3f}s (inside silence)")
             else:
                 self.log(f"    - [Silence Snap] Found silence zone [{zone_start:.3f}s - {zone_end:.3f}s, {avg_db:.1f}dB] (target timeline)")
-                self.log(f"    - [Silence Snap] Snapping boundary on target timeline: {boundary_s:.3f}s → {snap_point:.3f}s (offset: {offset:+.3f}s)")
+                self.log(f"    - [Silence Snap] Snapping boundary to center of silence: {boundary_s:.3f}s → {snap_point:.3f}s (offset: {offset:+.3f}s)")
                 return snap_point
 
         return boundary_s
