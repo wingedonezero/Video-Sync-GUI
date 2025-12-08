@@ -449,28 +449,31 @@ class SteppingCorrector:
         import json
 
         if mode == 'scenes':
-            # Use ffmpeg scene detection
+            # Use ffprobe to detect scene changes via scene score metadata
             threshold = self.config.get('stepping_video_scene_threshold', 0.4)
             cmd = [
-                'ffmpeg', '-i', video_file,
-                '-vf', f'select=\'gt(scene,{threshold})\',showinfo',
-                '-f', 'null', '-'
+                'ffprobe', '-v', 'error',
+                '-select_streams', 'v:0',
+                '-show_entries', 'frame=pkt_pts_time',
+                '-f', 'lavfi',
+                f'movie={video_file},select=gt(scene\\,{threshold})',
+                '-of', 'json'
             ]
 
             try:
-                result = self.runner.run(cmd, self.tool_paths, capture_output=True)
+                result = self.runner.run(cmd, self.tool_paths)
                 if result is None:
                     return []
 
-                # Parse scene changes from ffmpeg output
+                # Parse JSON output
+                data = json.loads(result)
                 scenes = []
-                for line in result.stderr.decode('utf-8', errors='ignore').split('\n'):
-                    if 'Parsed_showinfo' in line and 'pts_time:' in line:
-                        try:
-                            pts = line.split('pts_time:')[1].split()[0]
-                            scenes.append(float(pts))
-                        except (IndexError, ValueError):
-                            continue
+
+                for frame in data.get('frames', []):
+                    try:
+                        scenes.append(float(frame['pkt_pts_time']))
+                    except (KeyError, ValueError, TypeError):
+                        continue
 
                 self.log(f"    - [Video Snap] Detected {len(scenes)} scene changes")
                 return sorted(scenes)
@@ -490,18 +493,18 @@ class SteppingCorrector:
             ]
 
             try:
-                result = self.runner.run(cmd, self.tool_paths, capture_output=True)
+                result = self.runner.run(cmd, self.tool_paths)
                 if result is None:
                     return []
 
-                data = json.loads(result.stdout.decode('utf-8'))
+                data = json.loads(result)
                 keyframes = []
 
                 for packet in data.get('packets', []):
                     if 'K' in packet.get('flags', ''):  # K = keyframe
                         try:
                             keyframes.append(float(packet['pts_time']))
-                        except (KeyError, ValueError):
+                        except (KeyError, ValueError, TypeError):
                             continue
 
                 self.log(f"    - [Video Snap] Found {len(keyframes)} keyframes")
@@ -522,17 +525,17 @@ class SteppingCorrector:
             ]
 
             try:
-                result = self.runner.run(cmd, self.tool_paths, capture_output=True)
+                result = self.runner.run(cmd, self.tool_paths)
                 if result is None:
                     return []
 
-                data = json.loads(result.stdout.decode('utf-8'))
+                data = json.loads(result)
                 frames = []
 
                 for packet in data.get('packets', []):
                     try:
                         frames.append(float(packet['pts_time']))
-                    except (KeyError, ValueError):
+                    except (KeyError, ValueError, TypeError):
                         continue
 
                 self.log(f"    - [Video Snap] Found {len(frames)} total frames")
