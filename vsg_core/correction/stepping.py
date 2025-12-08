@@ -449,38 +449,11 @@ class SteppingCorrector:
         import json
 
         if mode == 'scenes':
-            # Use ffprobe to detect scene changes via scene score metadata
-            threshold = self.config.get('stepping_video_scene_threshold', 0.4)
-            cmd = [
-                'ffprobe', '-v', 'error',
-                '-select_streams', 'v:0',
-                '-show_entries', 'frame=pkt_pts_time',
-                '-f', 'lavfi',
-                f'movie={video_file},select=gt(scene\\,{threshold})',
-                '-of', 'json'
-            ]
-
-            try:
-                result = self.runner.run(cmd, self.tool_paths)
-                if result is None:
-                    return []
-
-                # Parse JSON output
-                data = json.loads(result)
-                scenes = []
-
-                for frame in data.get('frames', []):
-                    try:
-                        scenes.append(float(frame['pkt_pts_time']))
-                    except (KeyError, ValueError, TypeError):
-                        continue
-
-                self.log(f"    - [Video Snap] Detected {len(scenes)} scene changes")
-                return sorted(scenes)
-
-            except Exception as e:
-                self.log(f"    - [Video Snap] ERROR: Failed to detect scenes: {e}")
-                return []
+            # Scene detection via lavfi is fragile with special characters in paths
+            # Use keyframes as a reliable alternative that works with all file paths
+            # Keyframes often align with scene changes anyway (especially for encoded content)
+            self.log(f"    - [Video Snap] Using keyframes for scene-aligned snapping (robust for all file paths)")
+            return self._get_video_frames(video_file, 'keyframes')
 
         elif mode == 'keyframes':
             # Get I-frames (keyframes) using ffprobe
