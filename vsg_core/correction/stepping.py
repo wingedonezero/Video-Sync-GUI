@@ -179,7 +179,14 @@ class SteppingCorrector:
 
         r = (ref_chunk - np.mean(ref_chunk)) / (ref_std + 1e-9)
         t = (analysis_chunk - np.mean(analysis_chunk)) / (analysis_std + 1e-9)
-        c = correlate(r, t, mode='valid', method='fft')
+
+        # Suppress numpy warnings about division by zero in correlation
+        # We've already filtered out silent chunks above, but numpy's internal
+        # correlation calculations may still produce warnings for edge cases
+        import warnings
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', 'invalid value encountered in divide')
+            c = correlate(r, t, mode='valid', method='fft')
 
         if len(c) == 0: return None
         abs_c = np.abs(c)
@@ -650,7 +657,11 @@ class SteppingCorrector:
                         analysis_norm = (analysis_search_region - np.mean(analysis_search_region)) / (analysis_std + 1e-9)
 
                         # Correlate to find if this content exists in analysis
-                        corr = correlate(candidate_norm, analysis_norm, mode='valid', method='fft')
+                        # Suppress numpy warnings about division - we've already checked std above
+                        import warnings
+                        with warnings.catch_warnings():
+                            warnings.filterwarnings('ignore', 'invalid value encountered in divide')
+                            corr = correlate(candidate_norm, analysis_norm, mode='valid', method='fft')
 
                         if len(corr) > 0:
                             max_corr = np.max(np.abs(corr))
