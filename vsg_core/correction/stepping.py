@@ -173,7 +173,9 @@ class SteppingCorrector:
 
         if len(ref_chunk) < 100 or len(analysis_chunk) < len(ref_chunk): return None
         ref_std, analysis_std = np.std(ref_chunk), np.std(analysis_chunk)
-        if ref_std < 1e-6 or analysis_std < 1e-6: return None
+        # For int32 PCM audio, std < 100 indicates silence/near-silence
+        # This prevents division by zero in correlation
+        if ref_std < 100.0 or analysis_std < 100.0: return None
 
         r = (ref_chunk - np.mean(ref_chunk)) / (ref_std + 1e-9)
         t = (analysis_chunk - np.mean(analysis_chunk)) / (analysis_std + 1e-9)
@@ -226,7 +228,7 @@ class SteppingCorrector:
                 self.log(f"    - Coarse point at {timestamp_s:.1f}s: delay = {delay}ms")
         return coarse_map
 
-    def _find_boundary_in_zone(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int, zone_start_s: float, zone_end_s: float, delay_before: int, delay_after: int) -> float:
+    def _find_boundary_in_zone(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int, zone_start_s: float, zone_end_s: float, delay_before: int, delay_after: int, ref_file_path: Optional[str] = None) -> float:
         self.log(f"  [SteppingCorrector] Stage 2: Performing fine scan in zone {zone_start_s:.1f}s - {zone_end_s:.1f}s...")
         zone_start_sample, zone_end_sample = int(zone_start_s * sample_rate), int(zone_end_s * sample_rate)
 
@@ -264,6 +266,13 @@ class SteppingCorrector:
 
         if abs(snapped_boundary_target_s - initial_boundary_target_s) > 0.001:
             self.log(f"    - Snapped boundary on reference timeline: {initial_boundary_s:.3f}s → {final_boundary_s:.3f}s")
+
+        # Apply video-aware boundary snapping if enabled
+        # Video snap operates on reference timeline
+        if ref_file_path:
+            video_snapped_boundary_s = self._snap_boundary_to_video_frame(ref_file_path, final_boundary_s)
+            if abs(video_snapped_boundary_s - final_boundary_s) > 0.001:
+                final_boundary_s = video_snapped_boundary_s
 
         return final_boundary_s
 
@@ -425,6 +434,156 @@ class SteppingCorrector:
 
         return boundary_s
 
+    def _get_video_frames(self, video_file: str, mode: str) -> List[float]:
+        """
+        Get video frame timestamps from reference video.
+
+        Args:
+            video_file: Path to video file
+            mode: 'scenes', 'keyframes', or 'any_frame'
+
+        Returns:
+            List of timestamps in seconds
+        """
+        import subprocess
+        import json
+
+        if mode == 'scenes':
+            # Use ffmpeg scene detection
+            threshold = self.config.get('stepping_video_scene_threshold', 0.4)
+            cmd = [
+                'ffmpeg', '-i', video_file,
+                '-vf', f'select=\'gt(scene,{threshold})\',showinfo',
+                '-f', 'null', '-'
+            ]
+
+            try:
+                result = self.runner.run(cmd, self.tool_paths, capture_output=True)
+                if result is None:
+                    return []
+
+                # Parse scene changes from ffmpeg output
+                scenes = []
+                for line in result.stderr.decode('utf-8', errors='ignore').split('\n'):
+                    if 'Parsed_showinfo' in line and 'pts_time:' in line:
+                        try:
+                            pts = line.split('pts_time:')[1].split()[0]
+                            scenes.append(float(pts))
+                        except (IndexError, ValueError):
+                            continue
+
+                self.log(f"    - [Video Snap] Detected {len(scenes)} scene changes")
+                return sorted(scenes)
+
+            except Exception as e:
+                self.log(f"    - [Video Snap] ERROR: Failed to detect scenes: {e}")
+                return []
+
+        elif mode == 'keyframes':
+            # Get I-frames (keyframes) using ffprobe
+            cmd = [
+                'ffprobe', '-v', 'error',
+                '-select_streams', 'v:0',
+                '-show_entries', 'packet=pts_time,flags',
+                '-of', 'json',
+                video_file
+            ]
+
+            try:
+                result = self.runner.run(cmd, self.tool_paths, capture_output=True)
+                if result is None:
+                    return []
+
+                data = json.loads(result.stdout.decode('utf-8'))
+                keyframes = []
+
+                for packet in data.get('packets', []):
+                    if 'K' in packet.get('flags', ''):  # K = keyframe
+                        try:
+                            keyframes.append(float(packet['pts_time']))
+                        except (KeyError, ValueError):
+                            continue
+
+                self.log(f"    - [Video Snap] Found {len(keyframes)} keyframes")
+                return sorted(keyframes)
+
+            except Exception as e:
+                self.log(f"    - [Video Snap] ERROR: Failed to get keyframes: {e}")
+                return []
+
+        elif mode == 'any_frame':
+            # Get all frame timestamps
+            cmd = [
+                'ffprobe', '-v', 'error',
+                '-select_streams', 'v:0',
+                '-show_entries', 'packet=pts_time',
+                '-of', 'json',
+                video_file
+            ]
+
+            try:
+                result = self.runner.run(cmd, self.tool_paths, capture_output=True)
+                if result is None:
+                    return []
+
+                data = json.loads(result.stdout.decode('utf-8'))
+                frames = []
+
+                for packet in data.get('packets', []):
+                    try:
+                        frames.append(float(packet['pts_time']))
+                    except (KeyError, ValueError):
+                        continue
+
+                self.log(f"    - [Video Snap] Found {len(frames)} total frames")
+                return sorted(frames)
+
+            except Exception as e:
+                self.log(f"    - [Video Snap] ERROR: Failed to get frames: {e}")
+                return []
+
+        return []
+
+    def _snap_boundary_to_video_frame(self, video_file: str, boundary_s: float) -> float:
+        """
+        Attempt to snap a boundary to a nearby video frame or scene.
+
+        Args:
+            video_file: Path to reference video file
+            boundary_s: Original boundary position in seconds (reference timeline)
+
+        Returns:
+            New boundary position (or original if no suitable frame found)
+        """
+        if not self.config.get('stepping_snap_to_video_frames', False):
+            return boundary_s
+
+        snap_mode = self.config.get('stepping_video_snap_mode', 'scenes')
+        max_offset = self.config.get('stepping_video_snap_max_offset_s', 2.0)
+
+        self.log(f"    - [Video Snap] Searching for {snap_mode} near {boundary_s:.3f}s (reference timeline)")
+
+        # Get video frame/scene positions
+        video_positions = self._get_video_frames(video_file, snap_mode)
+
+        if not video_positions:
+            self.log(f"    - [Video Snap] No {snap_mode} detected, keeping audio-based boundary")
+            return boundary_s
+
+        # Find nearest position
+        nearest = min(video_positions, key=lambda x: abs(x - boundary_s))
+        offset = nearest - boundary_s
+
+        # Check if within acceptable range
+        if abs(offset) <= max_offset:
+            self.log(f"    - [Video Snap] Found {snap_mode[:-1]} at {nearest:.3f}s (offset: {offset:+.3f}s)")
+            self.log(f"    - [Video Snap] Snapping boundary on reference timeline: {boundary_s:.3f}s → {nearest:.3f}s")
+            return nearest
+        else:
+            self.log(f"    - [Video Snap] Nearest {snap_mode[:-1]} at {nearest:.3f}s is too far (offset: {offset:+.3f}s > {max_offset:.1f}s)")
+            self.log(f"    - [Video Snap] Keeping audio-based boundary at {boundary_s:.3f}s")
+            return boundary_s
+
     def _extract_content_from_reference(
         self,
         ref_pcm: np.ndarray,
@@ -486,7 +645,8 @@ class SteppingCorrector:
 
             # Check if this is actual content (not silence)
             content_std = np.std(candidate_content)
-            if content_std < 1e-6:
+            # For int32 PCM audio, std < 100 indicates silence/near-silence
+            if content_std < 100.0:
                 self.log(f"      [Smart Fill] Reference has silence at position → using silence fill")
                 return None, 0.0, 'silence'
 
@@ -509,7 +669,8 @@ class SteppingCorrector:
 
                 if len(analysis_search_region) > gap_samples:
                     analysis_std = np.std(analysis_search_region)
-                    if analysis_std > 1e-6:
+                    # For int32 PCM audio, std > 100 indicates actual audio content
+                    if analysis_std > 100.0:
                         analysis_norm = (analysis_search_region - np.mean(analysis_search_region)) / (analysis_std + 1e-9)
 
                         # Correlate to find if this content exists in analysis
@@ -1017,7 +1178,7 @@ class SteppingCorrector:
                 if abs(delay_before - delay_after) < triage_std_dev_ms:
                     continue
 
-                boundary_s_ref = self._find_boundary_in_zone(ref_pcm, analysis_pcm, sample_rate, zone_start_s, zone_end_s, delay_before, delay_after)
+                boundary_s_ref = self._find_boundary_in_zone(ref_pcm, analysis_pcm, sample_rate, zone_start_s, zone_end_s, delay_before, delay_after, ref_file_path)
                 boundary_s_target = boundary_s_ref + (delay_before / 1000.0)
                 edl.append(AudioSegment(start_s=boundary_s_target, end_s=boundary_s_target, delay_ms=delay_after))
 
