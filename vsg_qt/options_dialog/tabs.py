@@ -572,6 +572,67 @@ class SteppingTab(QWidget):
         segment_layout.addRow("    Silence Threshold:", self.widgets['stepping_silence_threshold_db'])
         segment_layout.addRow("    Min Silence Duration:", self.widgets['stepping_silence_min_duration_ms'])
 
+        # Video-aware boundary snapping
+        segment_layout.addRow(QLabel("<i>Video-Aware Boundary Snapping:</i>"))
+
+        self.widgets['stepping_snap_to_video_frames'] = QCheckBox("Enable boundary snapping to video frames/scenes")
+        self.widgets['stepping_snap_to_video_frames'].setToolTip(
+            "Aligns boundaries to video structure (scenes, keyframes, or frames).\n"
+            "When enabled, searches for video edit points near detected boundaries.\n"
+            "Ensures perfect audio-video sync at boundary points.\n"
+            "Particularly useful for stepped audio caused by:\n"
+            "  • Commercial breaks\n"
+            "  • Scene changes\n"
+            "  • Film reel changes\n"
+            "  • Chapter markers\n"
+            "Recommended: Enable for video content with visible scene changes.\n"
+            "Default: Disabled"
+        )
+
+        self.widgets['stepping_video_snap_mode'] = QComboBox()
+        self.widgets['stepping_video_snap_mode'].addItems(['scenes', 'keyframes', 'any_frame'])
+        self.widgets['stepping_video_snap_mode'].setToolTip(
+            "Video snap detection mode:\n"
+            "• scenes: Snap to scene changes (recommended for most content)\n"
+            "          Detects visual transitions like cuts, fades, and chapter breaks\n"
+            "• keyframes: Snap to I-frames (fast, good for encoded video)\n"
+            "             I-frames are complete frames, not deltas\n"
+            "• any_frame: Snap to nearest frame (most precise, slowest)\n"
+            "             Frame-perfect alignment\n"
+            "Default: scenes"
+        )
+
+        self.widgets['stepping_video_snap_max_offset_s'] = QDoubleSpinBox()
+        self.widgets['stepping_video_snap_max_offset_s'].setRange(0.1, 10.0)
+        self.widgets['stepping_video_snap_max_offset_s'].setSuffix(" s")
+        self.widgets['stepping_video_snap_max_offset_s'].setDecimals(1)
+        self.widgets['stepping_video_snap_max_offset_s'].setToolTip(
+            "Maximum distance to snap boundary to video position.\n"
+            "If nearest video position is further than this, boundary stays at audio-based position.\n"
+            "Larger = more flexible, but may move boundary further from audio detection\n"
+            "Smaller = keeps boundary closer to audio detection\n"
+            "Typical: 1-3 seconds\n"
+            "Default: 2.0s"
+        )
+
+        self.widgets['stepping_video_scene_threshold'] = QDoubleSpinBox()
+        self.widgets['stepping_video_scene_threshold'].setRange(0.1, 1.0)
+        self.widgets['stepping_video_scene_threshold'].setSingleStep(0.05)
+        self.widgets['stepping_video_scene_threshold'].setDecimals(2)
+        self.widgets['stepping_video_scene_threshold'].setToolTip(
+            "Scene detection sensitivity (only used in 'scenes' mode).\n"
+            "Lower = more sensitive (detects subtle transitions)\n"
+            "Higher = less sensitive (only major scene changes)\n"
+            "Range: 0.1 (very sensitive) to 1.0 (very insensitive)\n"
+            "Typical: 0.3-0.5\n"
+            "Default: 0.4"
+        )
+
+        segment_layout.addRow(self.widgets['stepping_snap_to_video_frames'])
+        segment_layout.addRow("    Video Snap Mode:", self.widgets['stepping_video_snap_mode'])
+        segment_layout.addRow("    Max Snap Distance:", self.widgets['stepping_video_snap_max_offset_s'])
+        segment_layout.addRow("    Scene Threshold:", self.widgets['stepping_video_scene_threshold'])
+
         segment_layout.addRow(QLabel("<i>Quality Assurance:</i>"))
         segment_layout.addRow("  QA Threshold:", self.widgets['segmented_qa_threshold'])
         segment_layout.addRow("  QA Chunk Count:", self.widgets['segment_qa_chunk_count'])

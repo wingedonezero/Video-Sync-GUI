@@ -137,6 +137,12 @@ class AppConfig:
             'stepping_silence_threshold_db': -40.0,  # Audio level in dB to consider as silence
             'stepping_silence_min_duration_ms': 100.0,  # Minimum silence duration to be considered for snapping
 
+            # --- Video-Aware Boundary Snapping ---
+            'stepping_snap_to_video_frames': False,  # Enable boundary snapping to video frames/scenes
+            'stepping_video_snap_mode': 'scenes',  # 'scenes', 'keyframes', or 'any_frame'
+            'stepping_video_snap_max_offset_s': 2.0,  # Maximum distance to snap (seconds)
+            'stepping_video_scene_threshold': 0.4,  # Scene detection sensitivity (0.1-1.0, lower=more sensitive)
+
             # --- Filtered Stepping Correction (New) ---
             'stepping_correction_mode': 'full',  # 'full', 'filtered', 'strict', 'disabled'
             'stepping_quality_mode': 'normal',  # 'strict', 'normal', 'lenient', 'custom'
