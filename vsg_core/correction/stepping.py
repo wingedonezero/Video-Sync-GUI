@@ -1346,7 +1346,7 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
                     original_props = preserved_item.track.props
 
                     # Build preserved track name from config
-                    preserved_label = self.config.get('stepping_preserved_track_label', '')
+                    preserved_label = corrector.config.get('stepping_preserved_track_label', '')
                     if preserved_label:
                         preserved_name = f"{original_props.name} ({preserved_label})" if original_props.name else preserved_label
                     else:
@@ -1367,7 +1367,7 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
                     target_item.container_delay_ms = 0  # FIXED: New FLAC has no container delay
 
                     # Build corrected track name from config
-                    corrected_label = self.config.get('stepping_corrected_track_label', '')
+                    corrected_label = corrector.config.get('stepping_corrected_track_label', '')
                     if corrected_label:
                         corrected_name = f"{original_props.name} ({corrected_label})" if original_props.name else corrected_label
                     else:
