@@ -235,7 +235,7 @@ class SteppingCorrector:
                 self.log(f"    - Coarse point at {timestamp_s:.1f}s: delay = {delay}ms")
         return coarse_map
 
-    def _find_boundary_in_zone(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int, zone_start_s: float, zone_end_s: float, delay_before: int, delay_after: int, ref_file_path: Optional[str] = None) -> float:
+    def _find_boundary_in_zone(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int, zone_start_s: float, zone_end_s: float, delay_before: int, delay_after: int, ref_file_path: Optional[str] = None, analysis_file_path: Optional[str] = None) -> float:
         self.log(f"  [SteppingCorrector] Stage 2: Performing fine scan in zone {zone_start_s:.1f}s - {zone_end_s:.1f}s...")
         zone_start_sample, zone_end_sample = int(zone_start_s * sample_rate), int(zone_end_s * sample_rate)
 
@@ -265,7 +265,7 @@ class SteppingCorrector:
         initial_boundary_target_s = initial_boundary_s + (delay_before / 1000.0)
 
         snapped_boundary_target_s = self._snap_boundary_to_silence(
-            analysis_pcm, sample_rate, initial_boundary_target_s
+            analysis_pcm, sample_rate, initial_boundary_target_s, analysis_file_path
         )
 
         # Convert snapped boundary back to reference timeline
@@ -283,9 +283,74 @@ class SteppingCorrector:
 
         return final_boundary_s
 
+    def _find_silence_zones_ffmpeg(self, audio_file: str, start_s: float, end_s: float, threshold_db: float, min_duration_s: float) -> List[Tuple[float, float, float]]:
+        """
+        Find silence zones using FFmpeg's silencedetect filter (frame-accurate).
+
+        Args:
+            audio_file: Path to audio file
+            start_s: Start of search window in seconds
+            end_s: End of search window in seconds
+            threshold_db: Silence threshold in dB
+            min_duration_s: Minimum silence duration in seconds
+
+        Returns:
+            List of tuples (start_s, end_s, avg_db) for each silence zone
+        """
+        import re
+
+        duration_s = end_s - start_s
+        if duration_s <= 0:
+            return []
+
+        # Run FFmpeg silencedetect filter
+        cmd = [
+            'ffmpeg', '-ss', str(start_s), '-t', str(duration_s),
+            '-i', audio_file,
+            '-af', f'silencedetect=noise={threshold_db}dB:d={min_duration_s}',
+            '-f', 'null', '-'
+        ]
+
+        try:
+            result = self.runner.run(cmd, self.tool_paths)
+            if result is None:
+                self.log(f"    - [FFmpeg silencedetect] Warning: Failed to run silencedetect")
+                return []
+
+            # Parse stderr output for silence_start and silence_end
+            # Format: [silencedetect @ ...] silence_start: 123.456
+            #         [silencedetect @ ...] silence_end: 125.678 | silence_duration: 2.222
+            silence_zones = []
+            silence_start = None
+
+            for line in result.splitlines():
+                # Look for silence_start
+                start_match = re.search(r'silence_start:\s*([\d.]+)', line)
+                if start_match:
+                    silence_start = float(start_match.group(1)) + start_s  # Adjust for -ss offset
+                    continue
+
+                # Look for silence_end
+                end_match = re.search(r'silence_end:\s*([\d.]+)', line)
+                if end_match and silence_start is not None:
+                    silence_end = float(end_match.group(1)) + start_s  # Adjust for -ss offset
+
+                    # Estimate average dB (FFmpeg doesn't provide this, use threshold as estimate)
+                    avg_db = threshold_db - 5.0  # Assume it's quieter than threshold
+
+                    silence_zones.append((silence_start, silence_end, avg_db))
+                    silence_start = None
+
+            self.log(f"    - [FFmpeg silencedetect] Found {len(silence_zones)} silence zone(s) with threshold {threshold_db}dB")
+            return silence_zones
+
+        except Exception as e:
+            self.log(f"    - [FFmpeg silencedetect] Error: {e}")
+            return []
+
     def _find_silence_zones(self, pcm: np.ndarray, sample_rate: int, start_s: float, end_s: float, threshold_db: float, min_duration_ms: float) -> List[Tuple[float, float, float]]:
         """
-        Find silence zones in audio within a time window.
+        Find silence zones in audio within a time window using RMS-based detection.
 
         Args:
             pcm: Audio PCM data (mono, int32)
@@ -363,14 +428,152 @@ class SteppingCorrector:
 
         return silence_zones
 
-    def _snap_boundary_to_silence(self, analysis_pcm: np.ndarray, sample_rate: int, boundary_s: float) -> float:
+    def _detect_speech_regions_vad(self, pcm: np.ndarray, sample_rate: int, start_s: float, end_s: float) -> List[Tuple[float, float]]:
         """
-        Attempt to snap a boundary to a nearby silence zone.
+        Detect speech regions using Voice Activity Detection (WebRTC VAD).
+        Requires webrtcvad library: pip install webrtcvad-wheels
+
+        Args:
+            pcm: Audio PCM data (mono, int32)
+            sample_rate: Sample rate in Hz
+            start_s: Start of search window in seconds
+            end_s: End of search window in seconds
+
+        Returns:
+            List of tuples (start_s, end_s) for each speech region
+        """
+        if not self.config.get('stepping_vad_enabled', True):
+            return []
+
+        try:
+            import webrtcvad
+        except ImportError:
+            self.log(f"    - [VAD] webrtcvad not installed, skipping speech detection")
+            self.log(f"    - [VAD] Install with: pip install webrtcvad-wheels")
+            return []
+
+        aggressiveness = self.config.get('stepping_vad_aggressiveness', 2)
+        frame_duration_ms = self.config.get('stepping_vad_frame_duration_ms', 30)
+
+        # VAD only works with specific sample rates
+        vad_sample_rate = 16000 if sample_rate >= 16000 else 8000
+
+        # Convert to required format
+        start_sample = max(0, int(start_s * sample_rate))
+        end_sample = min(len(pcm), int(end_s * sample_rate))
+        audio_segment = pcm[start_sample:end_sample]
+
+        if len(audio_segment) == 0:
+            return []
+
+        # Resample if needed and convert to int16
+        if sample_rate != vad_sample_rate:
+            # Simple decimation for downsampling
+            step = sample_rate // vad_sample_rate
+            audio_segment = audio_segment[::step]
+
+        # Convert int32 to int16 for VAD
+        audio_int16 = (audio_segment / 65536).astype(np.int16)
+        audio_bytes = audio_int16.tobytes()
+
+        # Initialize VAD
+        vad = webrtcvad.Vad(aggressiveness)
+
+        # Process in frames
+        frame_size = int(vad_sample_rate * frame_duration_ms / 1000)  # samples per frame
+        frame_bytes = frame_size * 2  # 2 bytes per int16 sample
+
+        speech_regions = []
+        speech_start = None
+
+        for i in range(0, len(audio_bytes) - frame_bytes, frame_bytes):
+            frame = audio_bytes[i:i + frame_bytes]
+            is_speech = vad.is_speech(frame, vad_sample_rate)
+
+            frame_time_s = start_s + (i / 2 / vad_sample_rate)  # Convert byte position to time
+
+            if is_speech and speech_start is None:
+                speech_start = frame_time_s
+            elif not is_speech and speech_start is not None:
+                speech_regions.append((speech_start, frame_time_s))
+                speech_start = None
+
+        # Close final region if still open
+        if speech_start is not None:
+            speech_regions.append((speech_start, end_s))
+
+        self.log(f"    - [VAD] Detected {len(speech_regions)} speech region(s)")
+        return speech_regions
+
+    def _detect_transients(self, pcm: np.ndarray, sample_rate: int, start_s: float, end_s: float) -> List[float]:
+        """
+        Detect transients (sudden amplitude increases like musical beats/impacts).
+
+        Args:
+            pcm: Audio PCM data (mono, int32)
+            sample_rate: Sample rate in Hz
+            start_s: Start of search window in seconds
+            end_s: End of search window in seconds
+
+        Returns:
+            List of timestamps where transients occur
+        """
+        if not self.config.get('stepping_transient_detection_enabled', True):
+            return []
+
+        threshold_db = self.config.get('stepping_transient_threshold', 8.0)
+
+        start_sample = max(0, int(start_s * sample_rate))
+        end_sample = min(len(pcm), int(end_s * sample_rate))
+
+        if end_sample <= start_sample:
+            return []
+
+        # Window size for RMS calculation (10ms windows)
+        window_size = int(0.01 * sample_rate)
+        if window_size < 1:
+            window_size = 1
+
+        transients = []
+        prev_rms_db = None
+
+        # Scan through the region in windows
+        for sample_pos in range(start_sample, end_sample - window_size, window_size):
+            window = pcm[sample_pos:sample_pos + window_size]
+
+            if len(window) == 0:
+                continue
+
+            # Calculate RMS amplitude
+            rms = np.sqrt(np.mean(window.astype(np.float64) ** 2))
+
+            # Convert to dB
+            if rms > 1e-10:
+                rms_db = 20 * np.log10(rms / 2147483648.0)
+            else:
+                rms_db = -96.0
+
+            # Detect sudden increase (transient)
+            if prev_rms_db is not None:
+                increase_db = rms_db - prev_rms_db
+                if increase_db >= threshold_db:
+                    transient_time_s = sample_pos / sample_rate
+                    transients.append(transient_time_s)
+
+            prev_rms_db = rms_db
+
+        self.log(f"    - [Transient Detection] Found {len(transients)} transient(s) with threshold {threshold_db}dB")
+        return transients
+
+    def _snap_boundary_to_silence(self, analysis_pcm: np.ndarray, sample_rate: int, boundary_s: float, analysis_file: Optional[str] = None) -> float:
+        """
+        Attempt to snap a boundary to a nearby silence zone using advanced detection methods.
 
         Args:
             analysis_pcm: Target audio PCM data
             sample_rate: Sample rate in Hz
             boundary_s: Original boundary position in seconds
+            analysis_file: Path to analysis audio file (required for FFmpeg silencedetect)
 
         Returns:
             New boundary position (or original if no suitable silence found)
@@ -378,7 +581,8 @@ class SteppingCorrector:
         if not self.config.get('stepping_snap_to_silence', True):
             return boundary_s
 
-        search_window_s = self.config.get('stepping_silence_search_window_s', 3.0)
+        detection_method = self.config.get('stepping_silence_detection_method', 'smart_fusion')
+        search_window_s = self.config.get('stepping_silence_search_window_s', 5.0)
         threshold_db = self.config.get('stepping_silence_threshold_db', -40.0)
         min_duration_ms = self.config.get('stepping_silence_min_duration_ms', 100.0)
 
@@ -386,58 +590,155 @@ class SteppingCorrector:
         search_start = max(0, boundary_s - search_window_s)
         search_end = boundary_s + search_window_s
 
-        silence_zones = self._find_silence_zones(
-            analysis_pcm, sample_rate, search_start, search_end,
-            threshold_db, min_duration_ms
-        )
+        # Select detection method
+        silence_zones = []
+
+        if detection_method == 'ffmpeg_silencedetect' and analysis_file:
+            # Use FFmpeg's silencedetect for frame-accurate detection
+            ffmpeg_threshold = self.config.get('stepping_ffmpeg_silence_noise', -40.0)
+            ffmpeg_duration = self.config.get('stepping_ffmpeg_silence_duration', 0.1)
+            silence_zones = self._find_silence_zones_ffmpeg(
+                analysis_file, search_start, search_end,
+                ffmpeg_threshold, ffmpeg_duration
+            )
+        elif detection_method == 'rms_basic':
+            # Use traditional RMS-based detection
+            silence_zones = self._find_silence_zones(
+                analysis_pcm, sample_rate, search_start, search_end,
+                threshold_db, min_duration_ms
+            )
+        elif detection_method == 'smart_fusion':
+            # Use multi-signal fusion approach
+            # Try FFmpeg first if available, fallback to RMS
+            if analysis_file:
+                ffmpeg_threshold = self.config.get('stepping_ffmpeg_silence_noise', -40.0)
+                ffmpeg_duration = self.config.get('stepping_ffmpeg_silence_duration', 0.1)
+                silence_zones = self._find_silence_zones_ffmpeg(
+                    analysis_file, search_start, search_end,
+                    ffmpeg_threshold, ffmpeg_duration
+                )
+
+            # Fallback to RMS if FFmpeg failed or no file provided
+            if not silence_zones:
+                silence_zones = self._find_silence_zones(
+                    analysis_pcm, sample_rate, search_start, search_end,
+                    threshold_db, min_duration_ms
+                )
+        else:
+            # Default to RMS
+            silence_zones = self._find_silence_zones(
+                analysis_pcm, sample_rate, search_start, search_end,
+                threshold_db, min_duration_ms
+            )
 
         if not silence_zones:
             self.log(f"    - [Silence Snap] No silence zones found within ±{search_window_s}s window (target timeline)")
             return boundary_s
 
-        # Find the silence zone that best contains or is closest to the boundary
-        best_zone = None
-        best_score = float('inf')
+        # Get additional signals for smart fusion
+        speech_regions = []
+        transients = []
+
+        if detection_method == 'smart_fusion':
+            # Detect speech regions to avoid
+            if self.config.get('stepping_vad_enabled', True) and self.config.get('stepping_vad_avoid_speech', True):
+                speech_regions = self._detect_speech_regions_vad(
+                    analysis_pcm, sample_rate, search_start, search_end
+                )
+
+            # Detect transients to avoid
+            if self.config.get('stepping_transient_detection_enabled', True):
+                transients = self._detect_transients(
+                    analysis_pcm, sample_rate, search_start, search_end
+                )
+
+        # Score each silence zone using multi-signal fusion
+        best_candidate = None
+        best_score = -float('inf')  # Higher score is better
+
+        # Get scoring weights
+        weight_silence = self.config.get('stepping_fusion_weight_silence', 10)
+        weight_no_speech = self.config.get('stepping_fusion_weight_no_speech', 8)
+        weight_duration = self.config.get('stepping_fusion_weight_duration', 2)
+        weight_no_transient = self.config.get('stepping_fusion_weight_no_transient', 3)
+        transient_avoid_window_ms = self.config.get('stepping_transient_avoid_window_ms', 50) / 1000.0
 
         for zone_start, zone_end, avg_db in silence_zones:
             zone_center = (zone_start + zone_end) / 2.0
             zone_duration = zone_end - zone_start
 
-            # Check if boundary is within this zone
-            if zone_start <= boundary_s <= zone_end:
-                # Boundary is inside this silence zone - prefer using it
-                # Score by how centered the boundary is (prefer center of silence)
-                distance_from_center = abs(boundary_s - zone_center)
-                score = distance_from_center / zone_duration
+            # Determine snap point: use center of zone for safety
+            snap_point = zone_center
 
-                if score < best_score:
-                    best_score = score
-                    best_zone = (zone_start, zone_end, boundary_s, avg_db, True)
+            # Calculate score based on multiple factors
+            score = 0
+
+            # 1. Silence depth (quieter is better)
+            silence_depth_score = max(0, (threshold_db - avg_db) / 10.0) * weight_silence
+            score += silence_depth_score
+
+            # 2. Distance to original boundary (closer is better)
+            distance = abs(snap_point - boundary_s)
+            distance_score = max(0, (search_window_s - distance) / search_window_s) * 5
+            score += distance_score
+
+            # 3. Zone duration (longer silence is better for smooth cuts)
+            duration_score = min(zone_duration / 1.0, 1.0) * weight_duration
+            score += duration_score
+
+            # 4. Speech avoidance (penalize zones with speech)
+            overlaps_speech = False
+            if speech_regions:
+                for speech_start, speech_end in speech_regions:
+                    if not (snap_point < speech_start or snap_point > speech_end):
+                        overlaps_speech = True
+                        break
+
+            if not overlaps_speech:
+                score += weight_no_speech
             else:
-                # Boundary is outside - snap to CENTER of silence zone (not edge!)
-                # This ensures we're safely in the middle of silence, avoiding abrupt starts/ends
-                distance_to_center = abs(boundary_s - zone_center)
-                snap_point = zone_center
+                score -= weight_no_speech * 2  # Heavy penalty for speech
 
-                # Prefer closer zones, and prefer longer/quieter zones
-                score = distance_to_center - (zone_duration * 0.1) + (avg_db / 100.0)
+            # 5. Transient avoidance (penalize zones near musical beats)
+            near_transient = False
+            if transients:
+                for transient_time in transients:
+                    if abs(snap_point - transient_time) < transient_avoid_window_ms:
+                        near_transient = True
+                        break
 
-                if score < best_score:
-                    best_score = score
-                    best_zone = (zone_start, zone_end, snap_point, avg_db, False)
+            if not near_transient:
+                score += weight_no_transient
+            else:
+                score -= weight_no_transient  # Moderate penalty for transients
 
-        if best_zone:
-            zone_start, zone_end, snap_point, avg_db, is_inside = best_zone
-            zone_center = (zone_start + zone_end) / 2.0
+            # Track best candidate
+            if score > best_score:
+                best_score = score
+                best_candidate = {
+                    'zone_start': zone_start,
+                    'zone_end': zone_end,
+                    'snap_point': snap_point,
+                    'avg_db': avg_db,
+                    'score': score,
+                    'overlaps_speech': overlaps_speech,
+                    'near_transient': near_transient,
+                    'duration': zone_duration
+                }
+
+        if best_candidate:
+            snap_point = best_candidate['snap_point']
+            zone_start = best_candidate['zone_start']
+            zone_end = best_candidate['zone_end']
+            avg_db = best_candidate['avg_db']
             offset = snap_point - boundary_s
 
-            if is_inside:
-                self.log(f"    - [Silence Snap] Boundary is already in silence zone [{zone_start:.3f}s - {zone_end:.3f}s, {avg_db:.1f}dB] (target timeline)")
-                self.log(f"    - [Silence Snap] Keeping boundary at {boundary_s:.3f}s (inside silence)")
-            else:
-                self.log(f"    - [Silence Snap] Found silence zone [{zone_start:.3f}s - {zone_end:.3f}s, {avg_db:.1f}dB] (target timeline)")
-                self.log(f"    - [Silence Snap] Snapping boundary to center of silence: {boundary_s:.3f}s → {snap_point:.3f}s (offset: {offset:+.3f}s)")
-                return snap_point
+            # Log the decision
+            self.log(f"    - [Smart Boundary] Found silence zone [{zone_start:.3f}s - {zone_end:.3f}s, {avg_db:.1f}dB]")
+            self.log(f"    - [Smart Boundary] Snapping: {boundary_s:.3f}s → {snap_point:.3f}s (offset: {offset:+.3f}s)")
+            self.log(f"    - [Smart Boundary] Score: {best_candidate['score']:.1f} | Speech: {'YES' if best_candidate['overlaps_speech'] else 'NO'} | Transient: {'YES' if best_candidate['near_transient'] else 'NO'}")
+
+            return snap_point
 
         return boundary_s
 
@@ -1165,7 +1466,7 @@ class SteppingCorrector:
                 if abs(delay_before - delay_after) < triage_std_dev_ms:
                     continue
 
-                boundary_s_ref = self._find_boundary_in_zone(ref_pcm, analysis_pcm, sample_rate, zone_start_s, zone_end_s, delay_before, delay_after, ref_file_path)
+                boundary_s_ref = self._find_boundary_in_zone(ref_pcm, analysis_pcm, sample_rate, zone_start_s, zone_end_s, delay_before, delay_after, ref_file_path, analysis_audio_path)
                 boundary_s_target = boundary_s_ref + (delay_before / 1000.0)
                 edl.append(AudioSegment(start_s=boundary_s_target, end_s=boundary_s_target, delay_ms=delay_after))
 

@@ -520,8 +520,70 @@ class SteppingTab(QWidget):
         segment_layout.addRow("  Chunk Duration:", self.widgets['segment_fine_chunk_s'])
         segment_layout.addRow("  Iterations:", self.widgets['segment_fine_iterations'])
 
+        # Advanced Silence Detection Methods
+        segment_layout.addRow(QLabel("<b>Advanced Silence Detection:</b>"))
+
+        self.widgets['stepping_silence_detection_method'] = QComboBox()
+        self.widgets['stepping_silence_detection_method'].addItems(['smart_fusion', 'ffmpeg_silencedetect', 'rms_basic'])
+        self.widgets['stepping_silence_detection_method'].setToolTip(
+            "Silence detection algorithm:\n"
+            "• smart_fusion (RECOMMENDED): Combines FFmpeg silencedetect + VAD + transient detection\n"
+            "  Uses multiple signals to find optimal cut points that avoid speech and music\n"
+            "  Provides the most accurate and content-aware boundary placement\n\n"
+            "• ffmpeg_silencedetect: Frame-accurate FFmpeg silence detector\n"
+            "  Fast and precise, but doesn't avoid speech or musical beats\n\n"
+            "• rms_basic: Traditional RMS energy-based detection\n"
+            "  Legacy method, least accurate but fastest\n\n"
+            "Default: smart_fusion"
+        )
+
+        self.widgets['stepping_vad_enabled'] = QCheckBox("Enable speech protection (VAD)")
+        self.widgets['stepping_vad_enabled'].setToolTip(
+            "Uses Voice Activity Detection to identify and avoid cutting dialogue.\n"
+            "Prevents boundaries from being placed in the middle of speech.\n"
+            "Requires: pip install webrtcvad-wheels\n"
+            "Recommended: Keep enabled for dialogue-heavy content\n"
+            "Default: Enabled"
+        )
+
+        self.widgets['stepping_vad_aggressiveness'] = QSpinBox()
+        self.widgets['stepping_vad_aggressiveness'].setRange(0, 3)
+        self.widgets['stepping_vad_aggressiveness'].setToolTip(
+            "VAD aggressiveness level (0-3):\n"
+            "0 = Least aggressive (keeps more audio as speech, safest)\n"
+            "1 = Moderate (balanced)\n"
+            "2 = Aggressive (recommended, good speech detection)\n"
+            "3 = Very aggressive (may miss some speech)\n"
+            "Default: 2"
+        )
+
+        self.widgets['stepping_transient_detection_enabled'] = QCheckBox("Enable transient detection (avoid musical beats)")
+        self.widgets['stepping_transient_detection_enabled'].setToolTip(
+            "Detects sudden amplitude increases (transients) like drum hits, beats, and impacts.\n"
+            "Avoids placing boundaries on musical beats for smoother cuts.\n"
+            "Recommended: Keep enabled for music-heavy content\n"
+            "Default: Enabled"
+        )
+
+        self.widgets['stepping_transient_threshold'] = QDoubleSpinBox()
+        self.widgets['stepping_transient_threshold'].setRange(3.0, 15.0)
+        self.widgets['stepping_transient_threshold'].setSuffix(" dB")
+        self.widgets['stepping_transient_threshold'].setDecimals(1)
+        self.widgets['stepping_transient_threshold'].setToolTip(
+            "dB threshold for detecting transients (sudden amplitude increases).\n"
+            "Lower = more sensitive (detects softer beats)\n"
+            "Higher = less sensitive (only loud impacts)\n"
+            "Default: 8.0 dB"
+        )
+
+        segment_layout.addRow("Detection Method:", self.widgets['stepping_silence_detection_method'])
+        segment_layout.addRow(self.widgets['stepping_vad_enabled'])
+        segment_layout.addRow("    VAD Aggressiveness:", self.widgets['stepping_vad_aggressiveness'])
+        segment_layout.addRow(self.widgets['stepping_transient_detection_enabled'])
+        segment_layout.addRow("    Transient Threshold:", self.widgets['stepping_transient_threshold'])
+
         # Silence-aware boundary snapping
-        segment_layout.addRow(QLabel("<i>Silence-Aware Boundary Snapping:</i>"))
+        segment_layout.addRow(QLabel("<b>Silence-Aware Boundary Snapping:</b>"))
 
         self.widgets['stepping_snap_to_silence'] = QCheckBox("Enable boundary snapping to silence zones")
         self.widgets['stepping_snap_to_silence'].setToolTip(
@@ -533,14 +595,14 @@ class SteppingTab(QWidget):
         )
 
         self.widgets['stepping_silence_search_window_s'] = QDoubleSpinBox()
-        self.widgets['stepping_silence_search_window_s'].setRange(0.5, 10.0)
+        self.widgets['stepping_silence_search_window_s'].setRange(0.5, 15.0)
         self.widgets['stepping_silence_search_window_s'].setSuffix(" s")
         self.widgets['stepping_silence_search_window_s'].setDecimals(1)
         self.widgets['stepping_silence_search_window_s'].setToolTip(
             "Search window in seconds (±N seconds from detected boundary).\n"
             "Larger = more flexibility in finding silence, but may move boundary further\n"
             "Smaller = keeps boundary closer to original detection\n"
-            "Default: 3.0s"
+            "Default: 5.0s (increased from 3.0s for better accuracy)"
         )
 
         self.widgets['stepping_silence_threshold_db'] = QDoubleSpinBox()

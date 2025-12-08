@@ -137,9 +137,34 @@ class AppConfig:
 
             # --- Silence-Aware Boundary Snapping ---
             'stepping_snap_to_silence': True,  # Enable boundary snapping to silence zones
-            'stepping_silence_search_window_s': 3.0,  # Search window in seconds (±N seconds from detected boundary)
+            'stepping_silence_search_window_s': 5.0,  # Search window in seconds (±N seconds from detected boundary)
             'stepping_silence_threshold_db': -40.0,  # Audio level in dB to consider as silence
             'stepping_silence_min_duration_ms': 100.0,  # Minimum silence duration to be considered for snapping
+
+            # --- Advanced Silence Detection Methods ---
+            'stepping_silence_detection_method': 'smart_fusion',  # 'rms_basic', 'ffmpeg_silencedetect', 'smart_fusion'
+
+            # FFmpeg silencedetect options (most accurate, frame-perfect)
+            'stepping_ffmpeg_silence_noise': -40.0,  # dB threshold for FFmpeg silencedetect
+            'stepping_ffmpeg_silence_duration': 0.1,  # Minimum silence duration in seconds
+
+            # Speech Protection (prevents cutting dialogue mid-sentence)
+            'stepping_vad_enabled': True,  # Enable Voice Activity Detection to protect speech
+            'stepping_vad_aggressiveness': 2,  # 0-3: 0=least aggressive (keeps more audio), 3=most aggressive
+            'stepping_vad_avoid_speech': True,  # Never cut in detected speech regions
+            'stepping_vad_frame_duration_ms': 30,  # VAD analysis frame size (10, 20, or 30ms)
+
+            # Transient Detection (prevents cutting on musical beats/impacts)
+            'stepping_transient_detection_enabled': True,  # Avoid cutting on musical transients
+            'stepping_transient_threshold': 8.0,  # dB increase threshold for transient detection
+            'stepping_transient_avoid_window_ms': 50,  # Avoid cuts within ±N ms of transients
+
+            # Smart Fusion Scoring Weights (for 'smart_fusion' method)
+            'stepping_fusion_weight_silence': 10,  # Weight for deep silence (low RMS)
+            'stepping_fusion_weight_no_speech': 8,  # Weight for non-speech regions
+            'stepping_fusion_weight_scene_align': 5,  # Weight for alignment with scene changes
+            'stepping_fusion_weight_duration': 2,  # Weight for longer silence zones
+            'stepping_fusion_weight_no_transient': 3,  # Weight for avoiding transients
 
             # --- Video-Aware Boundary Snapping ---
             'stepping_snap_to_video_frames': False,  # Enable boundary snapping to video frames/scenes
