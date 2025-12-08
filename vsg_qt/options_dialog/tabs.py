@@ -755,7 +755,49 @@ class SteppingTab(QWidget):
         segment_layout.addRow("  Outlier Sensitivity:", self.widgets['segment_drift_outlier_sensitivity'])
         segment_layout.addRow("  Scan Buffer %:", self.widgets['segment_drift_scan_buffer_pct'])
 
-        # ===== SECTION 6: SUBTITLE ADJUSTMENT =====
+        # ===== SECTION 6: TRACK NAMING =====
+        # Controls track naming in final MKV output
+        segment_layout.addRow(QLabel(""))
+        segment_layout.addRow(QLabel("<b>═══ Track Naming ═══</b>"))
+        segment_layout.addRow(QLabel("<i>Controls track naming in final MKV output</i>"))
+
+        self.widgets['stepping_corrected_track_label'] = QLineEdit()
+        self.widgets['stepping_corrected_track_label'].setPlaceholderText("Leave empty for no label")
+        self.widgets['stepping_corrected_track_label'].setToolTip(
+            "Label added to corrected audio tracks in final MKV.\n"
+            "If original track has a name, label is added in brackets.\n"
+            "If original track has no name, only the label is used.\n\n"
+            "Examples:\n"
+            "  Label = 'Stepping Corrected':\n"
+            "    'Surround 5.1' → 'Surround 5.1 (Stepping Corrected)'\n"
+            "    (no name) → 'Stepping Corrected'\n\n"
+            "  Label = '' (empty):\n"
+            "    'Surround 5.1' → 'Surround 5.1'\n"
+            "    (no name) → (no name)\n\n"
+            "Temp files still use 'corrected' for tracking.\n"
+            "Default: Empty (no label)"
+        )
+
+        self.widgets['stepping_preserved_track_label'] = QLineEdit()
+        self.widgets['stepping_preserved_track_label'].setPlaceholderText("Leave empty for no label")
+        self.widgets['stepping_preserved_track_label'].setToolTip(
+            "Label added to preserved original tracks in final MKV.\n"
+            "Preserved originals are kept when 'Preserve Original' is enabled.\n"
+            "Follows same naming rules as corrected tracks.\n\n"
+            "Examples:\n"
+            "  Label = 'Original':\n"
+            "    'Surround 5.1' → 'Surround 5.1 (Original)'\n"
+            "    (no name) → 'Original'\n\n"
+            "  Label = '' (empty):\n"
+            "    'Surround 5.1' → 'Surround 5.1'\n"
+            "    (no name) → (no name)\n\n"
+            "Default: Empty (no label)"
+        )
+
+        segment_layout.addRow("Corrected Track Label:", self.widgets['stepping_corrected_track_label'])
+        segment_layout.addRow("Preserved Track Label:", self.widgets['stepping_preserved_track_label'])
+
+        # ===== SECTION 7: SUBTITLE ADJUSTMENT =====
         # Controls subtitle timestamp adjustments for stepped sources
         segment_layout.addRow(QLabel(""))
         segment_layout.addRow(QLabel("<b>═══ Subtitle Adjustment ═══</b>"))
@@ -792,7 +834,7 @@ class SteppingTab(QWidget):
         segment_layout.addRow(self.widgets['stepping_adjust_subtitles_no_audio'])
         segment_layout.addRow("Boundary Spanning Mode:", self.widgets['stepping_boundary_mode'])
 
-        # ===== SECTION 7: DIAGNOSTICS =====
+        # ===== SECTION 8: DIAGNOSTICS =====
         # Controls diagnostic logging and debugging output
         segment_layout.addRow(QLabel(""))
         segment_layout.addRow(QLabel("<b>═══ Diagnostics ═══</b>"))
