@@ -1344,12 +1344,20 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
                     preserved_item.is_preserved = True
                     preserved_item.is_default = False
                     original_props = preserved_item.track.props
+
+                    # Build preserved track name from config
+                    preserved_label = self.config.get('stepping_preserved_track_label', '')
+                    if preserved_label:
+                        preserved_name = f"{original_props.name} ({preserved_label})" if original_props.name else preserved_label
+                    else:
+                        preserved_name = original_props.name if original_props.name else None
+
                     preserved_item.track = Track(
                         source=preserved_item.track.source, id=preserved_item.track.id, type=preserved_item.track.type,
                         props=StreamProps(
                             codec_id=original_props.codec_id,
                             lang=original_props.lang,
-                            name=f"{original_props.name} (Original)" if original_props.name else "Original"
+                            name=preserved_name
                         )
                     )
 
@@ -1357,12 +1365,20 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
                     target_item.extracted_path = corrected_path
                     target_item.is_corrected = True
                     target_item.container_delay_ms = 0  # FIXED: New FLAC has no container delay
+
+                    # Build corrected track name from config
+                    corrected_label = self.config.get('stepping_corrected_track_label', '')
+                    if corrected_label:
+                        corrected_name = f"{original_props.name} ({corrected_label})" if original_props.name else corrected_label
+                    else:
+                        corrected_name = original_props.name if original_props.name else None
+
                     target_item.track = Track(
                         source=target_item.track.source, id=target_item.track.id, type=target_item.track.type,
                         props=StreamProps(
                             codec_id="FLAC",
                             lang=original_props.lang,
-                            name=f"{original_props.name} (Stepping Corrected)" if original_props.name else "Stepping Corrected"  # FIXED: Clearer name
+                            name=corrected_name
                         )
                     )
                     target_item.apply_track_name = True

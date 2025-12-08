@@ -131,6 +131,10 @@ class AppConfig:
             'stepping_adjust_subtitles_no_audio': True,  # Apply stepping to subtitles when no audio is merged (uses correlation-based EDL)
             'stepping_boundary_mode': 'start',  # How to handle subs spanning boundaries: 'start', 'majority', 'midpoint'
 
+            # --- Track Naming ---
+            'stepping_corrected_track_label': '',  # Label for corrected audio in final MKV (empty = no label, e.g., "Stepping Corrected")
+            'stepping_preserved_track_label': '',  # Label for preserved original in final MKV (empty = no label, e.g., "Original")
+
             # --- Silence-Aware Boundary Snapping ---
             'stepping_snap_to_silence': True,  # Enable boundary snapping to silence zones
             'stepping_silence_search_window_s': 3.0,  # Search window in seconds (±N seconds from detected boundary)
