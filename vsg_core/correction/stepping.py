@@ -173,7 +173,9 @@ class SteppingCorrector:
 
         if len(ref_chunk) < 100 or len(analysis_chunk) < len(ref_chunk): return None
         ref_std, analysis_std = np.std(ref_chunk), np.std(analysis_chunk)
-        if ref_std < 1e-6 or analysis_std < 1e-6: return None
+        # For int32 PCM audio, std < 100 indicates silence/near-silence
+        # This prevents division by zero in correlation
+        if ref_std < 100.0 or analysis_std < 100.0: return None
 
         r = (ref_chunk - np.mean(ref_chunk)) / (ref_std + 1e-9)
         t = (analysis_chunk - np.mean(analysis_chunk)) / (analysis_std + 1e-9)
@@ -643,7 +645,8 @@ class SteppingCorrector:
 
             # Check if this is actual content (not silence)
             content_std = np.std(candidate_content)
-            if content_std < 1e-6:
+            # For int32 PCM audio, std < 100 indicates silence/near-silence
+            if content_std < 100.0:
                 self.log(f"      [Smart Fill] Reference has silence at position → using silence fill")
                 return None, 0.0, 'silence'
 
@@ -666,7 +669,8 @@ class SteppingCorrector:
 
                 if len(analysis_search_region) > gap_samples:
                     analysis_std = np.std(analysis_search_region)
-                    if analysis_std > 1e-6:
+                    # For int32 PCM audio, std > 100 indicates actual audio content
+                    if analysis_std > 100.0:
                         analysis_norm = (analysis_search_region - np.mean(analysis_search_region)) / (analysis_std + 1e-9)
 
                         # Correlate to find if this content exists in analysis
