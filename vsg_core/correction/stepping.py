@@ -288,15 +288,32 @@ class SteppingCorrector:
 
         # Apply video-aware boundary snapping if enabled
         # Video snap operates on reference timeline
-        if ref_file_path:
+        if ref_file_path and boundary_metadata:
             video_snapped_boundary_s = self._snap_boundary_to_video_frame(ref_file_path, final_boundary_s)
             if abs(video_snapped_boundary_s - final_boundary_s) > 0.001:
-                old_final = final_boundary_s
-                final_boundary_s = video_snapped_boundary_s
-                final_target_s = final_boundary_s + (delay_before / 1000.0)
-                self.log(f"    - [After Video Snap] Final adjusted position:")
-                self.log(f"        Reference: {final_boundary_s:.3f}s (was {old_final:.3f}s, moved to keyframe)")
-                self.log(f"        Target:    {final_target_s:.3f}s")
+                # Check if video snap would move outside the silence zone
+                video_snapped_target_s = video_snapped_boundary_s + (delay_before / 1000.0)
+                silence_start = boundary_metadata.get('zone_start', 0)
+                silence_end = boundary_metadata.get('zone_end', 0)
+                no_silence = boundary_metadata.get('no_silence_found', False)
+
+                # Only validate if we had a real silence zone
+                if not no_silence and (video_snapped_target_s < silence_start or video_snapped_target_s > silence_end):
+                    self.log(f"    - [Video Snap] ⚠️  Keyframe at {video_snapped_boundary_s:.3f}s (target: {video_snapped_target_s:.3f}s) is outside silence zone")
+                    self.log(f"    - [Video Snap] Silence zone: [{silence_start:.3f}s - {silence_end:.3f}s]")
+                    self.log(f"    - [Video Snap] Keeping audio-snapped boundary to maintain silence guarantee")
+                    # Flag this in metadata for audit
+                    boundary_metadata['video_snap_skipped'] = True
+                    boundary_metadata['video_snap_reason'] = 'outside_silence_zone'
+                else:
+                    # Video snap is valid - apply it
+                    old_final = final_boundary_s
+                    final_boundary_s = video_snapped_boundary_s
+                    final_target_s = final_boundary_s + (delay_before / 1000.0)
+                    self.log(f"    - [After Video Snap] Final adjusted position:")
+                    self.log(f"        Reference: {final_boundary_s:.3f}s (was {old_final:.3f}s, moved to keyframe)")
+                    self.log(f"        Target:    {final_target_s:.3f}s")
+                    boundary_metadata['video_snap_applied'] = True
 
         # Final summary
         final_target_s = final_boundary_s + (delay_before / 1000.0)
@@ -659,8 +676,21 @@ class SteppingCorrector:
             )
 
         if not silence_zones:
-            self.log(f"    - [Silence Snap] No silence zones found within ±{search_window_s}s window (target timeline)")
-            return boundary_s, None
+            self.log(f"    - [Silence Snap] ⚠️  No silence zones found within ±{search_window_s}s window")
+            self.log(f"    - [Silence Snap] Using raw boundary without silence guarantee")
+            # Return metadata to flag this in audit
+            no_silence_metadata = {
+                'zone_start': boundary_s,
+                'zone_end': boundary_s,
+                'snap_point': boundary_s,
+                'avg_db': 0.0,
+                'score': 0.0,
+                'overlaps_speech': False,
+                'near_transient': False,
+                'duration': 0.0,
+                'no_silence_found': True  # Flag for audit
+            }
+            return boundary_s, no_silence_metadata
 
         # Get additional signals for smart fusion
         speech_regions = []

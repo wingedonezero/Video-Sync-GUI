@@ -66,6 +66,8 @@ class SteppingCorrectionAuditor(BaseAuditor):
                 overlaps_speech = boundary.get('overlaps_speech', False)
                 near_transient = boundary.get('near_transient', False)
                 avg_db = boundary.get('avg_db', 0)
+                no_silence_found = boundary.get('no_silence_found', False)
+                video_snap_skipped = boundary.get('video_snap_skipped', False)
 
                 # Determine action type
                 # When delay increases (positive): target is falling behind → INSERT silence
@@ -78,6 +80,17 @@ class SteppingCorrectionAuditor(BaseAuditor):
                     amount_s = abs(delay_change_ms) / 1000.0
                 else:
                     continue  # No change, skip
+
+                # Check 0: No silence zone found (highest priority)
+                if no_silence_found:
+                    self.log(f"    ⚠️  Boundary {idx} at {target_time_s:.1f}s:")
+                    self.log(f"        Action: {action} {amount_s:.3f}s")
+                    self.log(f"        Issue: No silence zone found in search window")
+                    self.log(f"        → Correction applied at raw boundary without silence guarantee")
+                    self.log(f"        → High risk of cutting dialogue/music")
+                    high_priority_issues.append(f"{source_key} at {target_time_s:.1f}s: No silence zone found")
+                    issues += 1
+                    source_issues += 1
 
                 # Check 1: Silence overflow (only for removals)
                 if action == "REMOVE" and amount_s > zone_duration * overflow_tolerance_pct:
@@ -132,6 +145,8 @@ class SteppingCorrectionAuditor(BaseAuditor):
                     # All checks passed
                     self.log(f"    ✓ Boundary {idx} at {target_time_s:.1f}s: {action} {amount_s:.3f}s")
                     self.log(f"      Silence: [{zone_start:.1f}s - {zone_end:.1f}s], Score: {score:.1f}")
+                    if video_snap_skipped:
+                        self.log(f"      Note: Video snap skipped to maintain silence guarantee")
 
             if source_issues == 0:
                 self.log(f"  ✅ {source_key}: All quality checks passed")
