@@ -258,13 +258,15 @@ class SteppingCorrector:
             else: low += chunk_samples
 
         initial_boundary_s = high / sample_rate
-        self.log(f"    - Found precise boundary at: {initial_boundary_s:.3f}s (reference timeline)")
+        initial_boundary_target_s = initial_boundary_s + (delay_before / 1000.0)
+
+        self.log(f"    - [Boundary Detection] Initial position:")
+        self.log(f"        Reference: {initial_boundary_s:.3f}s")
+        self.log(f"        Target:    {initial_boundary_target_s:.3f}s (ref + {delay_before}ms delay)")
 
         # Apply silence-aware boundary snapping if enabled
         # CRITICAL: Convert boundary to target timeline before checking for silence in target audio
         # Reference timeline position needs delay offset to get target timeline position
-        initial_boundary_target_s = initial_boundary_s + (delay_before / 1000.0)
-
         snapped_boundary_target_s, boundary_metadata = self._snap_boundary_to_silence(
             analysis_pcm, sample_rate, initial_boundary_target_s, analysis_file_path
         )
@@ -279,14 +281,30 @@ class SteppingCorrector:
         final_boundary_s = snapped_boundary_target_s - (delay_before / 1000.0)
 
         if abs(snapped_boundary_target_s - initial_boundary_target_s) > 0.001:
-            self.log(f"    - Snapped boundary on reference timeline: {initial_boundary_s:.3f}s → {final_boundary_s:.3f}s")
+            offset_s = snapped_boundary_target_s - initial_boundary_target_s
+            self.log(f"    - [After Audio Snap] Adjusted position:")
+            self.log(f"        Reference: {final_boundary_s:.3f}s (was {initial_boundary_s:.3f}s, moved {offset_s:+.3f}s)")
+            self.log(f"        Target:    {snapped_boundary_target_s:.3f}s (snapped to silence center)")
 
         # Apply video-aware boundary snapping if enabled
         # Video snap operates on reference timeline
         if ref_file_path:
             video_snapped_boundary_s = self._snap_boundary_to_video_frame(ref_file_path, final_boundary_s)
             if abs(video_snapped_boundary_s - final_boundary_s) > 0.001:
+                old_final = final_boundary_s
                 final_boundary_s = video_snapped_boundary_s
+                final_target_s = final_boundary_s + (delay_before / 1000.0)
+                self.log(f"    - [After Video Snap] Final adjusted position:")
+                self.log(f"        Reference: {final_boundary_s:.3f}s (was {old_final:.3f}s, moved to keyframe)")
+                self.log(f"        Target:    {final_target_s:.3f}s")
+
+        # Final summary
+        final_target_s = final_boundary_s + (delay_before / 1000.0)
+        delay_change = delay_after - delay_before
+        self.log(f"    - [Final Boundary] Correction will be applied at:")
+        self.log(f"        Reference: {final_boundary_s:.3f}s")
+        self.log(f"        Target:    {final_target_s:.3f}s")
+        self.log(f"        Action:    {'ADD' if delay_change > 0 else 'REMOVE'} {abs(delay_change)}ms")
 
         return final_boundary_s
 
@@ -588,6 +606,8 @@ class SteppingCorrector:
         if not self.config.get('stepping_snap_to_silence', True):
             return boundary_s, None
 
+        self.log(f"    - [Smart Boundary] Analyzing target audio near {boundary_s:.3f}s...")
+
         detection_method = self.config.get('stepping_silence_detection_method', 'smart_fusion')
         search_window_s = self.config.get('stepping_silence_search_window_s', 5.0)
         threshold_db = self.config.get('stepping_silence_threshold_db', -40.0)
@@ -852,7 +872,7 @@ class SteppingCorrector:
         snap_mode = self.config.get('stepping_video_snap_mode', 'scenes')
         max_offset = self.config.get('stepping_video_snap_max_offset_s', 2.0)
 
-        self.log(f"    - [Video Snap] Searching for {snap_mode} near {boundary_s:.3f}s (reference timeline)")
+        self.log(f"    - [Video Snap] Analyzing reference video near {boundary_s:.3f}s...")
 
         # Get video frame/scene positions
         video_positions = self._get_video_frames(video_file, snap_mode)
@@ -867,12 +887,11 @@ class SteppingCorrector:
 
         # Check if within acceptable range
         if abs(offset) <= max_offset:
-            self.log(f"    - [Video Snap] Found {snap_mode[:-1]} at {nearest:.3f}s (offset: {offset:+.3f}s)")
-            self.log(f"    - [Video Snap] Snapping boundary on reference timeline: {boundary_s:.3f}s → {nearest:.3f}s")
+            self.log(f"    - [Video Snap] Found {snap_mode[:-1]} at {nearest:.3f}s (moved {offset:+.3f}s to align with video)")
             return nearest
         else:
             self.log(f"    - [Video Snap] Nearest {snap_mode[:-1]} at {nearest:.3f}s is too far (offset: {offset:+.3f}s > {max_offset:.1f}s)")
-            self.log(f"    - [Video Snap] Keeping audio-based boundary at {boundary_s:.3f}s")
+            self.log(f"    - [Video Snap] Keeping audio-based boundary")
             return boundary_s
 
     def _extract_content_from_reference(

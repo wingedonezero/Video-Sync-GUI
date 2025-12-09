@@ -68,11 +68,13 @@ class SteppingCorrectionAuditor(BaseAuditor):
                 avg_db = boundary.get('avg_db', 0)
 
                 # Determine action type
+                # When delay increases (positive): target is falling behind → INSERT silence
+                # When delay decreases (negative): target is getting ahead → REMOVE audio
                 if delay_change_ms > 0:
-                    action = "REMOVE"
+                    action = "ADD"
                     amount_s = abs(delay_change_ms) / 1000.0
                 elif delay_change_ms < 0:
-                    action = "ADD"
+                    action = "REMOVE"
                     amount_s = abs(delay_change_ms) / 1000.0
                 else:
                     continue  # No change, skip
