@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 import json
+import warnings
 from typing import List, Dict, Any
 
 import numpy as np
@@ -535,7 +536,9 @@ def diagnose_audio_issue(
 
     if abs(slope) > slope_threshold:
         y_predicted = slope * times + intercept
-        correlation_matrix = np.corrcoef(delays, y_predicted)
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', 'invalid value encountered in divide')
+            correlation_matrix = np.corrcoef(delays, y_predicted)
         r_squared = correlation_matrix[0, 1]**2
 
         if r_squared > r2_threshold:
