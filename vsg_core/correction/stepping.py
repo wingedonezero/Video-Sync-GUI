@@ -138,6 +138,7 @@ class SteppingCorrector:
         self.tool_paths = tool_paths
         self.config = config
         self.log = runner._log_message
+        self.audit_metadata = []  # Store audit metadata for quality checks
 
     def _get_codec_id(self, file_path: str) -> str:
         """Uses ffprobe to get the codec name for a given audio file."""
@@ -264,9 +265,15 @@ class SteppingCorrector:
         # Reference timeline position needs delay offset to get target timeline position
         initial_boundary_target_s = initial_boundary_s + (delay_before / 1000.0)
 
-        snapped_boundary_target_s = self._snap_boundary_to_silence(
+        snapped_boundary_target_s, boundary_metadata = self._snap_boundary_to_silence(
             analysis_pcm, sample_rate, initial_boundary_target_s, analysis_file_path
         )
+
+        # Store metadata for audit (includes silence zone info, score, speech/transient flags)
+        if boundary_metadata:
+            boundary_metadata['target_time_s'] = snapped_boundary_target_s
+            boundary_metadata['delay_change_ms'] = delay_after - delay_before
+            self.audit_metadata.append(boundary_metadata)
 
         # Convert snapped boundary back to reference timeline
         final_boundary_s = snapped_boundary_target_s - (delay_before / 1000.0)
@@ -565,7 +572,7 @@ class SteppingCorrector:
         self.log(f"    - [Transient Detection] Found {len(transients)} transient(s) with threshold {threshold_db}dB")
         return transients
 
-    def _snap_boundary_to_silence(self, analysis_pcm: np.ndarray, sample_rate: int, boundary_s: float, analysis_file: Optional[str] = None) -> float:
+    def _snap_boundary_to_silence(self, analysis_pcm: np.ndarray, sample_rate: int, boundary_s: float, analysis_file: Optional[str] = None) -> Tuple[float, Optional[Dict]]:
         """
         Attempt to snap a boundary to a nearby silence zone using advanced detection methods.
 
@@ -576,10 +583,10 @@ class SteppingCorrector:
             analysis_file: Path to analysis audio file (required for FFmpeg silencedetect)
 
         Returns:
-            New boundary position (or original if no suitable silence found)
+            Tuple of (new_boundary_position, audit_metadata_dict) or (original_boundary, None)
         """
         if not self.config.get('stepping_snap_to_silence', True):
-            return boundary_s
+            return boundary_s, None
 
         detection_method = self.config.get('stepping_silence_detection_method', 'smart_fusion')
         search_window_s = self.config.get('stepping_silence_search_window_s', 5.0)
@@ -633,7 +640,7 @@ class SteppingCorrector:
 
         if not silence_zones:
             self.log(f"    - [Silence Snap] No silence zones found within ±{search_window_s}s window (target timeline)")
-            return boundary_s
+            return boundary_s, None
 
         # Get additional signals for smart fusion
         speech_regions = []
@@ -738,9 +745,9 @@ class SteppingCorrector:
             self.log(f"    - [Smart Boundary] Snapping: {boundary_s:.3f}s → {snap_point:.3f}s (offset: {offset:+.3f}s)")
             self.log(f"    - [Smart Boundary] Score: {best_candidate['score']:.1f} | Speech: {'YES' if best_candidate['overlaps_speech'] else 'NO'} | Transient: {'YES' if best_candidate['near_transient'] else 'NO'}")
 
-            return snap_point
+            return snap_point, best_candidate
 
-        return boundary_s
+        return boundary_s, None
 
     def _get_video_frames(self, video_file: str, mode: str) -> List[float]:
         """
@@ -1496,8 +1503,11 @@ class SteppingCorrector:
             if not self._qa_check(str(qa_track_path), ref_file_path, edl[0].delay_ms, diagnosis_details):
                 return CorrectionResult(CorrectionVerdict.FAILED, {'error': "Corrected track failed QA check."})
 
-            # If QA passes, the EDL is good. Return it.
-            return CorrectionResult(CorrectionVerdict.STEPPED, {'edl': edl})
+            # If QA passes, the EDL is good. Return it with audit metadata.
+            return CorrectionResult(CorrectionVerdict.STEPPED, {
+                'edl': edl,
+                'audit_metadata': self.audit_metadata
+            })
 
         except Exception as e:
             self.log(f"[FATAL] SteppingCorrector failed with exception: {e}")
@@ -1618,10 +1628,15 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
 
         elif result.verdict == CorrectionVerdict.STEPPED:
             edl = result.data['edl']
+            audit_metadata = result.data.get('audit_metadata', [])
             runner._log_message(f"[SteppingCorrection] Analysis successful. Applying correction plan to {len(target_items)} audio track(s) from {source_key}.")
 
             # Store EDL in context for subtitle adjustment
             ctx.stepping_edls[source_key] = edl
+
+            # Store audit metadata in segment_flags for final audit
+            if analysis_track_key in ctx.segment_flags:
+                ctx.segment_flags[analysis_track_key]['audit_metadata'] = audit_metadata
 
             for target_item in target_items:
                 corrected_path = corrector.apply_plan_to_file(str(target_item.extracted_path), edl, ctx.temp_dir, ref_file_path=ref_file_path)

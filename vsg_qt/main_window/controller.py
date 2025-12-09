@@ -197,10 +197,10 @@ class MainController:
         summary_message += f"  - Jobs with warnings: {jobs_with_warnings}\n"
         summary_message += f"  - Failed jobs: {failed_jobs}\n"
 
-        # NEW: Add stepping detection summary
+        # Add stepping detection summary
         if stepping_jobs:
-            summary_message += f"\n⚠️  Jobs with Stepping Correction ({len(stepping_jobs)}):\n"
-            summary_message += "  (Manual review recommended to verify sync quality)\n"
+            summary_message += f"\nℹ️  Jobs with Stepping Correction ({len(stepping_jobs)}):\n"
+            summary_message += "  (Quality checks performed - warnings above indicate issues)\n"
             for job_info in stepping_jobs:
                 sources_str = ', '.join(job_info['sources'])
                 summary_message += f"  • {job_info['name']} - Sources: {sources_str}\n"
@@ -220,13 +220,13 @@ class MainController:
         if failed_jobs > 0:
             QMessageBox.critical(self.v, "Batch Complete", f"Finished processing {len(all_results)} jobs with {failed_jobs} failure(s).")
         elif stepping_jobs or stepping_detected_disabled_jobs:
-            # NEW: Show warning if any jobs used stepping or detected stepping without correction
+            # Show info if any jobs used stepping or detected stepping without correction
             msg_parts = [f"Finished processing {len(all_results)} jobs successfully.\n"]
 
             if stepping_jobs:
                 stepping_count = len(stepping_jobs)
-                msg_parts.append(f"\n⚠️  Note: {stepping_count} job(s) used stepping correction.")
-                msg_parts.append("Please review these jobs to verify sync quality.")
+                msg_parts.append(f"\nℹ️  Note: {stepping_count} job(s) used stepping correction.")
+                msg_parts.append("Check warnings above for any quality issues requiring review.")
 
             if stepping_detected_disabled_jobs:
                 detected_count = len(stepping_detected_disabled_jobs)
