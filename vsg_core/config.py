@@ -172,6 +172,11 @@ class AppConfig:
             'stepping_video_snap_max_offset_s': 2.0,  # Maximum distance to snap (seconds)
             'stepping_video_scene_threshold': 0.4,  # Scene detection sensitivity (0.1-1.0, lower=more sensitive)
 
+            # --- Stepping Quality Audit Thresholds ---
+            'stepping_audit_min_score': 12.0,  # Minimum boundary score (warning if below)
+            'stepping_audit_overflow_tolerance': 0.8,  # Max removal/silence ratio (0.8 = 80% of silence)
+            'stepping_audit_large_correction_s': 3.0,  # Threshold for large correction warnings
+
             # --- Filtered Stepping Correction (New) ---
             'stepping_correction_mode': 'full',  # 'full', 'filtered', 'strict', 'disabled'
             'stepping_quality_mode': 'normal',  # 'strict', 'normal', 'lenient', 'custom'

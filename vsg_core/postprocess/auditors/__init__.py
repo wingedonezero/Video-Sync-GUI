@@ -16,6 +16,7 @@ from .language_tags import LanguageTagsAuditor
 from .track_names import TrackNamesAuditor
 from .attachments import AttachmentsAuditor
 from .drift_correction import DriftCorrectionAuditor
+from .stepping_correction import SteppingCorrectionAuditor
 from .global_shift import GlobalShiftAuditor
 
 __all__ = [
@@ -34,5 +35,6 @@ __all__ = [
     'TrackNamesAuditor',
     'AttachmentsAuditor',
     'DriftCorrectionAuditor',
+    'SteppingCorrectionAuditor',
     'GlobalShiftAuditor',
 ]

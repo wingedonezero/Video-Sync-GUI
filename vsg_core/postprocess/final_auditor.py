@@ -28,6 +28,7 @@ from .auditors import (
     TrackNamesAuditor,
     AttachmentsAuditor,
     DriftCorrectionAuditor,
+    SteppingCorrectionAuditor,
     GlobalShiftAuditor,
 )
 
@@ -168,6 +169,12 @@ class FinalAuditor:
 
         self.log("\n--- Auditing Drift Corrections ---")
         auditor = DriftCorrectionAuditor(self.ctx, self.runner)
+        auditor._source_ffprobe_cache = self._shared_ffprobe_cache
+        auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
+        total_issues += auditor.run(final_mkv_path, final_mkvmerge_data, final_ffprobe_data)
+
+        self.log("\n--- Auditing Stepping Correction Quality ---")
+        auditor = SteppingCorrectionAuditor(self.ctx, self.runner)
         auditor._source_ffprobe_cache = self._shared_ffprobe_cache
         auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
         total_issues += auditor.run(final_mkv_path, final_mkvmerge_data, final_ffprobe_data)
