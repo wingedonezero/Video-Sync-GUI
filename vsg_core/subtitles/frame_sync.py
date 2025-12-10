@@ -214,12 +214,15 @@ def time_to_frame_vfr(time_ms: float, video_path: str, fps: float, runner) -> Op
         Frame number, or None if VideoTimestamps unavailable
     """
     try:
+        from video_timestamps import TimeType
+
         vts = get_vfr_timestamps(video_path, fps, runner)
         if vts is None:
             return None
 
-        # Convert time to frame
-        frame_num = vts.time_to_frame(time_ms)
+        # Convert time to frame - requires time_type parameter
+        # Use START to find which frame this timestamp belongs to
+        frame_num = vts.time_to_frame(time_ms, TimeType.START)
         return frame_num
 
     except Exception as e:
