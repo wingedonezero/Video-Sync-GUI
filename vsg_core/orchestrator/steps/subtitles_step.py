@@ -198,6 +198,13 @@ class SubtitlesStep:
 
                         if ctx.delays and source_key in ctx.delays.source_delays_ms:
                             delay_ms = int(ctx.delays.source_delays_ms[source_key])
+                            runner._log_message(f"[Frame-Perfect Sync] DEBUG: source_key='{source_key}', delay from source_delays_ms={delay_ms}ms")
+                            runner._log_message(f"[Frame-Perfect Sync] DEBUG: All source_delays_ms: {ctx.delays.source_delays_ms}")
+                            runner._log_message(f"[Frame-Perfect Sync] DEBUG: Global shift: {ctx.delays.global_shift_ms}ms")
+                        else:
+                            runner._log_message(f"[Frame-Perfect Sync] DEBUG: source_key='{source_key}' not found in delays or delays is None")
+                            if ctx.delays:
+                                runner._log_message(f"[Frame-Perfect Sync] DEBUG: Available keys: {list(ctx.delays.source_delays_ms.keys())}")
 
                         # Only apply if there's a non-zero delay
                         if delay_ms != 0:
