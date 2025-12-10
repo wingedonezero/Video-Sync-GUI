@@ -922,6 +922,82 @@ class SteppingTab(QWidget):
         self.rb_group.setVisible(text == 'rubberband')
 
 
+class SubtitleSyncTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.widgets: Dict[str, QWidget] = {}
+        main_layout = QVBoxLayout(self)
+
+        sync_group = QGroupBox("Subtitle Synchronization Mode")
+        sync_layout = QFormLayout(sync_group)
+
+        self.widgets['subtitle_sync_mode'] = QComboBox()
+        self.widgets['subtitle_sync_mode'].addItems(['time-based', 'frame-perfect'])
+        self.widgets['subtitle_sync_mode'].setToolTip(
+            "Subtitle synchronization method:\n\n"
+            "• time-based (Default): Apply delays using millisecond timestamps\n"
+            "  - Simple and fast\n"
+            "  - May cause frame misalignment for typesetting/moving signs\n"
+            "  - Works with all subtitle formats\n\n"
+            "• frame-perfect: Apply delays then snap to exact frame boundaries\n"
+            "  - Preserves frame-perfect alignment for ASS typesetting\n"
+            "  - Prevents ghosting of moving signs\n"
+            "  - Recommended for release group ASS subtitles\n"
+            "  - Requires FPS detection from Source 1 video\n\n"
+            "Note: Stepping correction (if enabled) takes precedence over this setting."
+        )
+
+        self.widgets['subtitle_target_fps'] = QDoubleSpinBox()
+        self.widgets['subtitle_target_fps'].setRange(0.0, 120.0)
+        self.widgets['subtitle_target_fps'].setDecimals(3)
+        self.widgets['subtitle_target_fps'].setSuffix(" fps")
+        self.widgets['subtitle_target_fps'].setSpecialValueText("Auto-detect")
+        self.widgets['subtitle_target_fps'].setValue(0.0)  # 0 = auto-detect
+        self.widgets['subtitle_target_fps'].setToolTip(
+            "Target frame rate for frame-perfect snapping.\n\n"
+            "Set to 0.0 (Auto-detect) to automatically detect FPS from Source 1 video.\n\n"
+            "Manual override useful when:\n"
+            "  - Source 1 has different FPS than subtitle source\n"
+            "  - Auto-detection fails\n\n"
+            "Common frame rates:\n"
+            "  - 23.976 fps (24000/1001) - Film, anime (NTSC)\n"
+            "  - 24.000 fps - Film (progressive)\n"
+            "  - 25.000 fps - PAL standard\n"
+            "  - 29.970 fps (30000/1001) - NTSC\n"
+            "  - 30.000 fps - Progressive\n"
+            "  - 59.940 fps (60000/1001) - High frame rate"
+        )
+
+        sync_layout.addRow("Sync Mode:", self.widgets['subtitle_sync_mode'])
+        sync_layout.addRow("Target FPS:", self.widgets['subtitle_target_fps'])
+
+        # Info label
+        info_label = QLabel(
+            "<b>Frame-Perfect Mode Details:</b><br>"
+            "When enabled, subtitle timestamps are adjusted as follows:<br>"
+            "1. Apply time-based delay offset (from audio correlation)<br>"
+            "2. Snap both start and end times to nearest frame boundary<br>"
+            "3. Save modified subtitle with frame-aligned timestamps<br>"
+            "4. Tell mkvmerge to use --sync 0:0 (no additional offset)<br><br>"
+            "<b>Supported formats:</b> ASS, SSA, SRT, VTT<br>"
+            "<b>Inline tags:</b> Preserved (\\move, \\pos, \\t, \\fad, etc.)<br>"
+            "<b>Logging:</b> Detailed reports show snap offsets and statistics"
+        )
+        info_label.setWordWrap(True)
+        sync_layout.addRow(info_label)
+
+        main_layout.addWidget(sync_group)
+        main_layout.addStretch(1)
+
+        # Connect signal to update FPS visibility
+        self.widgets['subtitle_sync_mode'].currentTextChanged.connect(self._update_fps_visibility)
+        self._update_fps_visibility(self.widgets['subtitle_sync_mode'].currentText())
+
+    def _update_fps_visibility(self, text: str):
+        """Show/hide FPS setting based on sync mode."""
+        is_frame_perfect = (text == 'frame-perfect')
+        self.widgets['subtitle_target_fps'].setEnabled(is_frame_perfect)
+
 class ChaptersTab(QWidget):
     def __init__(self):
         super().__init__()

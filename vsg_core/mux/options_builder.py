@@ -160,6 +160,13 @@ class MkvmergeOptionsBuilder:
         if tr.type == TrackType.SUBTITLES and item.stepping_adjusted:
             return 0
 
+        # SPECIAL CASE: Subtitles with frame-perfect sync applied
+        # If subtitle timestamps were already adjusted with frame-perfect sync,
+        # the delay is baked into the subtitle file with frame-snapping applied.
+        # Don't apply additional delay via mkvmerge to avoid double-applying.
+        if tr.type == TrackType.SUBTITLES and getattr(item, 'frame_adjusted', False):
+            return 0
+
         sync_key = item.sync_to if tr.source == 'External' else tr.source
         delay = plan.delays.source_delays_ms.get(sync_key, 0)
         return int(delay)
