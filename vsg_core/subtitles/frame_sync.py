@@ -130,11 +130,15 @@ def frame_to_time_vfr(frame_num: int, video_path: str, runner) -> Optional[int]:
         Timestamp in milliseconds, or None if VideoTimestamps unavailable
     """
     try:
-        from video_timestamps import VideoTimestamps
+        from video_timestamps import VideoTimestamps, TimeType
+        from fractions import Fraction
 
-        vts = VideoTimestamps(video_path)
+        # Create VideoTimestamps with required time_scale (milliseconds)
+        vts = VideoTimestamps(video_path, time_scale=Fraction(1000))
+
         # Get exact timestamp for this frame from video container
-        time_ms = vts.frame_to_time(frame_num)
+        # Use START time (beginning of frame)
+        time_ms = vts.frame_to_time(frame_num, TimeType.START)
         return int(time_ms)
 
     except ImportError:
@@ -161,8 +165,12 @@ def time_to_frame_vfr(time_ms: float, video_path: str, runner) -> Optional[int]:
     """
     try:
         from video_timestamps import VideoTimestamps
+        from fractions import Fraction
 
-        vts = VideoTimestamps(video_path)
+        # Create VideoTimestamps with required time_scale (milliseconds)
+        vts = VideoTimestamps(video_path, time_scale=Fraction(1000))
+
+        # Convert time to frame
         frame_num = vts.time_to_frame(time_ms)
         return frame_num
 
@@ -297,7 +305,10 @@ def apply_frame_perfect_sync(
                 runner._log_message(f"[Frame-Perfect Sync] ERROR: VFR conversion failed, falling back to middle mode")
                 start_frame = time_to_frame_middle(original_start, target_fps)
                 end_frame = time_to_frame_middle(original_end, target_fps)
-                timing_mode = 'middle'  # Fallback
+                # Switch to middle mode functions for remaining processing
+                timing_mode = 'middle'
+                time_to_frame_func = time_to_frame_middle
+                frame_to_time_func = frame_to_time_middle
         else:
             start_frame = time_to_frame_func(original_start, target_fps)
             end_frame = time_to_frame_func(original_end, target_fps)
