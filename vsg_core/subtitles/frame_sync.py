@@ -5,56 +5,186 @@ Frame-perfect subtitle synchronization module.
 
 Shifts subtitles by FRAME COUNT instead of milliseconds to preserve
 frame-perfect alignment for typesetting and moving signs from release groups.
+
+Supports multiple timing modes:
+- 'middle': Half-frame offset (targets middle of frame window)
+- 'aegisub': Aegisub-style (ceil to centisecond)
+- 'vfr': VideoTimestamps-based (for variable framerate)
 """
 from __future__ import annotations
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import pysubs2
+import math
 
 
-def time_to_frame(time_ms: float, fps: float) -> int:
+# ============================================================================
+# MODE 1: MIDDLE OF FRAME (Current Implementation)
+# ============================================================================
+
+def time_to_frame_middle(time_ms: float, fps: float) -> int:
     """
-    Convert timestamp in milliseconds to frame number.
+    MODE: Middle of frame window.
 
-    Since frame_to_time() adds a 0.5 frame offset, we need to subtract it
-    here to get back the original frame number.
+    Convert timestamp to frame number, accounting for +0.5 offset.
 
     Args:
         time_ms: Timestamp in milliseconds
         fps: Frame rate (e.g., 23.976)
 
     Returns:
-        Frame number (accounting for half-frame offset)
+        Frame number
     """
     frame_duration_ms = 1000.0 / fps
-    # Subtract 0.5 frames to account for the offset added by frame_to_time()
     return round(time_ms / frame_duration_ms - 0.5)
 
 
-def frame_to_time(frame_num: int, fps: float) -> int:
+def frame_to_time_middle(frame_num: int, fps: float) -> int:
     """
-    Convert frame number to timestamp in milliseconds.
+    MODE: Middle of frame window.
 
-    Uses half-frame offset to target the middle of the frame's display window
-    instead of the boundary. This prevents centisecond rounding in ASS format
-    from shifting subtitles to the wrong frame.
+    Targets the middle of the frame's display window with +0.5 offset.
 
     Example at 23.976 fps:
-    - Frame 24 displays from 1001.001ms to 1042.709ms (41.7ms window)
-    - Without offset: 24 * 41.708 = 1001ms → rounds to 1000ms (frame 23!)
-    - With +0.5 offset: 24.5 * 41.708 = 1022ms → rounds to 1020ms (frame 24 ✓)
+    - Frame 24 displays from 1001.001ms to 1042.709ms
+    - Calculation: 24.5 × 41.708 = 1022ms
+    - After centisecond rounding: 1020ms (safely in frame 24)
 
     Args:
         frame_num: Frame number
         fps: Frame rate (e.g., 23.976)
 
     Returns:
-        Timestamp in milliseconds (middle of frame display window)
+        Timestamp in milliseconds
     """
     frame_duration_ms = 1000.0 / fps
-    # Add 0.5 frames to target the middle of the frame's display window
-    # This ensures centisecond rounding (10ms precision) keeps us in the correct frame
     return int(round((frame_num + 0.5) * frame_duration_ms))
+
+
+# ============================================================================
+# MODE 2: AEGISUB-STYLE (Ceil to Centisecond)
+# ============================================================================
+
+def time_to_frame_aegisub(time_ms: float, fps: float) -> int:
+    """
+    MODE: Aegisub-style timing.
+
+    Convert timestamp to frame using floor division (which frame is currently displaying).
+
+    Args:
+        time_ms: Timestamp in milliseconds
+        fps: Frame rate
+
+    Returns:
+        Frame number
+    """
+    frame_duration_ms = 1000.0 / fps
+    return int(time_ms / frame_duration_ms)
+
+
+def frame_to_time_aegisub(frame_num: int, fps: float) -> int:
+    """
+    MODE: Aegisub-style timing.
+
+    Matches Aegisub's algorithm: Calculate exact frame start, then round UP
+    to the next centisecond to ensure timestamp falls within the frame.
+
+    Example at 23.976 fps:
+    - Frame 24 starts at 1001.001ms
+    - Exact calculation: 24 × 41.708 = 1001.001ms
+    - Round UP to next centisecond: ceil(1001.001 / 10) × 10 = 1010ms
+    - Result: 1010ms (safely in frame 24: 1001-1043ms)
+
+    Args:
+        frame_num: Frame number
+        fps: Frame rate
+
+    Returns:
+        Timestamp in milliseconds
+    """
+    frame_duration_ms = 1000.0 / fps
+    exact_time_ms = frame_num * frame_duration_ms
+
+    # Round UP to next centisecond (ASS format precision)
+    # This ensures the timestamp is guaranteed to fall within the frame
+    centiseconds = math.ceil(exact_time_ms / 10)
+    return centiseconds * 10
+
+
+# ============================================================================
+# MODE 3: VFR (VideoTimestamps-based)
+# ============================================================================
+
+def frame_to_time_vfr(frame_num: int, video_path: str, runner) -> Optional[int]:
+    """
+    MODE: VFR (Variable Frame Rate) using VideoTimestamps.
+
+    Gets actual frame timestamp from video file, handling VFR correctly.
+
+    Args:
+        frame_num: Frame number
+        video_path: Path to video file
+        runner: CommandRunner for logging
+
+    Returns:
+        Timestamp in milliseconds, or None if VideoTimestamps unavailable
+    """
+    try:
+        from video_timestamps import VideoTimestamps
+
+        vts = VideoTimestamps(video_path)
+        # Get exact timestamp for this frame from video container
+        time_ms = vts.frame_to_time(frame_num)
+        return int(time_ms)
+
+    except ImportError:
+        runner._log_message("[Frame-Perfect Sync] WARNING: VideoTimestamps not installed. Install with: pip install VideoTimestamps")
+        return None
+    except Exception as e:
+        runner._log_message(f"[Frame-Perfect Sync] WARNING: VideoTimestamps failed: {e}")
+        return None
+
+
+def time_to_frame_vfr(time_ms: float, video_path: str, runner) -> Optional[int]:
+    """
+    MODE: VFR using VideoTimestamps.
+
+    Converts timestamp to frame using actual video timecodes.
+
+    Args:
+        time_ms: Timestamp in milliseconds
+        video_path: Path to video file
+        runner: CommandRunner for logging
+
+    Returns:
+        Frame number, or None if VideoTimestamps unavailable
+    """
+    try:
+        from video_timestamps import VideoTimestamps
+
+        vts = VideoTimestamps(video_path)
+        frame_num = vts.time_to_frame(time_ms)
+        return frame_num
+
+    except ImportError:
+        return None
+    except Exception as e:
+        runner._log_message(f"[Frame-Perfect Sync] WARNING: VideoTimestamps failed: {e}")
+        return None
+
+
+# ============================================================================
+# LEGACY ALIASES (for backwards compatibility)
+# ============================================================================
+
+def time_to_frame(time_ms: float, fps: float) -> int:
+    """Legacy alias for time_to_frame_middle"""
+    return time_to_frame_middle(time_ms, fps)
+
+
+def frame_to_time(frame_num: int, fps: float) -> int:
+    """Legacy alias for frame_to_time_middle"""
+    return frame_to_time_middle(frame_num, fps)
 
 
 def apply_frame_perfect_sync(
@@ -62,40 +192,42 @@ def apply_frame_perfect_sync(
     delay_ms: int,
     target_fps: float,
     runner,
-    config: dict = None
+    config: dict = None,
+    video_path: str = None
 ) -> Dict[str, Any]:
     """
     Apply frame-perfect synchronization using FRAME-BASED shifting.
 
-    This preserves frame-perfect alignment by shifting by whole frame counts
-    instead of millisecond values, which is critical for release group ASS subs.
+    Supports multiple timing modes:
+    - 'middle': Half-frame offset (default, targets middle of frame window)
+    - 'aegisub': Aegisub-style (rounds UP to centisecond)
+    - 'vfr': VideoTimestamps-based (for variable framerate)
 
     Algorithm:
     1. Convert delay_ms to frame count (round to nearest whole frame)
     2. For each subtitle event:
-       - Convert timestamp to frame number
+       - Convert timestamp to frame number (using selected mode)
        - Add frame offset
-       - Convert back to timestamp at exact frame boundary
+       - Convert back to timestamp (using selected mode)
     3. Save modified subtitle file
 
     Args:
         subtitle_path: Path to subtitle file (.ass, .srt, .ssa, .vtt)
         delay_ms: Time offset in milliseconds (converted to frames)
-        target_fps: Target video frame rate
+        target_fps: Target video frame rate (ignored for VFR mode)
         runner: CommandRunner for logging
-        config: Optional config dict
+        config: Optional config dict with 'frame_sync_mode' key
+        video_path: Path to video file (required for VFR mode)
 
     Returns:
-        Dict with report statistics:
-            - total_events: Number of subtitle events processed
-            - adjusted_events: Number of events shifted
-            - frame_shift: Number of frames shifted by
-            - delay_applied_ms: Original delay in milliseconds
-            - effective_delay_ms: Actual delay after frame rounding
-            - target_fps: FPS used
+        Dict with report statistics
     """
     config = config or {}
 
+    # Determine timing mode
+    timing_mode = config.get('frame_sync_mode', 'middle')  # default to middle
+
+    runner._log_message(f"[Frame-Perfect Sync] Mode: {timing_mode}")
     runner._log_message(f"[Frame-Perfect Sync] Loading subtitle: {Path(subtitle_path).name}")
     runner._log_message(f"[Frame-Perfect Sync] Target FPS: {target_fps:.3f}")
     runner._log_message(f"[Frame-Perfect Sync] Delay to apply: {delay_ms:+d} ms")
@@ -133,6 +265,21 @@ def apply_frame_perfect_sync(
     adjusted_count = 0
     runner._log_message(f"[Frame-Perfect Sync] Processing {len(subs.events)} subtitle events...")
 
+    # Select conversion functions based on mode
+    if timing_mode == 'aegisub':
+        time_to_frame_func = time_to_frame_aegisub
+        frame_to_time_func = frame_to_time_aegisub
+    elif timing_mode == 'vfr':
+        if not video_path:
+            runner._log_message(f"[Frame-Perfect Sync] ERROR: VFR mode requires video_path")
+            return {'error': 'VFR mode requires video_path'}
+        # VFR functions need video_path, handle differently
+        time_to_frame_func = None  # Will use lambda below
+        frame_to_time_func = None
+    else:  # 'middle' or default
+        time_to_frame_func = time_to_frame_middle
+        frame_to_time_func = frame_to_time_middle
+
     # Process each event using FRAME-BASED shifting
     for event in subs.events:
         original_start = event.start
@@ -142,17 +289,33 @@ def apply_frame_perfect_sync(
         if original_start == original_end:
             continue
 
-        # Convert to frame numbers
-        start_frame = time_to_frame(original_start, target_fps)
-        end_frame = time_to_frame(original_end, target_fps)
+        # Convert to frame numbers (mode-specific)
+        if timing_mode == 'vfr':
+            start_frame = time_to_frame_vfr(original_start, video_path, runner)
+            end_frame = time_to_frame_vfr(original_end, video_path, runner)
+            if start_frame is None or end_frame is None:
+                runner._log_message(f"[Frame-Perfect Sync] ERROR: VFR conversion failed, falling back to middle mode")
+                start_frame = time_to_frame_middle(original_start, target_fps)
+                end_frame = time_to_frame_middle(original_end, target_fps)
+                timing_mode = 'middle'  # Fallback
+        else:
+            start_frame = time_to_frame_func(original_start, target_fps)
+            end_frame = time_to_frame_func(original_end, target_fps)
 
         # Apply frame shift
         new_start_frame = start_frame + frame_shift
         new_end_frame = end_frame + frame_shift
 
-        # Convert back to timestamps at exact frame boundaries
-        new_start_ms = frame_to_time(new_start_frame, target_fps)
-        new_end_ms = frame_to_time(new_end_frame, target_fps)
+        # Convert back to timestamps (mode-specific)
+        if timing_mode == 'vfr':
+            new_start_ms = frame_to_time_vfr(new_start_frame, video_path, runner)
+            new_end_ms = frame_to_time_vfr(new_end_frame, video_path, runner)
+            if new_start_ms is None or new_end_ms is None:
+                runner._log_message(f"[Frame-Perfect Sync] ERROR: VFR conversion failed")
+                continue
+        else:
+            new_start_ms = frame_to_time_func(new_start_frame, target_fps)
+            new_end_ms = frame_to_time_func(new_end_frame, target_fps)
 
         # Ensure end is after start
         if new_end_ms <= new_start_ms:

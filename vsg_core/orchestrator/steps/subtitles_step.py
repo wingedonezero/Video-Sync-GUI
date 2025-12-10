@@ -228,7 +228,8 @@ class SubtitlesStep:
                                 delay_ms,
                                 target_fps,
                                 runner,
-                                ctx.settings_dict
+                                ctx.settings_dict,
+                                video_path=source1_file  # For VFR mode
                             )
 
                             if frame_sync_report and 'error' not in frame_sync_report:

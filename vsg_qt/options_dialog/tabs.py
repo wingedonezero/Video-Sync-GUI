@@ -968,8 +968,30 @@ class SubtitleSyncTab(QWidget):
             "  - 59.940 fps (60000/1001) - High frame rate"
         )
 
+        self.widgets['frame_sync_mode'] = QComboBox()
+        self.widgets['frame_sync_mode'].addItems(['middle', 'aegisub', 'vfr'])
+        self.widgets['frame_sync_mode'].setToolTip(
+            "Frame timing algorithm (for frame-perfect mode):\n\n"
+            "• middle (Default): Targets middle of frame display window\n"
+            "  - Uses +0.5 frame offset\n"
+            "  - After centisecond rounding: Still lands in correct frame\n"
+            "  - Good balance of accuracy and safety\n\n"
+            "• aegisub: Aegisub-style timing\n"
+            "  - Rounds UP to next centisecond\n"
+            "  - Matches Aegisub's internal algorithm\n"
+            "  - May be closer to what release groups expect\n"
+            "  - Recommended if 'middle' mode has occasional frame errors\n\n"
+            "• vfr: VideoTimestamps-based (requires library)\n"
+            "  - Uses actual frame timestamps from video container\n"
+            "  - Required for Variable Frame Rate videos\n"
+            "  - Most accurate for mixed-framerate content\n"
+            "  - Requires: pip install VideoTimestamps\n\n"
+            "Note: This only applies when 'frame-perfect' sync mode is selected above."
+        )
+
         sync_layout.addRow("Sync Mode:", self.widgets['subtitle_sync_mode'])
         sync_layout.addRow("Target FPS:", self.widgets['subtitle_target_fps'])
+        sync_layout.addRow("Frame Timing:", self.widgets['frame_sync_mode'])
 
         # Info label
         info_label = QLabel(
