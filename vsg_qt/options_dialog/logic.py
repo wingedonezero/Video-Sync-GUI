@@ -37,6 +37,9 @@ class OptionsLogic:
 
     def _set_widget_val(self, widget, value):
         from PySide6.QtWidgets import QSpinBox, QDoubleSpinBox, QComboBox, QCheckBox, QWidget, QLineEdit
+        # Skip if value is None (config key doesn't exist yet)
+        if value is None:
+            return
         if isinstance(widget, QCheckBox):
             widget.setChecked(bool(value))
         elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
