@@ -16,30 +16,45 @@ def time_to_frame(time_ms: float, fps: float) -> int:
     """
     Convert timestamp in milliseconds to frame number.
 
+    Since frame_to_time() adds a 0.5 frame offset, we need to subtract it
+    here to get back the original frame number.
+
     Args:
         time_ms: Timestamp in milliseconds
         fps: Frame rate (e.g., 23.976)
 
     Returns:
-        Frame number (rounded to nearest frame)
+        Frame number (accounting for half-frame offset)
     """
     frame_duration_ms = 1000.0 / fps
-    return round(time_ms / frame_duration_ms)
+    # Subtract 0.5 frames to account for the offset added by frame_to_time()
+    return round(time_ms / frame_duration_ms - 0.5)
 
 
 def frame_to_time(frame_num: int, fps: float) -> int:
     """
     Convert frame number to timestamp in milliseconds.
 
+    Uses half-frame offset to target the middle of the frame's display window
+    instead of the boundary. This prevents centisecond rounding in ASS format
+    from shifting subtitles to the wrong frame.
+
+    Example at 23.976 fps:
+    - Frame 24 displays from 1001.001ms to 1042.709ms (41.7ms window)
+    - Without offset: 24 * 41.708 = 1001ms → rounds to 1000ms (frame 23!)
+    - With +0.5 offset: 24.5 * 41.708 = 1022ms → rounds to 1020ms (frame 24 ✓)
+
     Args:
         frame_num: Frame number
         fps: Frame rate (e.g., 23.976)
 
     Returns:
-        Timestamp in milliseconds (at exact frame boundary)
+        Timestamp in milliseconds (middle of frame display window)
     """
     frame_duration_ms = 1000.0 / fps
-    return int(round(frame_num * frame_duration_ms))
+    # Add 0.5 frames to target the middle of the frame's display window
+    # This ensures centisecond rounding (10ms precision) keeps us in the correct frame
+    return int(round((frame_num + 0.5) * frame_duration_ms))
 
 
 def apply_frame_perfect_sync(
