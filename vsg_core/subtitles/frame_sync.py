@@ -215,14 +215,17 @@ def time_to_frame_vfr(time_ms: float, video_path: str, fps: float, runner) -> Op
     """
     try:
         from video_timestamps import TimeType
+        from fractions import Fraction
 
         vts = get_vfr_timestamps(video_path, fps, runner)
         if vts is None:
             return None
 
-        # Convert time to frame - requires time_type parameter
-        # Use START to find which frame this timestamp belongs to
-        frame_num = vts.time_to_frame(time_ms, TimeType.START)
+        # Convert time_ms to Fraction (required by VideoTimestamps)
+        time_frac = Fraction(int(time_ms), 1)
+
+        # Convert time to frame - requires time_type parameter and Fraction input
+        frame_num = vts.time_to_frame(time_frac, TimeType.START)
         return frame_num
 
     except Exception as e:
