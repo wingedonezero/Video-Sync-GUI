@@ -3,8 +3,8 @@
 """
 Frame-perfect subtitle synchronization module.
 
-Applies time-based delays to subtitles while snapping timestamps to exact
-frame boundaries to preserve frame-alignment for typesetting and moving signs.
+Shifts subtitles by FRAME COUNT instead of milliseconds to preserve
+frame-perfect alignment for typesetting and moving signs from release groups.
 """
 from __future__ import annotations
 from pathlib import Path
@@ -12,29 +12,34 @@ from typing import List, Dict, Any
 import pysubs2
 
 
-def snap_to_frame(time_ms: float, fps: float) -> int:
+def time_to_frame(time_ms: float, fps: float) -> int:
     """
-    Snap a millisecond timestamp to the nearest frame boundary.
+    Convert timestamp in milliseconds to frame number.
 
     Args:
         time_ms: Timestamp in milliseconds
-        fps: Target video frame rate (e.g., 23.976)
+        fps: Frame rate (e.g., 23.976)
 
     Returns:
-        Snapped timestamp in milliseconds (as integer)
-
-    Example:
-        >>> snap_to_frame(1150.0, 23.976)
-        1167  # Snapped to frame 28
+        Frame number (rounded to nearest frame)
     """
-    if fps <= 0:
-        return int(round(time_ms))
-
     frame_duration_ms = 1000.0 / fps
-    frame_num = round(time_ms / frame_duration_ms)
-    snapped_ms = int(round(frame_num * frame_duration_ms))
+    return round(time_ms / frame_duration_ms)
 
-    return snapped_ms
+
+def frame_to_time(frame_num: int, fps: float) -> int:
+    """
+    Convert frame number to timestamp in milliseconds.
+
+    Args:
+        frame_num: Frame number
+        fps: Frame rate (e.g., 23.976)
+
+    Returns:
+        Timestamp in milliseconds (at exact frame boundary)
+    """
+    frame_duration_ms = 1000.0 / fps
+    return int(round(frame_num * frame_duration_ms))
 
 
 def apply_frame_perfect_sync(
@@ -45,36 +50,52 @@ def apply_frame_perfect_sync(
     config: dict = None
 ) -> Dict[str, Any]:
     """
-    Apply frame-perfect synchronization to subtitle file.
+    Apply frame-perfect synchronization using FRAME-BASED shifting.
 
-    This function:
-    1. Loads the subtitle file with pysubs2
-    2. Applies the time-based delay offset to each event
-    3. Snaps both start and end times to exact frame boundaries
-    4. Saves the modified subtitle file
+    This preserves frame-perfect alignment by shifting by whole frame counts
+    instead of millisecond values, which is critical for release group ASS subs.
+
+    Algorithm:
+    1. Convert delay_ms to frame count (round to nearest whole frame)
+    2. For each subtitle event:
+       - Convert timestamp to frame number
+       - Add frame offset
+       - Convert back to timestamp at exact frame boundary
+    3. Save modified subtitle file
 
     Args:
         subtitle_path: Path to subtitle file (.ass, .srt, .ssa, .vtt)
-        delay_ms: Time offset to apply in milliseconds (can be negative)
-        target_fps: Target video frame rate for snapping
+        delay_ms: Time offset in milliseconds (converted to frames)
+        target_fps: Target video frame rate
         runner: CommandRunner for logging
-        config: Optional config dict (for future extensions)
+        config: Optional config dict
 
     Returns:
         Dict with report statistics:
             - total_events: Number of subtitle events processed
-            - adjusted_events: Number of events that had non-zero adjustment
-            - avg_start_snap_ms: Average snap adjustment for start times
-            - avg_end_snap_ms: Average snap adjustment for end times
-            - max_snap_offset_ms: Maximum snap offset encountered
-            - target_fps: FPS used for snapping
-            - delay_applied_ms: Delay that was applied
+            - adjusted_events: Number of events shifted
+            - frame_shift: Number of frames shifted by
+            - delay_applied_ms: Original delay in milliseconds
+            - effective_delay_ms: Actual delay after frame rounding
+            - target_fps: FPS used
     """
     config = config or {}
 
     runner._log_message(f"[Frame-Perfect Sync] Loading subtitle: {Path(subtitle_path).name}")
     runner._log_message(f"[Frame-Perfect Sync] Target FPS: {target_fps:.3f}")
     runner._log_message(f"[Frame-Perfect Sync] Delay to apply: {delay_ms:+d} ms")
+
+    # Convert delay to frame count
+    frame_duration_ms = 1000.0 / target_fps
+    frame_shift = round(delay_ms / frame_duration_ms)
+    effective_delay_ms = frame_shift * frame_duration_ms
+
+    runner._log_message(f"[Frame-Perfect Sync] Frame duration: {frame_duration_ms:.3f} ms")
+    runner._log_message(f"[Frame-Perfect Sync] Frame shift: {frame_shift:+d} frames")
+    runner._log_message(f"[Frame-Perfect Sync] Effective delay: {effective_delay_ms:+.1f} ms")
+
+    if abs(delay_ms - effective_delay_ms) > 0.5:
+        runner._log_message(f"[Frame-Perfect Sync] NOTE: Rounded {delay_ms}ms to {effective_delay_ms:.1f}ms ({abs(delay_ms - effective_delay_ms):.1f}ms difference)")
 
     # Load subtitle file
     try:
@@ -88,61 +109,46 @@ def apply_frame_perfect_sync(
         return {
             'total_events': 0,
             'adjusted_events': 0,
-            'avg_start_snap_ms': 0.0,
-            'avg_end_snap_ms': 0.0,
-            'max_snap_offset_ms': 0.0,
-            'target_fps': target_fps,
-            'delay_applied_ms': delay_ms
+            'frame_shift': frame_shift,
+            'delay_applied_ms': delay_ms,
+            'effective_delay_ms': int(round(effective_delay_ms)),
+            'target_fps': target_fps
         }
 
-    # Track statistics
     adjusted_count = 0
-    start_snap_offsets = []
-    end_snap_offsets = []
-
     runner._log_message(f"[Frame-Perfect Sync] Processing {len(subs.events)} subtitle events...")
 
-    # Process each event
+    # Process each event using FRAME-BASED shifting
     for event in subs.events:
         original_start = event.start
         original_end = event.end
 
-        # Skip empty events (shouldn't happen, but be safe)
+        # Skip empty events
         if original_start == original_end:
             continue
 
-        # Apply time-based delay
-        adjusted_start = original_start + delay_ms
-        adjusted_end = original_end + delay_ms
+        # Convert to frame numbers
+        start_frame = time_to_frame(original_start, target_fps)
+        end_frame = time_to_frame(original_end, target_fps)
 
-        # Snap to frame boundaries
-        snapped_start = snap_to_frame(adjusted_start, target_fps)
-        snapped_end = snap_to_frame(adjusted_end, target_fps)
+        # Apply frame shift
+        new_start_frame = start_frame + frame_shift
+        new_end_frame = end_frame + frame_shift
 
-        # Ensure end is always after start (handle edge cases)
-        if snapped_end <= snapped_start:
-            # Duration collapsed - preserve at least 1 frame
-            frame_duration_ms = 1000.0 / target_fps
-            snapped_end = snapped_start + int(round(frame_duration_ms))
+        # Convert back to timestamps at exact frame boundaries
+        new_start_ms = frame_to_time(new_start_frame, target_fps)
+        new_end_ms = frame_to_time(new_end_frame, target_fps)
 
-        # Track snap offsets for reporting
-        start_snap_offset = abs(snapped_start - adjusted_start)
-        end_snap_offset = abs(snapped_end - adjusted_end)
-        start_snap_offsets.append(start_snap_offset)
-        end_snap_offsets.append(end_snap_offset)
+        # Ensure end is after start
+        if new_end_ms <= new_start_ms:
+            new_end_ms = new_start_ms + int(round(frame_duration_ms))
 
         # Update event
-        event.start = snapped_start
-        event.end = snapped_end
+        event.start = new_start_ms
+        event.end = new_end_ms
 
-        # Count as adjusted if delay was non-zero
-        if delay_ms != 0:
+        if frame_shift != 0:
             adjusted_count += 1
-
-    # Calculate statistics
-    avg_start_snap = sum(start_snap_offsets) / len(start_snap_offsets) if start_snap_offsets else 0.0
-    avg_end_snap = sum(end_snap_offsets) / len(end_snap_offsets) if end_snap_offsets else 0.0
-    max_snap = max(start_snap_offsets + end_snap_offsets) if (start_snap_offsets or end_snap_offsets) else 0.0
 
     # Save modified subtitle
     runner._log_message(f"[Frame-Perfect Sync] Saving modified subtitle file...")
@@ -155,18 +161,15 @@ def apply_frame_perfect_sync(
     # Log results
     runner._log_message(f"[Frame-Perfect Sync] ✓ Successfully processed {len(subs.events)} events")
     runner._log_message(f"[Frame-Perfect Sync]   - Events adjusted: {adjusted_count}")
-    runner._log_message(f"[Frame-Perfect Sync]   - Avg start snap: {avg_start_snap:.2f} ms")
-    runner._log_message(f"[Frame-Perfect Sync]   - Avg end snap: {avg_end_snap:.2f} ms")
-    runner._log_message(f"[Frame-Perfect Sync]   - Max snap offset: {max_snap:.2f} ms")
+    runner._log_message(f"[Frame-Perfect Sync]   - Frame shift applied: {frame_shift:+d} frames")
 
     return {
         'total_events': len(subs.events),
         'adjusted_events': adjusted_count,
-        'avg_start_snap_ms': round(avg_start_snap, 2),
-        'avg_end_snap_ms': round(avg_end_snap, 2),
-        'max_snap_offset_ms': round(max_snap, 2),
-        'target_fps': target_fps,
-        'delay_applied_ms': delay_ms
+        'frame_shift': frame_shift,
+        'delay_applied_ms': delay_ms,
+        'effective_delay_ms': int(round(effective_delay_ms)),
+        'target_fps': target_fps
     }
 
 
