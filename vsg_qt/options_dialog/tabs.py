@@ -932,7 +932,7 @@ class SubtitleSyncTab(QWidget):
         sync_layout = QFormLayout(sync_group)
 
         self.widgets['subtitle_sync_mode'] = QComboBox()
-        self.widgets['subtitle_sync_mode'].addItems(['time-based', 'frame-perfect', 'videotimestamps'])
+        self.widgets['subtitle_sync_mode'].addItems(['time-based', 'frame-perfect', 'frame-snapped', 'videotimestamps'])
         self.widgets['subtitle_sync_mode'].setToolTip(
             "Subtitle synchronization method:\n\n"
             "• time-based (Default): Apply delays using millisecond timestamps\n"
@@ -945,6 +945,13 @@ class SubtitleSyncTab(QWidget):
             "  - Optional frame shift rounding (round/floor/ceil)\n"
             "  - Optional zero-duration fix\n"
             "  - Recommended for release group ASS subtitles\n"
+            "  - Requires FPS detection from Source 1 video\n\n"
+            "• frame-snapped: Snap START to frames, preserve duration (RECOMMENDED)\n"
+            "  - Applies delay in milliseconds, then snaps START to frame boundaries\n"
+            "  - Preserves exact duration (whole subtitle block moves together)\n"
+            "  - Fixes 'random off by 1 frame' issues\n"
+            "  - Best for moving signs and typesetting\n"
+            "  - More accurate than uniform frame shift\n"
             "  - Requires FPS detection from Source 1 video\n\n"
             "• videotimestamps: Pure VideoTimestamps library\n"
             "  - Uses VideoTimestamps library directly\n"
@@ -1054,13 +1061,16 @@ class SubtitleSyncTab(QWidget):
     def _update_fps_visibility(self, text: str):
         """Show/hide FPS and frame timing settings based on sync mode."""
         is_frame_perfect = (text == 'frame-perfect')
+        is_frame_snapped = (text == 'frame-snapped')
         is_videotimestamps = (text == 'videotimestamps')
 
-        # FPS setting is used by both frame-perfect and videotimestamps
-        self.widgets['subtitle_target_fps'].setEnabled(is_frame_perfect or is_videotimestamps)
+        # FPS setting is used by frame-perfect, frame-snapped, and videotimestamps
+        self.widgets['subtitle_target_fps'].setEnabled(is_frame_perfect or is_frame_snapped or is_videotimestamps)
 
-        # These settings only apply to frame-perfect mode (not videotimestamps)
-        self.widgets['frame_sync_mode'].setEnabled(is_frame_perfect)
+        # Frame timing (middle/aegisub) applies to both frame-perfect and frame-snapped
+        self.widgets['frame_sync_mode'].setEnabled(is_frame_perfect or is_frame_snapped)
+
+        # Frame shift rounding and zero-duration fix only apply to frame-perfect mode
         self.widgets['frame_shift_rounding'].setEnabled(is_frame_perfect)
         self.widgets['frame_sync_fix_zero_duration'].setEnabled(is_frame_perfect)
 
