@@ -337,11 +337,11 @@ class AnalysisStep:
 
             # Use stepping override if available, otherwise calculate mode
             if stepping_override_delay is not None:
-                raw_delay_ms = stepping_override_delay
-                runner._log_message(f"{source_key.capitalize()} delay determined: {raw_delay_ms:+d} ms (first segment, stepping corrected).")
+                rounded_delay_ms = stepping_override_delay
+                runner._log_message(f"{source_key.capitalize()} delay determined: {rounded_delay_ms:+d} ms (first segment, stepping corrected).")
             else:
-                raw_delay_ms = _choose_final_delay(results, config, runner, source_key)
-                if raw_delay_ms is None:
+                rounded_delay_ms = _choose_final_delay(results, config, runner, source_key)
+                if rounded_delay_ms is None:
                     # ENHANCED ERROR MESSAGE
                     accepted_count = len([r for r in results if r.get('accepted', False)])
                     min_required = config.get('min_accepted_chunks', 3)
@@ -368,13 +368,22 @@ class AnalysisStep:
                         f'  - Check that both files are from the same video source'
                     )
 
+            # Extract raw delay from results that match the selected rounded delay
+            accepted_results = [r for r in results if r.get('accepted', False)]
+            matching_raw_delays = [r['raw_delay'] for r in accepted_results if r['delay'] == rounded_delay_ms]
+            if matching_raw_delays:
+                raw_delay_ms = sum(matching_raw_delays) / len(matching_raw_delays)
+            else:
+                # Fallback: use rounded delay as float
+                raw_delay_ms = float(rounded_delay_ms)
+
             # Calculate final delay including container delay chain correction
             # Store BOTH raw (for subtitles) and rounded (for mkvmerge)
             final_delay_raw_ms = raw_delay_ms + source1_audio_container_delay
             final_delay_ms = round(final_delay_raw_ms)
 
             if source1_audio_container_delay != 0:
-                runner._log_message(f"[Delay Chain] {source_key} raw correlation: {raw_delay_ms:+d}ms")
+                runner._log_message(f"[Delay Chain] {source_key} raw correlation: {raw_delay_ms:+.3f}ms")
                 runner._log_message(f"[Delay Chain] Adding Source 1 audio container delay: {source1_audio_container_delay:+.1f}ms")
                 runner._log_message(f"[Delay Chain] Final delay for {source_key}: {final_delay_ms:+d}ms (raw: {final_delay_raw_ms:+.3f}ms)")
 
