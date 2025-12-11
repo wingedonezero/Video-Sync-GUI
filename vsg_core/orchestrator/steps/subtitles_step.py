@@ -17,7 +17,7 @@ from vsg_core.subtitles.ocr import run_ocr
 from vsg_core.subtitles.cleanup import run_cleanup
 from vsg_core.subtitles.timing import fix_subtitle_timing
 from vsg_core.subtitles.stepping_adjust import apply_stepping_to_subtitles
-from vsg_core.subtitles.frame_sync import apply_frame_perfect_sync, apply_videotimestamps_sync, detect_video_fps
+from vsg_core.subtitles.frame_sync import apply_frame_perfect_sync, apply_videotimestamps_sync, apply_frame_snapped_sync, detect_video_fps
 
 class SubtitlesStep:
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
@@ -186,7 +186,7 @@ class SubtitlesStep:
             if item.extracted_path and not item.stepping_adjusted:
                 subtitle_sync_mode = ctx.settings_dict.get('subtitle_sync_mode', 'time-based')
 
-                if subtitle_sync_mode in ['frame-perfect', 'videotimestamps']:
+                if subtitle_sync_mode in ['frame-perfect', 'videotimestamps', 'frame-snapped']:
                     # Check if this subtitle format supports frame-perfect sync
                     ext = item.extracted_path.suffix.lower()
                     supported_formats = ['.ass', '.ssa', '.srt', '.vtt']
@@ -198,12 +198,12 @@ class SubtitlesStep:
 
                         if ctx.delays and source_key in ctx.delays.source_delays_ms:
                             delay_ms = int(ctx.delays.source_delays_ms[source_key])
-                            mode_label = "VideoTimestamps Sync" if subtitle_sync_mode == 'videotimestamps' else "Frame-Perfect Sync"
+                            mode_label = "Frame-Snapped Sync" if subtitle_sync_mode == 'frame-snapped' else ("VideoTimestamps Sync" if subtitle_sync_mode == 'videotimestamps' else "Frame-Perfect Sync")
                             runner._log_message(f"[{mode_label}] DEBUG: source_key='{source_key}', delay from source_delays_ms={delay_ms}ms")
                             runner._log_message(f"[{mode_label}] DEBUG: All source_delays_ms: {ctx.delays.source_delays_ms}")
                             runner._log_message(f"[{mode_label}] DEBUG: Global shift: {ctx.delays.global_shift_ms}ms")
                         else:
-                            mode_label = "VideoTimestamps Sync" if subtitle_sync_mode == 'videotimestamps' else "Frame-Perfect Sync"
+                            mode_label = "Frame-Snapped Sync" if subtitle_sync_mode == 'frame-snapped' else ("VideoTimestamps Sync" if subtitle_sync_mode == 'videotimestamps' else "Frame-Perfect Sync")
                             runner._log_message(f"[{mode_label}] DEBUG: source_key='{source_key}' not found in delays or delays is None")
                             if ctx.delays:
                                 runner._log_message(f"[{mode_label}] DEBUG: Available keys: {list(ctx.delays.source_delays_ms.keys())}")
@@ -218,11 +218,11 @@ class SubtitlesStep:
                                 if source1_file:
                                     target_fps = detect_video_fps(source1_file, runner)
                                 else:
-                                    mode_label = "VideoTimestamps Sync" if subtitle_sync_mode == 'videotimestamps' else "Frame-Perfect Sync"
+                                    mode_label = "Frame-Snapped Sync" if subtitle_sync_mode == 'frame-snapped' else ("VideoTimestamps Sync" if subtitle_sync_mode == 'videotimestamps' else "Frame-Perfect Sync")
                                     runner._log_message(f"[{mode_label}] WARNING: No Source 1 video found, using default 23.976 fps")
                                     target_fps = 23.976
                             else:
-                                mode_label = "VideoTimestamps Sync" if subtitle_sync_mode == 'videotimestamps' else "Frame-Perfect Sync"
+                                mode_label = "Frame-Snapped Sync" if subtitle_sync_mode == 'frame-snapped' else ("VideoTimestamps Sync" if subtitle_sync_mode == 'videotimestamps' else "Frame-Perfect Sync")
                                 runner._log_message(f"[{mode_label}] Using manual FPS: {target_fps:.3f}")
 
                             # Apply appropriate sync mode
@@ -237,6 +237,17 @@ class SubtitlesStep:
                                     ctx.settings_dict,
                                     video_path=source1_file  # Required for VideoTimestamps
                                 )
+                            elif subtitle_sync_mode == 'frame-snapped':
+                                # Frame-snapped mode - snap start to frames, preserve duration
+                                runner._log_message(f"[Frame-Snapped Sync] Applying to track {item.track.id} ({item.track.props.name or 'Unnamed'})")
+                                frame_sync_report = apply_frame_snapped_sync(
+                                    str(item.extracted_path),
+                                    delay_ms,
+                                    target_fps,
+                                    runner,
+                                    ctx.settings_dict,
+                                    video_path=source1_file
+                                )
                             else:
                                 # Frame-perfect mode - with middle/aegisub/vfr options
                                 runner._log_message(f"[Frame-Perfect Sync] Applying to track {item.track.id} ({item.track.props.name or 'Unnamed'})")
@@ -250,7 +261,7 @@ class SubtitlesStep:
                                 )
 
                             if frame_sync_report and 'error' not in frame_sync_report:
-                                mode_label = "VideoTimestamps Sync" if subtitle_sync_mode == 'videotimestamps' else "Frame-Perfect Sync"
+                                mode_label = "Frame-Snapped Sync" if subtitle_sync_mode == 'frame-snapped' else ("VideoTimestamps Sync" if subtitle_sync_mode == 'videotimestamps' else "Frame-Perfect Sync")
                                 runner._log_message(f"--- {mode_label} Report ---")
                                 for key, value in frame_sync_report.items():
                                     runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
@@ -258,7 +269,7 @@ class SubtitlesStep:
                                 # Mark that timestamps have been adjusted (so mux doesn't double-apply delay)
                                 item.frame_adjusted = True
                     else:
-                        mode_label = "VideoTimestamps Sync" if subtitle_sync_mode == 'videotimestamps' else "Frame-Perfect Sync"
+                        mode_label = "Frame-Snapped Sync" if subtitle_sync_mode == 'frame-snapped' else ("VideoTimestamps Sync" if subtitle_sync_mode == 'videotimestamps' else "Frame-Perfect Sync")
                         runner._log_message(f"[{mode_label}] Skipping track {item.track.id} - format {ext} not supported")
 
             if item.convert_to_ass and item.extracted_path and item.extracted_path.suffix.lower() == '.srt':

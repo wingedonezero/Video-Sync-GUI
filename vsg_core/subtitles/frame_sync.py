@@ -375,6 +375,144 @@ def apply_videotimestamps_sync(
 
 
 # ============================================================================
+# MODE 4: FRAME-SNAPPED (Snap Start, Preserve Duration)
+# ============================================================================
+
+def apply_frame_snapped_sync(
+    subtitle_path: str,
+    delay_ms: int,
+    target_fps: float,
+    runner,
+    config: dict = None,
+    video_path: str = None
+) -> Dict[str, Any]:
+    """
+    Apply frame-snapped synchronization: Snap START to frames, preserve duration in TIME.
+
+    This mode addresses the "random off by 1 frame" issue by:
+    1. Applying the delay in milliseconds (not converting to frame count upfront)
+    2. Snapping each subtitle START to the nearest frame boundary
+    3. Preserving the original duration in milliseconds
+    4. Calculating END as start + duration (not rounding independently)
+
+    This ensures:
+    - Start times are frame-aligned (important for moving signs)
+    - Duration is preserved exactly (whole block moves together)
+    - No independent rounding of start and end (prevents random errors)
+
+    Algorithm:
+    1. For each subtitle event:
+       - Apply delay_ms to start time
+       - Convert to nearest frame boundary
+       - Convert back to time (frame-snapped start)
+       - Calculate end as start + original_duration
+    2. Save modified subtitle file
+
+    Args:
+        subtitle_path: Path to subtitle file (.ass, .srt, .ssa, .vtt)
+        delay_ms: Time offset in milliseconds
+        target_fps: Target video frame rate
+        runner: CommandRunner for logging
+        config: Optional config dict with settings:
+            - 'frame_sync_mode': 'middle' or 'aegisub' (for frame conversion)
+        video_path: Path to video file (unused, kept for API compatibility)
+
+    Returns:
+        Dict with report statistics
+    """
+    config = config or {}
+
+    # Determine timing mode for frame conversion
+    timing_mode = config.get('frame_sync_mode', 'middle')
+
+    runner._log_message(f"[Frame-Snapped Sync] Mode: Snap start, preserve duration")
+    runner._log_message(f"[Frame-Snapped Sync] Loading subtitle: {Path(subtitle_path).name}")
+    runner._log_message(f"[Frame-Snapped Sync] Target FPS: {target_fps:.3f}")
+    runner._log_message(f"[Frame-Snapped Sync] Delay to apply: {delay_ms:+d} ms")
+    runner._log_message(f"[Frame-Snapped Sync] Frame timing convention: {timing_mode}")
+
+    # Load subtitle file
+    try:
+        subs = pysubs2.load(subtitle_path, encoding='utf-8')
+    except Exception as e:
+        runner._log_message(f"[Frame-Snapped Sync] ERROR: Failed to load subtitle file: {e}")
+        return {'error': str(e)}
+
+    if not subs.events:
+        runner._log_message(f"[Frame-Snapped Sync] WARNING: No subtitle events found in file")
+        return {
+            'total_events': 0,
+            'adjusted_events': 0,
+            'delay_applied_ms': delay_ms,
+            'target_fps': target_fps
+        }
+
+    # Select conversion functions based on timing mode
+    if timing_mode == 'aegisub':
+        time_to_frame_func = time_to_frame_aegisub
+        frame_to_time_func = frame_to_time_aegisub
+    else:  # 'middle' or default
+        time_to_frame_func = time_to_frame_middle
+        frame_to_time_func = frame_to_time_middle
+
+    adjusted_count = 0
+    duration_preserved_count = 0
+    runner._log_message(f"[Frame-Snapped Sync] Processing {len(subs.events)} subtitle events...")
+
+    # Process each event: snap start to frame, preserve duration
+    for event in subs.events:
+        original_start = event.start
+        original_end = event.end
+        original_duration = original_end - original_start
+
+        # Skip empty events
+        if original_duration == 0:
+            continue
+
+        # 1. Apply delay in milliseconds
+        new_start_ms = original_start + delay_ms
+
+        # 2. Snap start to nearest frame boundary
+        new_start_frame = time_to_frame_func(new_start_ms, target_fps)
+        new_start_ms_snapped = frame_to_time_func(new_start_frame, target_fps)
+
+        # 3. Preserve duration in TIME (don't round end independently!)
+        new_end_ms = new_start_ms_snapped + original_duration
+
+        # Update event
+        event.start = new_start_ms_snapped
+        event.end = new_end_ms
+
+        if delay_ms != 0:
+            adjusted_count += 1
+
+        # Track that we preserved duration
+        duration_preserved_count += 1
+
+    # Save modified subtitle
+    runner._log_message(f"[Frame-Snapped Sync] Saving modified subtitle file...")
+    try:
+        subs.save(subtitle_path, encoding='utf-8')
+    except Exception as e:
+        runner._log_message(f"[Frame-Snapped Sync] ERROR: Failed to save subtitle file: {e}")
+        return {'error': str(e)}
+
+    # Log results
+    runner._log_message(f"[Frame-Snapped Sync] ✓ Successfully processed {len(subs.events)} events")
+    runner._log_message(f"[Frame-Snapped Sync]   - Events adjusted: {adjusted_count}")
+    runner._log_message(f"[Frame-Snapped Sync]   - Durations preserved: {duration_preserved_count}")
+    runner._log_message(f"[Frame-Snapped Sync]   - Delay applied: {delay_ms:+d} ms")
+
+    return {
+        'total_events': len(subs.events),
+        'adjusted_events': adjusted_count,
+        'durations_preserved': duration_preserved_count,
+        'delay_applied_ms': delay_ms,
+        'target_fps': target_fps
+    }
+
+
+# ============================================================================
 # LEGACY ALIASES (for backwards compatibility)
 # ============================================================================
 
