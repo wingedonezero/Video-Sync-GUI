@@ -932,7 +932,7 @@ class SubtitleSyncTab(QWidget):
         sync_layout = QFormLayout(sync_group)
 
         self.widgets['subtitle_sync_mode'] = QComboBox()
-        self.widgets['subtitle_sync_mode'].addItems(['time-based', 'frame-perfect', 'frame-snapped', 'videotimestamps'])
+        self.widgets['subtitle_sync_mode'].addItems(['time-based', 'frame-perfect', 'frame-snapped', 'videotimestamps', 'frame-matched'])
         self.widgets['subtitle_sync_mode'].setToolTip(
             "Subtitle synchronization method:\n\n"
             "• time-based (Default): Apply delays using millisecond timestamps\n"
@@ -960,6 +960,15 @@ class SubtitleSyncTab(QWidget):
             "  - Supports Variable Frame Rate videos\n"
             "  - Requires: pip install VideoTimestamps\n"
             "  - Requires Source 1 video file\n\n"
+            "• frame-matched: Visual frame matching (BEST for different frame counts)\n"
+            "  - Extracts frames from both source and target videos\n"
+            "  - Uses perceptual hashing to find matching scenes\n"
+            "  - Handles encode vs remux with different frame positions\n"
+            "  - Solves duplicate/dropped frame mismatches\n"
+            "  - Perfect for anime releases with varying frame counts\n"
+            "  - Slower but most accurate for problematic sources\n"
+            "  - Requires: pip install imagehash\n"
+            "  - Requires both source and target video files\n\n"
             "Note: Stepping correction (if enabled) takes precedence over this setting."
         )
 
@@ -1047,12 +1056,56 @@ class SubtitleSyncTab(QWidget):
             "Works with TimeType.EXACT for precise video player frame timing."
         )
 
+        # Frame-Matched settings
+        self.widgets['frame_match_search_window_sec'] = QSpinBox()
+        self.widgets['frame_match_search_window_sec'].setRange(1, 60)
+        self.widgets['frame_match_search_window_sec'].setSuffix(" sec")
+        self.widgets['frame_match_search_window_sec'].setToolTip(
+            "Search window for frame matching (in seconds).\n\n"
+            "For each subtitle, we search ±N seconds around the expected time\n"
+            "to find the visually matching frame.\n\n"
+            "• Larger window: More thorough, but slower\n"
+            "• Smaller window: Faster, but may miss matches if videos differ significantly\n\n"
+            "Default: 10 seconds (good for most cases)"
+        )
+
+        self.widgets['frame_match_threshold'] = QSpinBox()
+        self.widgets['frame_match_threshold'].setRange(0, 64)
+        self.widgets['frame_match_threshold'].setToolTip(
+            "Match threshold (hamming distance).\n\n"
+            "Maximum allowed difference between frame hashes to consider a match.\n"
+            "For 8x8 hash, range is 0-64 bits.\n\n"
+            "• 0: Perfect match only (too strict)\n"
+            "• 5: Very similar frames (recommended)\n"
+            "• 10-15: More tolerant (compression differences)\n"
+            "• 20+: Too loose (may match wrong scenes)\n\n"
+            "Default: 5"
+        )
+
+        self.widgets['frame_match_method'] = QComboBox()
+        self.widgets['frame_match_method'].addItems(['phash', 'dhash', 'average_hash'])
+        self.widgets['frame_match_method'].setToolTip(
+            "Perceptual hash algorithm:\n\n"
+            "• phash (Default): DCT-based, best for compression differences\n"
+            "  - Most robust to re-encoding\n"
+            "  - Recommended for anime\n\n"
+            "• dhash: Gradient-based, good for slight variations\n"
+            "  - Faster than phash\n"
+            "  - Sensitive to scaling\n\n"
+            "• average_hash: Simple averaging, very fast\n"
+            "  - Less accurate\n"
+            "  - Use only if others are too slow"
+        )
+
         sync_layout.addRow("Sync Mode:", self.widgets['subtitle_sync_mode'])
         sync_layout.addRow("Target FPS:", self.widgets['subtitle_target_fps'])
         sync_layout.addRow("Frame Timing:", self.widgets['frame_sync_mode'])
         sync_layout.addRow("Frame Rounding:", self.widgets['frame_shift_rounding'])
         sync_layout.addRow("", self.widgets['frame_sync_fix_zero_duration'])
         sync_layout.addRow("VTS Rounding:", self.widgets['videotimestamps_rounding'])
+        sync_layout.addRow("Match Window:", self.widgets['frame_match_search_window_sec'])
+        sync_layout.addRow("Match Threshold:", self.widgets['frame_match_threshold'])
+        sync_layout.addRow("Hash Method:", self.widgets['frame_match_method'])
 
         # Info label
         info_label = QLabel(
@@ -1081,8 +1134,9 @@ class SubtitleSyncTab(QWidget):
         is_frame_perfect = (text == 'frame-perfect')
         is_frame_snapped = (text == 'frame-snapped')
         is_videotimestamps = (text == 'videotimestamps')
+        is_frame_matched = (text == 'frame-matched')
 
-        # FPS setting is used by frame-perfect, frame-snapped, and videotimestamps
+        # FPS setting is used by frame-perfect, frame-snapped, and videotimestamps (not frame-matched)
         self.widgets['subtitle_target_fps'].setEnabled(is_frame_perfect or is_frame_snapped or is_videotimestamps)
 
         # Frame timing (middle/aegisub) applies to both frame-perfect and frame-snapped
@@ -1094,6 +1148,11 @@ class SubtitleSyncTab(QWidget):
 
         # VideoTimestamps rounding only applies to videotimestamps mode
         self.widgets['videotimestamps_rounding'].setEnabled(is_videotimestamps)
+
+        # Frame-matched settings only apply to frame-matched mode
+        self.widgets['frame_match_search_window_sec'].setEnabled(is_frame_matched)
+        self.widgets['frame_match_threshold'].setEnabled(is_frame_matched)
+        self.widgets['frame_match_method'].setEnabled(is_frame_matched)
 
 class ChaptersTab(QWidget):
     def __init__(self):
