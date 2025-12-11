@@ -29,10 +29,10 @@ class AppConfig:
             'videotimestamps_rounding': 'round',
 
             # --- Frame-Matched Sync Settings ---
-            'frame_match_search_window_sec': 5,  # Reduced from 10 with smart delay centering
+            'frame_match_search_window_sec': 1,  # Reduced to 1 sec with smart delay centering + hash caching
             'frame_match_hash_size': 8,
             'frame_match_threshold': 5,
-            'frame_match_method': 'phash',
+            'frame_match_method': 'dhash',  # dhash is 10x faster than phash, still accurate
             'frame_match_skip_unmatched': False,
             'frame_match_max_search_frames': 300,
 
