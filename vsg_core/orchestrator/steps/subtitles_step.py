@@ -196,17 +196,18 @@ class SubtitlesStep:
                         source_key = item.sync_to if item.track.source == 'External' else item.track.source
                         delay_ms = 0
 
-                        if ctx.delays and source_key in ctx.delays.source_delays_ms:
-                            delay_ms = int(ctx.delays.source_delays_ms[source_key])
+                        if ctx.delays and source_key in ctx.delays.source_delays_raw_ms:
+                            delay_ms = ctx.delays.source_delays_raw_ms[source_key]  # Use RAW fractional delay for subtitles!
+                            delay_ms_rounded = ctx.delays.source_delays_ms[source_key]
                             mode_label = "Frame-Snapped Sync" if subtitle_sync_mode == 'frame-snapped' else ("VideoTimestamps Sync" if subtitle_sync_mode == 'videotimestamps' else "Frame-Perfect Sync")
-                            runner._log_message(f"[{mode_label}] DEBUG: source_key='{source_key}', delay from source_delays_ms={delay_ms}ms")
-                            runner._log_message(f"[{mode_label}] DEBUG: All source_delays_ms: {ctx.delays.source_delays_ms}")
+                            runner._log_message(f"[{mode_label}] DEBUG: source_key='{source_key}', raw delay={delay_ms:+.3f}ms (rounded={delay_ms_rounded:+d}ms for mkvmerge)")
+                            runner._log_message(f"[{mode_label}] DEBUG: All source_delays_raw_ms: {ctx.delays.source_delays_raw_ms}")
                             runner._log_message(f"[{mode_label}] DEBUG: Global shift: {ctx.delays.global_shift_ms}ms")
                         else:
                             mode_label = "Frame-Snapped Sync" if subtitle_sync_mode == 'frame-snapped' else ("VideoTimestamps Sync" if subtitle_sync_mode == 'videotimestamps' else "Frame-Perfect Sync")
                             runner._log_message(f"[{mode_label}] DEBUG: source_key='{source_key}' not found in delays or delays is None")
                             if ctx.delays:
-                                runner._log_message(f"[{mode_label}] DEBUG: Available keys: {list(ctx.delays.source_delays_ms.keys())}")
+                                runner._log_message(f"[{mode_label}] DEBUG: Available keys: {list(ctx.delays.source_delays_raw_ms.keys())}")
 
                         # Only apply if there's a non-zero delay
                         if delay_ms != 0:

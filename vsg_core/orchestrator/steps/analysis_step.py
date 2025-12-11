@@ -164,10 +164,11 @@ class AnalysisStep:
         # NEW: Skip analysis if only Source 1 (remux-only mode)
         if len(ctx.sources) == 1:
             runner._log_message("--- Analysis Phase: Skipped (Remux-only mode - no sync sources) ---")
-            ctx.delays = Delays(source_delays_ms={}, global_shift_ms=0)
+            ctx.delays = Delays(source_delays_ms={}, source_delays_raw_ms={}, global_shift_ms=0)
             return ctx
 
         source_delays: Dict[str, int] = {}
+        source_delays_raw: Dict[str, float] = {}  # Raw fractional values for subtitle sync
 
         # --- Step 1: Get Source 1's container delays for chain calculation ---
         runner._log_message("--- Getting Source 1 Container Delays for Analysis ---")
@@ -368,14 +369,17 @@ class AnalysisStep:
                     )
 
             # Calculate final delay including container delay chain correction
-            final_delay_ms = round(raw_delay_ms + source1_audio_container_delay)
+            # Store BOTH raw (for subtitles) and rounded (for mkvmerge)
+            final_delay_raw_ms = raw_delay_ms + source1_audio_container_delay
+            final_delay_ms = round(final_delay_raw_ms)
 
             if source1_audio_container_delay != 0:
                 runner._log_message(f"[Delay Chain] {source_key} raw correlation: {raw_delay_ms:+d}ms")
                 runner._log_message(f"[Delay Chain] Adding Source 1 audio container delay: {source1_audio_container_delay:+.1f}ms")
-                runner._log_message(f"[Delay Chain] Final delay for {source_key}: {final_delay_ms:+d}ms")
+                runner._log_message(f"[Delay Chain] Final delay for {source_key}: {final_delay_ms:+d}ms (raw: {final_delay_raw_ms:+.3f}ms)")
 
             source_delays[source_key] = final_delay_ms
+            source_delays_raw[source_key] = final_delay_raw_ms
 
             # --- Handle drift detection flags ---
             if diagnosis:
@@ -470,6 +474,7 @@ class AnalysisStep:
 
         # Initialize Source 1 with 0ms base delay so it gets the global shift
         source_delays["Source 1"] = 0
+        source_delays_raw["Source 1"] = 0.0
 
         # --- Step 3: Calculate Global Shift to Handle Negative Delays ---
         runner._log_message("\n--- Calculating Global Shift ---")
@@ -508,8 +513,10 @@ class AnalysisStep:
             runner._log_message(f"[Delay] Adjusted delays after global shift:")
             for source_key in sorted(source_delays.keys()):
                 original_delay = source_delays[source_key]
+                original_delay_raw = source_delays_raw[source_key]
                 source_delays[source_key] += global_shift_ms
-                runner._log_message(f"  - {source_key}: {original_delay:+.1f}ms → {source_delays[source_key]:+.1f}ms")
+                source_delays_raw[source_key] += global_shift_ms
+                runner._log_message(f"  - {source_key}: {original_delay:+.1f}ms → {source_delays[source_key]:+.1f}ms (raw: {source_delays_raw[source_key]:+.3f}ms)")
 
             if source1_container_delays:
                 runner._log_message(f"[Delay] Source 1 container delays (will have +{global_shift_ms}ms added during mux):")
@@ -526,7 +533,7 @@ class AnalysisStep:
             runner._log_message(f"[Delay] All relevant delays are non-negative. No global shift needed.")
 
         # Store the calculated delays with global shift
-        ctx.delays = Delays(source_delays_ms=source_delays, global_shift_ms=global_shift_ms)
+        ctx.delays = Delays(source_delays_ms=source_delays, source_delays_raw_ms=source_delays_raw, global_shift_ms=global_shift_ms)
 
         # Final summary
         runner._log_message(f"\n[Delay] === FINAL DELAYS (Sync Mode: {sync_mode.upper()}, Global Shift: +{global_shift_ms}ms) ===")

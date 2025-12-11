@@ -264,7 +264,7 @@ def time_to_frame_vfr(time_ms: float, video_path: str, fps: float, runner, confi
 
 def apply_videotimestamps_sync(
     subtitle_path: str,
-    delay_ms: int,
+    delay_ms: float,
     target_fps: float,
     runner,
     config: dict = None,
@@ -307,7 +307,7 @@ def apply_videotimestamps_sync(
     runner._log_message(f"[VideoTimestamps Sync] RoundingMethod: {rounding_method.upper()}")
     runner._log_message(f"[VideoTimestamps Sync] Loading subtitle: {Path(subtitle_path).name}")
     runner._log_message(f"[VideoTimestamps Sync] Video: {Path(video_path).name}")
-    runner._log_message(f"[VideoTimestamps Sync] Delay to apply: {delay_ms:+d} ms")
+    runner._log_message(f"[VideoTimestamps Sync] Delay to apply: {delay_ms:+.3f} ms")
 
     # Get VideoTimestamps instance
     vts = get_vfr_timestamps(video_path, target_fps, runner, config)
@@ -395,7 +395,7 @@ def apply_videotimestamps_sync(
 
 def apply_frame_snapped_sync(
     subtitle_path: str,
-    delay_ms: int,
+    delay_ms: float,
     target_fps: float,
     runner,
     config: dict = None,
@@ -443,7 +443,7 @@ def apply_frame_snapped_sync(
     runner._log_message(f"[Frame-Snapped Sync] Mode: Snap start, preserve duration")
     runner._log_message(f"[Frame-Snapped Sync] Loading subtitle: {Path(subtitle_path).name}")
     runner._log_message(f"[Frame-Snapped Sync] Target FPS: {target_fps:.3f}")
-    runner._log_message(f"[Frame-Snapped Sync] Delay to apply: {delay_ms:+d} ms")
+    runner._log_message(f"[Frame-Snapped Sync] Delay to apply: {delay_ms:+.3f} ms")
     runner._log_message(f"[Frame-Snapped Sync] Frame timing convention: {timing_mode}")
 
     # Load subtitle file
@@ -543,7 +543,7 @@ def frame_to_time(frame_num: int, fps: float) -> int:
 
 def apply_frame_perfect_sync(
     subtitle_path: str,
-    delay_ms: int,
+    delay_ms: float,
     target_fps: float,
     runner,
     config: dict = None,
@@ -587,7 +587,7 @@ def apply_frame_perfect_sync(
     runner._log_message(f"[Frame-Perfect Sync] Mode: {timing_mode}")
     runner._log_message(f"[Frame-Perfect Sync] Loading subtitle: {Path(subtitle_path).name}")
     runner._log_message(f"[Frame-Perfect Sync] Target FPS: {target_fps:.3f}")
-    runner._log_message(f"[Frame-Perfect Sync] Delay to apply: {delay_ms:+d} ms")
+    runner._log_message(f"[Frame-Perfect Sync] Delay to apply: {delay_ms:+.3f} ms")
 
     # Convert delay to frame count using configured rounding method
     frame_duration_ms = 1000.0 / target_fps

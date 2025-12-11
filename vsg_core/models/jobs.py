@@ -14,6 +14,7 @@ class JobSpec:
 @dataclass(frozen=True)
 class Delays:
     source_delays_ms: Dict[str, int] = field(default_factory=dict)
+    source_delays_raw_ms: Dict[str, float] = field(default_factory=dict)  # Raw fractional delays for subtitle sync
     global_shift_ms: int = 0
 
 @dataclass
