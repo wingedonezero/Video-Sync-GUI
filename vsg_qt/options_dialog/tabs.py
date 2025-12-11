@@ -1030,11 +1030,29 @@ class SubtitleSyncTab(QWidget):
             "Only enable if you have subtitles with invalid durations."
         )
 
+        self.widgets['videotimestamps_rounding'] = QComboBox()
+        self.widgets['videotimestamps_rounding'].addItems(['round', 'floor'])
+        self.widgets['videotimestamps_rounding'].setToolTip(
+            "VideoTimestamps RoundingMethod (for videotimestamps sync mode):\n\n"
+            "Controls how the VideoTimestamps library rounds presentation timestamps.\n\n"
+            "• round (Default): Round half up\n"
+            "  - Rounds to nearest integer (.5 and above rounds up)\n"
+            "  - Most accurate for general use\n"
+            "  - Balanced rounding\n\n"
+            "• floor: Always round down\n"
+            "  - Conservative rounding (never exceeds actual timestamp)\n"
+            "  - Matches Aegisub's int() floor division\n"
+            "  - Try this if subs are consistently 1 frame late\n\n"
+            "This setting only applies when 'videotimestamps' sync mode is selected.\n"
+            "Works with TimeType.EXACT for precise video player frame timing."
+        )
+
         sync_layout.addRow("Sync Mode:", self.widgets['subtitle_sync_mode'])
         sync_layout.addRow("Target FPS:", self.widgets['subtitle_target_fps'])
         sync_layout.addRow("Frame Timing:", self.widgets['frame_sync_mode'])
         sync_layout.addRow("Frame Rounding:", self.widgets['frame_shift_rounding'])
         sync_layout.addRow("", self.widgets['frame_sync_fix_zero_duration'])
+        sync_layout.addRow("VTS Rounding:", self.widgets['videotimestamps_rounding'])
 
         # Info label
         info_label = QLabel(
@@ -1073,6 +1091,9 @@ class SubtitleSyncTab(QWidget):
         # Frame shift rounding and zero-duration fix only apply to frame-perfect mode
         self.widgets['frame_shift_rounding'].setEnabled(is_frame_perfect)
         self.widgets['frame_sync_fix_zero_duration'].setEnabled(is_frame_perfect)
+
+        # VideoTimestamps rounding only applies to videotimestamps mode
+        self.widgets['videotimestamps_rounding'].setEnabled(is_videotimestamps)
 
 class ChaptersTab(QWidget):
     def __init__(self):
