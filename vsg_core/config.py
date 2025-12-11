@@ -28,6 +28,14 @@ class AppConfig:
             'frame_sync_fix_zero_duration': False,
             'videotimestamps_rounding': 'round',
 
+            # --- Frame-Matched Sync Settings ---
+            'frame_match_search_window_sec': 10,
+            'frame_match_hash_size': 8,
+            'frame_match_threshold': 5,
+            'frame_match_method': 'phash',
+            'frame_match_skip_unmatched': False,
+            'frame_match_max_search_frames': 300,
+
             # --- Timing Fix Settings ---
             'timing_fix_enabled': False,
             'timing_fix_overlaps': True,

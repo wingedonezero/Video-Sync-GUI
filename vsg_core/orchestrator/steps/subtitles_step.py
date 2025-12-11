@@ -18,6 +18,7 @@ from vsg_core.subtitles.cleanup import run_cleanup
 from vsg_core.subtitles.timing import fix_subtitle_timing
 from vsg_core.subtitles.stepping_adjust import apply_stepping_to_subtitles
 from vsg_core.subtitles.frame_sync import apply_frame_perfect_sync, apply_videotimestamps_sync, apply_frame_snapped_sync, detect_video_fps
+from vsg_core.subtitles.frame_matching import apply_frame_matched_sync
 
 class SubtitlesStep:
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
@@ -186,13 +187,49 @@ class SubtitlesStep:
             if item.extracted_path and not item.stepping_adjusted:
                 subtitle_sync_mode = ctx.settings_dict.get('subtitle_sync_mode', 'time-based')
 
-                if subtitle_sync_mode in ['frame-perfect', 'videotimestamps', 'frame-snapped']:
+                if subtitle_sync_mode in ['frame-perfect', 'videotimestamps', 'frame-snapped', 'frame-matched']:
                     # Check if this subtitle format supports frame-perfect sync
                     ext = item.extracted_path.suffix.lower()
                     supported_formats = ['.ass', '.ssa', '.srt', '.vtt']
 
                     if ext in supported_formats:
-                        # Get the uniform delay for this source
+                        # Frame-matched mode works differently - it doesn't use delays
+                        if subtitle_sync_mode == 'frame-matched':
+                            # Frame-matched mode requires source and target videos
+                            source_key = item.sync_to if item.track.source == 'External' else item.track.source
+                            source_video = ctx.sources.get(source_key)
+                            target_video = source1_file
+
+                            if source_video and target_video:
+                                runner._log_message(f"[Frame-Matched Sync] Applying to track {item.track.id} ({item.track.props.name or 'Unnamed'})")
+                                runner._log_message(f"[Frame-Matched Sync] Source video: {Path(source_video).name}")
+                                runner._log_message(f"[Frame-Matched Sync] Target video: {Path(target_video).name}")
+
+                                frame_sync_report = apply_frame_matched_sync(
+                                    str(item.extracted_path),
+                                    str(source_video),
+                                    str(target_video),
+                                    runner,
+                                    ctx.settings_dict
+                                )
+
+                                if frame_sync_report and 'error' not in frame_sync_report:
+                                    runner._log_message(f"--- Frame-Matched Sync Report ---")
+                                    for key, value in frame_sync_report.items():
+                                        runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
+                                    runner._log_message("-----------------------------------")
+                                    # Mark that timestamps have been adjusted
+                                    item.frame_adjusted = True
+                                else:
+                                    runner._log_message(f"[Frame-Matched Sync] WARNING: Sync failed for track {item.track.id}")
+                            else:
+                                runner._log_message(f"[Frame-Matched Sync] ERROR: Missing source or target video")
+                                runner._log_message(f"[Frame-Matched Sync] Source: {source_video}, Target: {target_video}")
+
+                            # Skip the delay-based sync logic for frame-matched mode
+                            continue
+
+                        # Get the uniform delay for this source (for other modes)
                         source_key = item.sync_to if item.track.source == 'External' else item.track.source
                         delay_ms = 0
 
