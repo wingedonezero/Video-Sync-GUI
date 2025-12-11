@@ -9,7 +9,8 @@ frame-perfect alignment for typesetting and moving signs from release groups.
 Supports multiple timing modes:
 - 'middle': Half-frame offset (targets middle of frame window)
 - 'aegisub': Aegisub-style (ceil to centisecond)
-- 'vfr': VideoTimestamps-based (for variable framerate)
+
+For Variable Frame Rate videos, use the separate 'videotimestamps' sync mode.
 """
 from __future__ import annotations
 from pathlib import Path
@@ -320,13 +321,22 @@ def apply_videotimestamps_sync(
             runner._log_message(f"[VideoTimestamps Sync] ERROR: Failed to convert time to frame")
             continue
 
-        # Calculate frame shift from delay
-        frame_duration_ms = 1000.0 / target_fps
-        frame_shift = round(delay_ms / frame_duration_ms)
+        # Apply delay: convert delay_ms to Fraction for precise calculation
+        from fractions import Fraction
+        delay_frac = Fraction(delay_ms, 1)
+        time_scale = Fraction(1000)  # milliseconds
 
-        # Apply frame shift
-        new_start_frame = start_frame + frame_shift
-        new_end_frame = end_frame + frame_shift
+        # Add delay using VideoTimestamps precision
+        new_start_frac = Fraction(original_start, 1) + delay_frac
+        new_end_frac = Fraction(original_end, 1) + delay_frac
+
+        # Convert to frames, then back to time using VideoTimestamps
+        new_start_frame = time_to_frame_vfr(int(new_start_frac), video_path, target_fps, runner)
+        new_end_frame = time_to_frame_vfr(int(new_end_frac), video_path, target_fps, runner)
+
+        if new_start_frame is None or new_end_frame is None:
+            runner._log_message(f"[VideoTimestamps Sync] ERROR: Failed to convert adjusted time to frame")
+            continue
 
         # Convert back to time using VideoTimestamps
         new_start_ms = frame_to_time_vfr(new_start_frame, video_path, target_fps, runner)
@@ -336,15 +346,11 @@ def apply_videotimestamps_sync(
             runner._log_message(f"[VideoTimestamps Sync] ERROR: Failed to convert frame to time")
             continue
 
-        # Ensure end is after start
-        if new_end_ms <= new_start_ms:
-            new_end_ms = new_start_ms + int(round(frame_duration_ms))
-
-        # Update event
+        # Update event (no fixes, let errors be visible)
         event.start = new_start_ms
         event.end = new_end_ms
 
-        if frame_shift != 0:
+        if delay_ms != 0:
             adjusted_count += 1
 
     # Save modified subtitle
@@ -355,23 +361,15 @@ def apply_videotimestamps_sync(
         runner._log_message(f"[VideoTimestamps Sync] ERROR: Failed to save subtitle file: {e}")
         return {'error': str(e)}
 
-    # Calculate effective delay
-    frame_duration_ms = 1000.0 / target_fps
-    frame_shift = round(delay_ms / frame_duration_ms)
-    effective_delay_ms = frame_shift * frame_duration_ms
-
     # Log results
     runner._log_message(f"[VideoTimestamps Sync] ✓ Successfully processed {len(subs.events)} events")
     runner._log_message(f"[VideoTimestamps Sync]   - Events adjusted: {adjusted_count}")
-    runner._log_message(f"[VideoTimestamps Sync]   - Frame shift applied: {frame_shift:+d} frames")
-    runner._log_message(f"[VideoTimestamps Sync]   - Effective delay: {effective_delay_ms:+.1f} ms")
+    runner._log_message(f"[VideoTimestamps Sync]   - Delay applied: {delay_ms:+d} ms")
 
     return {
         'total_events': len(subs.events),
         'adjusted_events': adjusted_count,
-        'frame_shift': frame_shift,
         'delay_applied_ms': delay_ms,
-        'effective_delay_ms': int(round(effective_delay_ms)),
         'target_fps': target_fps
     }
 
@@ -404,23 +402,26 @@ def apply_frame_perfect_sync(
     Supports multiple timing modes:
     - 'middle': Half-frame offset (default, targets middle of frame window)
     - 'aegisub': Aegisub-style (rounds UP to centisecond)
-    - 'vfr': VideoTimestamps-based (for variable framerate)
 
     Algorithm:
-    1. Convert delay_ms to frame count (round to nearest whole frame)
+    1. Convert delay_ms to frame count (using configured rounding method)
     2. For each subtitle event:
        - Convert timestamp to frame number (using selected mode)
        - Add frame offset
        - Convert back to timestamp (using selected mode)
-    3. Save modified subtitle file
+    3. Optionally fix zero-duration events (if enabled)
+    4. Save modified subtitle file
 
     Args:
         subtitle_path: Path to subtitle file (.ass, .srt, .ssa, .vtt)
         delay_ms: Time offset in milliseconds (converted to frames)
-        target_fps: Target video frame rate (ignored for VFR mode)
+        target_fps: Target video frame rate
         runner: CommandRunner for logging
-        config: Optional config dict with 'frame_sync_mode' key
-        video_path: Path to video file (required for VFR mode)
+        config: Optional config dict with settings:
+            - 'frame_sync_mode': 'middle' or 'aegisub'
+            - 'frame_shift_rounding': 'round', 'floor', or 'ceil'
+            - 'frame_sync_fix_zero_duration': bool
+        video_path: Path to video file (unused, kept for API compatibility)
 
     Returns:
         Dict with report statistics
@@ -435,13 +436,22 @@ def apply_frame_perfect_sync(
     runner._log_message(f"[Frame-Perfect Sync] Target FPS: {target_fps:.3f}")
     runner._log_message(f"[Frame-Perfect Sync] Delay to apply: {delay_ms:+d} ms")
 
-    # Convert delay to frame count
+    # Convert delay to frame count using configured rounding method
     frame_duration_ms = 1000.0 / target_fps
-    frame_shift = round(delay_ms / frame_duration_ms)
+    rounding_method = config.get('frame_shift_rounding', 'round')
+
+    raw_frame_shift = delay_ms / frame_duration_ms
+    if rounding_method == 'floor':
+        frame_shift = int(raw_frame_shift)  # floor
+    elif rounding_method == 'ceil':
+        frame_shift = int(raw_frame_shift) + (1 if raw_frame_shift > int(raw_frame_shift) else 0)  # ceil
+    else:  # 'round' (default)
+        frame_shift = round(raw_frame_shift)
+
     effective_delay_ms = frame_shift * frame_duration_ms
 
     runner._log_message(f"[Frame-Perfect Sync] Frame duration: {frame_duration_ms:.3f} ms")
-    runner._log_message(f"[Frame-Perfect Sync] Frame shift: {frame_shift:+d} frames")
+    runner._log_message(f"[Frame-Perfect Sync] Frame shift: {frame_shift:+d} frames (using {rounding_method})")
     runner._log_message(f"[Frame-Perfect Sync] Effective delay: {effective_delay_ms:+.1f} ms")
 
     if abs(delay_ms - effective_delay_ms) > 0.5:
@@ -472,13 +482,6 @@ def apply_frame_perfect_sync(
     if timing_mode == 'aegisub':
         time_to_frame_func = time_to_frame_aegisub
         frame_to_time_func = frame_to_time_aegisub
-    elif timing_mode == 'vfr':
-        if not video_path:
-            runner._log_message(f"[Frame-Perfect Sync] ERROR: VFR mode requires video_path")
-            return {'error': 'VFR mode requires video_path'}
-        # VFR functions need video_path, handle differently
-        time_to_frame_func = None  # Will use lambda below
-        frame_to_time_func = None
     else:  # 'middle' or default
         time_to_frame_func = time_to_frame_middle
         frame_to_time_func = frame_to_time_middle
@@ -492,40 +495,23 @@ def apply_frame_perfect_sync(
         if original_start == original_end:
             continue
 
-        # Convert to frame numbers (mode-specific)
-        if timing_mode == 'vfr':
-            start_frame = time_to_frame_vfr(original_start, video_path, target_fps, runner)
-            end_frame = time_to_frame_vfr(original_end, video_path, target_fps, runner)
-            if start_frame is None or end_frame is None:
-                runner._log_message(f"[Frame-Perfect Sync] ERROR: VFR conversion failed, falling back to middle mode")
-                start_frame = time_to_frame_middle(original_start, target_fps)
-                end_frame = time_to_frame_middle(original_end, target_fps)
-                # Switch to middle mode functions for remaining processing
-                timing_mode = 'middle'
-                time_to_frame_func = time_to_frame_middle
-                frame_to_time_func = frame_to_time_middle
-        else:
-            start_frame = time_to_frame_func(original_start, target_fps)
-            end_frame = time_to_frame_func(original_end, target_fps)
+        # Convert to frame numbers
+        start_frame = time_to_frame_func(original_start, target_fps)
+        end_frame = time_to_frame_func(original_end, target_fps)
 
         # Apply frame shift
         new_start_frame = start_frame + frame_shift
         new_end_frame = end_frame + frame_shift
 
-        # Convert back to timestamps (mode-specific)
-        if timing_mode == 'vfr':
-            new_start_ms = frame_to_time_vfr(new_start_frame, video_path, target_fps, runner)
-            new_end_ms = frame_to_time_vfr(new_end_frame, video_path, target_fps, runner)
-            if new_start_ms is None or new_end_ms is None:
-                runner._log_message(f"[Frame-Perfect Sync] ERROR: VFR conversion failed")
-                continue
-        else:
-            new_start_ms = frame_to_time_func(new_start_frame, target_fps)
-            new_end_ms = frame_to_time_func(new_end_frame, target_fps)
+        # Convert back to timestamps
+        new_start_ms = frame_to_time_func(new_start_frame, target_fps)
+        new_end_ms = frame_to_time_func(new_end_frame, target_fps)
 
-        # Ensure end is after start
-        if new_end_ms <= new_start_ms:
+        # Optionally fix zero-duration events
+        fix_zero_duration = config.get('frame_sync_fix_zero_duration', False)
+        if fix_zero_duration and new_end_ms <= new_start_ms:
             new_end_ms = new_start_ms + int(round(frame_duration_ms))
+            runner._log_message(f"[Frame-Perfect Sync] WARNING: Fixed zero-duration event at {new_start_ms}ms (added 1 frame)")
 
         # Update event
         event.start = new_start_ms

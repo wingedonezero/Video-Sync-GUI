@@ -940,14 +940,17 @@ class SubtitleSyncTab(QWidget):
             "  - May cause frame misalignment for typesetting/moving signs\n"
             "  - Works with all subtitle formats\n\n"
             "• frame-perfect: Apply delays with custom frame timing algorithms\n"
-            "  - Includes middle/aegisub/vfr timing options\n"
+            "  - Includes middle/aegisub timing options\n"
             "  - Custom frame offset adjustments (+0.5, ceil rounding)\n"
+            "  - Optional frame shift rounding (round/floor/ceil)\n"
+            "  - Optional zero-duration fix\n"
             "  - Recommended for release group ASS subtitles\n"
             "  - Requires FPS detection from Source 1 video\n\n"
-            "• videotimestamps: Pure VideoTimestamps library (no custom offsets)\n"
+            "• videotimestamps: Pure VideoTimestamps library\n"
             "  - Uses VideoTimestamps library directly\n"
-            "  - No custom frame offset adjustments\n"
+            "  - No custom frame offset adjustments or fixes\n"
             "  - Clean implementation for testing library behavior\n"
+            "  - Supports Variable Frame Rate videos\n"
             "  - Requires: pip install VideoTimestamps\n"
             "  - Requires Source 1 video file\n\n"
             "Note: Stepping correction (if enabled) takes precedence over this setting."
@@ -975,7 +978,7 @@ class SubtitleSyncTab(QWidget):
         )
 
         self.widgets['frame_sync_mode'] = QComboBox()
-        self.widgets['frame_sync_mode'].addItems(['middle', 'aegisub', 'vfr'])
+        self.widgets['frame_sync_mode'].addItems(['middle', 'aegisub'])
         self.widgets['frame_sync_mode'].setToolTip(
             "Frame timing algorithm (for frame-perfect mode):\n\n"
             "• middle (Default): Targets middle of frame display window\n"
@@ -987,17 +990,44 @@ class SubtitleSyncTab(QWidget):
             "  - Matches Aegisub's internal algorithm\n"
             "  - May be closer to what release groups expect\n"
             "  - Recommended if 'middle' mode has occasional frame errors\n\n"
-            "• vfr: VideoTimestamps-based (requires library)\n"
-            "  - Uses actual frame timestamps from video container\n"
-            "  - Required for Variable Frame Rate videos\n"
-            "  - Most accurate for mixed-framerate content\n"
-            "  - Requires: pip install VideoTimestamps\n\n"
-            "Note: This only applies when 'frame-perfect' sync mode is selected above."
+            "Note: For Variable Frame Rate videos, use 'videotimestamps' sync mode instead.\n"
+            "This only applies when 'frame-perfect' sync mode is selected above."
+        )
+
+        self.widgets['frame_shift_rounding'] = QComboBox()
+        self.widgets['frame_shift_rounding'].addItems(['round', 'floor', 'ceil'])
+        self.widgets['frame_shift_rounding'].setToolTip(
+            "Frame shift rounding strategy:\n\n"
+            "Controls how delay in milliseconds is converted to frame count.\n\n"
+            "• round (Default): Round to nearest frame\n"
+            "  - Example: 2.4 frames → 2, 2.6 frames → 3\n"
+            "  - Most accurate for typical delays\n\n"
+            "• floor: Always round down\n"
+            "  - Example: 2.9 frames → 2\n"
+            "  - More conservative, may under-shift\n\n"
+            "• ceil: Always round up\n"
+            "  - Example: 2.1 frames → 3\n"
+            "  - More aggressive, may over-shift\n\n"
+            "Try different options if sync is consistently off by 1 frame."
+        )
+
+        self.widgets['frame_sync_fix_zero_duration'] = QCheckBox("Fix zero-duration events")
+        self.widgets['frame_sync_fix_zero_duration'].setToolTip(
+            "Add 1 frame to end time if end ≤ start after conversion.\n\n"
+            "• Unchecked (Default): Let conversion errors be visible\n"
+            "  - Helps identify timing bugs\n"
+            "  - Recommended for testing\n\n"
+            "• Checked: Auto-fix zero/negative duration events\n"
+            "  - Masks potential conversion issues\n"
+            "  - May add unwanted +1 frame to end times\n\n"
+            "Only enable if you have subtitles with invalid durations."
         )
 
         sync_layout.addRow("Sync Mode:", self.widgets['subtitle_sync_mode'])
         sync_layout.addRow("Target FPS:", self.widgets['subtitle_target_fps'])
         sync_layout.addRow("Frame Timing:", self.widgets['frame_sync_mode'])
+        sync_layout.addRow("Frame Rounding:", self.widgets['frame_shift_rounding'])
+        sync_layout.addRow("", self.widgets['frame_sync_fix_zero_duration'])
 
         # Info label
         info_label = QLabel(
@@ -1029,8 +1059,10 @@ class SubtitleSyncTab(QWidget):
         # FPS setting is used by both frame-perfect and videotimestamps
         self.widgets['subtitle_target_fps'].setEnabled(is_frame_perfect or is_videotimestamps)
 
-        # Frame timing mode only applies to frame-perfect (not videotimestamps)
+        # These settings only apply to frame-perfect mode (not videotimestamps)
         self.widgets['frame_sync_mode'].setEnabled(is_frame_perfect)
+        self.widgets['frame_shift_rounding'].setEnabled(is_frame_perfect)
+        self.widgets['frame_sync_fix_zero_duration'].setEnabled(is_frame_perfect)
 
 class ChaptersTab(QWidget):
     def __init__(self):
