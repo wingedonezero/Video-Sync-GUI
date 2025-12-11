@@ -29,7 +29,7 @@ class AppConfig:
             'videotimestamps_rounding': 'round',
 
             # --- Frame-Matched Sync Settings ---
-            'frame_match_search_window_sec': 10,
+            'frame_match_search_window_sec': 5,  # Reduced from 10 with smart delay centering
             'frame_match_hash_size': 8,
             'frame_match_threshold': 5,
             'frame_match_method': 'phash',

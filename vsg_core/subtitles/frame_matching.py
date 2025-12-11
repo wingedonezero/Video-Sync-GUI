@@ -31,15 +31,44 @@ class VideoReader:
     """
     Efficient video reader that keeps video file open for fast frame access.
 
-    Uses opencv-python (cv2) if available, otherwise falls back to slower ffmpeg.
+    Priority order:
+    1. FFMS2 (fastest - indexed seeking, <1ms per frame)
+    2. OpenCV (fast - keeps file open, but seeks from keyframes)
+    3. FFmpeg (slow - spawns process per frame)
     """
     def __init__(self, video_path: str, runner):
         self.video_path = video_path
         self.runner = runner
+        self.source = None
         self.cap = None
+        self.use_ffms2 = False
         self.use_opencv = False
+        self.fps = None
 
-        # Try to use opencv for fast access
+        # Try FFMS2 first (fastest - indexed seeking)
+        try:
+            import ffms2
+            runner._log_message(f"[FrameMatch] Indexing video with FFMS2 (one-time cost)...")
+            runner._log_message(f"[FrameMatch] This may take 1-2 minutes, but enables instant frame access...")
+
+            # Create FFMS2 source (will create/use index file)
+            self.source = ffms2.VideoSource(str(video_path))
+            self.use_ffms2 = True
+
+            # Get video properties
+            self.fps = self.source.properties.FPSNumerator / self.source.properties.FPSDenominator
+
+            runner._log_message(f"[FrameMatch] ✓ FFMS2 indexed! Using instant frame seeking (FPS: {self.fps:.3f})")
+            runner._log_message(f"[FrameMatch] Index cached to: {video_path}.ffindex")
+            return
+
+        except ImportError:
+            runner._log_message(f"[FrameMatch] FFMS2 not installed, trying opencv...")
+            runner._log_message(f"[FrameMatch] Install FFMS2 for 100x speedup: pip install ffms2")
+        except Exception as e:
+            runner._log_message(f"[FrameMatch] WARNING: FFMS2 failed ({e}), trying opencv...")
+
+        # Fallback to opencv if FFMS2 unavailable
         try:
             import cv2
             self.cv2 = cv2
@@ -47,13 +76,13 @@ class VideoReader:
             if self.cap.isOpened():
                 self.use_opencv = True
                 self.fps = self.cap.get(cv2.CAP_PROP_FPS)
-                runner._log_message(f"[FrameMatch] Using opencv for fast frame access (FPS: {self.fps:.3f})")
+                runner._log_message(f"[FrameMatch] Using opencv for frame access (FPS: {self.fps:.3f})")
             else:
                 runner._log_message(f"[FrameMatch] WARNING: opencv couldn't open video, falling back to ffmpeg")
                 self.cap = None
         except ImportError:
             runner._log_message(f"[FrameMatch] WARNING: opencv not installed, using slower ffmpeg fallback")
-            runner._log_message(f"[FrameMatch] Install opencv for 100x speedup: pip install opencv-python")
+            runner._log_message(f"[FrameMatch] Install opencv for better performance: pip install opencv-python")
 
     def get_frame_at_time(self, time_ms: int) -> Optional[Image.Image]:
         """
@@ -65,10 +94,35 @@ class VideoReader:
         Returns:
             PIL Image object, or None on failure
         """
-        if self.use_opencv and self.cap:
+        if self.use_ffms2 and self.source:
+            return self._get_frame_ffms2(time_ms)
+        elif self.use_opencv and self.cap:
             return self._get_frame_opencv(time_ms)
         else:
             return self._get_frame_ffmpeg(time_ms)
+
+    def _get_frame_ffms2(self, time_ms: int) -> Optional[Image.Image]:
+        """Extract frame using FFMS2 (instant indexed seeking)."""
+        try:
+            # Convert time to frame number
+            frame_num = int((time_ms / 1000.0) * self.fps)
+
+            # Clamp to valid range
+            frame_num = max(0, min(frame_num, self.source.properties.NumFrames - 1))
+
+            # Get frame (instant - uses index!)
+            frame = self.source.get_frame(frame_num)
+
+            # Convert to PIL Image
+            # FFMS2 returns frames as numpy arrays in RGB format
+            frame_array = frame.planes[0]  # Get RGB data
+
+            # Create PIL Image from numpy array
+            return Image.fromarray(frame_array)
+
+        except Exception as e:
+            self.runner._log_message(f"[FrameMatch] ERROR: FFMS2 frame extraction failed: {e}")
+            return None
 
     def _get_frame_opencv(self, time_ms: int) -> Optional[Image.Image]:
         """Extract frame using opencv (fast)."""
@@ -137,6 +191,9 @@ class VideoReader:
 
     def close(self):
         """Release video resources."""
+        if self.source:
+            # FFMS2 sources don't need explicit closing, but clear reference
+            self.source = None
         if self.cap:
             self.cap.release()
             self.cap = None
@@ -182,13 +239,13 @@ def find_matching_frame(
     """
     Find the frame in target video that best matches the source hash.
 
-    Searches within a window around the expected time for efficiency.
+    Searches from center outward for efficiency (most likely match is in middle).
 
     Args:
         source_hash: ImageHash of the source frame
         target_reader: VideoReader for target video (keeps video open)
-        expected_time_ms: Expected timestamp (starting point for search)
-        search_window_ms: Search window in milliseconds (±window)
+        expected_time_ms: Expected timestamp (center of search, already adjusted for audio delay)
+        search_window_ms: Search window in milliseconds (±window from expected)
         threshold: Maximum hamming distance for match (0-64 for 8x8 hash)
         fps: Target video frame rate
         config: Config dict with hash settings
@@ -196,10 +253,6 @@ def find_matching_frame(
     Returns:
         Matched timestamp in milliseconds, or None if no match found
     """
-    # Calculate search range
-    start_time_ms = max(0, expected_time_ms - search_window_ms)
-    end_time_ms = expected_time_ms + search_window_ms
-
     # Frame duration in ms
     frame_duration_ms = 1000.0 / fps
 
@@ -210,49 +263,52 @@ def find_matching_frame(
     hash_size = config.get('frame_match_hash_size', 8)
     hash_method = config.get('frame_match_method', 'phash')
 
-    # Calculate number of frames to search
-    num_frames = int((end_time_ms - start_time_ms) / frame_duration_ms)
+    # Calculate number of frames to search (radius from center)
+    num_frames_radius = int(search_window_ms / frame_duration_ms)
 
-    # Limit search to reasonable number (e.g., max 300 frames = ~12 sec at 24fps)
+    # Limit search to reasonable number
     max_search_frames = config.get('frame_match_max_search_frames', 300)
-    if num_frames > max_search_frames:
-        num_frames = max_search_frames
-        end_time_ms = start_time_ms + (num_frames * frame_duration_ms)
+    if num_frames_radius * 2 > max_search_frames:
+        num_frames_radius = max_search_frames // 2
 
-    # Search through frames
-    current_time_ms = start_time_ms
+    # Search from center outward (spiral pattern)
+    # This finds matches faster when expected_time_ms is accurate (using audio delay)
     frames_checked = 0
 
-    while current_time_ms <= end_time_ms:
-        # Extract frame from target using VideoReader (FAST!)
-        target_frame = target_reader.get_frame_at_time(int(current_time_ms))
+    for offset in range(num_frames_radius + 1):
+        # Check frames at ±offset from center
+        for direction in ([0] if offset == 0 else [-1, 1]):
+            current_time_ms = expected_time_ms + (offset * direction * frame_duration_ms)
 
-        if target_frame is None:
-            current_time_ms += frame_duration_ms
-            continue
+            # Skip if out of bounds
+            if current_time_ms < 0:
+                continue
 
-        # Compute hash
-        target_hash = compute_frame_hash(target_frame, hash_size=hash_size, method=hash_method)
+            # Extract frame from target using VideoReader (FAST with FFMS2!)
+            target_frame = target_reader.get_frame_at_time(int(current_time_ms))
 
-        if target_hash is None:
-            current_time_ms += frame_duration_ms
-            continue
+            if target_frame is None:
+                continue
 
-        # Compare hashes
-        distance = source_hash - target_hash  # Hamming distance
+            # Compute hash
+            target_hash = compute_frame_hash(target_frame, hash_size=hash_size, method=hash_method)
 
-        frames_checked += 1
+            if target_hash is None:
+                continue
 
-        # Update best match if better
-        if distance < best_match_distance:
-            best_match_distance = distance
-            best_match_time = int(current_time_ms)
+            # Compare hashes
+            distance = source_hash - target_hash  # Hamming distance
 
-            # If perfect or very close match, stop searching
-            if distance <= 2:
-                break
+            frames_checked += 1
 
-        current_time_ms += frame_duration_ms
+            # Update best match if better
+            if distance < best_match_distance:
+                best_match_distance = distance
+                best_match_time = int(current_time_ms)
+
+                # If perfect or very close match, stop searching immediately
+                if distance <= 2:
+                    return best_match_time
 
     # Return best match if within threshold
     if best_match_time is not None and best_match_distance <= threshold:
@@ -266,16 +322,18 @@ def apply_frame_matched_sync(
     source_video: str,
     target_video: str,
     runner,
-    config: dict = None
+    config: dict = None,
+    audio_delay_ms: int = 0
 ) -> Dict[str, Any]:
     """
     Apply frame-accurate subtitle synchronization using visual frame matching.
 
     For each subtitle line:
     1. Extract frame at subtitle.start from source video
-    2. Find visually matching frame in target video
-    3. Adjust subtitle.start to matched time
-    4. Preserve duration (don't adjust end independently)
+    2. Apply audio_delay_ms to get expected target time (smart centering)
+    3. Search ±window around expected time for visually matching frame
+    4. Adjust subtitle.start to matched time
+    5. Preserve duration (don't adjust end independently)
 
     This handles videos with different frame counts/positions while preserving
     subtitle durations and inline tags.
@@ -286,11 +344,12 @@ def apply_frame_matched_sync(
         target_video: Path to video to sync subs to
         runner: CommandRunner for logging
         config: Optional config dict with settings:
-            - 'frame_match_search_window_sec': Search window in seconds (default: 10)
+            - 'frame_match_search_window_sec': Search window in seconds (default: 5)
             - 'frame_match_hash_size': Hash size (default: 8)
             - 'frame_match_threshold': Max hamming distance (default: 5)
             - 'frame_match_method': Hash method (default: 'phash')
             - 'frame_match_skip_unmatched': Skip lines with no match (default: False)
+        audio_delay_ms: Audio delay from correlation (used for smart search centering)
 
     Returns:
         Dict with report statistics
@@ -304,19 +363,20 @@ def apply_frame_matched_sync(
 
     config = config or {}
 
-    # Get config values
-    search_window_sec = config.get('frame_match_search_window_sec', 10)
+    # Get config values (reduced default window from 10 to 5 seconds with smart centering)
+    search_window_sec = config.get('frame_match_search_window_sec', 5)
     search_window_ms = search_window_sec * 1000
     hash_size = config.get('frame_match_hash_size', 8)
     threshold = config.get('frame_match_threshold', 5)
     hash_method = config.get('frame_match_method', 'phash')
     skip_unmatched = config.get('frame_match_skip_unmatched', False)
 
-    runner._log_message(f"[FrameMatch] Mode: Visual frame matching")
+    runner._log_message(f"[FrameMatch] Mode: Visual frame matching with smart search")
     runner._log_message(f"[FrameMatch] Source video: {Path(source_video).name}")
     runner._log_message(f"[FrameMatch] Target video: {Path(target_video).name}")
     runner._log_message(f"[FrameMatch] Loading subtitle: {Path(subtitle_path).name}")
-    runner._log_message(f"[FrameMatch] Search window: ±{search_window_sec} seconds")
+    runner._log_message(f"[FrameMatch] Audio delay for centering: {audio_delay_ms:+d}ms")
+    runner._log_message(f"[FrameMatch] Search window: ±{search_window_sec} seconds (from expected time)")
     runner._log_message(f"[FrameMatch] Hash method: {hash_method} ({hash_size}x{hash_size})")
     runner._log_message(f"[FrameMatch] Match threshold: {threshold} (hamming distance)")
 
@@ -402,10 +462,13 @@ def apply_frame_matched_sync(
                 continue
 
             # Find matching frame in target video using VideoReader
+            # Use audio delay to center search (smart search!)
+            expected_target_time_ms = original_start + audio_delay_ms
+
             matched_time_ms = find_matching_frame(
                 source_hash,
                 target_reader,  # Pass VideoReader, not path!
-                original_start,
+                expected_target_time_ms,  # Center search on expected time (audio delay applied)
                 search_window_ms,
                 threshold,
                 target_fps,
