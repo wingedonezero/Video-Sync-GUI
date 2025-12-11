@@ -24,6 +24,8 @@ class AppConfig:
             'subtitle_sync_mode': 'time-based',
             'subtitle_target_fps': 0.0,
             'frame_sync_mode': 'middle',
+            'frame_shift_rounding': 'round',
+            'frame_sync_fix_zero_duration': False,
 
             # --- Timing Fix Settings ---
             'timing_fix_enabled': False,
