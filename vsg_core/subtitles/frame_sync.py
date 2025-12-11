@@ -234,6 +234,149 @@ def time_to_frame_vfr(time_ms: float, video_path: str, fps: float, runner) -> Op
 
 
 # ============================================================================
+# CLEAN VIDEOTIMESTAMPS MODE (No custom offsets)
+# ============================================================================
+
+def apply_videotimestamps_sync(
+    subtitle_path: str,
+    delay_ms: int,
+    target_fps: float,
+    runner,
+    config: dict = None,
+    video_path: str = None
+) -> Dict[str, Any]:
+    """
+    Apply frame-perfect synchronization using VideoTimestamps library ONLY.
+
+    This mode uses the VideoTimestamps library in its pure form without any
+    custom frame offset adjustments (no +0.5 middle mode, no aegisub ceil).
+
+    The library handles all time↔frame conversions using actual video timestamps.
+
+    Args:
+        subtitle_path: Path to subtitle file (.ass, .srt, .ssa, .vtt)
+        delay_ms: Time offset in milliseconds
+        target_fps: Frame rate (used for CFR videos)
+        runner: CommandRunner for logging
+        config: Optional config dict (unused, for API compatibility)
+        video_path: Path to video file (required)
+
+    Returns:
+        Dict with report statistics
+    """
+    if not video_path:
+        runner._log_message("[VideoTimestamps Sync] ERROR: VideoTimestamps mode requires video_path")
+        return {'error': 'VideoTimestamps mode requires video_path'}
+
+    try:
+        from video_timestamps import FPSTimestamps, VideoTimestamps, TimeType, RoundingMethod
+        from fractions import Fraction
+    except ImportError:
+        runner._log_message("[VideoTimestamps Sync] ERROR: VideoTimestamps not installed. Install with: pip install VideoTimestamps")
+        return {'error': 'VideoTimestamps library not installed'}
+
+    runner._log_message(f"[VideoTimestamps Sync] Mode: Pure VideoTimestamps (no custom offsets)")
+    runner._log_message(f"[VideoTimestamps Sync] Loading subtitle: {Path(subtitle_path).name}")
+    runner._log_message(f"[VideoTimestamps Sync] Video: {Path(video_path).name}")
+    runner._log_message(f"[VideoTimestamps Sync] Delay to apply: {delay_ms:+d} ms")
+
+    # Get VideoTimestamps instance
+    vts = get_vfr_timestamps(video_path, target_fps, runner)
+    if vts is None:
+        return {'error': 'Failed to create VideoTimestamps instance'}
+
+    # Load subtitle file
+    try:
+        subs = pysubs2.load(subtitle_path, encoding='utf-8')
+    except Exception as e:
+        runner._log_message(f"[VideoTimestamps Sync] ERROR: Failed to load subtitle file: {e}")
+        return {'error': str(e)}
+
+    if not subs.events:
+        runner._log_message(f"[VideoTimestamps Sync] WARNING: No subtitle events found in file")
+        return {
+            'total_events': 0,
+            'adjusted_events': 0,
+            'delay_applied_ms': delay_ms
+        }
+
+    adjusted_count = 0
+    runner._log_message(f"[VideoTimestamps Sync] Processing {len(subs.events)} subtitle events...")
+
+    # Process each event: apply delay directly using VideoTimestamps for frame-accurate conversion
+    for event in subs.events:
+        original_start = event.start
+        original_end = event.end
+
+        # Skip empty events
+        if original_start == original_end:
+            continue
+
+        # Convert original times to frames using VideoTimestamps
+        start_frame = time_to_frame_vfr(original_start, video_path, target_fps, runner)
+        end_frame = time_to_frame_vfr(original_end, video_path, target_fps, runner)
+
+        if start_frame is None or end_frame is None:
+            runner._log_message(f"[VideoTimestamps Sync] ERROR: Failed to convert time to frame")
+            continue
+
+        # Calculate frame shift from delay
+        frame_duration_ms = 1000.0 / target_fps
+        frame_shift = round(delay_ms / frame_duration_ms)
+
+        # Apply frame shift
+        new_start_frame = start_frame + frame_shift
+        new_end_frame = end_frame + frame_shift
+
+        # Convert back to time using VideoTimestamps
+        new_start_ms = frame_to_time_vfr(new_start_frame, video_path, target_fps, runner)
+        new_end_ms = frame_to_time_vfr(new_end_frame, video_path, target_fps, runner)
+
+        if new_start_ms is None or new_end_ms is None:
+            runner._log_message(f"[VideoTimestamps Sync] ERROR: Failed to convert frame to time")
+            continue
+
+        # Ensure end is after start
+        if new_end_ms <= new_start_ms:
+            new_end_ms = new_start_ms + int(round(frame_duration_ms))
+
+        # Update event
+        event.start = new_start_ms
+        event.end = new_end_ms
+
+        if frame_shift != 0:
+            adjusted_count += 1
+
+    # Save modified subtitle
+    runner._log_message(f"[VideoTimestamps Sync] Saving modified subtitle file...")
+    try:
+        subs.save(subtitle_path, encoding='utf-8')
+    except Exception as e:
+        runner._log_message(f"[VideoTimestamps Sync] ERROR: Failed to save subtitle file: {e}")
+        return {'error': str(e)}
+
+    # Calculate effective delay
+    frame_duration_ms = 1000.0 / target_fps
+    frame_shift = round(delay_ms / frame_duration_ms)
+    effective_delay_ms = frame_shift * frame_duration_ms
+
+    # Log results
+    runner._log_message(f"[VideoTimestamps Sync] ✓ Successfully processed {len(subs.events)} events")
+    runner._log_message(f"[VideoTimestamps Sync]   - Events adjusted: {adjusted_count}")
+    runner._log_message(f"[VideoTimestamps Sync]   - Frame shift applied: {frame_shift:+d} frames")
+    runner._log_message(f"[VideoTimestamps Sync]   - Effective delay: {effective_delay_ms:+.1f} ms")
+
+    return {
+        'total_events': len(subs.events),
+        'adjusted_events': adjusted_count,
+        'frame_shift': frame_shift,
+        'delay_applied_ms': delay_ms,
+        'effective_delay_ms': int(round(effective_delay_ms)),
+        'target_fps': target_fps
+    }
+
+
+# ============================================================================
 # LEGACY ALIASES (for backwards compatibility)
 # ============================================================================
 

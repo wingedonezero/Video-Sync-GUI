@@ -20,6 +20,11 @@ class AppConfig:
             'ocr_cleanup_normalize_ellipsis': False,
             'ocr_cleanup_custom_wordlist_path': '',
 
+            # --- Subtitle Sync Settings ---
+            'subtitle_sync_mode': 'time-based',
+            'subtitle_target_fps': 0.0,
+            'frame_sync_mode': 'middle',
+
             # --- Timing Fix Settings ---
             'timing_fix_enabled': False,
             'timing_fix_overlaps': True,
