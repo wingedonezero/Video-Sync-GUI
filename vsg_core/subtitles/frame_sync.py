@@ -379,7 +379,7 @@ def apply_videotimestamps_sync(
     # Log results
     runner._log_message(f"[VideoTimestamps Sync] ✓ Successfully processed {len(subs.events)} events")
     runner._log_message(f"[VideoTimestamps Sync]   - Events adjusted: {adjusted_count}")
-    runner._log_message(f"[VideoTimestamps Sync]   - Delay applied: {delay_ms:+d} ms")
+    runner._log_message(f"[VideoTimestamps Sync]   - Delay applied: {delay_ms:+.3f} ms")
 
     return {
         'total_events': len(subs.events),
@@ -516,7 +516,7 @@ def apply_frame_snapped_sync(
     runner._log_message(f"[Frame-Snapped Sync] ✓ Successfully processed {len(subs.events)} events")
     runner._log_message(f"[Frame-Snapped Sync]   - Events adjusted: {adjusted_count}")
     runner._log_message(f"[Frame-Snapped Sync]   - Durations preserved: {duration_preserved_count}")
-    runner._log_message(f"[Frame-Snapped Sync]   - Delay applied: {delay_ms:+d} ms")
+    runner._log_message(f"[Frame-Snapped Sync]   - Delay applied: {delay_ms:+.3f} ms")
 
     return {
         'total_events': len(subs.events),
