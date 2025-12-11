@@ -261,7 +261,7 @@ def find_matching_frame(
     best_match_distance = threshold + 1  # Start above threshold
 
     hash_size = config.get('frame_match_hash_size', 8)
-    hash_method = config.get('frame_match_method', 'phash')
+    hash_method = config.get('frame_match_method', 'dhash')  # dhash default for speed
 
     # Calculate number of frames to search (radius from center)
     num_frames_radius = int(search_window_ms / frame_duration_ms)
