@@ -193,12 +193,18 @@ class SubtitlesStep:
                     supported_formats = ['.ass', '.ssa', '.srt', '.vtt']
 
                     if ext in supported_formats:
-                        # Frame-matched mode works differently - it doesn't use delays
+                        # Frame-matched mode uses audio delay for smart search centering
                         if subtitle_sync_mode == 'frame-matched':
                             # Frame-matched mode requires source and target videos
                             source_key = item.sync_to if item.track.source == 'External' else item.track.source
                             source_video = ctx.sources.get(source_key)
                             target_video = source1_file
+
+                            # Get audio delay for smart search centering (optional)
+                            audio_delay_ms = 0
+                            if ctx.delays and source_key in ctx.delays.source_delays_ms:
+                                audio_delay_ms = int(ctx.delays.source_delays_ms[source_key])
+                                runner._log_message(f"[Frame-Matched Sync] Using audio delay for smart search: {audio_delay_ms:+d}ms")
 
                             if source_video and target_video:
                                 runner._log_message(f"[Frame-Matched Sync] Applying to track {item.track.id} ({item.track.props.name or 'Unnamed'})")
@@ -210,7 +216,8 @@ class SubtitlesStep:
                                     str(source_video),
                                     str(target_video),
                                     runner,
-                                    ctx.settings_dict
+                                    ctx.settings_dict,
+                                    audio_delay_ms=audio_delay_ms  # Pass audio delay for smart centering!
                                 )
 
                                 if frame_sync_report and 'error' not in frame_sync_report:
