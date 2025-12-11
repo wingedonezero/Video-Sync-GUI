@@ -932,18 +932,24 @@ class SubtitleSyncTab(QWidget):
         sync_layout = QFormLayout(sync_group)
 
         self.widgets['subtitle_sync_mode'] = QComboBox()
-        self.widgets['subtitle_sync_mode'].addItems(['time-based', 'frame-perfect'])
+        self.widgets['subtitle_sync_mode'].addItems(['time-based', 'frame-perfect', 'videotimestamps'])
         self.widgets['subtitle_sync_mode'].setToolTip(
             "Subtitle synchronization method:\n\n"
             "• time-based (Default): Apply delays using millisecond timestamps\n"
             "  - Simple and fast\n"
             "  - May cause frame misalignment for typesetting/moving signs\n"
             "  - Works with all subtitle formats\n\n"
-            "• frame-perfect: Apply delays then snap to exact frame boundaries\n"
-            "  - Preserves frame-perfect alignment for ASS typesetting\n"
-            "  - Prevents ghosting of moving signs\n"
+            "• frame-perfect: Apply delays with custom frame timing algorithms\n"
+            "  - Includes middle/aegisub/vfr timing options\n"
+            "  - Custom frame offset adjustments (+0.5, ceil rounding)\n"
             "  - Recommended for release group ASS subtitles\n"
             "  - Requires FPS detection from Source 1 video\n\n"
+            "• videotimestamps: Pure VideoTimestamps library (no custom offsets)\n"
+            "  - Uses VideoTimestamps library directly\n"
+            "  - No custom frame offset adjustments\n"
+            "  - Clean implementation for testing library behavior\n"
+            "  - Requires: pip install VideoTimestamps\n"
+            "  - Requires Source 1 video file\n\n"
             "Note: Stepping correction (if enabled) takes precedence over this setting."
         )
 
@@ -1016,9 +1022,15 @@ class SubtitleSyncTab(QWidget):
         self._update_fps_visibility(self.widgets['subtitle_sync_mode'].currentText())
 
     def _update_fps_visibility(self, text: str):
-        """Show/hide FPS setting based on sync mode."""
+        """Show/hide FPS and frame timing settings based on sync mode."""
         is_frame_perfect = (text == 'frame-perfect')
-        self.widgets['subtitle_target_fps'].setEnabled(is_frame_perfect)
+        is_videotimestamps = (text == 'videotimestamps')
+
+        # FPS setting is used by both frame-perfect and videotimestamps
+        self.widgets['subtitle_target_fps'].setEnabled(is_frame_perfect or is_videotimestamps)
+
+        # Frame timing mode only applies to frame-perfect (not videotimestamps)
+        self.widgets['frame_sync_mode'].setEnabled(is_frame_perfect)
 
 class ChaptersTab(QWidget):
     def __init__(self):
