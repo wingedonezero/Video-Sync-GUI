@@ -261,7 +261,7 @@ def find_matching_frame(
     best_match_distance = threshold + 1  # Start above threshold
 
     hash_size = config.get('frame_match_hash_size', 8)
-    hash_method = config.get('frame_match_method', 'phash')
+    hash_method = config.get('frame_match_method', 'dhash')  # dhash default for speed
 
     # Calculate number of frames to search (radius from center)
     num_frames_radius = int(search_window_ms / frame_duration_ms)
@@ -363,8 +363,8 @@ def apply_frame_matched_sync(
 
     config = config or {}
 
-    # Get config values (reduced default window from 10 to 5 seconds with smart centering)
-    search_window_sec = config.get('frame_match_search_window_sec', 5)
+    # Get config values (reduced default window to 1 second with smart centering + hash caching)
+    search_window_sec = config.get('frame_match_search_window_sec', 1)
     search_window_ms = search_window_sec * 1000
     hash_size = config.get('frame_match_hash_size', 8)
     threshold = config.get('frame_match_threshold', 5)
@@ -416,6 +416,12 @@ def apply_frame_matched_sync(
     source_reader = VideoReader(source_video, runner)
     target_reader = VideoReader(target_video, runner)
 
+    # Hash caching to avoid recomputing hashes for duplicate timestamps
+    # Critical for karaoke files where many subs have same timestamp!
+    source_hash_cache = {}  # {time_ms: hash}
+
+    runner._log_message(f"[FrameMatch] Hash caching enabled for duplicate timestamps")
+
     try:
         matched_count = 0
         unmatched_count = 0
@@ -447,19 +453,26 @@ def apply_frame_matched_sync(
                 percent = ((i + 1) / len(subs.events)) * 100
                 runner._log_message(f"[FrameMatch] Progress: {i+1}/{len(subs.events)} ({percent:.1f}%) - Matched: {matched_count}, Unmatched: {unmatched_count}")
 
-            # Extract frame from source video at subtitle start using VideoReader
-            source_frame = source_reader.get_frame_at_time(original_start)
+            # Check hash cache first (critical for karaoke with duplicate timestamps!)
+            if original_start in source_hash_cache:
+                source_hash = source_hash_cache[original_start]
+            else:
+                # Extract frame from source video at subtitle start using VideoReader
+                source_frame = source_reader.get_frame_at_time(original_start)
 
-            if source_frame is None:
-                unmatched_count += 1
-                continue
+                if source_frame is None:
+                    unmatched_count += 1
+                    continue
 
-            # Compute hash of source frame
-            source_hash = compute_frame_hash(source_frame, hash_size=hash_size, method=hash_method)
+                # Compute hash of source frame
+                source_hash = compute_frame_hash(source_frame, hash_size=hash_size, method=hash_method)
 
-            if source_hash is None:
-                unmatched_count += 1
-                continue
+                if source_hash is None:
+                    unmatched_count += 1
+                    continue
+
+                # Cache the hash for this timestamp
+                source_hash_cache[original_start] = source_hash
 
             # Find matching frame in target video using VideoReader
             # Use audio delay to center search (smart search!)
