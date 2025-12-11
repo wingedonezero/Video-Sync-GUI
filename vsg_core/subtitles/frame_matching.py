@@ -22,72 +22,124 @@ This handles cases like:
 from __future__ import annotations
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
-import subprocess
-import tempfile
-import os
 import pysubs2
 from PIL import Image
+import numpy as np
 
 
-def extract_frame_at_time(video_path: str, time_ms: int, runner) -> Optional[Image.Image]:
+class VideoReader:
     """
-    Extract a single frame at the specified timestamp using ffmpeg.
+    Efficient video reader that keeps video file open for fast frame access.
 
-    Args:
-        video_path: Path to video file
-        time_ms: Timestamp in milliseconds
-        runner: CommandRunner for logging
-
-    Returns:
-        PIL Image object, or None on failure
+    Uses opencv-python (cv2) if available, otherwise falls back to slower ffmpeg.
     """
-    try:
-        # Convert ms to seconds for ffmpeg
-        time_sec = time_ms / 1000.0
+    def __init__(self, video_path: str, runner):
+        self.video_path = video_path
+        self.runner = runner
+        self.cap = None
+        self.use_opencv = False
 
-        # Create temporary file for frame
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-            tmp_path = tmp.name
+        # Try to use opencv for fast access
+        try:
+            import cv2
+            self.cv2 = cv2
+            self.cap = cv2.VideoCapture(str(video_path))
+            if self.cap.isOpened():
+                self.use_opencv = True
+                self.fps = self.cap.get(cv2.CAP_PROP_FPS)
+                runner._log_message(f"[FrameMatch] Using opencv for fast frame access (FPS: {self.fps:.3f})")
+            else:
+                runner._log_message(f"[FrameMatch] WARNING: opencv couldn't open video, falling back to ffmpeg")
+                self.cap = None
+        except ImportError:
+            runner._log_message(f"[FrameMatch] WARNING: opencv not installed, using slower ffmpeg fallback")
+            runner._log_message(f"[FrameMatch] Install opencv for 100x speedup: pip install opencv-python")
 
-        # Extract frame using ffmpeg
-        # -ss before -i for fast seek
-        # -vframes 1 to extract only one frame
-        cmd = [
-            'ffmpeg',
-            '-ss', f'{time_sec:.3f}',
-            '-i', str(video_path),
-            '-vframes', '1',
-            '-q:v', '2',  # High quality
-            '-y',
-            tmp_path
-        ]
+    def get_frame_at_time(self, time_ms: int) -> Optional[Image.Image]:
+        """
+        Extract frame at specified timestamp.
 
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
+        Args:
+            time_ms: Timestamp in milliseconds
 
-        if result.returncode != 0:
-            runner._log_message(f"[FrameMatch] WARNING: ffmpeg failed to extract frame at {time_ms}ms")
-            runner._log_message(f"[FrameMatch] Error: {result.stderr[:200]}")
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
+        Returns:
+            PIL Image object, or None on failure
+        """
+        if self.use_opencv and self.cap:
+            return self._get_frame_opencv(time_ms)
+        else:
+            return self._get_frame_ffmpeg(time_ms)
+
+    def _get_frame_opencv(self, time_ms: int) -> Optional[Image.Image]:
+        """Extract frame using opencv (fast)."""
+        try:
+            # Seek to timestamp (opencv uses milliseconds)
+            self.cap.set(self.cv2.CAP_PROP_POS_MSEC, time_ms)
+
+            # Read frame
+            ret, frame_bgr = self.cap.read()
+
+            if not ret or frame_bgr is None:
+                return None
+
+            # Convert BGR to RGB
+            frame_rgb = self.cv2.cvtColor(frame_bgr, self.cv2.COLOR_BGR2RGB)
+
+            # Convert to PIL Image
+            return Image.fromarray(frame_rgb)
+
+        except Exception as e:
+            self.runner._log_message(f"[FrameMatch] ERROR: opencv frame extraction failed: {e}")
             return None
 
-        # Load the extracted frame
-        frame = Image.open(tmp_path)
-        frame.load()  # Load image data before closing file
+    def _get_frame_ffmpeg(self, time_ms: int) -> Optional[Image.Image]:
+        """Extract frame using ffmpeg (slow fallback)."""
+        import subprocess
+        import tempfile
+        import os
 
-        # Clean up temp file
-        os.unlink(tmp_path)
+        try:
+            time_sec = time_ms / 1000.0
 
-        return frame
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+                tmp_path = tmp.name
 
-    except Exception as e:
-        runner._log_message(f"[FrameMatch] ERROR: Failed to extract frame: {e}")
-        return None
+            cmd = [
+                'ffmpeg',
+                '-ss', f'{time_sec:.3f}',
+                '-i', str(self.video_path),
+                '-vframes', '1',
+                '-q:v', '2',
+                '-y',
+                tmp_path
+            ]
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+
+            if result.returncode != 0:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+                return None
+
+            frame = Image.open(tmp_path)
+            frame.load()
+            os.unlink(tmp_path)
+
+            return frame
+
+        except Exception:
+            return None
+
+    def close(self):
+        """Release video resources."""
+        if self.cap:
+            self.cap.release()
+            self.cap = None
 
 
 def compute_frame_hash(frame: Image.Image, hash_size: int = 8, method: str = 'phash') -> Optional[Any]:
@@ -120,12 +172,11 @@ def compute_frame_hash(frame: Image.Image, hash_size: int = 8, method: str = 'ph
 
 def find_matching_frame(
     source_hash,
-    target_video: str,
+    target_reader: VideoReader,
     expected_time_ms: int,
     search_window_ms: int,
     threshold: int,
     fps: float,
-    runner,
     config: dict
 ) -> Optional[int]:
     """
@@ -135,12 +186,11 @@ def find_matching_frame(
 
     Args:
         source_hash: ImageHash of the source frame
-        target_video: Path to target video file
+        target_reader: VideoReader for target video (keeps video open)
         expected_time_ms: Expected timestamp (starting point for search)
         search_window_ms: Search window in milliseconds (±window)
         threshold: Maximum hamming distance for match (0-64 for 8x8 hash)
         fps: Target video frame rate
-        runner: CommandRunner for logging
         config: Config dict with hash settings
 
     Returns:
@@ -166,19 +216,16 @@ def find_matching_frame(
     # Limit search to reasonable number (e.g., max 300 frames = ~12 sec at 24fps)
     max_search_frames = config.get('frame_match_max_search_frames', 300)
     if num_frames > max_search_frames:
-        runner._log_message(f"[FrameMatch] WARNING: Search window too large ({num_frames} frames), capping at {max_search_frames}")
         num_frames = max_search_frames
         end_time_ms = start_time_ms + (num_frames * frame_duration_ms)
-
-    runner._log_message(f"[FrameMatch] Searching {num_frames} frames from {start_time_ms}ms to {end_time_ms}ms")
 
     # Search through frames
     current_time_ms = start_time_ms
     frames_checked = 0
 
     while current_time_ms <= end_time_ms:
-        # Extract frame from target
-        target_frame = extract_frame_at_time(target_video, int(current_time_ms), runner)
+        # Extract frame from target using VideoReader (FAST!)
+        target_frame = target_reader.get_frame_at_time(int(current_time_ms))
 
         if target_frame is None:
             current_time_ms += frame_duration_ms
@@ -203,18 +250,14 @@ def find_matching_frame(
 
             # If perfect or very close match, stop searching
             if distance <= 2:
-                runner._log_message(f"[FrameMatch] Found excellent match at {best_match_time}ms (distance={distance})")
                 break
 
         current_time_ms += frame_duration_ms
-
-    runner._log_message(f"[FrameMatch] Checked {frames_checked} frames, best distance: {best_match_distance}")
 
     # Return best match if within threshold
     if best_match_time is not None and best_match_distance <= threshold:
         return best_match_time
     else:
-        runner._log_message(f"[FrameMatch] No match found within threshold {threshold} (best was {best_match_distance})")
         return None
 
 
@@ -301,77 +344,100 @@ def apply_frame_matched_sync(
         }
 
     runner._log_message(f"[FrameMatch] Processing {len(subs.events)} subtitle events...")
-    runner._log_message(f"[FrameMatch] This may take a few minutes...")
 
-    matched_count = 0
-    unmatched_count = 0
-    total_offset_ms = 0
-    max_offset_ms = 0
+    # For large subtitle files, estimate processing time
+    if len(subs.events) > 1000:
+        runner._log_message(f"[FrameMatch] WARNING: Large subtitle file detected ({len(subs.events)} events)")
+        runner._log_message(f"[FrameMatch] This will take some time. Consider using smaller search window if too slow.")
 
-    # Process each subtitle event
-    for i, event in enumerate(subs.events):
-        original_start = event.start
-        original_end = event.end
-        original_duration = original_end - original_start
+    runner._log_message(f"[FrameMatch] Opening video files...")
 
-        # Skip empty events
-        if original_duration <= 0:
-            continue
+    # Create VideoReader instances (keeps videos open for fast access)
+    source_reader = VideoReader(source_video, runner)
+    target_reader = VideoReader(target_video, runner)
 
-        # Progress logging every 50 lines
-        if (i + 1) % 50 == 0:
-            runner._log_message(f"[FrameMatch] Progress: {i+1}/{len(subs.events)} lines processed...")
+    try:
+        matched_count = 0
+        unmatched_count = 0
+        total_offset_ms = 0
+        max_offset_ms = 0
 
-        # Extract frame from source video at subtitle start
-        source_frame = extract_frame_at_time(source_video, original_start, runner)
-
-        if source_frame is None:
-            runner._log_message(f"[FrameMatch] WARNING: Failed to extract frame from source at {original_start}ms (line {i+1})")
-            unmatched_count += 1
-            continue
-
-        # Compute hash of source frame
-        source_hash = compute_frame_hash(source_frame, hash_size=hash_size, method=hash_method)
-
-        if source_hash is None:
-            runner._log_message(f"[FrameMatch] WARNING: Failed to compute hash for source frame (line {i+1})")
-            unmatched_count += 1
-            continue
-
-        # Find matching frame in target video
-        matched_time_ms = find_matching_frame(
-            source_hash,
-            target_video,
-            original_start,  # Start search around original time
-            search_window_ms,
-            threshold,
-            target_fps,
-            runner,
-            config
-        )
-
-        if matched_time_ms is not None:
-            # Update subtitle timing
-            event.start = matched_time_ms
-            event.end = matched_time_ms + original_duration
-
-            # Track statistics
-            offset_ms = abs(matched_time_ms - original_start)
-            total_offset_ms += offset_ms
-            max_offset_ms = max(max_offset_ms, offset_ms)
-
-            matched_count += 1
-
-            # Log individual match (verbose, only for first few)
-            if i < 5:
-                runner._log_message(f"[FrameMatch] Line {i+1}: {original_start}ms → {matched_time_ms}ms (offset: {matched_time_ms - original_start:+d}ms)")
+        # Determine progress reporting interval based on number of events
+        if len(subs.events) > 10000:
+            progress_interval = 500  # Every 500 lines for huge files
+        elif len(subs.events) > 1000:
+            progress_interval = 100  # Every 100 lines for large files
         else:
-            unmatched_count += 1
-            runner._log_message(f"[FrameMatch] WARNING: No match found for line {i+1} at {original_start}ms")
+            progress_interval = 50   # Every 50 lines for normal files
 
-            # Optionally keep original timing if no match
-            if not skip_unmatched:
-                runner._log_message(f"[FrameMatch] Keeping original timing for line {i+1}")
+        runner._log_message(f"[FrameMatch] Starting frame matching...")
+
+        # Process each subtitle event
+        for i, event in enumerate(subs.events):
+            original_start = event.start
+            original_end = event.end
+            original_duration = original_end - original_start
+
+            # Skip empty events
+            if original_duration <= 0:
+                continue
+
+            # Progress logging
+            if (i + 1) % progress_interval == 0:
+                percent = ((i + 1) / len(subs.events)) * 100
+                runner._log_message(f"[FrameMatch] Progress: {i+1}/{len(subs.events)} ({percent:.1f}%) - Matched: {matched_count}, Unmatched: {unmatched_count}")
+
+            # Extract frame from source video at subtitle start using VideoReader
+            source_frame = source_reader.get_frame_at_time(original_start)
+
+            if source_frame is None:
+                unmatched_count += 1
+                continue
+
+            # Compute hash of source frame
+            source_hash = compute_frame_hash(source_frame, hash_size=hash_size, method=hash_method)
+
+            if source_hash is None:
+                unmatched_count += 1
+                continue
+
+            # Find matching frame in target video using VideoReader
+            matched_time_ms = find_matching_frame(
+                source_hash,
+                target_reader,  # Pass VideoReader, not path!
+                original_start,
+                search_window_ms,
+                threshold,
+                target_fps,
+                config
+            )
+
+            if matched_time_ms is not None:
+                # Update subtitle timing
+                event.start = matched_time_ms
+                event.end = matched_time_ms + original_duration
+
+                # Track statistics
+                offset_ms = abs(matched_time_ms - original_start)
+                total_offset_ms += offset_ms
+                max_offset_ms = max(max_offset_ms, offset_ms)
+
+                matched_count += 1
+
+                # Log individual match (verbose, only for first 3)
+                if i < 3:
+                    runner._log_message(f"[FrameMatch] Line {i+1}: {original_start}ms → {matched_time_ms}ms (offset: {matched_time_ms - original_start:+d}ms)")
+            else:
+                unmatched_count += 1
+                # Only log first few unmatched to avoid spam
+                if unmatched_count <= 10:
+                    runner._log_message(f"[FrameMatch] WARNING: No match found for line {i+1} at {original_start}ms")
+
+    finally:
+        # Always close video readers
+        runner._log_message(f"[FrameMatch] Closing video files...")
+        source_reader.close()
+        target_reader.close()
 
     # Save modified subtitle
     runner._log_message(f"[FrameMatch] Saving modified subtitle file...")
@@ -388,8 +454,9 @@ def apply_frame_matched_sync(
     runner._log_message(f"[FrameMatch] ✓ Successfully processed {len(subs.events)} events")
     runner._log_message(f"[FrameMatch]   - Matched: {matched_count}")
     runner._log_message(f"[FrameMatch]   - Unmatched: {unmatched_count}")
-    runner._log_message(f"[FrameMatch]   - Average offset: {avg_offset_ms:.1f}ms")
-    runner._log_message(f"[FrameMatch]   - Maximum offset: {max_offset_ms}ms")
+    if matched_count > 0:
+        runner._log_message(f"[FrameMatch]   - Average offset: {avg_offset_ms:.1f}ms")
+        runner._log_message(f"[FrameMatch]   - Maximum offset: {max_offset_ms}ms")
 
     return {
         'total_events': len(subs.events),
