@@ -26,6 +26,7 @@ class AppConfig:
             'frame_sync_mode': 'middle',
             'frame_shift_rounding': 'round',
             'frame_sync_fix_zero_duration': False,
+            'videotimestamps_rounding': 'round',
 
             # --- Timing Fix Settings ---
             'timing_fix_enabled': False,

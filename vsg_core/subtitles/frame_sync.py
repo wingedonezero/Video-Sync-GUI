@@ -119,20 +119,38 @@ def frame_to_time_aegisub(frame_num: int, fps: float) -> int:
 # Cache for VideoTimestamps instances to avoid re-parsing video
 _vfr_cache = {}
 
-def get_vfr_timestamps(video_path: str, fps: float, runner):
+def get_vfr_timestamps(video_path: str, fps: float, runner, config: dict = None):
     """
     Get appropriate timestamp handler based on video type.
 
     For CFR videos: Uses lightweight FPSTimestamps (just calculations)
     For VFR videos: Uses VideoTimestamps (analyzes actual video)
+
+    Args:
+        video_path: Path to video file
+        fps: Frame rate
+        runner: CommandRunner for logging
+        config: Optional config dict with 'videotimestamps_rounding' setting
     """
     try:
         from video_timestamps import FPSTimestamps, VideoTimestamps, TimeType, RoundingMethod
         from fractions import Fraction
 
+        # Get rounding method from config (default: ROUND)
+        config = config or {}
+        rounding_str = config.get('videotimestamps_rounding', 'round').upper()
+
+        if rounding_str == 'FLOOR':
+            rounding_method = RoundingMethod.FLOOR
+        else:  # 'ROUND' or default
+            rounding_method = RoundingMethod.ROUND
+
+        # Create cache key that includes rounding method
+        cache_key = f"{video_path}_{rounding_str}"
+
         # Check cache first
-        if video_path in _vfr_cache:
-            return _vfr_cache[video_path]
+        if cache_key in _vfr_cache:
+            return _vfr_cache[cache_key]
 
         # Try to detect if video is VFR by checking if it's a real video file
         # For now, use FPSTimestamps (lightweight) for CFR videos
@@ -151,22 +169,24 @@ def get_vfr_timestamps(video_path: str, fps: float, runner):
 
         # Use FPSTimestamps for CFR (constant framerate) - lightweight!
         time_scale = Fraction(1000)  # milliseconds
-        vts = FPSTimestamps(RoundingMethod.ROUND, time_scale, fps_frac)
+        vts = FPSTimestamps(rounding_method, time_scale, fps_frac)
 
-        runner._log_message(f"[Frame-Perfect Sync] Using FPSTimestamps for CFR video at {fps:.3f} fps")
+        runner._log_message(f"[VideoTimestamps] Using FPSTimestamps for CFR video at {fps:.3f} fps")
+        runner._log_message(f"[VideoTimestamps] RoundingMethod: {rounding_str}")
 
-        _vfr_cache[video_path] = vts
+        _vfr_cache[cache_key] = vts
         return vts
 
     except ImportError:
-        runner._log_message("[Frame-Perfect Sync] WARNING: VideoTimestamps not installed. Install with: pip install VideoTimestamps")
+        runner._log_message("[VideoTimestamps] WARNING: VideoTimestamps not installed. Install with: pip install VideoTimestamps")
         return None
     except Exception as e:
-        runner._log_message(f"[Frame-Perfect Sync] WARNING: Failed to create timestamps handler: {e}")
+        runner._log_message(f"[VideoTimestamps] WARNING: Failed to create timestamps handler: {e}")
         return None
 
 
-def frame_to_time_vfr(frame_num: int, video_path: str, fps: float, runner) -> Optional[int]:
+
+def frame_to_time_vfr(frame_num: int, video_path: str, fps: float, runner, config: dict = None) -> Optional[int]:
     """
     MODE: VFR (VideoTimestamps-based).
 
@@ -178,6 +198,7 @@ def frame_to_time_vfr(frame_num: int, video_path: str, fps: float, runner) -> Op
         video_path: Path to video file
         fps: Frame rate (used for CFR mode)
         runner: CommandRunner for logging
+        config: Optional config dict with settings
 
     Returns:
         Timestamp in milliseconds, or None if VideoTimestamps unavailable
@@ -185,21 +206,22 @@ def frame_to_time_vfr(frame_num: int, video_path: str, fps: float, runner) -> Op
     try:
         from video_timestamps import TimeType
 
-        vts = get_vfr_timestamps(video_path, fps, runner)
+        vts = get_vfr_timestamps(video_path, fps, runner, config)
         if vts is None:
             return None
 
         # Get exact timestamp for this frame
-        # Use START time (beginning of frame)
-        time_ms = vts.frame_to_time(frame_num, TimeType.START)
+        # Use EXACT time (precise frame display window) - NOT START!
+        # EXACT gives [current, next[ which matches video player behavior
+        time_ms = vts.frame_to_time(frame_num, TimeType.EXACT)
         return int(time_ms)
 
     except Exception as e:
-        runner._log_message(f"[Frame-Perfect Sync] WARNING: frame_to_time_vfr failed: {e}")
+        runner._log_message(f"[VideoTimestamps] WARNING: frame_to_time_vfr failed: {e}")
         return None
 
 
-def time_to_frame_vfr(time_ms: float, video_path: str, fps: float, runner) -> Optional[int]:
+def time_to_frame_vfr(time_ms: float, video_path: str, fps: float, runner, config: dict = None) -> Optional[int]:
     """
     MODE: VFR using VideoTimestamps.
 
@@ -210,6 +232,7 @@ def time_to_frame_vfr(time_ms: float, video_path: str, fps: float, runner) -> Op
         video_path: Path to video file
         fps: Frame rate (used for CFR mode)
         runner: CommandRunner for logging
+        config: Optional config dict with settings
 
     Returns:
         Frame number, or None if VideoTimestamps unavailable
@@ -218,19 +241,20 @@ def time_to_frame_vfr(time_ms: float, video_path: str, fps: float, runner) -> Op
         from video_timestamps import TimeType
         from fractions import Fraction
 
-        vts = get_vfr_timestamps(video_path, fps, runner)
+        vts = get_vfr_timestamps(video_path, fps, runner, config)
         if vts is None:
             return None
 
         # Convert time_ms to Fraction (required by VideoTimestamps)
         time_frac = Fraction(int(time_ms), 1)
 
-        # Convert time to frame - requires time_type parameter and Fraction input
-        frame_num = vts.time_to_frame(time_frac, TimeType.START)
+        # Convert time to frame using EXACT (precise frame display window)
+        # EXACT gives [current, next[ which matches video player behavior
+        frame_num = vts.time_to_frame(time_frac, TimeType.EXACT)
         return frame_num
 
     except Exception as e:
-        runner._log_message(f"[Frame-Perfect Sync] WARNING: time_to_frame_vfr failed: {e}")
+        runner._log_message(f"[VideoTimestamps] WARNING: time_to_frame_vfr failed: {e}")
         return None
 
 
@@ -276,13 +300,17 @@ def apply_videotimestamps_sync(
         runner._log_message("[VideoTimestamps Sync] ERROR: VideoTimestamps not installed. Install with: pip install VideoTimestamps")
         return {'error': 'VideoTimestamps library not installed'}
 
-    runner._log_message(f"[VideoTimestamps Sync] Mode: Pure VideoTimestamps (no custom offsets)")
+    config = config or {}
+    rounding_method = config.get('videotimestamps_rounding', 'round')
+
+    runner._log_message(f"[VideoTimestamps Sync] Mode: Pure VideoTimestamps with TimeType.EXACT")
+    runner._log_message(f"[VideoTimestamps Sync] RoundingMethod: {rounding_method.upper()}")
     runner._log_message(f"[VideoTimestamps Sync] Loading subtitle: {Path(subtitle_path).name}")
     runner._log_message(f"[VideoTimestamps Sync] Video: {Path(video_path).name}")
     runner._log_message(f"[VideoTimestamps Sync] Delay to apply: {delay_ms:+d} ms")
 
     # Get VideoTimestamps instance
-    vts = get_vfr_timestamps(video_path, target_fps, runner)
+    vts = get_vfr_timestamps(video_path, target_fps, runner, config)
     if vts is None:
         return {'error': 'Failed to create VideoTimestamps instance'}
 
@@ -304,7 +332,7 @@ def apply_videotimestamps_sync(
     adjusted_count = 0
     runner._log_message(f"[VideoTimestamps Sync] Processing {len(subs.events)} subtitle events...")
 
-    # Process each event: apply delay directly using VideoTimestamps for frame-accurate conversion
+    # Process each event: apply delay, then snap to frames using VideoTimestamps with EXACT
     for event in subs.events:
         original_start = event.start
         original_end = event.end
@@ -313,42 +341,29 @@ def apply_videotimestamps_sync(
         if original_start == original_end:
             continue
 
-        # Convert original times to frames using VideoTimestamps
-        start_frame = time_to_frame_vfr(original_start, video_path, target_fps, runner)
-        end_frame = time_to_frame_vfr(original_end, video_path, target_fps, runner)
+        # Apply delay in milliseconds
+        new_start_ms = original_start + delay_ms
+        new_end_ms = original_end + delay_ms
 
-        if start_frame is None or end_frame is None:
+        # Convert to frames using VideoTimestamps with TimeType.EXACT
+        new_start_frame = time_to_frame_vfr(new_start_ms, video_path, target_fps, runner, config)
+        new_end_frame = time_to_frame_vfr(new_end_ms, video_path, target_fps, runner, config)
+
+        if new_start_frame is None or new_end_frame is None:
             runner._log_message(f"[VideoTimestamps Sync] ERROR: Failed to convert time to frame")
             continue
 
-        # Apply delay: convert delay_ms to Fraction for precise calculation
-        from fractions import Fraction
-        delay_frac = Fraction(delay_ms, 1)
-        time_scale = Fraction(1000)  # milliseconds
+        # Convert back to time using VideoTimestamps with TimeType.EXACT
+        new_start_ms_snapped = frame_to_time_vfr(new_start_frame, video_path, target_fps, runner, config)
+        new_end_ms_snapped = frame_to_time_vfr(new_end_frame, video_path, target_fps, runner, config)
 
-        # Add delay using VideoTimestamps precision
-        new_start_frac = Fraction(original_start, 1) + delay_frac
-        new_end_frac = Fraction(original_end, 1) + delay_frac
-
-        # Convert to frames, then back to time using VideoTimestamps
-        new_start_frame = time_to_frame_vfr(int(new_start_frac), video_path, target_fps, runner)
-        new_end_frame = time_to_frame_vfr(int(new_end_frac), video_path, target_fps, runner)
-
-        if new_start_frame is None or new_end_frame is None:
-            runner._log_message(f"[VideoTimestamps Sync] ERROR: Failed to convert adjusted time to frame")
-            continue
-
-        # Convert back to time using VideoTimestamps
-        new_start_ms = frame_to_time_vfr(new_start_frame, video_path, target_fps, runner)
-        new_end_ms = frame_to_time_vfr(new_end_frame, video_path, target_fps, runner)
-
-        if new_start_ms is None or new_end_ms is None:
+        if new_start_ms_snapped is None or new_end_ms_snapped is None:
             runner._log_message(f"[VideoTimestamps Sync] ERROR: Failed to convert frame to time")
             continue
 
-        # Update event (no fixes, let errors be visible)
-        event.start = new_start_ms
-        event.end = new_end_ms
+        # Update event with frame-snapped times
+        event.start = new_start_ms_snapped
+        event.end = new_end_ms_snapped
 
         if delay_ms != 0:
             adjusted_count += 1
