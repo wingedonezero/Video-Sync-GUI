@@ -21,10 +21,13 @@ This handles cases like:
 """
 from __future__ import annotations
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 import pysubs2
 from PIL import Image
 import numpy as np
+import threading
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 class VideoReader:
@@ -317,6 +320,151 @@ def find_matching_frame(
         return None
 
 
+def _precompute_source_hashes(
+    subs: pysubs2.SSAFile,
+    source_reader: VideoReader,
+    hash_size: int,
+    hash_method: str,
+    runner
+) -> Dict[int, Any]:
+    """
+    Phase 1: Pre-compute source frame hashes for all unique timestamps.
+
+    This is done single-threaded since:
+    1. Hash caching makes duplicate timestamps instant
+    2. Source frame extraction is fast with FFMS2
+    3. Avoids thread-safety issues with VideoReader
+
+    Returns:
+        Dict mapping timestamp (ms) -> hash object
+    """
+    source_hash_cache = {}
+    unique_timestamps = set()
+
+    # Collect unique timestamps
+    for event in subs.events:
+        if event.end - event.start > 0:  # Skip zero-duration
+            unique_timestamps.add(event.start)
+
+    runner._log_message(f"[FrameMatch] Phase 1: Pre-computing {len(unique_timestamps)} unique source frame hashes...")
+
+    computed_count = 0
+    for i, timestamp in enumerate(sorted(unique_timestamps)):
+        # Extract frame from source video
+        source_frame = source_reader.get_frame_at_time(timestamp)
+
+        if source_frame is None:
+            continue
+
+        # Compute hash
+        source_hash = compute_frame_hash(source_frame, hash_size=hash_size, method=hash_method)
+
+        if source_hash is None:
+            continue
+
+        # Cache it
+        source_hash_cache[timestamp] = source_hash
+        computed_count += 1
+
+        # Progress reporting (every 10%)
+        if (i + 1) % max(1, len(unique_timestamps) // 10) == 0:
+            percent = ((i + 1) / len(unique_timestamps)) * 100
+            runner._log_message(f"[FrameMatch] Phase 1 Progress: {i+1}/{len(unique_timestamps)} ({percent:.1f}%)")
+
+    runner._log_message(f"[FrameMatch] Phase 1 Complete: {computed_count}/{len(unique_timestamps)} hashes computed")
+
+    return source_hash_cache
+
+
+def _process_subtitle_batch(
+    batch_indices: List[int],
+    events: List[pysubs2.SSAEvent],
+    source_hash_cache: Dict[int, Any],
+    target_video: str,
+    runner,
+    search_window_ms: int,
+    threshold: int,
+    target_fps: float,
+    audio_delay_ms: int,
+    config: dict,
+    progress_lock: threading.Lock,
+    progress_counter: Dict[str, int]
+) -> List[Tuple[int, Optional[int], int, int]]:
+    """
+    Phase 2 Worker: Process a batch of subtitles to find matching frames.
+
+    Each worker has its own target VideoReader instance to avoid conflicts.
+    Source hashes are read from cache (read-only, thread-safe).
+
+    Args:
+        batch_indices: List of subtitle indices to process
+        events: Full list of subtitle events (read-only)
+        source_hash_cache: Pre-computed source hashes (read-only)
+        target_video: Path to target video
+        runner: CommandRunner for logging (thread-safe methods only)
+        ... other matching parameters ...
+        progress_lock: Lock for thread-safe progress updates
+        progress_counter: Shared counter dict {'matched': 0, 'unmatched': 0, 'processed': 0}
+
+    Returns:
+        List of (index, matched_time_ms, offset_ms, original_start) tuples
+    """
+    # Create worker's own target VideoReader
+    target_reader = VideoReader(target_video, runner)
+
+    results = []
+
+    try:
+        for idx in batch_indices:
+            event = events[idx]
+            original_start = event.start
+            original_duration = event.end - event.start
+
+            # Skip empty events
+            if original_duration <= 0:
+                continue
+
+            # Get source hash from cache (read-only, no locking needed)
+            source_hash = source_hash_cache.get(original_start)
+
+            if source_hash is None:
+                # No hash for this timestamp (failed in Phase 1)
+                with progress_lock:
+                    progress_counter['unmatched'] += 1
+                    progress_counter['processed'] += 1
+                continue
+
+            # Find matching frame in target video
+            expected_target_time_ms = original_start + audio_delay_ms
+
+            matched_time_ms = find_matching_frame(
+                source_hash,
+                target_reader,
+                expected_target_time_ms,
+                search_window_ms,
+                threshold,
+                target_fps,
+                config
+            )
+
+            # Update progress (thread-safe)
+            with progress_lock:
+                if matched_time_ms is not None:
+                    progress_counter['matched'] += 1
+                    offset_ms = abs(matched_time_ms - original_start)
+                    results.append((idx, matched_time_ms, offset_ms, original_start))
+                else:
+                    progress_counter['unmatched'] += 1
+
+                progress_counter['processed'] += 1
+
+    finally:
+        # Clean up worker's VideoReader
+        target_reader.close()
+
+    return results
+
+
 def apply_frame_matched_sync(
     subtitle_path: str,
     source_video: str,
@@ -410,110 +558,156 @@ def apply_frame_matched_sync(
         runner._log_message(f"[FrameMatch] WARNING: Large subtitle file detected ({len(subs.events)} events)")
         runner._log_message(f"[FrameMatch] This will take some time. Consider using smaller search window if too slow.")
 
-    runner._log_message(f"[FrameMatch] Opening video files...")
+    # Determine number of worker threads
+    num_workers = config.get('frame_match_workers', 0)
+    if num_workers == 0:
+        # Auto: use cpu_count - 1, but at least 1
+        num_workers = max(1, os.cpu_count() - 1)
+    # Limit to reasonable range
+    num_workers = max(1, min(num_workers, 16))
 
-    # Create VideoReader instances (keeps videos open for fast access)
+    runner._log_message(f"[FrameMatch] Multithreading enabled: {num_workers} worker threads")
+    runner._log_message(f"[FrameMatch] Opening source video for Phase 1...")
+
+    # Create source VideoReader for Phase 1
     source_reader = VideoReader(source_video, runner)
-    target_reader = VideoReader(target_video, runner)
-
-    # Hash caching to avoid recomputing hashes for duplicate timestamps
-    # Critical for karaoke files where many subs have same timestamp!
-    source_hash_cache = {}  # {time_ms: hash}
-
-    runner._log_message(f"[FrameMatch] Hash caching enabled for duplicate timestamps")
 
     try:
+        # ============================================================
+        # PHASE 1: Pre-compute all unique source frame hashes
+        # ============================================================
+        source_hash_cache = _precompute_source_hashes(
+            subs,
+            source_reader,
+            hash_size,
+            hash_method,
+            runner
+        )
+
+        # Close source reader after Phase 1
+        source_reader.close()
+
+        runner._log_message(f"[FrameMatch] Source video closed (Phase 1 complete)")
+
+        # ============================================================
+        # PHASE 2: Parallel target frame matching
+        # ============================================================
+        runner._log_message(f"[FrameMatch] Phase 2: Starting parallel frame matching with {num_workers} workers...")
+
+        # Create batches of subtitle indices for parallel processing
+        total_subs = len(subs.events)
+        batch_size = max(1, total_subs // (num_workers * 4))  # 4 batches per worker for better load balancing
+
+        batches = []
+        for i in range(0, total_subs, batch_size):
+            batch_indices = list(range(i, min(i + batch_size, total_subs)))
+            batches.append(batch_indices)
+
+        runner._log_message(f"[FrameMatch] Created {len(batches)} batches (avg {batch_size} subs/batch)")
+
+        # Shared progress tracking (thread-safe)
+        progress_lock = threading.Lock()
+        progress_counter = {'matched': 0, 'unmatched': 0, 'processed': 0}
+
+        # Progress reporter thread
+        def log_progress():
+            while progress_counter['processed'] < total_subs:
+                with progress_lock:
+                    processed = progress_counter['processed']
+                    matched = progress_counter['matched']
+                    unmatched = progress_counter['unmatched']
+
+                if processed > 0:
+                    percent = (processed / total_subs) * 100
+                    runner._log_message(
+                        f"[FrameMatch] Phase 2 Progress: {processed}/{total_subs} ({percent:.1f}%) - "
+                        f"Matched: {matched}, Unmatched: {unmatched}"
+                    )
+
+                # Sleep before next update
+                import time
+                time.sleep(5)  # Log every 5 seconds
+
+        # Start progress reporter in background
+        import threading as thread_module
+        progress_thread = thread_module.Thread(target=log_progress, daemon=True)
+        progress_thread.start()
+
+        # Process batches in parallel with ThreadPoolExecutor
+        all_results = []
+
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            # Submit all batches to thread pool
+            future_to_batch = {}
+            for batch_idx, batch_indices in enumerate(batches):
+                future = executor.submit(
+                    _process_subtitle_batch,
+                    batch_indices,
+                    subs.events,
+                    source_hash_cache,
+                    target_video,
+                    runner,
+                    search_window_ms,
+                    threshold,
+                    target_fps,
+                    audio_delay_ms,
+                    config,
+                    progress_lock,
+                    progress_counter
+                )
+                future_to_batch[future] = batch_idx
+
+            # Collect results as they complete
+            for future in as_completed(future_to_batch):
+                batch_idx = future_to_batch[future]
+                try:
+                    batch_results = future.result()
+                    all_results.extend(batch_results)
+                except Exception as e:
+                    runner._log_message(f"[FrameMatch] ERROR: Batch {batch_idx} failed: {e}")
+
+        # Wait for progress thread to finish
+        progress_thread.join(timeout=1)
+
+        runner._log_message(f"[FrameMatch] Phase 2 Complete: All workers finished")
+
+        # ============================================================
+        # Apply results to subtitle events
+        # ============================================================
+        runner._log_message(f"[FrameMatch] Applying {len(all_results)} matched timings to subtitles...")
+
         matched_count = 0
         unmatched_count = 0
         total_offset_ms = 0
         max_offset_ms = 0
 
-        # Determine progress reporting interval based on number of events
-        if len(subs.events) > 10000:
-            progress_interval = 500  # Every 500 lines for huge files
-        elif len(subs.events) > 1000:
-            progress_interval = 100  # Every 100 lines for large files
-        else:
-            progress_interval = 50   # Every 50 lines for normal files
+        for idx, matched_time_ms, offset_ms, original_start in all_results:
+            event = subs.events[idx]
+            original_duration = event.end - event.start
 
-        runner._log_message(f"[FrameMatch] Starting frame matching...")
+            # Update subtitle timing
+            event.start = matched_time_ms
+            event.end = matched_time_ms + original_duration
 
-        # Process each subtitle event
-        for i, event in enumerate(subs.events):
-            original_start = event.start
-            original_end = event.end
-            original_duration = original_end - original_start
+            # Track statistics
+            total_offset_ms += offset_ms
+            max_offset_ms = max(max_offset_ms, offset_ms)
+            matched_count += 1
 
-            # Skip empty events
-            if original_duration <= 0:
-                continue
+            # Log individual match (verbose, only for first 3)
+            if matched_count <= 3:
+                runner._log_message(f"[FrameMatch] Line {idx+1}: {original_start}ms → {matched_time_ms}ms (offset: {matched_time_ms - original_start:+d}ms)")
 
-            # Progress logging
-            if (i + 1) % progress_interval == 0:
-                percent = ((i + 1) / len(subs.events)) * 100
-                runner._log_message(f"[FrameMatch] Progress: {i+1}/{len(subs.events)} ({percent:.1f}%) - Matched: {matched_count}, Unmatched: {unmatched_count}")
+        # Count unmatched from progress counter
+        unmatched_count = progress_counter['unmatched']
 
-            # Check hash cache first (critical for karaoke with duplicate timestamps!)
-            if original_start in source_hash_cache:
-                source_hash = source_hash_cache[original_start]
-            else:
-                # Extract frame from source video at subtitle start using VideoReader
-                source_frame = source_reader.get_frame_at_time(original_start)
-
-                if source_frame is None:
-                    unmatched_count += 1
-                    continue
-
-                # Compute hash of source frame
-                source_hash = compute_frame_hash(source_frame, hash_size=hash_size, method=hash_method)
-
-                if source_hash is None:
-                    unmatched_count += 1
-                    continue
-
-                # Cache the hash for this timestamp
-                source_hash_cache[original_start] = source_hash
-
-            # Find matching frame in target video using VideoReader
-            # Use audio delay to center search (smart search!)
-            expected_target_time_ms = original_start + audio_delay_ms
-
-            matched_time_ms = find_matching_frame(
-                source_hash,
-                target_reader,  # Pass VideoReader, not path!
-                expected_target_time_ms,  # Center search on expected time (audio delay applied)
-                search_window_ms,
-                threshold,
-                target_fps,
-                config
-            )
-
-            if matched_time_ms is not None:
-                # Update subtitle timing
-                event.start = matched_time_ms
-                event.end = matched_time_ms + original_duration
-
-                # Track statistics
-                offset_ms = abs(matched_time_ms - original_start)
-                total_offset_ms += offset_ms
-                max_offset_ms = max(max_offset_ms, offset_ms)
-
-                matched_count += 1
-
-                # Log individual match (verbose, only for first 3)
-                if i < 3:
-                    runner._log_message(f"[FrameMatch] Line {i+1}: {original_start}ms → {matched_time_ms}ms (offset: {matched_time_ms - original_start:+d}ms)")
-            else:
-                unmatched_count += 1
-                # Only log first few unmatched to avoid spam
-                if unmatched_count <= 10:
-                    runner._log_message(f"[FrameMatch] WARNING: No match found for line {i+1} at {original_start}ms")
+        runner._log_message(f"[FrameMatch] Timing adjustments applied")
 
     finally:
-        # Always close video readers
-        runner._log_message(f"[FrameMatch] Closing video files...")
-        source_reader.close()
-        target_reader.close()
+        # Ensure source reader is closed (in case of early exit)
+        if source_reader.cap or source_reader.source:
+            source_reader.close()
+        runner._log_message(f"[FrameMatch] Cleanup complete")
 
     # Save modified subtitle
     runner._log_message(f"[FrameMatch] Saving modified subtitle file...")

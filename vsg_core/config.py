@@ -35,6 +35,7 @@ class AppConfig:
             'frame_match_method': 'dhash',  # dhash is 10x faster than phash, still accurate
             'frame_match_skip_unmatched': False,
             'frame_match_max_search_frames': 300,
+            'frame_match_workers': 0,  # 0 = auto (cpu_count - 1), or set manually (1-16)
 
             # --- Timing Fix Settings ---
             'timing_fix_enabled': False,
