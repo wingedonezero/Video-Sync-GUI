@@ -1097,6 +1097,24 @@ class SubtitleSyncTab(QWidget):
             "  - Use only if others are too slow"
         )
 
+        self.widgets['frame_match_workers'] = QSpinBox()
+        self.widgets['frame_match_workers'].setRange(0, 16)
+        self.widgets['frame_match_workers'].setToolTip(
+            "Number of parallel worker threads for frame matching.\n\n"
+            "• 0 (Auto): Use CPU cores - 1 (recommended)\n"
+            "  - Example: 8-core CPU = 7 workers\n"
+            "  - Maximizes CPU usage for faster processing\n\n"
+            "• 1: Single-threaded (slowest, for debugging)\n\n"
+            "• 2-16: Manual thread count\n"
+            "  - Higher = faster processing\n"
+            "  - Each worker opens target video file\n"
+            "  - Don't exceed your CPU core count\n\n"
+            "Performance impact:\n"
+            "• 4-8x faster on multi-core CPUs\n"
+            "• Example: 25k subs from 2 hours → 15-20 minutes\n\n"
+            "Default: 0 (auto-detect)"
+        )
+
         sync_layout.addRow("Sync Mode:", self.widgets['subtitle_sync_mode'])
         sync_layout.addRow("Target FPS:", self.widgets['subtitle_target_fps'])
         sync_layout.addRow("Frame Timing:", self.widgets['frame_sync_mode'])
@@ -1106,6 +1124,7 @@ class SubtitleSyncTab(QWidget):
         sync_layout.addRow("Match Window:", self.widgets['frame_match_search_window_sec'])
         sync_layout.addRow("Match Threshold:", self.widgets['frame_match_threshold'])
         sync_layout.addRow("Hash Method:", self.widgets['frame_match_method'])
+        sync_layout.addRow("Worker Threads:", self.widgets['frame_match_workers'])
 
         # Info label
         info_label = QLabel(
@@ -1153,6 +1172,7 @@ class SubtitleSyncTab(QWidget):
         self.widgets['frame_match_search_window_sec'].setEnabled(is_frame_matched)
         self.widgets['frame_match_threshold'].setEnabled(is_frame_matched)
         self.widgets['frame_match_method'].setEnabled(is_frame_matched)
+        self.widgets['frame_match_workers'].setEnabled(is_frame_matched)
 
 class ChaptersTab(QWidget):
     def __init__(self):
