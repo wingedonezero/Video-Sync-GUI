@@ -313,8 +313,21 @@ class SubtitlesStep:
                                 # Mark that timestamps have been adjusted (so mux doesn't double-apply delay)
                                 item.frame_adjusted = True
                     else:
+                        # Unsupported format (PGS/VOB bitmap subtitles)
+                        # These can't be processed with advanced sync, but they still need
+                        # the basic audio delay applied via mkvmerge --sync
                         mode_label = "Frame-Snapped Sync" if subtitle_sync_mode == 'frame-snapped' else ("VideoTimestamps Sync" if subtitle_sync_mode == 'videotimestamps' else "Frame-Perfect Sync")
-                        runner._log_message(f"[{mode_label}] Skipping track {item.track.id} - format {ext} not supported")
+                        runner._log_message(f"[{mode_label}] Skipping track {item.track.id} - format {ext} not supported (bitmap subtitle)")
+
+                        # Get the delay for this source
+                        source_key = item.sync_to if item.track.source == 'External' else item.track.source
+                        delay_ms = 0
+
+                        if ctx.delays and source_key in ctx.delays.source_delays_ms:
+                            delay_ms = int(ctx.delays.source_delays_ms[source_key])
+                            runner._log_message(f"[{mode_label}] Track {item.track.id} will use mkvmerge --sync delay: {delay_ms:+d}ms (from {source_key})")
+                        else:
+                            runner._log_message(f"[{mode_label}] Track {item.track.id} will use mkvmerge --sync delay: 0ms (no delay found for {source_key})")
 
             if item.convert_to_ass and item.extracted_path and item.extracted_path.suffix.lower() == '.srt':
                 new_path = convert_srt_to_ass(str(item.extracted_path), runner, ctx.tool_paths)
