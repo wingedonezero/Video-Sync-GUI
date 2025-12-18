@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 import pysubs2
 import math
+from .metadata_preserver import SubtitleMetadata
 
 
 # ============================================================================
@@ -314,6 +315,10 @@ def apply_videotimestamps_sync(
     if vts is None:
         return {'error': 'Failed to create VideoTimestamps instance'}
 
+    # Capture original metadata before pysubs2 processing
+    metadata = SubtitleMetadata(subtitle_path)
+    metadata.capture()
+
     # Load subtitle file
     try:
         subs = pysubs2.load(subtitle_path, encoding='utf-8')
@@ -375,6 +380,9 @@ def apply_videotimestamps_sync(
     except Exception as e:
         runner._log_message(f"[VideoTimestamps Sync] ERROR: Failed to save subtitle file: {e}")
         return {'error': str(e)}
+
+    # Validate and restore lost metadata
+    metadata.validate_and_restore(runner)
 
     # Log results
     runner._log_message(f"[VideoTimestamps Sync] ✓ Successfully processed {len(subs.events)} events")
@@ -446,6 +454,10 @@ def apply_frame_snapped_sync(
     runner._log_message(f"[Frame-Snapped Sync] Delay to apply: {delay_ms:+d} ms")
     runner._log_message(f"[Frame-Snapped Sync] Frame timing convention: {timing_mode}")
 
+    # Capture original metadata before pysubs2 processing
+    metadata = SubtitleMetadata(subtitle_path)
+    metadata.capture()
+
     # Load subtitle file
     try:
         subs = pysubs2.load(subtitle_path, encoding='utf-8')
@@ -511,6 +523,9 @@ def apply_frame_snapped_sync(
     except Exception as e:
         runner._log_message(f"[Frame-Snapped Sync] ERROR: Failed to save subtitle file: {e}")
         return {'error': str(e)}
+
+    # Validate and restore lost metadata
+    metadata.validate_and_restore(runner)
 
     # Log results
     runner._log_message(f"[Frame-Snapped Sync] ✓ Successfully processed {len(subs.events)} events")
@@ -610,6 +625,10 @@ def apply_frame_perfect_sync(
     if abs(delay_ms - effective_delay_ms) > 0.5:
         runner._log_message(f"[Frame-Perfect Sync] NOTE: Rounded {delay_ms}ms to {effective_delay_ms:.1f}ms ({abs(delay_ms - effective_delay_ms):.1f}ms difference)")
 
+    # Capture original metadata before pysubs2 processing
+    metadata = SubtitleMetadata(subtitle_path)
+    metadata.capture()
+
     # Load subtitle file
     try:
         subs = pysubs2.load(subtitle_path, encoding='utf-8')
@@ -680,6 +699,9 @@ def apply_frame_perfect_sync(
     except Exception as e:
         runner._log_message(f"[Frame-Perfect Sync] ERROR: Failed to save subtitle file: {e}")
         return {'error': str(e)}
+
+    # Validate and restore lost metadata
+    metadata.validate_and_restore(runner)
 
     # Log results
     runner._log_message(f"[Frame-Perfect Sync] ✓ Successfully processed {len(subs.events)} events")

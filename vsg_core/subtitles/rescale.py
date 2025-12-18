@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 import pysubs2
 from ..io.runner import CommandRunner
+from .metadata_preserver import SubtitleMetadata
 
 def _scale_override_tags(text: str, scale: float, scale_h: float, offset_x: float, offset_y: float) -> str:
     """
@@ -127,6 +128,10 @@ def rescale_subtitle(subtitle_path: str, video_path: str, runner: CommandRunner,
         runner._log_message(f'[Rescale] WARN: Failed to parse video resolution.')
         return False
 
+    # Capture original metadata before pysubs2 processing
+    metadata = SubtitleMetadata(subtitle_path)
+    metadata.capture()
+
     # 2. Load subtitle file
     try:
         subs = pysubs2.load(subtitle_path, encoding='utf-8')
@@ -179,6 +184,9 @@ def rescale_subtitle(subtitle_path: str, video_path: str, runner: CommandRunner,
 
         # 8. Save the rescaled subtitle file
         subs.save(subtitle_path, encoding='utf-8')
+
+        # Validate and restore lost metadata
+        metadata.validate_and_restore(runner)
 
         runner._log_message(f'[Rescale] Successfully rescaled to {to_w}x{to_h}.')
         return True

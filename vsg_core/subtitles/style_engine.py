@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 import pysubs2
+from .metadata_preserver import SubtitleMetadata
 
 class StyleEngine:
     """
@@ -15,10 +16,15 @@ class StyleEngine:
     def __init__(self, subtitle_path: str):
         self.path = Path(subtitle_path)
         self.subs: Optional[pysubs2.SSAFile] = None
+        self.metadata: Optional[SubtitleMetadata] = None
         self.load()
 
     def load(self):
         """Loads the subtitle file, converting SRT to ASS if necessary."""
+        # Capture original metadata before pysubs2 processing
+        self.metadata = SubtitleMetadata(str(self.path))
+        self.metadata.capture()
+
         try:
             self.subs = pysubs2.load(str(self.path), encoding='utf-8')
         except Exception:
@@ -28,6 +34,10 @@ class StyleEngine:
         """Saves any changes back to the original file path."""
         if self.subs:
             self.subs.save(str(self.path), encoding='utf-8', format_=self.path.suffix[1:])
+
+            # Validate and restore lost metadata (without runner for GUI context)
+            if self.metadata:
+                self.metadata.validate_and_restore()
 
     def get_style_names(self) -> List[str]:
         """Returns a list of all style names defined in the file."""
@@ -128,6 +138,10 @@ class StyleEngine:
         Only styles with matching names are updated; unique styles in the target are preserved.
         """
         try:
+            # Capture original metadata before pysubs2 processing
+            metadata = SubtitleMetadata(target_path)
+            metadata.capture()
+
             target_subs = pysubs2.load(target_path, encoding='utf-8')
             template_subs = pysubs2.load(template_path, encoding='utf-8')
 
@@ -141,6 +155,10 @@ class StyleEngine:
 
             if updated_count > 0:
                 target_subs.save(target_path, encoding='utf-8')
+
+                # Validate and restore lost metadata
+                metadata.validate_and_restore()
+
                 return True
             return False
         except Exception as e:

@@ -6,6 +6,7 @@ from pathlib import Path
 from collections import defaultdict
 import pysubs2
 import enchant
+from .metadata_preserver import SubtitleMetadata
 
 class SubtitleCleaner:
     """
@@ -15,6 +16,11 @@ class SubtitleCleaner:
     def __init__(self, subtitle_path: str, config: dict, custom_wordlist: set = None):
         self.path = Path(subtitle_path)
         self.config = config
+
+        # Capture original metadata before pysubs2 processing
+        self.metadata = SubtitleMetadata(subtitle_path)
+        self.metadata.capture()
+
         self.subs = pysubs2.load(subtitle_path, encoding='utf-8')
         self.report = defaultdict(int)
 
@@ -252,6 +258,9 @@ def run_cleanup(subtitle_path: str, config: dict, runner) -> dict:
 
         cleaner = SubtitleCleaner(subtitle_path, config, custom_wordlist=custom_wordlist)
         report = cleaner.cleanup()
+
+        # Validate and restore lost metadata
+        cleaner.metadata.validate_and_restore(runner)
 
         runner._log_message(f"[OCR Cleanup] Cleaned '{Path(subtitle_path).name}'.")
 
