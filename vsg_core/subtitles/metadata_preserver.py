@@ -292,6 +292,8 @@ class SubtitleMetadata:
                     new_lines.append(line)
                     for orig_line in self.project_garbage_lines:
                         new_lines.append(orig_line + '\n')
+                    # Add blank line after section (standard ASS format)
+                    new_lines.append('\n')
                     in_project_garbage = True
                     section_replaced = True
                     continue
