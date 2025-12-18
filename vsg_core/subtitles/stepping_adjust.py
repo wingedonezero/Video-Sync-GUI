@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import List
 from pathlib import Path
 import pysubs2
+from .metadata_preserver import SubtitleMetadata
 
 
 def apply_stepping_to_subtitles(subtitle_path: str, edl: List, runner, config: dict = None) -> dict:
@@ -51,6 +52,10 @@ def apply_stepping_to_subtitles(subtitle_path: str, edl: List, runner, config: d
         return {}
 
     try:
+        # Capture original metadata before pysubs2 processing
+        metadata = SubtitleMetadata(subtitle_path)
+        metadata.capture()
+
         # Load subtitles
         subs = pysubs2.load(subtitle_path, encoding='utf-8')
 
@@ -95,6 +100,9 @@ def apply_stepping_to_subtitles(subtitle_path: str, edl: List, runner, config: d
 
         # Save adjusted subtitles
         subs.save(subtitle_path, encoding='utf-8')
+
+        # Validate and restore lost metadata
+        metadata.validate_and_restore(runner)
 
         # Build report
         report = {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 from collections import defaultdict
 import pysubs2
+from .metadata_preserver import SubtitleMetadata
 
 def fix_subtitle_timing(subtitle_path: str, config: dict, runner) -> dict:
     """
@@ -29,6 +30,10 @@ def fix_subtitle_timing(subtitle_path: str, config: dict, runner) -> dict:
         return {}
 
     try:
+        # Capture original metadata before pysubs2 processing
+        metadata = SubtitleMetadata(subtitle_path)
+        metadata.capture()
+
         subs = pysubs2.load(subtitle_path, encoding='utf-8')
         report = defaultdict(int)
 
@@ -67,6 +72,9 @@ def fix_subtitle_timing(subtitle_path: str, config: dict, runner) -> dict:
         if report:
             subs.save(subtitle_path, encoding='utf-8')
             runner._log_message(f"[TimingFix] Fixed {sum(report.values())} timing issues in '{subtitle_path}'")
+
+            # Validate and restore lost metadata
+            metadata.validate_and_restore(runner)
 
         return dict(report)
 

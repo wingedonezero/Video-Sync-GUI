@@ -28,6 +28,7 @@ import numpy as np
 import threading
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from .metadata_preserver import SubtitleMetadata
 
 
 class VideoReader:
@@ -536,6 +537,10 @@ def apply_frame_matched_sync(
     runner._log_message(f"[FrameMatch] Source FPS: {source_fps:.3f}")
     runner._log_message(f"[FrameMatch] Target FPS: {target_fps:.3f}")
 
+    # Capture original metadata before pysubs2 processing
+    metadata = SubtitleMetadata(subtitle_path)
+    metadata.capture()
+
     # Load subtitle file
     try:
         subs = pysubs2.load(subtitle_path, encoding='utf-8')
@@ -716,6 +721,9 @@ def apply_frame_matched_sync(
     except Exception as e:
         runner._log_message(f"[FrameMatch] ERROR: Failed to save subtitle file: {e}")
         return {'error': str(e)}
+
+    # Validate and restore lost metadata
+    metadata.validate_and_restore(runner)
 
     # Calculate statistics
     avg_offset_ms = total_offset_ms / matched_count if matched_count > 0 else 0
