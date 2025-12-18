@@ -26,9 +26,9 @@ class SubtitleMetadata:
         self.encoding: str = 'utf-8'
         self.has_bom: bool = False
 
-        # Sections that pysubs2 might lose
+        # Sections that pysubs2 might lose or corrupt
         self.aegisub_extradata: List[str] = []
-        self.project_garbage_extra: List[str] = []  # Lines beyond what pysubs2 keeps
+        self.project_garbage_lines: List[str] = []  # Original [Aegisub Project Garbage] content
 
         # Event validation data (non-timing)
         self.original_events: List[Dict[str, Any]] = []
@@ -64,8 +64,20 @@ class SubtitleMetadata:
             return False
 
     def _extract_sections(self):
-        """Extract sections that pysubs2 doesn't preserve."""
+        """Extract sections that pysubs2 doesn't preserve or corrupts."""
         lines = self.original_content.split('\n')
+
+        # Extract [Aegisub Project Garbage] - pysubs2 corrupts this by adding Data lines
+        in_project_garbage = False
+        for line in lines:
+            if line.strip() == '[Aegisub Project Garbage]':
+                in_project_garbage = True
+                continue
+            elif line.strip().startswith('[') and in_project_garbage:
+                # Hit next section, stop
+                break
+            elif in_project_garbage and line.strip():
+                self.project_garbage_lines.append(line.rstrip())
 
         # Extract [Aegisub Extradata]
         in_extradata = False
@@ -157,7 +169,8 @@ class SubtitleMetadata:
         stats = {
             'extradata_restored': 0,
             'comment_lines_restored': 0,
-            'validation_errors': 0
+            'validation_errors': 0,
+            'project_garbage_restored': 0
         }
 
         try:
@@ -175,6 +188,17 @@ class SubtitleMetadata:
                         runner._log_message(f"  - {error}")
                     if len(validation_errors) > 5:
                         runner._log_message(f"  ... and {len(validation_errors) - 5} more")
+
+            # Restore [Aegisub Project Garbage] to original (pysubs2 corrupts it by adding Data lines)
+            if self.project_garbage_lines and '[Aegisub Project Garbage]' in processed_content:
+                fixed = self._restore_project_garbage()
+                if fixed:
+                    stats['project_garbage_restored'] = 1
+                    if runner:
+                        runner._log_message(f"[MetadataPreserver] Restored original [Aegisub Project Garbage] section")
+                    # Re-read for subsequent operations
+                    with open(self.path, 'r', encoding='utf-8-sig') as f:
+                        processed_content = f.read()
 
             # Restore Aegisub Extradata if missing
             if self.aegisub_extradata and '[Aegisub Extradata]' not in processed_content:
@@ -241,6 +265,59 @@ class SubtitleMetadata:
                 errors.append(f"Line {line_num}: Effect changed")
 
         return errors
+
+    def _restore_project_garbage(self) -> bool:
+        """
+        Replace [Aegisub Project Garbage] section with original.
+        pysubs2 corrupts this section by adding Data: lines that shouldn't be there.
+        """
+        if not self.project_garbage_lines:
+            return False
+
+        try:
+            # Read current file
+            with open(self.path, 'r', encoding='utf-8-sig') as f:
+                lines = f.readlines()
+
+            # Find and replace [Aegisub Project Garbage] section
+            new_lines = []
+            in_project_garbage = False
+            section_replaced = False
+
+            for line in lines:
+                stripped = line.strip()
+
+                if stripped == '[Aegisub Project Garbage]':
+                    # Start of section - write header and original content
+                    new_lines.append(line)
+                    for orig_line in self.project_garbage_lines:
+                        new_lines.append(orig_line + '\n')
+                    in_project_garbage = True
+                    section_replaced = True
+                    continue
+                elif stripped.startswith('[') and in_project_garbage:
+                    # Hit next section - stop skipping and write this line
+                    in_project_garbage = False
+                    new_lines.append(line)
+                    continue
+                elif in_project_garbage:
+                    # Inside garbage section - skip (we already wrote the original)
+                    continue
+                else:
+                    # Normal line - keep it
+                    new_lines.append(line)
+
+            if section_replaced:
+                # Write back to file
+                with open(self.path, 'w', encoding=self.encoding) as f:
+                    f.writelines(new_lines)
+                return True
+
+            return False
+
+        except Exception as e:
+            print(f"[MetadataPreserver] ERROR restoring project garbage: {e}")
+            return False
 
     def _restore_extradata(self, processed_content: str):
         """Append [Aegisub Extradata] section to the file."""
