@@ -269,23 +269,31 @@ def apply_videotimestamps_sync(
     target_fps: float,
     runner,
     config: dict = None,
-    video_path: str = None
+    video_path: str = None,
+    source_delay_ms: int = None,
+    global_shift_ms: int = None
 ) -> Dict[str, Any]:
     """
-    Apply frame-perfect synchronization using VideoTimestamps library ONLY.
+    Apply frame-perfect synchronization using VideoTimestamps library with two-step approach.
 
-    This mode uses the VideoTimestamps library in its pure form without any
-    custom frame offset adjustments (no +0.5 middle mode, no aegisub ceil).
+    TWO-STEP PROCESS:
+    1. Apply source delay + snap to frames (fixes encoding issues like ghost frames)
+    2. Apply global shift as pure time offset (maintains alignment with shifted video)
 
-    The library handles all time↔frame conversions using actual video timestamps.
+    This ensures:
+    - VideoTimestamps fixes encoding issues (ghost frames, bad frame alignment)
+    - Global shift keeps subtitle aligned with globally-shifted video timeline
+    - No frame misalignment due to applying total delay then snapping
 
     Args:
         subtitle_path: Path to subtitle file (.ass, .srt, .ssa, .vtt)
-        delay_ms: Time offset in milliseconds
+        delay_ms: Time offset in milliseconds (for backward compatibility)
         target_fps: Frame rate (used for CFR videos)
         runner: CommandRunner for logging
         config: Optional config dict (unused, for API compatibility)
         video_path: Path to video file (required)
+        source_delay_ms: Delay relative to Source 1 (before global shift)
+        global_shift_ms: Global shift applied to entire timeline
 
     Returns:
         Dict with report statistics
@@ -304,11 +312,23 @@ def apply_videotimestamps_sync(
     config = config or {}
     rounding_method = config.get('videotimestamps_rounding', 'round')
 
-    runner._log_message(f"[VideoTimestamps Sync] Mode: Pure VideoTimestamps with TimeType.EXACT")
+    # Handle backward compatibility: if source_delay_ms and global_shift_ms not provided,
+    # use delay_ms as total (old behavior, but we'll still snap then shift)
+    if source_delay_ms is None and global_shift_ms is None:
+        # Backward compatibility: assume delay_ms is total delay
+        # We'll snap to frames first, then apply the delay
+        # This isn't perfect but maintains some backward compat
+        source_delay_ms = 0
+        global_shift_ms = delay_ms
+        runner._log_message(f"[VideoTimestamps Sync] WARNING: Using legacy single-delay mode. Consider updating caller.")
+
+    runner._log_message(f"[VideoTimestamps Sync] Mode: Two-Step VideoTimestamps with TimeType.EXACT")
     runner._log_message(f"[VideoTimestamps Sync] RoundingMethod: {rounding_method.upper()}")
     runner._log_message(f"[VideoTimestamps Sync] Loading subtitle: {Path(subtitle_path).name}")
     runner._log_message(f"[VideoTimestamps Sync] Video: {Path(video_path).name}")
-    runner._log_message(f"[VideoTimestamps Sync] Delay to apply: {delay_ms:+d} ms")
+    runner._log_message(f"[VideoTimestamps Sync] Source delay (step 1 - snap): {source_delay_ms:+d} ms")
+    runner._log_message(f"[VideoTimestamps Sync] Global shift (step 2 - pure): {global_shift_ms:+d} ms")
+    runner._log_message(f"[VideoTimestamps Sync] Total delay to apply: {source_delay_ms + global_shift_ms:+d} ms")
 
     # Get VideoTimestamps instance
     vts = get_vfr_timestamps(video_path, target_fps, runner, config)
@@ -337,7 +357,9 @@ def apply_videotimestamps_sync(
     adjusted_count = 0
     runner._log_message(f"[VideoTimestamps Sync] Processing {len(subs.events)} subtitle events...")
 
-    # Process each event: apply delay, then snap to frames using VideoTimestamps with EXACT
+    # Process each event with TWO-STEP approach:
+    # STEP 1: Apply source delay + snap to frames (fixes encoding issues)
+    # STEP 2: Apply global shift as pure time offset (maintains alignment)
     for event in subs.events:
         original_start = event.start
         original_end = event.end
@@ -346,31 +368,39 @@ def apply_videotimestamps_sync(
         if original_start == original_end:
             continue
 
-        # Apply delay in milliseconds
-        new_start_ms = original_start + delay_ms
-        new_end_ms = original_end + delay_ms
+        # === STEP 1: Source delay + frame snap ===
+        # Apply source delay (delay relative to Source 1)
+        stage1_start_ms = original_start + source_delay_ms
+        stage1_end_ms = original_end + source_delay_ms
 
-        # Convert to frames using VideoTimestamps with TimeType.EXACT
-        new_start_frame = time_to_frame_vfr(new_start_ms, video_path, target_fps, runner, config)
-        new_end_frame = time_to_frame_vfr(new_end_ms, video_path, target_fps, runner, config)
+        # Snap to frames using VideoTimestamps (fixes encoding issues like ghost frames)
+        start_frame = time_to_frame_vfr(stage1_start_ms, video_path, target_fps, runner, config)
+        end_frame = time_to_frame_vfr(stage1_end_ms, video_path, target_fps, runner, config)
 
-        if new_start_frame is None or new_end_frame is None:
-            runner._log_message(f"[VideoTimestamps Sync] ERROR: Failed to convert time to frame")
+        if start_frame is None or end_frame is None:
+            runner._log_message(f"[VideoTimestamps Sync] ERROR: Failed to convert time to frame (step 1)")
             continue
 
-        # Convert back to time using VideoTimestamps with TimeType.EXACT
-        new_start_ms_snapped = frame_to_time_vfr(new_start_frame, video_path, target_fps, runner, config)
-        new_end_ms_snapped = frame_to_time_vfr(new_end_frame, video_path, target_fps, runner, config)
+        # Convert back to time (frame-snapped)
+        snapped_start_ms = frame_to_time_vfr(start_frame, video_path, target_fps, runner, config)
+        snapped_end_ms = frame_to_time_vfr(end_frame, video_path, target_fps, runner, config)
 
-        if new_start_ms_snapped is None or new_end_ms_snapped is None:
-            runner._log_message(f"[VideoTimestamps Sync] ERROR: Failed to convert frame to time")
+        if snapped_start_ms is None or snapped_end_ms is None:
+            runner._log_message(f"[VideoTimestamps Sync] ERROR: Failed to convert frame to time (step 1)")
             continue
 
-        # Update event with frame-snapped times
-        event.start = new_start_ms_snapped
-        event.end = new_end_ms_snapped
+        # === STEP 2: Global shift (pure time, NO snap) ===
+        # Apply global shift to keep subtitle aligned with globally-shifted video
+        # This is a pure time offset - we don't re-snap to avoid breaking alignment
+        final_start_ms = snapped_start_ms + global_shift_ms
+        final_end_ms = snapped_end_ms + global_shift_ms
 
-        if delay_ms != 0:
+        # Update event with final times
+        event.start = final_start_ms
+        event.end = final_end_ms
+
+        # Count as adjusted if any delay was applied
+        if source_delay_ms != 0 or global_shift_ms != 0:
             adjusted_count += 1
 
     # Save modified subtitle
@@ -387,12 +417,16 @@ def apply_videotimestamps_sync(
     # Log results
     runner._log_message(f"[VideoTimestamps Sync] ✓ Successfully processed {len(subs.events)} events")
     runner._log_message(f"[VideoTimestamps Sync]   - Events adjusted: {adjusted_count}")
-    runner._log_message(f"[VideoTimestamps Sync]   - Delay applied: {delay_ms:+d} ms")
+    runner._log_message(f"[VideoTimestamps Sync]   - Source delay applied (step 1): {source_delay_ms:+d} ms")
+    runner._log_message(f"[VideoTimestamps Sync]   - Global shift applied (step 2): {global_shift_ms:+d} ms")
+    runner._log_message(f"[VideoTimestamps Sync]   - Total delay applied: {source_delay_ms + global_shift_ms:+d} ms")
 
     return {
         'total_events': len(subs.events),
         'adjusted_events': adjusted_count,
-        'delay_applied_ms': delay_ms,
+        'delay_applied_ms': source_delay_ms + global_shift_ms,
+        'source_delay_ms': source_delay_ms,
+        'global_shift_ms': global_shift_ms,
         'target_fps': target_fps
     }
 

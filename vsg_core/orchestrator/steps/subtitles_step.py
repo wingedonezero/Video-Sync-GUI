@@ -239,13 +239,25 @@ class SubtitlesStep:
                         # Get the uniform delay for this source (for other modes)
                         source_key = item.sync_to if item.track.source == 'External' else item.track.source
                         delay_ms = 0
+                        source_delay_only_ms = 0
+                        global_shift_ms = 0
 
                         if ctx.delays and source_key in ctx.delays.source_delays_ms:
+                            # Get total delay (includes global shift already)
                             delay_ms = int(ctx.delays.source_delays_ms[source_key])
+
+                            # Extract global shift
+                            global_shift_ms = int(ctx.delays.global_shift_ms)
+
+                            # Calculate source-only delay (relative to Source 1, before global shift)
+                            # source_delays_ms already includes global_shift, so subtract it
+                            source_delay_only_ms = delay_ms - global_shift_ms
+
                             mode_label = "Frame-Snapped Sync" if subtitle_sync_mode == 'frame-snapped' else ("VideoTimestamps Sync" if subtitle_sync_mode == 'videotimestamps' else "Frame-Perfect Sync")
                             runner._log_message(f"[{mode_label}] DEBUG: source_key='{source_key}', delay from source_delays_ms={delay_ms}ms")
                             runner._log_message(f"[{mode_label}] DEBUG: All source_delays_ms: {ctx.delays.source_delays_ms}")
-                            runner._log_message(f"[{mode_label}] DEBUG: Global shift: {ctx.delays.global_shift_ms}ms")
+                            runner._log_message(f"[{mode_label}] DEBUG: Global shift: {global_shift_ms}ms")
+                            runner._log_message(f"[{mode_label}] DEBUG: Source-only delay (before global shift): {source_delay_only_ms}ms")
                         else:
                             mode_label = "Frame-Snapped Sync" if subtitle_sync_mode == 'frame-snapped' else ("VideoTimestamps Sync" if subtitle_sync_mode == 'videotimestamps' else "Frame-Perfect Sync")
                             runner._log_message(f"[{mode_label}] DEBUG: source_key='{source_key}' not found in delays or delays is None")
@@ -271,7 +283,7 @@ class SubtitlesStep:
 
                             # Apply appropriate sync mode
                             if subtitle_sync_mode == 'videotimestamps':
-                                # VideoTimestamps mode - pure library, no custom offsets
+                                # VideoTimestamps mode - two-step approach for proper frame alignment
                                 runner._log_message(f"[VideoTimestamps Sync] Applying to track {item.track.id} ({item.track.props.name or 'Unnamed'})")
                                 frame_sync_report = apply_videotimestamps_sync(
                                     str(item.extracted_path),
@@ -279,7 +291,9 @@ class SubtitlesStep:
                                     target_fps,
                                     runner,
                                     ctx.settings_dict,
-                                    video_path=source1_file  # Required for VideoTimestamps
+                                    video_path=source1_file,  # Required for VideoTimestamps
+                                    source_delay_ms=source_delay_only_ms,  # Step 1: relative delay + snap
+                                    global_shift_ms=global_shift_ms  # Step 2: global shift (pure time)
                                 )
                             elif subtitle_sync_mode == 'frame-snapped':
                                 # Frame-snapped mode - snap start to frames, preserve duration
