@@ -147,7 +147,28 @@ def run_audio_correlation(
     role_tag: str
 ) -> List[Dict]:
     """
-    Runs the full analysis and returns a list of chunk result dictionaries.
+    Runs audio correlation analysis between reference and target files.
+
+    Decodes audio streams, applies optional filtering (dialogue band-pass or low-pass),
+    then analyzes multiple chunks across the file to detect delay and match quality.
+
+    Args:
+        ref_file: Path to reference video file (Source 1)
+        target_file: Path to target video file to analyze
+        config: Configuration dictionary with analysis settings
+        runner: CommandRunner for executing ffmpeg/ffprobe commands
+        tool_paths: Paths to external tools (ffmpeg, ffprobe, etc.)
+        ref_lang: Optional language code to select reference audio stream
+        target_lang: Optional language code to select target audio stream
+        role_tag: Source identifier for logging (e.g., "Source 2", "Source 3")
+
+    Returns:
+        List of chunk result dictionaries, each containing:
+            - delay (int): Rounded delay in milliseconds
+            - raw_delay (float): Unrounded delay value
+            - match (float): Match quality/confidence score (0-100)
+            - start (float): Start time of chunk in seconds
+            - accepted (bool): True if match >= min_match_pct threshold
     """
     log = runner._log_message
 
