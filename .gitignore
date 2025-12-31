@@ -9,6 +9,9 @@ docs/ARCHITECTURE.odt
 
 .todo.txt.kate-swp
 
+# User settings
+settings.json
+
 # Python cache
 __pycache__/
 *.py[cod]
