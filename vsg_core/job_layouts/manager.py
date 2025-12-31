@@ -1,5 +1,26 @@
 # vsg_core/job_layouts/manager.py
 # -*- coding: utf-8 -*-
+"""
+Job Layout Manager Module
+
+Orchestrates persistent track layout management for batch processing jobs with
+identical file structures. Enables reusing user-configured track orders and settings
+across multiple files.
+
+Architecture:
+- EnhancedSignatureGenerator: Creates track and structure signatures for comparing files
+- LayoutPersistence: Handles JSON storage/loading of layout files in temp_root/job_layouts/
+- LayoutValidator: Ensures loaded layouts have required fields and valid data
+- JobLayoutManager: Main API coordinating save, load, copy, and validation operations
+
+Key Features:
+- Track Signatures: Detect changes in codec, language, channels, or sample rate
+- Structure Signatures: Compare track counts/types to determine compatibility
+- Layout Copying: Reuse layouts between jobs if file structures match
+- Enhanced Layouts: Add positional metadata for robust track ordering
+
+Job IDs are MD5 hashes of source file names, ensuring consistency across runs.
+"""
 from __future__ import annotations
 import hashlib
 from pathlib import Path

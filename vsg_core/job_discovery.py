@@ -1,5 +1,19 @@
 # vsg_core/job_discovery.py
 # -*- coding: utf-8 -*-
+"""
+Job Discovery Module
+
+Discovers and creates processing jobs from source file paths. Supports two modes:
+
+1. Single File Mode: Source 1 is a file. Creates one job matching files by name
+   from other source folders, or a single-source job for remux-only mode.
+
+2. Batch Folder Mode: Source 1 is a folder. Scans for video files (.mkv, .mp4, .m4v)
+   and creates multiple jobs by matching filenames across all source folders.
+
+Returns a list of job dictionaries, each containing a 'sources' dict mapping
+source names to file paths.
+"""
 from __future__ import annotations
 from pathlib import Path
 from typing import List, Dict

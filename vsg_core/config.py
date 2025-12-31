@@ -1,5 +1,28 @@
 # vsg_core/config.py
 # -*- coding: utf-8 -*-
+"""
+Application Configuration Module
+
+Manages persistent user settings stored in settings.json. Settings are organized
+into categories:
+
+- Paths: Last used paths, output folders, tool locations
+- Subtitle Sync: Time-based vs frame-based sync modes, FPS, rounding
+- Frame Matching: Hash-based frame alignment settings (window, threshold, workers)
+- Timing Fixes: Overlap correction, duration limits, CPS enforcement
+- Audio Analysis: Source separation, filtering, correlation methods, drift detection
+- DSP & Filtering: Band-pass filters, chunk scanning parameters
+- Stepping Correction: Advanced audio stepping detection/correction with silence
+  snapping, VAD protection, transient detection, quality thresholds
+- Resampling: Engine selection (aresample/rubberband) and quality settings
+- Track Naming: Custom labels for corrected/preserved audio tracks
+- Post-Processing: Timestamp normalization, tag stripping, metadata options
+- Logging: Compact mode, autoscroll, error tailing, progress display
+
+The AppConfig class handles loading, saving, migrating old settings, and ensuring
+required directories exist. New settings are automatically added with defaults when
+the config file is loaded.
+"""
 import json
 from pathlib import Path
 from typing import Any
