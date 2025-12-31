@@ -1094,12 +1094,14 @@ class SteppingCorrector:
 
             self.log(f"    - Scanning segment from {segment_start_s:.2f}s to {segment_end_s:.2f}s (Target Timeline)...")
 
-            scan_chunk_s = 5.0
-            num_scans = max(5, int(segment_duration_s / 20.0))
+            # Internal drift scan parameters (rarely triggers - most files have stepping OR drift, not both)
+            scan_chunk_s = 5.0  # Audio chunk size (seconds) for correlation at each scan point
+            num_scans = max(5, int(segment_duration_s / 20.0))  # Min 5 scans, or ~1 per 20 seconds
             chunk_samples = int(scan_chunk_s * sample_rate)
             locality_samples = int(self.config.get('segment_search_locality_s', 10) * sample_rate)
 
-            offset = min(30.0, segment_duration_s * (scan_buffer_pct / 100.0))
+            # Edge buffer to avoid scanning near segment boundaries where stepping transitions occur
+            offset = min(30.0, segment_duration_s * (scan_buffer_pct / 100.0))  # Max 30s from each edge
             scan_window_start = segment_start_s + offset
             scan_window_end = segment_end_s - offset - scan_chunk_s
 
