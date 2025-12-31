@@ -157,15 +157,16 @@ def get_vfr_timestamps(video_path: str, fps: float, runner, config: dict = None)
         # For now, use FPSTimestamps (lightweight) for CFR videos
         # This just does math, doesn't analyze the video file
 
-        # Convert FPS to fraction (e.g., 23.976 = 24000/1001)
+        # Convert FPS to exact fraction for NTSC drop-frame rates
+        # NTSC standards use fractional rates (N*1000/1001) to avoid color/audio drift
         if abs(fps - 23.976) < 0.001:
-            fps_frac = Fraction(24000, 1001)
+            fps_frac = Fraction(24000, 1001)  # 23.976fps - NTSC film (24fps slowed down)
         elif abs(fps - 29.97) < 0.01:
-            fps_frac = Fraction(30000, 1001)
+            fps_frac = Fraction(30000, 1001)  # 29.97fps - NTSC video (30fps slowed down)
         elif abs(fps - 59.94) < 0.01:
-            fps_frac = Fraction(60000, 1001)
+            fps_frac = Fraction(60000, 1001)  # 59.94fps - NTSC high fps (60fps slowed down)
         else:
-            # Use decimal FPS as fraction
+            # Use decimal FPS as fraction for non-NTSC rates (PAL, web video, etc.)
             fps_frac = Fraction(int(fps * 1000), 1000).limit_denominator(10000)
 
         # Use FPSTimestamps for CFR (constant framerate) - lightweight!

@@ -127,7 +127,9 @@ def _analyze_transition_patterns(cluster_info: List[Dict[str, Any]], runner: Com
     all_positive = all(j > 0 for j in jumps)
     all_negative = all(j < 0 for j in jumps)
 
-    # Check for consistent jump sizes (within 50ms tolerance)
+    # Check for consistent jump sizes
+    # 50ms tolerance: Jumps within ±50ms of the mean are considered "consistent"
+    # This helps identify regular patterns (e.g., reel changes) vs random edits
     jump_sizes = [abs(j) for j in jumps]
     mean_jump = np.mean(jump_sizes)
     consistent_jumps = all(abs(j - mean_jump) < 50 for j in jump_sizes)
@@ -149,6 +151,8 @@ def _analyze_transition_patterns(cluster_info: List[Dict[str, Any]], runner: Com
         runner._log_message(f"  → Likely cause: Scene-specific edits or variable content changes")
 
     # Check for low match scores that might indicate content mismatches
+    # 70% threshold: Match scores below this suggest silence or mismatched content
+    # This is diagnostic only - doesn't affect processing
     low_match_clusters = [c for c in cluster_info if c['min_match_pct'] < 70]
     if low_match_clusters:
         runner._log_message(f"  ⚠ {len(low_match_clusters)} clusters have chunks with match < 70%")
@@ -340,9 +344,12 @@ def diagnose_audio_issue(
 
     # --- Test 1: Check for PAL Drift (Specific Linear Drift) ---
     framerate = _get_video_framerate(video_path, runner, tool_paths)
-    is_pal_framerate = abs(framerate - 25.0) < 0.1
+    is_pal_framerate = abs(framerate - 25.0) < 0.1  # PAL standard is 25fps
     if is_pal_framerate:
         slope, _ = np.polyfit(times, delays, 1)
+        # PAL speedup: 23.976fps NTSC film → 25fps PAL = 40.88 ms/s drift rate
+        # Formula: (25/23.976 - 1) * 1000 ≈ 40.9 ms/s
+        # ±5ms tolerance accounts for encoding variations
         if abs(slope - 40.9) < 5.0:
             runner._log_message(f"[PAL Drift Detected] Framerate is ~25fps and audio drift rate is {slope:.2f} ms/s.")
             return "PAL_DRIFT", {"rate": slope}

@@ -1080,11 +1080,14 @@ class SteppingCorrector:
             segment_end_s = edl[i+1].start_s if i + 1 < len(edl) else pcm_duration_s
             segment_duration_s = segment_end_s - segment_start_s
 
+            # Skip segments under 1 second - too short for reliable audio correlation
             if segment_duration_s < 1.0:
                 self.log(f"    - Skipping segment from {segment_start_s:.2f}s to {segment_end_s:.2f}s: too short ({segment_duration_s:.2f}s)")
                 final_edl.append(current_segment)
                 continue
 
+            # Skip fine-scanning segments under 20 seconds - not worth the computational cost
+            # These short segments are handled with the coarse delay estimate
             if segment_duration_s < 20.0:
                 final_edl.append(current_segment)
                 continue
