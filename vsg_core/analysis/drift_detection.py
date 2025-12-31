@@ -348,6 +348,9 @@ def diagnose_audio_issue(
             return "PAL_DRIFT", {"rate": slope}
 
     # --- Test 2: Check for Stepping (Clustered) ---
+    # Use DBSCAN (Density-Based Spatial Clustering) to detect delay clustering
+    # eps: Maximum distance (ms) between delays to be in same cluster
+    # min_samples: Minimum delays required to form a cluster (reject noise)
     epsilon_ms = config.get('detection_dbscan_epsilon_ms', 20.0)
     min_samples = config.get('detection_dbscan_min_samples', 2)
     delays_reshaped = delays.reshape(-1, 1)
