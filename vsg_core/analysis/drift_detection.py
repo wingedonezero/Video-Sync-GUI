@@ -3,7 +3,7 @@
 from __future__ import annotations
 import json
 import warnings
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 
 import numpy as np
 from sklearn.cluster import DBSCAN
@@ -325,7 +325,7 @@ def diagnose_audio_issue(
     runner: CommandRunner,
     tool_paths: dict,
     codec_id: str
-) -> (str, Dict):
+) -> Tuple[str, Dict]:
     """
     Analyzes correlation chunks to diagnose the type of sync issue.
     Returns:
