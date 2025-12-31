@@ -223,8 +223,18 @@ class SubtitleMetadata:
 
     def _validate_events(self, processed_content: str) -> List[str]:
         """
-        Compare original events with processed events.
-        Only timestamps should differ - everything else must match.
+        Validates that pysubs2 processing preserved all subtitle content and formatting.
+
+        After timestamp adjustments, ALL non-timing data must remain identical:
+        - Text content (dialogue, effects, formatting tags)
+        - Style assignments (font, color, positioning)
+        - Layer numbers (z-order for overlapping subs)
+        - Effects (karaoke, scrolling, etc.)
+
+        This catches pysubs2 bugs that corrupt subtitle data during read/write cycles.
+        Any differences (except timestamps) indicate data loss and trigger rejection.
+
+        Returns: List of validation errors (empty = success)
         """
         errors = []
 
