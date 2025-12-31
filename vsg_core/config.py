@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import json
 from pathlib import Path
+from typing import Any
 
 class AppConfig:
     def __init__(self, settings_filename='settings.json'):
@@ -257,10 +258,10 @@ class AppConfig:
         except IOError as e:
             print(f"Error saving settings: {e}")
 
-    def get(self, key: str, default: any = None) -> any:
+    def get(self, key: str, default: Any = None) -> Any:
         return self.settings.get(key, default)
 
-    def set(self, key: str, value: any):
+    def set(self, key: str, value: Any):
         self.settings[key] = value
 
     def ensure_dirs_exist(self):
