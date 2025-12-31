@@ -237,9 +237,26 @@ class SteppingCorrector:
         return coarse_map
 
     def _find_boundary_in_zone(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int, zone_start_s: float, zone_end_s: float, delay_before: int, delay_after: int, ref_file_path: Optional[str] = None, analysis_file_path: Optional[str] = None) -> float:
+        """
+        Finds the precise boundary where audio delay changes from delay_before to delay_after.
+
+        Algorithm:
+        1. Binary Search: Narrow down the zone by checking which delay each chunk matches
+        2. Silence Snapping: Move boundary to silence zone in target audio to avoid cutting speech
+        3. Video Snapping (optional): Align boundary with video keyframe/scene if within silence
+
+        Timeline Conversions:
+        - Reference timeline: Position in reference (Source 1) audio
+        - Target timeline: Position in target (Source 2+) audio = reference_time + delay_offset
+        - Silence detection happens in TARGET audio (where we'll cut)
+        - Video detection happens in REFERENCE video (frame sync source)
+
+        Returns: Final boundary position in reference timeline (seconds)
+        """
         self.log(f"  [SteppingCorrector] Stage 2: Performing fine scan in zone {zone_start_s:.1f}s - {zone_end_s:.1f}s...")
         zone_start_sample, zone_end_sample = int(zone_start_s * sample_rate), int(zone_end_s * sample_rate)
 
+        # Configuration for iterative binary search
         fine_chunk_s = self.config.get('segment_fine_chunk_s', 2.0)
         locality_s = self.config.get('segment_search_locality_s', 10)
         iterations = self.config.get('segment_fine_iterations', 10)
@@ -248,15 +265,19 @@ class SteppingCorrector:
         locality_samples = int(locality_s * sample_rate)
         low, high = zone_start_sample, zone_end_sample
 
+        # STAGE 1: Binary search to locate delay transition point
+        # Each iteration checks the midpoint and narrows the search based on which delay it matches
         for _ in range(iterations):
             if high - low < chunk_samples: break
             mid = (low + high) // 2
             delay = self._get_delay_for_chunk(ref_pcm, analysis_pcm, mid, chunk_samples, sample_rate, locality_samples)
             if delay is not None:
+                # Move search window based on which delay this chunk matches
                 if abs(delay - delay_before) < abs(delay - delay_after): low = mid
                 else: high = mid
             else: low += chunk_samples
 
+        # Binary search complete - 'high' is the boundary in reference timeline
         initial_boundary_s = high / sample_rate
         initial_boundary_target_s = initial_boundary_s + (delay_before / 1000.0)
 
@@ -264,9 +285,9 @@ class SteppingCorrector:
         self.log(f"        Reference: {initial_boundary_s:.3f}s")
         self.log(f"        Target:    {initial_boundary_target_s:.3f}s (ref + {delay_before}ms delay)")
 
-        # Apply silence-aware boundary snapping if enabled
-        # CRITICAL: Convert boundary to target timeline before checking for silence in target audio
-        # Reference timeline position needs delay offset to get target timeline position
+        # STAGE 2: Silence-aware boundary snapping
+        # CRITICAL: We cut the TARGET audio, so silence detection must happen in target timeline.
+        # Convert reference boundary to target timeline by adding the delay offset.
         snapped_boundary_target_s, boundary_metadata = self._snap_boundary_to_silence(
             analysis_pcm, sample_rate, initial_boundary_target_s, analysis_file_path
         )
@@ -277,7 +298,7 @@ class SteppingCorrector:
             boundary_metadata['delay_change_ms'] = delay_after - delay_before
             self.audit_metadata.append(boundary_metadata)
 
-        # Convert snapped boundary back to reference timeline
+        # Convert snapped boundary back to reference timeline for further processing
         final_boundary_s = snapped_boundary_target_s - (delay_before / 1000.0)
 
         if abs(snapped_boundary_target_s - initial_boundary_target_s) > 0.001:
@@ -286,18 +307,19 @@ class SteppingCorrector:
             self.log(f"        Reference: {final_boundary_s:.3f}s (was {initial_boundary_s:.3f}s, moved {offset_s:+.3f}s)")
             self.log(f"        Target:    {snapped_boundary_target_s:.3f}s (snapped to silence center)")
 
-        # Apply video-aware boundary snapping if enabled
-        # Video snap operates on reference timeline
+        # STAGE 3: Video-aware boundary snapping (optional)
+        # Video snap operates on REFERENCE timeline (we sync subtitles to reference video frames).
+        # Must validate that video snap doesn't move outside the silence zone we found in target audio.
         if ref_file_path and boundary_metadata:
             video_snapped_boundary_s = self._snap_boundary_to_video_frame(ref_file_path, final_boundary_s)
             if abs(video_snapped_boundary_s - final_boundary_s) > 0.001:
-                # Check if video snap would move outside the silence zone
+                # Validate: Convert video-snapped boundary to target timeline and check silence zone
                 video_snapped_target_s = video_snapped_boundary_s + (delay_before / 1000.0)
                 silence_start = boundary_metadata.get('zone_start', 0)
                 silence_end = boundary_metadata.get('zone_end', 0)
                 no_silence = boundary_metadata.get('no_silence_found', False)
 
-                # Only validate if we had a real silence zone
+                # Only validate if we had a real silence zone (otherwise no constraint)
                 if not no_silence and (video_snapped_target_s < silence_start or video_snapped_target_s > silence_end):
                     self.log(f"    - [Video Snap] ⚠️  Keyframe at {video_snapped_boundary_s:.3f}s (target: {video_snapped_target_s:.3f}s) is outside silence zone")
                     self.log(f"    - [Video Snap] Silence zone: [{silence_start:.3f}s - {silence_end:.3f}s]")
