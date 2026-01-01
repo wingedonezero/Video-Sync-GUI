@@ -141,11 +141,26 @@ class JobQueueLogic:
 
                     # Get available styles from the extracted file
                     available_styles = StyleFilterEngine.get_styles_from_file(extracted[0]['path'])
+                    available_style_names = set(available_styles.keys())
 
-                    # Check if configured styles exist
-                    missing_styles = [s for s in filter_styles if s not in available_styles]
+                    # Check if configured filter styles exist
+                    filter_style_set = set(filter_styles)
+                    missing_styles = filter_style_set - available_style_names
+
+                    # Also check if there are EXTRA styles not in the filter config
+                    # This matters because if the original had [Default, Sign] and you excluded [Default],
+                    # but the new file has [Default, Sign, Notes], you might want to exclude Notes too
+                    extra_styles = available_style_names - filter_style_set
+
+                    # Build warning message
                     if missing_styles:
-                        issues.append(f"'{track_name}': Styles not found: {', '.join(missing_styles)}")
+                        issues.append(f"'{track_name}': Configured styles not found: {', '.join(sorted(missing_styles))}")
+                    if extra_styles:
+                        # Only warn about extra styles if we're in exclude mode
+                        # (In include mode, extra styles are just ignored, which is expected)
+                        filter_mode = track.get('generated_filter_mode', 'exclude')
+                        if filter_mode == 'exclude':
+                            issues.append(f"'{track_name}': Source has additional styles: {', '.join(sorted(extra_styles))}")
 
                 finally:
                     # Clean up temp extraction
