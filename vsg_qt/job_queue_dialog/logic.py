@@ -97,8 +97,9 @@ class JobQueueLogic:
         Validates that generated tracks in the layout have valid style filters.
         This is an ADDITIONAL check that doesn't affect existing layout matching.
 
-        Uses exact set matching: the current file's style set must exactly match
-        the original file's style set (order doesn't matter, but names and count must be identical).
+        Auto-fixes safe mismatches:
+        - If ONLY missing styles (styles in original but not in current): Auto-update baseline, no warning
+        - If ANY extra styles (styles in current but not in original): Show warning, requires manual review
 
         Returns list of warning messages if there are issues, empty list if OK.
         """
@@ -106,6 +107,7 @@ class JobQueueLogic:
 
         issues = []
         enhanced_layout = layout_data.get('enhanced_layout', [])
+        layout_modified = False
 
         for track in enhanced_layout:
             # Skip non-generated tracks
@@ -148,7 +150,7 @@ class JobQueueLogic:
                     available_styles = StyleFilterEngine.get_styles_from_file(extracted[0]['path'])
                     available_style_set = set(available_styles.keys())
 
-                    # Compare complete style sets (exact matching)
+                    # Compare complete style sets
                     original_style_set = set(original_style_list)
 
                     if original_style_set != available_style_set:
@@ -156,14 +158,22 @@ class JobQueueLogic:
                         missing_styles = original_style_set - available_style_set
                         extra_styles = available_style_set - original_style_set
 
-                        # Build warning message showing both missing and extra
-                        warning_parts = []
-                        if missing_styles:
-                            warning_parts.append(f"Missing: {', '.join(sorted(missing_styles))}")
-                        if extra_styles:
-                            warning_parts.append(f"Extra: {', '.join(sorted(extra_styles))}")
+                        # AUTO-FIX: If ONLY missing styles (no extras), update baseline silently
+                        # This is SAFE because missing styles can't include unwanted dialogue
+                        if missing_styles and not extra_styles:
+                            # Update the baseline to match current file (remove missing styles)
+                            track['generated_original_style_list'] = sorted(available_styles.keys())
+                            layout_modified = True
+                            # Don't add to issues - this is safe and auto-fixed
 
-                        issues.append(f"'{track_name}': Style set mismatch ({'; '.join(warning_parts)})")
+                        # WARN: If ANY extra styles exist, require manual review
+                        # This is RISKY because extra styles might contain unwanted dialogue
+                        elif extra_styles:
+                            warning_parts = []
+                            if missing_styles:
+                                warning_parts.append(f"Missing: {', '.join(sorted(missing_styles))}")
+                            warning_parts.append(f"Extra: {', '.join(sorted(extra_styles))}")
+                            issues.append(f"'{track_name}': Style set mismatch ({'; '.join(warning_parts)})")
 
                 finally:
                     # Clean up temp extraction
@@ -173,6 +183,11 @@ class JobQueueLogic:
             except Exception as e:
                 # If validation fails, warn but don't block
                 issues.append(f"'{track_name}': Could not validate styles ({str(e)})")
+
+        # If we auto-fixed any tracks, save the updated layout
+        if layout_modified:
+            job_id = self.layout_manager.generate_job_id(job['sources'])
+            self.layout_manager.persistence.save_layout(job_id, layout_data)
 
         return issues
 

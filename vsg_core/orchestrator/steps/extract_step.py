@@ -274,6 +274,14 @@ class ExtractStep:
                 runner._log_message(f"[ERROR] Could not find source track {item.track.source} ID {item.generated_source_track_id}")
                 continue
 
+            # INHERIT source file properties (container delay, sync settings, etc.)
+            # These come from the source FILE/container, not user UI settings
+            item.container_delay_ms = source_item.container_delay_ms
+            item.sync_to = source_item.sync_to  # For external subs synced to specific source
+
+            if item.container_delay_ms != 0 or item.sync_to:
+                runner._log_message(f"  Inherited properties - Container delay: {item.container_delay_ms}ms, Sync to: {item.sync_to}")
+
             # ALWAYS use the extracted_path (original extraction), NEVER user_modified_path
             # This ensures source edits don't affect the generated track
             source_path = source_item.extracted_path
