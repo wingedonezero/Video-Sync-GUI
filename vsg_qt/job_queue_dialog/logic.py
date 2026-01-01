@@ -134,10 +134,16 @@ class JobQueueLogic:
             try:
                 # Extract the source subtitle temporarily to check styles
                 import tempfile
+                import time
                 from pathlib import Path
                 from vsg_core.extraction.tracks import extract_tracks
 
-                temp_dir = Path(tempfile.gettempdir()) / f"vsg_gen_validate_{source_key}_{source_id}"
+                # CRITICAL FIX: Include job_id to make temp path unique per episode
+                # Without this, all episodes would share the same temp directory and could
+                # validate against the wrong episode's subtitle file
+                job_id = self.layout_manager.generate_job_id(job['sources'])
+                timestamp = int(time.time() * 1000)  # milliseconds for uniqueness
+                temp_dir = Path(tempfile.gettempdir()) / f"vsg_gen_validate_{job_id}_{source_key}_{source_id}_{timestamp}"
                 temp_dir.mkdir(parents=True, exist_ok=True)
 
                 try:
