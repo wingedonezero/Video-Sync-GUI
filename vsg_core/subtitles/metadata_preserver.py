@@ -92,7 +92,7 @@ class SubtitleMetadata:
                 self.aegisub_extradata.append(line.rstrip())
 
     def _extract_events(self):
-        """Extract event data for validation (excluding timestamps)."""
+        """Extract event data for validation (including timestamps for timing validation)."""
         lines = self.original_content.split('\n')
 
         in_events = False
@@ -118,16 +118,20 @@ class SubtitleMetadata:
             if stripped.startswith('Comment:'):
                 self.original_comment_lines.append(line.rstrip())
 
-            # Parse Dialogue/Comment lines for validation
+            # Parse Dialogue/Comment lines for validation (including timestamps)
             if stripped.startswith(('Dialogue:', 'Comment:')):
-                event_data = self._parse_event_line(stripped)
+                event_data = self._parse_event_line(stripped, include_timestamps=True)
                 if event_data:
                     self.original_events.append(event_data)
 
-    def _parse_event_line(self, line: str) -> Optional[Dict[str, Any]]:
+    def _parse_event_line(self, line: str, include_timestamps: bool = False) -> Optional[Dict[str, Any]]:
         """
-        Parse an event line and extract non-timing data.
+        Parse an event line and extract event data.
         Format: Dialogue: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+
+        Args:
+            line: Event line to parse
+            include_timestamps: If True, also capture Start and End timestamps
         """
         try:
             # Split on first colon
@@ -137,7 +141,7 @@ class SubtitleMetadata:
             if len(parts) < 10:
                 return None
 
-            return {
+            event_data = {
                 'type': line_type.strip(),  # 'Dialogue' or 'Comment'
                 'layer': parts[0].strip(),
                 'style': parts[3].strip(),
@@ -148,15 +152,23 @@ class SubtitleMetadata:
                 'effect': parts[8].strip(),
                 'text': parts[9].strip()  # Includes all formatting tags
             }
+
+            # Optionally include timestamps for timing validation
+            if include_timestamps:
+                event_data['start'] = parts[1].strip()
+                event_data['end'] = parts[2].strip()
+
+            return event_data
         except Exception:
             return None
 
-    def validate_and_restore(self, runner=None) -> Dict[str, int]:
+    def validate_and_restore(self, runner=None, expected_delay_ms: Optional[int] = None) -> Dict[str, int]:
         """
         Validates pysubs2 output against original and restores lost data.
 
         Args:
             runner: Optional runner for logging. If None, logging is skipped.
+            expected_delay_ms: Expected delay applied in milliseconds. If provided, validates timing changes.
 
         Returns:
             Dictionary with restoration statistics
@@ -188,6 +200,19 @@ class SubtitleMetadata:
                         runner._log_message(f"  - {error}")
                     if len(validation_errors) > 5:
                         runner._log_message(f"  ... and {len(validation_errors) - 5} more")
+
+            # Validate timing changes if expected delay was provided
+            if expected_delay_ms is not None:
+                timing_errors = self._validate_timing(processed_content, expected_delay_ms)
+                if timing_errors:
+                    stats['timing_validation_errors'] = len(timing_errors)
+                    if runner:
+                        runner._log_message(f"[MetadataPreserver] WARNING: {len(timing_errors)} timing validation issue(s):")
+                        for error in timing_errors:
+                            runner._log_message(f"  - {error}")
+                else:
+                    if runner:
+                        runner._log_message(f"[MetadataPreserver] ✓ Timing validation passed (delay: {expected_delay_ms:+d}ms)")
 
             # Restore [Aegisub Project Garbage] to original (pysubs2 corrupts it by adding Data lines)
             if self.project_garbage_lines and '[Aegisub Project Garbage]' in processed_content:
@@ -275,6 +300,136 @@ class SubtitleMetadata:
                 errors.append(f"Line {line_num}: Effect changed")
 
         return errors
+
+    def _validate_timing(self, processed_content: str, expected_delay_ms: int) -> List[str]:
+        """
+        Validates that subtitle timestamps were changed correctly.
+
+        Uses a sample-based approach with generous tolerances since frame-snapping
+        modes (videotimestamps, frame-perfect) adjust delays to frame boundaries.
+
+        Args:
+            processed_content: Content of processed subtitle file
+            expected_delay_ms: Expected delay that should have been applied
+
+        Returns:
+            List of timing validation errors (empty = success)
+        """
+        errors = []
+
+        # Extract processed events with timestamps
+        processed_events = []
+        lines = processed_content.split('\n')
+        in_events = False
+
+        for line in lines:
+            stripped = line.strip()
+            if stripped == '[Events]':
+                in_events = True
+                continue
+            elif stripped.startswith('[') and in_events:
+                break
+            elif in_events and stripped.startswith('Dialogue:'):
+                event_data = self._parse_event_line(stripped, include_timestamps=True)
+                if event_data:
+                    processed_events.append(event_data)
+
+        # Get original dialogue events (already have timestamps from capture)
+        original_dialogue = [e for e in self.original_events if e['type'] == 'Dialogue']
+
+        # Must have matching counts
+        if len(original_dialogue) != len(processed_events):
+            return []  # Can't validate timing if event counts don't match
+
+        if not original_dialogue:
+            return []  # No events to validate
+
+        # Sample first 5 events (or fewer if not enough events)
+        sample_size = min(5, len(original_dialogue))
+
+        # Calculate shifts for sample events
+        shifts = []
+        for i in range(sample_size):
+            orig = original_dialogue[i]
+            proc = processed_events[i]
+
+            # Convert timestamps to milliseconds
+            orig_start_ms = self._timestamp_to_ms(orig['start'])
+            proc_start_ms = self._timestamp_to_ms(proc['start'])
+
+            if orig_start_ms is None or proc_start_ms is None:
+                continue
+
+            # Calculate actual shift
+            actual_shift = proc_start_ms - orig_start_ms
+            shifts.append(actual_shift)
+
+        if not shifts:
+            errors.append("Could not parse timestamps for validation")
+            return errors
+
+        # Calculate average shift
+        avg_shift = sum(shifts) / len(shifts)
+
+        # Validate shift direction and magnitude
+        if expected_delay_ms == 0:
+            # No delay expected - timestamps should be unchanged (or very close)
+            if abs(avg_shift) > 50:  # 50ms tolerance
+                errors.append(f"Timestamps changed by {avg_shift:.1f}ms but no delay was expected")
+        else:
+            # Delay expected - check direction
+            if (expected_delay_ms > 0 and avg_shift < 0) or (expected_delay_ms < 0 and avg_shift > 0):
+                errors.append(f"Timing shift direction wrong: expected {expected_delay_ms:+d}ms, got {avg_shift:+.1f}ms")
+                return errors
+
+            # Check magnitude with generous tolerance
+            # Frame-snapping can adjust delays by up to 1-2 frames
+            # At 23.976fps, 1 frame ≈ 42ms, so use 100ms tolerance
+            tolerance_ms = 100
+
+            difference = abs(avg_shift - expected_delay_ms)
+            if difference > tolerance_ms:
+                errors.append(
+                    f"Timing shift magnitude off: expected {expected_delay_ms:+d}ms, "
+                    f"got {avg_shift:+.1f}ms (difference: {difference:.1f}ms)"
+                )
+
+        return errors
+
+    @staticmethod
+    def _timestamp_to_ms(timestamp: str) -> Optional[float]:
+        """
+        Convert ASS timestamp to milliseconds.
+        Format: H:MM:SS.CC (hours:minutes:seconds.centiseconds)
+
+        Examples:
+            "0:00:05.20" → 5200ms
+            "0:01:30.50" → 90500ms
+        """
+        try:
+            # Split on colon
+            parts = timestamp.split(':')
+            if len(parts) != 3:
+                return None
+
+            hours = int(parts[0])
+            minutes = int(parts[1])
+
+            # Seconds and centiseconds
+            sec_parts = parts[2].split('.')
+            if len(sec_parts) != 2:
+                return None
+
+            seconds = int(sec_parts[0])
+            centiseconds = int(sec_parts[1])
+
+            # Convert to milliseconds
+            total_ms = (hours * 3600 + minutes * 60 + seconds) * 1000 + centiseconds * 10
+
+            return float(total_ms)
+
+        except (ValueError, IndexError):
+            return None
 
     def _restore_project_garbage(self) -> bool:
         """
