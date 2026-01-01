@@ -20,7 +20,9 @@ class SubtitleFormatsAuditor(BaseAuditor):
         - ASS conversion
         - Rescaling
         - Font size multipliers
-        - Time-based subtitle delays (mkvmerge --sync)
+
+        Note: Subtitle timing validation happens during processing (metadata_preserver),
+        not in final audit, since subtitle delay metadata in MKV is unreliable.
 
         Returns the number of issues found.
         """
@@ -96,11 +98,6 @@ class SubtitleFormatsAuditor(BaseAuditor):
             # Check 4: Font size multiplier
             if abs(plan_item.size_multiplier - 1.0) > 0.01 and plan_item.extracted_path:
                 issues += self._verify_font_size(plan_item, track_label)
-
-            # Check 5: Time-based subtitle delays (mkvmerge --sync)
-            # Only for subtitles where timestamps were NOT baked in (time-based mode)
-            if not getattr(plan_item, 'frame_adjusted', False) and not getattr(plan_item, 'stepping_adjusted', False):
-                issues += self._verify_subtitle_delay(plan_item, final_track, track_label)
 
             final_subtitle_idx += 1
 
@@ -267,46 +264,5 @@ class SubtitleFormatsAuditor(BaseAuditor):
         except Exception as e:
             self.log(f"[WARNING] Could not verify font size for '{track_name}': {e}")
             issues += 1
-
-        return issues
-
-    def _verify_subtitle_delay(self, plan_item, final_track: Dict, track_name: str) -> int:
-        """
-        Verify time-based subtitle delay matches expected value.
-        Similar to audio delay verification, but for subtitle tracks.
-        """
-        issues = 0
-
-        # Calculate expected delay (same logic as audio)
-        expected_delay_ms = self._calculate_expected_delay(plan_item)
-
-        # Get actual delay from track metadata (similar to audio sync auditor)
-        props = final_track.get('properties', {})
-
-        # Subtitle tracks may not have codec_delay, but might have sync_delay or similar
-        # Try multiple possible fields
-        actual_delay_ns = props.get('codec_delay', 0)
-        actual_delay_ms = actual_delay_ns / 1_000_000.0 if actual_delay_ns else 0.0
-
-        # Also check minimum_timestamp
-        min_timestamp = props.get('minimum_timestamp', 0)
-        if min_timestamp and not actual_delay_ms:
-            actual_delay_ms = min_timestamp / 1_000_000.0
-
-        source = plan_item.track.source
-        lang = plan_item.track.props.lang or 'und'
-
-        # Allow 1ms tolerance for floating point rounding
-        tolerance_ms = 1.0
-        diff_ms = abs(expected_delay_ms - actual_delay_ms)
-
-        if diff_ms > tolerance_ms:
-            self.log(f"[WARNING] Subtitle sync mismatch for '{track_name}' ({source}, {lang}):")
-            self.log(f"          Expected delay: {expected_delay_ms:+.1f}ms")
-            self.log(f"          Actual delay:   {actual_delay_ms:+.1f}ms")
-            self.log(f"          Difference:     {diff_ms:.1f}ms")
-            issues += 1
-        else:
-            self.log(f"  ✓ '{track_name}' ({source}) delay: {actual_delay_ms:+.1f}ms")
 
         return issues
