@@ -150,6 +150,17 @@ class JobQueueLogic:
                     available_styles = StyleFilterEngine.get_styles_from_file(extracted[0]['path'])
                     available_style_set = set(available_styles.keys())
 
+                    # ADDITIONAL CHECK: Validate that the filter styles actually exist
+                    # This catches cases where style names changed (e.g., "Default" -> "Dialogue")
+                    filter_styles = track.get('generated_filter_styles', [])
+                    if filter_styles:
+                        missing_filter_styles = [s for s in filter_styles if s not in available_style_set]
+                        if missing_filter_styles:
+                            issues.append(
+                                f"'{track_name}': Filter styles not found in target file: "
+                                f"{', '.join(missing_filter_styles)} - Generated track may not filter any events"
+                            )
+
                     # Compare complete style sets
                     original_style_set = set(original_style_list)
 
