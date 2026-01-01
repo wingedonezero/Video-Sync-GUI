@@ -12,11 +12,14 @@ from vsg_qt.track_widget import TrackWidget
 from .logic import ManualLogic
 
 class SourceList(QListWidget):
-    def __init__(self, parent=None):
+    def __init__(self, dialog: "ManualSelectionDialog" = None, parent=None):
         super().__init__(parent)
+        self.dialog = dialog
         self.setDragEnabled(True)
         self.setSelectionMode(QAbstractItemView.SingleSelection)
         self.setDefaultDropAction(Qt.CopyAction)
+        self.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_context_menu)
 
     def add_track_item(self, track: dict, guard_block: bool):
         item_text = f"[{track['type'][0].upper()}-{track['id']}] {track.get('description', '')}"
@@ -32,6 +35,35 @@ class SourceList(QListWidget):
             it.setForeground(QColor('#888'))
             it.setToolTip("Video from other sources is disabled.\nOnly Source 1 video is allowed.")
         return it
+
+    def _show_context_menu(self, pos: QPoint):
+        """Show context menu for source tracks."""
+        if not self.dialog:
+            return
+
+        item = self.itemAt(pos)
+        if not item:
+            return
+
+        track = item.data(Qt.UserRole)
+        if not track:
+            return
+
+        # Only show context menu for text-based subtitle tracks
+        is_text_subtitle = (
+            track.get('type') == 'subtitles' and
+            track.get('codec_id', '').upper() in ['S_TEXT/UTF8', 'S_TEXT/ASS', 'S_TEXT/SSA']
+        )
+
+        if not is_text_subtitle:
+            return
+
+        menu = QMenu(self)
+        act_create_signs = menu.addAction("Create Signs Track...")
+
+        act = menu.exec_(self.mapToGlobal(pos))
+        if act == act_create_signs:
+            self.dialog._create_generated_track(track)
 
 
 class FinalList(QListWidget):

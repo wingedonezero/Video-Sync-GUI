@@ -218,7 +218,106 @@ class ExtractStep:
             plan_item.custom_lang = sel.get('custom_lang', '')  # Preserve custom language
             plan_item.custom_name = sel.get('custom_name', '')  # Preserve custom name
 
+            # NEW: Handle generated track fields
+            plan_item.is_generated = bool(sel.get('is_generated', False))
+            plan_item.generated_source_track_id = sel.get('generated_source_track_id')
+            plan_item.generated_source_path = sel.get('generated_source_path')
+            plan_item.generated_filter_mode = sel.get('generated_filter_mode', 'exclude')
+            plan_item.generated_filter_styles = sel.get('generated_filter_styles', [])
+            plan_item.generated_verify_only_lines_removed = bool(sel.get('generated_verify_only_lines_removed', True))
+
             items.append(plan_item)
+
+        # --- Part 3: Process generated tracks (filter subtitle styles) ---
+        runner._log_message("--- Processing Generated Tracks ---")
+        generated_items = self._process_generated_tracks(items, runner, ctx.temp_dir)
+        items.extend(generated_items)
 
         ctx.extracted_items = items
         return ctx
+
+    def _process_generated_tracks(self, items: List[PlanItem], runner: CommandRunner, temp_dir: Path) -> List[PlanItem]:
+        """
+        Process generated tracks by creating filtered subtitle files.
+
+        Args:
+            items: Existing PlanItems (to find source tracks)
+            runner: Command runner for logging
+            temp_dir: Temporary directory for filtered files
+
+        Returns:
+            List of new PlanItems for generated tracks
+        """
+        from vsg_core.subtitles.style_filter import StyleFilterEngine
+
+        generated_plan_items = []
+
+        for item in items:
+            if not item.is_generated:
+                continue
+
+            runner._log_message(f"[Generated Track] Creating filtered track from {item.track.source} Track {item.generated_source_track_id}...")
+
+            # Find the source track's extracted path
+            source_path = item.extracted_path
+            if not source_path or not source_path.exists():
+                runner._log_message(f"[ERROR] Source file not found for generated track: {source_path}")
+                continue
+
+            # Create filtered subtitle file
+            try:
+                # Create unique filename for filtered file
+                original_stem = source_path.stem
+                filtered_filename = f"{original_stem}_generated_{id(item)}.{source_path.suffix.lstrip('.')}"
+                filtered_path = temp_dir / filtered_filename
+
+                # Copy the source file to the filtered path first
+                shutil.copy(source_path, filtered_path)
+
+                # Apply the style filter
+                filter_engine = StyleFilterEngine(str(filtered_path))
+                result = filter_engine.filter_by_styles(
+                    styles=item.generated_filter_styles,
+                    mode=item.generated_filter_mode,
+                    output_path=None  # Overwrites the copied file
+                )
+
+                # Log the results
+                mode_text = "excluded" if item.generated_filter_mode == 'exclude' else "included"
+                runner._log_message(
+                    f"  Filtered {result['removed_count']} events "
+                    f"({mode_text} styles: {', '.join(result['styles_found'])})"
+                )
+
+                # Check verification
+                if not result['verification_passed']:
+                    if item.generated_verify_only_lines_removed:
+                        # User wants verification - fail on verification issues
+                        runner._log_message(f"[ERROR] Verification failed for generated track:")
+                        for issue in result['verification_issues']:
+                            runner._log_message(f"  - {issue}")
+                        continue
+                    else:
+                        # Just warn
+                        runner._log_message(f"[WARNING] Verification issues detected:")
+                        for issue in result['verification_issues']:
+                            runner._log_message(f"  - {issue}")
+
+                # Check if any styles were missing
+                if result['styles_missing']:
+                    runner._log_message(
+                        f"  [WARNING] Some styles not found in source: {', '.join(result['styles_missing'])}"
+                    )
+
+                # Update the PlanItem's extracted_path to point to the filtered file
+                item.extracted_path = filtered_path
+
+                runner._log_message(f"  ✓ Generated track created: {filtered_path.name}")
+
+            except Exception as e:
+                runner._log_message(f"[ERROR] Failed to create generated track: {e}")
+                import traceback
+                runner._log_message(traceback.format_exc())
+                continue
+
+        return []  # We modified items in place, no new items to return
