@@ -78,13 +78,13 @@ class ManualSelectionDialog(QDialog):
             title = f"{source_key} Tracks ('{path_name}')"
             if source_key == "Source 1": title = f"{source_key} (Reference) Tracks ('{path_name}')"
 
-            source_list_widget = SourceList()
+            source_list_widget = SourceList(dialog=self)
             self.source_lists[source_key] = source_list_widget
             group_box = QGroupBox(title)
             group_layout = QVBoxLayout(group_box); group_layout.addWidget(source_list_widget)
             self.left_vbox.addWidget(group_box)
 
-        self.external_list = SourceList()
+        self.external_list = SourceList(dialog=self)
         self.ext_group = QGroupBox("External Subtitles"); ext_layout = QVBoxLayout(self.ext_group)
         ext_layout.addWidget(self.external_list); self.ext_group.setVisible(False)
         self.left_vbox.addWidget(self.ext_group)
@@ -267,6 +267,52 @@ class ManualSelectionDialog(QDialog):
         widget.refresh_badges()
         widget.refresh_summary()
         self.edited_widget = widget
+
+    def _create_generated_track(self, source_track: dict):
+        """
+        Create a generated track by filtering styles from a source subtitle track.
+
+        Args:
+            source_track: The source track dictionary to filter from
+        """
+        from vsg_qt.generated_track_dialog import GeneratedTrackDialog
+
+        # Open the style selection dialog
+        dialog = GeneratedTrackDialog(source_track, parent=self)
+        if not dialog.exec():
+            return  # User cancelled
+
+        filter_config = dialog.get_filter_config()
+        if not filter_config:
+            return
+
+        # Create a new track dictionary based on the source track
+        generated_track = dict(source_track)
+
+        # Mark it as generated and store filter configuration
+        generated_track['is_generated'] = True
+        generated_track['generated_source_track_id'] = source_track.get('id')
+        generated_track['generated_source_path'] = source_track.get('original_path')
+        generated_track['generated_filter_mode'] = filter_config['mode']
+        generated_track['generated_filter_styles'] = filter_config['styles']
+        generated_track['generated_verify_only_lines_removed'] = True
+
+        # Update the track name and description
+        generated_track['name'] = filter_config['name']
+        generated_track['custom_name'] = filter_config['name']
+
+        # Update description to indicate it's generated
+        original_desc = source_track.get('description', '')
+        source_name = source_track.get('source', 'Unknown')
+        track_id = source_track.get('id', 'N/A')
+        generated_track['description'] = f"Generated from {source_name} Track {track_id}"
+
+        # Add the generated track to the FinalList
+        self.final_list.add_track_widget(generated_track)
+
+        # Show confirmation
+        self.info_label.setText(f"✅ Generated track '{filter_config['name']}' created successfully.")
+        self.info_label.setVisible(True)
 
     def _launch_style_editor(self, widget: TrackWidget):
         track_data = widget.track_data

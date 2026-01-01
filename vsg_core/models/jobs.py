@@ -40,6 +40,14 @@ class PlanItem:
     aspect_ratio: Optional[str] = None  # NEW: Store original aspect ratio (e.g., "109:60")
     stepping_adjusted: bool = False  # True if subtitle timestamps were adjusted for stepping corrections
 
+    # Generated track fields (for tracks created by filtering styles from another track)
+    is_generated: bool = False  # Marks this as a generated track
+    generated_source_track_id: Optional[int] = None  # ID of the source track this was generated from
+    generated_source_path: Optional[str] = None  # Path to source subtitle file
+    generated_filter_mode: str = 'exclude'  # 'include' or 'exclude' styles
+    generated_filter_styles: List[str] = field(default_factory=list)  # Style names to include/exclude
+    generated_verify_only_lines_removed: bool = True  # Verify only event lines removed, nothing else changed
+
 @dataclass(frozen=True)
 class MergePlan:
     items: list[PlanItem]

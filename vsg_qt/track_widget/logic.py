@@ -65,11 +65,36 @@ class TrackWidgetLogic:
         # Show indicator if language was customized
         lang_indicator = f" → {custom_lang}" if custom_lang and custom_lang != original_lang else ""
 
-        summary_text = f"[{source}] [{track_type[0].upper()}-{track_id}] {description}{lang_indicator}"
+        # NEW: Show generated track information
+        is_generated = self.track_data.get('is_generated', False)
+        if is_generated:
+            gen_source = self.track_data.get('source', 'Unknown')
+            gen_track_id = self.track_data.get('generated_source_track_id', 'N/A')
+            gen_mode = self.track_data.get('generated_filter_mode', 'exclude')
+            gen_styles = self.track_data.get('generated_filter_styles', [])
+            styles_str = ', '.join(gen_styles[:3])  # Show first 3 styles
+            if len(gen_styles) > 3:
+                styles_str += f", +{len(gen_styles) - 3} more"
+
+            gen_indicator = f" [Generated from {gen_source} Track {gen_track_id}]"
+            summary_text = f"[{source}] [{track_type[0].upper()}-{track_id}] {description}{lang_indicator}{gen_indicator}"
+        else:
+            summary_text = f"[{source}] [{track_type[0].upper()}-{track_id}] {description}{lang_indicator}"
+
         self.v.summary_label.setText(summary_text)
 
         # Update the inline summary (which uses the 'source_label' widget for display)
         parts = []
+
+        # Show generated track filter info
+        if is_generated:
+            gen_mode = self.track_data.get('generated_filter_mode', 'exclude')
+            gen_styles = self.track_data.get('generated_filter_styles', [])
+            styles_str = ', '.join(gen_styles[:3])  # Show first 3 styles
+            if len(gen_styles) > 3:
+                styles_str += f", +{len(gen_styles) - 3} more"
+            parts.append(f"{'Excluding' if gen_mode == 'exclude' else 'Including'}: {styles_str}")
+
         # Only check subtitle-specific options for subtitles
         if self.track_data.get('type') == 'subtitles':
             if self.v.cb_ocr.isChecked(): parts.append("OCR")
@@ -89,6 +114,11 @@ class TrackWidgetLogic:
     def refresh_badges(self):
         """Updates the badge label based on the current settings."""
         badges = []
+
+        # NEW: Add generated track badge first (most important)
+        if self.track_data.get('is_generated', False):
+            badges.append("🔗 Generated")
+
         if self.v.cb_default.isChecked():
             badges.append("Default")
         if self.track_data.get('type') == 'subtitles' and self.v.cb_forced.isChecked():
@@ -141,6 +171,14 @@ class TrackWidgetLogic:
             "sync_to": self.v.sync_to_combo.currentData() if (is_subs and self.v.sync_to_combo.isVisible()) else None,
             "custom_lang": self.track_data.get('custom_lang', ''),  # NEW: Include custom language
             "custom_name": self.track_data.get('custom_name', ''),  # NEW: Include custom name
+
+            # NEW: Include generated track fields
+            "is_generated": self.track_data.get('is_generated', False),
+            "generated_source_track_id": self.track_data.get('generated_source_track_id'),
+            "generated_source_path": self.track_data.get('generated_source_path'),
+            "generated_filter_mode": self.track_data.get('generated_filter_mode', 'exclude'),
+            "generated_filter_styles": self.track_data.get('generated_filter_styles', []),
+            "generated_verify_only_lines_removed": self.track_data.get('generated_verify_only_lines_removed', True),
         }
 
         return config
