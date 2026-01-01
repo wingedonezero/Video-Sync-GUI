@@ -277,14 +277,63 @@ class ManualSelectionDialog(QDialog):
         """
         from vsg_qt.generated_track_dialog import GeneratedTrackDialog
 
-        # Open the style selection dialog
-        dialog = GeneratedTrackDialog(source_track, parent=self)
-        if not dialog.exec():
-            return  # User cancelled
+        # Extract the subtitle track first so we can read its styles
+        source_file = source_track.get('original_path')
+        track_id = source_track.get('id')
+        is_external = source_track.get('source') == 'External'
 
-        filter_config = dialog.get_filter_config()
-        if not filter_config:
+        if not source_file or (track_id is None and not is_external):
+            QMessageBox.warning(self, "Error", "Missing track information.")
             return
+
+        runner = CommandRunner(self.config.settings, self.log_callback)
+        tool_paths = {t: shutil.which(t) for t in ['mkvmerge', 'mkvextract', 'ffmpeg']}
+
+        try:
+            # Extract subtitle to temp location
+            temp_dir = Path(tempfile.gettempdir()) / f"vsg_gen_track_{Path(source_file).stem}_{track_id}_{int(time.time())}"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+
+            if is_external:
+                temp_sub_path = temp_dir / Path(source_file).name
+                shutil.copy2(source_file, temp_sub_path)
+            else:
+                extracted = extract_tracks(source_file, temp_dir, runner, tool_paths, 'temp', specific_tracks=[track_id])
+                if not extracted:
+                    QMessageBox.warning(self, "Error", f"Failed to extract subtitle track {track_id}")
+                    return
+                temp_sub_path = Path(extracted[0]['path'])
+
+            # Convert SRT to ASS if needed
+            if temp_sub_path.suffix.lower() == '.srt':
+                temp_sub_path = Path(convert_srt_to_ass(str(temp_sub_path), runner, tool_paths))
+
+            # Create a modified source_track with the extracted path for the dialog
+            source_track_for_dialog = dict(source_track)
+            source_track_for_dialog['original_path'] = str(temp_sub_path)
+
+            # Open the style selection dialog with the extracted subtitle
+            dialog = GeneratedTrackDialog(source_track_for_dialog, parent=self)
+            if not dialog.exec():
+                # Clean up temp file
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                return  # User cancelled
+
+            filter_config = dialog.get_filter_config()
+            if not filter_config:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                return
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to extract subtitle for style analysis:\n{str(e)}")
+            self.log_callback(f"[ERROR] Exception extracting subtitle: {e}")
+            import traceback
+            self.log_callback(traceback.format_exc())
+            return
+        finally:
+            # Clean up temp extraction
+            if 'temp_dir' in locals():
+                shutil.rmtree(temp_dir, ignore_errors=True)
 
         # Create a new track dictionary based on the source track
         generated_track = dict(source_track)
