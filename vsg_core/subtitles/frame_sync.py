@@ -382,8 +382,8 @@ def apply_videotimestamps_sync(
         runner._log_message(f"[VideoTimestamps Sync] ERROR: Failed to save subtitle file: {e}")
         return {'error': str(e)}
 
-    # Validate and restore lost metadata
-    metadata.validate_and_restore(runner)
+    # Validate and restore lost metadata (with timing validation)
+    metadata.validate_and_restore(runner, expected_delay_ms=delay_ms)
 
     # Log results
     runner._log_message(f"[VideoTimestamps Sync] ✓ Successfully processed {len(subs.events)} events")
@@ -525,8 +525,8 @@ def apply_frame_snapped_sync(
         runner._log_message(f"[Frame-Snapped Sync] ERROR: Failed to save subtitle file: {e}")
         return {'error': str(e)}
 
-    # Validate and restore lost metadata
-    metadata.validate_and_restore(runner)
+    # Validate and restore lost metadata (with timing validation)
+    metadata.validate_and_restore(runner, expected_delay_ms=delay_ms)
 
     # Log results
     runner._log_message(f"[Frame-Snapped Sync] ✓ Successfully processed {len(subs.events)} events")
@@ -701,8 +701,8 @@ def apply_frame_perfect_sync(
         runner._log_message(f"[Frame-Perfect Sync] ERROR: Failed to save subtitle file: {e}")
         return {'error': str(e)}
 
-    # Validate and restore lost metadata
-    metadata.validate_and_restore(runner)
+    # Validate and restore lost metadata (with timing validation)
+    metadata.validate_and_restore(runner, expected_delay_ms=delay_ms)
 
     # Log results
     runner._log_message(f"[Frame-Perfect Sync] ✓ Successfully processed {len(subs.events)} events")
