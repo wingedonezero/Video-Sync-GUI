@@ -231,8 +231,12 @@ class ExtractStep:
 
         # --- Part 3: Process generated tracks (filter subtitle styles) ---
         runner._log_message("--- Processing Generated Tracks ---")
-        generated_items = self._process_generated_tracks(items, runner, ctx.temp_dir)
-        items.extend(generated_items)
+        failed_generated_tracks = self._process_generated_tracks(items, runner, ctx.temp_dir)
+
+        # Remove any generated tracks that failed processing (have no extracted_path)
+        if failed_generated_tracks:
+            runner._log_message(f"[WARNING] Removing {len(failed_generated_tracks)} generated track(s) that failed processing")
+            items = [item for item in items if item not in failed_generated_tracks]
 
         ctx.extracted_items = items
         return ctx
@@ -247,11 +251,11 @@ class ExtractStep:
             temp_dir: Temporary directory for filtered files
 
         Returns:
-            List of new PlanItems for generated tracks
+            List of PlanItems that failed processing (to be removed from pipeline)
         """
         from vsg_core.subtitles.style_filter import StyleFilterEngine
 
-        generated_plan_items = []
+        failed_tracks = []
 
         for item in items:
             if not item.is_generated:
@@ -272,6 +276,8 @@ class ExtractStep:
 
             if not source_item:
                 runner._log_message(f"[ERROR] Could not find source track {item.track.source} ID {item.generated_source_track_id}")
+                runner._log_message(f"[ERROR] Removing generated track '{item.custom_name or item.track.props.name}' from pipeline")
+                failed_tracks.append(item)
                 continue
 
             # INHERIT source file properties (container delay, sync settings, etc.)
@@ -287,6 +293,8 @@ class ExtractStep:
             source_path = source_item.extracted_path
             if not source_path or not source_path.exists():
                 runner._log_message(f"[ERROR] Source file not found for generated track: {source_path}")
+                runner._log_message(f"[ERROR] Removing generated track '{item.custom_name or item.track.props.name}' from pipeline")
+                failed_tracks.append(item)
                 continue
 
             runner._log_message(f"  Filtering from original extraction: {source_path.name}")
@@ -323,6 +331,8 @@ class ExtractStep:
                         runner._log_message(f"[ERROR] Verification failed for generated track:")
                         for issue in result['verification_issues']:
                             runner._log_message(f"  - {issue}")
+                        runner._log_message(f"[ERROR] Removing generated track '{item.custom_name or item.track.props.name}' from pipeline")
+                        failed_tracks.append(item)
                         continue
                     else:
                         # Just warn
@@ -345,6 +355,8 @@ class ExtractStep:
                 runner._log_message(f"[ERROR] Failed to create generated track: {e}")
                 import traceback
                 runner._log_message(traceback.format_exc())
+                runner._log_message(f"[ERROR] Removing generated track '{item.custom_name or item.track.props.name}' from pipeline")
+                failed_tracks.append(item)
                 continue
 
-        return []  # We modified items in place, no new items to return
+        return failed_tracks  # Return list of failed tracks to be removed

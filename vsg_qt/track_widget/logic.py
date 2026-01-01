@@ -178,6 +178,7 @@ class TrackWidgetLogic:
             "generated_source_path": self.track_data.get('generated_source_path'),
             "generated_filter_mode": self.track_data.get('generated_filter_mode', 'exclude'),
             "generated_filter_styles": self.track_data.get('generated_filter_styles', []),
+            "generated_original_style_list": self.track_data.get('generated_original_style_list', []),
             "generated_verify_only_lines_removed": self.track_data.get('generated_verify_only_lines_removed', True),
         }
 
