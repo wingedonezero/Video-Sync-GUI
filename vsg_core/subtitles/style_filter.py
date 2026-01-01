@@ -197,9 +197,10 @@ class StyleFilterEngine:
         """
         issues = []
 
-        # Create a mapping of filtered events by their text/timing signature
+        # Create a mapping of filtered events by their text/timing/style signature
+        # Include style in signature to handle events with same timing/text but different styles
         filtered_map = {
-            (e['start'], e['end'], e['text']): e
+            (e['start'], e['end'], e['style'], e['text']): e
             for e in filtered_events
         }
 
@@ -210,7 +211,8 @@ class StyleFilterEngine:
                 (mode == 'include' and orig_event['style'] not in filter_styles)
             )
 
-            signature = (orig_event['start'], orig_event['end'], orig_event['text'])
+            # Include style in signature to match the filtered_map key format
+            signature = (orig_event['start'], orig_event['end'], orig_event['style'], orig_event['text'])
 
             if should_be_removed:
                 # This event should have been filtered out
