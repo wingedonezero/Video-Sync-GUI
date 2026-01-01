@@ -14,6 +14,8 @@ class SubtitleFormatsAuditor(BaseAuditor):
     def run(self, final_mkv_path: Path, final_mkvmerge_data: Dict, final_ffprobe_data=None) -> int:
         """
         Comprehensive subtitle audit including:
+        - Track count verification
+        - Generated track verification
         - OCR conversion
         - ASS conversion
         - Rescaling
@@ -32,33 +34,60 @@ class SubtitleFormatsAuditor(BaseAuditor):
         final_tracks = final_mkvmerge_data.get('tracks', [])
         final_subtitle_tracks = [t for t in final_tracks if t.get('type') == 'subtitles']
 
+        # NEW: Check total subtitle track count
+        expected_count = len(subtitle_items)
+        actual_count = len(final_subtitle_tracks)
+        generated_count = sum(1 for item in subtitle_items if item.is_generated)
+
+        if expected_count != actual_count:
+            self.log(f"[ERROR] Subtitle track count mismatch!")
+            self.log(f"        Expected: {expected_count} tracks (including {generated_count} generated)")
+            self.log(f"        Actual:   {actual_count} tracks in final output")
+            self.log(f"        Missing:  {expected_count - actual_count} track(s)")
+            issues += 1
+        else:
+            gen_info = f" (including {generated_count} generated)" if generated_count > 0 else ""
+            self.log(f"✓ Subtitle track count verified: {actual_count}{gen_info}")
+
         final_subtitle_idx = 0
         for plan_item in subtitle_items:
             if final_subtitle_idx >= len(final_subtitle_tracks):
-                self.log(f"[WARNING] Subtitle track for '{plan_item.track.props.name}' missing from final file!")
+                # Identify if missing track is generated
+                track_type = "Generated track" if plan_item.is_generated else "Subtitle track"
+                track_name = plan_item.track.props.name or f"Track {final_subtitle_idx}"
+                self.log(f"[WARNING] {track_type} '{track_name}' missing from final file!")
+                if plan_item.is_generated:
+                    self.log(f"          Source: {plan_item.track.source} Track {plan_item.generated_source_track_id}")
+                    self.log(f"          Filter: {plan_item.generated_filter_mode} {plan_item.generated_filter_styles}")
                 issues += 1
                 continue
 
             final_track = final_subtitle_tracks[final_subtitle_idx]
             track_name = plan_item.track.props.name or f"Subtitle {final_subtitle_idx}"
 
+            # Label generated tracks in logs for clarity
+            if plan_item.is_generated:
+                track_label = f"{track_name} [Generated]"
+            else:
+                track_label = track_name
+
             # --- THE FIX: Skip OCR checks for preserved tracks ---
             if not plan_item.is_preserved:
                 # Check 1: OCR conversion
                 if plan_item.perform_ocr:
-                    issues += self._verify_ocr(final_track, track_name)
+                    issues += self._verify_ocr(final_track, track_label)
 
                 # Check 2: ASS conversion
                 if plan_item.convert_to_ass:
-                    issues += self._verify_ass_conversion(final_track, track_name)
+                    issues += self._verify_ass_conversion(final_track, track_label)
 
             # Check 3: Rescaling (requires reading the actual subtitle file)
             if plan_item.rescale and plan_item.extracted_path:
-                issues += self._verify_rescaling(plan_item, track_name)
+                issues += self._verify_rescaling(plan_item, track_label)
 
             # Check 4: Font size multiplier
             if abs(plan_item.size_multiplier - 1.0) > 0.01 and plan_item.extracted_path:
-                issues += self._verify_font_size(plan_item, track_name)
+                issues += self._verify_font_size(plan_item, track_label)
 
             final_subtitle_idx += 1
 
