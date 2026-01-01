@@ -364,6 +364,106 @@ class ManualSelectionDialog(QDialog):
         self.info_label.setText(f"✅ Generated track '{filter_config['name']}' created successfully.")
         self.info_label.setVisible(True)
 
+    def _edit_generated_track(self, widget: TrackWidget, item):
+        """
+        Edit an existing generated track's filter configuration.
+
+        Args:
+            widget: The track widget to edit
+            item: The list item containing the widget
+        """
+        from vsg_qt.generated_track_dialog import GeneratedTrackDialog
+
+        track_data = widget.track_data
+        if not track_data.get('is_generated'):
+            QMessageBox.warning(self, "Error", "This is not a generated track.")
+            return
+
+        # Get current configuration from track_data
+        existing_config = {
+            'mode': track_data.get('generated_filter_mode', 'exclude'),
+            'styles': track_data.get('generated_filter_styles', []),
+            'name': track_data.get('custom_name', track_data.get('name', 'Generated Track'))
+        }
+
+        # Get the source track information
+        source_track_id = track_data.get('generated_source_track_id')
+        source_path = track_data.get('generated_source_path')
+        source_key = track_data.get('source')
+
+        if not source_path or source_track_id is None:
+            QMessageBox.warning(self, "Error", "Missing source track information.")
+            return
+
+        # Extract the source subtitle so we can read its current styles
+        runner = CommandRunner(self.config.settings, self.log_callback)
+        tool_paths = {t: shutil.which(t) for t in ['mkvmerge', 'mkvextract', 'ffmpeg']}
+
+        try:
+            # Extract subtitle to temp location
+            temp_dir = Path(tempfile.gettempdir()) / f"vsg_gen_edit_{Path(source_path).stem}_{source_track_id}_{int(time.time())}"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+
+            extracted = extract_tracks(source_path, temp_dir, runner, tool_paths, 'temp', specific_tracks=[source_track_id])
+            if not extracted:
+                QMessageBox.warning(self, "Error", f"Failed to extract source subtitle track {source_track_id}")
+                return
+            temp_sub_path = Path(extracted[0]['path'])
+
+            # Convert SRT to ASS if needed
+            if temp_sub_path.suffix.lower() == '.srt':
+                temp_sub_path = Path(convert_srt_to_ass(str(temp_sub_path), runner, tool_paths))
+
+            # Create a source_track dict for the dialog
+            source_track_for_dialog = {
+                'source': source_key,
+                'id': source_track_id,
+                'description': f"Source Track {source_track_id}",
+                'original_path': str(temp_sub_path)
+            }
+
+            # Open the dialog with existing configuration
+            dialog = GeneratedTrackDialog(source_track_for_dialog, existing_config=existing_config, parent=self)
+            if not dialog.exec():
+                # Clean up temp file
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                return  # User cancelled
+
+            filter_config = dialog.get_filter_config()
+            if not filter_config:
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                return
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to extract subtitle for editing:\n{str(e)}")
+            self.log_callback(f"[ERROR] Exception extracting subtitle: {e}")
+            import traceback
+            self.log_callback(traceback.format_exc())
+            return
+        finally:
+            # Clean up temp extraction
+            if 'temp_dir' in locals():
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
+        # Update the track_data with new configuration
+        track_data['generated_filter_mode'] = filter_config['mode']
+        track_data['generated_filter_styles'] = filter_config['styles']
+        track_data['generated_original_style_list'] = filter_config.get('original_style_list', [])
+        track_data['name'] = filter_config['name']
+        track_data['custom_name'] = filter_config['name']
+
+        # Update the description
+        track_data['description'] = f"Generated from {source_key} Track {source_track_id}"
+
+        # Refresh the widget to show updated configuration
+        if hasattr(widget, 'logic'):
+            widget.logic.refresh_badges()
+            widget.logic.refresh_summary()
+
+        # Show confirmation
+        self.info_label.setText(f"✅ Generated track '{filter_config['name']}' updated successfully.")
+        self.info_label.setVisible(True)
+
     def _launch_style_editor(self, widget: TrackWidget):
         track_data = widget.track_data
         ref_video_path = self.track_info.get('Source 1', [{}])[0].get('original_path')

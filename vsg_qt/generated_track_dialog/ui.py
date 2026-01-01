@@ -19,18 +19,21 @@ class GeneratedTrackDialog(QDialog):
     when creating a generated track.
     """
 
-    def __init__(self, source_track: dict, parent=None):
+    def __init__(self, source_track: dict, existing_config: dict = None, parent=None):
         super().__init__(parent)
         self.source_track = source_track
+        self.existing_config = existing_config  # For editing existing generated tracks
         self.filter_config = None  # Will be set if user clicks OK
         self.style_counts = {}
         self.style_checkboxes = {}
 
-        self.setWindowTitle("Create Generated Track")
+        is_editing = existing_config is not None
+        self.setWindowTitle("Edit Generated Track" if is_editing else "Create Generated Track")
         self.setMinimumSize(500, 600)
 
         self._build_ui()
         self._load_styles()
+        self._apply_existing_config()  # Apply existing settings if editing
         self._update_preview()
 
     def _build_ui(self):
@@ -148,6 +151,29 @@ class GeneratedTrackDialog(QDialog):
         except Exception as e:
             self.preview_label.setText(f"❌ Error loading styles:\n{str(e)}")
             self.preview_label.setStyleSheet("font-weight: bold; padding: 10px; color: #FF0000;")
+
+    def _apply_existing_config(self):
+        """Apply existing configuration when editing a generated track."""
+        if not self.existing_config:
+            return
+
+        # Set the filter mode
+        mode = self.existing_config.get('mode', 'exclude')
+        if mode == 'include':
+            self.include_radio.setChecked(True)
+        else:
+            self.exclude_radio.setChecked(True)
+
+        # Check the previously selected styles
+        selected_styles = self.existing_config.get('styles', [])
+        for style_name in selected_styles:
+            if style_name in self.style_checkboxes:
+                self.style_checkboxes[style_name].setChecked(True)
+
+        # Set the track name
+        track_name = self.existing_config.get('name', '')
+        if track_name:
+            self.name_edit.setText(track_name)
 
     def _select_all_styles(self):
         """Check all style checkboxes."""

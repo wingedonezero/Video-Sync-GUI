@@ -134,10 +134,17 @@ class FinalList(QListWidget):
         menu = QMenu(self)
 
         is_subs = getattr(widget, 'track_type', '') == 'subtitles'
+        is_generated = widget.track_data.get('is_generated', False) if hasattr(widget, 'track_data') else False
 
         act_up = menu.addAction("Move Up")
         act_down = menu.addAction("Move Down")
         menu.addSeparator()
+
+        # Add "Edit Generated Track..." option for generated tracks
+        act_edit_generated = None
+        if is_generated:
+            act_edit_generated = menu.addAction("Edit Generated Track...")
+            menu.addSeparator()
 
         act_copy = menu.addAction("✂️ Copy Styles")
         act_paste = menu.addAction("📋 Paste Styles")
@@ -155,6 +162,8 @@ class FinalList(QListWidget):
 
         if act == act_up: self._move_by(-1)
         elif act == act_down: self._move_by(+1)
+        elif act_edit_generated and act == act_edit_generated:
+            self.dialog._edit_generated_track(widget, item)
         elif act == act_copy: self.dialog._copy_styles(widget)
         elif act == act_paste: self.dialog._paste_styles(widget)
         elif act == act_default and hasattr(widget, 'cb_default'):
