@@ -258,11 +258,29 @@ class ExtractStep:
 
             runner._log_message(f"[Generated Track] Creating filtered track from {item.track.source} Track {item.generated_source_track_id}...")
 
-            # Find the source track's extracted path
-            source_path = item.extracted_path
+            # Find the SOURCE track's ORIGINAL extracted path
+            # We want the original extraction, NOT any user edits
+            # This keeps generated and source tracks completely independent
+            source_item = None
+            for potential_source in items:
+                if (potential_source.track.source == item.track.source and
+                    potential_source.track.id == item.generated_source_track_id and
+                    not potential_source.is_generated):
+                    source_item = potential_source
+                    break
+
+            if not source_item:
+                runner._log_message(f"[ERROR] Could not find source track {item.track.source} ID {item.generated_source_track_id}")
+                continue
+
+            # ALWAYS use the extracted_path (original extraction), NEVER user_modified_path
+            # This ensures source edits don't affect the generated track
+            source_path = source_item.extracted_path
             if not source_path or not source_path.exists():
                 runner._log_message(f"[ERROR] Source file not found for generated track: {source_path}")
                 continue
+
+            runner._log_message(f"  Filtering from original extraction: {source_path.name}")
 
             # Create filtered subtitle file
             try:
@@ -271,7 +289,7 @@ class ExtractStep:
                 filtered_filename = f"{original_stem}_generated_{id(item)}.{source_path.suffix.lstrip('.')}"
                 filtered_path = temp_dir / filtered_filename
 
-                # Copy the source file to the filtered path first
+                # Copy the ORIGINAL source file to the filtered path
                 shutil.copy(source_path, filtered_path)
 
                 # Apply the style filter
