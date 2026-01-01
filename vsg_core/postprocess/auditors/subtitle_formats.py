@@ -59,9 +59,15 @@ class SubtitleFormatsAuditor(BaseAuditor):
                 # Identify if missing track is generated
                 track_type = "Generated track" if plan_item.is_generated else "Subtitle track"
                 self.log(f"[WARNING] {track_type} '{track_name}' missing from final file!")
+
+                # Show source and track ID for ALL missing tracks
                 if plan_item.is_generated:
                     self.log(f"          Source: {plan_item.track.source} Track {plan_item.generated_source_track_id}")
                     self.log(f"          Filter: {plan_item.generated_filter_mode} {plan_item.generated_filter_styles}")
+                else:
+                    # For normal tracks, show source and track ID
+                    self.log(f"          Source: {plan_item.track.source} Track {plan_item.track.id}")
+
                 issues += 1
                 continue
 
