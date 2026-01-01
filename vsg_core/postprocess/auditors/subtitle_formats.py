@@ -51,10 +51,12 @@ class SubtitleFormatsAuditor(BaseAuditor):
 
         final_subtitle_idx = 0
         for plan_item in subtitle_items:
+            # Use custom_name if set, otherwise use track.props.name
+            track_name = plan_item.custom_name or plan_item.track.props.name or f"Track {final_subtitle_idx}"
+
             if final_subtitle_idx >= len(final_subtitle_tracks):
                 # Identify if missing track is generated
                 track_type = "Generated track" if plan_item.is_generated else "Subtitle track"
-                track_name = plan_item.track.props.name or f"Track {final_subtitle_idx}"
                 self.log(f"[WARNING] {track_type} '{track_name}' missing from final file!")
                 if plan_item.is_generated:
                     self.log(f"          Source: {plan_item.track.source} Track {plan_item.generated_source_track_id}")
@@ -63,7 +65,6 @@ class SubtitleFormatsAuditor(BaseAuditor):
                 continue
 
             final_track = final_subtitle_tracks[final_subtitle_idx]
-            track_name = plan_item.track.props.name or f"Subtitle {final_subtitle_idx}"
 
             # Label generated tracks in logs for clarity
             if plan_item.is_generated:
