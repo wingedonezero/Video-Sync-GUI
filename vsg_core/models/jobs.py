@@ -46,6 +46,7 @@ class PlanItem:
     generated_source_path: Optional[str] = None  # Path to source subtitle file
     generated_filter_mode: str = 'exclude'  # 'include' or 'exclude' styles
     generated_filter_styles: List[str] = field(default_factory=list)  # Style names to include/exclude
+    generated_original_style_list: List[str] = field(default_factory=list)  # Complete style list from original source (for validation)
     generated_verify_only_lines_removed: bool = True  # Verify only event lines removed, nothing else changed
 
 @dataclass(frozen=True)

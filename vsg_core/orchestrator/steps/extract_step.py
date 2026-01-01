@@ -224,6 +224,7 @@ class ExtractStep:
             plan_item.generated_source_path = sel.get('generated_source_path')
             plan_item.generated_filter_mode = sel.get('generated_filter_mode', 'exclude')
             plan_item.generated_filter_styles = sel.get('generated_filter_styles', [])
+            plan_item.generated_original_style_list = sel.get('generated_original_style_list', [])
             plan_item.generated_verify_only_lines_removed = bool(sel.get('generated_verify_only_lines_removed', True))
 
             items.append(plan_item)

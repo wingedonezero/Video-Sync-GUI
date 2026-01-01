@@ -344,6 +344,7 @@ class ManualSelectionDialog(QDialog):
         generated_track['generated_source_path'] = source_track.get('original_path')
         generated_track['generated_filter_mode'] = filter_config['mode']
         generated_track['generated_filter_styles'] = filter_config['styles']
+        generated_track['generated_original_style_list'] = filter_config.get('original_style_list', [])  # Complete style list for validation
         generated_track['generated_verify_only_lines_removed'] = True
 
         # Update the track name and description

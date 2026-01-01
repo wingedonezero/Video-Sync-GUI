@@ -97,6 +97,9 @@ class JobQueueLogic:
         Validates that generated tracks in the layout have valid style filters.
         This is an ADDITIONAL check that doesn't affect existing layout matching.
 
+        Uses exact set matching: the current file's style set must exactly match
+        the original file's style set (order doesn't matter, but names and count must be identical).
+
         Returns list of warning messages if there are issues, empty list if OK.
         """
         from vsg_core.subtitles.style_filter import StyleFilterEngine
@@ -112,11 +115,13 @@ class JobQueueLogic:
             # Get the source track details
             source_id = track.get('generated_source_track_id')
             source_key = track.get('source')
-            filter_styles = track.get('generated_filter_styles', [])
+            original_style_list = track.get('generated_original_style_list', [])
             track_name = track.get('custom_name') or track.get('name', 'Unknown')
 
-            if not filter_styles:
-                continue  # No styles configured, nothing to validate
+            if not original_style_list:
+                # No original style list stored - can't validate
+                # This might happen for older layouts created before this feature
+                continue
 
             # Get the actual source file path from the job
             source_file = job['sources'].get(source_key)
@@ -141,26 +146,24 @@ class JobQueueLogic:
 
                     # Get available styles from the extracted file
                     available_styles = StyleFilterEngine.get_styles_from_file(extracted[0]['path'])
-                    available_style_names = set(available_styles.keys())
+                    available_style_set = set(available_styles.keys())
 
-                    # Check if configured filter styles exist
-                    filter_style_set = set(filter_styles)
-                    missing_styles = filter_style_set - available_style_names
+                    # Compare complete style sets (exact matching)
+                    original_style_set = set(original_style_list)
 
-                    # Also check if there are EXTRA styles not in the filter config
-                    # This matters because if the original had [Default, Sign] and you excluded [Default],
-                    # but the new file has [Default, Sign, Notes], you might want to exclude Notes too
-                    extra_styles = available_style_names - filter_style_set
+                    if original_style_set != available_style_set:
+                        # Style sets don't match - find what's different
+                        missing_styles = original_style_set - available_style_set
+                        extra_styles = available_style_set - original_style_set
 
-                    # Build warning message
-                    if missing_styles:
-                        issues.append(f"'{track_name}': Configured styles not found: {', '.join(sorted(missing_styles))}")
-                    if extra_styles:
-                        # Only warn about extra styles if we're in exclude mode
-                        # (In include mode, extra styles are just ignored, which is expected)
-                        filter_mode = track.get('generated_filter_mode', 'exclude')
-                        if filter_mode == 'exclude':
-                            issues.append(f"'{track_name}': Source has additional styles: {', '.join(sorted(extra_styles))}")
+                        # Build warning message showing both missing and extra
+                        warning_parts = []
+                        if missing_styles:
+                            warning_parts.append(f"Missing: {', '.join(sorted(missing_styles))}")
+                        if extra_styles:
+                            warning_parts.append(f"Extra: {', '.join(sorted(extra_styles))}")
+
+                        issues.append(f"'{track_name}': Style set mismatch ({'; '.join(warning_parts)})")
 
                 finally:
                     # Clean up temp extraction
