@@ -31,14 +31,29 @@ class StyleFilterEngine:
 
     def load(self):
         """Load the subtitle file using pysubs2."""
-        # Capture original metadata before pysubs2 processing
-        self.metadata = SubtitleMetadata(str(self.path))
-        self.metadata.capture()
-
+        # Capture original metadata before pysubs2 processing (skip if it fails)
         try:
-            self.subs = pysubs2.load(str(self.path), encoding='utf-8')
+            self.metadata = SubtitleMetadata(str(self.path))
+            self.metadata.capture()
         except Exception:
+            # Metadata capture failed, but we can still proceed with filtering
+            self.metadata = None
+
+        # Try multiple encodings
+        encodings = ['utf-8', 'utf-8-sig', 'cp1252', 'latin1', 'shift_jis', 'gbk']
+
+        for encoding in encodings:
+            try:
+                self.subs = pysubs2.load(str(self.path), encoding=encoding)
+                return
+            except (UnicodeDecodeError, LookupError):
+                continue
+
+        # Last resort: let pysubs2 detect encoding
+        try:
             self.subs = pysubs2.load(str(self.path))
+        except Exception as e:
+            raise Exception(f"Failed to load subtitle file with any encoding: {e}")
 
     def get_available_styles(self) -> Dict[str, int]:
         """

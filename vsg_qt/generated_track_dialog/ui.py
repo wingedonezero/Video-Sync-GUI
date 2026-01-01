@@ -45,7 +45,7 @@ class GeneratedTrackDialog(QDialog):
             f"Description: {self.source_track.get('description', 'N/A')}"
         )
         info_label = QLabel(info_text)
-        info_label.setStyleSheet("font-weight: bold; padding: 10px; background-color: #f0f0f0;")
+        info_label.setStyleSheet("font-weight: bold; padding: 10px; background-color: #f0f0f0; color: #000000;")
         layout.addWidget(info_label)
 
         # Filter mode selection
@@ -92,7 +92,7 @@ class GeneratedTrackDialog(QDialog):
 
         # Preview label
         self.preview_label = QLabel()
-        self.preview_label.setStyleSheet("font-weight: bold; color: blue; padding: 10px;")
+        self.preview_label.setStyleSheet("font-weight: bold; padding: 10px;")
         self.preview_label.setWordWrap(True)
         layout.addWidget(self.preview_label)
 
@@ -132,7 +132,8 @@ class GeneratedTrackDialog(QDialog):
             self.style_counts = StyleFilterEngine.get_styles_from_file(subtitle_path)
 
             if not self.style_counts:
-                self.preview_label.setText("No styles found in subtitle file")
+                self.preview_label.setText("⚠️ No styles found in subtitle file")
+                self.preview_label.setStyleSheet("font-weight: bold; padding: 10px; color: #FFA500;")
                 return
 
             # Add checkboxes for each style
@@ -145,7 +146,12 @@ class GeneratedTrackDialog(QDialog):
                 self.style_checkboxes[style_name] = checkbox
 
         except Exception as e:
-            self.preview_label.setText(f"Error loading styles: {str(e)}")
+            import traceback
+            error_details = traceback.format_exc()
+            self.preview_label.setText(f"❌ Error loading styles:\n{str(e)}\n\nSee terminal for details")
+            self.preview_label.setStyleSheet("font-weight: bold; padding: 10px; color: #FF0000;")
+            print(f"[Generated Track Dialog] Error loading styles from {subtitle_path}:")
+            print(error_details)
 
     def _select_all_styles(self):
         """Check all style checkboxes."""
@@ -171,6 +177,7 @@ class GeneratedTrackDialog(QDialog):
 
         if not selected_styles:
             self.preview_label.setText("⚠️ No styles selected - nothing will be filtered")
+            self.preview_label.setStyleSheet("font-weight: bold; padding: 10px; color: #FFA500;")
             return
 
         total_events = sum(self.style_counts.values())
@@ -192,6 +199,7 @@ class GeneratedTrackDialog(QDialog):
             )
 
         self.preview_label.setText(preview_text)
+        self.preview_label.setStyleSheet("font-weight: bold; padding: 10px; color: #00AA00;")
 
     def _on_accept(self):
         """Validate and save the configuration when user clicks OK."""
@@ -199,6 +207,7 @@ class GeneratedTrackDialog(QDialog):
 
         if not selected_styles:
             self.preview_label.setText("⚠️ Please select at least one style")
+            self.preview_label.setStyleSheet("font-weight: bold; padding: 10px; color: #FF0000;")
             return
 
         track_name = self.name_edit.text().strip()
