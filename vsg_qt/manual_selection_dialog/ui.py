@@ -347,15 +347,9 @@ class ManualSelectionDialog(QDialog):
         generated_track['generated_original_style_list'] = filter_config.get('original_style_list', [])  # Complete style list for validation
         generated_track['generated_verify_only_lines_removed'] = True
 
-        # Update the track name and description
+        # Update the track name (keep original description - the 🔗 Generated badge shows it's generated)
         generated_track['name'] = filter_config['name']
         generated_track['custom_name'] = filter_config['name']
-
-        # Update description to indicate it's generated
-        original_desc = source_track.get('description', '')
-        source_name = source_track.get('source', 'Unknown')
-        track_id = source_track.get('id', 'N/A')
-        generated_track['description'] = f"Generated from {source_name} Track {track_id}"
 
         # Add the generated track to the FinalList
         self.final_list.add_track_widget(generated_track)
@@ -451,9 +445,6 @@ class ManualSelectionDialog(QDialog):
         track_data['generated_original_style_list'] = filter_config.get('original_style_list', [])
         track_data['name'] = filter_config['name']
         track_data['custom_name'] = filter_config['name']
-
-        # Update the description
-        track_data['description'] = f"Generated from {source_key} Track {source_track_id}"
 
         # Refresh the widget to show updated configuration
         if hasattr(widget, 'logic'):
