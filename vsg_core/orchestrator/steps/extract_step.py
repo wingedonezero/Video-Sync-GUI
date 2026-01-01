@@ -256,16 +256,11 @@ class ExtractStep:
             if not item.is_generated:
                 continue
 
-            # If user manually edited this generated track, skip filtering entirely
-            if item.user_modified_path:
-                runner._log_message(f"[Generated Track] Using user-edited version (skipping filter)")
-                item.extracted_path = Path(item.user_modified_path)
-                continue
-
             runner._log_message(f"[Generated Track] Creating filtered track from {item.track.source} Track {item.generated_source_track_id}...")
 
-            # Find the SOURCE track's extracted path (not the generated track's)
-            # This ensures we filter from any user-edited version of the source
+            # Find the SOURCE track's ORIGINAL extracted path
+            # We want the original extraction, NOT any user edits
+            # This keeps generated and source tracks completely independent
             source_item = None
             for potential_source in items:
                 if (potential_source.track.source == item.track.source and
@@ -278,13 +273,14 @@ class ExtractStep:
                 runner._log_message(f"[ERROR] Could not find source track {item.track.source} ID {item.generated_source_track_id}")
                 continue
 
-            # Use the source track's path (might be user_modified_path or extracted_path)
-            source_path = Path(source_item.user_modified_path) if source_item.user_modified_path else source_item.extracted_path
+            # ALWAYS use the extracted_path (original extraction), NEVER user_modified_path
+            # This ensures source edits don't affect the generated track
+            source_path = source_item.extracted_path
             if not source_path or not source_path.exists():
                 runner._log_message(f"[ERROR] Source file not found for generated track: {source_path}")
                 continue
 
-            runner._log_message(f"  Filtering from: {source_path.name}")
+            runner._log_message(f"  Filtering from original extraction: {source_path.name}")
 
             # Create filtered subtitle file
             try:
@@ -293,18 +289,8 @@ class ExtractStep:
                 filtered_filename = f"{original_stem}_generated_{id(item)}.{source_path.suffix.lstrip('.')}"
                 filtered_path = temp_dir / filtered_filename
 
-                # Copy the source file to the filtered path first
+                # Copy the ORIGINAL source file to the filtered path
                 shutil.copy(source_path, filtered_path)
-
-                # If the source track had style patches applied, we need to apply them too
-                # (This happens BEFORE filtering so we filter the edited styles)
-                if source_item.style_patch:
-                    runner._log_message(f"  Applying source track's style patches before filtering...")
-                    from vsg_core.subtitles.style_engine import StyleEngine
-                    style_engine = StyleEngine(str(filtered_path))
-                    for style_name, attrs in source_item.style_patch.items():
-                        style_engine.update_style_attributes(style_name, attrs)
-                    style_engine.save()
 
                 # Apply the style filter
                 filter_engine = StyleFilterEngine(str(filtered_path))
