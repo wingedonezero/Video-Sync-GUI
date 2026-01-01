@@ -256,6 +256,12 @@ class ExtractStep:
             if not item.is_generated:
                 continue
 
+            # If user manually edited this generated track, skip filtering entirely
+            if item.user_modified_path:
+                runner._log_message(f"[Generated Track] Using user-edited version (skipping filter)")
+                item.extracted_path = Path(item.user_modified_path)
+                continue
+
             runner._log_message(f"[Generated Track] Creating filtered track from {item.track.source} Track {item.generated_source_track_id}...")
 
             # Find the SOURCE track's extracted path (not the generated track's)
