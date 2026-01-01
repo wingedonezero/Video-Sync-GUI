@@ -124,6 +124,8 @@ class ExtractStep:
             track_ids_to_extract = [t['id'] for t in ctx.manual_layout if t.get('source') == source_key]
             if track_ids_to_extract:
                 runner._log_message(f"Preparing to extract {len(track_ids_to_extract)} track(s) from {source_key}...")
+                runner._log_message(f"  [DEBUG] Source file: {source_path}")
+                runner._log_message(f"  [DEBUG] Track IDs: {track_ids_to_extract}")
                 extracted_for_source = extract_tracks(
                     str(source_path), ctx.temp_dir, runner, ctx.tool_paths,
                     role=source_key,
@@ -262,6 +264,9 @@ class ExtractStep:
                 continue
 
             runner._log_message(f"[Generated Track] Creating filtered track from {item.track.source} Track {item.generated_source_track_id}...")
+            runner._log_message(f"  [DEBUG] Generated track original_path: {item.track.source} (ID {item.track.id})")
+            runner._log_message(f"  [DEBUG] Generated source path: {item.generated_source_path}")
+            runner._log_message(f"  [DEBUG] Looking for source track: {item.track.source} ID {item.generated_source_track_id}")
 
             # Find the SOURCE track's ORIGINAL extracted path
             # We want the original extraction, NOT any user edits
@@ -272,6 +277,7 @@ class ExtractStep:
                     potential_source.track.id == item.generated_source_track_id and
                     not potential_source.is_generated):
                     source_item = potential_source
+                    runner._log_message(f"  [DEBUG] Found potential source: {potential_source.track.source} ID {potential_source.track.id}, extracted from: {potential_source.extracted_path}")
                     break
 
             if not source_item:
