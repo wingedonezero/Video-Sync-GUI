@@ -41,7 +41,8 @@ class SubtitleFormatsAuditor(BaseAuditor):
 
         if expected_count != actual_count:
             self.log(f"[ERROR] Subtitle track count mismatch!")
-            self.log(f"        Expected: {expected_count} tracks (including {generated_count} generated)")
+            gen_info = f" (including {generated_count} generated)" if generated_count > 0 else ""
+            self.log(f"        Expected: {expected_count} tracks{gen_info}")
             self.log(f"        Actual:   {actual_count} tracks in final output")
             self.log(f"        Missing:  {expected_count - actual_count} track(s)")
             issues += 1
