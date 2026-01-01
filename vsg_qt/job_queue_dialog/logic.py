@@ -275,6 +275,10 @@ class JobQueueLogic:
             source_key = new_track.get('source')
             if source_key in target_sources:
                 new_track['original_path'] = target_sources[source_key]
+                # CRITICAL FIX: Also update generated_source_path for generated tracks
+                # This ensures the Edit dialog extracts from the correct source file
+                if new_track.get('is_generated'):
+                    new_track['generated_source_path'] = target_sources[source_key]
             new_layout.append(new_track)
         return new_layout
 
