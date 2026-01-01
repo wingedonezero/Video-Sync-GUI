@@ -127,9 +127,22 @@ class GeneratedTrackDialog(QDialog):
             self.preview_label.setText("Error: No subtitle file path found")
             return
 
+        # Debug logging
+        print(f"\n[Generated Track Dialog] Loading styles from: {subtitle_path}")
+        import os
+        if os.path.exists(subtitle_path):
+            file_size = os.path.getsize(subtitle_path)
+            print(f"  File exists, size: {file_size} bytes")
+        else:
+            print(f"  ERROR: File does not exist!")
+
         try:
             # Get style counts from the filter engine
             self.style_counts = StyleFilterEngine.get_styles_from_file(subtitle_path)
+            print(f"  Loaded {len(self.style_counts)} styles:")
+            for style, count in self.style_counts.items():
+                print(f"    - {style}: {count} events")
+            print(f"  Total events: {sum(self.style_counts.values())}")
 
             if not self.style_counts:
                 self.preview_label.setText("⚠️ No styles found in subtitle file")
