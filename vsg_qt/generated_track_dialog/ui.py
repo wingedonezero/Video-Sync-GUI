@@ -212,10 +212,13 @@ class GeneratedTrackDialog(QDialog):
 
         mode = 'exclude' if self.exclude_radio.isChecked() else 'include'
 
+        # Store both the selected filter styles AND the complete original style list
+        # The complete list is used for validation when pasting layouts
         self.filter_config = {
             'mode': mode,
             'styles': selected_styles,
-            'name': track_name
+            'name': track_name,
+            'original_style_list': sorted(self.style_counts.keys())  # Complete list for exact matching
         }
 
         self.accept()
@@ -225,6 +228,11 @@ class GeneratedTrackDialog(QDialog):
         Get the filter configuration if dialog was accepted.
 
         Returns:
-            dict or None: {'mode': 'exclude'/'include', 'styles': [...], 'name': '...'} or None
+            dict or None: {
+                'mode': 'exclude'/'include',
+                'styles': [...],  # Selected styles to filter
+                'name': '...',
+                'original_style_list': [...]  # Complete style list from source
+            } or None
         """
         return self.filter_config

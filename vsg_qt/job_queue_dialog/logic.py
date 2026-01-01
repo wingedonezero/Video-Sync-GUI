@@ -62,18 +62,119 @@ class JobQueueLogic:
         job_id = self.layout_manager.generate_job_id(job['sources'])
         status_text = "Configured" if self.layout_manager.layout_exists(job_id) else "Needs Configuration"
 
+        # NEW: Additional check for generated tracks (doesn't affect existing validation)
+        generated_track_warning = ""
+        if status_text == "Configured":
+            # Only check generated tracks if layout exists
+            layout_data = self.layout_manager.load_job_layout(job_id)
+            if layout_data:
+                gen_issues = self._validate_generated_tracks(layout_data, job)
+                if gen_issues:
+                    generated_track_warning = " ⚠️"
+                    # Store issues for tooltip or dialog display
+                    job['generated_track_issues'] = gen_issues
+
         # *** THE FIX IS HERE ***
         # Update the in-memory status to match the on-disk reality.
-        job['status'] = status_text
+        job['status'] = status_text + generated_track_warning
 
         order_item = QTableWidgetItem(str(row + 1)); order_item.setTextAlignment(Qt.AlignCenter)
         self.v.table.setItem(row, 0, order_item)
-        self.v.table.setItem(row, 1, QTableWidgetItem(status_text))
+        status_item = QTableWidgetItem(status_text + generated_track_warning)
+        if generated_track_warning:
+            # Add tooltip showing what's wrong
+            issues_text = job.get('generated_track_issues', [])
+            status_item.setToolTip("Generated track style warnings:\n" + "\n".join(issues_text))
+        self.v.table.setItem(row, 1, status_item)
 
         source_names = [Path(p).name for p in job['sources'].values()]
         item = QTableWidgetItem(" + ".join(source_names))
         item.setToolTip("\n".join(job['sources'].values()))
         self.v.table.setItem(row, 2, item)
+
+    def _validate_generated_tracks(self, layout_data: Dict, job: Dict) -> List[str]:
+        """
+        Validates that generated tracks in the layout have valid style filters.
+        This is an ADDITIONAL check that doesn't affect existing layout matching.
+
+        Uses exact set matching: the current file's style set must exactly match
+        the original file's style set (order doesn't matter, but names and count must be identical).
+
+        Returns list of warning messages if there are issues, empty list if OK.
+        """
+        from vsg_core.subtitles.style_filter import StyleFilterEngine
+
+        issues = []
+        enhanced_layout = layout_data.get('enhanced_layout', [])
+
+        for track in enhanced_layout:
+            # Skip non-generated tracks
+            if not track.get('is_generated'):
+                continue
+
+            # Get the source track details
+            source_id = track.get('generated_source_track_id')
+            source_key = track.get('source')
+            original_style_list = track.get('generated_original_style_list', [])
+            track_name = track.get('custom_name') or track.get('name', 'Unknown')
+
+            if not original_style_list:
+                # No original style list stored - can't validate
+                # This might happen for older layouts created before this feature
+                continue
+
+            # Get the actual source file path from the job
+            source_file = job['sources'].get(source_key)
+            if not source_file:
+                issues.append(f"'{track_name}': Source '{source_key}' not found")
+                continue
+
+            try:
+                # Extract the source subtitle temporarily to check styles
+                import tempfile
+                from pathlib import Path
+                from vsg_core.extraction.tracks import extract_tracks
+
+                temp_dir = Path(tempfile.gettempdir()) / f"vsg_gen_validate_{source_key}_{source_id}"
+                temp_dir.mkdir(parents=True, exist_ok=True)
+
+                try:
+                    extracted = extract_tracks(source_file, temp_dir, self.runner, self.tool_paths, 'validate', specific_tracks=[source_id])
+                    if not extracted:
+                        issues.append(f"'{track_name}': Could not extract source track for validation")
+                        continue
+
+                    # Get available styles from the extracted file
+                    available_styles = StyleFilterEngine.get_styles_from_file(extracted[0]['path'])
+                    available_style_set = set(available_styles.keys())
+
+                    # Compare complete style sets (exact matching)
+                    original_style_set = set(original_style_list)
+
+                    if original_style_set != available_style_set:
+                        # Style sets don't match - find what's different
+                        missing_styles = original_style_set - available_style_set
+                        extra_styles = available_style_set - original_style_set
+
+                        # Build warning message showing both missing and extra
+                        warning_parts = []
+                        if missing_styles:
+                            warning_parts.append(f"Missing: {', '.join(sorted(missing_styles))}")
+                        if extra_styles:
+                            warning_parts.append(f"Extra: {', '.join(sorted(extra_styles))}")
+
+                        issues.append(f"'{track_name}': Style set mismatch ({'; '.join(warning_parts)})")
+
+                finally:
+                    # Clean up temp extraction
+                    import shutil
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+
+            except Exception as e:
+                # If validation fails, warn but don't block
+                issues.append(f"'{track_name}': Could not validate styles ({str(e)})")
+
+        return issues
 
     def _get_track_info_for_job(self, job: Dict) -> Dict | None:
         """Retrieves and caches track info for a job."""
@@ -192,7 +293,8 @@ class JobQueueLogic:
         final_jobs = []
         unconfigured_names = []
         for job in self.jobs:
-            if job.get('status') != 'Configured':
+            # Check if status starts with "Configured" (might have ⚠️ suffix)
+            if not job.get('status', '').startswith('Configured'):
                 unconfigured_names.append(Path(job['sources']['Source 1']).name)
                 continue
 
