@@ -104,14 +104,7 @@ class GeneratedTrackDialog(QDialog):
         name_layout = QHBoxLayout(name_group)
         name_label = QLabel("Name:")
         self.name_edit = QLineEdit()
-
-        # Default name based on source
-        default_name = self.source_track.get('name', 'Subtitles')
-        if default_name:
-            default_name = f"{default_name} (Signs)"
-        else:
-            default_name = "Signs & Songs"
-        self.name_edit.setText(default_name)
+        self.name_edit.setPlaceholderText("Leave empty for no custom name")
 
         name_layout.addWidget(name_label)
         name_layout.addWidget(self.name_edit)
@@ -233,8 +226,6 @@ class GeneratedTrackDialog(QDialog):
             return
 
         track_name = self.name_edit.text().strip()
-        if not track_name:
-            track_name = "Generated Track"
 
         mode = 'exclude' if self.exclude_radio.isChecked() else 'include'
 

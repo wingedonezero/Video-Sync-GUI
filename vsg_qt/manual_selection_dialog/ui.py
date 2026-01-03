@@ -355,7 +355,8 @@ class ManualSelectionDialog(QDialog):
         self.final_list.add_track_widget(generated_track)
 
         # Show confirmation
-        self.info_label.setText(f"✅ Generated track '{filter_config['name']}' created successfully.")
+        name_display = f"'{filter_config['name']}' " if filter_config['name'] else ""
+        self.info_label.setText(f"✅ Generated track {name_display}created successfully.")
         self.info_label.setVisible(True)
 
     def _edit_generated_track(self, widget: TrackWidget, item):
@@ -377,7 +378,7 @@ class ManualSelectionDialog(QDialog):
         existing_config = {
             'mode': track_data.get('generated_filter_mode', 'exclude'),
             'styles': track_data.get('generated_filter_styles', []),
-            'name': track_data.get('custom_name', track_data.get('name', 'Generated Track'))
+            'name': track_data.get('custom_name', track_data.get('name', ''))
         }
 
         # Get the source track information
@@ -452,7 +453,8 @@ class ManualSelectionDialog(QDialog):
             widget.logic.refresh_summary()
 
         # Show confirmation
-        self.info_label.setText(f"✅ Generated track '{filter_config['name']}' updated successfully.")
+        name_display = f"'{filter_config['name']}' " if filter_config['name'] else ""
+        self.info_label.setText(f"✅ Generated track {name_display}updated successfully.")
         self.info_label.setVisible(True)
 
     def _launch_style_editor(self, widget: TrackWidget):
