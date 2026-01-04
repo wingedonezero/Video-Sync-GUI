@@ -31,6 +31,24 @@ class ManualLogic:
         counters.clear()
         for prev_item in layout:
             src, ttype = prev_item.get('source'), prev_item.get('type')
+
+            # CRITICAL FIX: Generated tracks don't exist in source files
+            # They're created from other tracks, so preserve them from layout without pool matching
+            if prev_item.get('is_generated'):
+                # Generated tracks use their settings from the saved layout
+                # Just verify the source track they reference actually exists
+                source_track_id = prev_item.get('generated_source_track_id')
+                if source_track_id is not None:
+                    # Find the source track in track_info to validate it exists
+                    source_exists = any(
+                        t.get('id') == source_track_id
+                        for t in self.v.track_info.get(src, [])
+                    )
+                    if source_exists:
+                        realized_layout.append(prev_item.copy())
+                    # else: Skip this generated track - its source doesn't exist
+                continue
+
             idx = counters.get((src, ttype), 0)
             counters[(src, ttype)] = idx + 1
 
