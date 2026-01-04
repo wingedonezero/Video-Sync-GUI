@@ -217,7 +217,8 @@ class SubtitlesStep:
                                     str(target_video),
                                     runner,
                                     ctx.settings_dict,
-                                    audio_delay_ms=audio_delay_ms  # Pass audio delay for smart centering!
+                                    audio_delay_ms=audio_delay_ms,  # Pass audio delay for smart centering!
+                                    temp_dir=ctx.temp_dir  # Pass temp_dir for FFMS2 index caching
                                 )
 
                                 if frame_sync_report and 'error' not in frame_sync_report:

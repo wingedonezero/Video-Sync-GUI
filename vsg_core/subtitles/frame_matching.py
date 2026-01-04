@@ -29,6 +29,7 @@ import threading
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from .metadata_preserver import SubtitleMetadata
+from .frame_sync import time_to_frame_vfr, frame_to_time_vfr
 
 
 class VideoReader:
@@ -40,7 +41,7 @@ class VideoReader:
     2. OpenCV (fast - keeps file open, but seeks from keyframes)
     3. FFmpeg (slow - spawns process per frame)
     """
-    def __init__(self, video_path: str, runner):
+    def __init__(self, video_path: str, runner, temp_dir: Path = None):
         self.video_path = video_path
         self.runner = runner
         self.source = None
@@ -48,22 +49,52 @@ class VideoReader:
         self.use_ffms2 = False
         self.use_opencv = False
         self.fps = None
+        self.temp_dir = temp_dir
 
         # Try FFMS2 first (fastest - indexed seeking)
         try:
             import ffms2
-            runner._log_message(f"[FrameMatch] Indexing video with FFMS2 (one-time cost)...")
-            runner._log_message(f"[FrameMatch] This may take 1-2 minutes, but enables instant frame access...")
 
-            # Create FFMS2 source (will create/use index file)
-            self.source = ffms2.VideoSource(str(video_path))
+            # Determine index storage location
+            if temp_dir:
+                # Store index in job temp directory for reuse across subtitle tracks
+                video_name = Path(video_path).stem
+                # Create a stable hash of the full video path for uniqueness
+                import hashlib
+                path_hash = hashlib.md5(str(Path(video_path).resolve()).encode()).hexdigest()[:8]
+                index_filename = f"ffms2_{video_name}_{path_hash}.ffindex"
+                index_path = temp_dir / index_filename
+
+                runner._log_message(f"[FrameMatch] FFMS2 index location: {index_filename}")
+            else:
+                # Fallback: store next to video file (old behavior)
+                index_path = Path(f"{video_path}.ffindex")
+                runner._log_message(f"[FrameMatch] FFMS2 index location: {index_path}")
+
+            # Check if index already exists
+            if index_path.exists():
+                runner._log_message(f"[FrameMatch] ✓ Reusing cached FFMS2 index!")
+                runner._log_message(f"[FrameMatch] Loading index from: {index_path.name}")
+                # Load existing index
+                index = ffms2.Index(str(index_path))
+            else:
+                runner._log_message(f"[FrameMatch] Creating FFMS2 index (one-time cost)...")
+                runner._log_message(f"[FrameMatch] This may take 1-2 minutes, but enables instant frame access...")
+                # Create new index
+                indexer = ffms2.Indexer(str(video_path))
+                index = indexer.do_indexing2()
+                # Save index for future reuse
+                index.write_index(str(index_path))
+                runner._log_message(f"[FrameMatch] ✓ Index created and saved to: {index_path.name}")
+
+            # Create video source from index
+            self.source = ffms2.VideoSource(str(video_path), index=index)
             self.use_ffms2 = True
 
             # Get video properties
             self.fps = self.source.properties.FPSNumerator / self.source.properties.FPSDenominator
 
-            runner._log_message(f"[FrameMatch] ✓ FFMS2 indexed! Using instant frame seeking (FPS: {self.fps:.3f})")
-            runner._log_message(f"[FrameMatch] Index cached to: {video_path}.ffindex")
+            runner._log_message(f"[FrameMatch] ✓ FFMS2 ready! Using instant frame seeking (FPS: {self.fps:.3f})")
             return
 
         except ImportError:
@@ -71,6 +102,7 @@ class VideoReader:
             runner._log_message(f"[FrameMatch] Install FFMS2 for 100x speedup: pip install ffms2")
         except Exception as e:
             runner._log_message(f"[FrameMatch] WARNING: FFMS2 failed ({e}), trying opencv...")
+
 
         # Fallback to opencv if FFMS2 unavailable
         try:
@@ -267,8 +299,16 @@ def find_matching_frame(
     hash_size = config.get('frame_match_hash_size', 8)
     hash_method = config.get('frame_match_method', 'dhash')  # dhash default for speed
 
-    # Calculate number of frames to search (radius from center)
-    num_frames_radius = int(search_window_ms / frame_duration_ms)
+    # Determine search window size
+    # NEW: Frame-based search window (more precise, faster)
+    search_window_frames = config.get('frame_match_search_window_frames', 0)
+
+    if search_window_frames > 0:
+        # Use frame-based window (±N frames)
+        num_frames_radius = search_window_frames
+    else:
+        # Fall back to time-based window (±N seconds converted to frames)
+        num_frames_radius = int(search_window_ms / frame_duration_ms)
 
     # Limit search to reasonable number
     max_search_frames = config.get('frame_match_max_search_frames', 300)
@@ -381,15 +421,18 @@ def _process_subtitle_batch(
     batch_indices: List[int],
     events: List[pysubs2.SSAEvent],
     source_hash_cache: Dict[int, Any],
+    source_video: str,
     target_video: str,
     runner,
     search_window_ms: int,
     threshold: int,
+    source_fps: float,
     target_fps: float,
     audio_delay_ms: int,
     config: dict,
     progress_lock: threading.Lock,
-    progress_counter: Dict[str, int]
+    progress_counter: Dict[str, int],
+    temp_dir: Path = None
 ) -> List[Tuple[int, Optional[int], int, int]]:
     """
     Phase 2 Worker: Process a batch of subtitles to find matching frames.
@@ -401,17 +444,23 @@ def _process_subtitle_batch(
         batch_indices: List of subtitle indices to process
         events: Full list of subtitle events (read-only)
         source_hash_cache: Pre-computed source hashes (read-only)
+        source_video: Path to source video (for timestamp pre-filtering)
         target_video: Path to target video
         runner: CommandRunner for logging (thread-safe methods only)
         ... other matching parameters ...
         progress_lock: Lock for thread-safe progress updates
         progress_counter: Shared counter dict {'matched': 0, 'unmatched': 0, 'processed': 0}
+        temp_dir: Optional temp directory for FFMS2 index storage
 
     Returns:
         List of (index, matched_time_ms, offset_ms, original_start) tuples
     """
     # Create worker's own target VideoReader
-    target_reader = VideoReader(target_video, runner)
+    # Pass temp_dir so workers can reuse the same cached FFMS2 index!
+    target_reader = VideoReader(target_video, runner, temp_dir=temp_dir)
+
+    # Check if timestamp pre-filtering is enabled
+    use_timestamp_prefilter = config.get('frame_match_use_timestamp_prefilter', True)
 
     results = []
 
@@ -435,8 +484,48 @@ def _process_subtitle_batch(
                     progress_counter['processed'] += 1
                 continue
 
-            # Find matching frame in target video
-            expected_target_time_ms = original_start + audio_delay_ms
+            # Calculate expected target time with optional timestamp pre-filtering
+            if use_timestamp_prefilter:
+                # TIMESTAMP PRE-FILTERING: Use VideoTimestamps to refine search center
+                # This gives us a frame-accurate center point for visual search
+                #
+                # Steps:
+                # 1. Convert source time → source frame (exact)
+                # 2. Convert source frame → source timestamp (frame-snapped)
+                # 3. Add delay to get expected target time
+                # 4. Convert to target frame (exact)
+                # 5. Convert target frame → target timestamp (frame-snapped)
+                # 6. Use this refined timestamp as visual search center
+                #
+                # This allows ±5 frame search instead of ±24, giving ~5x speedup!
+
+                source_frame = time_to_frame_vfr(original_start, source_video, source_fps, runner, config)
+
+                if source_frame is not None:
+                    # Get exact source timestamp for this frame
+                    source_timestamp_exact = frame_to_time_vfr(source_frame, source_video, source_fps, runner, config)
+
+                    if source_timestamp_exact is not None:
+                        # Add delay to get expected target time
+                        adjusted_time = source_timestamp_exact + audio_delay_ms
+
+                        # Convert to target frame and back to get frame-snapped center
+                        target_frame = time_to_frame_vfr(adjusted_time, target_video, target_fps, runner, config)
+
+                        if target_frame is not None:
+                            expected_target_time_ms = frame_to_time_vfr(target_frame, target_video, target_fps, runner, config)
+                            if expected_target_time_ms is None:
+                                # Fallback to basic calculation if frame conversion fails
+                                expected_target_time_ms = original_start + audio_delay_ms
+                        else:
+                            expected_target_time_ms = original_start + audio_delay_ms
+                    else:
+                        expected_target_time_ms = original_start + audio_delay_ms
+                else:
+                    expected_target_time_ms = original_start + audio_delay_ms
+            else:
+                # Basic calculation without pre-filtering
+                expected_target_time_ms = original_start + audio_delay_ms
 
             matched_time_ms = find_matching_frame(
                 source_hash,
@@ -472,7 +561,8 @@ def apply_frame_matched_sync(
     target_video: str,
     runner,
     config: dict = None,
-    audio_delay_ms: int = 0
+    audio_delay_ms: int = 0,
+    temp_dir: Path = None
 ) -> Dict[str, Any]:
     """
     Apply frame-accurate subtitle synchronization using visual frame matching.
@@ -499,6 +589,7 @@ def apply_frame_matched_sync(
             - 'frame_match_method': Hash method (default: 'phash')
             - 'frame_match_skip_unmatched': Skip lines with no match (default: False)
         audio_delay_ms: Audio delay from correlation (used for smart search centering)
+        temp_dir: Optional temp directory for FFMS2 index storage (for reuse across tracks)
 
     Returns:
         Dict with report statistics
@@ -525,7 +616,19 @@ def apply_frame_matched_sync(
     runner._log_message(f"[FrameMatch] Target video: {Path(target_video).name}")
     runner._log_message(f"[FrameMatch] Loading subtitle: {Path(subtitle_path).name}")
     runner._log_message(f"[FrameMatch] Audio delay for centering: {audio_delay_ms:+d}ms")
-    runner._log_message(f"[FrameMatch] Search window: ±{search_window_sec} seconds (from expected time)")
+
+    # Log search window optimization settings
+    search_window_frames = config.get('frame_match_search_window_frames', 0)
+    use_timestamp_prefilter = config.get('frame_match_use_timestamp_prefilter', True)
+
+    if search_window_frames > 0:
+        runner._log_message(f"[FrameMatch] Search window: ±{search_window_frames} frames (frame-based)")
+    else:
+        runner._log_message(f"[FrameMatch] Search window: ±{search_window_sec} seconds (time-based)")
+
+    if use_timestamp_prefilter:
+        runner._log_message(f"[FrameMatch] ✓ Timestamp pre-filtering enabled (VideoTimestamps-guided search center)")
+
     runner._log_message(f"[FrameMatch] Hash method: {hash_method} ({hash_size}x{hash_size})")
     runner._log_message(f"[FrameMatch] Match threshold: {threshold} (hamming distance)")
 
@@ -575,7 +678,8 @@ def apply_frame_matched_sync(
     runner._log_message(f"[FrameMatch] Opening source video for Phase 1...")
 
     # Create source VideoReader for Phase 1
-    source_reader = VideoReader(source_video, runner)
+    # Pass temp_dir for persistent FFMS2 index caching
+    source_reader = VideoReader(source_video, runner, temp_dir=temp_dir)
 
     try:
         # ============================================================
@@ -650,15 +754,18 @@ def apply_frame_matched_sync(
                     batch_indices,
                     subs.events,
                     source_hash_cache,
+                    source_video,
                     target_video,
                     runner,
                     search_window_ms,
                     threshold,
+                    source_fps,
                     target_fps,
                     audio_delay_ms,
                     config,
                     progress_lock,
-                    progress_counter
+                    progress_counter,
+                    temp_dir  # Pass temp_dir for FFMS2 index reuse
                 )
                 future_to_batch[future] = batch_idx
 
