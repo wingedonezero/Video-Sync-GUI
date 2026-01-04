@@ -236,21 +236,9 @@ class VideoReader:
             # Get frame (instant - uses FFMS2 index!)
             frame = self.vs_clip.get_frame(frame_num)
 
-            # Get frame dimensions and stride
-            width = frame.width
-            height = frame.height
-
-            # VapourSynth frames have stride (row padding for alignment)
-            # We need to handle this properly
-            plane_data = frame.get_read_ptr(0)  # Get pointer to Y plane
-            stride = frame.get_stride(0)  # Get stride (bytes per row including padding)
-
-            # Create array from pointer with stride
-            arr = np.frombuffer(plane_data, dtype=np.uint8, count=stride * height)
-            arr = arr.reshape(height, stride)
-
-            # Extract only the actual image data (remove padding)
-            y_plane = arr[:, :width]
+            # VapourSynth frames support the array protocol
+            # frame[0] is the Y (luma) plane, np.asarray handles stride automatically
+            y_plane = np.asarray(frame[0])
 
             # Convert to PIL Image (grayscale mode 'L')
             return Image.fromarray(y_plane, 'L')
