@@ -37,21 +37,28 @@ class VideoReader:
     Efficient video reader that keeps video file open for fast frame access.
 
     Priority order:
-    1. FFMS2 (fastest - indexed seeking, <1ms per frame)
-    2. OpenCV (fast - keeps file open, but seeks from keyframes)
-    3. FFmpeg (slow - spawns process per frame)
+    1. VapourSynth + FFMS2 plugin (fastest - persistent index caching, <1ms per frame, thread-safe)
+    2. pyffms2 (fast - indexed seeking, but re-indexes each time)
+    3. OpenCV (medium - keeps file open, but seeks from keyframes)
+    4. FFmpeg (slow - spawns process per frame)
     """
     def __init__(self, video_path: str, runner, temp_dir: Path = None):
         self.video_path = video_path
         self.runner = runner
-        self.source = None
-        self.cap = None
+        self.vs_clip = None  # VapourSynth clip
+        self.source = None   # FFMS2 source
+        self.cap = None      # OpenCV capture
+        self.use_vapoursynth = False
         self.use_ffms2 = False
         self.use_opencv = False
         self.fps = None
         self.temp_dir = temp_dir
 
-        # Try FFMS2 first (fastest - indexed seeking)
+        # Try VapourSynth first (fastest - persistent index caching)
+        if self._try_vapoursynth():
+            return
+
+        # Try FFMS2 second (fast but re-indexes each time)
         try:
             import ffms2
 
@@ -100,6 +107,93 @@ class VideoReader:
             runner._log_message(f"[FrameMatch] WARNING: opencv not installed, using slower ffmpeg fallback")
             runner._log_message(f"[FrameMatch] Install opencv for better performance: pip install opencv-python")
 
+    def _get_index_cache_path(self, video_path: str, temp_dir: Path) -> Path:
+        """
+        Generate persistent cache path for FFMS2 index.
+
+        Cache key: video filename + size + mtime (detects file changes)
+        Location: {temp_dir}/ffindex/{cache_key}.ffindex
+        """
+        import os
+
+        video_path_obj = Path(video_path)
+
+        # Get file metadata for cache invalidation
+        stat = os.stat(video_path)
+        file_size = stat.st_size
+        mtime = int(stat.st_mtime)
+
+        # Generate cache key
+        cache_key = f"{video_path_obj.stem}_{file_size}_{mtime}"
+
+        # Use temp_dir if available, otherwise use system temp
+        if temp_dir:
+            cache_dir = temp_dir / "ffindex"
+        else:
+            import tempfile
+            cache_dir = Path(tempfile.gettempdir()) / "vsg_ffindex"
+
+        return cache_dir / f"{cache_key}.ffindex"
+
+    def _try_vapoursynth(self) -> bool:
+        """
+        Try to initialize VapourSynth with FFMS2 plugin for persistent index caching.
+
+        Returns:
+            True if successful, False if VapourSynth unavailable or failed
+        """
+        try:
+            import vapoursynth as vs
+
+            self.runner._log_message("[FrameMatch] Attempting VapourSynth with FFMS2 plugin...")
+
+            # Create thread-local core
+            core = vs.core.core()
+
+            # Check if ffms2 plugin is available
+            if not hasattr(core, 'ffms2'):
+                self.runner._log_message("[FrameMatch] VapourSynth installed but ffms2 plugin missing")
+                self.runner._log_message("[FrameMatch] Install FFMS2 plugin for VapourSynth")
+                return False
+
+            # Generate cache path
+            index_path = self._get_index_cache_path(self.video_path, self.temp_dir)
+
+            # Ensure cache directory exists
+            index_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Load video with persistent index caching
+            if index_path.exists():
+                self.runner._log_message(f"[FrameMatch] ✓ Reusing existing index: {index_path.name}")
+            else:
+                self.runner._log_message(f"[FrameMatch] Creating new index (this may take 1-2 minutes)...")
+
+            self.vs_clip = core.ffms2.Source(
+                source=str(self.video_path),
+                cachefile=str(index_path)
+            )
+
+            # Get video properties
+            self.fps = self.vs_clip.fps_num / self.vs_clip.fps_den
+            self.use_vapoursynth = True
+
+            self.runner._log_message(f"[FrameMatch] ✓ VapourSynth ready! Using persistent index cache (FPS: {self.fps:.3f})")
+            self.runner._log_message(f"[FrameMatch] ✓ Index will be shared across all workers (no re-indexing!)")
+
+            return True
+
+        except ImportError:
+            self.runner._log_message("[FrameMatch] VapourSynth not installed, trying pyffms2...")
+            self.runner._log_message("[FrameMatch] Install VapourSynth for persistent index caching: pip install VapourSynth")
+            return False
+        except AttributeError as e:
+            self.runner._log_message(f"[FrameMatch] VapourSynth ffms2 plugin not found: {e}")
+            self.runner._log_message("[FrameMatch] Install FFMS2 plugin for VapourSynth")
+            return False
+        except Exception as e:
+            self.runner._log_message(f"[FrameMatch] VapourSynth initialization failed: {e}")
+            return False
+
     def get_frame_at_time(self, time_ms: int) -> Optional[Image.Image]:
         """
         Extract frame at specified timestamp.
@@ -110,12 +204,53 @@ class VideoReader:
         Returns:
             PIL Image object, or None on failure
         """
-        if self.use_ffms2 and self.source:
+        if self.use_vapoursynth and self.vs_clip:
+            return self._get_frame_vapoursynth(time_ms)
+        elif self.use_ffms2 and self.source:
             return self._get_frame_ffms2(time_ms)
         elif self.use_opencv and self.cap:
             return self._get_frame_opencv(time_ms)
         else:
             return self._get_frame_ffmpeg(time_ms)
+
+    def _get_frame_vapoursynth(self, time_ms: int) -> Optional[Image.Image]:
+        """
+        Extract frame using VapourSynth (instant indexed seeking with persistent cache).
+
+        VapourSynth frames are planar (separate R, G, B planes), so we convert to
+        interleaved RGB for PIL compatibility.
+        """
+        try:
+            import numpy as np
+
+            # Convert time to frame number
+            frame_num = int((time_ms / 1000.0) * self.fps)
+
+            # Clamp to valid range
+            frame_num = max(0, min(frame_num, len(self.vs_clip) - 1))
+
+            # Get frame (instant - uses FFMS2 index!)
+            frame = self.vs_clip.get_frame(frame_num)
+
+            # Get frame dimensions
+            width = frame.width
+            height = frame.height
+
+            # VapourSynth stores frames as planar: plane 0=R, 1=G, 2=B
+            # Need to convert to interleaved RGB for PIL
+            arr = np.zeros((height, width, 3), dtype=np.uint8)
+
+            for plane in range(3):
+                # Get read array for this plane
+                plane_arr = np.asarray(frame[plane])
+                arr[:, :, plane] = plane_arr
+
+            # Convert to PIL Image
+            return Image.fromarray(arr, 'RGB')
+
+        except Exception as e:
+            self.runner._log_message(f"[FrameMatch] ERROR: VapourSynth frame extraction failed: {e}")
+            return None
 
     def _get_frame_ffms2(self, time_ms: int) -> Optional[Image.Image]:
         """Extract frame using FFMS2 (instant indexed seeking)."""
@@ -207,9 +342,17 @@ class VideoReader:
 
     def close(self):
         """Release video resources."""
+        # VapourSynth cleanup
+        if self.vs_clip:
+            # VapourSynth clips are reference counted, just clear reference
+            self.vs_clip = None
+
+        # FFMS2 cleanup
         if self.source:
             # FFMS2 sources don't need explicit closing, but clear reference
             self.source = None
+
+        # OpenCV cleanup
         if self.cap:
             self.cap.release()
             self.cap = None
