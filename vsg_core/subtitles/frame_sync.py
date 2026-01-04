@@ -170,7 +170,8 @@ def get_vfr_timestamps(video_path: str, fps: float, runner, config: dict = None)
             fps_frac = Fraction(int(fps * 1000), 1000).limit_denominator(10000)
 
         # Use FPSTimestamps for CFR (constant framerate) - lightweight!
-        time_scale = Fraction(1000)  # milliseconds
+        # time_scale = 1 means we work in seconds (not milliseconds)
+        time_scale = Fraction(1)
         vts = FPSTimestamps(rounding_method, time_scale, fps_frac)
 
         runner._log_message(f"[VideoTimestamps] Using FPSTimestamps for CFR video at {fps:.3f} fps")
@@ -215,8 +216,9 @@ def frame_to_time_vfr(frame_num: int, video_path: str, fps: float, runner, confi
         # Get exact timestamp for this frame
         # Use EXACT time (precise frame display window) - NOT START!
         # EXACT gives [current, next[ which matches video player behavior
-        time_ms = vts.frame_to_time(frame_num, TimeType.EXACT)
-        return int(time_ms)
+        # time_scale = 1 (seconds), so we need to convert seconds to milliseconds
+        time_seconds = vts.frame_to_time(frame_num, TimeType.EXACT)
+        return int(time_seconds * 1000)
 
     except Exception as e:
         runner._log_message(f"[VideoTimestamps] WARNING: frame_to_time_vfr failed: {e}")
@@ -247,8 +249,9 @@ def time_to_frame_vfr(time_ms: float, video_path: str, fps: float, runner, confi
         if vts is None:
             return None
 
-        # Convert time_ms to Fraction (required by VideoTimestamps)
-        time_frac = Fraction(int(time_ms), 1)
+        # Convert time_ms to seconds as Fraction (required by VideoTimestamps)
+        # time_scale = 1 (seconds), so we need to convert ms to seconds
+        time_frac = Fraction(int(time_ms), 1000)
 
         # Convert time to frame using EXACT (precise frame display window)
         # EXACT gives [current, next[ which matches video player behavior

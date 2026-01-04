@@ -1252,7 +1252,7 @@ class SubtitleSyncTab(QWidget):
         """Show/hide FPS and frame timing settings based on sync mode."""
         is_frame_perfect = (text == 'frame-perfect')
         is_frame_snapped = (text == 'frame-snapped')
-        is_videotimestamps = (text == 'videotimestamps')
+        is_videotimestamps = (text == 'videotimestamps' or text == 'dual-videotimestamps')
         is_frame_matched = (text == 'frame-matched')
 
         # FPS setting is used by frame-perfect, frame-snapped, and videotimestamps (not frame-matched)
