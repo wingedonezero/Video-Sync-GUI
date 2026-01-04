@@ -502,22 +502,11 @@ def apply_dual_videotimestamps_sync(
         if original_duration <= 0:
             continue
 
-        # === STEP 1: Get exact frame timestamp from SOURCE video ===
-        source_frame = time_to_frame_vfr(original_start, source_video, source_fps, runner, config)
-        if source_frame is None:
-            runner._log_message(f"[Dual VideoTimestamps] WARNING: Failed to get source frame for time {original_start}ms")
-            continue
+        # === STEP 1: Add delay to original subtitle time (NOT rounded source timestamp!) ===
+        # This preserves the original timing relationship without introducing rounding errors
+        adjusted_timestamp = original_start + delay_ms
 
-        source_timestamp_exact = frame_to_time_vfr(source_frame, source_video, source_fps, runner, config)
-        if source_timestamp_exact is None:
-            runner._log_message(f"[Dual VideoTimestamps] WARNING: Failed to get source timestamp for frame {source_frame}")
-            continue
-
-        # === STEP 2: Add delay to get target position ===
-        # This delay already includes global shift and represents final position in output timeline
-        adjusted_timestamp = source_timestamp_exact + delay_ms
-
-        # === STEP 3: Find exact frame in TARGET video ===
+        # === STEP 2: Snap to exact frame in TARGET video using VideoTimestamps ===
         target_frame = time_to_frame_vfr(adjusted_timestamp, target_video, target_fps, runner, config)
         if target_frame is None:
             runner._log_message(f"[Dual VideoTimestamps] WARNING: Failed to get target frame for time {adjusted_timestamp}ms")
@@ -528,11 +517,15 @@ def apply_dual_videotimestamps_sync(
             runner._log_message(f"[Dual VideoTimestamps] WARNING: Failed to get target timestamp for frame {target_frame}")
             continue
 
-        # === STEP 4: Update subtitle with frame-accurate timestamp ===
+        # === STEP 3: Update subtitle with frame-accurate timestamp ===
         event.start = target_timestamp_exact
         event.end = target_timestamp_exact + original_duration
 
         # Track statistics
+        # For verification, also check what frame this was in the source
+        source_frame = time_to_frame_vfr(original_start, source_video, source_fps, runner, config)
+        source_timestamp_exact = frame_to_time_vfr(source_frame, source_video, source_fps, runner, config) if source_frame is not None else None
+
         # Compare adjusted_timestamp (what we asked for) vs target_timestamp_exact (what we got)
         discrepancy = abs(adjusted_timestamp - target_timestamp_exact)
         timestamp_discrepancies.append(discrepancy)
@@ -543,9 +536,12 @@ def apply_dual_videotimestamps_sync(
         # Log first few matches for verification
         if matched_count <= 3:
             runner._log_message(f"[Dual VideoTimestamps] Line {matched_count}:")
-            runner._log_message(f"  Source: {original_start}ms (frame {source_frame}) → exact: {source_timestamp_exact}ms")
-            runner._log_message(f"  Adjusted: {adjusted_timestamp}ms (+ {delay_ms}ms delay)")
-            runner._log_message(f"  Target: {target_timestamp_exact}ms (frame {target_frame})")
+            runner._log_message(f"  Original: {original_start}ms → Source frame {source_frame}")
+            runner._log_message(f"  Adjusted: {original_start}ms + {delay_ms}ms = {adjusted_timestamp}ms")
+            runner._log_message(f"  Target: frame {target_frame} at {target_timestamp_exact}ms")
+            if source_timestamp_exact:
+                runner._log_message(f"  Source frame exact timestamp: {source_timestamp_exact}ms (for comparison)")
+
 
     # Save modified subtitle
     runner._log_message(f"[Dual VideoTimestamps] Saving modified subtitle file...")
