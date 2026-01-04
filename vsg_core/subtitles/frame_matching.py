@@ -237,10 +237,10 @@ class VideoReader:
             height = frame.height
 
             # VapourSynth frames are planar (separate R, G, B planes)
-            # Use get_read_array() to get properly shaped numpy arrays
-            r_plane = np.asarray(frame.get_read_array(0))
-            g_plane = np.asarray(frame.get_read_array(1))
-            b_plane = np.asarray(frame.get_read_array(2))
+            # frame[plane] returns memoryview, convert to numpy with proper shape
+            r_plane = np.frombuffer(frame[0], dtype=np.uint8).reshape(height, width)
+            g_plane = np.frombuffer(frame[1], dtype=np.uint8).reshape(height, width)
+            b_plane = np.frombuffer(frame[2], dtype=np.uint8).reshape(height, width)
 
             # Stack planes into RGB image (height, width, 3)
             rgb_array = np.stack([r_plane, g_plane, b_plane], axis=-1)
