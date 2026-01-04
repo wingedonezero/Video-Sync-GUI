@@ -168,10 +168,14 @@ class VideoReader:
             else:
                 self.runner._log_message(f"[FrameMatch] Creating new index (this may take 1-2 minutes)...")
 
-            self.vs_clip = core.ffms2.Source(
+            clip = core.ffms2.Source(
                 source=str(self.video_path),
                 cachefile=str(index_path)
             )
+
+            # Convert to RGB24 for easier frame extraction
+            # FFMS2 outputs YUV by default, we need RGB for PIL
+            self.vs_clip = core.resize.Bicubic(clip, format=vs.RGB24, matrix_in_s="709")
 
             # Get video properties
             self.fps = self.vs_clip.fps_num / self.vs_clip.fps_den
