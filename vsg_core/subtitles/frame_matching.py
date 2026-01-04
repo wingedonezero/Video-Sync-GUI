@@ -55,43 +55,20 @@ class VideoReader:
         try:
             import ffms2
 
-            # Determine index storage location
-            if temp_dir:
-                # Store index in job temp directory for reuse across subtitle tracks
-                video_name = Path(video_path).stem
-                # Create a stable hash of the full video path for uniqueness
-                import hashlib
-                path_hash = hashlib.md5(str(Path(video_path).resolve()).encode()).hexdigest()[:8]
-                index_filename = f"ffms2_{video_name}_{path_hash}.ffindex"
-                index_path = temp_dir / index_filename
+            # Note: The pyffms2 Python bindings don't reliably support loading cached indexes
+            # We create the index on-demand each time (still faster than OpenCV fallback)
+            runner._log_message(f"[FrameMatch] Creating FFMS2 index...")
+            runner._log_message(f"[FrameMatch] This may take 1-2 minutes on first access...")
 
-                runner._log_message(f"[FrameMatch] FFMS2 index location: {index_filename}")
-            else:
-                # Fallback: store next to video file (old behavior)
-                index_path = Path(f"{video_path}.ffindex")
-                runner._log_message(f"[FrameMatch] FFMS2 index location: {index_path}")
+            # Create indexer and generate index
+            indexer = ffms2.Indexer(str(video_path))
+            index = indexer.do_indexing2()
 
-            # Check if index already exists
-            if index_path.exists():
-                runner._log_message(f"[FrameMatch] ✓ Reusing cached FFMS2 index!")
-                runner._log_message(f"[FrameMatch] Loading index from: {index_path.name}")
-                # Load video source with existing index file
-                # Note: FFMS2 doesn't have Index(filepath) - use indexfile parameter instead
-                self.source = ffms2.VideoSource(str(video_path), indexfile=str(index_path))
-            else:
-                runner._log_message(f"[FrameMatch] Creating FFMS2 index (one-time cost)...")
-                runner._log_message(f"[FrameMatch] This may take 1-2 minutes, but enables instant frame access...")
-                # Create new index
-                indexer = ffms2.Indexer(str(video_path))
-                index = indexer.do_indexing2()
-                # Save index for future reuse
-                # Note: FFMS2 Index objects use write(), not write_index()
-                index.write(str(index_path))
-                runner._log_message(f"[FrameMatch] ✓ Index created and saved to: {index_path.name}")
+            # Get first video track
+            track_number = index.get_first_indexed_track_of_type(ffms2.FFMS_TYPE_VIDEO)
 
-                # Create video source from the newly created index object
-                self.source = ffms2.VideoSource(str(video_path), index=index)
-
+            # Create video source from index
+            self.source = ffms2.VideoSource(str(video_path), track_number, index)
             self.use_ffms2 = True
 
             # Get video properties
