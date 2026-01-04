@@ -399,7 +399,192 @@ def apply_videotimestamps_sync(
 
 
 # ============================================================================
-# MODE 4: FRAME-SNAPPED (Snap Start, Preserve Duration)
+# MODE 4: DUAL VIDEOTIMESTAMPS (Two-Video Frame-Accurate Mapping)
+# ============================================================================
+
+def apply_dual_videotimestamps_sync(
+    subtitle_path: str,
+    source_video: str,
+    target_video: str,
+    delay_ms: int,
+    runner,
+    config: dict = None
+) -> Dict[str, Any]:
+    """
+    Apply frame-accurate synchronization using VideoTimestamps from BOTH videos.
+
+    This mode improves upon standard videotimestamps by using exact frame timestamps
+    from both the subtitle source video AND the target video (Source 1).
+
+    Algorithm:
+    1. Get exact frame timestamp from SOURCE video (subtitle source)
+    2. Add the audio delay (from source_delays_ms)
+    3. Find exact frame timestamp in TARGET video (Source 1)
+    4. Update subtitle with frame-accurate position
+
+    This provides better accuracy than single-video VideoTimestamps because:
+    - Uses exact source frame timestamp (not approximate subtitle time)
+    - Accounts for both videos' precise frame positions
+    - Results in frame-accurate alignment to target video
+
+    Args:
+        subtitle_path: Path to subtitle file (.ass, .srt, .ssa, .vtt)
+        source_video: Path to video that subs were originally timed to
+        target_video: Path to target video (Source 1)
+        delay_ms: Audio delay from correlation (already includes global shift)
+        runner: CommandRunner for logging
+        config: Optional config dict with settings
+
+    Returns:
+        Dict with report statistics
+    """
+    try:
+        from video_timestamps import FPSTimestamps, VideoTimestamps, TimeType, RoundingMethod
+        from fractions import Fraction
+    except ImportError:
+        runner._log_message("[Dual VideoTimestamps] ERROR: VideoTimestamps not installed. Install with: pip install VideoTimestamps")
+        return {'error': 'VideoTimestamps library not installed'}
+
+    config = config or {}
+
+    runner._log_message(f"[Dual VideoTimestamps] Mode: Frame-accurate mapping using both videos")
+    runner._log_message(f"[Dual VideoTimestamps] Loading subtitle: {Path(subtitle_path).name}")
+    runner._log_message(f"[Dual VideoTimestamps] Source video: {Path(source_video).name}")
+    runner._log_message(f"[Dual VideoTimestamps] Target video: {Path(target_video).name}")
+    runner._log_message(f"[Dual VideoTimestamps] Delay to apply: {delay_ms:+d} ms")
+
+    # Detect FPS of both videos
+    source_fps = detect_video_fps(source_video, runner)
+    target_fps = detect_video_fps(target_video, runner)
+
+    runner._log_message(f"[Dual VideoTimestamps] Source FPS: {source_fps:.3f}")
+    runner._log_message(f"[Dual VideoTimestamps] Target FPS: {target_fps:.3f}")
+
+    # Get VideoTimestamps instances for both videos
+    source_vts = get_vfr_timestamps(source_video, source_fps, runner, config)
+    target_vts = get_vfr_timestamps(target_video, target_fps, runner, config)
+
+    if source_vts is None or target_vts is None:
+        return {'error': 'Failed to create VideoTimestamps instances'}
+
+    # Capture original metadata before pysubs2 processing
+    metadata = SubtitleMetadata(subtitle_path)
+    metadata.capture()
+
+    # Load subtitle file
+    try:
+        subs = pysubs2.load(subtitle_path, encoding='utf-8')
+    except Exception as e:
+        runner._log_message(f"[Dual VideoTimestamps] ERROR: Failed to load subtitle file: {e}")
+        return {'error': str(e)}
+
+    if not subs.events:
+        runner._log_message(f"[Dual VideoTimestamps] WARNING: No subtitle events found in file")
+        return {
+            'total_events': 0,
+            'matched_events': 0,
+            'avg_discrepancy_ms': 0
+        }
+
+    runner._log_message(f"[Dual VideoTimestamps] Processing {len(subs.events)} subtitle events...")
+
+    # Statistics tracking
+    matched_count = 0
+    timestamp_discrepancies = []
+    max_discrepancy = 0
+
+    # Process each event
+    for event in subs.events:
+        original_start = event.start
+        original_duration = event.end - event.start
+
+        # Skip empty events
+        if original_duration <= 0:
+            continue
+
+        # === STEP 1: Get exact frame timestamp from SOURCE video ===
+        source_frame = time_to_frame_vfr(original_start, source_video, source_fps, runner, config)
+        if source_frame is None:
+            runner._log_message(f"[Dual VideoTimestamps] WARNING: Failed to get source frame for time {original_start}ms")
+            continue
+
+        source_timestamp_exact = frame_to_time_vfr(source_frame, source_video, source_fps, runner, config)
+        if source_timestamp_exact is None:
+            runner._log_message(f"[Dual VideoTimestamps] WARNING: Failed to get source timestamp for frame {source_frame}")
+            continue
+
+        # === STEP 2: Add delay to get target position ===
+        # This delay already includes global shift and represents final position in output timeline
+        adjusted_timestamp = source_timestamp_exact + delay_ms
+
+        # === STEP 3: Find exact frame in TARGET video ===
+        target_frame = time_to_frame_vfr(adjusted_timestamp, target_video, target_fps, runner, config)
+        if target_frame is None:
+            runner._log_message(f"[Dual VideoTimestamps] WARNING: Failed to get target frame for time {adjusted_timestamp}ms")
+            continue
+
+        target_timestamp_exact = frame_to_time_vfr(target_frame, target_video, target_fps, runner, config)
+        if target_timestamp_exact is None:
+            runner._log_message(f"[Dual VideoTimestamps] WARNING: Failed to get target timestamp for frame {target_frame}")
+            continue
+
+        # === STEP 4: Update subtitle with frame-accurate timestamp ===
+        event.start = target_timestamp_exact
+        event.end = target_timestamp_exact + original_duration
+
+        # Track statistics
+        # Compare adjusted_timestamp (what we asked for) vs target_timestamp_exact (what we got)
+        discrepancy = abs(adjusted_timestamp - target_timestamp_exact)
+        timestamp_discrepancies.append(discrepancy)
+        max_discrepancy = max(max_discrepancy, discrepancy)
+
+        matched_count += 1
+
+        # Log first few matches for verification
+        if matched_count <= 3:
+            runner._log_message(f"[Dual VideoTimestamps] Line {matched_count}:")
+            runner._log_message(f"  Source: {original_start}ms (frame {source_frame}) → exact: {source_timestamp_exact}ms")
+            runner._log_message(f"  Adjusted: {adjusted_timestamp}ms (+ {delay_ms}ms delay)")
+            runner._log_message(f"  Target: {target_timestamp_exact}ms (frame {target_frame})")
+
+    # Save modified subtitle
+    runner._log_message(f"[Dual VideoTimestamps] Saving modified subtitle file...")
+    try:
+        subs.save(subtitle_path, encoding='utf-8')
+    except Exception as e:
+        runner._log_message(f"[Dual VideoTimestamps] ERROR: Failed to save subtitle file: {e}")
+        return {'error': str(e)}
+
+    # Validate and restore lost metadata
+    metadata.validate_and_restore(runner, expected_delay_ms=delay_ms)
+
+    # Calculate statistics
+    avg_discrepancy = sum(timestamp_discrepancies) / len(timestamp_discrepancies) if timestamp_discrepancies else 0
+
+    # Log results
+    runner._log_message(f"[Dual VideoTimestamps] ✓ Successfully processed {len(subs.events)} events")
+    runner._log_message(f"[Dual VideoTimestamps]   - Matched events: {matched_count}")
+    runner._log_message(f"[Dual VideoTimestamps]   - Delay applied: {delay_ms:+d}ms")
+    runner._log_message(f"[Dual VideoTimestamps]   - Avg timestamp discrepancy: {avg_discrepancy:.2f}ms")
+    runner._log_message(f"[Dual VideoTimestamps]   - Max timestamp discrepancy: {max_discrepancy:.2f}ms")
+
+    if max_discrepancy > 100:
+        runner._log_message(f"[Dual VideoTimestamps] WARNING: Large timestamp discrepancy detected (>{max_discrepancy:.0f}ms)")
+        runner._log_message(f"[Dual VideoTimestamps]          This may indicate frame drops or different frame counts")
+
+    return {
+        'total_events': len(subs.events),
+        'matched_events': matched_count,
+        'delay_applied_ms': delay_ms,
+        'avg_discrepancy_ms': avg_discrepancy,
+        'max_discrepancy_ms': max_discrepancy,
+        'source_fps': source_fps,
+        'target_fps': target_fps
+    }
+
+
+# ============================================================================
+# MODE 5: FRAME-SNAPPED (Snap Start, Preserve Duration)
 # ============================================================================
 
 def apply_frame_snapped_sync(

@@ -17,7 +17,7 @@ from vsg_core.subtitles.ocr import run_ocr
 from vsg_core.subtitles.cleanup import run_cleanup
 from vsg_core.subtitles.timing import fix_subtitle_timing
 from vsg_core.subtitles.stepping_adjust import apply_stepping_to_subtitles
-from vsg_core.subtitles.frame_sync import apply_frame_perfect_sync, apply_videotimestamps_sync, apply_frame_snapped_sync, detect_video_fps
+from vsg_core.subtitles.frame_sync import apply_frame_perfect_sync, apply_videotimestamps_sync, apply_frame_snapped_sync, apply_dual_videotimestamps_sync, detect_video_fps
 from vsg_core.subtitles.frame_matching import apply_frame_matched_sync
 
 class SubtitlesStep:
@@ -187,7 +187,7 @@ class SubtitlesStep:
             if item.extracted_path and not item.stepping_adjusted:
                 subtitle_sync_mode = ctx.settings_dict.get('subtitle_sync_mode', 'time-based')
 
-                if subtitle_sync_mode in ['frame-perfect', 'videotimestamps', 'frame-snapped', 'frame-matched']:
+                if subtitle_sync_mode in ['frame-perfect', 'videotimestamps', 'frame-snapped', 'frame-matched', 'dual-videotimestamps']:
                     # Check if this subtitle format supports frame-perfect sync
                     ext = item.extracted_path.suffix.lower()
                     supported_formats = ['.ass', '.ssa', '.srt', '.vtt']
@@ -234,6 +234,49 @@ class SubtitlesStep:
                                 runner._log_message(f"[Frame-Matched Sync] Source: {source_video}, Target: {target_video}")
 
                             # Skip the delay-based sync logic for frame-matched mode
+                            continue
+
+                        # Dual-VideoTimestamps mode: Frame-accurate mapping using both videos' timestamps
+                        if subtitle_sync_mode == 'dual-videotimestamps':
+                            # Requires source and target videos (like frame-matched)
+                            source_key = item.sync_to if item.track.source == 'External' else item.track.source
+                            source_video = ctx.sources.get(source_key)
+                            target_video = source1_file
+
+                            # Get audio delay for subtitle positioning
+                            audio_delay_ms = 0
+                            if ctx.delays and source_key in ctx.delays.source_delays_ms:
+                                audio_delay_ms = int(ctx.delays.source_delays_ms[source_key])
+                                runner._log_message(f"[Dual VideoTimestamps] Using audio delay: {audio_delay_ms:+d}ms")
+
+                            if source_video and target_video:
+                                runner._log_message(f"[Dual VideoTimestamps] Applying to track {item.track.id} ({item.track.props.name or 'Unnamed'})")
+                                runner._log_message(f"[Dual VideoTimestamps] Source video: {Path(source_video).name}")
+                                runner._log_message(f"[Dual VideoTimestamps] Target video: {Path(target_video).name}")
+
+                                frame_sync_report = apply_dual_videotimestamps_sync(
+                                    str(item.extracted_path),
+                                    str(source_video),
+                                    str(target_video),
+                                    audio_delay_ms,
+                                    runner,
+                                    ctx.settings_dict
+                                )
+
+                                if frame_sync_report and 'error' not in frame_sync_report:
+                                    runner._log_message(f"--- Dual VideoTimestamps Sync Report ---")
+                                    for key, value in frame_sync_report.items():
+                                        runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
+                                    runner._log_message("------------------------------------------")
+                                    # Mark that timestamps have been adjusted
+                                    item.frame_adjusted = True
+                                else:
+                                    runner._log_message(f"[Dual VideoTimestamps] WARNING: Sync failed for track {item.track.id}")
+                            else:
+                                runner._log_message(f"[Dual VideoTimestamps] ERROR: Missing source or target video")
+                                runner._log_message(f"[Dual VideoTimestamps] Source: {source_video}, Target: {target_video}")
+
+                            # Skip the delay-based sync logic for dual-videotimestamps mode
                             continue
 
                         # Get the uniform delay for this source (for other modes)
