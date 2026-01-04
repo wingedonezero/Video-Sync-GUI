@@ -75,8 +75,9 @@ class VideoReader:
             if index_path.exists():
                 runner._log_message(f"[FrameMatch] ✓ Reusing cached FFMS2 index!")
                 runner._log_message(f"[FrameMatch] Loading index from: {index_path.name}")
-                # Load existing index
-                index = ffms2.Index(str(index_path))
+                # Load video source with existing index file
+                # Note: FFMS2 doesn't have Index(filepath) - use indexfile parameter instead
+                self.source = ffms2.VideoSource(str(video_path), indexfile=str(index_path))
             else:
                 runner._log_message(f"[FrameMatch] Creating FFMS2 index (one-time cost)...")
                 runner._log_message(f"[FrameMatch] This may take 1-2 minutes, but enables instant frame access...")
@@ -88,8 +89,9 @@ class VideoReader:
                 index.write(str(index_path))
                 runner._log_message(f"[FrameMatch] ✓ Index created and saved to: {index_path.name}")
 
-            # Create video source from index
-            self.source = ffms2.VideoSource(str(video_path), index=index)
+                # Create video source from the newly created index object
+                self.source = ffms2.VideoSource(str(video_path), index=index)
+
             self.use_ffms2 = True
 
             # Get video properties
