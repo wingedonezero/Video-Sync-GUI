@@ -1126,6 +1126,73 @@ class SubtitleSyncTab(QWidget):
             "Default: 0 (auto-detect)"
         )
 
+        self.widgets['frame_match_hash_size'] = QSpinBox()
+        self.widgets['frame_match_hash_size'].setRange(8, 16)
+        self.widgets['frame_match_hash_size'].setSingleStep(8)
+        self.widgets['frame_match_hash_size'].setToolTip(
+            "Perceptual hash size (resolution).\n\n"
+            "• 8 (Default): 8x8 hash = 64 bits\n"
+            "  - Faster comparison\n"
+            "  - Good for most anime/video\n"
+            "  - Hamming distance range: 0-64\n\n"
+            "• 16: 16x16 hash = 256 bits\n"
+            "  - More accurate, slower\n"
+            "  - Better for subtle differences\n"
+            "  - Hamming distance range: 0-256\n\n"
+            "Note: If you change this, adjust Match Threshold accordingly.\n"
+            "Default: 8"
+        )
+
+        self.widgets['frame_match_search_window_frames'] = QSpinBox()
+        self.widgets['frame_match_search_window_frames'].setRange(0, 500)
+        self.widgets['frame_match_search_window_frames'].setSuffix(" frames")
+        self.widgets['frame_match_search_window_frames'].setToolTip(
+            "Frame-based search window (more precise than time-based).\n\n"
+            "• 0 (Default): Use time-based window (Match Window in seconds)\n"
+            "  - Searches ±N seconds around expected time\n"
+            "  - Converted to frames internally\n\n"
+            "• 1-500: Search ±N frames around expected position\n"
+            "  - More precise control\n"
+            "  - Example: ±5 frames at 24fps = ±208ms\n"
+            "  - Faster when combined with timestamp pre-filtering\n\n"
+            "Recommended: 0 (time-based) for general use,\n"
+            "5-10 frames when using timestamp pre-filtering.\n\n"
+            "Default: 0 (disabled, use time-based)"
+        )
+
+        self.widgets['frame_match_use_timestamp_prefilter'] = QCheckBox("Use timestamp pre-filtering (VideoTimestamps)")
+        self.widgets['frame_match_use_timestamp_prefilter'].setToolTip(
+            "Enable VideoTimestamps-guided search center positioning.\n\n"
+            "How it works:\n"
+            "1. Converts subtitle time → source frame → source timestamp\n"
+            "2. Adds audio delay to get expected target time\n"
+            "3. Converts to target frame → target timestamp\n"
+            "4. Uses this refined timestamp as visual search center\n\n"
+            "Benefits:\n"
+            "• 5x faster: Allows ±5 frame search instead of ±24\n"
+            "• More accurate: Frame-snapped center point\n"
+            "• Handles VFR videos correctly\n\n"
+            "Requirements:\n"
+            "• pip install VideoTimestamps\n"
+            "• Source and target videos available\n\n"
+            "Recommended: Enable for faster, more accurate matching.\n"
+            "Default: Enabled"
+        )
+
+        self.widgets['frame_match_max_search_frames'] = QSpinBox()
+        self.widgets['frame_match_max_search_frames'].setRange(50, 1000)
+        self.widgets['frame_match_max_search_frames'].setSuffix(" frames")
+        self.widgets['frame_match_max_search_frames'].setToolTip(
+            "Maximum frames to search (safety limit).\n\n"
+            "Prevents excessive searching when window is very large.\n"
+            "If calculated search window exceeds this, it will be clamped.\n\n"
+            "• At 24fps:\n"
+            "  - 300 frames = ±6.25 seconds total window\n"
+            "  - 500 frames = ±10.4 seconds total window\n\n"
+            "Only applies when search window would exceed this limit.\n\n"
+            "Default: 300 frames"
+        )
+
         sync_layout.addRow("Sync Mode:", self.widgets['subtitle_sync_mode'])
         sync_layout.addRow("Target FPS:", self.widgets['subtitle_target_fps'])
         sync_layout.addRow("Frame Timing:", self.widgets['frame_sync_mode'])
@@ -1135,7 +1202,11 @@ class SubtitleSyncTab(QWidget):
         sync_layout.addRow("Match Window:", self.widgets['frame_match_search_window_sec'])
         sync_layout.addRow("Match Threshold:", self.widgets['frame_match_threshold'])
         sync_layout.addRow("Hash Method:", self.widgets['frame_match_method'])
+        sync_layout.addRow("Hash Size:", self.widgets['frame_match_hash_size'])
         sync_layout.addRow("Worker Threads:", self.widgets['frame_match_workers'])
+        sync_layout.addRow("Frame Window:", self.widgets['frame_match_search_window_frames'])
+        sync_layout.addRow("", self.widgets['frame_match_use_timestamp_prefilter'])
+        sync_layout.addRow("Max Search Frames:", self.widgets['frame_match_max_search_frames'])
 
         # Info label
         info_label = QLabel(
@@ -1183,7 +1254,11 @@ class SubtitleSyncTab(QWidget):
         self.widgets['frame_match_search_window_sec'].setEnabled(is_frame_matched)
         self.widgets['frame_match_threshold'].setEnabled(is_frame_matched)
         self.widgets['frame_match_method'].setEnabled(is_frame_matched)
+        self.widgets['frame_match_hash_size'].setEnabled(is_frame_matched)
         self.widgets['frame_match_workers'].setEnabled(is_frame_matched)
+        self.widgets['frame_match_search_window_frames'].setEnabled(is_frame_matched)
+        self.widgets['frame_match_use_timestamp_prefilter'].setEnabled(is_frame_matched)
+        self.widgets['frame_match_max_search_frames'].setEnabled(is_frame_matched)
 
 class ChaptersTab(QWidget):
     def __init__(self):

@@ -84,7 +84,8 @@ class VideoReader:
                 indexer = ffms2.Indexer(str(video_path))
                 index = indexer.do_indexing2()
                 # Save index for future reuse
-                index.write_index(str(index_path))
+                # Note: FFMS2 Index objects use write(), not write_index()
+                index.write(str(index_path))
                 runner._log_message(f"[FrameMatch] ✓ Index created and saved to: {index_path.name}")
 
             # Create video source from index
