@@ -236,17 +236,17 @@ class VideoReader:
             width = frame.width
             height = frame.height
 
-            # VapourSynth stores frames as planar: plane 0=R, 1=G, 2=B
-            # Need to convert to interleaved RGB for PIL
-            arr = np.zeros((height, width, 3), dtype=np.uint8)
+            # VapourSynth frames are planar (separate R, G, B planes)
+            # Use get_read_array() to get properly shaped numpy arrays
+            r_plane = np.asarray(frame.get_read_array(0))
+            g_plane = np.asarray(frame.get_read_array(1))
+            b_plane = np.asarray(frame.get_read_array(2))
 
-            for plane in range(3):
-                # Get read array for this plane
-                plane_arr = np.asarray(frame[plane])
-                arr[:, :, plane] = plane_arr
+            # Stack planes into RGB image (height, width, 3)
+            rgb_array = np.stack([r_plane, g_plane, b_plane], axis=-1)
 
             # Convert to PIL Image
-            return Image.fromarray(arr, 'RGB')
+            return Image.fromarray(rgb_array, 'RGB')
 
         except Exception as e:
             self.runner._log_message(f"[FrameMatch] ERROR: VapourSynth frame extraction failed: {e}")
