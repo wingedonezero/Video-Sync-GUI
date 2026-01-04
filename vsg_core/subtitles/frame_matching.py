@@ -173,9 +173,9 @@ class VideoReader:
                 cachefile=str(index_path)
             )
 
-            # Convert to RGB24 for easier frame extraction
-            # FFMS2 outputs YUV by default, we need RGB for PIL
-            self.vs_clip = core.resize.Bicubic(clip, format=vs.RGB24, matrix_in_s="709")
+            # Keep clip in original format (usually YUV)
+            # We'll extract only luma (Y) plane for hashing - more reliable than RGB
+            self.vs_clip = clip
 
             # Get video properties
             self.fps = self.vs_clip.fps_num / self.vs_clip.fps_den
@@ -221,8 +221,8 @@ class VideoReader:
         """
         Extract frame using VapourSynth (instant indexed seeking with persistent cache).
 
-        VapourSynth frames are planar (separate R, G, B planes), so we convert to
-        interleaved RGB for PIL compatibility.
+        Extracts only the luma (Y) plane as grayscale for better perceptual hashing.
+        Luma contains most of the perceptual information and avoids color conversion artifacts.
         """
         try:
             import numpy as np
@@ -240,17 +240,13 @@ class VideoReader:
             width = frame.width
             height = frame.height
 
-            # VapourSynth frames are planar (separate R, G, B planes)
-            # frame[plane] returns memoryview, convert to numpy with proper shape
-            r_plane = np.frombuffer(frame[0], dtype=np.uint8).reshape(height, width)
-            g_plane = np.frombuffer(frame[1], dtype=np.uint8).reshape(height, width)
-            b_plane = np.frombuffer(frame[2], dtype=np.uint8).reshape(height, width)
+            # Extract only Y (luma) plane for grayscale image
+            # This is more reliable for perceptual hashing than RGB conversion
+            # Frame is in YUV format, plane 0 is luma (brightness)
+            y_plane = np.frombuffer(frame[0], dtype=np.uint8).reshape(height, width)
 
-            # Stack planes into RGB image (height, width, 3)
-            rgb_array = np.stack([r_plane, g_plane, b_plane], axis=-1)
-
-            # Convert to PIL Image
-            return Image.fromarray(rgb_array, 'RGB')
+            # Convert to PIL Image (grayscale mode 'L')
+            return Image.fromarray(y_plane, 'L')
 
         except Exception as e:
             self.runner._log_message(f"[FrameMatch] ERROR: VapourSynth frame extraction failed: {e}")
