@@ -147,8 +147,8 @@ class VideoReader:
 
             self.runner._log_message("[FrameMatch] Attempting VapourSynth with FFMS2 plugin...")
 
-            # Create thread-local core
-            core = vs.core.core()
+            # Get VapourSynth core instance
+            core = vs.core
 
             # Check if ffms2 plugin is available
             if not hasattr(core, 'ffms2'):
