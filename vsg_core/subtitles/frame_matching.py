@@ -40,7 +40,7 @@ class VideoReader:
     2. OpenCV (fast - keeps file open, but seeks from keyframes)
     3. FFmpeg (slow - spawns process per frame)
     """
-    def __init__(self, video_path: str, runner):
+    def __init__(self, video_path: str, runner, temp_dir: Path = None):
         self.video_path = video_path
         self.runner = runner
         self.source = None
@@ -48,22 +48,52 @@ class VideoReader:
         self.use_ffms2 = False
         self.use_opencv = False
         self.fps = None
+        self.temp_dir = temp_dir
 
         # Try FFMS2 first (fastest - indexed seeking)
         try:
             import ffms2
-            runner._log_message(f"[FrameMatch] Indexing video with FFMS2 (one-time cost)...")
-            runner._log_message(f"[FrameMatch] This may take 1-2 minutes, but enables instant frame access...")
 
-            # Create FFMS2 source (will create/use index file)
-            self.source = ffms2.VideoSource(str(video_path))
+            # Determine index storage location
+            if temp_dir:
+                # Store index in job temp directory for reuse across subtitle tracks
+                video_name = Path(video_path).stem
+                # Create a stable hash of the full video path for uniqueness
+                import hashlib
+                path_hash = hashlib.md5(str(Path(video_path).resolve()).encode()).hexdigest()[:8]
+                index_filename = f"ffms2_{video_name}_{path_hash}.ffindex"
+                index_path = temp_dir / index_filename
+
+                runner._log_message(f"[FrameMatch] FFMS2 index location: {index_filename}")
+            else:
+                # Fallback: store next to video file (old behavior)
+                index_path = Path(f"{video_path}.ffindex")
+                runner._log_message(f"[FrameMatch] FFMS2 index location: {index_path}")
+
+            # Check if index already exists
+            if index_path.exists():
+                runner._log_message(f"[FrameMatch] ✓ Reusing cached FFMS2 index!")
+                runner._log_message(f"[FrameMatch] Loading index from: {index_path.name}")
+                # Load existing index
+                index = ffms2.Index(str(index_path))
+            else:
+                runner._log_message(f"[FrameMatch] Creating FFMS2 index (one-time cost)...")
+                runner._log_message(f"[FrameMatch] This may take 1-2 minutes, but enables instant frame access...")
+                # Create new index
+                indexer = ffms2.Indexer(str(video_path))
+                index = indexer.do_indexing2()
+                # Save index for future reuse
+                index.write_index(str(index_path))
+                runner._log_message(f"[FrameMatch] ✓ Index created and saved to: {index_path.name}")
+
+            # Create video source from index
+            self.source = ffms2.VideoSource(str(video_path), index=index)
             self.use_ffms2 = True
 
             # Get video properties
             self.fps = self.source.properties.FPSNumerator / self.source.properties.FPSDenominator
 
-            runner._log_message(f"[FrameMatch] ✓ FFMS2 indexed! Using instant frame seeking (FPS: {self.fps:.3f})")
-            runner._log_message(f"[FrameMatch] Index cached to: {video_path}.ffindex")
+            runner._log_message(f"[FrameMatch] ✓ FFMS2 ready! Using instant frame seeking (FPS: {self.fps:.3f})")
             return
 
         except ImportError:
@@ -71,6 +101,7 @@ class VideoReader:
             runner._log_message(f"[FrameMatch] Install FFMS2 for 100x speedup: pip install ffms2")
         except Exception as e:
             runner._log_message(f"[FrameMatch] WARNING: FFMS2 failed ({e}), trying opencv...")
+
 
         # Fallback to opencv if FFMS2 unavailable
         try:
@@ -389,7 +420,8 @@ def _process_subtitle_batch(
     audio_delay_ms: int,
     config: dict,
     progress_lock: threading.Lock,
-    progress_counter: Dict[str, int]
+    progress_counter: Dict[str, int],
+    temp_dir: Path = None
 ) -> List[Tuple[int, Optional[int], int, int]]:
     """
     Phase 2 Worker: Process a batch of subtitles to find matching frames.
@@ -406,12 +438,14 @@ def _process_subtitle_batch(
         ... other matching parameters ...
         progress_lock: Lock for thread-safe progress updates
         progress_counter: Shared counter dict {'matched': 0, 'unmatched': 0, 'processed': 0}
+        temp_dir: Optional temp directory for FFMS2 index storage
 
     Returns:
         List of (index, matched_time_ms, offset_ms, original_start) tuples
     """
     # Create worker's own target VideoReader
-    target_reader = VideoReader(target_video, runner)
+    # Pass temp_dir so workers can reuse the same cached FFMS2 index!
+    target_reader = VideoReader(target_video, runner, temp_dir=temp_dir)
 
     results = []
 
@@ -472,7 +506,8 @@ def apply_frame_matched_sync(
     target_video: str,
     runner,
     config: dict = None,
-    audio_delay_ms: int = 0
+    audio_delay_ms: int = 0,
+    temp_dir: Path = None
 ) -> Dict[str, Any]:
     """
     Apply frame-accurate subtitle synchronization using visual frame matching.
@@ -499,6 +534,7 @@ def apply_frame_matched_sync(
             - 'frame_match_method': Hash method (default: 'phash')
             - 'frame_match_skip_unmatched': Skip lines with no match (default: False)
         audio_delay_ms: Audio delay from correlation (used for smart search centering)
+        temp_dir: Optional temp directory for FFMS2 index storage (for reuse across tracks)
 
     Returns:
         Dict with report statistics
@@ -575,7 +611,8 @@ def apply_frame_matched_sync(
     runner._log_message(f"[FrameMatch] Opening source video for Phase 1...")
 
     # Create source VideoReader for Phase 1
-    source_reader = VideoReader(source_video, runner)
+    # Pass temp_dir for persistent FFMS2 index caching
+    source_reader = VideoReader(source_video, runner, temp_dir=temp_dir)
 
     try:
         # ============================================================
@@ -658,7 +695,8 @@ def apply_frame_matched_sync(
                     audio_delay_ms,
                     config,
                     progress_lock,
-                    progress_counter
+                    progress_counter,
+                    temp_dir  # Pass temp_dir for FFMS2 index reuse
                 )
                 future_to_batch[future] = batch_idx
 
