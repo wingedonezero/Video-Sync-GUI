@@ -54,6 +54,8 @@ class AppConfig:
 
             # --- Frame-Matched Sync Settings ---
             'frame_match_search_window_sec': 1,  # Reduced to 1 sec with smart delay centering + hash caching
+            'frame_match_search_window_frames': 5,  # NEW: Search ±N frames (overrides _sec if > 0)
+            'frame_match_use_timestamp_prefilter': True,  # NEW: Use timestamps to narrow search
             'frame_match_hash_size': 8,
             'frame_match_threshold': 5,
             'frame_match_method': 'dhash',  # dhash is 10x faster than phash, still accurate

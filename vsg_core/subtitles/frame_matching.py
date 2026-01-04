@@ -29,6 +29,7 @@ import threading
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from .metadata_preserver import SubtitleMetadata
+from .frame_sync import time_to_frame_vfr, frame_to_time_vfr
 
 
 class VideoReader:
@@ -298,8 +299,16 @@ def find_matching_frame(
     hash_size = config.get('frame_match_hash_size', 8)
     hash_method = config.get('frame_match_method', 'dhash')  # dhash default for speed
 
-    # Calculate number of frames to search (radius from center)
-    num_frames_radius = int(search_window_ms / frame_duration_ms)
+    # Determine search window size
+    # NEW: Frame-based search window (more precise, faster)
+    search_window_frames = config.get('frame_match_search_window_frames', 0)
+
+    if search_window_frames > 0:
+        # Use frame-based window (±N frames)
+        num_frames_radius = search_window_frames
+    else:
+        # Fall back to time-based window (±N seconds converted to frames)
+        num_frames_radius = int(search_window_ms / frame_duration_ms)
 
     # Limit search to reasonable number
     max_search_frames = config.get('frame_match_max_search_frames', 300)
@@ -412,10 +421,12 @@ def _process_subtitle_batch(
     batch_indices: List[int],
     events: List[pysubs2.SSAEvent],
     source_hash_cache: Dict[int, Any],
+    source_video: str,
     target_video: str,
     runner,
     search_window_ms: int,
     threshold: int,
+    source_fps: float,
     target_fps: float,
     audio_delay_ms: int,
     config: dict,
@@ -433,6 +444,7 @@ def _process_subtitle_batch(
         batch_indices: List of subtitle indices to process
         events: Full list of subtitle events (read-only)
         source_hash_cache: Pre-computed source hashes (read-only)
+        source_video: Path to source video (for timestamp pre-filtering)
         target_video: Path to target video
         runner: CommandRunner for logging (thread-safe methods only)
         ... other matching parameters ...
@@ -446,6 +458,9 @@ def _process_subtitle_batch(
     # Create worker's own target VideoReader
     # Pass temp_dir so workers can reuse the same cached FFMS2 index!
     target_reader = VideoReader(target_video, runner, temp_dir=temp_dir)
+
+    # Check if timestamp pre-filtering is enabled
+    use_timestamp_prefilter = config.get('frame_match_use_timestamp_prefilter', True)
 
     results = []
 
@@ -469,8 +484,48 @@ def _process_subtitle_batch(
                     progress_counter['processed'] += 1
                 continue
 
-            # Find matching frame in target video
-            expected_target_time_ms = original_start + audio_delay_ms
+            # Calculate expected target time with optional timestamp pre-filtering
+            if use_timestamp_prefilter:
+                # TIMESTAMP PRE-FILTERING: Use VideoTimestamps to refine search center
+                # This gives us a frame-accurate center point for visual search
+                #
+                # Steps:
+                # 1. Convert source time → source frame (exact)
+                # 2. Convert source frame → source timestamp (frame-snapped)
+                # 3. Add delay to get expected target time
+                # 4. Convert to target frame (exact)
+                # 5. Convert target frame → target timestamp (frame-snapped)
+                # 6. Use this refined timestamp as visual search center
+                #
+                # This allows ±5 frame search instead of ±24, giving ~5x speedup!
+
+                source_frame = time_to_frame_vfr(original_start, source_video, source_fps, runner, config)
+
+                if source_frame is not None:
+                    # Get exact source timestamp for this frame
+                    source_timestamp_exact = frame_to_time_vfr(source_frame, source_video, source_fps, runner, config)
+
+                    if source_timestamp_exact is not None:
+                        # Add delay to get expected target time
+                        adjusted_time = source_timestamp_exact + audio_delay_ms
+
+                        # Convert to target frame and back to get frame-snapped center
+                        target_frame = time_to_frame_vfr(adjusted_time, target_video, target_fps, runner, config)
+
+                        if target_frame is not None:
+                            expected_target_time_ms = frame_to_time_vfr(target_frame, target_video, target_fps, runner, config)
+                            if expected_target_time_ms is None:
+                                # Fallback to basic calculation if frame conversion fails
+                                expected_target_time_ms = original_start + audio_delay_ms
+                        else:
+                            expected_target_time_ms = original_start + audio_delay_ms
+                    else:
+                        expected_target_time_ms = original_start + audio_delay_ms
+                else:
+                    expected_target_time_ms = original_start + audio_delay_ms
+            else:
+                # Basic calculation without pre-filtering
+                expected_target_time_ms = original_start + audio_delay_ms
 
             matched_time_ms = find_matching_frame(
                 source_hash,
@@ -561,7 +616,19 @@ def apply_frame_matched_sync(
     runner._log_message(f"[FrameMatch] Target video: {Path(target_video).name}")
     runner._log_message(f"[FrameMatch] Loading subtitle: {Path(subtitle_path).name}")
     runner._log_message(f"[FrameMatch] Audio delay for centering: {audio_delay_ms:+d}ms")
-    runner._log_message(f"[FrameMatch] Search window: ±{search_window_sec} seconds (from expected time)")
+
+    # Log search window optimization settings
+    search_window_frames = config.get('frame_match_search_window_frames', 0)
+    use_timestamp_prefilter = config.get('frame_match_use_timestamp_prefilter', True)
+
+    if search_window_frames > 0:
+        runner._log_message(f"[FrameMatch] Search window: ±{search_window_frames} frames (frame-based)")
+    else:
+        runner._log_message(f"[FrameMatch] Search window: ±{search_window_sec} seconds (time-based)")
+
+    if use_timestamp_prefilter:
+        runner._log_message(f"[FrameMatch] ✓ Timestamp pre-filtering enabled (VideoTimestamps-guided search center)")
+
     runner._log_message(f"[FrameMatch] Hash method: {hash_method} ({hash_size}x{hash_size})")
     runner._log_message(f"[FrameMatch] Match threshold: {threshold} (hamming distance)")
 
@@ -687,10 +754,12 @@ def apply_frame_matched_sync(
                     batch_indices,
                     subs.events,
                     source_hash_cache,
+                    source_video,
                     target_video,
                     runner,
                     search_window_ms,
                     threshold,
+                    source_fps,
                     target_fps,
                     audio_delay_ms,
                     config,
