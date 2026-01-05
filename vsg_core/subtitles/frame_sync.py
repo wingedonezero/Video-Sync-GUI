@@ -261,6 +261,118 @@ def time_to_frame_vfr(time_ms: float, video_path: str, fps: float, runner, confi
 
 
 # ============================================================================
+# RAW DELAY MODE (No Frame Analysis)
+# ============================================================================
+
+def apply_raw_delay_sync(
+    subtitle_path: str,
+    delay_ms: float,
+    runner,
+    config: dict = None,
+    rounding_mode: str = 'round'
+) -> Dict[str, Any]:
+    """
+    Apply raw audio delay with ASS centisecond precision rounding.
+
+    This is a pure delay mode for testing/debugging:
+    1. Load subtitles
+    2. Add raw delay to all timestamps
+    3. Round to centisecond precision (10ms for ASS format)
+    4. Save subtitles
+
+    NO frame analysis, NO VideoTimestamps - just pure math.
+    Useful for isolating whether frame correction is causing sync issues.
+
+    Args:
+        subtitle_path: Path to subtitle file (.ass, .srt, .ssa, .vtt)
+        delay_ms: Raw audio delay (unrounded float, full precision)
+        runner: CommandRunner for logging
+        config: Optional config dict (unused, for API compatibility)
+        rounding_mode: How to round to centiseconds:
+            - 'floor': Round down (1065.458ms → 1060ms)
+            - 'round': Round to nearest (1065.458ms → 1070ms)
+            - 'ceil': Round up (1065.458ms → 1070ms)
+
+    Returns:
+        Dict with report statistics
+    """
+    config = config or {}
+    rounding_mode = config.get('raw_delay_rounding', rounding_mode)
+
+    runner._log_message(f"[Raw Delay Sync] Mode: Pure delay + centisecond rounding")
+    runner._log_message(f"[Raw Delay Sync] Loading subtitle: {Path(subtitle_path).name}")
+    runner._log_message(f"[Raw Delay Sync] Raw audio delay: {delay_ms:+.3f}ms")
+    runner._log_message(f"[Raw Delay Sync] Rounding mode: {rounding_mode}")
+
+    # Capture original metadata before pysubs2 processing
+    metadata = SubtitleMetadata(subtitle_path)
+    metadata.capture()
+
+    # Load subtitle file
+    try:
+        subs = pysubs2.load(subtitle_path, encoding='utf-8')
+    except Exception as e:
+        runner._log_message(f"[Raw Delay Sync] ERROR: Failed to load subtitle file: {e}")
+        return {'error': str(e)}
+
+    if not subs.events:
+        runner._log_message(f"[Raw Delay Sync] WARNING: No subtitle events found in file")
+        return {
+            'total_events': 0,
+            'delay_applied_ms': delay_ms
+        }
+
+    runner._log_message(f"[Raw Delay Sync] Loaded {len(subs.events)} subtitle events")
+
+    # Apply delay to all events
+    for event in subs.events:
+        # Add raw delay
+        new_start_ms = event.start + delay_ms
+        new_end_ms = event.end + delay_ms
+
+        # Round to centiseconds (10ms precision for ASS)
+        if rounding_mode == 'floor':
+            event.start = int(new_start_ms // 10) * 10
+            event.end = int(new_end_ms // 10) * 10
+        elif rounding_mode == 'ceil':
+            event.start = int(math.ceil(new_start_ms / 10)) * 10
+            event.end = int(math.ceil(new_end_ms / 10)) * 10
+        else:  # 'round' (default)
+            event.start = int(round(new_start_ms / 10)) * 10
+            event.end = int(round(new_end_ms / 10)) * 10
+
+    # Calculate what the delay became after rounding
+    # Use first event as example
+    if subs.events:
+        first_event_original = metadata.metadata.get('first_event_start', 0)
+        first_event_new = subs.events[0].start
+        actual_delay = first_event_new - first_event_original
+        runner._log_message(f"[Raw Delay Sync] Example: First event shifted by {actual_delay:+.0f}ms (after rounding)")
+
+    # Save modified subtitle
+    runner._log_message(f"[Raw Delay Sync] Saving modified subtitle file...")
+    try:
+        subs.save(subtitle_path, encoding='utf-8')
+    except Exception as e:
+        runner._log_message(f"[Raw Delay Sync] ERROR: Failed to save subtitle file: {e}")
+        return {'error': str(e)}
+
+    # Validate and restore lost metadata
+    metadata.validate_and_restore(runner, expected_delay_ms=int(round(delay_ms)))
+
+    # Log results
+    runner._log_message(f"[Raw Delay Sync] ✓ Successfully synchronized {len(subs.events)} events")
+    runner._log_message(f"[Raw Delay Sync]   - Raw delay applied: {delay_ms:+.3f}ms")
+    runner._log_message(f"[Raw Delay Sync]   - Rounding mode: {rounding_mode}")
+
+    return {
+        'total_events': len(subs.events),
+        'raw_delay_ms': delay_ms,
+        'rounding_mode': rounding_mode
+    }
+
+
+# ============================================================================
 # FRAME-CORRECTED DELAY CALCULATION
 # ============================================================================
 

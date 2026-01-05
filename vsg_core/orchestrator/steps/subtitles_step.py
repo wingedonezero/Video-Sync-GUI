@@ -17,7 +17,7 @@ from vsg_core.subtitles.ocr import run_ocr
 from vsg_core.subtitles.cleanup import run_cleanup
 from vsg_core.subtitles.timing import fix_subtitle_timing
 from vsg_core.subtitles.stepping_adjust import apply_stepping_to_subtitles
-from vsg_core.subtitles.frame_sync import apply_frame_perfect_sync, apply_videotimestamps_sync, apply_frame_snapped_sync, apply_dual_videotimestamps_sync, detect_video_fps
+from vsg_core.subtitles.frame_sync import apply_frame_perfect_sync, apply_videotimestamps_sync, apply_frame_snapped_sync, apply_dual_videotimestamps_sync, apply_raw_delay_sync, detect_video_fps
 from vsg_core.subtitles.frame_matching import apply_frame_matched_sync
 
 class SubtitlesStep:
@@ -235,6 +235,37 @@ class SubtitlesStep:
                                 runner._log_message(f"[Frame-Matched Sync] Source: {source_video}, Target: {target_video}")
 
                             # Skip the delay-based sync logic for frame-matched mode
+                            continue
+
+                        # Raw-Delay mode: Pure delay with centisecond rounding (no frame analysis)
+                        if subtitle_sync_mode == 'raw-delay':
+                            # Get RAW audio delay (preserves precision)
+                            source_key = item.sync_to if item.track.source == 'External' else item.track.source
+                            audio_delay_ms = 0.0
+                            if ctx.delays and source_key in ctx.delays.raw_source_delays_ms:
+                                audio_delay_ms = ctx.delays.raw_source_delays_ms[source_key]
+                                runner._log_message(f"[Raw Delay Sync] Using raw audio delay: {audio_delay_ms:+.3f}ms from {source_key}")
+
+                            runner._log_message(f"[Raw Delay Sync] Applying to track {item.track.id} ({item.track.props.name or 'Unnamed'})")
+
+                            frame_sync_report = apply_raw_delay_sync(
+                                str(item.extracted_path),
+                                audio_delay_ms,
+                                runner,
+                                ctx.settings_dict
+                            )
+
+                            if frame_sync_report and 'error' not in frame_sync_report:
+                                runner._log_message(f"--- Raw Delay Sync Report ---")
+                                for key, value in frame_sync_report.items():
+                                    runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
+                                runner._log_message("------------------------------------------")
+                                # Mark that timestamps have been adjusted
+                                item.frame_adjusted = True
+                            else:
+                                runner._log_message(f"[Raw Delay Sync] WARNING: Sync failed for track {item.track.id}")
+
+                            # Skip the delay-based sync logic for raw-delay mode
                             continue
 
                         # Dual-VideoTimestamps mode: Frame-accurate mapping using both videos' timestamps
