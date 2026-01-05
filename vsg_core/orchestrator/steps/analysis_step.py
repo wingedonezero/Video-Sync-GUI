@@ -122,6 +122,7 @@ def _choose_final_delay_raw(results: List[Dict[str, Any]], config: Dict, runner:
     """
     Same as _choose_final_delay but returns raw float value without rounding.
     Used for VideoTimestamps modes to preserve precision and prevent triple-rounding.
+    Uses r['raw'] field from correlation results instead of r['delay'].
     """
     min_match_pct = float(config.get('min_match_pct', 5.0))
     min_accepted_chunks = int(config.get('min_accepted_chunks', 3))
@@ -131,25 +132,41 @@ def _choose_final_delay_raw(results: List[Dict[str, Any]], config: Dict, runner:
     if len(accepted) < min_accepted_chunks:
         return None
 
-    delays = [r['delay'] for r in accepted]
+    # Use raw delays (with decimals) instead of rounded delays
+    raw_delays = [r['raw'] for r in accepted]
+    rounded_delays = [r['delay'] for r in accepted]
 
     if delay_mode == 'First Stable':
-        # Use proper stability detection to find first stable segment
-        winner = _find_first_stable_segment_delay(results, runner, config)
-        if winner is None:
+        # Find first stable segment using rounded delays (same logic as _choose_final_delay)
+        winner_rounded = _find_first_stable_segment_delay(results, runner, config)
+        if winner_rounded is None:
             # Fallback to mode if no stable segment found
-            counts = Counter(delays)
-            winner = counts.most_common(1)[0][0]
-        winner_raw = float(winner)
+            counts = Counter(rounded_delays)
+            winner_rounded = counts.most_common(1)[0][0]
+
+        # Find the first occurrence of this rounded delay and return its raw value
+        for r in accepted:
+            if r['delay'] == winner_rounded:
+                return r['raw']
+        # Fallback: convert rounded to float
+        return float(winner_rounded)
+
     elif delay_mode == 'Average':
         # Return raw average without rounding
-        winner_raw = sum(delays) / len(delays)
-    else:  # Mode (Most Common) - default
-        counts = Counter(delays)
-        winner = counts.most_common(1)[0][0]
-        winner_raw = float(winner)
+        return sum(raw_delays) / len(raw_delays)
 
-    return winner_raw
+    else:  # Mode (Most Common) - default
+        # Find most common rounded delay
+        counts = Counter(rounded_delays)
+        winner_rounded = counts.most_common(1)[0][0]
+
+        # Return the first raw value that corresponds to this rounded delay
+        for r in accepted:
+            if r['delay'] == winner_rounded:
+                return r['raw']
+        # Fallback: convert rounded to float
+        return float(winner_rounded)
+
 
 
 class AnalysisStep:
