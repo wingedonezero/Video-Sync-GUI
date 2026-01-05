@@ -164,7 +164,7 @@ class AnalysisStep:
         # NEW: Skip analysis if only Source 1 (remux-only mode)
         if len(ctx.sources) == 1:
             runner._log_message("--- Analysis Phase: Skipped (Remux-only mode - no sync sources) ---")
-            ctx.delays = Delays(source_delays_ms={}, raw_source_delays_ms={}, global_shift_ms=0)
+            ctx.delays = Delays(source_delays_ms={}, raw_source_delays_ms={}, global_shift_ms=0, raw_global_shift_ms=0.0)
             return ctx
 
         source_delays: Dict[str, int] = {}
@@ -480,6 +480,7 @@ class AnalysisStep:
         runner._log_message("\n--- Calculating Global Shift ---")
 
         delays_to_consider = []
+        raw_delays_to_consider = []  # For VideoTimestamps precision
         if ctx.global_shift_is_required:
             runner._log_message("[Global Shift] Identifying delays from sources contributing audio tracks...")
             for item in ctx.manual_layout:
@@ -488,6 +489,7 @@ class AnalysisStep:
                 if item_type == 'audio':
                     if item_source in source_delays and source_delays[item_source] not in delays_to_consider:
                         delays_to_consider.append(source_delays[item_source])
+                        raw_delays_to_consider.append(raw_source_delays[item_source])
                         runner._log_message(f"  - Considering delay from {item_source}: {source_delays[item_source]}ms")
 
             if source1_container_delays and source1_info:
@@ -504,18 +506,25 @@ class AnalysisStep:
                     runner._log_message("  - Considering Source 1 audio container delays (video delays ignored).")
 
         most_negative = min(delays_to_consider) if delays_to_consider else 0
+        most_negative_raw = min(raw_delays_to_consider) if raw_delays_to_consider else 0.0
         global_shift_ms = 0
+        raw_global_shift_ms = 0.0
 
         if most_negative < 0:
+            # Rounded global shift for mkvmerge/audio sync (existing behavior)
             global_shift_ms = abs(most_negative)
-            runner._log_message(f"[Delay] Most negative relevant delay: {most_negative}ms")
-            runner._log_message(f"[Delay] Applying lossless global shift: +{global_shift_ms}ms")
+            # Raw global shift for VideoTimestamps precision (prevents triple rounding)
+            raw_global_shift_ms = abs(most_negative_raw)
+
+            runner._log_message(f"[Delay] Most negative relevant delay: {most_negative}ms (rounded), {most_negative_raw:.3f}ms (raw)")
+            runner._log_message(f"[Delay] Applying lossless global shift: +{global_shift_ms}ms (rounded), +{raw_global_shift_ms:.3f}ms (raw)")
             runner._log_message(f"[Delay] Adjusted delays after global shift:")
             for source_key in sorted(source_delays.keys()):
                 original_delay = source_delays[source_key]
+                original_raw_delay = raw_source_delays[source_key]
                 source_delays[source_key] += global_shift_ms
-                raw_source_delays[source_key] += global_shift_ms
-                runner._log_message(f"  - {source_key}: {original_delay:+.1f}ms → {source_delays[source_key]:+.1f}ms")
+                raw_source_delays[source_key] += raw_global_shift_ms
+                runner._log_message(f"  - {source_key}: {original_delay:+.1f}ms → {source_delays[source_key]:+.1f}ms (rounded: {original_raw_delay:+.3f}ms → {raw_source_delays[source_key]:+.3f}ms raw)")
 
             if source1_container_delays:
                 runner._log_message(f"[Delay] Source 1 container delays (will have +{global_shift_ms}ms added during mux):")
@@ -535,7 +544,8 @@ class AnalysisStep:
         ctx.delays = Delays(
             source_delays_ms=source_delays,
             raw_source_delays_ms=raw_source_delays,
-            global_shift_ms=global_shift_ms
+            global_shift_ms=global_shift_ms,
+            raw_global_shift_ms=raw_global_shift_ms
         )
 
         # Final summary
