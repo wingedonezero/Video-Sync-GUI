@@ -373,6 +373,169 @@ def apply_raw_delay_sync(
 
 
 # ============================================================================
+# DURATION ALIGNMENT MODE (Frame Alignment via Total Duration)
+# ============================================================================
+
+def apply_duration_align_sync(
+    subtitle_path: str,
+    source_video: str,
+    target_video: str,
+    global_shift_ms: float,
+    runner,
+    config: dict = None
+) -> Dict[str, Any]:
+    """
+    Align subtitles by total video duration difference (frame alignment).
+
+    Algorithm:
+    1. Get total duration of source video (where subs are from)
+    2. Get total duration of target video (Source 1)
+    3. Calculate duration_offset = target_duration - source_duration
+    4. Apply duration_offset to all subtitle times
+    5. Apply global_shift_ms on top (if any)
+
+    Example:
+    - Source video: 23:40.003 (1420003ms)
+    - Target video: 23:41.002 (1421002ms)
+    - Duration offset: +999ms
+    - Global shift: +1000ms
+    - Total shift: +1999ms
+
+    This aligns subtitles to the target video's frame timing,
+    then adds global shift to sync with other tracks.
+
+    Args:
+        subtitle_path: Path to subtitle file
+        source_video: Path to video that subs were originally timed to
+        target_video: Path to target video (Source 1)
+        global_shift_ms: Global shift from delays (raw_global_shift_ms)
+        runner: CommandRunner for logging
+        config: Optional config dict
+
+    Returns:
+        Dict with report statistics
+    """
+    try:
+        from video_timestamps import FPSTimestamps, VideoTimestamps
+        from fractions import Fraction
+    except ImportError:
+        runner._log_message("[Duration Align] ERROR: VideoTimestamps not installed. Install with: pip install VideoTimestamps")
+        return {'error': 'VideoTimestamps library not installed'}
+
+    config = config or {}
+
+    runner._log_message(f"[Duration Align] Mode: Frame alignment via total duration difference")
+    runner._log_message(f"[Duration Align] Loading subtitle: {Path(subtitle_path).name}")
+    runner._log_message(f"[Duration Align] Source video: {Path(source_video).name}")
+    runner._log_message(f"[Duration Align] Target video: {Path(target_video).name}")
+
+    # Detect FPS of both videos
+    source_fps = detect_video_fps(source_video, runner)
+    target_fps = detect_video_fps(target_video, runner)
+
+    # Get VideoTimestamps for duration calculation
+    source_vts = get_vfr_timestamps(source_video, source_fps, runner, config)
+    target_vts = get_vfr_timestamps(target_video, target_fps, runner, config)
+
+    if source_vts is None or target_vts is None:
+        return {'error': 'Failed to create VideoTimestamps instances'}
+
+    # Get total frame count and calculate duration
+    # For CFR: num_frames = duration_ms / frame_duration_ms
+    source_frame_duration = 1000.0 / source_fps
+    target_frame_duration = 1000.0 / target_fps
+
+    # Estimate total duration from video file
+    # We'll use ffprobe or similar to get exact duration
+    import subprocess
+    import json
+
+    try:
+        # Get source video duration
+        cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', source_video]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        source_info = json.loads(result.stdout)
+        source_duration_sec = float(source_info['format']['duration'])
+        source_duration_ms = source_duration_sec * 1000
+
+        # Get target video duration
+        cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', target_video]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        target_info = json.loads(result.stdout)
+        target_duration_sec = float(target_info['format']['duration'])
+        target_duration_ms = target_duration_sec * 1000
+
+    except Exception as e:
+        runner._log_message(f"[Duration Align] ERROR: Failed to get video durations: {e}")
+        return {'error': str(e)}
+
+    # Calculate duration offset
+    duration_offset_ms = target_duration_ms - source_duration_ms
+
+    runner._log_message(f"[Duration Align] Source video duration: {source_duration_ms:.3f}ms ({source_duration_sec:.3f}s)")
+    runner._log_message(f"[Duration Align] Target video duration: {target_duration_ms:.3f}ms ({target_duration_sec:.3f}s)")
+    runner._log_message(f"[Duration Align] Duration offset: {duration_offset_ms:+.3f}ms")
+    runner._log_message(f"[Duration Align] Global shift: {global_shift_ms:+.3f}ms")
+
+    # Total shift = duration offset + global shift
+    total_shift_ms = duration_offset_ms + global_shift_ms
+    runner._log_message(f"[Duration Align] Total shift to apply: {total_shift_ms:+.3f}ms")
+
+    # Capture original metadata
+    metadata = SubtitleMetadata(subtitle_path)
+    metadata.capture()
+
+    # Load subtitle file
+    try:
+        subs = pysubs2.load(subtitle_path, encoding='utf-8')
+    except Exception as e:
+        runner._log_message(f"[Duration Align] ERROR: Failed to load subtitle file: {e}")
+        return {'error': str(e)}
+
+    if not subs.events:
+        runner._log_message(f"[Duration Align] WARNING: No subtitle events found")
+        return {
+            'total_events': 0,
+            'duration_offset_ms': duration_offset_ms,
+            'global_shift_ms': global_shift_ms,
+            'total_shift_ms': total_shift_ms
+        }
+
+    runner._log_message(f"[Duration Align] Loaded {len(subs.events)} subtitle events")
+
+    # Apply total shift to all events
+    for event in subs.events:
+        event.start = event.start + total_shift_ms
+        event.end = event.end + total_shift_ms
+
+    # Save modified subtitle
+    runner._log_message(f"[Duration Align] Saving modified subtitle file...")
+    try:
+        subs.save(subtitle_path, encoding='utf-8')
+    except Exception as e:
+        runner._log_message(f"[Duration Align] ERROR: Failed to save subtitle file: {e}")
+        return {'error': str(e)}
+
+    # Validate and restore metadata
+    metadata.validate_and_restore(runner, expected_delay_ms=int(round(total_shift_ms)))
+
+    # Log results
+    runner._log_message(f"[Duration Align] ✓ Successfully synchronized {len(subs.events)} events")
+    runner._log_message(f"[Duration Align]   - Duration offset: {duration_offset_ms:+.3f}ms")
+    runner._log_message(f"[Duration Align]   - Global shift: {global_shift_ms:+.3f}ms")
+    runner._log_message(f"[Duration Align]   - Total shift applied: {total_shift_ms:+.3f}ms")
+
+    return {
+        'total_events': len(subs.events),
+        'source_duration_ms': source_duration_ms,
+        'target_duration_ms': target_duration_ms,
+        'duration_offset_ms': duration_offset_ms,
+        'global_shift_ms': global_shift_ms,
+        'total_shift_ms': total_shift_ms
+    }
+
+
+# ============================================================================
 # FRAME-CORRECTED DELAY CALCULATION
 # ============================================================================
 

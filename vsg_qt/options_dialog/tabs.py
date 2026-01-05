@@ -932,7 +932,7 @@ class SubtitleSyncTab(QWidget):
         sync_layout = QFormLayout(sync_group)
 
         self.widgets['subtitle_sync_mode'] = QComboBox()
-        self.widgets['subtitle_sync_mode'].addItems(['time-based', 'frame-perfect', 'frame-snapped', 'videotimestamps', 'dual-videotimestamps', 'frame-matched', 'raw-delay'])
+        self.widgets['subtitle_sync_mode'].addItems(['time-based', 'frame-perfect', 'frame-snapped', 'videotimestamps', 'dual-videotimestamps', 'frame-matched', 'raw-delay', 'duration-align'])
         self.widgets['subtitle_sync_mode'].setToolTip(
             "Subtitle synchronization method:\n\n"
             "• time-based (Default): Apply delays using millisecond timestamps\n"
@@ -988,6 +988,14 @@ class SubtitleSyncTab(QWidget):
             "  - If this mode is perfect but dual-videotimestamps isn't,\n"
             "    then frame correction algorithm needs adjustment\n"
             "  - No external dependencies\n\n"
+            "• duration-align: Frame alignment via total duration difference\n"
+            "  - Calculates: target_duration - source_duration\n"
+            "  - Applies this offset to all subtitle times\n"
+            "  - Then adds global shift (if any)\n"
+            "  - Example: Source 23:40.003, Target 23:41.002 → +999ms offset\n"
+            "  - Ignores audio correlation completely\n"
+            "  - Best for frame-aligned videos with different total durations\n"
+            "  - Requires both source and target video files\n\n"
             "Note: Stepping correction (if enabled) takes precedence over this setting."
         )
 
