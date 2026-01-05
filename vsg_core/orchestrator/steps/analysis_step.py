@@ -3,7 +3,6 @@
 from __future__ import annotations
 from typing import Optional, List, Dict, Any
 from collections import Counter
-import math
 
 from vsg_core.io.runner import CommandRunner
 from vsg_core.orchestrator.steps.context import Context
@@ -487,10 +486,9 @@ class AnalysisStep:
                 item_source = item.get('source')
                 item_type = item.get('type')
                 if item_type == 'audio':
-                    # Use RAW delays to calculate global shift for VideoTimestamps precision
-                    if item_source in raw_source_delays and raw_source_delays[item_source] not in delays_to_consider:
-                        delays_to_consider.append(raw_source_delays[item_source])
-                        runner._log_message(f"  - Considering delay from {item_source}: {raw_source_delays[item_source]:.3f}ms")
+                    if item_source in source_delays and source_delays[item_source] not in delays_to_consider:
+                        delays_to_consider.append(source_delays[item_source])
+                        runner._log_message(f"  - Considering delay from {item_source}: {source_delays[item_source]}ms")
 
             if source1_container_delays and source1_info:
                 audio_container_delays = []
@@ -509,9 +507,8 @@ class AnalysisStep:
         global_shift_ms = 0
 
         if most_negative < 0:
-            # Use ceil to ensure all RAW delays become non-negative (e.g., -1033.458 needs +1034)
-            global_shift_ms = math.ceil(abs(most_negative))
-            runner._log_message(f"[Delay] Most negative relevant delay: {most_negative:.3f}ms")
+            global_shift_ms = abs(most_negative)
+            runner._log_message(f"[Delay] Most negative relevant delay: {most_negative}ms")
             runner._log_message(f"[Delay] Applying lossless global shift: +{global_shift_ms}ms")
             runner._log_message(f"[Delay] Adjusted delays after global shift:")
             for source_key in sorted(source_delays.keys()):
