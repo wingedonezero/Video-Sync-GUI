@@ -244,11 +244,11 @@ class SubtitlesStep:
                             source_video = ctx.sources.get(source_key)
                             target_video = source1_file
 
-                            # Get audio delay for subtitle positioning
-                            audio_delay_ms = 0
-                            if ctx.delays and source_key in ctx.delays.source_delays_ms:
-                                audio_delay_ms = int(ctx.delays.source_delays_ms[source_key])
-                                runner._log_message(f"[Dual VideoTimestamps] Using audio delay: {audio_delay_ms:+d}ms")
+                            # Get RAW audio delay for subtitle positioning (preserves precision)
+                            audio_delay_ms = 0.0
+                            if ctx.delays and source_key in ctx.delays.raw_source_delays_ms:
+                                audio_delay_ms = ctx.delays.raw_source_delays_ms[source_key]
+                                runner._log_message(f"[Dual VideoTimestamps] Using raw audio delay: {audio_delay_ms:+.3f}ms")
 
                             if source_video and target_video:
                                 runner._log_message(f"[Dual VideoTimestamps] Applying to track {item.track.id} ({item.track.props.name or 'Unnamed'})")
@@ -284,17 +284,30 @@ class SubtitlesStep:
                         source_key = item.sync_to if item.track.source == 'External' else item.track.source
                         delay_ms = 0
 
-                        if ctx.delays and source_key in ctx.delays.source_delays_ms:
-                            delay_ms = int(ctx.delays.source_delays_ms[source_key])
-                            mode_label = "Frame-Snapped Sync" if subtitle_sync_mode == 'frame-snapped' else ("VideoTimestamps Sync" if subtitle_sync_mode == 'videotimestamps' else "Frame-Perfect Sync")
-                            runner._log_message(f"[{mode_label}] DEBUG: source_key='{source_key}', delay from source_delays_ms={delay_ms}ms")
-                            runner._log_message(f"[{mode_label}] DEBUG: All source_delays_ms: {ctx.delays.source_delays_ms}")
-                            runner._log_message(f"[{mode_label}] DEBUG: Global shift: {ctx.delays.global_shift_ms}ms")
+                        # Use RAW delays for videotimestamps mode (preserves precision)
+                        # Use rounded delays for other modes
+                        if subtitle_sync_mode == 'videotimestamps':
+                            if ctx.delays and source_key in ctx.delays.raw_source_delays_ms:
+                                delay_ms = ctx.delays.raw_source_delays_ms[source_key]
+                                runner._log_message(f"[VideoTimestamps Sync] DEBUG: source_key='{source_key}', raw delay={delay_ms:.3f}ms")
+                                runner._log_message(f"[VideoTimestamps Sync] DEBUG: All raw_source_delays_ms: {ctx.delays.raw_source_delays_ms}")
+                                runner._log_message(f"[VideoTimestamps Sync] DEBUG: Global shift: {ctx.delays.raw_global_shift_ms:.3f}ms")
+                            else:
+                                runner._log_message(f"[VideoTimestamps Sync] DEBUG: source_key='{source_key}' not found in raw delays or delays is None")
+                                if ctx.delays:
+                                    runner._log_message(f"[VideoTimestamps Sync] DEBUG: Available keys: {list(ctx.delays.raw_source_delays_ms.keys())}")
                         else:
-                            mode_label = "Frame-Snapped Sync" if subtitle_sync_mode == 'frame-snapped' else ("VideoTimestamps Sync" if subtitle_sync_mode == 'videotimestamps' else "Frame-Perfect Sync")
-                            runner._log_message(f"[{mode_label}] DEBUG: source_key='{source_key}' not found in delays or delays is None")
-                            if ctx.delays:
-                                runner._log_message(f"[{mode_label}] DEBUG: Available keys: {list(ctx.delays.source_delays_ms.keys())}")
+                            if ctx.delays and source_key in ctx.delays.source_delays_ms:
+                                delay_ms = int(ctx.delays.source_delays_ms[source_key])
+                                mode_label = "Frame-Snapped Sync" if subtitle_sync_mode == 'frame-snapped' else "Frame-Perfect Sync"
+                                runner._log_message(f"[{mode_label}] DEBUG: source_key='{source_key}', delay from source_delays_ms={delay_ms}ms")
+                                runner._log_message(f"[{mode_label}] DEBUG: All source_delays_ms: {ctx.delays.source_delays_ms}")
+                                runner._log_message(f"[{mode_label}] DEBUG: Global shift: {ctx.delays.global_shift_ms}ms")
+                            else:
+                                mode_label = "Frame-Snapped Sync" if subtitle_sync_mode == 'frame-snapped' else "Frame-Perfect Sync"
+                                runner._log_message(f"[{mode_label}] DEBUG: source_key='{source_key}' not found in delays or delays is None")
+                                if ctx.delays:
+                                    runner._log_message(f"[{mode_label}] DEBUG: Available keys: {list(ctx.delays.source_delays_ms.keys())}")
 
                         # Only apply if there's a non-zero delay
                         if delay_ms != 0:

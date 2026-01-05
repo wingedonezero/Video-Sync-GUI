@@ -261,31 +261,132 @@ def time_to_frame_vfr(time_ms: float, video_path: str, fps: float, runner, confi
 
 
 # ============================================================================
+# FRAME-CORRECTED DELAY CALCULATION
+# ============================================================================
+
+def compute_frame_corrected_delay(
+    source_video: str,
+    target_video: str,
+    raw_delay_ms: float,
+    anchor_subtitle_time_ms: int,
+    runner,
+    config: dict = None
+) -> float:
+    """
+    Compute a single frame-corrected delay using video timestamps.
+
+    This function implements the CORRECT subtitle sync algorithm:
+    1. Uses video-timestamps ONLY to compute a frame-corrected delay offset
+    2. Returns a single delay to be applied to ALL subtitle events
+    3. No per-event frame snapping (which causes random ±1-4 frame errors)
+
+    Algorithm:
+    1. Find the exact frame PTS in source video for the anchor subtitle time
+    2. Add the raw audio delay
+    3. Find the nearest frame PTS in target video
+    4. Compute the correction factor (target_pts - predicted_pts)
+    5. Return final_delay = raw_delay + correction
+
+    This delay is then applied ONCE to all subtitle events, preserving
+    their relative timing relationships.
+
+    Args:
+        source_video: Path to video that subs were originally timed to
+        target_video: Path to target video (Source 1)
+        raw_delay_ms: Raw audio delay from correlation (unrounded float)
+        anchor_subtitle_time_ms: Timestamp of anchor subtitle (first dialogue line)
+        runner: CommandRunner for logging
+        config: Optional config dict with settings
+
+    Returns:
+        Frame-corrected delay in milliseconds (float)
+    """
+    runner._log_message(f"[Frame Correction] Computing frame-corrected delay using anchor-based method")
+    runner._log_message(f"[Frame Correction] Anchor subtitle time: {anchor_subtitle_time_ms}ms")
+    runner._log_message(f"[Frame Correction] Raw audio delay: {raw_delay_ms:+.3f}ms")
+
+    # Detect FPS of both videos
+    source_fps = detect_video_fps(source_video, runner)
+    target_fps = detect_video_fps(target_video, runner)
+
+    runner._log_message(f"[Frame Correction] Source FPS: {source_fps:.3f}")
+    runner._log_message(f"[Frame Correction] Target FPS: {target_fps:.3f}")
+
+    # Step 1: Find nearest frame PTS in source for anchor time
+    source_frame = time_to_frame_vfr(anchor_subtitle_time_ms, source_video, source_fps, runner, config)
+    if source_frame is None:
+        runner._log_message(f"[Frame Correction] WARNING: Failed to get source frame, using raw delay")
+        return raw_delay_ms
+
+    source_pts = frame_to_time_vfr(source_frame, source_video, source_fps, runner, config)
+    if source_pts is None:
+        runner._log_message(f"[Frame Correction] WARNING: Failed to get source PTS, using raw delay")
+        return raw_delay_ms
+
+    runner._log_message(f"[Frame Correction] Source: frame {source_frame} @ {source_pts}ms")
+
+    # Step 2: Add raw delay to get predicted target time
+    predicted_target_time = source_pts + raw_delay_ms
+    runner._log_message(f"[Frame Correction] Predicted target time: {source_pts}ms + {raw_delay_ms:+.3f}ms = {predicted_target_time:.3f}ms")
+
+    # Step 3: Find nearest frame PTS in target
+    target_frame = time_to_frame_vfr(predicted_target_time, target_video, target_fps, runner, config)
+    if target_frame is None:
+        runner._log_message(f"[Frame Correction] WARNING: Failed to get target frame, using raw delay")
+        return raw_delay_ms
+
+    target_pts = frame_to_time_vfr(target_frame, target_video, target_fps, runner, config)
+    if target_pts is None:
+        runner._log_message(f"[Frame Correction] WARNING: Failed to get target PTS, using raw delay")
+        return raw_delay_ms
+
+    runner._log_message(f"[Frame Correction] Target: frame {target_frame} @ {target_pts}ms")
+
+    # Step 4: Compute correction factor
+    correction = target_pts - predicted_target_time
+    runner._log_message(f"[Frame Correction] Correction: {target_pts}ms - {predicted_target_time:.3f}ms = {correction:.3f}ms")
+
+    # Step 5: Calculate final delay
+    final_delay = raw_delay_ms + correction
+    runner._log_message(f"[Frame Correction] Final delay: {raw_delay_ms:+.3f}ms + {correction:+.3f}ms = {final_delay:+.3f}ms")
+    runner._log_message(f"[Frame Correction] ✓ Frame-corrected delay calculated successfully")
+
+    return final_delay
+
+
+# ============================================================================
 # CLEAN VIDEOTIMESTAMPS MODE (No custom offsets)
 # ============================================================================
 
 def apply_videotimestamps_sync(
     subtitle_path: str,
-    delay_ms: int,
+    delay_ms: float,
     target_fps: float,
     runner,
     config: dict = None,
     video_path: str = None
 ) -> Dict[str, Any]:
     """
-    Apply frame-perfect synchronization using VideoTimestamps library ONLY.
+    Apply frame-corrected synchronization using VideoTimestamps library.
 
-    This mode uses the VideoTimestamps library in its pure form without any
-    custom frame offset adjustments (no +0.5 middle mode, no aegisub ceil).
+    CORRECT ALGORITHM (prevents per-event frame rounding errors):
+    1. Find first non-empty subtitle event as anchor
+    2. Calculate frame correction for anchor subtitle
+    3. Apply single frame-corrected delay to ALL events (preserves relative timing)
+    4. No per-event frame snapping (eliminates random ±1-4 frame errors)
 
-    The library handles all time↔frame conversions using actual video timestamps.
+    This provides frame-accurate alignment while preserving subtitle timing relationships:
+    - Uses video-timestamps ONLY for delay correction calculation
+    - Applies single global shift to all events
+    - Preserves original subtitle durations and relative positions
+    - ASS/SRT format handles final centisecond quantization
 
     Args:
         subtitle_path: Path to subtitle file (.ass, .srt, .ssa, .vtt)
-        delay_ms: Time offset in milliseconds
+        delay_ms: Raw audio delay from correlation (unrounded float)
         target_fps: Frame rate (used for CFR videos)
         runner: CommandRunner for logging
-        config: Optional config dict (unused, for API compatibility)
+        config: Optional config dict
         video_path: Path to video file (required)
 
     Returns:
@@ -295,26 +396,12 @@ def apply_videotimestamps_sync(
         runner._log_message("[VideoTimestamps Sync] ERROR: VideoTimestamps mode requires video_path")
         return {'error': 'VideoTimestamps mode requires video_path'}
 
-    try:
-        from video_timestamps import FPSTimestamps, VideoTimestamps, TimeType, RoundingMethod
-        from fractions import Fraction
-    except ImportError:
-        runner._log_message("[VideoTimestamps Sync] ERROR: VideoTimestamps not installed. Install with: pip install VideoTimestamps")
-        return {'error': 'VideoTimestamps library not installed'}
-
     config = config or {}
-    rounding_method = config.get('videotimestamps_rounding', 'round')
 
-    runner._log_message(f"[VideoTimestamps Sync] Mode: Pure VideoTimestamps with TimeType.EXACT")
-    runner._log_message(f"[VideoTimestamps Sync] RoundingMethod: {rounding_method.upper()}")
+    runner._log_message(f"[VideoTimestamps Sync] Mode: Frame-corrected sync using target video")
     runner._log_message(f"[VideoTimestamps Sync] Loading subtitle: {Path(subtitle_path).name}")
-    runner._log_message(f"[VideoTimestamps Sync] Video: {Path(video_path).name}")
-    runner._log_message(f"[VideoTimestamps Sync] Delay to apply: {delay_ms:+d} ms")
-
-    # Get VideoTimestamps instance
-    vts = get_vfr_timestamps(video_path, target_fps, runner, config)
-    if vts is None:
-        return {'error': 'Failed to create VideoTimestamps instance'}
+    runner._log_message(f"[VideoTimestamps Sync] Target video: {Path(video_path).name}")
+    runner._log_message(f"[VideoTimestamps Sync] Raw audio delay: {delay_ms:+.3f}ms")
 
     # Capture original metadata before pysubs2 processing
     metadata = SubtitleMetadata(subtitle_path)
@@ -331,48 +418,48 @@ def apply_videotimestamps_sync(
         runner._log_message(f"[VideoTimestamps Sync] WARNING: No subtitle events found in file")
         return {
             'total_events': 0,
-            'adjusted_events': 0,
-            'delay_applied_ms': delay_ms
+            'frame_corrected_delay_ms': delay_ms
         }
 
-    adjusted_count = 0
-    runner._log_message(f"[VideoTimestamps Sync] Processing {len(subs.events)} subtitle events...")
+    runner._log_message(f"[VideoTimestamps Sync] Loaded {len(subs.events)} subtitle events")
 
-    # Process each event: apply delay, then snap to frames using VideoTimestamps with EXACT
+    # Find first non-empty event as anchor
+    anchor_event = next((e for e in subs.events if e.end > e.start), subs.events[0])
+    anchor_time_ms = anchor_event.start
+
+    runner._log_message(f"[VideoTimestamps Sync] Using anchor subtitle at {anchor_time_ms}ms")
+    runner._log_message(f"[VideoTimestamps Sync] Computing frame correction for anchor...")
+
+    # Calculate frame correction for single-video mode
+    # Add delay first
+    adjusted_anchor_time = anchor_time_ms + delay_ms
+
+    # Snap to frame boundary
+    anchor_frame = time_to_frame_vfr(adjusted_anchor_time, video_path, target_fps, runner, config)
+    if anchor_frame is None:
+        runner._log_message(f"[VideoTimestamps Sync] WARNING: Failed to get anchor frame, using raw delay")
+        frame_corrected_delay = delay_ms
+    else:
+        anchor_frame_pts = frame_to_time_vfr(anchor_frame, video_path, target_fps, runner, config)
+        if anchor_frame_pts is None:
+            runner._log_message(f"[VideoTimestamps Sync] WARNING: Failed to get anchor PTS, using raw delay")
+            frame_corrected_delay = delay_ms
+        else:
+            # Correction = difference between frame-snapped position and original adjusted position
+            correction = anchor_frame_pts - adjusted_anchor_time
+            frame_corrected_delay = delay_ms + correction
+
+            runner._log_message(f"[VideoTimestamps Sync] Anchor after delay: {adjusted_anchor_time:.3f}ms")
+            runner._log_message(f"[VideoTimestamps Sync] Anchor frame {anchor_frame} @ {anchor_frame_pts}ms")
+            runner._log_message(f"[VideoTimestamps Sync] Correction: {correction:+.3f}ms")
+            runner._log_message(f"[VideoTimestamps Sync] Frame-corrected delay: {frame_corrected_delay:+.3f}ms")
+
+    runner._log_message(f"[VideoTimestamps Sync] Applying single delay of {frame_corrected_delay:+.3f}ms to all {len(subs.events)} events...")
+
+    # Apply the SAME delay to ALL events (no per-event frame snapping!)
     for event in subs.events:
-        original_start = event.start
-        original_end = event.end
-
-        # Skip empty events
-        if original_start == original_end:
-            continue
-
-        # Apply delay in milliseconds
-        new_start_ms = original_start + delay_ms
-        new_end_ms = original_end + delay_ms
-
-        # Convert to frames using VideoTimestamps with TimeType.EXACT
-        new_start_frame = time_to_frame_vfr(new_start_ms, video_path, target_fps, runner, config)
-        new_end_frame = time_to_frame_vfr(new_end_ms, video_path, target_fps, runner, config)
-
-        if new_start_frame is None or new_end_frame is None:
-            runner._log_message(f"[VideoTimestamps Sync] ERROR: Failed to convert time to frame")
-            continue
-
-        # Convert back to time using VideoTimestamps with TimeType.EXACT
-        new_start_ms_snapped = frame_to_time_vfr(new_start_frame, video_path, target_fps, runner, config)
-        new_end_ms_snapped = frame_to_time_vfr(new_end_frame, video_path, target_fps, runner, config)
-
-        if new_start_ms_snapped is None or new_end_ms_snapped is None:
-            runner._log_message(f"[VideoTimestamps Sync] ERROR: Failed to convert frame to time")
-            continue
-
-        # Update event with frame-snapped times
-        event.start = new_start_ms_snapped
-        event.end = new_end_ms_snapped
-
-        if delay_ms != 0:
-            adjusted_count += 1
+        event.start = event.start + frame_corrected_delay
+        event.end = event.end + frame_corrected_delay
 
     # Save modified subtitle
     runner._log_message(f"[VideoTimestamps Sync] Saving modified subtitle file...")
@@ -382,18 +469,20 @@ def apply_videotimestamps_sync(
         runner._log_message(f"[VideoTimestamps Sync] ERROR: Failed to save subtitle file: {e}")
         return {'error': str(e)}
 
-    # Validate and restore lost metadata (with timing validation)
-    metadata.validate_and_restore(runner, expected_delay_ms=delay_ms)
+    # Validate and restore lost metadata
+    metadata.validate_and_restore(runner, expected_delay_ms=int(round(frame_corrected_delay)))
 
     # Log results
-    runner._log_message(f"[VideoTimestamps Sync] ✓ Successfully processed {len(subs.events)} events")
-    runner._log_message(f"[VideoTimestamps Sync]   - Events adjusted: {adjusted_count}")
-    runner._log_message(f"[VideoTimestamps Sync]   - Delay applied: {delay_ms:+d} ms")
+    runner._log_message(f"[VideoTimestamps Sync] ✓ Successfully synchronized {len(subs.events)} events")
+    runner._log_message(f"[VideoTimestamps Sync]   - Raw audio delay: {delay_ms:+.3f}ms")
+    runner._log_message(f"[VideoTimestamps Sync]   - Frame-corrected delay: {frame_corrected_delay:+.3f}ms")
+    runner._log_message(f"[VideoTimestamps Sync]   - Correction applied: {(frame_corrected_delay - delay_ms):+.3f}ms")
 
     return {
         'total_events': len(subs.events),
-        'adjusted_events': adjusted_count,
-        'delay_applied_ms': delay_ms,
+        'raw_delay_ms': delay_ms,
+        'frame_corrected_delay_ms': frame_corrected_delay,
+        'correction_ms': frame_corrected_delay - delay_ms,
         'target_fps': target_fps
     }
 
@@ -406,66 +495,43 @@ def apply_dual_videotimestamps_sync(
     subtitle_path: str,
     source_video: str,
     target_video: str,
-    delay_ms: int,
+    delay_ms: float,
     runner,
     config: dict = None
 ) -> Dict[str, Any]:
     """
     Apply frame-accurate synchronization using VideoTimestamps from BOTH videos.
 
-    This mode improves upon standard videotimestamps by using exact frame timestamps
-    from both the subtitle source video AND the target video (Source 1).
+    CORRECT ALGORITHM (prevents per-event frame rounding errors):
+    1. Find first non-empty subtitle event as anchor
+    2. Use compute_frame_corrected_delay() to calculate ONE frame-corrected delay
+    3. Apply that single delay to ALL subtitle events (preserves relative timing)
+    4. No per-event frame snapping (eliminates random ±1-4 frame errors)
 
-    Algorithm:
-    1. Get exact frame timestamp from SOURCE video (subtitle source)
-    2. Add the audio delay (from source_delays_ms)
-    3. Find exact frame timestamp in TARGET video (Source 1)
-    4. Update subtitle with frame-accurate position
-
-    This provides better accuracy than single-video VideoTimestamps because:
-    - Uses exact source frame timestamp (not approximate subtitle time)
-    - Accounts for both videos' precise frame positions
-    - Results in frame-accurate alignment to target video
+    This provides frame-accurate alignment while preserving subtitle timing relationships:
+    - Uses video-timestamps ONLY for delay correction calculation
+    - Applies single global shift to all events
+    - Preserves original subtitle durations and relative positions
+    - ASS/SRT format handles final centisecond quantization
 
     Args:
         subtitle_path: Path to subtitle file (.ass, .srt, .ssa, .vtt)
         source_video: Path to video that subs were originally timed to
         target_video: Path to target video (Source 1)
-        delay_ms: Audio delay from correlation (already includes global shift)
+        delay_ms: Raw audio delay from correlation (unrounded float, includes global shift)
         runner: CommandRunner for logging
         config: Optional config dict with settings
 
     Returns:
         Dict with report statistics
     """
-    try:
-        from video_timestamps import FPSTimestamps, VideoTimestamps, TimeType, RoundingMethod
-        from fractions import Fraction
-    except ImportError:
-        runner._log_message("[Dual VideoTimestamps] ERROR: VideoTimestamps not installed. Install with: pip install VideoTimestamps")
-        return {'error': 'VideoTimestamps library not installed'}
-
     config = config or {}
 
-    runner._log_message(f"[Dual VideoTimestamps] Mode: Frame-accurate mapping using both videos")
+    runner._log_message(f"[Dual VideoTimestamps] Mode: Frame-corrected sync using both videos")
     runner._log_message(f"[Dual VideoTimestamps] Loading subtitle: {Path(subtitle_path).name}")
     runner._log_message(f"[Dual VideoTimestamps] Source video: {Path(source_video).name}")
     runner._log_message(f"[Dual VideoTimestamps] Target video: {Path(target_video).name}")
-    runner._log_message(f"[Dual VideoTimestamps] Delay to apply: {delay_ms:+d} ms")
-
-    # Detect FPS of both videos
-    source_fps = detect_video_fps(source_video, runner)
-    target_fps = detect_video_fps(target_video, runner)
-
-    runner._log_message(f"[Dual VideoTimestamps] Source FPS: {source_fps:.3f}")
-    runner._log_message(f"[Dual VideoTimestamps] Target FPS: {target_fps:.3f}")
-
-    # Get VideoTimestamps instances for both videos
-    source_vts = get_vfr_timestamps(source_video, source_fps, runner, config)
-    target_vts = get_vfr_timestamps(target_video, target_fps, runner, config)
-
-    if source_vts is None or target_vts is None:
-        return {'error': 'Failed to create VideoTimestamps instances'}
+    runner._log_message(f"[Dual VideoTimestamps] Raw audio delay: {delay_ms:+.3f}ms")
 
     # Capture original metadata before pysubs2 processing
     metadata = SubtitleMetadata(subtitle_path)
@@ -482,66 +548,33 @@ def apply_dual_videotimestamps_sync(
         runner._log_message(f"[Dual VideoTimestamps] WARNING: No subtitle events found in file")
         return {
             'total_events': 0,
-            'matched_events': 0,
-            'avg_discrepancy_ms': 0
+            'frame_corrected_delay_ms': delay_ms
         }
 
-    runner._log_message(f"[Dual VideoTimestamps] Processing {len(subs.events)} subtitle events...")
+    runner._log_message(f"[Dual VideoTimestamps] Loaded {len(subs.events)} subtitle events")
 
-    # Statistics tracking
-    matched_count = 0
-    timestamp_discrepancies = []
-    max_discrepancy = 0
+    # Find first non-empty event as anchor
+    anchor_event = next((e for e in subs.events if e.end > e.start), subs.events[0])
+    anchor_time_ms = anchor_event.start
 
-    # Process each event
+    runner._log_message(f"[Dual VideoTimestamps] Using anchor subtitle at {anchor_time_ms}ms")
+
+    # Compute single frame-corrected delay using anchor subtitle
+    frame_corrected_delay = compute_frame_corrected_delay(
+        source_video,
+        target_video,
+        delay_ms,
+        anchor_time_ms,
+        runner,
+        config
+    )
+
+    runner._log_message(f"[Dual VideoTimestamps] Applying single delay of {frame_corrected_delay:+.3f}ms to all {len(subs.events)} events...")
+
+    # Apply the SAME delay to ALL events (no per-event frame snapping!)
     for event in subs.events:
-        original_start = event.start
-        original_duration = event.end - event.start
-
-        # Skip empty events
-        if original_duration <= 0:
-            continue
-
-        # === STEP 1: Add delay to original subtitle time (NOT rounded source timestamp!) ===
-        # This preserves the original timing relationship without introducing rounding errors
-        adjusted_timestamp = original_start + delay_ms
-
-        # === STEP 2: Snap to exact frame in TARGET video using VideoTimestamps ===
-        target_frame = time_to_frame_vfr(adjusted_timestamp, target_video, target_fps, runner, config)
-        if target_frame is None:
-            runner._log_message(f"[Dual VideoTimestamps] WARNING: Failed to get target frame for time {adjusted_timestamp}ms")
-            continue
-
-        target_timestamp_exact = frame_to_time_vfr(target_frame, target_video, target_fps, runner, config)
-        if target_timestamp_exact is None:
-            runner._log_message(f"[Dual VideoTimestamps] WARNING: Failed to get target timestamp for frame {target_frame}")
-            continue
-
-        # === STEP 3: Update subtitle with frame-accurate timestamp ===
-        event.start = target_timestamp_exact
-        event.end = target_timestamp_exact + original_duration
-
-        # Track statistics
-        # For verification, also check what frame this was in the source
-        source_frame = time_to_frame_vfr(original_start, source_video, source_fps, runner, config)
-        source_timestamp_exact = frame_to_time_vfr(source_frame, source_video, source_fps, runner, config) if source_frame is not None else None
-
-        # Compare adjusted_timestamp (what we asked for) vs target_timestamp_exact (what we got)
-        discrepancy = abs(adjusted_timestamp - target_timestamp_exact)
-        timestamp_discrepancies.append(discrepancy)
-        max_discrepancy = max(max_discrepancy, discrepancy)
-
-        matched_count += 1
-
-        # Log first few matches for verification
-        if matched_count <= 3:
-            runner._log_message(f"[Dual VideoTimestamps] Line {matched_count}:")
-            runner._log_message(f"  Original: {original_start}ms → Source frame {source_frame}")
-            runner._log_message(f"  Adjusted: {original_start}ms + {delay_ms}ms = {adjusted_timestamp}ms")
-            runner._log_message(f"  Target: frame {target_frame} at {target_timestamp_exact}ms")
-            if source_timestamp_exact:
-                runner._log_message(f"  Source frame exact timestamp: {source_timestamp_exact}ms (for comparison)")
-
+        event.start = event.start + frame_corrected_delay
+        event.end = event.end + frame_corrected_delay
 
     # Save modified subtitle
     runner._log_message(f"[Dual VideoTimestamps] Saving modified subtitle file...")
@@ -552,30 +585,19 @@ def apply_dual_videotimestamps_sync(
         return {'error': str(e)}
 
     # Validate and restore lost metadata
-    metadata.validate_and_restore(runner, expected_delay_ms=delay_ms)
-
-    # Calculate statistics
-    avg_discrepancy = sum(timestamp_discrepancies) / len(timestamp_discrepancies) if timestamp_discrepancies else 0
+    metadata.validate_and_restore(runner, expected_delay_ms=int(round(frame_corrected_delay)))
 
     # Log results
-    runner._log_message(f"[Dual VideoTimestamps] ✓ Successfully processed {len(subs.events)} events")
-    runner._log_message(f"[Dual VideoTimestamps]   - Matched events: {matched_count}")
-    runner._log_message(f"[Dual VideoTimestamps]   - Delay applied: {delay_ms:+d}ms")
-    runner._log_message(f"[Dual VideoTimestamps]   - Avg timestamp discrepancy: {avg_discrepancy:.2f}ms")
-    runner._log_message(f"[Dual VideoTimestamps]   - Max timestamp discrepancy: {max_discrepancy:.2f}ms")
-
-    if max_discrepancy > 100:
-        runner._log_message(f"[Dual VideoTimestamps] WARNING: Large timestamp discrepancy detected (>{max_discrepancy:.0f}ms)")
-        runner._log_message(f"[Dual VideoTimestamps]          This may indicate frame drops or different frame counts")
+    runner._log_message(f"[Dual VideoTimestamps] ✓ Successfully synchronized {len(subs.events)} events")
+    runner._log_message(f"[Dual VideoTimestamps]   - Raw audio delay: {delay_ms:+.3f}ms")
+    runner._log_message(f"[Dual VideoTimestamps]   - Frame-corrected delay: {frame_corrected_delay:+.3f}ms")
+    runner._log_message(f"[Dual VideoTimestamps]   - Correction applied: {(frame_corrected_delay - delay_ms):+.3f}ms")
 
     return {
         'total_events': len(subs.events),
-        'matched_events': matched_count,
-        'delay_applied_ms': delay_ms,
-        'avg_discrepancy_ms': avg_discrepancy,
-        'max_discrepancy_ms': max_discrepancy,
-        'source_fps': source_fps,
-        'target_fps': target_fps
+        'raw_delay_ms': delay_ms,
+        'frame_corrected_delay_ms': frame_corrected_delay,
+        'correction_ms': frame_corrected_delay - delay_ms
     }
 
 
