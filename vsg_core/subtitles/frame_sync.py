@@ -280,15 +280,15 @@ def compute_frame_corrected_delay(
     2. Returns a single delay to be applied to ALL subtitle events
     3. No per-event frame snapping (which causes random ±1-4 frame errors)
 
-    Algorithm:
-    1. Find the exact frame PTS in source video for the anchor subtitle time
-    2. Add the raw audio delay
+    Algorithm (CORRECTED - no source frame snapping):
+    1. Take anchor subtitle time directly (don't snap to source frame!)
+    2. Add the raw audio delay → predicted target position
     3. Find the nearest frame PTS in target video
     4. Compute the correction factor (target_pts - predicted_pts)
     5. Return final_delay = raw_delay + correction
 
-    This delay is then applied ONCE to all subtitle events, preserving
-    their relative timing relationships.
+    For frame-aligned videos (same frame count), snapping to source frame first
+    loses precision and causes offset errors. We use the actual subtitle timing.
 
     Args:
         source_video: Path to video that subs were originally timed to
@@ -312,22 +312,17 @@ def compute_frame_corrected_delay(
     runner._log_message(f"[Frame Correction] Source FPS: {source_fps:.3f}")
     runner._log_message(f"[Frame Correction] Target FPS: {target_fps:.3f}")
 
-    # Step 1: Find nearest frame PTS in source for anchor time
+    # Step 1 (OPTIONAL): Find source frame for reference/logging only
     source_frame = time_to_frame_vfr(anchor_subtitle_time_ms, source_video, source_fps, runner, config)
-    if source_frame is None:
-        runner._log_message(f"[Frame Correction] WARNING: Failed to get source frame, using raw delay")
-        return raw_delay_ms
+    if source_frame is not None:
+        source_pts = frame_to_time_vfr(source_frame, source_video, source_fps, runner, config)
+        if source_pts is not None:
+            runner._log_message(f"[Frame Correction] Source reference: frame {source_frame} @ {source_pts}ms")
 
-    source_pts = frame_to_time_vfr(source_frame, source_video, source_fps, runner, config)
-    if source_pts is None:
-        runner._log_message(f"[Frame Correction] WARNING: Failed to get source PTS, using raw delay")
-        return raw_delay_ms
-
-    runner._log_message(f"[Frame Correction] Source: frame {source_frame} @ {source_pts}ms")
-
-    # Step 2: Add raw delay to get predicted target time
-    predicted_target_time = source_pts + raw_delay_ms
-    runner._log_message(f"[Frame Correction] Predicted target time: {source_pts}ms + {raw_delay_ms:+.3f}ms = {predicted_target_time:.3f}ms")
+    # Step 2: Add raw delay DIRECTLY to anchor time (no source frame snapping!)
+    # This preserves the exact subtitle timing and prevents offset errors
+    predicted_target_time = anchor_subtitle_time_ms + raw_delay_ms
+    runner._log_message(f"[Frame Correction] Predicted target position: {anchor_subtitle_time_ms}ms + {raw_delay_ms:+.3f}ms = {predicted_target_time:.3f}ms")
 
     # Step 3: Find nearest frame PTS in target
     target_frame = time_to_frame_vfr(predicted_target_time, target_video, target_fps, runner, config)
