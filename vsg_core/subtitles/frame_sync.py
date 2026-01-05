@@ -267,7 +267,7 @@ def time_to_frame_vfr(time_ms: float, video_path: str, fps: float, runner, confi
 
 def apply_videotimestamps_sync(
     subtitle_path: str,
-    delay_ms: int,
+    delay_ms: float,
     target_fps: float,
     runner,
     config: dict = None,
@@ -310,7 +310,7 @@ def apply_videotimestamps_sync(
     runner._log_message(f"[VideoTimestamps Sync] RoundingMethod: {rounding_method.upper()}")
     runner._log_message(f"[VideoTimestamps Sync] Loading subtitle: {Path(subtitle_path).name}")
     runner._log_message(f"[VideoTimestamps Sync] Video: {Path(video_path).name}")
-    runner._log_message(f"[VideoTimestamps Sync] Delay to apply: {delay_ms:+d} ms")
+    runner._log_message(f"[VideoTimestamps Sync] Delay to apply: {delay_ms:+.3f} ms")
 
     # Get VideoTimestamps instance
     vts = get_vfr_timestamps(video_path, target_fps, runner, config)
@@ -389,7 +389,7 @@ def apply_videotimestamps_sync(
     # Log results
     runner._log_message(f"[VideoTimestamps Sync] ✓ Successfully processed {len(subs.events)} events")
     runner._log_message(f"[VideoTimestamps Sync]   - Events adjusted: {adjusted_count}")
-    runner._log_message(f"[VideoTimestamps Sync]   - Delay applied: {delay_ms:+d} ms")
+    runner._log_message(f"[VideoTimestamps Sync]   - Delay applied: {delay_ms:+.3f} ms")
 
     return {
         'total_events': len(subs.events),
@@ -407,7 +407,7 @@ def apply_dual_videotimestamps_sync(
     subtitle_path: str,
     source_video: str,
     target_video: str,
-    delay_ms: int,
+    delay_ms: float,
     runner,
     config: dict = None
 ) -> Dict[str, Any]:
@@ -452,7 +452,7 @@ def apply_dual_videotimestamps_sync(
     runner._log_message(f"[Dual VideoTimestamps] Loading subtitle: {Path(subtitle_path).name}")
     runner._log_message(f"[Dual VideoTimestamps] Source video: {Path(source_video).name}")
     runner._log_message(f"[Dual VideoTimestamps] Target video: {Path(target_video).name}")
-    runner._log_message(f"[Dual VideoTimestamps] Delay to apply: {delay_ms:+d} ms")
+    runner._log_message(f"[Dual VideoTimestamps] Delay to apply: {delay_ms:+.3f} ms")
 
     # Detect FPS of both videos
     source_fps = detect_video_fps(source_video, runner)
@@ -561,7 +561,7 @@ def apply_dual_videotimestamps_sync(
     # Log results
     runner._log_message(f"[Dual VideoTimestamps] ✓ Successfully processed {len(subs.events)} events")
     runner._log_message(f"[Dual VideoTimestamps]   - Matched events: {matched_count}")
-    runner._log_message(f"[Dual VideoTimestamps]   - Delay applied: {delay_ms:+d}ms")
+    runner._log_message(f"[Dual VideoTimestamps]   - Delay applied: {delay_ms:+.3f}ms")
     runner._log_message(f"[Dual VideoTimestamps]   - Avg timestamp discrepancy: {avg_discrepancy:.2f}ms")
     runner._log_message(f"[Dual VideoTimestamps]   - Max timestamp discrepancy: {max_discrepancy:.2f}ms")
 
