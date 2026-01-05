@@ -932,7 +932,7 @@ class SubtitleSyncTab(QWidget):
         sync_layout = QFormLayout(sync_group)
 
         self.widgets['subtitle_sync_mode'] = QComboBox()
-        self.widgets['subtitle_sync_mode'].addItems(['time-based', 'frame-perfect', 'frame-snapped', 'videotimestamps', 'dual-videotimestamps', 'frame-matched'])
+        self.widgets['subtitle_sync_mode'].addItems(['time-based', 'frame-perfect', 'frame-snapped', 'videotimestamps', 'dual-videotimestamps', 'frame-matched', 'raw-delay'])
         self.widgets['subtitle_sync_mode'].setToolTip(
             "Subtitle synchronization method:\n\n"
             "• time-based (Default): Apply delays using millisecond timestamps\n"
@@ -980,6 +980,14 @@ class SubtitleSyncTab(QWidget):
             "  - SLOW but most accurate for problematic sources\n"
             "  - Requires: pip install imagehash\n"
             "  - Requires both source and target video files\n\n"
+            "• raw-delay: Pure delay with centisecond rounding (DEBUG/TESTING)\n"
+            "  - NO frame analysis - just adds raw delay and rounds\n"
+            "  - Rounds to ASS centisecond precision (10ms)\n"
+            "  - Configurable rounding: floor/round/ceil\n"
+            "  - Use to isolate if frame correction is causing issues\n"
+            "  - If this mode is perfect but dual-videotimestamps isn't,\n"
+            "    then frame correction algorithm needs adjustment\n"
+            "  - No external dependencies\n\n"
             "Note: Stepping correction (if enabled) takes precedence over this setting."
         )
 
