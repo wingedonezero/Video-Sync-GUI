@@ -440,40 +440,49 @@ def apply_duration_align_sync(
     if source_vts is None or target_vts is None:
         return {'error': 'Failed to create VideoTimestamps instances'}
 
-    # Get total frame count and calculate duration
-    # For CFR: num_frames = duration_ms / frame_duration_ms
-    source_frame_duration = 1000.0 / source_fps
-    target_frame_duration = 1000.0 / target_fps
-
-    # Estimate total duration from video file
-    # We'll use ffprobe or similar to get exact duration
+    # Get exact frame count from videos (frame-accurate, not container duration)
     import subprocess
     import json
 
     try:
-        # Get source video duration
-        cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', source_video]
+        # Get source video frame count
+        cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-count_frames',
+               '-show_entries', 'stream=nb_read_frames', '-print_format', 'json', source_video]
         result = subprocess.run(cmd, capture_output=True, text=True)
         source_info = json.loads(result.stdout)
-        source_duration_sec = float(source_info['format']['duration'])
-        source_duration_ms = source_duration_sec * 1000
+        source_frame_count = int(source_info['streams'][0]['nb_read_frames'])
 
-        # Get target video duration
-        cmd = ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', target_video]
+        # Get target video frame count
+        cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-count_frames',
+               '-show_entries', 'stream=nb_read_frames', '-print_format', 'json', target_video]
         result = subprocess.run(cmd, capture_output=True, text=True)
         target_info = json.loads(result.stdout)
-        target_duration_sec = float(target_info['format']['duration'])
-        target_duration_ms = target_duration_sec * 1000
+        target_frame_count = int(target_info['streams'][0]['nb_read_frames'])
 
     except Exception as e:
-        runner._log_message(f"[Duration Align] ERROR: Failed to get video durations: {e}")
+        runner._log_message(f"[Duration Align] ERROR: Failed to get frame counts: {e}")
         return {'error': str(e)}
+
+    runner._log_message(f"[Duration Align] Source frame count: {source_frame_count}")
+    runner._log_message(f"[Duration Align] Target frame count: {target_frame_count}")
+
+    # Calculate exact duration from last frame timestamp using VideoTimestamps
+    # Last frame index = total_frames - 1 (zero-indexed)
+    source_last_frame = source_frame_count - 1
+    target_last_frame = target_frame_count - 1
+
+    source_duration_ms = frame_to_time_vfr(source_last_frame, source_video, source_fps, runner, config)
+    target_duration_ms = frame_to_time_vfr(target_last_frame, target_video, target_fps, runner, config)
+
+    if source_duration_ms is None or target_duration_ms is None:
+        runner._log_message(f"[Duration Align] ERROR: Failed to get last frame timestamps")
+        return {'error': 'Failed to get last frame timestamps'}
 
     # Calculate duration offset
     duration_offset_ms = target_duration_ms - source_duration_ms
 
-    runner._log_message(f"[Duration Align] Source video duration: {source_duration_ms:.3f}ms ({source_duration_sec:.3f}s)")
-    runner._log_message(f"[Duration Align] Target video duration: {target_duration_ms:.3f}ms ({target_duration_sec:.3f}s)")
+    runner._log_message(f"[Duration Align] Source last frame (#{source_last_frame}): {source_duration_ms}ms")
+    runner._log_message(f"[Duration Align] Target last frame (#{target_last_frame}): {target_duration_ms}ms")
     runner._log_message(f"[Duration Align] Duration offset: {duration_offset_ms:+.3f}ms")
     runner._log_message(f"[Duration Align] Global shift: {global_shift_ms:+.3f}ms")
 
