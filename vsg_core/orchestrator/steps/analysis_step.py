@@ -134,8 +134,8 @@ def _choose_final_delay_raw(results: List[Dict[str, Any]], config: Dict, runner:
     accepted = [r for r in results if r.get('accepted', False)]
     for r in accepted:
         if r.get('delay') == winner_rounded:
-            # Return raw value if it exists, otherwise convert rounded to float
-            return r.get('raw', float(winner_rounded))
+            # Return raw_delay if it exists, otherwise convert rounded to float
+            return r.get('raw_delay', float(winner_rounded))
 
     # Fallback: convert rounded to float
     return float(winner_rounded)
