@@ -1075,6 +1075,27 @@ class SubtitleSyncTab(QWidget):
             "Works with TimeType.EXACT for precise video player frame timing."
         )
 
+        self.widgets['raw_delay_rounding'] = QComboBox()
+        self.widgets['raw_delay_rounding'].addItems(['round', 'floor', 'ceil'])
+        self.widgets['raw_delay_rounding'].setToolTip(
+            "Raw Delay Rounding Mode (for raw-delay sync mode):\n\n"
+            "Controls how timestamps are rounded to ASS centisecond precision (10ms).\n\n"
+            "• round (Default): Round to nearest 10ms\n"
+            "  - Example: 1065.458ms → 1070ms\n"
+            "  - Most accurate statistically\n"
+            "  - Use this first\n\n"
+            "• floor: Round down to nearest 10ms\n"
+            "  - Example: 1065.458ms → 1060ms\n"
+            "  - Conservative (subtitles appear slightly earlier)\n"
+            "  - Try this if subs are consistently late\n\n"
+            "• ceil: Round up to nearest 10ms\n"
+            "  - Example: 1065.458ms → 1070ms\n"
+            "  - Aggressive (subtitles appear slightly later)\n"
+            "  - Try this if subs are consistently early\n\n"
+            "This setting only applies when 'raw-delay' sync mode is selected.\n"
+            "Used for testing/debugging frame correction issues."
+        )
+
         # Frame-Matched settings
         self.widgets['frame_match_search_window_sec'] = QSpinBox()
         self.widgets['frame_match_search_window_sec'].setRange(1, 60)
@@ -1224,6 +1245,7 @@ class SubtitleSyncTab(QWidget):
         sync_layout.addRow("Frame Rounding:", self.widgets['frame_shift_rounding'])
         sync_layout.addRow("", self.widgets['frame_sync_fix_zero_duration'])
         sync_layout.addRow("VTS Rounding:", self.widgets['videotimestamps_rounding'])
+        sync_layout.addRow("Raw Delay Rounding:", self.widgets['raw_delay_rounding'])
         sync_layout.addRow("", self.widgets['frame_match_use_vapoursynth'])
         sync_layout.addRow("Match Window:", self.widgets['frame_match_search_window_sec'])
         sync_layout.addRow("Match Threshold:", self.widgets['frame_match_threshold'])
@@ -1262,6 +1284,7 @@ class SubtitleSyncTab(QWidget):
         is_frame_snapped = (text == 'frame-snapped')
         is_videotimestamps = (text == 'videotimestamps')
         is_frame_matched = (text == 'frame-matched')
+        is_raw_delay = (text == 'raw-delay')
 
         # FPS setting is used by frame-perfect, frame-snapped, and videotimestamps (not frame-matched)
         self.widgets['subtitle_target_fps'].setEnabled(is_frame_perfect or is_frame_snapped or is_videotimestamps)
@@ -1275,6 +1298,9 @@ class SubtitleSyncTab(QWidget):
 
         # VideoTimestamps rounding only applies to videotimestamps mode
         self.widgets['videotimestamps_rounding'].setEnabled(is_videotimestamps)
+
+        # Raw delay rounding only applies to raw-delay mode
+        self.widgets['raw_delay_rounding'].setEnabled(is_raw_delay)
 
         # Frame-matched settings only apply to frame-matched mode
         self.widgets['frame_match_use_vapoursynth'].setEnabled(is_frame_matched)

@@ -51,6 +51,7 @@ class AppConfig:
             'frame_shift_rounding': 'round',
             'frame_sync_fix_zero_duration': False,
             'videotimestamps_rounding': 'round',
+            'raw_delay_rounding': 'round',
 
             # --- Frame-Matched Sync Settings ---
             'frame_match_search_window_sec': 1,  # Reduced to 1 sec with smart delay centering + hash caching
