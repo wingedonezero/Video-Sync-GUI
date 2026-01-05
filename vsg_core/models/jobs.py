@@ -14,6 +14,7 @@ class JobSpec:
 @dataclass(frozen=True)
 class Delays:
     source_delays_ms: Dict[str, int] = field(default_factory=dict)
+    raw_source_delays_ms: Dict[str, float] = field(default_factory=dict)  # Unrounded for VideoTimestamps
     global_shift_ms: int = 0
 
 @dataclass

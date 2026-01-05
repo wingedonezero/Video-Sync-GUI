@@ -245,10 +245,11 @@ class SubtitlesStep:
                             target_video = source1_file
 
                             # Get audio delay for subtitle positioning
-                            audio_delay_ms = 0
-                            if ctx.delays and source_key in ctx.delays.source_delays_ms:
-                                audio_delay_ms = int(ctx.delays.source_delays_ms[source_key])
-                                runner._log_message(f"[Dual VideoTimestamps] Using audio delay: {audio_delay_ms:+d}ms")
+                            audio_delay_ms = 0.0
+                            if ctx.delays and source_key in ctx.delays.raw_source_delays_ms:
+                                # Use raw (unrounded) delays to avoid double-rounding with VideoTimestamps
+                                audio_delay_ms = ctx.delays.raw_source_delays_ms[source_key]
+                                runner._log_message(f"[Dual VideoTimestamps] Using audio delay: {audio_delay_ms:+.3f}ms (raw)")
 
                             if source_video and target_video:
                                 runner._log_message(f"[Dual VideoTimestamps] Applying to track {item.track.id} ({item.track.props.name or 'Unnamed'})")
@@ -285,9 +286,16 @@ class SubtitlesStep:
                         delay_ms = 0
 
                         if ctx.delays and source_key in ctx.delays.source_delays_ms:
-                            delay_ms = int(ctx.delays.source_delays_ms[source_key])
                             mode_label = "Frame-Snapped Sync" if subtitle_sync_mode == 'frame-snapped' else ("VideoTimestamps Sync" if subtitle_sync_mode == 'videotimestamps' else "Frame-Perfect Sync")
-                            runner._log_message(f"[{mode_label}] DEBUG: source_key='{source_key}', delay from source_delays_ms={delay_ms}ms")
+
+                            # Use raw delays for VideoTimestamps mode to avoid double-rounding
+                            if subtitle_sync_mode == 'videotimestamps' and source_key in ctx.delays.raw_source_delays_ms:
+                                delay_ms = ctx.delays.raw_source_delays_ms[source_key]
+                                runner._log_message(f"[{mode_label}] DEBUG: source_key='{source_key}', delay from raw_source_delays_ms={delay_ms:.3f}ms")
+                            else:
+                                delay_ms = int(ctx.delays.source_delays_ms[source_key])
+                                runner._log_message(f"[{mode_label}] DEBUG: source_key='{source_key}', delay from source_delays_ms={delay_ms}ms")
+
                             runner._log_message(f"[{mode_label}] DEBUG: All source_delays_ms: {ctx.delays.source_delays_ms}")
                             runner._log_message(f"[{mode_label}] DEBUG: Global shift: {ctx.delays.global_shift_ms}ms")
                         else:
