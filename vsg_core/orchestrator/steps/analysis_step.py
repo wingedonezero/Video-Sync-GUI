@@ -117,6 +117,41 @@ def _choose_final_delay(results: List[Dict[str, Any]], config: Dict, runner: Com
     runner._log_message(f"{role_tag.capitalize()} delay determined: {winner:+d} ms ({method_label}).")
     return winner
 
+
+def _choose_final_delay_raw(results: List[Dict[str, Any]], config: Dict, runner: CommandRunner, role_tag: str) -> Optional[float]:
+    """
+    Same as _choose_final_delay but returns raw float value without rounding.
+    Used for VideoTimestamps modes to preserve precision and prevent triple-rounding.
+    """
+    min_match_pct = float(config.get('min_match_pct', 5.0))
+    min_accepted_chunks = int(config.get('min_accepted_chunks', 3))
+    delay_mode = config.get('delay_selection_mode', 'Mode (Most Common)')
+
+    accepted = [r for r in results if r.get('accepted', False)]
+    if len(accepted) < min_accepted_chunks:
+        return None
+
+    delays = [r['delay'] for r in accepted]
+
+    if delay_mode == 'First Stable':
+        # Use proper stability detection to find first stable segment
+        winner = _find_first_stable_segment_delay(results, runner, config)
+        if winner is None:
+            # Fallback to mode if no stable segment found
+            counts = Counter(delays)
+            winner = counts.most_common(1)[0][0]
+        winner_raw = float(winner)
+    elif delay_mode == 'Average':
+        # Return raw average without rounding
+        winner_raw = sum(delays) / len(delays)
+    else:  # Mode (Most Common) - default
+        counts = Counter(delays)
+        winner = counts.most_common(1)[0][0]
+        winner_raw = float(winner)
+
+    return winner_raw
+
+
 class AnalysisStep:
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
         source1_file = ctx.sources.get("Source 1")
@@ -336,11 +371,14 @@ class AnalysisStep:
                     # Don't set stepping_override_delay - let normal flow handle it
 
             # Use stepping override if available, otherwise calculate mode
+            # Get both rounded (for mkvmerge/audio) and raw (for VideoTimestamps precision)
             if stepping_override_delay is not None:
                 raw_delay_ms = stepping_override_delay
+                raw_delay_ms_unrounded = float(stepping_override_delay)
                 runner._log_message(f"{source_key.capitalize()} delay determined: {raw_delay_ms:+d} ms (first segment, stepping corrected).")
             else:
                 raw_delay_ms = _choose_final_delay(results, config, runner, source_key)
+                raw_delay_ms_unrounded = _choose_final_delay_raw(results, config, runner, source_key)
                 if raw_delay_ms is None:
                     # ENHANCED ERROR MESSAGE
                     accepted_count = len([r for r in results if r.get('accepted', False)])
@@ -370,13 +408,13 @@ class AnalysisStep:
 
             # Calculate final delay including container delay chain correction
             # Store both rounded (for mkvmerge) and raw (for VideoTimestamps precision)
-            raw_final_delay_ms = raw_delay_ms + source1_audio_container_delay
-            final_delay_ms = round(raw_final_delay_ms)
+            final_delay_ms = round(raw_delay_ms + source1_audio_container_delay)  # Rounded for mkvmerge/audio
+            raw_final_delay_ms = raw_delay_ms_unrounded + source1_audio_container_delay  # Raw for VideoTimestamps
 
             if source1_audio_container_delay != 0:
-                runner._log_message(f"[Delay Chain] {source_key} raw correlation: {raw_delay_ms:+d}ms")
+                runner._log_message(f"[Delay Chain] {source_key} raw correlation: {raw_delay_ms:+d}ms (rounded), {raw_delay_ms_unrounded:+.3f}ms (raw)")
                 runner._log_message(f"[Delay Chain] Adding Source 1 audio container delay: {source1_audio_container_delay:+.1f}ms")
-                runner._log_message(f"[Delay Chain] Final delay for {source_key}: {final_delay_ms:+d}ms")
+                runner._log_message(f"[Delay Chain] Final delay for {source_key}: {final_delay_ms:+d}ms (rounded), {raw_final_delay_ms:+.3f}ms (raw)")
 
             source_delays[source_key] = final_delay_ms
             raw_source_delays[source_key] = raw_final_delay_ms
