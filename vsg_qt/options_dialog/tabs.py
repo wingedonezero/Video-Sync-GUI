@@ -1155,18 +1155,130 @@ class SubtitleSyncTab(QWidget):
         )
 
         self.widgets['duration_align_hash_threshold'] = QSpinBox()
-        self.widgets['duration_align_hash_threshold'].setRange(0, 20)
+        self.widgets['duration_align_hash_threshold'].setRange(0, 30)
         self.widgets['duration_align_hash_threshold'].setValue(5)
         self.widgets['duration_align_hash_threshold'].setToolTip(
             "Perceptual hash similarity threshold:\n\n"
             "Maximum hamming distance for frames to be considered matching.\n\n"
             "• 0: Perfect match only (too strict for compression differences)\n"
-            "• 3-5 (Recommended): Very similar frames\n"
+            "• 3-5 (Default): Very similar frames\n"
             "  - Tolerates minor compression differences\n"
-            "  - Good for different encodes of same source\n"
-            "• 8-10: More tolerant (color grading differences)\n"
-            "• 15+: Too loose (may match different scenes)\n\n"
-            "Start with 5, increase if validation fails on identical scenes."
+            "  - Good for Remux ↔ WebDL\n"
+            "• 8-15: More tolerant\n"
+            "  - Heavy re-encoding (Remux ↔ Encode)\n"
+            "  - Color grading differences\n"
+            "• 20-30: Very loose\n"
+            "  - Different filters/processing\n"
+            "  - May match wrong scenes if too high\n\n"
+            "Increase if validation fails on visually identical scenes."
+        )
+
+        self.widgets['duration_align_hash_algorithm'] = QComboBox()
+        self.widgets['duration_align_hash_algorithm'].addItems(['dhash', 'phash', 'average_hash', 'whash'])
+        self.widgets['duration_align_hash_algorithm'].setToolTip(
+            "Perceptual hash algorithm:\n\n"
+            "Different algorithms have different tolerance to visual changes:\n\n"
+            "• dhash (Default): Difference hash\n"
+            "  - Fast and accurate\n"
+            "  - Good for compression artifacts\n"
+            "  - Best for: Remux ↔ WebDL, light transcodes\n"
+            "  - Use with threshold 3-8\n\n"
+            "• phash: Perceptual hash (DCT-based)\n"
+            "  - More robust to re-encoding\n"
+            "  - Handles color grading, filtering\n"
+            "  - Best for: Remux ↔ Heavy Encode\n"
+            "  - Use with threshold 10-20\n\n"
+            "• average_hash: Simple averaging\n"
+            "  - Fastest but least accurate\n"
+            "  - Use for testing only\n\n"
+            "• whash: Wavelet hash\n"
+            "  - Most robust, but slowest\n"
+            "  - Best for heavily processed videos\n"
+            "  - Use with threshold 15-30\n\n"
+            "Start with dhash, try phash if validation fails on same-source videos."
+        )
+
+        self.widgets['duration_align_hash_size'] = QComboBox()
+        self.widgets['duration_align_hash_size'].addItems(['4', '8', '16'])
+        self.widgets['duration_align_hash_size'].setCurrentIndex(1)  # Default to 8
+        self.widgets['duration_align_hash_size'].setToolTip(
+            "Hash size (resolution):\n\n"
+            "Larger hash = more precise but less tolerant to differences.\n\n"
+            "• 4x4 (16 bits):\n"
+            "  - Very tolerant to changes\n"
+            "  - Less precise\n"
+            "  - Good for heavily re-encoded content\n\n"
+            "• 8x8 (64 bits) [DEFAULT]:\n"
+            "  - Balanced precision and tolerance\n"
+            "  - Recommended for most cases\n\n"
+            "• 16x16 (256 bits):\n"
+            "  - Very precise\n"
+            "  - Less tolerant to compression\n"
+            "  - Good for near-identical encodes\n\n"
+            "Keep at 8 unless you need more tolerance (use 4) or precision (use 16)."
+        )
+
+        self.widgets['duration_align_strictness'] = QSpinBox()
+        self.widgets['duration_align_strictness'].setRange(50, 100)
+        self.widgets['duration_align_strictness'].setValue(80)
+        self.widgets['duration_align_strictness'].setSuffix("%")
+        self.widgets['duration_align_strictness'].setToolTip(
+            "Validation strictness (match percentage required):\n\n"
+            "Percentage of frames that must match at each checkpoint for validation to pass.\n\n"
+            "• 90-100%: Very strict\n"
+            "  - Requires near-perfect matches\n"
+            "  - Good for identical encodes\n\n"
+            "• 80% (Default): Balanced\n"
+            "  - Allows some mismatches\n"
+            "  - Good for light transcodes\n\n"
+            "• 60-70%: Tolerant\n"
+            "  - Accepts more differences\n"
+            "  - Good for heavy re-encodes\n\n"
+            "Lower this if validation fails on same-source videos with different encoding."
+        )
+
+        self.widgets['duration_align_fallback_mode'] = QComboBox()
+        self.widgets['duration_align_fallback_mode'].addItems(['none', 'abort', 'auto-fallback'])
+        self.widgets['duration_align_fallback_mode'].setToolTip(
+            "What to do if frame validation fails:\n\n"
+            "• none (Default): Warn but continue\n"
+            "  - Shows warning in logs\n"
+            "  - Applies duration-align sync anyway\n"
+            "  - User can review and re-run if needed\n\n"
+            "• abort: Stop the job\n"
+            "  - Fails the job immediately\n"
+            "  - Forces user to fix settings or choose different mode\n"
+            "  - Safest option if you want guaranteed accuracy\n\n"
+            "• auto-fallback: Try different sync mode\n"
+            "  - Automatically uses fallback mode (configured below)\n"
+            "  - Seamless recovery from validation failures\n"
+            "  - Good for automated workflows\n\n"
+            "Recommended: 'none' for testing, 'auto-fallback' for production."
+        )
+
+        self.widgets['duration_align_fallback_target'] = QComboBox()
+        self.widgets['duration_align_fallback_target'].addItems([
+            'dual-videotimestamps',
+            'videotimestamps',
+            'audio-correlation',
+            'frame-snapped',
+            'frame-perfect',
+            'raw-delay'
+        ])
+        self.widgets['duration_align_fallback_target'].setToolTip(
+            "Fallback sync mode if validation fails:\n\n"
+            "Only used when 'auto-fallback' is selected above.\n\n"
+            "• dual-videotimestamps: Frame-accurate using both videos\n"
+            "  - Good fallback for VFR videos\n"
+            "  - Requires both source and target videos\n\n"
+            "• audio-correlation: Audio-based sync\n"
+            "  - Works when videos not frame-aligned\n"
+            "  - Requires audio tracks\n"
+            "  - Most reliable universal fallback\n\n"
+            "• videotimestamps: Frame-accurate using target video\n"
+            "  - Good for single-video workflows\n\n"
+            "• Others: Less recommended fallbacks\n\n"
+            "Recommended: 'audio-correlation' for most cases."
         )
 
         # Frame-Matched settings
@@ -1322,7 +1434,12 @@ class SubtitleSyncTab(QWidget):
         sync_layout.addRow("", self.widgets['duration_align_use_vapoursynth'])
         sync_layout.addRow("", self.widgets['duration_align_validate'])
         sync_layout.addRow("Validation Points:", self.widgets['duration_align_validate_points'])
+        sync_layout.addRow("Hash Algorithm:", self.widgets['duration_align_hash_algorithm'])
+        sync_layout.addRow("Hash Size:", self.widgets['duration_align_hash_size'])
         sync_layout.addRow("Hash Threshold:", self.widgets['duration_align_hash_threshold'])
+        sync_layout.addRow("Strictness:", self.widgets['duration_align_strictness'])
+        sync_layout.addRow("Fallback Mode:", self.widgets['duration_align_fallback_mode'])
+        sync_layout.addRow("Fallback Target:", self.widgets['duration_align_fallback_target'])
         sync_layout.addRow("", self.widgets['frame_match_use_vapoursynth'])
         sync_layout.addRow("Match Window:", self.widgets['frame_match_search_window_sec'])
         sync_layout.addRow("Match Threshold:", self.widgets['frame_match_threshold'])
