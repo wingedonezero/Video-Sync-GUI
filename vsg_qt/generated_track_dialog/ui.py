@@ -99,21 +99,6 @@ class GeneratedTrackDialog(QDialog):
         self.preview_label.setWordWrap(True)
         layout.addWidget(self.preview_label)
 
-        # Skip frame validation checkbox
-        validation_group = QGroupBox("Validation Options")
-        validation_layout = QVBoxLayout(validation_group)
-        self.skip_validation_checkbox = QCheckBox("Skip duration-align frame validation (recommended)")
-        self.skip_validation_checkbox.setChecked(True)  # Default: ON
-        validation_help = QLabel(
-            "Generated tracks inherit timing from the source track. "
-            "Skipping frame validation is safe and faster."
-        )
-        validation_help.setWordWrap(True)
-        validation_help.setStyleSheet("color: #666666; font-size: 10px;")
-        validation_layout.addWidget(self.skip_validation_checkbox)
-        validation_layout.addWidget(validation_help)
-        layout.addWidget(validation_group)
-
         # Track naming
         name_group = QGroupBox("Generated Track Name")
         name_layout = QHBoxLayout(name_group)
@@ -183,10 +168,6 @@ class GeneratedTrackDialog(QDialog):
         if track_name:
             self.name_edit.setText(track_name)
 
-        # Set the skip validation checkbox (default to True if not specified)
-        skip_validation = self.existing_config.get('skip_frame_validation', True)
-        self.skip_validation_checkbox.setChecked(skip_validation)
-
     def _select_all_styles(self):
         """Check all style checkboxes."""
         for checkbox in self.style_checkboxes.values():
@@ -245,7 +226,6 @@ class GeneratedTrackDialog(QDialog):
             return
 
         track_name = self.name_edit.text().strip()
-        skip_validation = self.skip_validation_checkbox.isChecked()
 
         mode = 'exclude' if self.exclude_radio.isChecked() else 'include'
 
@@ -255,8 +235,7 @@ class GeneratedTrackDialog(QDialog):
             'mode': mode,
             'styles': selected_styles,
             'name': track_name,
-            'original_style_list': sorted(self.style_counts.keys()),  # Complete list for exact matching
-            'skip_frame_validation': skip_validation  # NEW: Skip frame validation flag
+            'original_style_list': sorted(self.style_counts.keys())  # Complete list for exact matching
         }
 
         self.accept()

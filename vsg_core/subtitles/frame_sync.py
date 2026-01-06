@@ -848,6 +848,78 @@ def apply_raw_delay_sync(
 # DURATION ALIGNMENT MODE (Frame Alignment via Total Duration)
 # ============================================================================
 
+def _select_smart_checkpoints(subtitle_events: List, runner) -> List:
+    """
+    Smart checkpoint selection: avoid OP/ED, prefer dialogue events.
+
+    Strategy:
+    - Filter out first/last 2 minutes (OP/ED likely)
+    - Prefer longer duration events (likely dialogue, not signs)
+    - Use repeatable selection based on event count
+    - Return 3 checkpoints: early (1/6), middle (1/2), late (5/6)
+    """
+    total_events = len(subtitle_events)
+    if total_events == 0:
+        return []
+
+    # Calculate video duration to determine safe zones
+    first_start = subtitle_events[0].start
+    last_end = subtitle_events[-1].end
+    duration_ms = last_end - first_start
+
+    # Define safe zone: skip first/last 2 minutes (120000ms)
+    op_zone_ms = 120000  # First 2 minutes
+    ed_zone_ms = 120000  # Last 2 minutes
+
+    safe_start_ms = first_start + op_zone_ms
+    safe_end_ms = last_end - ed_zone_ms
+
+    # If video is too short, just use middle third
+    if duration_ms < (op_zone_ms + ed_zone_ms):
+        safe_start_ms = first_start + (duration_ms // 3)
+        safe_end_ms = last_end - (duration_ms // 3)
+
+    # Filter events in safe zone
+    safe_events = [e for e in subtitle_events if safe_start_ms <= e.start <= safe_end_ms]
+
+    if len(safe_events) < 3:
+        # Not enough safe events, fall back to middle third of all events
+        start_idx = total_events // 3
+        end_idx = 2 * total_events // 3
+        safe_events = subtitle_events[start_idx:end_idx]
+        runner._log_message(f"[Checkpoint Selection] Using middle third (not enough events in safe zone)")
+
+    if len(safe_events) == 0:
+        # Last resort: use first/mid/last of all events
+        return [subtitle_events[0], subtitle_events[total_events // 2], subtitle_events[-1]]
+
+    # Prefer longer duration events (dialogue over signs)
+    # Sort by duration descending, take top 40%
+    sorted_by_duration = sorted(safe_events, key=lambda e: e.end - e.start, reverse=True)
+    top_events = sorted_by_duration[:max(3, len(sorted_by_duration) * 40 // 100)]
+
+    # Sort these back by start time for temporal ordering
+    top_events_sorted = sorted(top_events, key=lambda e: e.start)
+
+    if len(top_events_sorted) >= 3:
+        # Pick early (1/6), middle (1/2), late (5/6)
+        early = top_events_sorted[len(top_events_sorted) // 6]
+        middle = top_events_sorted[len(top_events_sorted) // 2]
+        late = top_events_sorted[5 * len(top_events_sorted) // 6]
+        checkpoints = [early, middle, late]
+    elif len(top_events_sorted) == 2:
+        checkpoints = top_events_sorted
+    else:
+        checkpoints = top_events_sorted
+
+    runner._log_message(f"[Checkpoint Selection] Selected {len(checkpoints)} dialogue events:")
+    for i, e in enumerate(checkpoints):
+        duration = e.end - e.start
+        runner._log_message(f"  {i+1}. Time: {e.start}ms, Duration: {duration}ms")
+
+    return checkpoints
+
+
 def verify_alignment_with_sliding_window(
     source_video: str,
     target_video: str,
@@ -857,19 +929,25 @@ def verify_alignment_with_sliding_window(
     config: dict = None
 ) -> Dict[str, Any]:
     """
-    Hybrid verification: Use duration offset as starting point, then verify with
-    sliding window frame matching at multiple checkpoints.
+    Hybrid verification with TEMPORAL CONSISTENCY: Use duration offset as starting
+    point, then verify with sliding window matching of MULTIPLE adjacent frames.
 
     Algorithm:
     1. Use duration_offset_ms as rough estimate
-    2. Pick 3 checkpoints (first/mid/last subtitles)
+    2. Smart checkpoint selection (avoid OP/ED, prefer dialogue)
     3. For each checkpoint:
-       - Extract 11 frames from source (center ± 5)
-       - Search in target around duration_offset ± search_window
-       - Use perceptual hash sliding window to find best match
-       - Record the precise offset
-    4. Check if all measurements agree within tolerance
+       - Extract 11 frames from source (center ± 5 frames)
+       - Compute hashes for ALL 11 frames
+       - For each candidate offset in search window:
+           * Extract 11 corresponding frames from target
+           * Compare ALL frame pairs (temporal consistency)
+           * Calculate aggregate match score
+       - Select offset with BEST aggregate score
+    4. Check if all checkpoint measurements agree within tolerance
     5. Return precise offset if agreement, else indicate fallback needed
+
+    This fixes false positives on static anime scenes by verifying temporal
+    consistency across multiple frames, not just a single center frame.
 
     Args:
         source_video: Path to source video
@@ -896,7 +974,7 @@ def verify_alignment_with_sliding_window(
     config = config or {}
 
     runner._log_message(f"[Hybrid Verification] ═══════════════════════════════════════")
-    runner._log_message(f"[Hybrid Verification] Running frame-based verification...")
+    runner._log_message(f"[Hybrid Verification] Running TEMPORAL CONSISTENCY verification...")
     runner._log_message(f"[Hybrid Verification] Duration offset (rough): {duration_offset_ms:+.3f}ms")
 
     # Get config parameters
@@ -910,29 +988,18 @@ def verify_alignment_with_sliding_window(
     runner._log_message(f"[Hybrid Verification] Agreement tolerance: ±{tolerance_ms}ms")
     runner._log_message(f"[Hybrid Verification] Hash: {hash_algorithm}, size={hash_size}, threshold={hash_threshold}")
 
-    # Filter valid events (require at least 5 seconds in)
-    valid_events = [e for e in subtitle_events if e.start >= 5000]
-    if not valid_events:
-        runner._log_message(f"[Hybrid Verification] WARNING: No valid subtitle events found")
+    # Smart checkpoint selection (avoid OP/ED, prefer dialogue)
+    checkpoints = _select_smart_checkpoints(subtitle_events, runner)
+
+    if len(checkpoints) == 0:
+        runner._log_message(f"[Hybrid Verification] ERROR: No valid checkpoints found")
         return {
             'enabled': True,
             'valid': False,
-            'error': 'No valid subtitle events for verification',
+            'error': 'No valid checkpoints for verification',
             'measurements': [],
             'duration_offset_ms': duration_offset_ms
         }
-
-    # Select 3 checkpoints (first, middle, last)
-    num_points = min(3, len(valid_events))
-    if num_points == 1:
-        checkpoints = [valid_events[0]]
-    else:
-        first_event = valid_events[0]
-        middle_event = valid_events[len(valid_events) // 2]
-        last_event = valid_events[-1]
-        checkpoints = [first_event, middle_event, last_event]
-
-    runner._log_message(f"[Hybrid Verification] Selected {len(checkpoints)} checkpoints for verification")
 
     # Import frame matching utilities
     try:
@@ -964,83 +1031,109 @@ def verify_alignment_with_sliding_window(
             'duration_offset_ms': duration_offset_ms
         }
 
-    # Process each checkpoint
+    # Process each checkpoint with TEMPORAL CONSISTENCY
+    fps = source_reader.fps or 23.976
+    frame_duration_ms = 1000.0 / fps
+    num_frames = 11  # center ± 5
+
     for i, event in enumerate(checkpoints):
         checkpoint_time_ms = event.start
         runner._log_message(f"[Hybrid Verification] Checkpoint {i+1}/{len(checkpoints)}: {checkpoint_time_ms}ms")
 
-        # Extract 11 frames from source (center ± 5 frames)
-        fps = source_reader.fps or 23.976
-        frame_duration_ms = 1000.0 / fps
-
-        source_frames = []
+        # Step 1: Extract and hash ALL 11 source frames
+        source_frame_hashes = []  # List of (offset, hash)
         for offset in range(-5, 6):  # -5 to +5 = 11 frames
             frame_time_ms = checkpoint_time_ms + (offset * frame_duration_ms)
             frame = source_reader.get_frame_at_time(int(frame_time_ms))
             if frame is not None:
-                source_frames.append((offset, frame))
+                frame_hash = compute_frame_hash(frame, hash_size=hash_size, method=hash_algorithm)
+                if frame_hash is not None:
+                    source_frame_hashes.append((offset, frame_hash))
 
-        if len(source_frames) < 5:  # Need at least 5 frames
-            runner._log_message(f"[Hybrid Verification] WARNING: Could not extract enough frames from source")
+        if len(source_frame_hashes) < 8:  # Need at least 8/11 frames (73%)
+            runner._log_message(f"[Hybrid Verification] WARNING: Not enough source frames ({len(source_frame_hashes)}/11)")
             continue
 
-        # Compute hash for center frame
-        center_frame = [f for o, f in source_frames if o == 0]
-        if not center_frame:
-            runner._log_message(f"[Hybrid Verification] WARNING: No center frame extracted")
-            continue
+        runner._log_message(f"[Hybrid Verification]   Extracted {len(source_frame_hashes)} source frames for temporal matching")
 
-        source_hash = compute_frame_hash(center_frame[0], hash_size=hash_size, method=hash_algorithm)
-        if source_hash is None:
-            runner._log_message(f"[Hybrid Verification] WARNING: Failed to compute source hash")
-            continue
-
-        # Search in target around duration_offset ± search_window
+        # Step 2: Sliding window with AGGREGATE SCORING (temporal consistency)
         search_center_ms = checkpoint_time_ms + duration_offset_ms
         search_start_ms = search_center_ms - search_window_ms
         search_end_ms = search_center_ms + search_window_ms
 
         runner._log_message(f"[Hybrid Verification]   Searching {search_start_ms:.0f}ms - {search_end_ms:.0f}ms")
 
-        # Sliding window search
+        # Track best match across entire search window
         best_match_offset = None
-        best_match_distance = float('inf')
+        best_aggregate_score = -1  # Higher = better
+        best_matched_frames = 0
 
-        search_step_ms = 1000.0 / fps  # Search every frame
+        # Search every 5 frames (skip some for performance)
+        search_step_ms = 5 * frame_duration_ms
         current_search_ms = search_start_ms
 
+        candidates_checked = 0
         while current_search_ms <= search_end_ms:
-            target_frame = target_reader.get_frame_at_time(int(current_search_ms))
-            if target_frame is not None:
-                target_hash = compute_frame_hash(target_frame, hash_size=hash_size, method=hash_algorithm)
-                if target_hash is not None:
-                    distance = source_hash - target_hash  # ImageHash subtraction returns hamming distance
+            # For this candidate offset, extract and compare ALL frames
+            matched_frames = 0
+            total_distance = 0
 
-                    if distance < best_match_distance:
-                        best_match_distance = distance
-                        best_match_offset = current_search_ms - checkpoint_time_ms
+            for offset, source_hash in source_frame_hashes:
+                target_time_ms = current_search_ms + (offset * frame_duration_ms)
+                target_frame = target_reader.get_frame_at_time(int(target_time_ms))
+
+                if target_frame is not None:
+                    target_hash = compute_frame_hash(target_frame, hash_size=hash_size, method=hash_algorithm)
+                    if target_hash is not None:
+                        distance = source_hash - target_hash
+
+                        # Frame matches if within threshold
+                        if distance <= hash_threshold:
+                            matched_frames += 1
+
+                        total_distance += distance
+
+            # Calculate aggregate score: prioritize match count, then average distance
+            # Score = (matched_frames * 1000) - average_distance
+            if len(source_frame_hashes) > 0:
+                avg_distance = total_distance / len(source_frame_hashes)
+                aggregate_score = (matched_frames * 1000) - avg_distance
+
+                # Update best match if this is better
+                if aggregate_score > best_aggregate_score:
+                    best_aggregate_score = aggregate_score
+                    best_match_offset = current_search_ms - checkpoint_time_ms
+                    best_matched_frames = matched_frames
 
             current_search_ms += search_step_ms
+            candidates_checked += 1
 
-        if best_match_offset is None:
-            runner._log_message(f"[Hybrid Verification] WARNING: No match found for checkpoint {i+1}")
-            continue
+        runner._log_message(f"[Hybrid Verification]   Checked {candidates_checked} candidate offsets")
 
-        if best_match_distance <= hash_threshold:
+        # Step 3: Validate temporal consistency (need ≥70% frame matches)
+        min_required_matches = int(len(source_frame_hashes) * 0.70)  # 70% threshold
+
+        if best_match_offset is not None and best_matched_frames >= min_required_matches:
+            match_percent = (best_matched_frames / len(source_frame_hashes)) * 100
             measurements.append(best_match_offset)
-            runner._log_message(f"[Hybrid Verification]   ✓ Match found: offset={best_match_offset:+.1f}ms, distance={best_match_distance}")
+            runner._log_message(f"[Hybrid Verification]   ✓ Match: offset={best_match_offset:+.1f}ms, {best_matched_frames}/{len(source_frame_hashes)} frames ({match_percent:.0f}%)")
             checkpoint_details.append({
                 'checkpoint_ms': checkpoint_time_ms,
                 'offset_ms': best_match_offset,
-                'hash_distance': best_match_distance,
+                'matched_frames': best_matched_frames,
+                'total_frames': len(source_frame_hashes),
+                'match_percent': match_percent,
                 'matched': True
             })
         else:
-            runner._log_message(f"[Hybrid Verification]   ✗ No good match: best distance={best_match_distance} (threshold={hash_threshold})")
+            match_percent = (best_matched_frames / len(source_frame_hashes) * 100) if best_matched_frames else 0
+            runner._log_message(f"[Hybrid Verification]   ✗ No temporal consistency: {best_matched_frames}/{len(source_frame_hashes)} frames ({match_percent:.0f}% < 70%)")
             checkpoint_details.append({
                 'checkpoint_ms': checkpoint_time_ms,
-                'offset_ms': None,
-                'hash_distance': best_match_distance,
+                'offset_ms': best_match_offset,
+                'matched_frames': best_matched_frames,
+                'total_frames': len(source_frame_hashes),
+                'match_percent': match_percent,
                 'matched': False
             })
 

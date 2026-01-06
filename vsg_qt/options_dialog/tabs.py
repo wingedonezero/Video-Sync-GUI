@@ -1343,6 +1343,22 @@ class SubtitleSyncTab(QWidget):
             "Recommended: 'audio-correlation' for most cases."
         )
 
+        # Skip validation for generated tracks
+        self.widgets['duration_align_skip_validation_generated_tracks'] = QCheckBox("Skip validation for generated tracks (recommended)")
+        self.widgets['duration_align_skip_validation_generated_tracks'].setChecked(True)
+        self.widgets['duration_align_skip_validation_generated_tracks'].setToolTip(
+            "Automatically skip frame validation for generated tracks:\n\n"
+            "Generated tracks are created by filtering styles from an already-synced\n"
+            "source track. They inherit the same timing, so re-validating is redundant.\n\n"
+            "• Checked (Default): Skip validation for all generated tracks\n"
+            "  - Faster processing\n"
+            "  - Safe since source was already validated\n\n"
+            "• Unchecked: Validate generated tracks like normal tracks\n"
+            "  - May fail validation on sparse events (signs tracks)\n"
+            "  - Slower but more thorough\n\n"
+            "Recommendation: Keep enabled for faster, safer processing."
+        )
+
         # Frame-Matched settings
         self.widgets['frame_match_search_window_sec'] = QSpinBox()
         self.widgets['frame_match_search_window_sec'].setRange(1, 60)
@@ -1505,6 +1521,7 @@ class SubtitleSyncTab(QWidget):
         sync_layout.addRow("Verify Tolerance:", self.widgets['duration_align_verify_tolerance'])
         sync_layout.addRow("Fallback Mode:", self.widgets['duration_align_fallback_mode'])
         sync_layout.addRow("Fallback Target:", self.widgets['duration_align_fallback_target'])
+        sync_layout.addRow("", self.widgets['duration_align_skip_validation_generated_tracks'])
         sync_layout.addRow("", self.widgets['frame_match_use_vapoursynth'])
         sync_layout.addRow("Match Window:", self.widgets['frame_match_search_window_sec'])
         sync_layout.addRow("Match Threshold:", self.widgets['frame_match_threshold'])
