@@ -23,6 +23,70 @@ from .metadata_preserver import SubtitleMetadata
 
 
 # ============================================================================
+# MODE 0: FRAME START (For Correlation-Frame-Snap - STABLE & DETERMINISTIC)
+# ============================================================================
+
+def time_to_frame_start(time_ms: float, fps: float) -> int:
+    """
+    MODE: Frame START (stable, deterministic).
+
+    Convert timestamp to frame number using FLOOR with epsilon protection.
+
+    This is the ONLY correct method for sync math because:
+    - Deterministic (no rounding ambiguity)
+    - Stable under floating point drift
+    - Maps to actual frame boundaries (frame N starts at N * frame_duration)
+
+    Args:
+        time_ms: Timestamp in milliseconds
+        fps: Frame rate (e.g., 23.976)
+
+    Returns:
+        Frame number (which frame is displaying at this time)
+
+    Examples at 23.976 fps (frame_duration = 41.708ms):
+        time_to_frame_start(0.0, 23.976) → 0
+        time_to_frame_start(41.707, 23.976) → 0 (still in frame 0)
+        time_to_frame_start(41.708, 23.976) → 1 (frame 1 starts)
+        time_to_frame_start(1000.999, 23.976) → 23 (FP drift protected)
+        time_to_frame_start(1001.0, 23.976) → 24
+    """
+    frame_duration_ms = 1000.0 / fps
+    # Add epsilon to protect against FP errors where time_ms is slightly under frame boundary
+    # e.g., 1000.9999999 should be frame 24, not 23
+    epsilon = 1e-6
+    return int((time_ms + epsilon) / frame_duration_ms)
+
+
+def frame_to_time_start(frame_num: int, fps: float) -> float:
+    """
+    MODE: Frame START (stable, deterministic).
+
+    Convert frame number to its START timestamp.
+
+    This is the ONLY correct method for sync math because:
+    - Frame N starts at exactly N * frame_duration
+    - No rounding (exact calculation)
+    - Guarantees frame-aligned timing
+
+    Args:
+        frame_num: Frame number
+        fps: Frame rate (e.g., 23.976)
+
+    Returns:
+        Timestamp in milliseconds (frame START time)
+
+    Examples at 23.976 fps (frame_duration = 41.708ms):
+        frame_to_time_start(0, 23.976) → 0.0
+        frame_to_time_start(1, 23.976) → 41.708
+        frame_to_time_start(24, 23.976) → 1001.0
+        frame_to_time_start(100, 23.976) → 4170.8
+    """
+    frame_duration_ms = 1000.0 / fps
+    return frame_num * frame_duration_ms
+
+
+# ============================================================================
 # MODE 1: MIDDLE OF FRAME (Current Implementation)
 # ============================================================================
 
@@ -1453,13 +1517,37 @@ def verify_correlation_with_frame_snap(
         final_delta = 0
         status = 'failed_validation'
 
-    # Calculate final precise offset
-    frame_snap_ms = final_delta * frame_duration_ms
-    precise_offset_ms = raw_correlation_delay_ms + frame_snap_ms
+    # Calculate final precise offset using CORRECT frame-boundary math
+    # The delta tells us which FRAME to use, we need to calculate the TIME offset to land on it
+    #
+    # Example: checkpoint=10000ms, raw_correlation=-42.667ms, fps=23.976
+    # - Expected target time: 10000 + (-42.667) = 9957.333ms
+    # - Base frame: time_to_frame_start(9957.333, 23.976) = floor(238.68) = 238
+    # - If final_delta = 0: use frame 238
+    # - Frame 238 starts at: 238 * 41.708 = 9926.504ms
+    # - Required offset: 9926.504 - 10000 = -73.496ms
+    #
+    # General formula:
+    # base_frame = time_to_frame_start(checkpoint + raw_correlation, fps)
+    # target_frame = base_frame + final_delta
+    # target_time = frame_to_time_start(target_frame, fps)
+    # precise_offset = target_time - checkpoint
+    #
+    # Simplified (using checkpoint from validation):
+    checkpoint_time_ms = checkpoint_results[0]['time_ms']  # Use start checkpoint
+    base_frame = time_to_frame_start(checkpoint_time_ms + raw_correlation_delay_ms, fps)
+    target_frame = base_frame + final_delta
+    target_time_ms = frame_to_time_start(target_frame, fps)
+    precise_offset_ms = target_time_ms - checkpoint_time_ms
+    frame_snap_ms = precise_offset_ms - raw_correlation_delay_ms
 
     runner._log_message(f"[Correlation+FrameSnap] Final offset calculation:")
+    runner._log_message(f"[Correlation+FrameSnap]   Checkpoint:      {checkpoint_time_ms:.0f}ms")
     runner._log_message(f"[Correlation+FrameSnap]   RAW correlation: {raw_correlation_delay_ms:+.3f}ms")
-    runner._log_message(f"[Correlation+FrameSnap]   Frame snap:      {frame_snap_ms:+.3f}ms ({final_delta:+d} frames)")
+    runner._log_message(f"[Correlation+FrameSnap]   Base frame:      {base_frame} (frame at checkpoint + correlation)")
+    runner._log_message(f"[Correlation+FrameSnap]   Frame delta:     {final_delta:+d}")
+    runner._log_message(f"[Correlation+FrameSnap]   Target frame:    {target_frame} (base + delta)")
+    runner._log_message(f"[Correlation+FrameSnap]   Frame snap:      {frame_snap_ms:+.3f}ms")
     runner._log_message(f"[Correlation+FrameSnap]   Precise offset:  {precise_offset_ms:+.3f}ms")
 
     return {

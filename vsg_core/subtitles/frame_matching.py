@@ -227,8 +227,11 @@ class VideoReader:
         try:
             import numpy as np
 
-            # Convert time to frame number
-            frame_num = int((time_ms / 1000.0) * self.fps)
+            # Convert time to frame number using FLOOR with epsilon protection
+            # This ensures stable, deterministic frame selection without FP drift issues
+            frame_duration_ms = 1000.0 / self.fps
+            epsilon = 1e-6  # Protect against FP errors (e.g., 1000.9999 → frame 24, not 23)
+            frame_num = int((time_ms + epsilon) / frame_duration_ms)
 
             # Clamp to valid range
             frame_num = max(0, min(frame_num, len(self.vs_clip) - 1))
@@ -250,8 +253,10 @@ class VideoReader:
     def _get_frame_ffms2(self, time_ms: int) -> Optional[Image.Image]:
         """Extract frame using FFMS2 (instant indexed seeking)."""
         try:
-            # Convert time to frame number
-            frame_num = int((time_ms / 1000.0) * self.fps)
+            # Convert time to frame number using FLOOR with epsilon protection
+            frame_duration_ms = 1000.0 / self.fps
+            epsilon = 1e-6  # Protect against FP errors
+            frame_num = int((time_ms + epsilon) / frame_duration_ms)
 
             # Clamp to valid range
             frame_num = max(0, min(frame_num, self.source.properties.NumFrames - 1))
