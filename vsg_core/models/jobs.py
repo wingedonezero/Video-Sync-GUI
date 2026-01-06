@@ -50,6 +50,7 @@ class PlanItem:
     generated_filter_styles: List[str] = field(default_factory=list)  # Style names to include/exclude
     generated_original_style_list: List[str] = field(default_factory=list)  # Complete style list from original source (for validation)
     generated_verify_only_lines_removed: bool = True  # Verify only event lines removed, nothing else changed
+    skip_frame_validation: bool = False  # Skip duration-align frame validation (for generated tracks)
 
 @dataclass(frozen=True)
 class MergePlan:

@@ -346,6 +346,7 @@ class ManualSelectionDialog(QDialog):
         generated_track['generated_filter_styles'] = filter_config['styles']
         generated_track['generated_original_style_list'] = filter_config.get('original_style_list', [])  # Complete style list for validation
         generated_track['generated_verify_only_lines_removed'] = True
+        generated_track['skip_frame_validation'] = filter_config.get('skip_frame_validation', True)  # Default to True for generated tracks
 
         # Update the track name (keep original description - the 🔗 Generated badge shows it's generated)
         generated_track['name'] = filter_config['name']
@@ -378,7 +379,8 @@ class ManualSelectionDialog(QDialog):
         existing_config = {
             'mode': track_data.get('generated_filter_mode', 'exclude'),
             'styles': track_data.get('generated_filter_styles', []),
-            'name': track_data.get('custom_name', track_data.get('name', ''))
+            'name': track_data.get('custom_name', track_data.get('name', '')),
+            'skip_frame_validation': track_data.get('skip_frame_validation', True)
         }
 
         # Get the source track information
@@ -444,6 +446,7 @@ class ManualSelectionDialog(QDialog):
         track_data['generated_filter_mode'] = filter_config['mode']
         track_data['generated_filter_styles'] = filter_config['styles']
         track_data['generated_original_style_list'] = filter_config.get('original_style_list', [])
+        track_data['skip_frame_validation'] = filter_config.get('skip_frame_validation', True)
         track_data['name'] = filter_config['name']
         track_data['custom_name'] = filter_config['name']
 

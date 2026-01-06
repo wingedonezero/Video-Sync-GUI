@@ -1237,23 +1237,85 @@ class SubtitleSyncTab(QWidget):
             "Lower this if validation fails on same-source videos with different encoding."
         )
 
+        # Hybrid verification settings
+        self.widgets['duration_align_verify_with_frames'] = QCheckBox("Verify alignment with frame matching (hybrid mode)")
+        self.widgets['duration_align_verify_with_frames'].setChecked(False)
+        self.widgets['duration_align_verify_with_frames'].setToolTip(
+            "Enable hybrid verification mode:\n\n"
+            "Combines duration-align (fast rough estimate) with sliding window\n"
+            "frame matching (precise verification) for maximum accuracy.\n\n"
+            "How it works:\n"
+            "1. Calculate duration offset (fast, approximate)\n"
+            "2. Extract frames at 3 checkpoints (first/mid/last subtitles)\n"
+            "3. Use sliding window to find actual frame alignment\n"
+            "4. Verify all measurements agree (within tolerance)\n"
+            "5. Use precise measurement if agreement, fallback if not\n\n"
+            "Benefits:\n"
+            "• More accurate than pure duration-align\n"
+            "• Faster than full frame-matched mode\n"
+            "• Self-validates - knows if sync is correct\n"
+            "• Works even with small encode differences\n\n"
+            "Adds ~10-20 seconds but gives high-confidence sync.\n\n"
+            "Recommended for important syncs where accuracy matters."
+        )
+
+        self.widgets['duration_align_verify_search_window'] = QSpinBox()
+        self.widgets['duration_align_verify_search_window'].setRange(500, 10000)
+        self.widgets['duration_align_verify_search_window'].setValue(2000)
+        self.widgets['duration_align_verify_search_window'].setSingleStep(500)
+        self.widgets['duration_align_verify_search_window'].setSuffix(" ms")
+        self.widgets['duration_align_verify_search_window'].setToolTip(
+            "Search window for frame matching verification:\n\n"
+            "How far to search around the duration-based estimate.\n\n"
+            "• 2000ms (Default): Search ±2 seconds\n"
+            "  - Good for most encode differences\n"
+            "  - Catches frame shift of ~48-60 frames at 24fps\n\n"
+            "• 5000ms: Search ±5 seconds\n"
+            "  - For heavily different encodes\n"
+            "  - If duration estimate might be very wrong\n\n"
+            "Larger = more thorough but slower.\n"
+            "Only used when hybrid mode enabled."
+        )
+
+        self.widgets['duration_align_verify_tolerance'] = QSpinBox()
+        self.widgets['duration_align_verify_tolerance'].setRange(10, 500)
+        self.widgets['duration_align_verify_tolerance'].setValue(100)
+        self.widgets['duration_align_verify_tolerance'].setSingleStep(10)
+        self.widgets['duration_align_verify_tolerance'].setSuffix(" ms")
+        self.widgets['duration_align_verify_tolerance'].setToolTip(
+            "Agreement tolerance for measurements:\n\n"
+            "All 3 checkpoints must agree within this tolerance.\n\n"
+            "• 100ms (Default): Tight agreement\n"
+            "  - Ensures all measurements are consistent\n"
+            "  - ~2-3 frames at 24fps\n\n"
+            "• 200ms: Looser tolerance\n"
+            "  - For VFR or borderline cases\n"
+            "  - ~5 frames at 24fps\n\n"
+            "If measurements disagree, uses fallback mode setting.\n"
+            "Only used when hybrid mode enabled."
+        )
+
         self.widgets['duration_align_fallback_mode'] = QComboBox()
-        self.widgets['duration_align_fallback_mode'].addItems(['none', 'abort', 'auto-fallback'])
+        self.widgets['duration_align_fallback_mode'].addItems(['none', 'abort', 'auto-fallback', 'duration-offset'])
         self.widgets['duration_align_fallback_mode'].setToolTip(
             "What to do if frame validation fails:\n\n"
             "• none (Default): Warn but continue\n"
             "  - Shows warning in logs\n"
             "  - Applies duration-align sync anyway\n"
             "  - User can review and re-run if needed\n\n"
-            "• abort: Stop the job\n"
-            "  - Fails the job immediately\n"
-            "  - Forces user to fix settings or choose different mode\n"
-            "  - Safest option if you want guaranteed accuracy\n\n"
+            "• abort: Fail the job\n"
+            "  - Returns error, job shows as failed\n"
+            "  - Good for batch processing to identify problems\n"
+            "  - Forces manual review and correction\n\n"
+            "• duration-offset: Use duration offset\n"
+            "  - Falls back to simple duration calculation\n"
+            "  - Skips frame verification entirely\n"
+            "  - For hybrid mode: use if measurements disagree\n\n"
             "• auto-fallback: Try different sync mode\n"
             "  - Automatically uses fallback mode (configured below)\n"
             "  - Seamless recovery from validation failures\n"
             "  - Good for automated workflows\n\n"
-            "Recommended: 'none' for testing, 'auto-fallback' for production."
+            "Recommended: 'abort' for batch, 'duration-offset' for hybrid mode."
         )
 
         self.widgets['duration_align_fallback_target'] = QComboBox()
@@ -1438,6 +1500,9 @@ class SubtitleSyncTab(QWidget):
         sync_layout.addRow("Hash Size:", self.widgets['duration_align_hash_size'])
         sync_layout.addRow("Hash Threshold:", self.widgets['duration_align_hash_threshold'])
         sync_layout.addRow("Strictness:", self.widgets['duration_align_strictness'])
+        sync_layout.addRow("", self.widgets['duration_align_verify_with_frames'])
+        sync_layout.addRow("Verify Search Window:", self.widgets['duration_align_verify_search_window'])
+        sync_layout.addRow("Verify Tolerance:", self.widgets['duration_align_verify_tolerance'])
         sync_layout.addRow("Fallback Mode:", self.widgets['duration_align_fallback_mode'])
         sync_layout.addRow("Fallback Target:", self.widgets['duration_align_fallback_target'])
         sync_layout.addRow("", self.widgets['frame_match_use_vapoursynth'])

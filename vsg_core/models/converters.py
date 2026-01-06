@@ -64,7 +64,16 @@ def realize_plan_from_manual_layout(
                 rescale=bool(sel.get('rescale', False)),
                 size_multiplier=float(sel.get('size_multiplier', 1.0)),
                 custom_lang=sel.get('custom_lang', ''),
-                custom_name=sel.get('custom_name', '')
+                custom_name=sel.get('custom_name', ''),
+                # Generated track fields
+                is_generated=bool(sel.get('is_generated', False)),
+                generated_source_track_id=sel.get('generated_source_track_id'),
+                generated_source_path=sel.get('generated_source_path'),
+                generated_filter_mode=sel.get('generated_filter_mode', 'exclude'),
+                generated_filter_styles=sel.get('generated_filter_styles', []),
+                generated_original_style_list=sel.get('generated_original_style_list', []),
+                generated_verify_only_lines_removed=bool(sel.get('generated_verify_only_lines_removed', True)),
+                skip_frame_validation=bool(sel.get('skip_frame_validation', False))
             )
         )
     return realized
