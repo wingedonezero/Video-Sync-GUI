@@ -14,9 +14,11 @@ For Variable Frame Rate videos, use the separate 'videotimestamps' sync mode.
 """
 from __future__ import annotations
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import pysubs2
 import math
+import gc
+import tempfile
 from .metadata_preserver import SubtitleMetadata
 
 
@@ -261,6 +263,441 @@ def time_to_frame_vfr(time_ms: float, video_path: str, fps: float, runner, confi
 
 
 # ============================================================================
+# VAPOURSYNTH FRAME INDEXING (Fast & Accurate)
+# ============================================================================
+
+def get_vapoursynth_frame_info(video_path: str, runner) -> Optional[Tuple[int, float]]:
+    """
+    Get frame count and last frame timestamp using VapourSynth indexing.
+
+    This is MUCH faster than ffprobe -count_frames after the initial index:
+    - First run: ~30-60s (generates .lwi index file)
+    - Subsequent runs: <1s (reads cached index)
+
+    Handles CFR and VFR videos perfectly.
+
+    IMPORTANT: Properly frees memory after use to prevent RAM buildup.
+
+    Args:
+        video_path: Path to video file
+        runner: CommandRunner for logging
+
+    Returns:
+        Tuple of (frame_count, last_frame_timestamp_ms) or None on error
+    """
+    try:
+        import vapoursynth as vs
+
+        runner._log_message(f"[VapourSynth] Indexing video: {Path(video_path).name}")
+
+        # Create new core instance for isolation
+        core = vs.core
+
+        # Load video - this auto-generates .lwi index if not present
+        # LWLibavSource is preferred for accuracy and VFR support
+        try:
+            clip = core.lsmas.LWLibavSource(str(video_path))
+            runner._log_message(f"[VapourSynth] Using LWLibavSource (L-SMASH)")
+        except Exception as e:
+            # Fallback to FFmpegSource2 if L-SMASH fails
+            runner._log_message(f"[VapourSynth] L-SMASH failed, trying FFmpegSource2: {e}")
+            clip = core.ffms2.Source(str(video_path))
+            runner._log_message(f"[VapourSynth] Using FFmpegSource2")
+
+        # Get frame count
+        frame_count = clip.num_frames
+        runner._log_message(f"[VapourSynth] Frame count: {frame_count}")
+
+        # Get last frame timestamp
+        # VapourSynth uses rational time base, convert to milliseconds
+        last_frame_idx = frame_count - 1
+        last_frame = clip.get_frame(last_frame_idx)
+
+        # Calculate timestamp from frame properties
+        # _DurationNum / _DurationDen gives frame duration in seconds
+        fps_num = clip.fps.numerator
+        fps_den = clip.fps.denominator
+
+        # Last frame timestamp = (frame_index / fps) * 1000
+        last_frame_timestamp_ms = (last_frame_idx * fps_den * 1000.0) / fps_num
+
+        runner._log_message(f"[VapourSynth] Last frame (#{last_frame_idx}) timestamp: {last_frame_timestamp_ms:.3f}ms")
+        runner._log_message(f"[VapourSynth] FPS: {fps_num}/{fps_den} ({fps_num/fps_den:.3f})")
+
+        # CRITICAL: Free memory immediately
+        # VapourSynth can hold large amounts of RAM if not freed
+        del clip
+        del last_frame
+        del core
+        gc.collect()  # Force garbage collection
+
+        runner._log_message(f"[VapourSynth] ✓ Index loaded, memory freed")
+
+        return (frame_count, last_frame_timestamp_ms)
+
+    except ImportError:
+        runner._log_message("[VapourSynth] WARNING: VapourSynth not installed, falling back to ffprobe")
+        return None
+    except Exception as e:
+        runner._log_message(f"[VapourSynth] ERROR: Failed to index video: {e}")
+        # Ensure cleanup even on error
+        try:
+            del clip
+            del core
+        except:
+            pass
+        gc.collect()
+        return None
+
+
+def extract_frame_as_image(video_path: str, frame_number: int, runner) -> Optional[bytes]:
+    """
+    Extract a single frame from video as PNG image data using VapourSynth.
+
+    Args:
+        video_path: Path to video file
+        frame_number: Frame index to extract (0-based)
+        runner: CommandRunner for logging
+
+    Returns:
+        PNG image data as bytes, or None on error
+    """
+    try:
+        import vapoursynth as vs
+        from PIL import Image
+        import numpy as np
+        import io
+
+        core = vs.core
+
+        # Load video
+        try:
+            clip = core.lsmas.LWLibavSource(str(video_path))
+        except:
+            clip = core.ffms2.Source(str(video_path))
+
+        # Validate frame number
+        if frame_number < 0 or frame_number >= clip.num_frames:
+            runner._log_message(f"[VapourSynth] ERROR: Frame {frame_number} out of range (0-{clip.num_frames-1})")
+            del clip
+            del core
+            gc.collect()
+            return None
+
+        # Get frame
+        frame = clip.get_frame(frame_number)
+
+        # Convert frame to RGB for PIL
+        # VapourSynth frame format is planar, need to convert to interleaved
+        width = frame.width
+        height = frame.height
+
+        # Read planes (YUV or RGB depending on format)
+        # Convert to RGB24 first if needed
+        if frame.format.color_family == vs.YUV:
+            clip_rgb = core.resize.Bicubic(clip, format=vs.RGB24, matrix_in_s="709")
+            frame_rgb = clip_rgb.get_frame(frame_number)
+        else:
+            frame_rgb = frame
+
+        # Extract RGB data
+        # VapourSynth stores planes separately, PIL needs interleaved RGB
+        r_plane = np.array(frame_rgb[0], copy=False)
+        g_plane = np.array(frame_rgb[1], copy=False)
+        b_plane = np.array(frame_rgb[2], copy=False)
+
+        # Stack into RGB image
+        rgb_array = np.stack([r_plane, g_plane, b_plane], axis=2)
+
+        # Create PIL Image
+        img = Image.fromarray(rgb_array, mode='RGB')
+
+        # Convert to PNG bytes
+        img_bytes = io.BytesIO()
+        img.save(img_bytes, format='PNG')
+        img_data = img_bytes.getvalue()
+
+        # Free memory
+        del frame
+        del frame_rgb
+        del clip
+        try:
+            del clip_rgb
+        except:
+            pass
+        del core
+        del img
+        del rgb_array
+        gc.collect()
+
+        return img_data
+
+    except Exception as e:
+        runner._log_message(f"[VapourSynth] ERROR: Failed to extract frame {frame_number}: {e}")
+        # Cleanup on error
+        try:
+            del clip
+            del core
+        except:
+            pass
+        gc.collect()
+        return None
+
+
+def compute_perceptual_hash(image_data: bytes, runner) -> Optional[str]:
+    """
+    Compute perceptual hash (dHash) from image data.
+
+    Uses dHash (difference hash) which is robust to:
+    - JPEG compression artifacts
+    - Minor encoding differences
+    - Slight color shifts
+
+    Args:
+        image_data: PNG/JPEG image data as bytes
+        runner: CommandRunner for logging
+
+    Returns:
+        Hexadecimal hash string, or None on error
+    """
+    try:
+        from PIL import Image
+        import imagehash
+        import io
+
+        img = Image.open(io.BytesIO(image_data))
+
+        # dHash (difference hash) - robust to compression
+        dhash = imagehash.dhash(img, hash_size=8)
+
+        del img
+        gc.collect()
+
+        return str(dhash)
+
+    except ImportError:
+        runner._log_message("[Perceptual Hash] WARNING: imagehash library not installed")
+        runner._log_message("[Perceptual Hash] Install with: pip install imagehash")
+        return None
+    except Exception as e:
+        runner._log_message(f"[Perceptual Hash] ERROR: Failed to compute hash: {e}")
+        return None
+
+
+def validate_frame_alignment(
+    source_video: str,
+    target_video: str,
+    subtitle_events: List,
+    duration_offset_ms: float,
+    runner,
+    config: dict = None
+) -> Dict[str, Any]:
+    """
+    Validate that videos are frame-aligned by comparing perceptual hashes.
+
+    Checks 3 points throughout the video:
+    1. First subtitle event (~5 min in)
+    2. Middle subtitle event (~45 min in)
+    3. Last subtitle event (~85 min in)
+
+    For each checkpoint:
+    - Extracts 11 frames (center ± 5 frames)
+    - Computes perceptual hashes
+    - Compares source vs target
+    - Reports match confidence
+
+    Args:
+        source_video: Path to source video
+        target_video: Path to target video
+        subtitle_events: List of subtitle events
+        duration_offset_ms: Calculated duration offset
+        runner: CommandRunner for logging
+        config: Optional config dict with:
+            - 'duration_align_validate': bool (enable/disable)
+            - 'duration_align_validate_points': int (1 or 3)
+            - 'duration_align_hash_threshold': int (max hamming distance)
+
+    Returns:
+        Dict with validation results
+    """
+    config = config or {}
+
+    # Check if validation is enabled
+    if not config.get('duration_align_validate', True):
+        runner._log_message("[Frame Validation] Validation disabled in config")
+        return {'enabled': False, 'valid': True}
+
+    runner._log_message(f"[Frame Validation] ═══════════════════════════════════════")
+    runner._log_message(f"[Frame Validation] Validating frame alignment...")
+
+    # Get number of checkpoints to validate
+    # UI sends text like "1 point (fast)" or "3 points (thorough)", extract the number
+    num_points_str = config.get('duration_align_validate_points', '3 points (thorough)')
+    if '1 point' in str(num_points_str):
+        num_points = 1
+    elif '3 points' in str(num_points_str):
+        num_points = 3
+    else:
+        # Fallback: try to extract number or default to 3
+        try:
+            num_points = int(num_points_str)
+        except (ValueError, TypeError):
+            num_points = 3
+
+    hash_threshold = config.get('duration_align_hash_threshold', 5)
+
+    # Find non-empty subtitle events
+    valid_events = [e for e in subtitle_events if e.end > e.start]
+    if not valid_events:
+        runner._log_message("[Frame Validation] WARNING: No valid subtitle events to validate")
+        return {'enabled': True, 'valid': False, 'error': 'No valid subtitle events'}
+
+    # Select checkpoints
+    checkpoints = []
+    if num_points == 1:
+        # Just check first event
+        checkpoints = [valid_events[0]]
+    else:  # 3 points
+        # First, middle, last
+        first_event = valid_events[0]
+        middle_event = valid_events[len(valid_events) // 2]
+        last_event = valid_events[-1]
+        checkpoints = [first_event, middle_event, last_event]
+        runner._log_message(f"[Frame Validation] Checking 3 points:")
+        runner._log_message(f"[Frame Validation]   - First subtitle @ {first_event.start}ms")
+        runner._log_message(f"[Frame Validation]   - Middle subtitle @ {middle_event.start}ms")
+        runner._log_message(f"[Frame Validation]   - Last subtitle @ {last_event.start}ms")
+
+    # Detect FPS
+    source_fps = detect_video_fps(source_video, runner)
+    target_fps = detect_video_fps(target_video, runner)
+
+    validation_results = {
+        'enabled': True,
+        'valid': True,
+        'checkpoints': [],
+        'total_frames_checked': 0,
+        'matched_frames': 0,
+        'mismatched_frames': 0
+    }
+
+    # Validate each checkpoint
+    for idx, event in enumerate(checkpoints, 1):
+        checkpoint_name = ['First', 'Middle', 'Last'][idx - 1] if num_points == 3 else 'First'
+
+        runner._log_message(f"[Frame Validation] ─────────────────────────────────────")
+        runner._log_message(f"[Frame Validation] Checkpoint {idx}/{len(checkpoints)}: {checkpoint_name} subtitle")
+
+        # Get source frame for this subtitle
+        source_time_ms = event.start
+        source_frame = time_to_frame_vfr(source_time_ms, source_video, source_fps, runner, config)
+
+        if source_frame is None:
+            # Fallback to simple calculation
+            source_frame = int(source_time_ms * source_fps / 1000.0)
+
+        # Get target frame (source time + duration offset)
+        target_time_ms = source_time_ms + duration_offset_ms
+        target_frame = time_to_frame_vfr(target_time_ms, target_video, target_fps, runner, config)
+
+        if target_frame is None:
+            target_frame = int(target_time_ms * target_fps / 1000.0)
+
+        runner._log_message(f"[Frame Validation] Source: frame {source_frame} @ {source_time_ms}ms")
+        runner._log_message(f"[Frame Validation] Target: frame {target_frame} @ {target_time_ms:.1f}ms")
+        runner._log_message(f"[Frame Validation] Comparing 11 frames (center ± 5)...")
+
+        checkpoint_result = {
+            'checkpoint': checkpoint_name,
+            'source_frame': source_frame,
+            'target_frame': target_frame,
+            'frames_checked': 0,
+            'frames_matched': 0,
+            'frames_mismatched': 0,
+            'match_percentage': 0.0
+        }
+
+        # Compare frames: center ± 5
+        for offset in range(-5, 6):
+            src_frame_num = source_frame + offset
+            tgt_frame_num = target_frame + offset
+
+            # Extract frames
+            src_img = extract_frame_as_image(source_video, src_frame_num, runner)
+            tgt_img = extract_frame_as_image(target_video, tgt_frame_num, runner)
+
+            if src_img is None or tgt_img is None:
+                runner._log_message(f"[Frame Validation]   Frame {offset:+d}: SKIP (extraction failed)")
+                continue
+
+            # Compute hashes
+            src_hash = compute_perceptual_hash(src_img, runner)
+            tgt_hash = compute_perceptual_hash(tgt_img, runner)
+
+            if src_hash is None or tgt_hash is None:
+                runner._log_message(f"[Frame Validation]   Frame {offset:+d}: SKIP (hash failed)")
+                continue
+
+            # Compare hashes (Hamming distance)
+            try:
+                import imagehash
+                src_hash_obj = imagehash.hex_to_hash(src_hash)
+                tgt_hash_obj = imagehash.hex_to_hash(tgt_hash)
+                hamming_dist = src_hash_obj - tgt_hash_obj
+
+                checkpoint_result['frames_checked'] += 1
+                validation_results['total_frames_checked'] += 1
+
+                if hamming_dist <= hash_threshold:
+                    checkpoint_result['frames_matched'] += 1
+                    validation_results['matched_frames'] += 1
+                    runner._log_message(f"[Frame Validation]   Frame {offset:+d}: ✓ MATCH (distance: {hamming_dist})")
+                else:
+                    checkpoint_result['frames_mismatched'] += 1
+                    validation_results['mismatched_frames'] += 1
+                    runner._log_message(f"[Frame Validation]   Frame {offset:+d}: ✗ MISMATCH (distance: {hamming_dist})")
+
+            except Exception as e:
+                runner._log_message(f"[Frame Validation]   Frame {offset:+d}: ERROR ({e})")
+
+        # Calculate match percentage for this checkpoint
+        if checkpoint_result['frames_checked'] > 0:
+            match_pct = (checkpoint_result['frames_matched'] / checkpoint_result['frames_checked']) * 100
+            checkpoint_result['match_percentage'] = match_pct
+
+            runner._log_message(f"[Frame Validation] Checkpoint result: {checkpoint_result['frames_matched']}/{checkpoint_result['frames_checked']} matched ({match_pct:.1f}%)")
+
+            # Consider checkpoint valid if >80% frames match
+            if match_pct < 80.0:
+                validation_results['valid'] = False
+                runner._log_message(f"[Frame Validation] ⚠ WARNING: Low match rate for {checkpoint_name} subtitle!")
+
+        validation_results['checkpoints'].append(checkpoint_result)
+
+    # Final verdict
+    runner._log_message(f"[Frame Validation] ═══════════════════════════════════════")
+
+    if validation_results['total_frames_checked'] > 0:
+        overall_match_pct = (validation_results['matched_frames'] / validation_results['total_frames_checked']) * 100
+        validation_results['overall_match_percentage'] = overall_match_pct
+
+        runner._log_message(f"[Frame Validation] OVERALL: {validation_results['matched_frames']}/{validation_results['total_frames_checked']} frames matched ({overall_match_pct:.1f}%)")
+
+        if validation_results['valid']:
+            runner._log_message(f"[Frame Validation] ✓ VALIDATION PASSED - Videos appear frame-aligned")
+        else:
+            runner._log_message(f"[Frame Validation] ✗ VALIDATION FAILED - Videos may NOT be frame-aligned!")
+            runner._log_message(f"[Frame Validation] ⚠ Consider using audio-correlation mode instead")
+    else:
+        runner._log_message(f"[Frame Validation] ERROR: No frames could be validated")
+        validation_results['valid'] = False
+
+    runner._log_message(f"[Frame Validation] ═══════════════════════════════════════")
+
+    return validation_results
+
+
+# ============================================================================
 # RAW DELAY MODE (No Frame Analysis)
 # ============================================================================
 
@@ -429,57 +866,86 @@ def apply_duration_align_sync(
     runner._log_message(f"[Duration Align] Source video: {Path(source_video).name}")
     runner._log_message(f"[Duration Align] Target video: {Path(target_video).name}")
 
-    # Detect FPS of both videos
-    source_fps = detect_video_fps(source_video, runner)
-    target_fps = detect_video_fps(target_video, runner)
+    # Try VapourSynth first (fast + accurate), fallback to ffprobe
+    use_vapoursynth = config.get('duration_align_use_vapoursynth', True)
 
-    # Get VideoTimestamps for duration calculation
-    source_vts = get_vfr_timestamps(source_video, source_fps, runner, config)
-    target_vts = get_vfr_timestamps(target_video, target_fps, runner, config)
+    source_frame_count = None
+    source_duration_ms = None
+    target_frame_count = None
+    target_duration_ms = None
 
-    if source_vts is None or target_vts is None:
-        return {'error': 'Failed to create VideoTimestamps instances'}
+    if use_vapoursynth:
+        runner._log_message(f"[Duration Align] Using VapourSynth for frame indexing (fast after first run)")
 
-    # Get exact frame count from videos (frame-accurate, not container duration)
-    import subprocess
-    import json
+        # Get source video info
+        source_info = get_vapoursynth_frame_info(source_video, runner)
+        if source_info:
+            source_frame_count, source_duration_ms = source_info
+        else:
+            runner._log_message(f"[Duration Align] VapourSynth failed for source, falling back to ffprobe")
 
-    try:
-        # Get source video frame count
-        cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-count_frames',
-               '-show_entries', 'stream=nb_read_frames', '-print_format', 'json', source_video]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        source_info = json.loads(result.stdout)
-        source_frame_count = int(source_info['streams'][0]['nb_read_frames'])
+        # Get target video info
+        target_info = get_vapoursynth_frame_info(target_video, runner)
+        if target_info:
+            target_frame_count, target_duration_ms = target_info
+        else:
+            runner._log_message(f"[Duration Align] VapourSynth failed for target, falling back to ffprobe")
 
-        # Get target video frame count
-        cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-count_frames',
-               '-show_entries', 'stream=nb_read_frames', '-print_format', 'json', target_video]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        target_info = json.loads(result.stdout)
-        target_frame_count = int(target_info['streams'][0]['nb_read_frames'])
+    # Fallback to ffprobe if VapourSynth failed or disabled
+    if source_frame_count is None or target_frame_count is None:
+        runner._log_message(f"[Duration Align] Using ffprobe for frame counting (slower, but reliable)")
 
-    except Exception as e:
-        runner._log_message(f"[Duration Align] ERROR: Failed to get frame counts: {e}")
-        return {'error': str(e)}
+        # Detect FPS of both videos
+        source_fps = detect_video_fps(source_video, runner)
+        target_fps = detect_video_fps(target_video, runner)
 
+        # Get exact frame count from videos (frame-accurate, not container duration)
+        import subprocess
+        import json
+
+        try:
+            # Get source video frame count
+            cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-count_frames',
+                   '-show_entries', 'stream=nb_read_frames', '-print_format', 'json', source_video]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            source_info = json.loads(result.stdout)
+            source_frame_count = int(source_info['streams'][0]['nb_read_frames'])
+
+            # Get target video frame count
+            cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-count_frames',
+                   '-show_entries', 'stream=nb_read_frames', '-print_format', 'json', target_video]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            target_info = json.loads(result.stdout)
+            target_frame_count = int(target_info['streams'][0]['nb_read_frames'])
+
+        except Exception as e:
+            runner._log_message(f"[Duration Align] ERROR: Failed to get frame counts: {e}")
+            return {'error': str(e)}
+
+        runner._log_message(f"[Duration Align] Source frame count: {source_frame_count}")
+        runner._log_message(f"[Duration Align] Target frame count: {target_frame_count}")
+
+        # Calculate exact duration from last frame timestamp using VideoTimestamps
+        # Last frame index = total_frames - 1 (zero-indexed)
+        source_last_frame = source_frame_count - 1
+        target_last_frame = target_frame_count - 1
+
+        source_duration_ms = frame_to_time_vfr(source_last_frame, source_video, source_fps, runner, config)
+        target_duration_ms = frame_to_time_vfr(target_last_frame, target_video, target_fps, runner, config)
+
+        if source_duration_ms is None or target_duration_ms is None:
+            runner._log_message(f"[Duration Align] ERROR: Failed to get last frame timestamps")
+            return {'error': 'Failed to get last frame timestamps'}
+
+    # Report frame counts
     runner._log_message(f"[Duration Align] Source frame count: {source_frame_count}")
     runner._log_message(f"[Duration Align] Target frame count: {target_frame_count}")
 
-    # Calculate exact duration from last frame timestamp using VideoTimestamps
-    # Last frame index = total_frames - 1 (zero-indexed)
-    source_last_frame = source_frame_count - 1
-    target_last_frame = target_frame_count - 1
-
-    source_duration_ms = frame_to_time_vfr(source_last_frame, source_video, source_fps, runner, config)
-    target_duration_ms = frame_to_time_vfr(target_last_frame, target_video, target_fps, runner, config)
-
-    if source_duration_ms is None or target_duration_ms is None:
-        runner._log_message(f"[Duration Align] ERROR: Failed to get last frame timestamps")
-        return {'error': 'Failed to get last frame timestamps'}
-
     # Calculate duration offset
     duration_offset_ms = target_duration_ms - source_duration_ms
+
+    source_last_frame = source_frame_count - 1
+    target_last_frame = target_frame_count - 1
 
     runner._log_message(f"[Duration Align] Source last frame (#{source_last_frame}): {source_duration_ms}ms")
     runner._log_message(f"[Duration Align] Target last frame (#{target_last_frame}): {target_duration_ms}ms")
@@ -512,6 +978,25 @@ def apply_duration_align_sync(
 
     runner._log_message(f"[Duration Align] Loaded {len(subs.events)} subtitle events")
 
+    # VALIDATE: Check if videos are actually frame-aligned
+    validation_result = validate_frame_alignment(
+        source_video,
+        target_video,
+        subs.events,
+        duration_offset_ms,
+        runner,
+        config
+    )
+
+    # If validation failed, warn user but continue (they can decide)
+    if validation_result.get('enabled') and not validation_result.get('valid'):
+        runner._log_message(f"[Duration Align] ⚠⚠⚠ VALIDATION FAILED ⚠⚠⚠")
+        runner._log_message(f"[Duration Align] Videos may NOT be frame-aligned!")
+        runner._log_message(f"[Duration Align] Sync may be INCORRECT - consider using audio-correlation mode")
+        runner._log_message(f"[Duration Align] Continuing anyway... (you can abort if needed)")
+        # Add warning to result
+        validation_result['warning'] = 'Frame alignment validation failed - sync may be incorrect'
+
     # Apply total shift to all events
     for event in subs.events:
         event.start = event.start + total_shift_ms
@@ -534,14 +1019,21 @@ def apply_duration_align_sync(
     runner._log_message(f"[Duration Align]   - Global shift: {global_shift_ms:+.3f}ms")
     runner._log_message(f"[Duration Align]   - Total shift applied: {total_shift_ms:+.3f}ms")
 
-    return {
+    result = {
         'total_events': len(subs.events),
         'source_duration_ms': source_duration_ms,
         'target_duration_ms': target_duration_ms,
         'duration_offset_ms': duration_offset_ms,
         'global_shift_ms': global_shift_ms,
-        'total_shift_ms': total_shift_ms
+        'total_shift_ms': total_shift_ms,
+        'validation': validation_result
     }
+
+    # Add warning if validation failed
+    if validation_result.get('enabled') and not validation_result.get('valid'):
+        result['warning'] = 'Frame alignment validation failed - sync may be incorrect'
+
+    return result
 
 
 # ============================================================================
