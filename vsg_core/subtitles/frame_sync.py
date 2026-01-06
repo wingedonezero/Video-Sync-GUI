@@ -293,16 +293,27 @@ def get_vapoursynth_frame_info(video_path: str, runner) -> Optional[Tuple[int, f
         # Create new core instance for isolation
         core = vs.core
 
-        # Load video - this auto-generates .lwi index if not present
-        # LWLibavSource is preferred for accuracy and VFR support
+        # Load video - this auto-generates index if not present
+        # Try L-SMASH first (more accurate), fall back to FFmpegSource2
+        clip = None
         try:
             clip = core.lsmas.LWLibavSource(str(video_path))
             runner._log_message(f"[VapourSynth] Using LWLibavSource (L-SMASH)")
+        except AttributeError:
+            # L-SMASH plugin not installed
+            runner._log_message(f"[VapourSynth] L-SMASH plugin not found, using FFmpegSource2")
         except Exception as e:
-            # Fallback to FFmpegSource2 if L-SMASH fails
-            runner._log_message(f"[VapourSynth] L-SMASH failed, trying FFmpegSource2: {e}")
-            clip = core.ffms2.Source(str(video_path))
-            runner._log_message(f"[VapourSynth] Using FFmpegSource2")
+            runner._log_message(f"[VapourSynth] L-SMASH failed: {e}, trying FFmpegSource2")
+
+        if clip is None:
+            try:
+                clip = core.ffms2.Source(str(video_path))
+                runner._log_message(f"[VapourSynth] Using FFmpegSource2")
+            except Exception as e:
+                runner._log_message(f"[VapourSynth] ERROR: FFmpegSource2 also failed: {e}")
+                del core
+                gc.collect()
+                return None
 
         # Get frame count
         frame_count = clip.num_frames
@@ -370,11 +381,21 @@ def extract_frame_as_image(video_path: str, frame_number: int, runner) -> Option
 
         core = vs.core
 
-        # Load video
+        # Load video - try L-SMASH first, fall back to FFmpegSource2
+        clip = None
         try:
             clip = core.lsmas.LWLibavSource(str(video_path))
-        except:
-            clip = core.ffms2.Source(str(video_path))
+        except (AttributeError, Exception):
+            pass
+
+        if clip is None:
+            try:
+                clip = core.ffms2.Source(str(video_path))
+            except Exception as e:
+                runner._log_message(f"[VapourSynth] ERROR: Failed to load video: {e}")
+                del core
+                gc.collect()
+                return None
 
         # Validate frame number
         if frame_number < 0 or frame_number >= clip.num_frames:
@@ -590,18 +611,12 @@ def validate_frame_alignment(
 
         # Get source frame for this subtitle
         source_time_ms = event.start
-        source_frame = time_to_frame_vfr(source_time_ms, source_video, source_fps, runner, config)
-
-        if source_frame is None:
-            # Fallback to simple calculation
-            source_frame = int(source_time_ms * source_fps / 1000.0)
+        # Use simple calculation instead of VFR function to avoid VideoTimestamps complexity
+        source_frame = int(source_time_ms * source_fps / 1000.0)
 
         # Get target frame (source time + duration offset)
         target_time_ms = source_time_ms + duration_offset_ms
-        target_frame = time_to_frame_vfr(target_time_ms, target_video, target_fps, runner, config)
-
-        if target_frame is None:
-            target_frame = int(target_time_ms * target_fps / 1000.0)
+        target_frame = int(target_time_ms * target_fps / 1000.0)
 
         runner._log_message(f"[Frame Validation] Source: frame {source_frame} @ {source_time_ms}ms")
         runner._log_message(f"[Frame Validation] Target: frame {target_frame} @ {target_time_ms:.1f}ms")
