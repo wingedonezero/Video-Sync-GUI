@@ -58,6 +58,7 @@ class AppConfig:
             'duration_align_verify_search_window_ms': 2000,  # Search window for sliding window (±2 seconds)
             'duration_align_verify_agreement_tolerance_ms': 100,  # Measurements must agree within ±100ms
             'duration_align_verify_checkpoints': 3,  # Number of checkpoints to verify (1 or 3)
+            'duration_align_skip_validation_generated_tracks': True,  # Skip validation for generated tracks (default: True)
 
             # --- Frame-Matched Sync Settings ---
             'frame_match_search_window_sec': 1,  # Reduced to 1 sec with smart delay centering + hash caching
