@@ -308,8 +308,15 @@ class SubtitlesStep:
                                     runner._log_message("------------------------------------------")
                                     # Mark that timestamps have been adjusted
                                     item.frame_adjusted = True
+                                elif frame_sync_report and 'error' in frame_sync_report:
+                                    # Sync function returned error - this is a fatal error (abort mode)
+                                    error_msg = frame_sync_report['error']
+                                    runner._log_message(f"[Duration Align] ERROR: Sync failed for track {item.track.id}: {error_msg}")
+                                    raise RuntimeError(f"Duration-align sync failed for track {item.track.id}: {error_msg}")
                                 else:
-                                    runner._log_message(f"[Duration Align] WARNING: Sync failed for track {item.track.id}")
+                                    # No report returned at all - unexpected
+                                    runner._log_message(f"[Duration Align] ERROR: No sync report returned for track {item.track.id}")
+                                    raise RuntimeError(f"Duration-align sync failed for track {item.track.id}: No report returned")
                             else:
                                 runner._log_message(f"[Duration Align] ERROR: Missing source or target video")
                                 runner._log_message(f"[Duration Align] Source: {source_video}, Target: {target_video}")

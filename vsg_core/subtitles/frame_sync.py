@@ -936,7 +936,7 @@ def verify_alignment_with_sliding_window(
 
     # Import frame matching utilities
     try:
-        from .frame_matching import VideoReader, compute_perceptual_hash
+        from .frame_matching import VideoReader, compute_frame_hash
     except ImportError:
         runner._log_message(f"[Hybrid Verification] ERROR: frame_matching module not available")
         return {
@@ -970,14 +970,13 @@ def verify_alignment_with_sliding_window(
         runner._log_message(f"[Hybrid Verification] Checkpoint {i+1}/{len(checkpoints)}: {checkpoint_time_ms}ms")
 
         # Extract 11 frames from source (center ± 5 frames)
-        center_time_s = checkpoint_time_ms / 1000.0
         fps = source_reader.fps or 23.976
-        frame_duration_s = 1.0 / fps
+        frame_duration_ms = 1000.0 / fps
 
         source_frames = []
         for offset in range(-5, 6):  # -5 to +5 = 11 frames
-            frame_time_s = center_time_s + (offset * frame_duration_s)
-            frame = source_reader.get_frame_at_time(frame_time_s)
+            frame_time_ms = checkpoint_time_ms + (offset * frame_duration_ms)
+            frame = source_reader.get_frame_at_time(int(frame_time_ms))
             if frame is not None:
                 source_frames.append((offset, frame))
 
@@ -991,7 +990,10 @@ def verify_alignment_with_sliding_window(
             runner._log_message(f"[Hybrid Verification] WARNING: No center frame extracted")
             continue
 
-        source_hash = compute_perceptual_hash(center_frame[0], method=hash_algorithm, hash_size=hash_size)
+        source_hash = compute_frame_hash(center_frame[0], hash_size=hash_size, method=hash_algorithm)
+        if source_hash is None:
+            runner._log_message(f"[Hybrid Verification] WARNING: Failed to compute source hash")
+            continue
 
         # Search in target around duration_offset ± search_window
         search_center_ms = checkpoint_time_ms + duration_offset_ms
@@ -1008,14 +1010,15 @@ def verify_alignment_with_sliding_window(
         current_search_ms = search_start_ms
 
         while current_search_ms <= search_end_ms:
-            target_frame = target_reader.get_frame_at_time(current_search_ms / 1000.0)
+            target_frame = target_reader.get_frame_at_time(int(current_search_ms))
             if target_frame is not None:
-                target_hash = compute_perceptual_hash(target_frame, method=hash_algorithm, hash_size=hash_size)
-                distance = bin(source_hash ^ target_hash).count('1')  # Hamming distance
+                target_hash = compute_frame_hash(target_frame, hash_size=hash_size, method=hash_algorithm)
+                if target_hash is not None:
+                    distance = source_hash - target_hash  # ImageHash subtraction returns hamming distance
 
-                if distance < best_match_distance:
-                    best_match_distance = distance
-                    best_match_offset = current_search_ms - checkpoint_time_ms
+                    if distance < best_match_distance:
+                        best_match_distance = distance
+                        best_match_offset = current_search_ms - checkpoint_time_ms
 
             current_search_ms += search_step_ms
 
