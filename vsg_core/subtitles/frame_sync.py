@@ -848,6 +848,252 @@ def apply_raw_delay_sync(
 # DURATION ALIGNMENT MODE (Frame Alignment via Total Duration)
 # ============================================================================
 
+def verify_alignment_with_sliding_window(
+    source_video: str,
+    target_video: str,
+    subtitle_events: List,
+    duration_offset_ms: float,
+    runner,
+    config: dict = None
+) -> Dict[str, Any]:
+    """
+    Hybrid verification: Use duration offset as starting point, then verify with
+    sliding window frame matching at multiple checkpoints.
+
+    Algorithm:
+    1. Use duration_offset_ms as rough estimate
+    2. Pick 3 checkpoints (first/mid/last subtitles)
+    3. For each checkpoint:
+       - Extract 11 frames from source (center ± 5)
+       - Search in target around duration_offset ± search_window
+       - Use perceptual hash sliding window to find best match
+       - Record the precise offset
+    4. Check if all measurements agree within tolerance
+    5. Return precise offset if agreement, else indicate fallback needed
+
+    Args:
+        source_video: Path to source video
+        target_video: Path to target video
+        subtitle_events: List of subtitle events
+        duration_offset_ms: Rough offset from duration calculation
+        runner: CommandRunner for logging
+        config: Config dict with:
+            - duration_align_verify_search_window_ms: ±search window (default: 2000)
+            - duration_align_verify_agreement_tolerance_ms: tolerance (default: 100)
+            - duration_align_hash_algorithm: hash method (default: 'dhash')
+            - duration_align_hash_size: hash size (default: 8)
+            - duration_align_hash_threshold: max hamming distance (default: 5)
+
+    Returns:
+        Dict with:
+            - enabled: bool (whether verification ran)
+            - valid: bool (whether measurements agree)
+            - precise_offset_ms: float (median of measurements if valid)
+            - measurements: List[float] (individual measurements)
+            - duration_offset_ms: float (original duration offset)
+            - checkpoints: List[Dict] (details for each checkpoint)
+    """
+    config = config or {}
+
+    runner._log_message(f"[Hybrid Verification] ═══════════════════════════════════════")
+    runner._log_message(f"[Hybrid Verification] Running frame-based verification...")
+    runner._log_message(f"[Hybrid Verification] Duration offset (rough): {duration_offset_ms:+.3f}ms")
+
+    # Get config parameters
+    search_window_ms = config.get('duration_align_verify_search_window_ms', 2000)
+    tolerance_ms = config.get('duration_align_verify_agreement_tolerance_ms', 100)
+    hash_algorithm = config.get('duration_align_hash_algorithm', 'dhash')
+    hash_size = int(config.get('duration_align_hash_size', 8))
+    hash_threshold = int(config.get('duration_align_hash_threshold', 5))
+
+    runner._log_message(f"[Hybrid Verification] Search window: ±{search_window_ms}ms")
+    runner._log_message(f"[Hybrid Verification] Agreement tolerance: ±{tolerance_ms}ms")
+    runner._log_message(f"[Hybrid Verification] Hash: {hash_algorithm}, size={hash_size}, threshold={hash_threshold}")
+
+    # Filter valid events (require at least 5 seconds in)
+    valid_events = [e for e in subtitle_events if e.start >= 5000]
+    if not valid_events:
+        runner._log_message(f"[Hybrid Verification] WARNING: No valid subtitle events found")
+        return {
+            'enabled': True,
+            'valid': False,
+            'error': 'No valid subtitle events for verification',
+            'measurements': [],
+            'duration_offset_ms': duration_offset_ms
+        }
+
+    # Select 3 checkpoints (first, middle, last)
+    num_points = min(3, len(valid_events))
+    if num_points == 1:
+        checkpoints = [valid_events[0]]
+    else:
+        first_event = valid_events[0]
+        middle_event = valid_events[len(valid_events) // 2]
+        last_event = valid_events[-1]
+        checkpoints = [first_event, middle_event, last_event]
+
+    runner._log_message(f"[Hybrid Verification] Selected {len(checkpoints)} checkpoints for verification")
+
+    # Import frame matching utilities
+    try:
+        from .frame_matching import VideoReader, compute_perceptual_hash
+    except ImportError:
+        runner._log_message(f"[Hybrid Verification] ERROR: frame_matching module not available")
+        return {
+            'enabled': True,
+            'valid': False,
+            'error': 'frame_matching module not available',
+            'measurements': [],
+            'duration_offset_ms': duration_offset_ms
+        }
+
+    measurements = []
+    checkpoint_details = []
+
+    # Open video readers
+    try:
+        source_reader = VideoReader(source_video, runner)
+        target_reader = VideoReader(target_video, runner)
+    except Exception as e:
+        runner._log_message(f"[Hybrid Verification] ERROR: Failed to open videos: {e}")
+        return {
+            'enabled': True,
+            'valid': False,
+            'error': f'Failed to open videos: {e}',
+            'measurements': [],
+            'duration_offset_ms': duration_offset_ms
+        }
+
+    # Process each checkpoint
+    for i, event in enumerate(checkpoints):
+        checkpoint_time_ms = event.start
+        runner._log_message(f"[Hybrid Verification] Checkpoint {i+1}/{len(checkpoints)}: {checkpoint_time_ms}ms")
+
+        # Extract 11 frames from source (center ± 5 frames)
+        center_time_s = checkpoint_time_ms / 1000.0
+        fps = source_reader.fps or 23.976
+        frame_duration_s = 1.0 / fps
+
+        source_frames = []
+        for offset in range(-5, 6):  # -5 to +5 = 11 frames
+            frame_time_s = center_time_s + (offset * frame_duration_s)
+            frame = source_reader.get_frame_at_time(frame_time_s)
+            if frame is not None:
+                source_frames.append((offset, frame))
+
+        if len(source_frames) < 5:  # Need at least 5 frames
+            runner._log_message(f"[Hybrid Verification] WARNING: Could not extract enough frames from source")
+            continue
+
+        # Compute hash for center frame
+        center_frame = [f for o, f in source_frames if o == 0]
+        if not center_frame:
+            runner._log_message(f"[Hybrid Verification] WARNING: No center frame extracted")
+            continue
+
+        source_hash = compute_perceptual_hash(center_frame[0], method=hash_algorithm, hash_size=hash_size)
+
+        # Search in target around duration_offset ± search_window
+        search_center_ms = checkpoint_time_ms + duration_offset_ms
+        search_start_ms = search_center_ms - search_window_ms
+        search_end_ms = search_center_ms + search_window_ms
+
+        runner._log_message(f"[Hybrid Verification]   Searching {search_start_ms:.0f}ms - {search_end_ms:.0f}ms")
+
+        # Sliding window search
+        best_match_offset = None
+        best_match_distance = float('inf')
+
+        search_step_ms = 1000.0 / fps  # Search every frame
+        current_search_ms = search_start_ms
+
+        while current_search_ms <= search_end_ms:
+            target_frame = target_reader.get_frame_at_time(current_search_ms / 1000.0)
+            if target_frame is not None:
+                target_hash = compute_perceptual_hash(target_frame, method=hash_algorithm, hash_size=hash_size)
+                distance = bin(source_hash ^ target_hash).count('1')  # Hamming distance
+
+                if distance < best_match_distance:
+                    best_match_distance = distance
+                    best_match_offset = current_search_ms - checkpoint_time_ms
+
+            current_search_ms += search_step_ms
+
+        if best_match_offset is None:
+            runner._log_message(f"[Hybrid Verification] WARNING: No match found for checkpoint {i+1}")
+            continue
+
+        if best_match_distance <= hash_threshold:
+            measurements.append(best_match_offset)
+            runner._log_message(f"[Hybrid Verification]   ✓ Match found: offset={best_match_offset:+.1f}ms, distance={best_match_distance}")
+            checkpoint_details.append({
+                'checkpoint_ms': checkpoint_time_ms,
+                'offset_ms': best_match_offset,
+                'hash_distance': best_match_distance,
+                'matched': True
+            })
+        else:
+            runner._log_message(f"[Hybrid Verification]   ✗ No good match: best distance={best_match_distance} (threshold={hash_threshold})")
+            checkpoint_details.append({
+                'checkpoint_ms': checkpoint_time_ms,
+                'offset_ms': None,
+                'hash_distance': best_match_distance,
+                'matched': False
+            })
+
+    # Clean up video readers
+    del source_reader
+    del target_reader
+    gc.collect()
+
+    # Check if measurements agree
+    if len(measurements) < 2:
+        runner._log_message(f"[Hybrid Verification] FAILED: Not enough successful measurements ({len(measurements)}/3)")
+        return {
+            'enabled': True,
+            'valid': False,
+            'measurements': measurements,
+            'duration_offset_ms': duration_offset_ms,
+            'checkpoints': checkpoint_details,
+            'error': 'Not enough successful measurements'
+        }
+
+    # Calculate statistics
+    median_offset = sorted(measurements)[len(measurements) // 2]
+    max_deviation = max(abs(m - median_offset) for m in measurements)
+
+    runner._log_message(f"[Hybrid Verification] Measurements: {[f'{m:+.1f}ms' for m in measurements]}")
+    runner._log_message(f"[Hybrid Verification] Median offset: {median_offset:+.1f}ms")
+    runner._log_message(f"[Hybrid Verification] Max deviation: {max_deviation:.1f}ms")
+    runner._log_message(f"[Hybrid Verification] Duration offset: {duration_offset_ms:+.1f}ms")
+    runner._log_message(f"[Hybrid Verification] Difference: {abs(median_offset - duration_offset_ms):.1f}ms")
+
+    # Check agreement
+    if max_deviation <= tolerance_ms:
+        runner._log_message(f"[Hybrid Verification] ✓ PASS: All measurements agree within ±{tolerance_ms}ms")
+        return {
+            'enabled': True,
+            'valid': True,
+            'precise_offset_ms': median_offset,
+            'measurements': measurements,
+            'duration_offset_ms': duration_offset_ms,
+            'max_deviation_ms': max_deviation,
+            'checkpoints': checkpoint_details
+        }
+    else:
+        runner._log_message(f"[Hybrid Verification] ✗ FAIL: Measurements disagree (max deviation: {max_deviation:.1f}ms > {tolerance_ms}ms)")
+        return {
+            'enabled': True,
+            'valid': False,
+            'precise_offset_ms': median_offset,
+            'measurements': measurements,
+            'duration_offset_ms': duration_offset_ms,
+            'max_deviation_ms': max_deviation,
+            'checkpoints': checkpoint_details,
+            'error': 'Measurements disagree - videos may have different cuts or VFR'
+        }
+
+
 def apply_duration_align_sync(
     subtitle_path: str,
     source_video: str,
@@ -1013,40 +1259,96 @@ def apply_duration_align_sync(
 
     runner._log_message(f"[Duration Align] Loaded {len(subs.events)} subtitle events")
 
-    # VALIDATE: Check if videos are actually frame-aligned
-    validation_result = validate_frame_alignment(
-        source_video,
-        target_video,
-        subs.events,
-        duration_offset_ms,
-        runner,
-        config
-    )
+    # VALIDATE/VERIFY: Check if videos are actually frame-aligned
+    # Check if hybrid verification mode is enabled
+    use_hybrid_verification = config.get('duration_align_verify_with_frames', False)
 
-    # If validation failed, handle based on fallback mode
-    if validation_result.get('enabled') and not validation_result.get('valid'):
-        fallback_mode = config.get('duration_align_fallback_mode', 'none')
+    if use_hybrid_verification:
+        # HYBRID MODE: Duration + sliding window frame matching
+        verification_result = verify_alignment_with_sliding_window(
+            source_video,
+            target_video,
+            subs.events,
+            duration_offset_ms,
+            runner,
+            config
+        )
 
-        runner._log_message(f"[Duration Align] ⚠⚠⚠ VALIDATION FAILED ⚠⚠⚠")
-        runner._log_message(f"[Duration Align] Videos may NOT be frame-aligned!")
-        runner._log_message(f"[Duration Align] Sync may be INCORRECT - consider using audio-correlation mode")
+        if verification_result.get('valid'):
+            # Use precise offset from frame matching
+            precise_offset = verification_result['precise_offset_ms']
+            runner._log_message(f"[Duration Align] ✓ Using precise offset from hybrid verification: {precise_offset:+.3f}ms")
 
-        if fallback_mode == 'abort':
-            runner._log_message(f"[Duration Align] ABORTING: Fallback mode is 'abort'")
-            runner._log_message(f"[Duration Align] Either fix validation settings or switch to different sync mode")
-            return {
-                'error': 'Frame alignment validation failed (fallback mode: abort)',
-                'validation': validation_result
-            }
-        elif fallback_mode == 'auto-fallback':
-            fallback_target = config.get('duration_align_fallback_target', 'dual-videotimestamps')
-            runner._log_message(f"[Duration Align] AUTO-FALLBACK: Would switch to '{fallback_target}' mode")
-            runner._log_message(f"[Duration Align] (Auto-fallback not yet implemented, continuing with duration-align)")
-            runner._log_message(f"[Duration Align] TODO: Implement automatic fallback to other sync modes")
-            validation_result['warning'] = 'Frame alignment validation failed - sync may be incorrect'
-        else:  # 'none' - warn but continue
-            runner._log_message(f"[Duration Align] Continuing anyway... (you can abort if needed)")
-            validation_result['warning'] = 'Frame alignment validation failed - sync may be incorrect'
+            # Update total shift with precise offset
+            total_shift_ms = precise_offset + global_shift_ms
+            runner._log_message(f"[Duration Align] Updated total shift: {total_shift_ms:+.3f}ms")
+
+            validation_result = verification_result
+        else:
+            # Hybrid verification failed - handle based on fallback mode
+            fallback_mode = config.get('duration_align_fallback_mode', 'none')
+
+            runner._log_message(f"[Duration Align] ⚠⚠⚠ HYBRID VERIFICATION FAILED ⚠⚠⚠")
+            runner._log_message(f"[Duration Align] Reason: {verification_result.get('error', 'Unknown')}")
+
+            if fallback_mode == 'abort':
+                runner._log_message(f"[Duration Align] ABORTING: Fallback mode is 'abort'")
+                return {
+                    'error': f"Hybrid verification failed: {verification_result.get('error', 'Unknown')}",
+                    'validation': verification_result
+                }
+            elif fallback_mode == 'duration-offset':
+                runner._log_message(f"[Duration Align] Using duration offset (fallback)")
+                runner._log_message(f"[Duration Align] Total shift: {total_shift_ms:+.3f}ms")
+                validation_result = verification_result
+                validation_result['warning'] = 'Hybrid verification failed - using duration offset'
+            elif fallback_mode == 'auto-fallback':
+                fallback_target = config.get('duration_align_fallback_target', 'dual-videotimestamps')
+                runner._log_message(f"[Duration Align] AUTO-FALLBACK: Would switch to '{fallback_target}' mode")
+                runner._log_message(f"[Duration Align] (Auto-fallback not yet implemented, using duration offset)")
+                validation_result = verification_result
+                validation_result['warning'] = 'Hybrid verification failed - using duration offset'
+            else:  # 'none' - warn but continue with duration offset
+                runner._log_message(f"[Duration Align] Continuing with duration offset...")
+                validation_result = verification_result
+                validation_result['warning'] = 'Hybrid verification failed - using duration offset'
+    else:
+        # STANDARD MODE: Simple hash validation
+        validation_result = validate_frame_alignment(
+            source_video,
+            target_video,
+            subs.events,
+            duration_offset_ms,
+            runner,
+            config
+        )
+
+        # If validation failed, handle based on fallback mode
+        if validation_result.get('enabled') and not validation_result.get('valid'):
+            fallback_mode = config.get('duration_align_fallback_mode', 'none')
+
+            runner._log_message(f"[Duration Align] ⚠⚠⚠ VALIDATION FAILED ⚠⚠⚠")
+            runner._log_message(f"[Duration Align] Videos may NOT be frame-aligned!")
+            runner._log_message(f"[Duration Align] Sync may be INCORRECT - consider using audio-correlation mode")
+
+            if fallback_mode == 'abort':
+                runner._log_message(f"[Duration Align] ABORTING: Fallback mode is 'abort'")
+                runner._log_message(f"[Duration Align] Either fix validation settings or switch to different sync mode")
+                return {
+                    'error': 'Frame alignment validation failed (fallback mode: abort)',
+                    'validation': validation_result
+                }
+            elif fallback_mode == 'duration-offset':
+                runner._log_message(f"[Duration Align] Using duration offset (fallback)")
+                validation_result['warning'] = 'Frame alignment validation failed - using duration offset'
+            elif fallback_mode == 'auto-fallback':
+                fallback_target = config.get('duration_align_fallback_target', 'dual-videotimestamps')
+                runner._log_message(f"[Duration Align] AUTO-FALLBACK: Would switch to '{fallback_target}' mode")
+                runner._log_message(f"[Duration Align] (Auto-fallback not yet implemented, continuing with duration-align)")
+                validation_result['warning'] = 'Frame alignment validation failed - sync may be incorrect'
+            else:  # 'none' - warn but continue
+                runner._log_message(f"[Duration Align] Continuing anyway... (you can abort if needed)")
+                validation_result['warning'] = 'Frame alignment validation failed - sync may be incorrect'
 
     # Apply total shift to all events
     for event in subs.events:

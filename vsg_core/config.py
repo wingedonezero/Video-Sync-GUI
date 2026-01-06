@@ -53,6 +53,12 @@ class AppConfig:
             'videotimestamps_rounding': 'round',
             'raw_delay_rounding': 'round',
 
+            # --- Duration-Align Sync Settings (Hybrid Mode) ---
+            'duration_align_verify_with_frames': False,  # Enable hybrid: duration + sliding window verification
+            'duration_align_verify_search_window_ms': 2000,  # Search window for sliding window (±2 seconds)
+            'duration_align_verify_agreement_tolerance_ms': 100,  # Measurements must agree within ±100ms
+            'duration_align_verify_checkpoints': 3,  # Number of checkpoints to verify (1 or 3)
+
             # --- Frame-Matched Sync Settings ---
             'frame_match_search_window_sec': 1,  # Reduced to 1 sec with smart delay centering + hash caching
             'frame_match_search_window_frames': 5,  # NEW: Search ±N frames (overrides _sec if > 0)
