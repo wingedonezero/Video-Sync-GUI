@@ -1104,6 +1104,71 @@ class SubtitleSyncTab(QWidget):
             "Used for testing/debugging frame correction issues."
         )
 
+        # Duration-Align settings
+        self.widgets['duration_align_use_vapoursynth'] = QCheckBox("Use VapourSynth indexing")
+        self.widgets['duration_align_use_vapoursynth'].setChecked(True)
+        self.widgets['duration_align_use_vapoursynth'].setToolTip(
+            "Use VapourSynth for frame indexing (duration-align mode):\n\n"
+            "• Checked (Default): Use VapourSynth to get frame count/timestamps\n"
+            "  - MUCH faster after first run (~1s vs 60s)\n"
+            "  - Generates .lwi index files (cached)\n"
+            "  - More accurate for VFR videos\n"
+            "  - Requires VapourSynth installed\n"
+            "  - Falls back to ffprobe if unavailable\n\n"
+            "• Unchecked: Always use ffprobe -count_frames\n"
+            "  - Slower (30-60 seconds per video)\n"
+            "  - No dependencies\n"
+            "  - Reliable fallback\n\n"
+            "VapourSynth indexing speeds up duration-align significantly!"
+        )
+
+        self.widgets['duration_align_validate'] = QCheckBox("Validate frame alignment")
+        self.widgets['duration_align_validate'].setChecked(True)
+        self.widgets['duration_align_validate'].setToolTip(
+            "Validate frame alignment using perceptual hashing:\n\n"
+            "• Checked (Default): Verify videos are actually frame-aligned\n"
+            "  - Compares frames at key subtitle positions\n"
+            "  - Warns if videos don't match (wrong mode selected)\n"
+            "  - Adds ~2-5 seconds to processing\n"
+            "  - HIGH CONFIDENCE validation\n\n"
+            "• Unchecked: Skip validation\n"
+            "  - Faster, but no confirmation sync is correct\n"
+            "  - Risk of applying wrong sync offset\n\n"
+            "Highly recommended to leave enabled!"
+        )
+
+        self.widgets['duration_align_validate_points'] = QComboBox()
+        self.widgets['duration_align_validate_points'].addItems(['1 point (fast)', '3 points (thorough)'])
+        self.widgets['duration_align_validate_points'].setCurrentIndex(1)  # Default to 3 points
+        self.widgets['duration_align_validate_points'].setToolTip(
+            "Number of checkpoints to validate:\n\n"
+            "• 1 point (fast): Only check first subtitle\n"
+            "  - Fastest (~1-2 seconds)\n"
+            "  - Good if videos are known to be same cut\n"
+            "  - May miss issues later in video\n\n"
+            "• 3 points (thorough) [DEFAULT]: Check first, middle, last subtitles\n"
+            "  - Takes ~3-5 seconds\n"
+            "  - Catches scene cut differences\n"
+            "  - Detects credits length differences\n"
+            "  - RECOMMENDED for unknown videos\n\n"
+            "For each checkpoint, validates 11 frames (center ± 5)."
+        )
+
+        self.widgets['duration_align_hash_threshold'] = QSpinBox()
+        self.widgets['duration_align_hash_threshold'].setRange(0, 20)
+        self.widgets['duration_align_hash_threshold'].setValue(5)
+        self.widgets['duration_align_hash_threshold'].setToolTip(
+            "Perceptual hash similarity threshold:\n\n"
+            "Maximum hamming distance for frames to be considered matching.\n\n"
+            "• 0: Perfect match only (too strict for compression differences)\n"
+            "• 3-5 (Recommended): Very similar frames\n"
+            "  - Tolerates minor compression differences\n"
+            "  - Good for different encodes of same source\n"
+            "• 8-10: More tolerant (color grading differences)\n"
+            "• 15+: Too loose (may match different scenes)\n\n"
+            "Start with 5, increase if validation fails on identical scenes."
+        )
+
         # Frame-Matched settings
         self.widgets['frame_match_search_window_sec'] = QSpinBox()
         self.widgets['frame_match_search_window_sec'].setRange(1, 60)
@@ -1254,6 +1319,10 @@ class SubtitleSyncTab(QWidget):
         sync_layout.addRow("", self.widgets['frame_sync_fix_zero_duration'])
         sync_layout.addRow("VTS Rounding:", self.widgets['videotimestamps_rounding'])
         sync_layout.addRow("Raw Delay Rounding:", self.widgets['raw_delay_rounding'])
+        sync_layout.addRow("", self.widgets['duration_align_use_vapoursynth'])
+        sync_layout.addRow("", self.widgets['duration_align_validate'])
+        sync_layout.addRow("Validation Points:", self.widgets['duration_align_validate_points'])
+        sync_layout.addRow("Hash Threshold:", self.widgets['duration_align_hash_threshold'])
         sync_layout.addRow("", self.widgets['frame_match_use_vapoursynth'])
         sync_layout.addRow("Match Window:", self.widgets['frame_match_search_window_sec'])
         sync_layout.addRow("Match Threshold:", self.widgets['frame_match_threshold'])
