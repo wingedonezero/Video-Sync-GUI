@@ -286,13 +286,19 @@ class SubtitlesStep:
                                 runner._log_message(f"[Duration Align] Source video: {Path(source_video).name}")
                                 runner._log_message(f"[Duration Align] Target video: {Path(target_video).name}")
 
+                                # Check if this track should skip frame validation (for generated tracks)
+                                sync_config = ctx.settings_dict.copy()
+                                if item.skip_frame_validation:
+                                    runner._log_message(f"[Duration Align] Skipping frame validation for this track (generated track)")
+                                    sync_config['duration_align_validate'] = False
+
                                 frame_sync_report = apply_duration_align_sync(
                                     str(item.extracted_path),
                                     str(source_video),
                                     str(target_video),
                                     global_shift_ms,
                                     runner,
-                                    ctx.settings_dict
+                                    sync_config
                                 )
 
                                 if frame_sync_report and 'error' not in frame_sync_report:
