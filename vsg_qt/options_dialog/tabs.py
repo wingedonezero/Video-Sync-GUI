@@ -1369,6 +1369,113 @@ class SubtitleSyncTab(QWidget):
             "Recommendation: Keep enabled for faster, safer processing."
         )
 
+        # Correlation-Frame-Snap settings
+        self.widgets['correlation_snap_fallback_mode'] = QComboBox()
+        self.widgets['correlation_snap_fallback_mode'].addItems(['snap-to-frame', 'use-raw-correlation', 'abort'])
+        self.widgets['correlation_snap_fallback_mode'].setToolTip(
+            "What to do when visual frame matching fails:\n\n"
+            "• snap-to-frame (Default): Round correlation to nearest frame boundary\n"
+            "  - Uses audio correlation as authoritative\n"
+            "  - Snaps to nearest frame mathematically\n"
+            "  - Works even with heavily re-encoded videos\n"
+            "  - RECOMMENDED for most cases\n\n"
+            "• use-raw-correlation: Use raw audio correlation (no frame snap)\n"
+            "  - Applies correlation delay directly\n"
+            "  - May not align to frame boundaries\n"
+            "  - Use for sub-frame precision\n\n"
+            "• abort: Fail the job\n"
+            "  - Returns error if frame matching fails\n"
+            "  - Forces manual review\n"
+            "  - Use for strict validation workflows\n\n"
+            "Visual frame matching can fail when videos are heavily re-encoded,\n"
+            "have different color grading, or use different sources.\n\n"
+            "Recommendation: Keep at 'snap-to-frame' for reliability."
+        )
+
+        self.widgets['correlation_snap_hash_algorithm'] = QComboBox()
+        self.widgets['correlation_snap_hash_algorithm'].addItems(['dhash', 'phash', 'average_hash', 'whash'])
+        self.widgets['correlation_snap_hash_algorithm'].setToolTip(
+            "Perceptual hash algorithm for frame matching:\n\n"
+            "• dhash (Default): Difference hash\n"
+            "  - Fast and accurate\n"
+            "  - Good for compression artifacts\n"
+            "  - Best for: Remux ↔ WebDL\n"
+            "  - Use with threshold 3-8\n\n"
+            "• phash: Perceptual hash (DCT-based)\n"
+            "  - More robust to re-encoding\n"
+            "  - Handles color grading, filtering\n"
+            "  - Best for: Remux ↔ Encode\n"
+            "  - Use with threshold 10-20\n\n"
+            "• average_hash: Simple averaging\n"
+            "  - Fastest but least accurate\n"
+            "  - Use for testing only\n\n"
+            "• whash: Wavelet hash\n"
+            "  - Most robust, but slowest\n"
+            "  - Best for heavily processed videos\n"
+            "  - Use with threshold 15-30\n\n"
+            "Start with dhash, try phash if validation fails."
+        )
+
+        self.widgets['correlation_snap_hash_threshold'] = QSpinBox()
+        self.widgets['correlation_snap_hash_threshold'].setRange(0, 30)
+        self.widgets['correlation_snap_hash_threshold'].setValue(5)
+        self.widgets['correlation_snap_hash_threshold'].setToolTip(
+            "Perceptual hash similarity threshold:\n\n"
+            "Maximum hamming distance for frames to be considered matching.\n\n"
+            "• 0: Perfect match only (too strict)\n"
+            "• 3-5 (Default): Very similar frames\n"
+            "  - Tolerates minor compression differences\n"
+            "  - Good for Remux ↔ WebDL\n\n"
+            "• 8-15: More tolerant\n"
+            "  - Heavy re-encoding (Remux ↔ Encode)\n"
+            "  - Color grading differences\n\n"
+            "• 20-30: Very loose\n"
+            "  - Different filters/processing\n"
+            "  - May match wrong scenes if too high\n\n"
+            "If frame matching fails, fallback mode is used instead.\n"
+            "Increase if validation fails on same-source videos."
+        )
+
+        self.widgets['correlation_snap_hash_size'] = QComboBox()
+        self.widgets['correlation_snap_hash_size'].addItems(['4', '8', '16'])
+        self.widgets['correlation_snap_hash_size'].setCurrentIndex(1)  # Default to 8
+        self.widgets['correlation_snap_hash_size'].setToolTip(
+            "Hash size (resolution):\n\n"
+            "Larger hash = more precise but less tolerant to differences.\n\n"
+            "• 4x4 (16 bits):\n"
+            "  - Very tolerant to changes\n"
+            "  - Less precise\n"
+            "  - Good for heavily re-encoded content\n\n"
+            "• 8x8 (64 bits) [DEFAULT]:\n"
+            "  - Balanced precision and tolerance\n"
+            "  - Recommended for most cases\n\n"
+            "• 16x16 (256 bits):\n"
+            "  - Very precise\n"
+            "  - Less tolerant to compression\n"
+            "  - Good for near-identical encodes\n\n"
+            "Keep at 8 unless you need more tolerance (use 4) or precision (use 16)."
+        )
+
+        self.widgets['correlation_snap_adjacent_frames'] = QSpinBox()
+        self.widgets['correlation_snap_adjacent_frames'].setRange(1, 10)
+        self.widgets['correlation_snap_adjacent_frames'].setValue(3)
+        self.widgets['correlation_snap_adjacent_frames'].setToolTip(
+            "Number of adjacent frames to check:\n\n"
+            "For each frame delta (-1, 0, +1), checks ±N adjacent frames\n"
+            "for temporal consistency.\n\n"
+            "• 1: Only check center frame\n"
+            "  - Fastest (3 frames per delta)\n"
+            "  - May miss if center frame is a transition\n\n"
+            "• 3 (Default): Check ±3 frames (7 total)\n"
+            "  - Good balance of speed and accuracy\n"
+            "  - Catches temporal consistency\n\n"
+            "• 5-10: Check more frames\n"
+            "  - More robust validation\n"
+            "  - Slower frame extraction\n\n"
+            "Higher values are more robust but slower.\n"
+            "Recommendation: Keep at 3 for balanced performance."
+        )
+
         # Frame-Matched settings
         self.widgets['frame_match_search_window_sec'] = QSpinBox()
         self.widgets['frame_match_search_window_sec'].setRange(1, 60)
@@ -1532,6 +1639,11 @@ class SubtitleSyncTab(QWidget):
         sync_layout.addRow("Fallback Mode:", self.widgets['duration_align_fallback_mode'])
         sync_layout.addRow("Fallback Target:", self.widgets['duration_align_fallback_target'])
         sync_layout.addRow("", self.widgets['duration_align_skip_validation_generated_tracks'])
+        sync_layout.addRow("Corr+Snap Fallback:", self.widgets['correlation_snap_fallback_mode'])
+        sync_layout.addRow("Corr+Snap Hash:", self.widgets['correlation_snap_hash_algorithm'])
+        sync_layout.addRow("Corr+Snap Hash Size:", self.widgets['correlation_snap_hash_size'])
+        sync_layout.addRow("Corr+Snap Threshold:", self.widgets['correlation_snap_hash_threshold'])
+        sync_layout.addRow("Corr+Snap Adj Frames:", self.widgets['correlation_snap_adjacent_frames'])
         sync_layout.addRow("", self.widgets['frame_match_use_vapoursynth'])
         sync_layout.addRow("Match Window:", self.widgets['frame_match_search_window_sec'])
         sync_layout.addRow("Match Threshold:", self.widgets['frame_match_threshold'])
@@ -1571,6 +1683,7 @@ class SubtitleSyncTab(QWidget):
         is_videotimestamps = (text == 'videotimestamps')
         is_frame_matched = (text == 'frame-matched')
         is_raw_delay = (text == 'raw-delay')
+        is_correlation_frame_snap = (text == 'correlation-frame-snap')
 
         # FPS setting is used by frame-perfect, frame-snapped, and videotimestamps (not frame-matched)
         self.widgets['subtitle_target_fps'].setEnabled(is_frame_perfect or is_frame_snapped or is_videotimestamps)
@@ -1587,6 +1700,13 @@ class SubtitleSyncTab(QWidget):
 
         # Raw delay rounding only applies to raw-delay mode
         self.widgets['raw_delay_rounding'].setEnabled(is_raw_delay)
+
+        # Correlation-Frame-Snap settings only apply to correlation-frame-snap mode
+        self.widgets['correlation_snap_fallback_mode'].setEnabled(is_correlation_frame_snap)
+        self.widgets['correlation_snap_hash_algorithm'].setEnabled(is_correlation_frame_snap)
+        self.widgets['correlation_snap_hash_size'].setEnabled(is_correlation_frame_snap)
+        self.widgets['correlation_snap_hash_threshold'].setEnabled(is_correlation_frame_snap)
+        self.widgets['correlation_snap_adjacent_frames'].setEnabled(is_correlation_frame_snap)
 
         # Frame-matched settings only apply to frame-matched mode
         self.widgets['frame_match_use_vapoursynth'].setEnabled(is_frame_matched)

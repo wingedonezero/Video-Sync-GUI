@@ -1563,7 +1563,7 @@ def apply_correlation_frame_snap_sync(
 
     if not verification_result.get('valid'):
         # Frame snap validation failed - handle based on fallback mode
-        fallback_mode = config.get('correlation_snap_fallback_mode', 'abort')
+        fallback_mode = config.get('correlation_snap_fallback_mode', 'snap-to-frame')
 
         runner._log_message(f"[Correlation+FrameSnap Sync] ⚠⚠⚠ FRAME SNAP VALIDATION FAILED ⚠⚠⚠")
         runner._log_message(f"[Correlation+FrameSnap Sync] Reason: {verification_result.get('error', 'Checkpoints disagree')}")
@@ -1576,19 +1576,53 @@ def apply_correlation_frame_snap_sync(
                 'validation': verification_result,
                 'raw_correlation_delay_ms': raw_correlation_delay_ms
             }
+        elif fallback_mode == 'snap-to-frame':
+            # Calculate FPS and frame duration to round to nearest frame
+            try:
+                from .frame_matching import VideoReader
+                source_reader = VideoReader(source_video, runner)
+                fps = source_reader.fps or 23.976
+                del source_reader
+                gc.collect()
+            except Exception:
+                fps = 23.976  # Default fallback
+
+            frame_duration_ms = 1000.0 / fps
+
+            # Round correlation to nearest frame boundary
+            frame_delta = round(raw_correlation_delay_ms / frame_duration_ms)
+            frame_snap_ms = (frame_delta * frame_duration_ms) - raw_correlation_delay_ms
+            precise_offset_ms = raw_correlation_delay_ms + frame_snap_ms
+
+            runner._log_message(f"[Correlation+FrameSnap Sync] Using FALLBACK: Snap to nearest frame boundary")
+            runner._log_message(f"[Correlation+FrameSnap Sync] FPS: {fps:.3f} → frame duration: {frame_duration_ms:.3f}ms")
+            runner._log_message(f"[Correlation+FrameSnap Sync] RAW correlation: {raw_correlation_delay_ms:+.3f}ms")
+            runner._log_message(f"[Correlation+FrameSnap Sync] Nearest frame: {frame_delta:+d} frames = {precise_offset_ms:+.3f}ms")
+            runner._log_message(f"[Correlation+FrameSnap Sync] Frame snap adjustment: {frame_snap_ms:+.3f}ms")
         elif fallback_mode == 'use-raw-correlation':
             runner._log_message(f"[Correlation+FrameSnap Sync] Using raw correlation (no frame snap)")
             precise_offset_ms = raw_correlation_delay_ms
             frame_snap_ms = 0.0
         else:
-            # Default: abort
-            runner._log_message(f"[Correlation+FrameSnap Sync] Unknown fallback mode '{fallback_mode}', aborting")
-            return {
-                'success': False,
-                'error': 'Frame snap validation failed and unknown fallback mode',
-                'validation': verification_result,
-                'raw_correlation_delay_ms': raw_correlation_delay_ms
-            }
+            # Default: snap-to-frame
+            runner._log_message(f"[Correlation+FrameSnap Sync] Unknown fallback mode '{fallback_mode}', using snap-to-frame")
+            # Calculate FPS and frame duration to round to nearest frame
+            try:
+                from .frame_matching import VideoReader
+                source_reader = VideoReader(source_video, runner)
+                fps = source_reader.fps or 23.976
+                del source_reader
+                gc.collect()
+            except Exception:
+                fps = 23.976  # Default fallback
+
+            frame_duration_ms = 1000.0 / fps
+            frame_delta = round(raw_correlation_delay_ms / frame_duration_ms)
+            frame_snap_ms = (frame_delta * frame_duration_ms) - raw_correlation_delay_ms
+            precise_offset_ms = raw_correlation_delay_ms + frame_snap_ms
+
+            runner._log_message(f"[Correlation+FrameSnap Sync] Using FALLBACK: Snap to nearest frame boundary")
+            runner._log_message(f"[Correlation+FrameSnap Sync] Nearest frame: {frame_delta:+d} frames = {precise_offset_ms:+.3f}ms")
     else:
         # Frame snap validation passed - use precise offset
         precise_offset_ms = verification_result['precise_offset_ms']
