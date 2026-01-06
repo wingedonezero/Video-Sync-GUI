@@ -1517,37 +1517,18 @@ def verify_correlation_with_frame_snap(
         final_delta = 0
         status = 'failed_validation'
 
-    # Calculate final precise offset using CORRECT frame-boundary math
-    # The delta tells us which FRAME to use, we need to calculate the TIME offset to land on it
-    #
-    # Example: checkpoint=10000ms, raw_correlation=-42.667ms, fps=23.976
-    # - Expected target time: 10000 + (-42.667) = 9957.333ms
-    # - Base frame: time_to_frame_start(9957.333, 23.976) = floor(238.68) = 238
-    # - If final_delta = 0: use frame 238
-    # - Frame 238 starts at: 238 * 41.708 = 9926.504ms
-    # - Required offset: 9926.504 - 10000 = -73.496ms
-    #
-    # General formula:
-    # base_frame = time_to_frame_start(checkpoint + raw_correlation, fps)
-    # target_frame = base_frame + final_delta
-    # target_time = frame_to_time_start(target_frame, fps)
-    # precise_offset = target_time - checkpoint
-    #
-    # Simplified (using checkpoint from validation):
-    checkpoint_time_ms = checkpoint_results[0]['time_ms']  # Use start checkpoint
-    base_frame = time_to_frame_start(checkpoint_time_ms + raw_correlation_delay_ms, fps)
-    target_frame = base_frame + final_delta
-    target_time_ms = frame_to_time_start(target_frame, fps)
-    precise_offset_ms = target_time_ms - checkpoint_time_ms
-    frame_snap_ms = precise_offset_ms - raw_correlation_delay_ms
+    # Calculate final precise offset: raw correlation + frame adjustment
+    # Delta is a GLOBAL correction applied to the correlation offset
+    # - Delta -1: Pull back 1 frame from correlation (correlation + (-1 * frame_duration))
+    # - Delta  0: Use correlation as-is (no frame adjustment)
+    # - Delta +1: Push forward 1 frame from correlation (correlation + (+1 * frame_duration))
+    # This offset is applied uniformly to ALL subtitles (not checkpoint-specific!)
+    frame_snap_ms = final_delta * frame_duration_ms
+    precise_offset_ms = raw_correlation_delay_ms + frame_snap_ms
 
     runner._log_message(f"[Correlation+FrameSnap] Final offset calculation:")
-    runner._log_message(f"[Correlation+FrameSnap]   Checkpoint:      {checkpoint_time_ms:.0f}ms")
     runner._log_message(f"[Correlation+FrameSnap]   RAW correlation: {raw_correlation_delay_ms:+.3f}ms")
-    runner._log_message(f"[Correlation+FrameSnap]   Base frame:      {base_frame} (frame at checkpoint + correlation)")
-    runner._log_message(f"[Correlation+FrameSnap]   Frame delta:     {final_delta:+d}")
-    runner._log_message(f"[Correlation+FrameSnap]   Target frame:    {target_frame} (base + delta)")
-    runner._log_message(f"[Correlation+FrameSnap]   Frame snap:      {frame_snap_ms:+.3f}ms")
+    runner._log_message(f"[Correlation+FrameSnap]   Frame snap:      {frame_snap_ms:+.3f}ms ({final_delta:+d} frames)")
     runner._log_message(f"[Correlation+FrameSnap]   Precise offset:  {precise_offset_ms:+.3f}ms")
 
     return {
