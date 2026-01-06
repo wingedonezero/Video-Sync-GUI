@@ -1190,6 +1190,487 @@ def verify_alignment_with_sliding_window(
         }
 
 
+def verify_correlation_with_frame_snap(
+    source_video: str,
+    target_video: str,
+    subtitle_events: List,
+    raw_correlation_delay_ms: float,
+    runner,
+    config: dict = None
+) -> Dict[str, Any]:
+    """
+    Correlation + Frame Snap Mode: Use correlation as authoritative offset,
+    then snap to nearest frame boundary (±1 frame only).
+
+    This mode trusts correlation results as accurate, and only fine-tunes by
+    checking if shifting by ±1 frame improves frame-level matching.
+
+    Algorithm:
+    1. Use raw_correlation_delay_ms as authoritative time offset
+    2. At 2 checkpoints (10%, 90%):
+       - Test frame_delta ∈ {-1, 0, +1}
+       - For each delta, extract ±3 adjacent frames
+       - Compare frames using perceptual hashing
+       - Score temporal consistency
+       - Pick delta with best score
+    3. Validate that start and end deltas agree:
+       - Both == 0 → correlation was already frame-perfect
+       - Same non-zero → apply consistent snap
+       - Differ by 1 → warning (minor drift, proceed anyway)
+       - Differ by >1 → fail (stepping/drift detected)
+    4. Return:
+       - valid: whether validation passed
+       - frame_delta: best frame adjustment (-1, 0, or +1)
+       - precise_offset_ms: raw_correlation + (delta × frame_time)
+
+    Args:
+        source_video: Path to source video
+        target_video: Path to target video
+        subtitle_events: List of subtitle events
+        raw_correlation_delay_ms: RAW delay from correlation (no rounding)
+        runner: CommandRunner for logging
+        config: Config dict with:
+            - correlation_snap_hash_algorithm: hash method (default: 'dhash')
+            - correlation_snap_hash_size: hash size (default: 8)
+            - correlation_snap_hash_threshold: max hamming distance (default: 5)
+            - correlation_snap_adjacent_frames: frames to check (default: 3)
+
+    Returns:
+        Dict with:
+            - enabled: bool (whether verification ran)
+            - valid: bool (whether validation passed)
+            - frame_delta: int (best frame adjustment: -1, 0, or +1)
+            - precise_offset_ms: float (correlation + frame snap)
+            - start_delta: int (frame delta at start checkpoint)
+            - end_delta: int (frame delta at end checkpoint)
+            - checkpoints: List[Dict] (details for each checkpoint)
+    """
+    config = config or {}
+
+    runner._log_message(f"[Correlation+FrameSnap] ═══════════════════════════════════════")
+    runner._log_message(f"[Correlation+FrameSnap] Running frame snap verification...")
+    runner._log_message(f"[Correlation+FrameSnap] RAW correlation delay: {raw_correlation_delay_ms:+.3f}ms (authoritative)")
+
+    # Get config parameters
+    hash_algorithm = config.get('correlation_snap_hash_algorithm', 'dhash')
+    hash_size = int(config.get('correlation_snap_hash_size', 8))
+    hash_threshold = int(config.get('correlation_snap_hash_threshold', 5))
+    adjacent_frames = int(config.get('correlation_snap_adjacent_frames', 3))
+
+    runner._log_message(f"[Correlation+FrameSnap] Hash: {hash_algorithm}, size={hash_size}, threshold={hash_threshold}")
+    runner._log_message(f"[Correlation+FrameSnap] Adjacent frames to check: ±{adjacent_frames}")
+
+    # Import frame matching utilities
+    try:
+        from .frame_matching import VideoReader, compute_frame_hash
+    except ImportError:
+        runner._log_message(f"[Correlation+FrameSnap] ERROR: frame_matching module not available")
+        return {
+            'enabled': True,
+            'valid': False,
+            'error': 'frame_matching module not available',
+            'raw_correlation_delay_ms': raw_correlation_delay_ms
+        }
+
+    # Open video readers
+    try:
+        source_reader = VideoReader(source_video, runner)
+        target_reader = VideoReader(target_video, runner)
+    except Exception as e:
+        runner._log_message(f"[Correlation+FrameSnap] ERROR: Failed to open videos: {e}")
+        return {
+            'enabled': True,
+            'valid': False,
+            'error': f'Failed to open videos: {e}',
+            'raw_correlation_delay_ms': raw_correlation_delay_ms
+        }
+
+    fps = source_reader.fps or 23.976
+    frame_duration_ms = 1000.0 / fps
+
+    runner._log_message(f"[Correlation+FrameSnap] FPS: {fps:.3f} → frame duration: {frame_duration_ms:.3f}ms")
+
+    # Select 2 checkpoints: start (10%) and end (90%)
+    if not subtitle_events:
+        runner._log_message(f"[Correlation+FrameSnap] ERROR: No subtitle events provided")
+        del source_reader
+        del target_reader
+        gc.collect()
+        return {
+            'enabled': True,
+            'valid': False,
+            'error': 'No subtitle events',
+            'raw_correlation_delay_ms': raw_correlation_delay_ms
+        }
+
+    # Get video duration from last subtitle time
+    max_sub_time = max(event.end for event in subtitle_events)
+
+    # Calculate checkpoint times
+    start_checkpoint_ms = max_sub_time * 0.10  # 10%
+    end_checkpoint_ms = max_sub_time * 0.90    # 90%
+
+    checkpoints = [
+        ('start', start_checkpoint_ms),
+        ('end', end_checkpoint_ms)
+    ]
+
+    runner._log_message(f"[Correlation+FrameSnap] Checkpoints: start={start_checkpoint_ms:.0f}ms, end={end_checkpoint_ms:.0f}ms")
+
+    checkpoint_results = []
+
+    # Process each checkpoint
+    for checkpoint_name, checkpoint_time_ms in checkpoints:
+        runner._log_message(f"[Correlation+FrameSnap] Checkpoint '{checkpoint_name}' at {checkpoint_time_ms:.0f}ms:")
+
+        # Test frame deltas: -1, 0, +1
+        best_delta = 0
+        best_score = -1
+        delta_scores = {}
+
+        for frame_delta in [-1, 0, +1]:
+            # Calculate candidate offset for this delta
+            candidate_offset_ms = raw_correlation_delay_ms + (frame_delta * frame_duration_ms)
+
+            # Extract adjacent frames from source (center ± N frames)
+            source_frame_hashes = []
+            for adj_offset in range(-adjacent_frames, adjacent_frames + 1):
+                frame_time_ms = checkpoint_time_ms + (adj_offset * frame_duration_ms)
+                frame = source_reader.get_frame_at_time(int(frame_time_ms))
+                if frame is not None:
+                    frame_hash = compute_frame_hash(frame, hash_size=hash_size, method=hash_algorithm)
+                    if frame_hash is not None:
+                        source_frame_hashes.append((adj_offset, frame_hash))
+
+            if len(source_frame_hashes) < (adjacent_frames * 2 * 0.7):  # Need at least 70%
+                runner._log_message(f"[Correlation+FrameSnap]   Delta {frame_delta:+d}: Not enough source frames")
+                continue
+
+            # Extract corresponding frames from target
+            matched_frames = 0
+            total_distance = 0
+
+            for adj_offset, source_hash in source_frame_hashes:
+                target_time_ms = checkpoint_time_ms + candidate_offset_ms + (adj_offset * frame_duration_ms)
+                target_frame = target_reader.get_frame_at_time(int(target_time_ms))
+
+                if target_frame is not None:
+                    target_hash = compute_frame_hash(target_frame, hash_size=hash_size, method=hash_algorithm)
+                    if target_hash is not None:
+                        distance = source_hash - target_hash
+
+                        if distance <= hash_threshold:
+                            matched_frames += 1
+
+                        total_distance += distance
+
+            # Calculate score: prioritize match count, then average distance
+            if len(source_frame_hashes) > 0:
+                avg_distance = total_distance / len(source_frame_hashes)
+                match_percent = (matched_frames / len(source_frame_hashes)) * 100
+                score = (matched_frames * 1000) - avg_distance
+
+                delta_scores[frame_delta] = {
+                    'score': score,
+                    'matched_frames': matched_frames,
+                    'total_frames': len(source_frame_hashes),
+                    'match_percent': match_percent,
+                    'avg_distance': avg_distance
+                }
+
+                runner._log_message(
+                    f"[Correlation+FrameSnap]   Delta {frame_delta:+d}: "
+                    f"{matched_frames}/{len(source_frame_hashes)} frames ({match_percent:.0f}%), "
+                    f"avg_dist={avg_distance:.1f}, score={score:.0f}"
+                )
+
+                if score > best_score:
+                    best_score = score
+                    best_delta = frame_delta
+
+        runner._log_message(f"[Correlation+FrameSnap]   → Best delta: {best_delta:+d} (score={best_score:.0f})")
+
+        checkpoint_results.append({
+            'name': checkpoint_name,
+            'time_ms': checkpoint_time_ms,
+            'best_delta': best_delta,
+            'best_score': best_score,
+            'delta_scores': delta_scores
+        })
+
+    # Clean up video readers
+    del source_reader
+    del target_reader
+    gc.collect()
+
+    # Validate consistency between checkpoints
+    if len(checkpoint_results) < 2:
+        runner._log_message(f"[Correlation+FrameSnap] FAILED: Not enough checkpoints measured")
+        return {
+            'enabled': True,
+            'valid': False,
+            'error': 'Not enough checkpoints',
+            'raw_correlation_delay_ms': raw_correlation_delay_ms,
+            'checkpoints': checkpoint_results
+        }
+
+    start_delta = checkpoint_results[0]['best_delta']
+    end_delta = checkpoint_results[1]['best_delta']
+    delta_diff = abs(start_delta - end_delta)
+
+    runner._log_message(f"[Correlation+FrameSnap] Consistency check:")
+    runner._log_message(f"[Correlation+FrameSnap]   Start delta: {start_delta:+d}")
+    runner._log_message(f"[Correlation+FrameSnap]   End delta:   {end_delta:+d}")
+    runner._log_message(f"[Correlation+FrameSnap]   Difference:  {delta_diff}")
+
+    # Determine validation result
+    if start_delta == end_delta:
+        # Perfect agreement
+        final_delta = start_delta
+        if final_delta == 0:
+            runner._log_message(f"[Correlation+FrameSnap] ✓ PASS: Correlation was already frame-perfect!")
+        else:
+            runner._log_message(f"[Correlation+FrameSnap] ✓ PASS: Consistent snap of {final_delta:+d} frame(s)")
+
+        valid = True
+        status = 'perfect_agreement'
+
+    elif delta_diff == 1:
+        # Minor disagreement (1 frame) - warn but proceed
+        final_delta = start_delta  # Use start checkpoint delta
+        runner._log_message(f"[Correlation+FrameSnap] ⚠ WARN: Deltas differ by 1 frame (minor drift)")
+        runner._log_message(f"[Correlation+FrameSnap] ⚠ Using start delta: {final_delta:+d}")
+
+        valid = True
+        status = 'minor_disagreement'
+
+    else:
+        # Major disagreement - likely stepping or drift
+        runner._log_message(f"[Correlation+FrameSnap] ✗ FAIL: Deltas differ by {delta_diff} frames")
+        runner._log_message(f"[Correlation+FrameSnap] ✗ This indicates stepping or drift - use stepping correction mode")
+
+        valid = False
+        final_delta = 0
+        status = 'failed_validation'
+
+    # Calculate final precise offset
+    frame_snap_ms = final_delta * frame_duration_ms
+    precise_offset_ms = raw_correlation_delay_ms + frame_snap_ms
+
+    runner._log_message(f"[Correlation+FrameSnap] Final offset calculation:")
+    runner._log_message(f"[Correlation+FrameSnap]   RAW correlation: {raw_correlation_delay_ms:+.3f}ms")
+    runner._log_message(f"[Correlation+FrameSnap]   Frame snap:      {frame_snap_ms:+.3f}ms ({final_delta:+d} frames)")
+    runner._log_message(f"[Correlation+FrameSnap]   Precise offset:  {precise_offset_ms:+.3f}ms")
+
+    return {
+        'enabled': True,
+        'valid': valid,
+        'status': status,
+        'frame_delta': final_delta,
+        'precise_offset_ms': precise_offset_ms,
+        'raw_correlation_delay_ms': raw_correlation_delay_ms,
+        'frame_snap_ms': frame_snap_ms,
+        'start_delta': start_delta,
+        'end_delta': end_delta,
+        'checkpoints': checkpoint_results
+    }
+
+
+def apply_correlation_frame_snap_sync(
+    subtitle_path: str,
+    source_video: str,
+    target_video: str,
+    correlation_chunks: List[Dict],
+    global_shift_ms: float,
+    runner,
+    config: dict = None
+) -> Dict[str, Any]:
+    """
+    Correlation + Frame Snap Mode: Apply subtitle sync using correlation + frame refinement.
+
+    This mode uses audio correlation as authoritative, then refines to exact frame boundaries.
+
+    Algorithm:
+    1. Extract RAW correlation delay from accepted chunks (median, no rounding)
+    2. Run frame snap verification (±1 frame check at 2 points)
+    3. Calculate final offset:
+       - precise_offset = raw_correlation + frame_snap
+       - final_offset = precise_offset + global_shift
+    4. Apply final_offset to all subtitle events ONCE (no double rounding)
+
+    IMPORTANT: This mode does NOT double-apply offsets:
+    - precise_offset syncs subtitles to Source 1 (audio correlation + frame snap)
+    - global_shift then syncs to overall video timing
+    - Both are applied together in a single operation
+
+    Args:
+        subtitle_path: Path to subtitle file
+        source_video: Path to source video (where subs were originally timed to)
+        target_video: Path to target video (Source 1)
+        correlation_chunks: Results from run_audio_correlation()
+        global_shift_ms: Global shift to apply (from main analysis)
+        runner: CommandRunner for logging
+        config: Configuration dict
+
+    Returns:
+        Dict with:
+            - success: bool
+            - total_events: int (number of subtitle events)
+            - raw_correlation_delay_ms: float (from audio correlation)
+            - frame_snap_ms: float (frame adjustment)
+            - precise_offset_ms: float (correlation + snap)
+            - global_shift_ms: float (global timing adjustment)
+            - final_offset_ms: float (total applied offset)
+            - validation: Dict (frame snap verification results)
+    """
+    config = config or {}
+
+    runner._log_message(f"[Correlation+FrameSnap Sync] ═══════════════════════════════════════")
+    runner._log_message(f"[Correlation+FrameSnap Sync] Applying correlation + frame snap mode")
+    runner._log_message(f"[Correlation+FrameSnap Sync] Global shift: {global_shift_ms:+.3f}ms")
+
+    # Step 1: Extract RAW correlation delay from accepted chunks
+    accepted_chunks = [c for c in correlation_chunks if c.get('accepted', False)]
+
+    if not accepted_chunks:
+        runner._log_message(f"[Correlation+FrameSnap Sync] ERROR: No accepted correlation chunks")
+        return {
+            'success': False,
+            'error': 'No accepted correlation chunks available'
+        }
+
+    # Use RAW delay values (no rounding yet)
+    raw_delays = [c['raw_delay'] for c in accepted_chunks]
+
+    # Use median to be robust against outliers
+    import numpy as np
+    raw_correlation_delay_ms = float(np.median(raw_delays))
+
+    runner._log_message(f"[Correlation+FrameSnap Sync] Extracted raw correlation delay: {raw_correlation_delay_ms:+.3f}ms")
+    runner._log_message(f"[Correlation+FrameSnap Sync] (from {len(accepted_chunks)} accepted chunks)")
+
+    # Load subtitle file
+    try:
+        subs = pysubs2.load(subtitle_path, encoding='utf-8')
+    except Exception as e:
+        runner._log_message(f"[Correlation+FrameSnap Sync] ERROR: Failed to load subtitle file: {e}")
+        return {
+            'success': False,
+            'error': f'Failed to load subtitle file: {e}'
+        }
+
+    if not subs.events:
+        runner._log_message(f"[Correlation+FrameSnap Sync] WARNING: No subtitle events found")
+        return {
+            'success': True,
+            'total_events': 0,
+            'raw_correlation_delay_ms': raw_correlation_delay_ms,
+            'global_shift_ms': global_shift_ms
+        }
+
+    runner._log_message(f"[Correlation+FrameSnap Sync] Loaded {len(subs.events)} subtitle events")
+
+    # Step 2: Run frame snap verification
+    verification_result = verify_correlation_with_frame_snap(
+        source_video,
+        target_video,
+        subs.events,
+        raw_correlation_delay_ms,
+        runner,
+        config
+    )
+
+    if not verification_result.get('valid'):
+        # Frame snap validation failed - handle based on fallback mode
+        fallback_mode = config.get('correlation_snap_fallback_mode', 'abort')
+
+        runner._log_message(f"[Correlation+FrameSnap Sync] ⚠⚠⚠ FRAME SNAP VALIDATION FAILED ⚠⚠⚠")
+        runner._log_message(f"[Correlation+FrameSnap Sync] Reason: {verification_result.get('error', 'Checkpoints disagree')}")
+
+        if fallback_mode == 'abort':
+            runner._log_message(f"[Correlation+FrameSnap Sync] ABORTING: Fallback mode is 'abort'")
+            return {
+                'success': False,
+                'error': f"Frame snap validation failed: {verification_result.get('error', 'Unknown')}",
+                'validation': verification_result,
+                'raw_correlation_delay_ms': raw_correlation_delay_ms
+            }
+        elif fallback_mode == 'use-raw-correlation':
+            runner._log_message(f"[Correlation+FrameSnap Sync] Using raw correlation (no frame snap)")
+            precise_offset_ms = raw_correlation_delay_ms
+            frame_snap_ms = 0.0
+        else:
+            # Default: abort
+            runner._log_message(f"[Correlation+FrameSnap Sync] Unknown fallback mode '{fallback_mode}', aborting")
+            return {
+                'success': False,
+                'error': 'Frame snap validation failed and unknown fallback mode',
+                'validation': verification_result,
+                'raw_correlation_delay_ms': raw_correlation_delay_ms
+            }
+    else:
+        # Frame snap validation passed - use precise offset
+        precise_offset_ms = verification_result['precise_offset_ms']
+        frame_snap_ms = verification_result['frame_snap_ms']
+
+        runner._log_message(f"[Correlation+FrameSnap Sync] ✓ Frame snap validation passed")
+        runner._log_message(f"[Correlation+FrameSnap Sync] Precise offset: {precise_offset_ms:+.3f}ms")
+
+    # Step 3: Calculate final offset (precise + global, applied ONCE)
+    final_offset_ms = precise_offset_ms + global_shift_ms
+
+    runner._log_message(f"[Correlation+FrameSnap Sync] Final offset calculation:")
+    runner._log_message(f"[Correlation+FrameSnap Sync]   RAW correlation:  {raw_correlation_delay_ms:+.3f}ms")
+    runner._log_message(f"[Correlation+FrameSnap Sync]   Frame snap:       {frame_snap_ms:+.3f}ms")
+    runner._log_message(f"[Correlation+FrameSnap Sync]   Precise offset:   {precise_offset_ms:+.3f}ms")
+    runner._log_message(f"[Correlation+FrameSnap Sync]   Global shift:     {global_shift_ms:+.3f}ms")
+    runner._log_message(f"[Correlation+FrameSnap Sync]   ─────────────────────────────────────")
+    runner._log_message(f"[Correlation+FrameSnap Sync]   FINAL offset:     {final_offset_ms:+.3f}ms")
+
+    # Capture original metadata
+    metadata = SubtitleMetadata(subtitle_path)
+    metadata.capture()
+
+    # Step 4: Apply offset to all subtitle events (ONCE, no double rounding)
+    runner._log_message(f"[Correlation+FrameSnap Sync] Applying offset to {len(subs.events)} events...")
+
+    for event in subs.events:
+        event.start += int(round(final_offset_ms))
+        event.end += int(round(final_offset_ms))
+
+    # Save subtitle file
+    try:
+        temp_path = Path(subtitle_path).with_suffix('.tmp.ass')
+        subs.save(str(temp_path), encoding='utf-8')
+
+        # Restore metadata
+        metadata.restore(str(temp_path))
+
+        # Replace original
+        import shutil
+        shutil.move(str(temp_path), subtitle_path)
+
+        runner._log_message(f"[Correlation+FrameSnap Sync] ✓ Subtitle file updated successfully")
+    except Exception as e:
+        runner._log_message(f"[Correlation+FrameSnap Sync] ERROR: Failed to save subtitle file: {e}")
+        return {
+            'success': False,
+            'error': f'Failed to save subtitle file: {e}',
+            'validation': verification_result
+        }
+
+    return {
+        'success': True,
+        'total_events': len(subs.events),
+        'raw_correlation_delay_ms': raw_correlation_delay_ms,
+        'frame_snap_ms': frame_snap_ms,
+        'precise_offset_ms': precise_offset_ms,
+        'global_shift_ms': global_shift_ms,
+        'final_offset_ms': final_offset_ms,
+        'validation': verification_result
+    }
+
+
 def apply_duration_align_sync(
     subtitle_path: str,
     source_video: str,

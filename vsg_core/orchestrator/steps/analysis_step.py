@@ -298,6 +298,9 @@ class AnalysisStep:
                 role_tag=source_key
             )
 
+            # Store correlation chunks for correlation + frame snap mode
+            ctx.correlation_chunks[source_key] = results
+
             # --- CRITICAL FIX: Detect stepping BEFORE calculating mode delay ---
             diagnosis = None
             details = {}

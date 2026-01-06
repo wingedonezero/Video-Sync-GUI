@@ -17,7 +17,7 @@ from vsg_core.subtitles.ocr import run_ocr
 from vsg_core.subtitles.cleanup import run_cleanup
 from vsg_core.subtitles.timing import fix_subtitle_timing
 from vsg_core.subtitles.stepping_adjust import apply_stepping_to_subtitles
-from vsg_core.subtitles.frame_sync import apply_frame_perfect_sync, apply_videotimestamps_sync, apply_frame_snapped_sync, apply_dual_videotimestamps_sync, apply_raw_delay_sync, apply_duration_align_sync, detect_video_fps
+from vsg_core.subtitles.frame_sync import apply_frame_perfect_sync, apply_videotimestamps_sync, apply_frame_snapped_sync, apply_dual_videotimestamps_sync, apply_raw_delay_sync, apply_duration_align_sync, apply_correlation_frame_snap_sync, detect_video_fps
 from vsg_core.subtitles.frame_matching import apply_frame_matched_sync
 
 class SubtitlesStep:
@@ -187,7 +187,7 @@ class SubtitlesStep:
             if item.extracted_path and not item.stepping_adjusted:
                 subtitle_sync_mode = ctx.settings_dict.get('subtitle_sync_mode', 'time-based')
 
-                if subtitle_sync_mode in ['frame-perfect', 'videotimestamps', 'frame-snapped', 'frame-matched', 'dual-videotimestamps', 'raw-delay', 'duration-align']:
+                if subtitle_sync_mode in ['frame-perfect', 'videotimestamps', 'frame-snapped', 'frame-matched', 'dual-videotimestamps', 'raw-delay', 'duration-align', 'correlation-frame-snap']:
                     # Check if this subtitle format supports frame-perfect sync
                     ext = item.extracted_path.suffix.lower()
                     supported_formats = ['.ass', '.ssa', '.srt', '.vtt']
@@ -322,6 +322,62 @@ class SubtitlesStep:
                                 runner._log_message(f"[Duration Align] Source: {source_video}, Target: {target_video}")
 
                             # Skip the delay-based sync logic for duration-align mode
+                            continue
+
+                        # Correlation + Frame Snap mode: Correlation as authoritative, refined to frame boundaries
+                        if subtitle_sync_mode == 'correlation-frame-snap':
+                            # Requires source and target videos + correlation chunks
+                            source_key = item.sync_to if item.track.source == 'External' else item.track.source
+                            source_video = ctx.sources.get(source_key)
+                            target_video = source1_file
+
+                            # Get correlation chunks for this source
+                            correlation_chunks = ctx.correlation_chunks.get(source_key, [])
+
+                            # Get raw global shift (NOT source-specific delay)
+                            global_shift_ms = 0.0
+                            if ctx.delays:
+                                global_shift_ms = ctx.delays.raw_global_shift_ms
+                                runner._log_message(f"[Correlation+FrameSnap] Using raw global shift: {global_shift_ms:+.3f}ms")
+
+                            if source_video and target_video and correlation_chunks:
+                                runner._log_message(f"[Correlation+FrameSnap] Applying to track {item.track.id} ({item.track.props.name or 'Unnamed'})")
+                                runner._log_message(f"[Correlation+FrameSnap] Source video: {Path(source_video).name}")
+                                runner._log_message(f"[Correlation+FrameSnap] Target video: {Path(target_video).name}")
+
+                                frame_sync_report = apply_correlation_frame_snap_sync(
+                                    str(item.extracted_path),
+                                    str(source_video),
+                                    str(target_video),
+                                    correlation_chunks,
+                                    global_shift_ms,
+                                    runner,
+                                    ctx.settings_dict
+                                )
+
+                                if frame_sync_report and frame_sync_report.get('success'):
+                                    runner._log_message(f"--- Correlation+FrameSnap Sync Report ---")
+                                    for key, value in frame_sync_report.items():
+                                        if key != 'validation':  # Skip nested validation dict
+                                            runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
+                                    runner._log_message("------------------------------------------")
+                                    # Mark that timestamps have been adjusted
+                                    item.frame_adjusted = True
+                                elif frame_sync_report and 'error' in frame_sync_report:
+                                    # Sync function returned error
+                                    error_msg = frame_sync_report['error']
+                                    runner._log_message(f"[Correlation+FrameSnap] ERROR: Sync failed for track {item.track.id}: {error_msg}")
+                                    raise RuntimeError(f"Correlation+FrameSnap sync failed for track {item.track.id}: {error_msg}")
+                                else:
+                                    # No report or unexpected result
+                                    runner._log_message(f"[Correlation+FrameSnap] ERROR: No sync report returned for track {item.track.id}")
+                                    raise RuntimeError(f"Correlation+FrameSnap sync failed for track {item.track.id}: No report returned")
+                            else:
+                                runner._log_message(f"[Correlation+FrameSnap] ERROR: Missing requirements")
+                                runner._log_message(f"[Correlation+FrameSnap] Source: {source_video}, Target: {target_video}, Chunks: {len(correlation_chunks) if correlation_chunks else 0}")
+                                raise RuntimeError(f"Correlation+FrameSnap sync failed: missing source/target video or correlation chunks")
+
+                            # Skip the delay-based sync logic for correlation-frame-snap mode
                             continue
 
                         # Dual-VideoTimestamps mode: Frame-accurate mapping using both videos' timestamps
