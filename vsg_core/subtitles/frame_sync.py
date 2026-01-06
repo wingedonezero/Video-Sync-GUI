@@ -465,18 +465,21 @@ def extract_frame_as_image(video_path: str, frame_number: int, runner) -> Option
         return None
 
 
-def compute_perceptual_hash(image_data: bytes, runner) -> Optional[str]:
+def compute_perceptual_hash(image_data: bytes, runner, algorithm: str = 'dhash', hash_size: int = 8) -> Optional[str]:
     """
-    Compute perceptual hash (dHash) from image data.
+    Compute perceptual hash from image data.
 
-    Uses dHash (difference hash) which is robust to:
-    - JPEG compression artifacts
-    - Minor encoding differences
-    - Slight color shifts
+    Supports multiple algorithms with different tolerance levels:
+    - dhash: Difference hash - good for compression artifacts (default)
+    - phash: Perceptual hash - best for heavy re-encoding, color grading
+    - average_hash: Simple averaging - fast but less accurate
+    - whash: Wavelet hash - very robust but slower
 
     Args:
         image_data: PNG/JPEG image data as bytes
         runner: CommandRunner for logging
+        algorithm: Hash algorithm to use (dhash, phash, average_hash, whash)
+        hash_size: Hash size (4, 8, 16) - larger = more precise but less tolerant
 
     Returns:
         Hexadecimal hash string, or None on error
@@ -488,13 +491,20 @@ def compute_perceptual_hash(image_data: bytes, runner) -> Optional[str]:
 
         img = Image.open(io.BytesIO(image_data))
 
-        # dHash (difference hash) - robust to compression
-        dhash = imagehash.dhash(img, hash_size=8)
+        # Select hash algorithm
+        if algorithm == 'phash':
+            hash_obj = imagehash.phash(img, hash_size=hash_size)
+        elif algorithm == 'average_hash':
+            hash_obj = imagehash.average_hash(img, hash_size=hash_size)
+        elif algorithm == 'whash':
+            hash_obj = imagehash.whash(img, hash_size=hash_size)
+        else:  # dhash (default)
+            hash_obj = imagehash.dhash(img, hash_size=hash_size)
 
         del img
         gc.collect()
 
-        return str(dhash)
+        return str(hash_obj)
 
     except ImportError:
         runner._log_message("[Perceptual Hash] WARNING: imagehash library not installed")
@@ -566,6 +576,16 @@ def validate_frame_alignment(
             num_points = 3
 
     hash_threshold = config.get('duration_align_hash_threshold', 5)
+    hash_algorithm = config.get('duration_align_hash_algorithm', 'dhash')
+    # UI sends hash_size as string ("4", "8", "16"), convert to int
+    hash_size_str = config.get('duration_align_hash_size', '8')
+    hash_size = int(hash_size_str) if isinstance(hash_size_str, str) else hash_size_str
+    strictness_pct = config.get('duration_align_strictness', 80)
+
+    runner._log_message(f"[Frame Validation] Hash algorithm: {hash_algorithm}")
+    runner._log_message(f"[Frame Validation] Hash size: {hash_size}x{hash_size}")
+    runner._log_message(f"[Frame Validation] Hash threshold: {hash_threshold}")
+    runner._log_message(f"[Frame Validation] Strictness: {strictness_pct}%")
 
     # Find non-empty subtitle events
     valid_events = [e for e in subtitle_events if e.end > e.start]
@@ -646,8 +666,8 @@ def validate_frame_alignment(
                 continue
 
             # Compute hashes
-            src_hash = compute_perceptual_hash(src_img, runner)
-            tgt_hash = compute_perceptual_hash(tgt_img, runner)
+            src_hash = compute_perceptual_hash(src_img, runner, hash_algorithm, hash_size)
+            tgt_hash = compute_perceptual_hash(tgt_img, runner, hash_algorithm, hash_size)
 
             if src_hash is None or tgt_hash is None:
                 runner._log_message(f"[Frame Validation]   Frame {offset:+d}: SKIP (hash failed)")
@@ -682,10 +702,10 @@ def validate_frame_alignment(
 
             runner._log_message(f"[Frame Validation] Checkpoint result: {checkpoint_result['frames_matched']}/{checkpoint_result['frames_checked']} matched ({match_pct:.1f}%)")
 
-            # Consider checkpoint valid if >80% frames match
-            if match_pct < 80.0:
+            # Consider checkpoint valid if >= strictness threshold
+            if match_pct < strictness_pct:
                 validation_results['valid'] = False
-                runner._log_message(f"[Frame Validation] ⚠ WARNING: Low match rate for {checkpoint_name} subtitle!")
+                runner._log_message(f"[Frame Validation] ⚠ WARNING: Low match rate for {checkpoint_name} subtitle ({match_pct:.1f}% < {strictness_pct}% required)!")
 
         validation_results['checkpoints'].append(checkpoint_result)
 
@@ -1003,14 +1023,30 @@ def apply_duration_align_sync(
         config
     )
 
-    # If validation failed, warn user but continue (they can decide)
+    # If validation failed, handle based on fallback mode
     if validation_result.get('enabled') and not validation_result.get('valid'):
+        fallback_mode = config.get('duration_align_fallback_mode', 'none')
+
         runner._log_message(f"[Duration Align] ⚠⚠⚠ VALIDATION FAILED ⚠⚠⚠")
         runner._log_message(f"[Duration Align] Videos may NOT be frame-aligned!")
         runner._log_message(f"[Duration Align] Sync may be INCORRECT - consider using audio-correlation mode")
-        runner._log_message(f"[Duration Align] Continuing anyway... (you can abort if needed)")
-        # Add warning to result
-        validation_result['warning'] = 'Frame alignment validation failed - sync may be incorrect'
+
+        if fallback_mode == 'abort':
+            runner._log_message(f"[Duration Align] ABORTING: Fallback mode is 'abort'")
+            runner._log_message(f"[Duration Align] Either fix validation settings or switch to different sync mode")
+            return {
+                'error': 'Frame alignment validation failed (fallback mode: abort)',
+                'validation': validation_result
+            }
+        elif fallback_mode == 'auto-fallback':
+            fallback_target = config.get('duration_align_fallback_target', 'dual-videotimestamps')
+            runner._log_message(f"[Duration Align] AUTO-FALLBACK: Would switch to '{fallback_target}' mode")
+            runner._log_message(f"[Duration Align] (Auto-fallback not yet implemented, continuing with duration-align)")
+            runner._log_message(f"[Duration Align] TODO: Implement automatic fallback to other sync modes")
+            validation_result['warning'] = 'Frame alignment validation failed - sync may be incorrect'
+        else:  # 'none' - warn but continue
+            runner._log_message(f"[Duration Align] Continuing anyway... (you can abort if needed)")
+            validation_result['warning'] = 'Frame alignment validation failed - sync may be incorrect'
 
     # Apply total shift to all events
     for event in subs.events:
