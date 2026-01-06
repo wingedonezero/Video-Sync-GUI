@@ -1619,19 +1619,10 @@ def apply_correlation_frame_snap_sync(
         event.start += int(round(final_offset_ms))
         event.end += int(round(final_offset_ms))
 
-    # Save subtitle file
+    # Save modified subtitle
+    runner._log_message(f"[Correlation+FrameSnap Sync] Saving modified subtitle file...")
     try:
-        temp_path = Path(subtitle_path).with_suffix('.tmp.ass')
-        subs.save(str(temp_path), encoding='utf-8')
-
-        # Restore metadata
-        metadata.restore(str(temp_path))
-
-        # Replace original
-        import shutil
-        shutil.move(str(temp_path), subtitle_path)
-
-        runner._log_message(f"[Correlation+FrameSnap Sync] ✓ Subtitle file updated successfully")
+        subs.save(subtitle_path, encoding='utf-8')
     except Exception as e:
         runner._log_message(f"[Correlation+FrameSnap Sync] ERROR: Failed to save subtitle file: {e}")
         return {
@@ -1639,6 +1630,11 @@ def apply_correlation_frame_snap_sync(
             'error': f'Failed to save subtitle file: {e}',
             'validation': verification_result
         }
+
+    # Validate and restore metadata
+    metadata.validate_and_restore(runner, expected_delay_ms=int(round(final_offset_ms)))
+
+    runner._log_message(f"[Correlation+FrameSnap Sync] ✓ Successfully synchronized {len(subs.events)} events")
 
     return {
         'success': True,
