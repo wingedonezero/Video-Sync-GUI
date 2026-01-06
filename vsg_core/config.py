@@ -60,6 +60,13 @@ class AppConfig:
             'duration_align_verify_checkpoints': 3,  # Number of checkpoints to verify (1 or 3)
             'duration_align_skip_validation_generated_tracks': True,  # Skip validation for generated tracks (default: True)
 
+            # --- Correlation + Frame Snap Settings ---
+            'correlation_snap_fallback_mode': 'snap-to-frame',  # What to do if verification fails: 'snap-to-frame', 'use-raw', 'abort'
+            'correlation_snap_hash_algorithm': 'dhash',  # Hash algorithm: 'dhash', 'phash', 'average_hash'
+            'correlation_snap_hash_size': 8,  # Hash size for perceptual hashing
+            'correlation_snap_hash_threshold': 5,  # Max hamming distance for frame match
+            'correlation_snap_adjacent_frames': 3,  # Number of adjacent frames to check at each checkpoint
+
             # --- Frame-Matched Sync Settings ---
             'frame_match_search_window_sec': 1,  # Reduced to 1 sec with smart delay centering + hash caching
             'frame_match_search_window_frames': 5,  # NEW: Search ±N frames (overrides _sec if > 0)
