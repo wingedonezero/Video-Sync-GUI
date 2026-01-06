@@ -326,13 +326,16 @@ class SubtitlesStep:
 
                         # Correlation + Frame Snap mode: Correlation as authoritative, refined to frame boundaries
                         if subtitle_sync_mode == 'correlation-frame-snap':
-                            # Requires source and target videos + correlation chunks
+                            # Requires source and target videos + raw correlation delay
                             source_key = item.sync_to if item.track.source == 'External' else item.track.source
                             source_video = ctx.sources.get(source_key)
                             target_video = source1_file
 
-                            # Get correlation chunks for this source
-                            correlation_chunks = ctx.correlation_chunks.get(source_key, [])
+                            # Get RAW correlation delay for this source (no rounding)
+                            raw_correlation_delay_ms = 0.0
+                            if ctx.delays and source_key in ctx.delays.raw_source_delays_ms:
+                                raw_correlation_delay_ms = ctx.delays.raw_source_delays_ms[source_key]
+                                runner._log_message(f"[Correlation+FrameSnap] Using raw correlation delay: {raw_correlation_delay_ms:+.3f}ms from {source_key}")
 
                             # Get raw global shift (NOT source-specific delay)
                             global_shift_ms = 0.0
@@ -340,7 +343,7 @@ class SubtitlesStep:
                                 global_shift_ms = ctx.delays.raw_global_shift_ms
                                 runner._log_message(f"[Correlation+FrameSnap] Using raw global shift: {global_shift_ms:+.3f}ms")
 
-                            if source_video and target_video and correlation_chunks:
+                            if source_video and target_video:
                                 runner._log_message(f"[Correlation+FrameSnap] Applying to track {item.track.id} ({item.track.props.name or 'Unnamed'})")
                                 runner._log_message(f"[Correlation+FrameSnap] Source video: {Path(source_video).name}")
                                 runner._log_message(f"[Correlation+FrameSnap] Target video: {Path(target_video).name}")
@@ -349,7 +352,7 @@ class SubtitlesStep:
                                     str(item.extracted_path),
                                     str(source_video),
                                     str(target_video),
-                                    correlation_chunks,
+                                    raw_correlation_delay_ms,
                                     global_shift_ms,
                                     runner,
                                     ctx.settings_dict
@@ -373,9 +376,9 @@ class SubtitlesStep:
                                     runner._log_message(f"[Correlation+FrameSnap] ERROR: No sync report returned for track {item.track.id}")
                                     raise RuntimeError(f"Correlation+FrameSnap sync failed for track {item.track.id}: No report returned")
                             else:
-                                runner._log_message(f"[Correlation+FrameSnap] ERROR: Missing requirements")
-                                runner._log_message(f"[Correlation+FrameSnap] Source: {source_video}, Target: {target_video}, Chunks: {len(correlation_chunks) if correlation_chunks else 0}")
-                                raise RuntimeError(f"Correlation+FrameSnap sync failed: missing source/target video or correlation chunks")
+                                runner._log_message(f"[Correlation+FrameSnap] ERROR: Missing source or target video")
+                                runner._log_message(f"[Correlation+FrameSnap] Source: {source_video}, Target: {target_video}")
+                                raise RuntimeError(f"Correlation+FrameSnap sync failed: missing source/target video")
 
                             # Skip the delay-based sync logic for correlation-frame-snap mode
                             continue

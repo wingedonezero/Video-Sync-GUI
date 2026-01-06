@@ -62,10 +62,6 @@ class Context:
     # Format: {source_key: List[AudioSegment]}
     stepping_edls: Dict[str, List[Any]] = field(default_factory=dict)
 
-    # Store correlation chunks for correlation + frame snap mode
-    # Format: {source_key: List[Dict]} where Dict is correlation chunk result
-    correlation_chunks: Dict[str, List[Dict]] = field(default_factory=dict)
-
     # Results/summaries
     out_file: Optional[str] = None
     tokens: Optional[List[str]] = None

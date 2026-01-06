@@ -932,7 +932,7 @@ class SubtitleSyncTab(QWidget):
         sync_layout = QFormLayout(sync_group)
 
         self.widgets['subtitle_sync_mode'] = QComboBox()
-        self.widgets['subtitle_sync_mode'].addItems(['time-based', 'frame-perfect', 'frame-snapped', 'videotimestamps', 'dual-videotimestamps', 'frame-matched', 'raw-delay', 'duration-align'])
+        self.widgets['subtitle_sync_mode'].addItems(['time-based', 'frame-perfect', 'frame-snapped', 'videotimestamps', 'dual-videotimestamps', 'frame-matched', 'raw-delay', 'duration-align', 'correlation-frame-snap'])
         self.widgets['subtitle_sync_mode'].setToolTip(
             "Subtitle synchronization method:\n\n"
             "• time-based (Default): Apply delays using millisecond timestamps\n"
@@ -995,6 +995,16 @@ class SubtitleSyncTab(QWidget):
             "  - Example: Source 23:40.003, Target 23:41.002 → +999ms offset\n"
             "  - Ignores audio correlation completely\n"
             "  - Best for frame-aligned videos with different total durations\n"
+            "  - Requires both source and target video files\n\n"
+            "• correlation-frame-snap: Correlation + frame boundary refinement (NEW!)\n"
+            "  - Uses audio correlation as authoritative time offset\n"
+            "  - Refines to exact frame boundaries (±1 frame adjustment)\n"
+            "  - Validates consistency at start/end checkpoints\n"
+            "  - Proper offset composition (no double-rounding)\n"
+            "  - Best of both worlds: correlation precision + frame accuracy\n"
+            "  - Faster than frame-matched (only checks ±1 frame)\n"
+            "  - Detects stepping/drift if checkpoints disagree\n"
+            "  - Requires: pip install imagehash\n"
             "  - Requires both source and target video files\n\n"
             "Note: Stepping correction (if enabled) takes precedence over this setting."
         )

@@ -1480,7 +1480,7 @@ def apply_correlation_frame_snap_sync(
     subtitle_path: str,
     source_video: str,
     target_video: str,
-    correlation_chunks: List[Dict],
+    raw_correlation_delay_ms: float,
     global_shift_ms: float,
     runner,
     config: dict = None
@@ -1491,7 +1491,7 @@ def apply_correlation_frame_snap_sync(
     This mode uses audio correlation as authoritative, then refines to exact frame boundaries.
 
     Algorithm:
-    1. Extract RAW correlation delay from accepted chunks (median, no rounding)
+    1. Use RAW correlation delay (already calculated, from delays.raw_source_delays_ms)
     2. Run frame snap verification (±1 frame check at 2 points)
     3. Calculate final offset:
        - precise_offset = raw_correlation + frame_snap
@@ -1507,8 +1507,8 @@ def apply_correlation_frame_snap_sync(
         subtitle_path: Path to subtitle file
         source_video: Path to source video (where subs were originally timed to)
         target_video: Path to target video (Source 1)
-        correlation_chunks: Results from run_audio_correlation()
-        global_shift_ms: Global shift to apply (from main analysis)
+        raw_correlation_delay_ms: RAW delay from audio correlation (from delays.raw_source_delays_ms)
+        global_shift_ms: Global shift to apply (from delays.raw_global_shift_ms)
         runner: CommandRunner for logging
         config: Configuration dict
 
@@ -1527,27 +1527,8 @@ def apply_correlation_frame_snap_sync(
 
     runner._log_message(f"[Correlation+FrameSnap Sync] ═══════════════════════════════════════")
     runner._log_message(f"[Correlation+FrameSnap Sync] Applying correlation + frame snap mode")
+    runner._log_message(f"[Correlation+FrameSnap Sync] RAW correlation delay: {raw_correlation_delay_ms:+.3f}ms")
     runner._log_message(f"[Correlation+FrameSnap Sync] Global shift: {global_shift_ms:+.3f}ms")
-
-    # Step 1: Extract RAW correlation delay from accepted chunks
-    accepted_chunks = [c for c in correlation_chunks if c.get('accepted', False)]
-
-    if not accepted_chunks:
-        runner._log_message(f"[Correlation+FrameSnap Sync] ERROR: No accepted correlation chunks")
-        return {
-            'success': False,
-            'error': 'No accepted correlation chunks available'
-        }
-
-    # Use RAW delay values (no rounding yet)
-    raw_delays = [c['raw_delay'] for c in accepted_chunks]
-
-    # Use median to be robust against outliers
-    import numpy as np
-    raw_correlation_delay_ms = float(np.median(raw_delays))
-
-    runner._log_message(f"[Correlation+FrameSnap Sync] Extracted raw correlation delay: {raw_correlation_delay_ms:+.3f}ms")
-    runner._log_message(f"[Correlation+FrameSnap Sync] (from {len(accepted_chunks)} accepted chunks)")
 
     # Load subtitle file
     try:
