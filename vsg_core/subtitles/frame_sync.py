@@ -2289,11 +2289,16 @@ def verify_correlation_with_frame_snap(
     IMPORTANT: pure_correlation_delay_ms should be the PURE correlation delay
     WITHOUT global_shift, because we're comparing against original videos.
 
+    USES VideoTimestamps library for precision frame math to avoid floating point
+    errors that cause 1-frame offsets. The key issue is that int(time * fps) can
+    truncate 1000.9999 to 1000 instead of 1001.
+
     Algorithm:
     1. Select checkpoints at 10%, 50%, 90% of subtitle duration
     2. At each checkpoint, test frame_delta ∈ {-1, 0, +1}:
-       - Extract frames from source at checkpoint time ± adjacent frames
-       - Extract frames from target at (checkpoint + correlation + delta*frame_duration)
+       - Convert checkpoint time to frame using VideoTimestamps (precise)
+       - Extract adjacent frames from source using frame numbers
+       - Convert source frame + correlation + delta to target frame
        - Compare using perceptual hashing
        - Score based on match count and distance
     3. Pick the delta with best aggregate score
@@ -2323,8 +2328,11 @@ def verify_correlation_with_frame_snap(
     runner._log_message(f"[Correlation+FrameSnap] Pure correlation delay: {pure_correlation_delay_ms:+.3f}ms")
     runner._log_message(f"[Correlation+FrameSnap] (This is correlation only, WITHOUT global shift)")
 
-    frame_duration_ms = 1000.0 / fps
+    # Use VideoTimestamps for frame calculations (precision math with Fractions)
+    # This avoids floating point errors like int(1000.9999) -> 1000 instead of 1001
+    frame_duration_ms = 1000.0 / fps  # Keep for logging, but use VTS for actual calculations
     runner._log_message(f"[Correlation+FrameSnap] FPS: {fps:.3f} → frame duration: {frame_duration_ms:.3f}ms")
+    runner._log_message(f"[Correlation+FrameSnap] Using VideoTimestamps for precision frame math")
 
     # Get config parameters
     hash_algorithm = config.get('correlation_snap_hash_algorithm', 'dhash')
@@ -2395,45 +2403,84 @@ def verify_correlation_with_frame_snap(
     for checkpoint_name, checkpoint_time_ms in checkpoints:
         runner._log_message(f"[Correlation+FrameSnap] Checkpoint '{checkpoint_name}' at {checkpoint_time_ms:.0f}ms:")
 
+        # Convert checkpoint time to frame number using VideoTimestamps (precision math)
+        # This avoids floating point errors like int(1000.9999) -> 1000 instead of 1001
+        checkpoint_frame = time_to_frame_vfr(checkpoint_time_ms, source_video, fps, runner, config)
+        if checkpoint_frame is None:
+            # Fallback to simple division if VTS unavailable
+            checkpoint_frame = int(checkpoint_time_ms * fps / 1000.0)
+            runner._log_message(f"[Correlation+FrameSnap]   WARNING: VideoTimestamps unavailable, using fallback")
+
+        runner._log_message(f"[Correlation+FrameSnap]   Checkpoint frame: {checkpoint_frame}")
+
         best_delta = 0
         best_score = -float('inf')
         delta_scores = {}
 
         for frame_delta in [-1, 0, +1]:
-            # For this delta, what's the total offset from source to target?
-            # target_time = source_time + correlation + (delta * frame_duration)
-            test_offset_ms = pure_correlation_delay_ms + (frame_delta * frame_duration_ms)
+            # For this delta, we shift target frame by delta frames
+            # delta = -1: target is 1 frame earlier (source frame N should match target frame N-1)
+            # delta = 0:  frames should match directly
+            # delta = +1: target is 1 frame later
 
-            # Extract adjacent frames from source around the checkpoint
+            # Extract adjacent frames from source around the checkpoint using INTEGER FRAME MATH
             source_frame_hashes = []
+            source_frame_times = {}  # Store frame -> time mapping for target extraction
+
             for adj_offset in range(-adjacent_frames, adjacent_frames + 1):
-                source_time_ms = checkpoint_time_ms + (adj_offset * frame_duration_ms)
-                if source_time_ms < 0:
+                source_frame_num = checkpoint_frame + adj_offset
+                if source_frame_num < 0:
                     continue
-                frame = source_reader.get_frame_at_time(int(source_time_ms))
+
+                # Convert frame number to time using VideoTimestamps (precision)
+                source_time_ms = frame_to_time_vfr(source_frame_num, source_video, fps, runner, config)
+                if source_time_ms is None:
+                    # Fallback if VTS unavailable
+                    source_time_ms = int(source_frame_num * 1000.0 / fps)
+
+                source_frame_times[adj_offset] = source_time_ms
+
+                frame = source_reader.get_frame_at_time(source_time_ms)
                 if frame is not None:
                     frame_hash = compute_frame_hash(frame, hash_size=hash_size, method=hash_algorithm)
                     if frame_hash is not None:
-                        source_frame_hashes.append((adj_offset, frame_hash))
+                        source_frame_hashes.append((adj_offset, frame_hash, source_frame_num))
 
             if len(source_frame_hashes) < max(1, int(adjacent_frames * 2 * 0.5)):
                 runner._log_message(f"[Correlation+FrameSnap]   Delta {frame_delta:+d}: Not enough source frames")
                 continue
 
             # Extract corresponding frames from target and compare
+            # For target: find which frame displays at (source_time + correlation)
             matched_frames = 0
             total_distance = 0
             compared_count = 0
 
-            for adj_offset, source_hash in source_frame_hashes:
-                # Target time = source_time + test_offset
-                source_time_ms = checkpoint_time_ms + (adj_offset * frame_duration_ms)
-                target_time_ms = source_time_ms + test_offset_ms
+            for adj_offset, source_hash, source_frame_num in source_frame_hashes:
+                source_time_ms = source_frame_times[adj_offset]
 
-                if target_time_ms < 0:
+                # Target time = source_time + correlation
+                # Then apply frame_delta adjustment
+                target_time_with_correlation = source_time_ms + pure_correlation_delay_ms
+
+                # Convert to target frame, apply delta, convert back to time
+                # This ensures we're comparing exact frames, not interpolated times
+                target_frame_num = time_to_frame_vfr(target_time_with_correlation, target_video, fps, runner, config)
+                if target_frame_num is None:
+                    target_frame_num = int(target_time_with_correlation * fps / 1000.0)
+
+                # Apply frame delta adjustment
+                adjusted_target_frame = target_frame_num + frame_delta
+
+                if adjusted_target_frame < 0:
                     continue
 
-                target_frame = target_reader.get_frame_at_time(int(target_time_ms))
+                # Get the exact time for this target frame
+                target_time_ms = frame_to_time_vfr(adjusted_target_frame, target_video, fps, runner, config)
+                if target_time_ms is None:
+                    target_time_ms = int(adjusted_target_frame * 1000.0 / fps)
+
+                target_frame = target_reader.get_frame_at_time(target_time_ms)
                 if target_frame is not None:
                     target_hash = compute_frame_hash(target_frame, hash_size=hash_size, method=hash_algorithm)
                     if target_hash is not None:
@@ -2519,7 +2566,16 @@ def verify_correlation_with_frame_snap(
         runner._log_message(f"[Correlation+FrameSnap] This may indicate drift, stepping, or different cuts")
         valid = False
 
-    frame_correction_ms = overall_best_delta * frame_duration_ms
+    # Calculate frame_correction_ms using VideoTimestamps for precision
+    # frame_to_time_vfr(1) gives the exact duration of 1 frame for NTSC rates
+    if overall_best_delta != 0:
+        # Get exact frame duration using VideoTimestamps
+        one_frame_time = frame_to_time_vfr(1, source_video, fps, runner, config)
+        if one_frame_time is None:
+            one_frame_time = frame_duration_ms  # Fallback
+        frame_correction_ms = overall_best_delta * one_frame_time
+    else:
+        frame_correction_ms = 0.0
 
     runner._log_message(f"[Correlation+FrameSnap] Frame correction: {overall_best_delta:+d} frames = {frame_correction_ms:+.3f}ms")
     runner._log_message(f"[Correlation+FrameSnap] ═══════════════════════════════════════")
@@ -2653,14 +2709,33 @@ def apply_correlation_frame_snap_sync(
             frame_correction_ms = 0.0
             frame_delta = 0
         else:  # 'snap-to-frame' (default)
-            # Snap pure correlation to frame boundary using FLOOR (user preference)
-            # Floor gives the frame that contains the correlation time point
-            frame_delta = int(math.floor(pure_correlation_ms / frame_duration_ms))
-            snapped_correlation = frame_delta * frame_duration_ms
+            # Snap pure correlation to frame boundary using VideoTimestamps for precision
+            # This avoids floating point errors with NTSC rates (23.976fps, 29.97fps, etc.)
+            runner._log_message(f"[Correlation+FrameSnap] Fallback: Snapping to frame boundary using VideoTimestamps")
+
+            # Convert pure correlation time to frame number using VideoTimestamps
+            correlation_frame = time_to_frame_vfr(abs(pure_correlation_ms), source_video, fps, runner, config)
+            if correlation_frame is None:
+                # Fallback if VTS unavailable
+                correlation_frame = int(abs(pure_correlation_ms) * fps / 1000.0)
+                runner._log_message(f"[Correlation+FrameSnap]   WARNING: VideoTimestamps unavailable, using fallback")
+
+            # Handle sign: time_to_frame_vfr only works with positive times
+            if pure_correlation_ms < 0:
+                frame_delta = -correlation_frame
+            else:
+                frame_delta = correlation_frame
+
+            # Get exact snapped time for this frame using VideoTimestamps
+            snapped_time_abs = frame_to_time_vfr(abs(frame_delta), source_video, fps, runner, config)
+            if snapped_time_abs is None:
+                snapped_time_abs = abs(frame_delta) * 1000.0 / fps
+
+            snapped_correlation = snapped_time_abs if pure_correlation_ms >= 0 else -snapped_time_abs
             frame_correction_ms = snapped_correlation - pure_correlation_ms
 
-            runner._log_message(f"[Correlation+FrameSnap] Fallback: Snapping to frame boundary (using floor)")
             runner._log_message(f"[Correlation+FrameSnap] Pure correlation {pure_correlation_ms:+.3f}ms -> frame {frame_delta}")
+            runner._log_message(f"[Correlation+FrameSnap] Snapped correlation: {snapped_correlation:+.3f}ms")
             runner._log_message(f"[Correlation+FrameSnap] Frame correction: {frame_correction_ms:+.3f}ms")
 
     # Calculate final offset
