@@ -2524,6 +2524,21 @@ def verify_correlation_with_frame_snap(
                 best_delta = frame_delta
                 best_match_distance = distance
 
+        # Check for ambiguous match - if scores are too close, match is unreliable
+        # This happens when adjacent frames look similar (static scenes, slow pans)
+        match_is_ambiguous = False
+        second_best_score = -float('inf')
+        for delta, info in delta_scores.items():
+            if delta != best_delta and info['score'] > second_best_score:
+                second_best_score = info['score']
+
+        # If best and second-best scores are within 20% of each other, it's ambiguous
+        if second_best_score > -float('inf') and best_score > 0:
+            score_margin = (best_score - second_best_score) / best_score if best_score > 0 else 0
+            match_is_ambiguous = score_margin < 0.20  # Less than 20% margin = ambiguous
+            if match_is_ambiguous:
+                runner._log_message(f"[Correlation+FrameSnap]   ⚠ AMBIGUOUS: score margin only {score_margin*100:.1f}% (frames look similar)")
+
         # Calculate precise anchor offset from verified frame times
         if best_score > 0:  # We found a match
             matching_target_frame = predicted_target_frame + best_delta
@@ -2534,18 +2549,23 @@ def verify_correlation_with_frame_snap(
             # ANCHOR OFFSET: This is the TRUE offset calculated from verified frame times
             # Just like duration-align does: target_frame_time - source_frame_time
             anchor_offset = target_frame_time_ms - source_frame_time_ms
-            anchor_offsets_ms.append(anchor_offset)
 
-            runner._log_message(f"[Correlation+FrameSnap]   → Best match: delta={best_delta:+d}, target frame {matching_target_frame}")
-            runner._log_message(f"[Correlation+FrameSnap]   → Source frame time: {source_frame_time_ms:.3f}ms")
-            runner._log_message(f"[Correlation+FrameSnap]   → Target frame time: {target_frame_time_ms:.3f}ms")
-            runner._log_message(f"[Correlation+FrameSnap]   → ANCHOR OFFSET: {anchor_offset:.3f}ms (correlation was {pure_correlation_delay_ms:.3f}ms)")
+            # Only use anchor offset if match is NOT ambiguous
+            # If ambiguous, we can't trust it - frames look too similar
+            if not match_is_ambiguous:
+                anchor_offsets_ms.append(anchor_offset)
+                runner._log_message(f"[Correlation+FrameSnap]   → Best match: delta={best_delta:+d}, target frame {matching_target_frame}")
+                runner._log_message(f"[Correlation+FrameSnap]   → Source frame time: {source_frame_time_ms:.3f}ms")
+                runner._log_message(f"[Correlation+FrameSnap]   → Target frame time: {target_frame_time_ms:.3f}ms")
+                runner._log_message(f"[Correlation+FrameSnap]   → ANCHOR OFFSET: {anchor_offset:.3f}ms (correlation was {pure_correlation_delay_ms:.3f}ms)")
+            else:
+                runner._log_message(f"[Correlation+FrameSnap]   → Match too ambiguous, not using anchor offset from this checkpoint")
         else:
             runner._log_message(f"[Correlation+FrameSnap]   → No good match found at this checkpoint")
 
         # Store checkpoint result
         checkpoint_anchor_offset = None
-        if best_score > 0 and anchor_offsets_ms:
+        if best_score > 0 and not match_is_ambiguous and anchor_offsets_ms:
             checkpoint_anchor_offset = anchor_offsets_ms[-1]  # The one we just added
 
         checkpoint_results.append({
@@ -2556,6 +2576,7 @@ def verify_correlation_with_frame_snap(
             'best_delta': best_delta,
             'best_score': best_score,
             'delta_scores': delta_scores,
+            'match_is_ambiguous': match_is_ambiguous,
             'anchor_offset_ms': checkpoint_anchor_offset
         })
 
@@ -2572,7 +2593,19 @@ def verify_correlation_with_frame_snap(
     runner._log_message(f"[Correlation+FrameSnap] Aggregate scores: {all_delta_scores}")
     runner._log_message(f"[Correlation+FrameSnap] Per-checkpoint deltas: {checkpoint_deltas}")
 
-    # Calculate PRECISE refinement from anchor offsets (like duration-align)
+    # Calculate frame correction from anchor offsets
+    # KEY INSIGHT: Anchor matching tells us IF we need a frame correction (±1 frame),
+    # but correlation has sub-frame precision. So we:
+    # 1. Use anchor offsets to determine how many FRAMES off correlation is
+    # 2. Apply that frame correction TO correlation (not replace correlation with anchor)
+
+    # Count ambiguous checkpoints
+    ambiguous_count = sum(1 for r in checkpoint_results if r.get('match_is_ambiguous', False))
+    total_checkpoints = len(checkpoint_results)
+
+    if ambiguous_count > 0:
+        runner._log_message(f"[Correlation+FrameSnap] Ambiguous checkpoints: {ambiguous_count}/{total_checkpoints}")
+
     if anchor_offsets_ms:
         runner._log_message(f"[Correlation+FrameSnap] Anchor offsets from verified frames: {[f'{o:.3f}ms' for o in anchor_offsets_ms]}")
 
@@ -2582,40 +2615,59 @@ def verify_correlation_with_frame_snap(
         max_offset = max(anchor_offsets_ms)
         offset_spread = max_offset - min_offset
 
-        if offset_spread <= offset_tolerance_ms:
-            # Anchors agree - use average for precision
+        if offset_spread <= frame_duration_ms:
+            # Anchors agree (or minor disagreement) - calculate frame correction
             avg_anchor_offset = sum(anchor_offsets_ms) / len(anchor_offsets_ms)
-            frame_correction_ms = avg_anchor_offset - pure_correlation_delay_ms
-            valid = True
 
-            runner._log_message(f"[Correlation+FrameSnap] Anchors agree (spread={offset_spread:.3f}ms <= {offset_tolerance_ms:.3f}ms)")
+            # How many frames off is correlation from the anchor offset?
+            offset_difference = avg_anchor_offset - pure_correlation_delay_ms
+            frames_difference = round(offset_difference / frame_duration_ms)
+
             runner._log_message(f"[Correlation+FrameSnap] Average anchor offset: {avg_anchor_offset:.3f}ms")
-            runner._log_message(f"[Correlation+FrameSnap] PRECISE REFINEMENT: {frame_correction_ms:+.3f}ms")
-            runner._log_message(f"[Correlation+FrameSnap]   (Correlation {pure_correlation_delay_ms:.3f}ms was off by {frame_correction_ms:+.3f}ms)")
-        elif offset_spread <= frame_duration_ms:
-            # Minor disagreement - still usable
-            avg_anchor_offset = sum(anchor_offsets_ms) / len(anchor_offsets_ms)
-            frame_correction_ms = avg_anchor_offset - pure_correlation_delay_ms
-            valid = True
+            runner._log_message(f"[Correlation+FrameSnap] Correlation: {pure_correlation_delay_ms:.3f}ms")
+            runner._log_message(f"[Correlation+FrameSnap] Difference: {offset_difference:+.3f}ms = {frames_difference:+d} frames")
 
-            runner._log_message(f"[Correlation+FrameSnap] Minor anchor disagreement (spread={offset_spread:.3f}ms)")
-            runner._log_message(f"[Correlation+FrameSnap] Using average anchor offset: {avg_anchor_offset:.3f}ms")
-            runner._log_message(f"[Correlation+FrameSnap] PRECISE REFINEMENT: {frame_correction_ms:+.3f}ms")
+            if frames_difference == 0:
+                # Anchor confirms correlation is on the right frame
+                # Use correlation directly (it has sub-frame precision!)
+                frame_correction_ms = 0.0
+                runner._log_message(f"[Correlation+FrameSnap] Anchor confirms correlation is correct (0 frame correction)")
+                runner._log_message(f"[Correlation+FrameSnap] Using correlation value with sub-frame precision")
+            else:
+                # Anchor says correlation is off by N frames
+                # Apply N * frame_duration correction to correlation
+                frame_correction_ms = frames_difference * frame_duration_ms
+                runner._log_message(f"[Correlation+FrameSnap] Anchor indicates {frames_difference:+d} frame correction needed")
+                runner._log_message(f"[Correlation+FrameSnap] Frame correction: {frame_correction_ms:+.3f}ms")
+
+            valid = True
+            if offset_spread > offset_tolerance_ms:
+                runner._log_message(f"[Correlation+FrameSnap] Note: Minor anchor disagreement (spread={offset_spread:.3f}ms)")
         else:
             # Major disagreement - possible drift
             runner._log_message(f"[Correlation+FrameSnap] Major anchor disagreement (spread={offset_spread:.3f}ms)")
             runner._log_message(f"[Correlation+FrameSnap] This may indicate drift, stepping, or different cuts")
 
-            # Fall back to legacy frame-delta calculation
-            frame_correction_ms = overall_best_delta * frame_duration_ms
+            # Fall back to trusting correlation (has sub-frame precision)
+            frame_correction_ms = 0.0
+            runner._log_message(f"[Correlation+FrameSnap] Falling back to correlation without frame correction")
             valid = False
+    elif ambiguous_count == total_checkpoints:
+        # All checkpoints were ambiguous - frames look too similar everywhere
+        # Trust correlation directly, no frame correction
+        runner._log_message(f"[Correlation+FrameSnap] All checkpoints ambiguous - frames look similar throughout")
+        runner._log_message(f"[Correlation+FrameSnap] Trusting correlation without frame correction (no reliable anchors)")
+        frame_correction_ms = 0.0
+        valid = True  # We're valid, just trusting correlation
     else:
         # No anchor offsets - verification failed completely
         runner._log_message(f"[Correlation+FrameSnap] No valid anchor offsets found")
-        frame_correction_ms = overall_best_delta * frame_duration_ms
+        # Fall back to trusting correlation
+        frame_correction_ms = 0.0
+        runner._log_message(f"[Correlation+FrameSnap] Falling back to correlation without frame correction")
         valid = False
 
-    runner._log_message(f"[Correlation+FrameSnap] Final refinement: {frame_correction_ms:+.3f}ms")
+    runner._log_message(f"[Correlation+FrameSnap] Final frame correction: {frame_correction_ms:+.3f}ms")
     runner._log_message(f"[Correlation+FrameSnap] ═══════════════════════════════════════")
 
     return {
