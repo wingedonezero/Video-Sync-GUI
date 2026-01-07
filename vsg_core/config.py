@@ -47,11 +47,8 @@ class AppConfig:
             # --- Subtitle Sync Settings ---
             'subtitle_sync_mode': 'time-based',
             'subtitle_target_fps': 0.0,
-            'frame_sync_mode': 'middle',
-            'frame_shift_rounding': 'round',
-            'frame_sync_fix_zero_duration': False,
-            'videotimestamps_rounding': 'round',
-            'raw_delay_rounding': 'round',
+            'time_based_use_raw_values': False,  # Use pysubs instead of mkvmerge --sync
+            'raw_delay_rounding': 'floor',  # Rounding for raw/time-based-raw: floor, round, ceil
 
             # --- Duration-Align Sync Settings (Hybrid Mode) ---
             'duration_align_verify_with_frames': False,  # Enable hybrid: duration + sliding window verification
@@ -68,17 +65,6 @@ class AppConfig:
             'correlation_snap_window_radius': 3,  # Frames before/after center for sliding window (3 = 7 frame window)
             'correlation_snap_search_range': 5,  # Search ±N frames around correlation prediction (increase for encodes)
             'correlation_snap_use_scene_changes': True,  # Use PySceneDetect to find anchor points
-
-            # --- Frame-Matched Sync Settings ---
-            'frame_match_search_window_sec': 1,  # Reduced to 1 sec with smart delay centering + hash caching
-            'frame_match_search_window_frames': 5,  # NEW: Search ±N frames (overrides _sec if > 0)
-            'frame_match_use_timestamp_prefilter': True,  # NEW: Use timestamps to narrow search
-            'frame_match_hash_size': 8,
-            'frame_match_threshold': 5,
-            'frame_match_method': 'dhash',  # dhash is 10x faster than phash, still accurate
-            'frame_match_skip_unmatched': False,
-            'frame_match_max_search_frames': 300,
-            'frame_match_workers': 0,  # 0 = auto (cpu_count - 1), or set manually (1-16)
 
             # --- Timing Fix Settings ---
             'timing_fix_enabled': False,
