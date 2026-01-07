@@ -430,17 +430,20 @@ def detect_scene_changes(
     start_frame: int,
     end_frame: int,
     runner,
-    max_scenes: int = 10
+    max_scenes: int = 10,
+    threshold: float = 27.0
 ) -> List[int]:
     """
-    Detect scene changes in a video using VapourSynth.
+    Detect scene changes in a video using PySceneDetect.
 
-    Tries multiple methods in order:
-    1. wwxd plugin (fast Xvid-like detection)
-    2. PlaneStatsDiff (frame difference threshold)
+    Uses ContentDetector for fast and reliable scene change detection.
+    Returns the frame BEFORE each scene change (last frame of previous scene)
+    as a concrete anchor point for sync verification.
 
-    Scene changes are ideal checkpoints because adjacent frames are
-    distinctly different, making frame matching unambiguous.
+    Scene changes are ideal checkpoints because:
+    - Adjacent frames are distinctly different (unambiguous for matching)
+    - The frame before the cut is a stable reference point
+    - Frame matching at cuts is highly reliable
 
     Args:
         video_path: Path to video file
@@ -448,123 +451,100 @@ def detect_scene_changes(
         end_frame: End frame to search to
         runner: CommandRunner for logging
         max_scenes: Maximum number of scene changes to return
+        threshold: Detection threshold (lower = more sensitive, default 27.0)
 
     Returns:
-        List of frame numbers where scene changes occur
+        List of frame numbers (the frame BEFORE each scene change)
     """
     try:
-        import vapoursynth as vs
+        from scenedetect import detect, ContentDetector, open_video
 
         runner._log_message(f"[SceneDetect] Detecting scene changes in {Path(video_path).name}")
+        runner._log_message(f"[SceneDetect] Using PySceneDetect (ContentDetector, threshold={threshold})")
         runner._log_message(f"[SceneDetect] Searching frames {start_frame} to {end_frame}")
 
-        core = vs.core
+        # Open video and get framerate
+        video = open_video(str(video_path))
+        fps = video.frame_rate
 
-        # Load video
-        clip = None
-        try:
-            clip = core.lsmas.LWLibavSource(str(video_path))
-        except (AttributeError, Exception):
-            pass
+        # Convert frame range to time range for PySceneDetect
+        start_time_sec = start_frame / fps
+        end_time_sec = end_frame / fps
 
-        if clip is None:
-            try:
-                clip = core.ffms2.Source(str(video_path))
-            except Exception as e:
-                runner._log_message(f"[SceneDetect] ERROR: Failed to load video: {e}")
-                return []
+        runner._log_message(f"[SceneDetect] Time range: {start_time_sec:.2f}s - {end_time_sec:.2f}s (fps={fps:.3f})")
 
-        # Limit to search range
-        if end_frame > clip.num_frames:
-            end_frame = clip.num_frames - 1
-        if start_frame < 0:
-            start_frame = 0
+        # Detect scenes using ContentDetector
+        # Returns list of (start_timecode, end_timecode) tuples for each scene
+        scene_list = detect(
+            str(video_path),
+            ContentDetector(threshold=threshold, min_scene_len=15),
+            start_time=start_time_sec,
+            end_time=end_time_sec,
+            show_progress=False
+        )
 
-        # Trim to region of interest
-        clip = clip[start_frame:end_frame + 1]
-
+        # Extract frame BEFORE each scene change (last frame of previous scene)
+        # This is our concrete anchor point - the frame just before the cut
         scene_frames = []
 
-        # Try wwxd plugin first (fastest and most reliable)
-        try:
-            wwxd_clip = core.wwxd.WWXD(clip)
+        for i, (scene_start, scene_end) in enumerate(scene_list):
+            if i == 0:
+                # First scene - skip, no "before" frame exists for the first cut
+                continue
 
-            # Request frames and check SceneChange property
-            for i in range(wwxd_clip.num_frames):
-                frame = wwxd_clip.get_frame(i)
-                if frame.props.get('Scenechange', 0) == 1 or frame.props.get('SceneChange', 0) == 1:
-                    actual_frame = start_frame + i
-                    scene_frames.append(actual_frame)
+            # scene_start is the first frame of the NEW scene (after the cut)
+            # We want the frame BEFORE this (last frame of previous scene)
+            cut_frame = scene_start.get_frames()
+            anchor_frame = cut_frame - 1  # Frame before the scene change
+
+            if anchor_frame >= start_frame and anchor_frame <= end_frame:
+                scene_frames.append(anchor_frame)
+                runner._log_message(
+                    f"[SceneDetect] Scene change at frame {cut_frame} → anchor frame {anchor_frame} "
+                    f"(t={anchor_frame/fps:.3f}s)"
+                )
+
+                if len(scene_frames) >= max_scenes:
+                    break
+
+        runner._log_message(f"[SceneDetect] Found {len(scene_frames)} scene change anchor frames")
+
+        # If we didn't find enough scenes, try with lower threshold
+        if len(scene_frames) < 2:
+            runner._log_message(f"[SceneDetect] Few scenes found, trying with lower threshold (15.0)")
+
+            scene_list = detect(
+                str(video_path),
+                ContentDetector(threshold=15.0, min_scene_len=10),
+                start_time=start_time_sec,
+                end_time=end_time_sec,
+                show_progress=False
+            )
+
+            scene_frames = []
+            for i, (scene_start, scene_end) in enumerate(scene_list):
+                if i == 0:
+                    continue
+                cut_frame = scene_start.get_frames()
+                anchor_frame = cut_frame - 1
+
+                if anchor_frame >= start_frame and anchor_frame <= end_frame:
+                    scene_frames.append(anchor_frame)
                     if len(scene_frames) >= max_scenes:
                         break
 
-            runner._log_message(f"[SceneDetect] Found {len(scene_frames)} scene changes using wwxd")
+            runner._log_message(f"[SceneDetect] Found {len(scene_frames)} scenes with lower threshold")
 
-            # Cleanup
-            del wwxd_clip
-            del clip
-            del core
-            gc.collect()
+        return scene_frames
 
-            return scene_frames
-
-        except AttributeError:
-            runner._log_message(f"[SceneDetect] wwxd plugin not installed, trying PlaneStatsDiff")
-        except Exception as e:
-            runner._log_message(f"[SceneDetect] wwxd failed: {e}, trying PlaneStatsDiff")
-
-        # Fallback: Use PlaneStatsDiff to detect scene changes
-        # Compare each frame to the previous one
-        try:
-            # Convert to grayscale for faster comparison
-            gray = core.std.ShufflePlanes(clip, planes=0, colorfamily=vs.GRAY)
-
-            # Add frame difference statistics
-            diff_clip = core.std.PlaneStats(gray, gray[1:] + gray[-1:])
-
-            # Scene change threshold (higher = more sensitive)
-            # PlaneStatsDiff returns average difference, 0.1 = 10% pixel difference
-            threshold = 0.15
-
-            for i in range(1, diff_clip.num_frames):
-                frame = diff_clip.get_frame(i)
-                diff = frame.props.get('PlaneStatsDiff', 0)
-
-                if diff > threshold:
-                    actual_frame = start_frame + i
-                    scene_frames.append(actual_frame)
-                    if len(scene_frames) >= max_scenes:
-                        break
-
-            runner._log_message(f"[SceneDetect] Found {len(scene_frames)} scene changes using PlaneStatsDiff")
-
-            # Cleanup
-            del diff_clip
-            del gray
-            del clip
-            del core
-            gc.collect()
-
-            return scene_frames
-
-        except Exception as e:
-            runner._log_message(f"[SceneDetect] PlaneStatsDiff failed: {e}")
-
-        # Cleanup on failure
-        try:
-            del clip
-            del core
-        except:
-            pass
-        gc.collect()
-
-        return []
-
-    except ImportError:
-        runner._log_message("[SceneDetect] WARNING: VapourSynth not installed")
+    except ImportError as e:
+        runner._log_message(f"[SceneDetect] WARNING: PySceneDetect not available: {e}")
+        runner._log_message("[SceneDetect] Install with: pip install scenedetect opencv-python")
         return []
     except Exception as e:
         runner._log_message(f"[SceneDetect] ERROR: {e}")
+        import traceback
+        runner._log_message(f"[SceneDetect] Traceback: {traceback.format_exc()}")
         return []
 
 
@@ -2642,8 +2622,11 @@ def verify_correlation_with_frame_snap(
 
             # Also check adjacent frames for boundary verification
             boundary_verified = False
+            scene_change_verified = False
+            is_scene_checkpoint = checkpoint_name.startswith('scene_')
+
             if is_match:
-                # Check that adjacent frames are DIFFERENT (confirms we found the right frame)
+                # Check that adjacent frames match source adjacent (confirms alignment)
                 target_prev_hash = None
                 target_next_hash = None
 
@@ -2656,23 +2639,41 @@ def verify_correlation_with_frame_snap(
                 if next_img is not None:
                     target_next_hash = compute_frame_hash(next_img, hash_size=hash_size, method=hash_algorithm)
 
-                # Verify boundaries: adjacent frames should be different (or match source adjacent)
-                prev_different = True
-                next_different = True
+                # Verify boundaries: adjacent frames should match source adjacent
+                prev_matches = True
+                next_matches = True
 
                 if source_prev_hash and target_prev_hash:
                     prev_distance = source_prev_hash - target_prev_hash
-                    prev_different = prev_distance <= hash_threshold  # Should MATCH source prev
+                    prev_matches = prev_distance <= hash_threshold  # Should MATCH source prev
 
                 if source_next_hash and target_next_hash:
                     next_distance = source_next_hash - target_next_hash
-                    next_different = next_distance <= hash_threshold  # Should MATCH source next
+                    next_matches = next_distance <= hash_threshold  # Should MATCH source next
 
-                boundary_verified = prev_different and next_different
+                boundary_verified = prev_matches and next_matches
 
-            # Score: match quality + boundary verification bonus
+                # For scene checkpoints: verify scene change exists in target
+                # The anchor frame is the frame BEFORE the cut
+                # The NEXT frame should be DIFFERENT from anchor (confirming cut point)
+                if is_scene_checkpoint and target_next_hash:
+                    # Check that anchor and next frame are distinctly different in target
+                    anchor_vs_next_distance = target_hash - target_next_hash
+                    # Scene change = high hash distance between adjacent frames
+                    scene_change_threshold = hash_threshold * 2  # Require significant difference
+                    scene_change_verified = anchor_vs_next_distance > scene_change_threshold
+                    if scene_change_verified:
+                        runner._log_message(
+                            f"[Correlation+FrameSnap]   Scene change VERIFIED in target "
+                            f"(anchor→next distance={anchor_vs_next_distance})"
+                        )
+
+            # Score: match quality + boundary verification + scene change bonus
             if is_match:
                 score = (1000 - distance) + (500 if boundary_verified else 0)
+                # Extra bonus for verified scene changes (highly reliable checkpoints)
+                if scene_change_verified:
+                    score += 300
             else:
                 score = -distance
 
@@ -2680,15 +2681,17 @@ def verify_correlation_with_frame_snap(
                 'score': score,
                 'distance': distance,
                 'is_match': is_match,
-                'boundary_verified': boundary_verified
+                'boundary_verified': boundary_verified,
+                'scene_change_verified': scene_change_verified
             }
             all_delta_scores[frame_delta] += score
 
             status = "✓ MATCH" if is_match else "✗ no match"
             boundary_status = " (boundary verified)" if boundary_verified else ""
+            scene_status = " [SCENE CUT]" if scene_change_verified else ""
             runner._log_message(
                 f"[Correlation+FrameSnap]   Delta {frame_delta:+d} → frame {target_frame_num}: "
-                f"dist={distance}, {status}{boundary_status}"
+                f"dist={distance}, {status}{boundary_status}{scene_status}"
             )
 
             if score > best_score or (score == best_score and frame_delta == 0):
