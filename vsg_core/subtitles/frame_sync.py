@@ -2846,6 +2846,92 @@ def apply_correlation_frame_snap_sync(
     fps = detect_video_fps(source_video, runner)
     frame_duration_ms = 1000.0 / fps
 
+    # Check for sparse subtitle tracks (signs/songs with very few events)
+    # Scene-based verification won't work well for these - not enough content to find scene changes
+    MIN_EVENTS_FOR_SCENE_VERIFICATION = 5  # Need at least 5 events to have a reasonable chance of scene detection
+    MIN_DURATION_FOR_SCENE_VERIFICATION_MS = 120000  # And at least 2 minutes of content span
+
+    min_sub_time = min(event.start for event in subs.events)
+    max_sub_time = max(event.end for event in subs.events)
+    sub_duration_ms = max_sub_time - min_sub_time
+
+    is_sparse_track = (len(subs.events) < MIN_EVENTS_FOR_SCENE_VERIFICATION or
+                       sub_duration_ms < MIN_DURATION_FOR_SCENE_VERIFICATION_MS)
+
+    if is_sparse_track:
+        runner._log_message(f"[Correlation+FrameSnap] ───────────────────────────────────────")
+        runner._log_message(f"[Correlation+FrameSnap] SPARSE TRACK DETECTED")
+        runner._log_message(f"[Correlation+FrameSnap]   Events: {len(subs.events)} (threshold: {MIN_EVENTS_FOR_SCENE_VERIFICATION})")
+        runner._log_message(f"[Correlation+FrameSnap]   Duration span: {sub_duration_ms:.0f}ms (threshold: {MIN_DURATION_FOR_SCENE_VERIFICATION_MS}ms)")
+        runner._log_message(f"[Correlation+FrameSnap]   Skipping scene-based verification (not enough content)")
+        runner._log_message(f"[Correlation+FrameSnap]   Using raw delay (no frame snapping) for sparse track")
+
+        # Use raw delay directly - no frame correction/snapping
+        # This matches how the mode works when verification succeeds (precise ms, floor at final step)
+        # Sparse tracks can't be verified via scenes, so just trust the correlation
+        frame_correction_ms = 0.0
+        frame_delta = 0
+
+        # Final offset is just the total delay as-is (already includes global shift)
+        final_offset_ms = total_delay_with_global_ms
+
+        runner._log_message(f"[Correlation+FrameSnap] ───────────────────────────────────────")
+        runner._log_message(f"[Correlation+FrameSnap] Final offset calculation:")
+        runner._log_message(f"[Correlation+FrameSnap]   Pure correlation:     {pure_correlation_ms:+.3f}ms")
+        runner._log_message(f"[Correlation+FrameSnap]   + Frame correction:   {frame_correction_ms:+.3f}ms")
+        runner._log_message(f"[Correlation+FrameSnap]   + Global shift:       {raw_global_shift_ms:+.3f}ms")
+        runner._log_message(f"[Correlation+FrameSnap]   ─────────────────────────────────────")
+        runner._log_message(f"[Correlation+FrameSnap]   = FINAL offset:       {final_offset_ms:+.3f}ms")
+
+        # Capture original metadata
+        metadata = SubtitleMetadata(subtitle_path)
+        metadata.capture()
+
+        # Apply offset to all subtitle events
+        runner._log_message(f"[Correlation+FrameSnap] Applying offset to {len(subs.events)} events (sparse track mode)...")
+        final_offset_int = int(math.floor(final_offset_ms))
+
+        for event in subs.events:
+            event.start += final_offset_int
+            event.end += final_offset_int
+
+        # Save modified subtitle
+        runner._log_message(f"[Correlation+FrameSnap] Saving modified subtitle file...")
+        try:
+            subs.save(subtitle_path, encoding='utf-8')
+        except Exception as e:
+            runner._log_message(f"[Correlation+FrameSnap] ERROR: Failed to save subtitle file: {e}")
+            return {
+                'success': False,
+                'error': f'Failed to save subtitle file: {e}'
+            }
+
+        # Validate and restore metadata
+        metadata.validate_and_restore(runner, expected_delay_ms=final_offset_int)
+
+        runner._log_message(f"[Correlation+FrameSnap] Successfully synchronized {len(subs.events)} events (sparse track)")
+        runner._log_message(f"[Correlation+FrameSnap] ═══════════════════════════════════════")
+
+        return {
+            'success': True,
+            'total_events': len(subs.events),
+            'pure_correlation_ms': pure_correlation_ms,
+            'frame_delta': frame_delta,
+            'frame_correction_ms': frame_correction_ms,
+            'global_shift_ms': raw_global_shift_ms,
+            'final_offset_ms': final_offset_ms,
+            'final_offset_applied': final_offset_int,
+            'fps': fps,
+            'frame_duration_ms': frame_duration_ms,
+            'sparse_track': True,
+            'verification': {
+                'valid': True,  # Mark as valid since we handled it gracefully
+                'sparse_track_fallback': True,
+                'frame_delta': frame_delta,
+                'frame_correction_ms': frame_correction_ms
+            }
+        }
+
     # Run frame verification using PURE correlation (without global shift)
     # because we're comparing against original videos
     verification_result = verify_correlation_with_frame_snap(
