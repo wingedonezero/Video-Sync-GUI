@@ -2468,9 +2468,14 @@ def verify_correlation_with_frame_snap(
                     f"avg_dist={avg_distance:.1f}, score={score:.0f}"
                 )
 
+                # FIX: When scores are equal, prefer delta=0 (no correction)
+                # This avoids defaulting to -1 just because it's checked first
                 if score > best_score:
                     best_score = score
                     best_delta = frame_delta
+                elif score == best_score and frame_delta == 0:
+                    # Tie: prefer delta=0 (trust correlation, no frame correction)
+                    best_delta = 0
 
         checkpoint_results.append({
             'name': checkpoint_name,
@@ -2648,12 +2653,13 @@ def apply_correlation_frame_snap_sync(
             frame_correction_ms = 0.0
             frame_delta = 0
         else:  # 'snap-to-frame' (default)
-            # Snap pure correlation to nearest frame boundary
-            frame_delta = round(pure_correlation_ms / frame_duration_ms)
+            # Snap pure correlation to frame boundary using FLOOR (user preference)
+            # Floor gives the frame that contains the correlation time point
+            frame_delta = int(math.floor(pure_correlation_ms / frame_duration_ms))
             snapped_correlation = frame_delta * frame_duration_ms
             frame_correction_ms = snapped_correlation - pure_correlation_ms
 
-            runner._log_message(f"[Correlation+FrameSnap] Fallback: Snapping to nearest frame boundary")
+            runner._log_message(f"[Correlation+FrameSnap] Fallback: Snapping to frame boundary (using floor)")
             runner._log_message(f"[Correlation+FrameSnap] Pure correlation {pure_correlation_ms:+.3f}ms -> frame {frame_delta}")
             runner._log_message(f"[Correlation+FrameSnap] Frame correction: {frame_correction_ms:+.3f}ms")
 
