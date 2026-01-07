@@ -64,8 +64,10 @@ class AppConfig:
             'correlation_snap_fallback_mode': 'snap-to-frame',  # What to do if verification fails: 'snap-to-frame', 'use-raw', 'abort'
             'correlation_snap_hash_algorithm': 'dhash',  # Hash algorithm: 'dhash', 'phash', 'average_hash'
             'correlation_snap_hash_size': 8,  # Hash size for perceptual hashing
-            'correlation_snap_hash_threshold': 5,  # Max hamming distance for frame match
-            'correlation_snap_adjacent_frames': 3,  # Number of adjacent frames to check at each checkpoint
+            'correlation_snap_hash_threshold': 5,  # Max hamming distance for frame match (increase for encodes)
+            'correlation_snap_window_radius': 3,  # Frames before/after center for sliding window (3 = 7 frame window)
+            'correlation_snap_search_range': 5,  # Search ±N frames around correlation prediction (increase for encodes)
+            'correlation_snap_use_scene_changes': True,  # Use PySceneDetect to find anchor points
 
             # --- Frame-Matched Sync Settings ---
             'frame_match_search_window_sec': 1,  # Reduced to 1 sec with smart delay centering + hash caching

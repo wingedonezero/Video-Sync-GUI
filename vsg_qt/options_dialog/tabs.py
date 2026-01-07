@@ -1418,18 +1418,30 @@ class SubtitleSyncTab(QWidget):
             "Lower = stricter matching."
         )
 
-        self.widgets['correlation_snap_adjacent_frames'] = QSpinBox()
-        self.widgets['correlation_snap_adjacent_frames'].setRange(1, 10)
-        self.widgets['correlation_snap_adjacent_frames'].setValue(3)
-        self.widgets['correlation_snap_adjacent_frames'].setToolTip(
-            "Adjacent frames to check around each checkpoint:\n\n"
-            "For each checkpoint, extracts ±N frames and compares.\n"
-            "More frames = more robust but slower.\n\n"
-            "• 1: Minimal (3 frames total)\n"
-            "• 3 (Default): Good balance (7 frames total)\n"
-            "• 5: More thorough (11 frames total)\n"
-            "• 10: Very thorough but slow (21 frames)\n\n"
-            "Recommendation: 3 for most cases."
+        self.widgets['correlation_snap_window_radius'] = QSpinBox()
+        self.widgets['correlation_snap_window_radius'].setRange(1, 10)
+        self.widgets['correlation_snap_window_radius'].setValue(3)
+        self.widgets['correlation_snap_window_radius'].setToolTip(
+            "Sliding window radius (frames before/after center):\n\n"
+            "Creates a window of (2*N+1) frames centered on scene change.\n"
+            "Used to match a sequence of frames, not just one.\n\n"
+            "• 1: 3 frame window (minimal)\n"
+            "• 3 (Default): 7 frame window (recommended)\n"
+            "• 5: 11 frame window (more robust)\n\n"
+            "Larger = more robust matching but slower."
+        )
+
+        self.widgets['correlation_snap_search_range'] = QSpinBox()
+        self.widgets['correlation_snap_search_range'].setRange(1, 30)
+        self.widgets['correlation_snap_search_range'].setValue(5)
+        self.widgets['correlation_snap_search_range'].setToolTip(
+            "Search range around correlation prediction (±N frames):\n\n"
+            "After correlation predicts target position, we search\n"
+            "±N frames to find the best frame alignment.\n\n"
+            "• 5 (Default): Good for remux vs remux (~200ms)\n"
+            "• 10-15: For encodes or larger timing differences\n"
+            "• 20-30: For very different sources\n\n"
+            "Increase if best match is at edge of search window."
         )
 
         # Frame-Matched settings
@@ -1598,7 +1610,8 @@ class SubtitleSyncTab(QWidget):
         sync_layout.addRow("Corr+Snap Fallback:", self.widgets['correlation_snap_fallback_mode'])
         sync_layout.addRow("Corr+Snap Hash:", self.widgets['correlation_snap_hash_algorithm'])
         sync_layout.addRow("Corr+Snap Threshold:", self.widgets['correlation_snap_hash_threshold'])
-        sync_layout.addRow("Corr+Snap Adj. Frames:", self.widgets['correlation_snap_adjacent_frames'])
+        sync_layout.addRow("Corr+Snap Window:", self.widgets['correlation_snap_window_radius'])
+        sync_layout.addRow("Corr+Snap Search:", self.widgets['correlation_snap_search_range'])
         sync_layout.addRow("", self.widgets['frame_match_use_vapoursynth'])
         sync_layout.addRow("Match Window:", self.widgets['frame_match_search_window_sec'])
         sync_layout.addRow("Match Threshold:", self.widgets['frame_match_threshold'])
@@ -1671,7 +1684,8 @@ class SubtitleSyncTab(QWidget):
         self.widgets['correlation_snap_fallback_mode'].setEnabled(is_correlation_snap)
         self.widgets['correlation_snap_hash_algorithm'].setEnabled(is_correlation_snap)
         self.widgets['correlation_snap_hash_threshold'].setEnabled(is_correlation_snap)
-        self.widgets['correlation_snap_adjacent_frames'].setEnabled(is_correlation_snap)
+        self.widgets['correlation_snap_window_radius'].setEnabled(is_correlation_snap)
+        self.widgets['correlation_snap_search_range'].setEnabled(is_correlation_snap)
 
 class ChaptersTab(QWidget):
     def __init__(self):
