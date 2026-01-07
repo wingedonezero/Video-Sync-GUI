@@ -932,62 +932,14 @@ class SubtitleSyncTab(QWidget):
         sync_layout = QFormLayout(sync_group)
 
         self.widgets['subtitle_sync_mode'] = QComboBox()
-        self.widgets['subtitle_sync_mode'].addItems(['time-based', 'frame-perfect', 'frame-snapped', 'videotimestamps', 'dual-videotimestamps', 'frame-matched', 'raw-delay', 'duration-align', 'correlation-frame-snap'])
+        self.widgets['subtitle_sync_mode'].addItems(['time-based', 'duration-align', 'correlation-frame-snap'])
         self.widgets['subtitle_sync_mode'].setToolTip(
             "Subtitle synchronization method:\n\n"
             "• time-based (Default): Apply delays using millisecond timestamps\n"
-            "  - Simple and fast\n"
-            "  - May cause frame misalignment for typesetting/moving signs\n"
+            "  - Simple and fast, uses mkvmerge --sync\n"
+            "  - Optional: Enable 'Use raw correlation values' to embed\n"
+            "    delay directly in subtitle file using pysubs2\n"
             "  - Works with all subtitle formats\n\n"
-            "• frame-perfect: Apply delays with custom frame timing algorithms\n"
-            "  - Includes middle/aegisub timing options\n"
-            "  - Custom frame offset adjustments (+0.5, ceil rounding)\n"
-            "  - Optional frame shift rounding (round/floor/ceil)\n"
-            "  - Optional zero-duration fix\n"
-            "  - Recommended for release group ASS subtitles\n"
-            "  - Requires FPS detection from Source 1 video\n\n"
-            "• frame-snapped: Snap START to frames, preserve duration (RECOMMENDED)\n"
-            "  - Applies delay in milliseconds, then snaps START to frame boundaries\n"
-            "  - Preserves exact duration (whole subtitle block moves together)\n"
-            "  - Fixes 'random off by 1 frame' issues\n"
-            "  - Best for moving signs and typesetting\n"
-            "  - More accurate than uniform frame shift\n"
-            "  - Requires FPS detection from Source 1 video\n\n"
-            "• videotimestamps: Pure VideoTimestamps library (DEPRECATED)\n"
-            "  - Uses VideoTimestamps library for single video\n"
-            "  - No custom frame offset adjustments or fixes\n"
-            "  - Clean implementation for testing library behavior\n"
-            "  - Supports Variable Frame Rate videos\n"
-            "  - Requires: pip install VideoTimestamps\n"
-            "  - Requires Source 1 video file\n"
-            "  - Consider using dual-videotimestamps instead\n\n"
-            "• dual-videotimestamps: Frame-accurate mapping using BOTH videos (NEW!)\n"
-            "  - Uses VideoTimestamps from subtitle source AND target video\n"
-            "  - Gets exact frame timestamps from both videos\n"
-            "  - More accurate than single-video videotimestamps\n"
-            "  - MUCH faster than frame-matched (no frame extraction)\n"
-            "  - Perfect for same-source encodes with different containers\n"
-            "  - Handles CFR and VFR videos\n"
-            "  - Reports timestamp discrepancies\n"
-            "  - Requires: pip install VideoTimestamps\n"
-            "  - Requires both source and target video files\n\n"
-            "• frame-matched: Visual frame matching (for different frame counts)\n"
-            "  - Extracts frames from both source and target videos\n"
-            "  - Uses perceptual hashing to find matching scenes\n"
-            "  - Handles encode vs remux with different frame positions\n"
-            "  - Solves duplicate/dropped frame mismatches\n"
-            "  - Perfect for anime releases with varying frame counts\n"
-            "  - SLOW but most accurate for problematic sources\n"
-            "  - Requires: pip install imagehash\n"
-            "  - Requires both source and target video files\n\n"
-            "• raw-delay: Pure delay with centisecond rounding (DEBUG/TESTING)\n"
-            "  - NO frame analysis - just adds raw delay and rounds\n"
-            "  - Rounds to ASS centisecond precision (10ms)\n"
-            "  - Configurable rounding: floor/round/ceil\n"
-            "  - Use to isolate if frame correction is causing issues\n"
-            "  - If this mode is perfect but dual-videotimestamps isn't,\n"
-            "    then frame correction algorithm needs adjustment\n"
-            "  - No external dependencies\n\n"
             "• duration-align: Frame alignment via total duration difference\n"
             "  - Calculates: target_duration - source_duration\n"
             "  - Applies this offset to all subtitle times\n"
@@ -995,11 +947,12 @@ class SubtitleSyncTab(QWidget):
             "  - Example: Source 23:40.003, Target 23:41.002 → +999ms offset\n"
             "  - Ignores audio correlation completely\n"
             "  - Best for frame-aligned videos with different total durations\n"
+            "  - Optional hybrid frame verification for accuracy\n"
             "  - Requires both source and target video files\n\n"
             "• correlation-frame-snap: Correlation + frame boundary refinement (RECOMMENDED)\n"
             "  - Uses audio correlation as authoritative offset\n"
-            "  - Verifies frame alignment at multiple checkpoints\n"
-            "  - Applies ±1 frame correction if needed\n"
+            "  - Verifies frame alignment using scene change anchors\n"
+            "  - Applies precise refinement based on frame matching\n"
             "  - Handles global shift correctly (no double-application)\n"
             "  - Uses floor rounding for final timestamps\n"
             "  - Detects drift/stepping via checkpoint disagreement\n"
@@ -1008,109 +961,37 @@ class SubtitleSyncTab(QWidget):
             "Note: Stepping correction (if enabled) takes precedence over this setting."
         )
 
-        self.widgets['subtitle_target_fps'] = QDoubleSpinBox()
-        self.widgets['subtitle_target_fps'].setRange(0.0, 120.0)
-        self.widgets['subtitle_target_fps'].setDecimals(3)
-        self.widgets['subtitle_target_fps'].setSuffix(" fps")
-        self.widgets['subtitle_target_fps'].setSpecialValueText("Auto-detect")
-        self.widgets['subtitle_target_fps'].setValue(0.0)  # 0 = auto-detect
-        self.widgets['subtitle_target_fps'].setToolTip(
-            "Target frame rate for frame-perfect snapping.\n\n"
-            "Set to 0.0 (Auto-detect) to automatically detect FPS from Source 1 video.\n\n"
-            "Manual override useful when:\n"
-            "  - Source 1 has different FPS than subtitle source\n"
-            "  - Auto-detection fails\n\n"
-            "Common frame rates:\n"
-            "  - 23.976 fps (24000/1001) - Film, anime (NTSC)\n"
-            "  - 24.000 fps - Film (progressive)\n"
-            "  - 25.000 fps - PAL standard\n"
-            "  - 29.970 fps (30000/1001) - NTSC\n"
-            "  - 30.000 fps - Progressive\n"
-            "  - 59.940 fps (60000/1001) - High frame rate"
-        )
-
-        self.widgets['frame_sync_mode'] = QComboBox()
-        self.widgets['frame_sync_mode'].addItems(['middle', 'aegisub'])
-        self.widgets['frame_sync_mode'].setToolTip(
-            "Frame timing algorithm (for frame-perfect mode):\n\n"
-            "• middle (Default): Targets middle of frame display window\n"
-            "  - Uses +0.5 frame offset\n"
-            "  - After centisecond rounding: Still lands in correct frame\n"
-            "  - Good balance of accuracy and safety\n\n"
-            "• aegisub: Aegisub-style timing\n"
-            "  - Rounds UP to next centisecond\n"
-            "  - Matches Aegisub's internal algorithm\n"
-            "  - May be closer to what release groups expect\n"
-            "  - Recommended if 'middle' mode has occasional frame errors\n\n"
-            "Note: For Variable Frame Rate videos, use 'videotimestamps' sync mode instead.\n"
-            "This only applies when 'frame-perfect' sync mode is selected above."
-        )
-
-        self.widgets['frame_shift_rounding'] = QComboBox()
-        self.widgets['frame_shift_rounding'].addItems(['round', 'floor', 'ceil'])
-        self.widgets['frame_shift_rounding'].setToolTip(
-            "Frame shift rounding strategy:\n\n"
-            "Controls how delay in milliseconds is converted to frame count.\n\n"
-            "• round (Default): Round to nearest frame\n"
-            "  - Example: 2.4 frames → 2, 2.6 frames → 3\n"
-            "  - Most accurate for typical delays\n\n"
-            "• floor: Always round down\n"
-            "  - Example: 2.9 frames → 2\n"
-            "  - More conservative, may under-shift\n\n"
-            "• ceil: Always round up\n"
-            "  - Example: 2.1 frames → 3\n"
-            "  - More aggressive, may over-shift\n\n"
-            "Try different options if sync is consistently off by 1 frame."
-        )
-
-        self.widgets['frame_sync_fix_zero_duration'] = QCheckBox("Fix zero-duration events")
-        self.widgets['frame_sync_fix_zero_duration'].setToolTip(
-            "Add 1 frame to end time if end ≤ start after conversion.\n\n"
-            "• Unchecked (Default): Let conversion errors be visible\n"
-            "  - Helps identify timing bugs\n"
-            "  - Recommended for testing\n\n"
-            "• Checked: Auto-fix zero/negative duration events\n"
-            "  - Masks potential conversion issues\n"
-            "  - May add unwanted +1 frame to end times\n\n"
-            "Only enable if you have subtitles with invalid durations."
-        )
-
-        self.widgets['videotimestamps_rounding'] = QComboBox()
-        self.widgets['videotimestamps_rounding'].addItems(['round', 'floor'])
-        self.widgets['videotimestamps_rounding'].setToolTip(
-            "VideoTimestamps RoundingMethod (for videotimestamps sync mode):\n\n"
-            "Controls how the VideoTimestamps library rounds presentation timestamps.\n\n"
-            "• round (Default): Round half up\n"
-            "  - Rounds to nearest integer (.5 and above rounds up)\n"
-            "  - Most accurate for general use\n"
-            "  - Balanced rounding\n\n"
-            "• floor: Always round down\n"
-            "  - Conservative rounding (never exceeds actual timestamp)\n"
-            "  - Matches Aegisub's int() floor division\n"
-            "  - Try this if subs are consistently 1 frame late\n\n"
-            "This setting only applies when 'videotimestamps' sync mode is selected.\n"
-            "Works with TimeType.EXACT for precise video player frame timing."
+        # Time-based mode options
+        self.widgets['time_based_use_raw_values'] = QCheckBox("Use raw correlation values (pysubs)")
+        self.widgets['time_based_use_raw_values'].setToolTip(
+            "Apply delay directly to subtitle timestamps using pysubs2:\n\n"
+            "• Unchecked (Default): Use mkvmerge --sync for delay\n"
+            "  - Delay stored in container, subtitle file unchanged\n"
+            "  - Most compatible with all players\n\n"
+            "• Checked: Embed delay in subtitle timestamps\n"
+            "  - Uses raw correlation values with rounding\n"
+            "  - Subtitle file modified directly\n"
+            "  - Useful when mkvmerge delay causes issues\n\n"
+            "When enabled, the 'Rounding' setting below controls\n"
+            "how timestamps are rounded to centisecond precision."
         )
 
         self.widgets['raw_delay_rounding'] = QComboBox()
-        self.widgets['raw_delay_rounding'].addItems(['round', 'floor', 'ceil'])
+        self.widgets['raw_delay_rounding'].addItems(['floor', 'round', 'ceil'])
         self.widgets['raw_delay_rounding'].setToolTip(
-            "Raw Delay Rounding Mode (for raw-delay sync mode):\n\n"
+            "Rounding mode for subtitle timestamps:\n\n"
             "Controls how timestamps are rounded to ASS centisecond precision (10ms).\n\n"
-            "• round (Default): Round to nearest 10ms\n"
-            "  - Example: 1065.458ms → 1070ms\n"
-            "  - Most accurate statistically\n"
-            "  - Use this first\n\n"
-            "• floor: Round down to nearest 10ms\n"
+            "• floor (Default): Round down to nearest 10ms\n"
             "  - Example: 1065.458ms → 1060ms\n"
             "  - Conservative (subtitles appear slightly earlier)\n"
-            "  - Try this if subs are consistently late\n\n"
+            "  - Recommended for most cases\n\n"
+            "• round: Round to nearest 10ms\n"
+            "  - Example: 1065.458ms → 1070ms\n"
+            "  - Statistically balanced\n\n"
             "• ceil: Round up to nearest 10ms\n"
             "  - Example: 1065.458ms → 1070ms\n"
-            "  - Aggressive (subtitles appear slightly later)\n"
-            "  - Try this if subs are consistently early\n\n"
-            "This setting only applies when 'raw-delay' sync mode is selected.\n"
-            "Used for testing/debugging frame correction issues."
+            "  - Aggressive (subtitles appear slightly later)\n\n"
+            "Used when 'Use raw correlation values' is enabled."
         )
 
         # Duration-Align settings
@@ -1444,156 +1325,14 @@ class SubtitleSyncTab(QWidget):
             "Increase if best match is at edge of search window."
         )
 
-        # Frame-Matched settings
-        self.widgets['frame_match_search_window_sec'] = QSpinBox()
-        self.widgets['frame_match_search_window_sec'].setRange(1, 60)
-        self.widgets['frame_match_search_window_sec'].setSuffix(" sec")
-        self.widgets['frame_match_search_window_sec'].setToolTip(
-            "Search window for frame matching (in seconds).\n\n"
-            "For each subtitle, we search ±N seconds around the expected time\n"
-            "to find the visually matching frame.\n\n"
-            "• Larger window: More thorough, but slower\n"
-            "• Smaller window: Faster, but may miss matches if videos differ significantly\n\n"
-            "Default: 10 seconds (good for most cases)"
-        )
-
-        self.widgets['frame_match_threshold'] = QSpinBox()
-        self.widgets['frame_match_threshold'].setRange(0, 64)
-        self.widgets['frame_match_threshold'].setToolTip(
-            "Match threshold (hamming distance).\n\n"
-            "Maximum allowed difference between frame hashes to consider a match.\n"
-            "For 8x8 hash, range is 0-64 bits.\n\n"
-            "• 0: Perfect match only (too strict)\n"
-            "• 5: Very similar frames (recommended)\n"
-            "• 10-15: More tolerant (compression differences)\n"
-            "• 20+: Too loose (may match wrong scenes)\n\n"
-            "Default: 5"
-        )
-
-        self.widgets['frame_match_method'] = QComboBox()
-        self.widgets['frame_match_method'].addItems(['phash', 'dhash', 'average_hash'])
-        self.widgets['frame_match_method'].setToolTip(
-            "Perceptual hash algorithm:\n\n"
-            "• phash (Default): DCT-based, best for compression differences\n"
-            "  - Most robust to re-encoding\n"
-            "  - Recommended for anime\n\n"
-            "• dhash: Gradient-based, good for slight variations\n"
-            "  - Faster than phash\n"
-            "  - Sensitive to scaling\n\n"
-            "• average_hash: Simple averaging, very fast\n"
-            "  - Less accurate\n"
-            "  - Use only if others are too slow"
-        )
-
-        self.widgets['frame_match_workers'] = QSpinBox()
-        self.widgets['frame_match_workers'].setRange(0, 16)
-        self.widgets['frame_match_workers'].setToolTip(
-            "Number of parallel worker threads for frame matching.\n\n"
-            "• 0 (Auto): Use CPU cores - 1 (recommended)\n"
-            "  - Example: 8-core CPU = 7 workers\n"
-            "  - Maximizes CPU usage for faster processing\n\n"
-            "• 1: Single-threaded (slowest, for debugging)\n\n"
-            "• 2-16: Manual thread count\n"
-            "  - Higher = faster processing\n"
-            "  - Each worker opens target video file\n"
-            "  - Don't exceed your CPU core count\n\n"
-            "Performance impact:\n"
-            "• 4-8x faster on multi-core CPUs\n"
-            "• Example: 25k subs from 2 hours → 15-20 minutes\n\n"
-            "Default: 0 (auto-detect)"
-        )
-
-        self.widgets['frame_match_use_vapoursynth'] = QCheckBox("Prefer VapourSynth for frame access (recommended)")
-        self.widgets['frame_match_use_vapoursynth'].setToolTip(
-            "Use VapourSynth with FFMS2 plugin for persistent index caching.\n\n"
-            "Benefits:\n"
-            "• Index created once and shared across all workers\n"
-            "• No re-indexing with parallel processing (8x speedup!)\n"
-            "• Thread-safe by design\n"
-            "• Persistent cache across runs (instant startup)\n"
-            "• 60-75% faster frame matching overall\n\n"
-            "Requirements:\n"
-            "• pip install VapourSynth\n"
-            "• FFMS2 plugin for VapourSynth\n\n"
-            "Fallback: Automatically falls back to pyffms2 → OpenCV → FFmpeg if unavailable.\n\n"
-            "Recommended: Keep enabled for production subtitle syncing.\n"
-            "Default: Enabled"
-        )
-
-        self.widgets['frame_match_hash_size'] = QSpinBox()
-        self.widgets['frame_match_hash_size'].setRange(8, 16)
-        self.widgets['frame_match_hash_size'].setSingleStep(8)
-        self.widgets['frame_match_hash_size'].setToolTip(
-            "Perceptual hash size (resolution).\n\n"
-            "• 8 (Default): 8x8 hash = 64 bits\n"
-            "  - Faster comparison\n"
-            "  - Good for most anime/video\n"
-            "  - Hamming distance range: 0-64\n\n"
-            "• 16: 16x16 hash = 256 bits\n"
-            "  - More accurate, slower\n"
-            "  - Better for subtle differences\n"
-            "  - Hamming distance range: 0-256\n\n"
-            "Note: If you change this, adjust Match Threshold accordingly.\n"
-            "Default: 8"
-        )
-
-        self.widgets['frame_match_search_window_frames'] = QSpinBox()
-        self.widgets['frame_match_search_window_frames'].setRange(0, 500)
-        self.widgets['frame_match_search_window_frames'].setSuffix(" frames")
-        self.widgets['frame_match_search_window_frames'].setToolTip(
-            "Frame-based search window (more precise than time-based).\n\n"
-            "• 0 (Default): Use time-based window (Match Window in seconds)\n"
-            "  - Searches ±N seconds around expected time\n"
-            "  - Converted to frames internally\n\n"
-            "• 1-500: Search ±N frames around expected position\n"
-            "  - More precise control\n"
-            "  - Example: ±5 frames at 24fps = ±208ms\n"
-            "  - Faster when combined with timestamp pre-filtering\n\n"
-            "Recommended: 0 (time-based) for general use,\n"
-            "5-10 frames when using timestamp pre-filtering.\n\n"
-            "Default: 0 (disabled, use time-based)"
-        )
-
-        self.widgets['frame_match_use_timestamp_prefilter'] = QCheckBox("Use timestamp pre-filtering (VideoTimestamps)")
-        self.widgets['frame_match_use_timestamp_prefilter'].setToolTip(
-            "Enable VideoTimestamps-guided search center positioning.\n\n"
-            "How it works:\n"
-            "1. Converts subtitle time → source frame → source timestamp\n"
-            "2. Adds audio delay to get expected target time\n"
-            "3. Converts to target frame → target timestamp\n"
-            "4. Uses this refined timestamp as visual search center\n\n"
-            "Benefits:\n"
-            "• 5x faster: Allows ±5 frame search instead of ±24\n"
-            "• More accurate: Frame-snapped center point\n"
-            "• Handles VFR videos correctly\n\n"
-            "Requirements:\n"
-            "• pip install VideoTimestamps\n"
-            "• Source and target videos available\n\n"
-            "Recommended: Enable for faster, more accurate matching.\n"
-            "Default: Enabled"
-        )
-
-        self.widgets['frame_match_max_search_frames'] = QSpinBox()
-        self.widgets['frame_match_max_search_frames'].setRange(50, 1000)
-        self.widgets['frame_match_max_search_frames'].setSuffix(" frames")
-        self.widgets['frame_match_max_search_frames'].setToolTip(
-            "Maximum frames to search (safety limit).\n\n"
-            "Prevents excessive searching when window is very large.\n"
-            "If calculated search window exceeds this, it will be clamped.\n\n"
-            "• At 24fps:\n"
-            "  - 300 frames = ±6.25 seconds total window\n"
-            "  - 500 frames = ±10.4 seconds total window\n\n"
-            "Only applies when search window would exceed this limit.\n\n"
-            "Default: 300 frames"
-        )
-
+        # Layout - Sync Mode
         sync_layout.addRow("Sync Mode:", self.widgets['subtitle_sync_mode'])
-        sync_layout.addRow("Target FPS:", self.widgets['subtitle_target_fps'])
-        sync_layout.addRow("Frame Timing:", self.widgets['frame_sync_mode'])
-        sync_layout.addRow("Frame Rounding:", self.widgets['frame_shift_rounding'])
-        sync_layout.addRow("", self.widgets['frame_sync_fix_zero_duration'])
-        sync_layout.addRow("VTS Rounding:", self.widgets['videotimestamps_rounding'])
-        sync_layout.addRow("Raw Delay Rounding:", self.widgets['raw_delay_rounding'])
+
+        # Time-based mode options
+        sync_layout.addRow("", self.widgets['time_based_use_raw_values'])
+        sync_layout.addRow("Rounding:", self.widgets['raw_delay_rounding'])
+
+        # Duration-Align mode options
         sync_layout.addRow("", self.widgets['duration_align_use_vapoursynth'])
         sync_layout.addRow("", self.widgets['duration_align_validate'])
         sync_layout.addRow("Validation Points:", self.widgets['duration_align_validate_points'])
@@ -1607,80 +1346,57 @@ class SubtitleSyncTab(QWidget):
         sync_layout.addRow("Fallback Mode:", self.widgets['duration_align_fallback_mode'])
         sync_layout.addRow("Fallback Target:", self.widgets['duration_align_fallback_target'])
         sync_layout.addRow("", self.widgets['duration_align_skip_validation_generated_tracks'])
+
+        # Correlation+FrameSnap mode options
         sync_layout.addRow("Corr+Snap Fallback:", self.widgets['correlation_snap_fallback_mode'])
         sync_layout.addRow("Corr+Snap Hash:", self.widgets['correlation_snap_hash_algorithm'])
         sync_layout.addRow("Corr+Snap Threshold:", self.widgets['correlation_snap_hash_threshold'])
         sync_layout.addRow("Corr+Snap Window:", self.widgets['correlation_snap_window_radius'])
         sync_layout.addRow("Corr+Snap Search:", self.widgets['correlation_snap_search_range'])
-        sync_layout.addRow("", self.widgets['frame_match_use_vapoursynth'])
-        sync_layout.addRow("Match Window:", self.widgets['frame_match_search_window_sec'])
-        sync_layout.addRow("Match Threshold:", self.widgets['frame_match_threshold'])
-        sync_layout.addRow("Hash Method:", self.widgets['frame_match_method'])
-        sync_layout.addRow("Hash Size:", self.widgets['frame_match_hash_size'])
-        sync_layout.addRow("Worker Threads:", self.widgets['frame_match_workers'])
-        sync_layout.addRow("Frame Window:", self.widgets['frame_match_search_window_frames'])
-        sync_layout.addRow("", self.widgets['frame_match_use_timestamp_prefilter'])
-        sync_layout.addRow("Max Search Frames:", self.widgets['frame_match_max_search_frames'])
-
-        # Info label
-        info_label = QLabel(
-            "<b>Frame-Perfect Mode Details:</b><br>"
-            "When enabled, subtitle timestamps are adjusted as follows:<br>"
-            "1. Apply time-based delay offset (from audio correlation)<br>"
-            "2. Snap both start and end times to nearest frame boundary<br>"
-            "3. Save modified subtitle with frame-aligned timestamps<br>"
-            "4. Tell mkvmerge to use --sync 0:0 (no additional offset)<br><br>"
-            "<b>Supported formats:</b> ASS, SSA, SRT, VTT<br>"
-            "<b>Inline tags:</b> Preserved (\\move, \\pos, \\t, \\fad, etc.)<br>"
-            "<b>Logging:</b> Detailed reports show snap offsets and statistics"
-        )
-        info_label.setWordWrap(True)
-        sync_layout.addRow(info_label)
 
         main_layout.addWidget(sync_group)
         main_layout.addStretch(1)
 
-        # Connect signal to update FPS visibility
-        self.widgets['subtitle_sync_mode'].currentTextChanged.connect(self._update_fps_visibility)
-        self._update_fps_visibility(self.widgets['subtitle_sync_mode'].currentText())
+        # Connect signals for visibility updates
+        self.widgets['subtitle_sync_mode'].currentTextChanged.connect(self._update_mode_visibility)
+        self.widgets['time_based_use_raw_values'].toggled.connect(
+            lambda: self._update_mode_visibility(self.widgets['subtitle_sync_mode'].currentText())
+        )
+        self.widgets['duration_align_verify_with_frames'].toggled.connect(
+            lambda: self._update_mode_visibility(self.widgets['subtitle_sync_mode'].currentText())
+        )
+        self._update_mode_visibility(self.widgets['subtitle_sync_mode'].currentText())
 
-    def _update_fps_visibility(self, text: str):
-        """Show/hide FPS and frame timing settings based on sync mode."""
-        is_frame_perfect = (text == 'frame-perfect')
-        is_frame_snapped = (text == 'frame-snapped')
-        is_videotimestamps = (text == 'videotimestamps')
-        is_frame_matched = (text == 'frame-matched')
-        is_raw_delay = (text == 'raw-delay')
-
-        # FPS setting is used by frame-perfect, frame-snapped, and videotimestamps (not frame-matched)
-        self.widgets['subtitle_target_fps'].setEnabled(is_frame_perfect or is_frame_snapped or is_videotimestamps)
-
-        # Frame timing (middle/aegisub) applies to both frame-perfect and frame-snapped
-        self.widgets['frame_sync_mode'].setEnabled(is_frame_perfect or is_frame_snapped)
-
-        # Frame shift rounding and zero-duration fix only apply to frame-perfect mode
-        self.widgets['frame_shift_rounding'].setEnabled(is_frame_perfect)
-        self.widgets['frame_sync_fix_zero_duration'].setEnabled(is_frame_perfect)
-
-        # VideoTimestamps rounding only applies to videotimestamps mode
-        self.widgets['videotimestamps_rounding'].setEnabled(is_videotimestamps)
-
-        # Raw delay rounding only applies to raw-delay mode
-        self.widgets['raw_delay_rounding'].setEnabled(is_raw_delay)
-
-        # Frame-matched settings only apply to frame-matched mode
-        self.widgets['frame_match_use_vapoursynth'].setEnabled(is_frame_matched)
-        self.widgets['frame_match_search_window_sec'].setEnabled(is_frame_matched)
-        self.widgets['frame_match_threshold'].setEnabled(is_frame_matched)
-        self.widgets['frame_match_method'].setEnabled(is_frame_matched)
-        self.widgets['frame_match_hash_size'].setEnabled(is_frame_matched)
-        self.widgets['frame_match_workers'].setEnabled(is_frame_matched)
-        self.widgets['frame_match_search_window_frames'].setEnabled(is_frame_matched)
-        self.widgets['frame_match_use_timestamp_prefilter'].setEnabled(is_frame_matched)
-        self.widgets['frame_match_max_search_frames'].setEnabled(is_frame_matched)
-
-        # Correlation + Frame Snap settings only apply to correlation-frame-snap mode
+    def _update_mode_visibility(self, text: str):
+        """Show/hide settings based on selected sync mode."""
+        is_time_based = (text == 'time-based')
+        is_duration_align = (text == 'duration-align')
         is_correlation_snap = (text == 'correlation-frame-snap')
+
+        # Time-based mode options
+        self.widgets['time_based_use_raw_values'].setEnabled(is_time_based)
+        use_raw = is_time_based and self.widgets['time_based_use_raw_values'].isChecked()
+        self.widgets['raw_delay_rounding'].setEnabled(use_raw)
+
+        # Duration-align mode options
+        self.widgets['duration_align_use_vapoursynth'].setEnabled(is_duration_align)
+        self.widgets['duration_align_validate'].setEnabled(is_duration_align)
+        self.widgets['duration_align_validate_points'].setEnabled(is_duration_align)
+        self.widgets['duration_align_hash_algorithm'].setEnabled(is_duration_align)
+        self.widgets['duration_align_hash_size'].setEnabled(is_duration_align)
+        self.widgets['duration_align_hash_threshold'].setEnabled(is_duration_align)
+        self.widgets['duration_align_strictness'].setEnabled(is_duration_align)
+        self.widgets['duration_align_verify_with_frames'].setEnabled(is_duration_align)
+        self.widgets['duration_align_skip_validation_generated_tracks'].setEnabled(is_duration_align)
+        self.widgets['duration_align_fallback_mode'].setEnabled(is_duration_align)
+
+        # Hybrid mode sub-settings (only when duration-align AND hybrid enabled)
+        hybrid_enabled = is_duration_align and self.widgets['duration_align_verify_with_frames'].isChecked()
+        self.widgets['duration_align_verify_search_window'].setEnabled(hybrid_enabled)
+        self.widgets['duration_align_verify_tolerance'].setEnabled(hybrid_enabled)
+        self.widgets['duration_align_fallback_target'].setEnabled(hybrid_enabled)
+
+        # Correlation-frame-snap mode options
         self.widgets['correlation_snap_fallback_mode'].setEnabled(is_correlation_snap)
         self.widgets['correlation_snap_hash_algorithm'].setEnabled(is_correlation_snap)
         self.widgets['correlation_snap_hash_threshold'].setEnabled(is_correlation_snap)
