@@ -425,6 +425,149 @@ def get_vapoursynth_frame_info(video_path: str, runner) -> Optional[Tuple[int, f
         return None
 
 
+def detect_scene_changes(
+    video_path: str,
+    start_frame: int,
+    end_frame: int,
+    runner,
+    max_scenes: int = 10
+) -> List[int]:
+    """
+    Detect scene changes in a video using VapourSynth.
+
+    Tries multiple methods in order:
+    1. wwxd plugin (fast Xvid-like detection)
+    2. PlaneStatsDiff (frame difference threshold)
+
+    Scene changes are ideal checkpoints because adjacent frames are
+    distinctly different, making frame matching unambiguous.
+
+    Args:
+        video_path: Path to video file
+        start_frame: Start frame to search from
+        end_frame: End frame to search to
+        runner: CommandRunner for logging
+        max_scenes: Maximum number of scene changes to return
+
+    Returns:
+        List of frame numbers where scene changes occur
+    """
+    try:
+        import vapoursynth as vs
+
+        runner._log_message(f"[SceneDetect] Detecting scene changes in {Path(video_path).name}")
+        runner._log_message(f"[SceneDetect] Searching frames {start_frame} to {end_frame}")
+
+        core = vs.core
+
+        # Load video
+        clip = None
+        try:
+            clip = core.lsmas.LWLibavSource(str(video_path))
+        except (AttributeError, Exception):
+            pass
+
+        if clip is None:
+            try:
+                clip = core.ffms2.Source(str(video_path))
+            except Exception as e:
+                runner._log_message(f"[SceneDetect] ERROR: Failed to load video: {e}")
+                return []
+
+        # Limit to search range
+        if end_frame > clip.num_frames:
+            end_frame = clip.num_frames - 1
+        if start_frame < 0:
+            start_frame = 0
+
+        # Trim to region of interest
+        clip = clip[start_frame:end_frame + 1]
+
+        scene_frames = []
+
+        # Try wwxd plugin first (fastest and most reliable)
+        try:
+            wwxd_clip = core.wwxd.WWXD(clip)
+
+            # Request frames and check SceneChange property
+            for i in range(wwxd_clip.num_frames):
+                frame = wwxd_clip.get_frame(i)
+                if frame.props.get('Scenechange', 0) == 1 or frame.props.get('SceneChange', 0) == 1:
+                    actual_frame = start_frame + i
+                    scene_frames.append(actual_frame)
+                    if len(scene_frames) >= max_scenes:
+                        break
+
+            runner._log_message(f"[SceneDetect] Found {len(scene_frames)} scene changes using wwxd")
+
+            # Cleanup
+            del wwxd_clip
+            del clip
+            del core
+            gc.collect()
+
+            return scene_frames
+
+        except AttributeError:
+            runner._log_message(f"[SceneDetect] wwxd plugin not installed, trying PlaneStatsDiff")
+        except Exception as e:
+            runner._log_message(f"[SceneDetect] wwxd failed: {e}, trying PlaneStatsDiff")
+
+        # Fallback: Use PlaneStatsDiff to detect scene changes
+        # Compare each frame to the previous one
+        try:
+            # Convert to grayscale for faster comparison
+            gray = core.std.ShufflePlanes(clip, planes=0, colorfamily=vs.GRAY)
+
+            # Add frame difference statistics
+            diff_clip = core.std.PlaneStats(gray, gray[1:] + gray[-1:])
+
+            # Scene change threshold (higher = more sensitive)
+            # PlaneStatsDiff returns average difference, 0.1 = 10% pixel difference
+            threshold = 0.15
+
+            for i in range(1, diff_clip.num_frames):
+                frame = diff_clip.get_frame(i)
+                diff = frame.props.get('PlaneStatsDiff', 0)
+
+                if diff > threshold:
+                    actual_frame = start_frame + i
+                    scene_frames.append(actual_frame)
+                    if len(scene_frames) >= max_scenes:
+                        break
+
+            runner._log_message(f"[SceneDetect] Found {len(scene_frames)} scene changes using PlaneStatsDiff")
+
+            # Cleanup
+            del diff_clip
+            del gray
+            del clip
+            del core
+            gc.collect()
+
+            return scene_frames
+
+        except Exception as e:
+            runner._log_message(f"[SceneDetect] PlaneStatsDiff failed: {e}")
+
+        # Cleanup on failure
+        try:
+            del clip
+            del core
+        except:
+            pass
+        gc.collect()
+
+        return []
+
+    except ImportError:
+        runner._log_message("[SceneDetect] WARNING: VapourSynth not installed")
+        return []
+    except Exception as e:
+        runner._log_message(f"[SceneDetect] ERROR: {e}")
+        return []
+
+
 def extract_frame_as_image(video_path: str, frame_number: int, runner) -> Optional[bytes]:
     """
     Extract a single frame from video as PNG image data using VapourSynth.
@@ -2385,14 +2528,43 @@ def verify_correlation_with_frame_snap(
     max_sub_time = max(event.end for event in subtitle_events)
     sub_duration = max_sub_time - min_sub_time
 
-    # Select 3 checkpoints: 10%, 50%, 90% of subtitle duration
-    checkpoints = [
-        ('start (10%)', min_sub_time + sub_duration * 0.10),
-        ('middle (50%)', min_sub_time + sub_duration * 0.50),
-        ('end (90%)', min_sub_time + sub_duration * 0.90),
-    ]
-
     runner._log_message(f"[Correlation+FrameSnap] Subtitle range: {min_sub_time}ms - {max_sub_time}ms ({sub_duration}ms)")
+
+    # Try to use scene changes as checkpoints (more reliable than arbitrary positions)
+    use_scene_checkpoints = config.get('correlation_snap_use_scene_changes', True)
+    checkpoints = []
+
+    if use_scene_checkpoints:
+        runner._log_message(f"[Correlation+FrameSnap] Searching for scene changes (unambiguous checkpoints)...")
+
+        # Convert time range to frame range
+        start_frame = int(min_sub_time * fps / 1000.0)
+        end_frame = int(max_sub_time * fps / 1000.0)
+
+        # Detect scene changes in source video
+        scene_frames = detect_scene_changes(source_video, start_frame, end_frame, runner, max_scenes=5)
+
+        if scene_frames and len(scene_frames) >= 2:
+            # Use scene changes as checkpoints
+            runner._log_message(f"[Correlation+FrameSnap] Using {len(scene_frames)} scene changes as checkpoints")
+
+            for i, frame_num in enumerate(scene_frames[:3]):  # Max 3 checkpoints
+                frame_time_ms = frame_to_time_vfr(frame_num, source_video, fps, runner, config)
+                if frame_time_ms is None:
+                    frame_time_ms = frame_num * 1000.0 / fps
+                checkpoints.append((f'scene_{i+1} (frame {frame_num})', float(frame_time_ms)))
+        else:
+            runner._log_message(f"[Correlation+FrameSnap] Not enough scene changes found, using percentage-based checkpoints")
+
+    # Fallback: Select 3 checkpoints at 10%, 50%, 90% of subtitle duration
+    if not checkpoints:
+        checkpoints = [
+            ('start (10%)', min_sub_time + sub_duration * 0.10),
+            ('middle (50%)', min_sub_time + sub_duration * 0.50),
+            ('end (90%)', min_sub_time + sub_duration * 0.90),
+        ]
+        runner._log_message(f"[Correlation+FrameSnap] Using percentage-based checkpoints")
+
     runner._log_message(f"[Correlation+FrameSnap] Checkpoints: {[f'{name}={t:.0f}ms' for name, t in checkpoints]}")
 
     checkpoint_results = []
@@ -2524,6 +2696,21 @@ def verify_correlation_with_frame_snap(
                 best_delta = frame_delta
                 best_match_distance = distance
 
+        # Check for ambiguous match - if scores are too close, match is unreliable
+        # This happens when adjacent frames look similar (static scenes, slow pans)
+        match_is_ambiguous = False
+        second_best_score = -float('inf')
+        for delta, info in delta_scores.items():
+            if delta != best_delta and info['score'] > second_best_score:
+                second_best_score = info['score']
+
+        # If best and second-best scores are within 20% of each other, it's ambiguous
+        if second_best_score > -float('inf') and best_score > 0:
+            score_margin = (best_score - second_best_score) / best_score if best_score > 0 else 0
+            match_is_ambiguous = score_margin < 0.20  # Less than 20% margin = ambiguous
+            if match_is_ambiguous:
+                runner._log_message(f"[Correlation+FrameSnap]   ⚠ AMBIGUOUS: score margin only {score_margin*100:.1f}% (frames look similar)")
+
         # Calculate precise anchor offset from verified frame times
         if best_score > 0:  # We found a match
             matching_target_frame = predicted_target_frame + best_delta
@@ -2534,18 +2721,23 @@ def verify_correlation_with_frame_snap(
             # ANCHOR OFFSET: This is the TRUE offset calculated from verified frame times
             # Just like duration-align does: target_frame_time - source_frame_time
             anchor_offset = target_frame_time_ms - source_frame_time_ms
-            anchor_offsets_ms.append(anchor_offset)
 
-            runner._log_message(f"[Correlation+FrameSnap]   → Best match: delta={best_delta:+d}, target frame {matching_target_frame}")
-            runner._log_message(f"[Correlation+FrameSnap]   → Source frame time: {source_frame_time_ms:.3f}ms")
-            runner._log_message(f"[Correlation+FrameSnap]   → Target frame time: {target_frame_time_ms:.3f}ms")
-            runner._log_message(f"[Correlation+FrameSnap]   → ANCHOR OFFSET: {anchor_offset:.3f}ms (correlation was {pure_correlation_delay_ms:.3f}ms)")
+            # Only use anchor offset if match is NOT ambiguous
+            # If ambiguous, we can't trust it - frames look too similar
+            if not match_is_ambiguous:
+                anchor_offsets_ms.append(anchor_offset)
+                runner._log_message(f"[Correlation+FrameSnap]   → Best match: delta={best_delta:+d}, target frame {matching_target_frame}")
+                runner._log_message(f"[Correlation+FrameSnap]   → Source frame time: {source_frame_time_ms:.3f}ms")
+                runner._log_message(f"[Correlation+FrameSnap]   → Target frame time: {target_frame_time_ms:.3f}ms")
+                runner._log_message(f"[Correlation+FrameSnap]   → ANCHOR OFFSET: {anchor_offset:.3f}ms (correlation was {pure_correlation_delay_ms:.3f}ms)")
+            else:
+                runner._log_message(f"[Correlation+FrameSnap]   → Match too ambiguous, not using anchor offset from this checkpoint")
         else:
             runner._log_message(f"[Correlation+FrameSnap]   → No good match found at this checkpoint")
 
         # Store checkpoint result
         checkpoint_anchor_offset = None
-        if best_score > 0 and anchor_offsets_ms:
+        if best_score > 0 and not match_is_ambiguous and anchor_offsets_ms:
             checkpoint_anchor_offset = anchor_offsets_ms[-1]  # The one we just added
 
         checkpoint_results.append({
@@ -2556,6 +2748,7 @@ def verify_correlation_with_frame_snap(
             'best_delta': best_delta,
             'best_score': best_score,
             'delta_scores': delta_scores,
+            'match_is_ambiguous': match_is_ambiguous,
             'anchor_offset_ms': checkpoint_anchor_offset
         })
 
@@ -2572,7 +2765,19 @@ def verify_correlation_with_frame_snap(
     runner._log_message(f"[Correlation+FrameSnap] Aggregate scores: {all_delta_scores}")
     runner._log_message(f"[Correlation+FrameSnap] Per-checkpoint deltas: {checkpoint_deltas}")
 
-    # Calculate PRECISE refinement from anchor offsets (like duration-align)
+    # Calculate frame correction from anchor offsets
+    # KEY INSIGHT: Anchor matching tells us IF we need a frame correction (±1 frame),
+    # but correlation has sub-frame precision. So we:
+    # 1. Use anchor offsets to determine how many FRAMES off correlation is
+    # 2. Apply that frame correction TO correlation (not replace correlation with anchor)
+
+    # Count ambiguous checkpoints
+    ambiguous_count = sum(1 for r in checkpoint_results if r.get('match_is_ambiguous', False))
+    total_checkpoints = len(checkpoint_results)
+
+    if ambiguous_count > 0:
+        runner._log_message(f"[Correlation+FrameSnap] Ambiguous checkpoints: {ambiguous_count}/{total_checkpoints}")
+
     if anchor_offsets_ms:
         runner._log_message(f"[Correlation+FrameSnap] Anchor offsets from verified frames: {[f'{o:.3f}ms' for o in anchor_offsets_ms]}")
 
@@ -2582,40 +2787,59 @@ def verify_correlation_with_frame_snap(
         max_offset = max(anchor_offsets_ms)
         offset_spread = max_offset - min_offset
 
-        if offset_spread <= offset_tolerance_ms:
-            # Anchors agree - use average for precision
+        if offset_spread <= frame_duration_ms:
+            # Anchors agree (or minor disagreement) - calculate frame correction
             avg_anchor_offset = sum(anchor_offsets_ms) / len(anchor_offsets_ms)
-            frame_correction_ms = avg_anchor_offset - pure_correlation_delay_ms
-            valid = True
 
-            runner._log_message(f"[Correlation+FrameSnap] Anchors agree (spread={offset_spread:.3f}ms <= {offset_tolerance_ms:.3f}ms)")
+            # How many frames off is correlation from the anchor offset?
+            offset_difference = avg_anchor_offset - pure_correlation_delay_ms
+            frames_difference = round(offset_difference / frame_duration_ms)
+
             runner._log_message(f"[Correlation+FrameSnap] Average anchor offset: {avg_anchor_offset:.3f}ms")
-            runner._log_message(f"[Correlation+FrameSnap] PRECISE REFINEMENT: {frame_correction_ms:+.3f}ms")
-            runner._log_message(f"[Correlation+FrameSnap]   (Correlation {pure_correlation_delay_ms:.3f}ms was off by {frame_correction_ms:+.3f}ms)")
-        elif offset_spread <= frame_duration_ms:
-            # Minor disagreement - still usable
-            avg_anchor_offset = sum(anchor_offsets_ms) / len(anchor_offsets_ms)
-            frame_correction_ms = avg_anchor_offset - pure_correlation_delay_ms
-            valid = True
+            runner._log_message(f"[Correlation+FrameSnap] Correlation: {pure_correlation_delay_ms:.3f}ms")
+            runner._log_message(f"[Correlation+FrameSnap] Difference: {offset_difference:+.3f}ms = {frames_difference:+d} frames")
 
-            runner._log_message(f"[Correlation+FrameSnap] Minor anchor disagreement (spread={offset_spread:.3f}ms)")
-            runner._log_message(f"[Correlation+FrameSnap] Using average anchor offset: {avg_anchor_offset:.3f}ms")
-            runner._log_message(f"[Correlation+FrameSnap] PRECISE REFINEMENT: {frame_correction_ms:+.3f}ms")
+            if frames_difference == 0:
+                # Anchor confirms correlation is on the right frame
+                # Use correlation directly (it has sub-frame precision!)
+                frame_correction_ms = 0.0
+                runner._log_message(f"[Correlation+FrameSnap] Anchor confirms correlation is correct (0 frame correction)")
+                runner._log_message(f"[Correlation+FrameSnap] Using correlation value with sub-frame precision")
+            else:
+                # Anchor says correlation is off by N frames
+                # Apply N * frame_duration correction to correlation
+                frame_correction_ms = frames_difference * frame_duration_ms
+                runner._log_message(f"[Correlation+FrameSnap] Anchor indicates {frames_difference:+d} frame correction needed")
+                runner._log_message(f"[Correlation+FrameSnap] Frame correction: {frame_correction_ms:+.3f}ms")
+
+            valid = True
+            if offset_spread > offset_tolerance_ms:
+                runner._log_message(f"[Correlation+FrameSnap] Note: Minor anchor disagreement (spread={offset_spread:.3f}ms)")
         else:
             # Major disagreement - possible drift
             runner._log_message(f"[Correlation+FrameSnap] Major anchor disagreement (spread={offset_spread:.3f}ms)")
             runner._log_message(f"[Correlation+FrameSnap] This may indicate drift, stepping, or different cuts")
 
-            # Fall back to legacy frame-delta calculation
-            frame_correction_ms = overall_best_delta * frame_duration_ms
+            # Fall back to trusting correlation (has sub-frame precision)
+            frame_correction_ms = 0.0
+            runner._log_message(f"[Correlation+FrameSnap] Falling back to correlation without frame correction")
             valid = False
+    elif ambiguous_count == total_checkpoints:
+        # All checkpoints were ambiguous - frames look too similar everywhere
+        # Trust correlation directly, no frame correction
+        runner._log_message(f"[Correlation+FrameSnap] All checkpoints ambiguous - frames look similar throughout")
+        runner._log_message(f"[Correlation+FrameSnap] Trusting correlation without frame correction (no reliable anchors)")
+        frame_correction_ms = 0.0
+        valid = True  # We're valid, just trusting correlation
     else:
         # No anchor offsets - verification failed completely
         runner._log_message(f"[Correlation+FrameSnap] No valid anchor offsets found")
-        frame_correction_ms = overall_best_delta * frame_duration_ms
+        # Fall back to trusting correlation
+        frame_correction_ms = 0.0
+        runner._log_message(f"[Correlation+FrameSnap] Falling back to correlation without frame correction")
         valid = False
 
-    runner._log_message(f"[Correlation+FrameSnap] Final refinement: {frame_correction_ms:+.3f}ms")
+    runner._log_message(f"[Correlation+FrameSnap] Final frame correction: {frame_correction_ms:+.3f}ms")
     runner._log_message(f"[Correlation+FrameSnap] ═══════════════════════════════════════")
 
     return {
