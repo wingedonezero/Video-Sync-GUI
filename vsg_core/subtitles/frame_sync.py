@@ -2281,23 +2281,29 @@ def verify_correlation_with_frame_snap(
     config: dict = None
 ) -> Dict[str, Any]:
     """
-    Verify frame alignment and determine ±1 frame correction.
+    Verify frame alignment and calculate precise ms refinement from anchor frames.
 
     This function checks if the correlation-based offset aligns frames correctly
-    by comparing perceptual hashes of frames at multiple checkpoints.
+    by comparing perceptual hashes of frames at multiple checkpoints, then
+    calculates a PRECISE ms refinement from verified frame times (like duration mode).
 
     IMPORTANT: pure_correlation_delay_ms should be the PURE correlation delay
     WITHOUT global_shift, because we're comparing against original videos.
 
-    Algorithm:
+    Algorithm (Anchor-Based Offset Calculation):
     1. Select checkpoints at 10%, 50%, 90% of subtitle duration
-    2. At each checkpoint, test frame_delta ∈ {-1, 0, +1}:
-       - Extract frames from source at checkpoint time ± adjacent frames
-       - Extract frames from target at (checkpoint + correlation + delta*frame_duration)
-       - Compare using perceptual hashing
-       - Score based on match count and distance
-    3. Pick the delta with best aggregate score
-    4. Validate that checkpoints agree (no drift/stepping detected)
+    2. At each checkpoint:
+       - Get the source frame at checkpoint time
+       - Use correlation to predict target frame location
+       - Search ±1 frame around prediction to find matching frame
+       - Verify boundary (adjacent frames should be different)
+       - Calculate: offset = target_frame_time - source_frame_time
+       - Refinement = offset - correlation (how much correlation was off)
+    3. If checkpoints agree on refinement (within tolerance), use average
+    4. Return precise ms refinement (NOT quantized to frame_duration!)
+
+    This approach mimics duration-align's success: calculate offset from verified
+    frame times rather than snapping to frame boundaries.
 
     Args:
         source_video: Path to source video (where subs were authored)
@@ -2311,10 +2317,11 @@ def verify_correlation_with_frame_snap(
     Returns:
         Dict with:
             - valid: bool (whether verification passed)
-            - frame_delta: int (best frame adjustment: -1, 0, or +1)
-            - frame_correction_ms: float (delta * frame_duration)
+            - frame_delta: int (best frame adjustment: -1, 0, or +1) [legacy, for logging]
+            - frame_correction_ms: float (PRECISE ms refinement from anchor frames)
             - checkpoint_deltas: List[int] (delta found at each checkpoint)
-            - details: Dict (per-checkpoint scores)
+            - anchor_offsets_ms: List[float] (precise offset from each checkpoint)
+            - details: Dict (per-checkpoint results)
     """
     config = config or {}
 
@@ -2390,174 +2397,233 @@ def verify_correlation_with_frame_snap(
 
     checkpoint_results = []
     all_delta_scores = {-1: 0.0, 0: 0.0, 1: 0.0}
+    anchor_offsets_ms = []  # Precise offsets calculated from verified frame times
 
-    # Process each checkpoint
+    # Process each checkpoint - find anchor frames and calculate precise offset
     for checkpoint_name, checkpoint_time_ms in checkpoints:
         runner._log_message(f"[Correlation+FrameSnap] Checkpoint '{checkpoint_name}' at {checkpoint_time_ms:.0f}ms:")
 
-        # Convert checkpoint time to frame number using VideoTimestamps for precision
-        # This avoids floating point errors like int(1000.9999 * fps / 1000) -> wrong frame
-        checkpoint_frame = time_to_frame_vfr(checkpoint_time_ms, source_video, fps, runner, config)
-        if checkpoint_frame is None:
-            # Fallback if VideoTimestamps unavailable
-            checkpoint_frame = int(checkpoint_time_ms * fps / 1000.0)
-        runner._log_message(f"[Correlation+FrameSnap]   Checkpoint frame: {checkpoint_frame}")
+        # Get source frame at checkpoint time using VideoTimestamps for precision
+        source_frame = time_to_frame_vfr(checkpoint_time_ms, source_video, fps, runner, config)
+        if source_frame is None:
+            source_frame = int(checkpoint_time_ms * fps / 1000.0)
 
+        # Get EXACT start time of this source frame (anchor point)
+        source_frame_time_ms = frame_to_time_vfr(source_frame, source_video, fps, runner, config)
+        if source_frame_time_ms is None:
+            source_frame_time_ms = source_frame * 1000.0 / fps
+
+        runner._log_message(f"[Correlation+FrameSnap]   Source frame: {source_frame} (starts at {source_frame_time_ms:.3f}ms)")
+
+        # Get source frame hash for matching
+        source_frame_img = source_reader.get_frame_at_index(source_frame)
+        if source_frame_img is None:
+            runner._log_message(f"[Correlation+FrameSnap]   ERROR: Could not read source frame {source_frame}")
+            continue
+
+        source_hash = compute_frame_hash(source_frame_img, hash_size=hash_size, method=hash_algorithm)
+        if source_hash is None:
+            runner._log_message(f"[Correlation+FrameSnap]   ERROR: Could not hash source frame")
+            continue
+
+        # Also get hashes for adjacent source frames (for boundary verification)
+        source_prev_hash = None
+        source_next_hash = None
+        if source_frame > 0:
+            prev_img = source_reader.get_frame_at_index(source_frame - 1)
+            if prev_img is not None:
+                source_prev_hash = compute_frame_hash(prev_img, hash_size=hash_size, method=hash_algorithm)
+        next_img = source_reader.get_frame_at_index(source_frame + 1)
+        if next_img is not None:
+            source_next_hash = compute_frame_hash(next_img, hash_size=hash_size, method=hash_algorithm)
+
+        # Use correlation to predict where this frame should be on target
+        predicted_target_time_ms = source_frame_time_ms + pure_correlation_delay_ms
+        predicted_target_frame = time_to_frame_vfr(predicted_target_time_ms, target_video, fps, runner, config)
+        if predicted_target_frame is None:
+            predicted_target_frame = int(predicted_target_time_ms * fps / 1000.0)
+
+        runner._log_message(f"[Correlation+FrameSnap]   Correlation predicts target frame: {predicted_target_frame}")
+
+        # Search ±1 frame around prediction to find the matching frame
         best_delta = 0
         best_score = -float('inf')
+        best_match_distance = float('inf')
         delta_scores = {}
 
         for frame_delta in [-1, 0, +1]:
-            # Extract adjacent frames from source around the checkpoint using FRAME INDICES
-            # This avoids the floating-point time conversion that causes 1-frame errors
-            source_frame_hashes = []
-            source_frame_nums = {}  # Map adj_offset -> frame_num for target calculation
-
-            for adj_offset in range(-adjacent_frames, adjacent_frames + 1):
-                source_frame_num = checkpoint_frame + adj_offset
-                if source_frame_num < 0:
-                    continue
-
-                source_frame_nums[adj_offset] = source_frame_num
-
-                # Use frame index directly - avoids int(time * fps) precision issues!
-                frame = source_reader.get_frame_at_index(source_frame_num)
-                if frame is not None:
-                    frame_hash = compute_frame_hash(frame, hash_size=hash_size, method=hash_algorithm)
-                    if frame_hash is not None:
-                        source_frame_hashes.append((adj_offset, frame_hash))
-
-            if len(source_frame_hashes) < max(1, int(adjacent_frames * 2 * 0.5)):
-                runner._log_message(f"[Correlation+FrameSnap]   Delta {frame_delta:+d}: Not enough source frames")
+            target_frame_num = predicted_target_frame + frame_delta
+            if target_frame_num < 0:
                 continue
 
-            # Extract corresponding frames from target and compare
-            matched_frames = 0
-            total_distance = 0
-            compared_count = 0
+            target_frame_img = target_reader.get_frame_at_index(target_frame_num)
+            if target_frame_img is None:
+                continue
 
-            for adj_offset, source_hash in source_frame_hashes:
-                source_frame_num = source_frame_nums[adj_offset]
+            target_hash = compute_frame_hash(target_frame_img, hash_size=hash_size, method=hash_algorithm)
+            if target_hash is None:
+                continue
 
-                # Get exact timestamp for this source frame using VideoTimestamps
-                source_time_ms = frame_to_time_vfr(source_frame_num, source_video, fps, runner, config)
-                if source_time_ms is None:
-                    source_time_ms = source_frame_num * 1000.0 / fps
+            # Compare source frame to this target frame
+            distance = source_hash - target_hash
+            is_match = distance <= hash_threshold
 
-                # Target time = source frame time + correlation
-                target_time_ms = source_time_ms + pure_correlation_delay_ms
+            # Also check adjacent frames for boundary verification
+            boundary_verified = False
+            if is_match:
+                # Check that adjacent frames are DIFFERENT (confirms we found the right frame)
+                target_prev_hash = None
+                target_next_hash = None
 
-                if target_time_ms < 0:
-                    continue
+                if target_frame_num > 0:
+                    prev_img = target_reader.get_frame_at_index(target_frame_num - 1)
+                    if prev_img is not None:
+                        target_prev_hash = compute_frame_hash(prev_img, hash_size=hash_size, method=hash_algorithm)
 
-                # Convert target time to frame number, then apply delta
-                target_frame_num = time_to_frame_vfr(target_time_ms, target_video, fps, runner, config)
-                if target_frame_num is None:
-                    target_frame_num = int(target_time_ms * fps / 1000.0)
+                next_img = target_reader.get_frame_at_index(target_frame_num + 1)
+                if next_img is not None:
+                    target_next_hash = compute_frame_hash(next_img, hash_size=hash_size, method=hash_algorithm)
 
-                # Apply frame delta adjustment
-                target_frame_num += frame_delta
+                # Verify boundaries: adjacent frames should be different (or match source adjacent)
+                prev_different = True
+                next_different = True
 
-                if target_frame_num < 0:
-                    continue
+                if source_prev_hash and target_prev_hash:
+                    prev_distance = source_prev_hash - target_prev_hash
+                    prev_different = prev_distance <= hash_threshold  # Should MATCH source prev
 
-                # Use frame index directly for target too
-                target_frame = target_reader.get_frame_at_index(target_frame_num)
-                if target_frame is not None:
-                    target_hash = compute_frame_hash(target_frame, hash_size=hash_size, method=hash_algorithm)
-                    if target_hash is not None:
-                        distance = source_hash - target_hash
-                        compared_count += 1
+                if source_next_hash and target_next_hash:
+                    next_distance = source_next_hash - target_next_hash
+                    next_different = next_distance <= hash_threshold  # Should MATCH source next
 
-                        if distance <= hash_threshold:
-                            matched_frames += 1
+                boundary_verified = prev_different and next_different
 
-                        total_distance += distance
+            # Score: match quality + boundary verification bonus
+            if is_match:
+                score = (1000 - distance) + (500 if boundary_verified else 0)
+            else:
+                score = -distance
 
-            # Calculate score: prioritize match count, then minimize distance
-            if compared_count > 0:
-                avg_distance = total_distance / compared_count
-                match_percent = (matched_frames / compared_count) * 100
-                # Score = matches * 1000 - avg_distance (higher is better)
-                score = (matched_frames * 1000) - avg_distance
+            delta_scores[frame_delta] = {
+                'score': score,
+                'distance': distance,
+                'is_match': is_match,
+                'boundary_verified': boundary_verified
+            }
+            all_delta_scores[frame_delta] += score
 
-                delta_scores[frame_delta] = {
-                    'score': score,
-                    'matched_frames': matched_frames,
-                    'compared_frames': compared_count,
-                    'match_percent': match_percent,
-                    'avg_distance': avg_distance
-                }
+            status = "✓ MATCH" if is_match else "✗ no match"
+            boundary_status = " (boundary verified)" if boundary_verified else ""
+            runner._log_message(
+                f"[Correlation+FrameSnap]   Delta {frame_delta:+d} → frame {target_frame_num}: "
+                f"dist={distance}, {status}{boundary_status}"
+            )
 
-                all_delta_scores[frame_delta] += score
+            if score > best_score or (score == best_score and frame_delta == 0):
+                best_score = score
+                best_delta = frame_delta
+                best_match_distance = distance
 
-                runner._log_message(
-                    f"[Correlation+FrameSnap]   Delta {frame_delta:+d}: "
-                    f"{matched_frames}/{compared_count} frames ({match_percent:.0f}%), "
-                    f"avg_dist={avg_distance:.1f}, score={score:.0f}"
-                )
+        # Calculate precise anchor offset from verified frame times
+        if best_score > 0:  # We found a match
+            matching_target_frame = predicted_target_frame + best_delta
+            target_frame_time_ms = frame_to_time_vfr(matching_target_frame, target_video, fps, runner, config)
+            if target_frame_time_ms is None:
+                target_frame_time_ms = matching_target_frame * 1000.0 / fps
 
-                # FIX: When scores are equal, prefer delta=0 (no correction)
-                # This avoids defaulting to -1 just because it's checked first
-                if score > best_score:
-                    best_score = score
-                    best_delta = frame_delta
-                elif score == best_score and frame_delta == 0:
-                    # Tie: prefer delta=0 (trust correlation, no frame correction)
-                    best_delta = 0
+            # ANCHOR OFFSET: This is the TRUE offset calculated from verified frame times
+            # Just like duration-align does: target_frame_time - source_frame_time
+            anchor_offset = target_frame_time_ms - source_frame_time_ms
+            anchor_offsets_ms.append(anchor_offset)
+
+            runner._log_message(f"[Correlation+FrameSnap]   → Best match: delta={best_delta:+d}, target frame {matching_target_frame}")
+            runner._log_message(f"[Correlation+FrameSnap]   → Source frame time: {source_frame_time_ms:.3f}ms")
+            runner._log_message(f"[Correlation+FrameSnap]   → Target frame time: {target_frame_time_ms:.3f}ms")
+            runner._log_message(f"[Correlation+FrameSnap]   → ANCHOR OFFSET: {anchor_offset:.3f}ms (correlation was {pure_correlation_delay_ms:.3f}ms)")
+        else:
+            runner._log_message(f"[Correlation+FrameSnap]   → No good match found at this checkpoint")
+
+        # Store checkpoint result
+        checkpoint_anchor_offset = None
+        if best_score > 0 and anchor_offsets_ms:
+            checkpoint_anchor_offset = anchor_offsets_ms[-1]  # The one we just added
 
         checkpoint_results.append({
             'name': checkpoint_name,
             'time_ms': checkpoint_time_ms,
+            'source_frame': source_frame,
+            'source_frame_time_ms': source_frame_time_ms,
             'best_delta': best_delta,
             'best_score': best_score,
-            'delta_scores': delta_scores
+            'delta_scores': delta_scores,
+            'anchor_offset_ms': checkpoint_anchor_offset
         })
-
-        runner._log_message(f"[Correlation+FrameSnap]   → Best delta for this checkpoint: {best_delta:+d}")
 
     # Clean up video readers
     del source_reader
     del target_reader
     gc.collect()
 
-    # Determine overall best delta from aggregate scores
+    # Determine overall best delta (for legacy compatibility/logging)
     overall_best_delta = max(all_delta_scores, key=all_delta_scores.get)
     checkpoint_deltas = [r['best_delta'] for r in checkpoint_results]
 
     runner._log_message(f"[Correlation+FrameSnap] ───────────────────────────────────────")
     runner._log_message(f"[Correlation+FrameSnap] Aggregate scores: {all_delta_scores}")
     runner._log_message(f"[Correlation+FrameSnap] Per-checkpoint deltas: {checkpoint_deltas}")
-    runner._log_message(f"[Correlation+FrameSnap] Overall best delta: {overall_best_delta:+d}")
 
-    # Validate checkpoint agreement
-    unique_deltas = set(checkpoint_deltas)
-    max_delta_diff = max(checkpoint_deltas) - min(checkpoint_deltas) if checkpoint_deltas else 0
+    # Calculate PRECISE refinement from anchor offsets (like duration-align)
+    if anchor_offsets_ms:
+        runner._log_message(f"[Correlation+FrameSnap] Anchor offsets from verified frames: {[f'{o:.3f}ms' for o in anchor_offsets_ms]}")
 
-    if max_delta_diff == 0:
-        # All checkpoints agree
-        runner._log_message(f"[Correlation+FrameSnap] All checkpoints agree on delta={overall_best_delta:+d}")
-        valid = True
-    elif max_delta_diff == 1:
-        # Minor disagreement (within 1 frame) - use aggregate best
-        runner._log_message(f"[Correlation+FrameSnap] Minor disagreement (within 1 frame), using aggregate best: {overall_best_delta:+d}")
-        valid = True
+        # Check if anchor offsets agree (within tolerance - half a frame)
+        offset_tolerance_ms = frame_duration_ms / 2
+        min_offset = min(anchor_offsets_ms)
+        max_offset = max(anchor_offsets_ms)
+        offset_spread = max_offset - min_offset
+
+        if offset_spread <= offset_tolerance_ms:
+            # Anchors agree - use average for precision
+            avg_anchor_offset = sum(anchor_offsets_ms) / len(anchor_offsets_ms)
+            frame_correction_ms = avg_anchor_offset - pure_correlation_delay_ms
+            valid = True
+
+            runner._log_message(f"[Correlation+FrameSnap] Anchors agree (spread={offset_spread:.3f}ms <= {offset_tolerance_ms:.3f}ms)")
+            runner._log_message(f"[Correlation+FrameSnap] Average anchor offset: {avg_anchor_offset:.3f}ms")
+            runner._log_message(f"[Correlation+FrameSnap] PRECISE REFINEMENT: {frame_correction_ms:+.3f}ms")
+            runner._log_message(f"[Correlation+FrameSnap]   (Correlation {pure_correlation_delay_ms:.3f}ms was off by {frame_correction_ms:+.3f}ms)")
+        elif offset_spread <= frame_duration_ms:
+            # Minor disagreement - still usable
+            avg_anchor_offset = sum(anchor_offsets_ms) / len(anchor_offsets_ms)
+            frame_correction_ms = avg_anchor_offset - pure_correlation_delay_ms
+            valid = True
+
+            runner._log_message(f"[Correlation+FrameSnap] Minor anchor disagreement (spread={offset_spread:.3f}ms)")
+            runner._log_message(f"[Correlation+FrameSnap] Using average anchor offset: {avg_anchor_offset:.3f}ms")
+            runner._log_message(f"[Correlation+FrameSnap] PRECISE REFINEMENT: {frame_correction_ms:+.3f}ms")
+        else:
+            # Major disagreement - possible drift
+            runner._log_message(f"[Correlation+FrameSnap] Major anchor disagreement (spread={offset_spread:.3f}ms)")
+            runner._log_message(f"[Correlation+FrameSnap] This may indicate drift, stepping, or different cuts")
+
+            # Fall back to legacy frame-delta calculation
+            frame_correction_ms = overall_best_delta * frame_duration_ms
+            valid = False
     else:
-        # Major disagreement - possible drift or stepping
-        runner._log_message(f"[Correlation+FrameSnap] Major disagreement detected (diff={max_delta_diff} frames)")
-        runner._log_message(f"[Correlation+FrameSnap] This may indicate drift, stepping, or different cuts")
+        # No anchor offsets - verification failed completely
+        runner._log_message(f"[Correlation+FrameSnap] No valid anchor offsets found")
+        frame_correction_ms = overall_best_delta * frame_duration_ms
         valid = False
 
-    frame_correction_ms = overall_best_delta * frame_duration_ms
-
-    runner._log_message(f"[Correlation+FrameSnap] Frame correction: {overall_best_delta:+d} frames = {frame_correction_ms:+.3f}ms")
+    runner._log_message(f"[Correlation+FrameSnap] Final refinement: {frame_correction_ms:+.3f}ms")
     runner._log_message(f"[Correlation+FrameSnap] ═══════════════════════════════════════")
 
     return {
         'valid': valid,
-        'frame_delta': overall_best_delta,
-        'frame_correction_ms': frame_correction_ms,
+        'frame_delta': overall_best_delta,  # Legacy, for logging
+        'frame_correction_ms': frame_correction_ms,  # Now PRECISE, not quantized!
         'checkpoint_deltas': checkpoint_deltas,
+        'anchor_offsets_ms': anchor_offsets_ms,  # New: precise offsets from each anchor
         'aggregate_scores': all_delta_scores,
         'details': checkpoint_results
     }
@@ -2573,15 +2639,26 @@ def apply_correlation_frame_snap_sync(
     config: dict = None
 ) -> Dict[str, Any]:
     """
-    Correlation + Frame Snap Mode: Apply subtitle sync using correlation + frame refinement.
+    Correlation + Frame Snap Mode: Apply subtitle sync using anchor-based offset calculation.
 
-    This mode uses audio correlation as authoritative, then refines to exact frame boundaries.
+    This mode uses audio correlation as a guide to find matching frames, then calculates
+    PRECISE offset from verified frame times (like duration-align mode). No frame snapping!
+
+    Algorithm (Anchor-Based):
+    1. Use correlation to guide where to search for matching frames
+    2. At checkpoints, find actual matching frames via perceptual hashing
+    3. Calculate precise offset from verified frame times:
+       anchor_offset = target_frame_time - source_frame_time
+    4. If checkpoints agree, use average anchor offset
+    5. Apply offset simply (like duration mode): start += offset, end += offset
 
     CRITICAL MATH:
     - total_delay_with_global_ms = raw_source_delays_ms[source] (ALREADY includes global_shift!)
     - raw_global_shift_ms = the global shift that was added during analysis
     - pure_correlation = total_delay_with_global_ms - raw_global_shift_ms
     - Frame verification uses pure_correlation (videos are in original state)
+    - Anchor offset calculated from verified frame times (PRECISE, not quantized!)
+    - frame_correction = anchor_offset - correlation (how much correlation was off)
     - Final offset = total_delay_with_global_ms + frame_correction
       (global_shift is already baked in, so we just add frame correction)
 
