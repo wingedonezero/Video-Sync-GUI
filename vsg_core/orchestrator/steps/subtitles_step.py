@@ -198,16 +198,25 @@ class SubtitlesStep:
 
                         if ext in supported_formats:
                             source_key = item.sync_to if item.track.source == 'External' else item.track.source
-                            audio_delay_ms = 0.0
+
+                            # Get total delay (already includes global shift)
+                            total_delay_with_global_ms = 0.0
                             if ctx.delays and source_key in ctx.delays.raw_source_delays_ms:
-                                audio_delay_ms = ctx.delays.raw_source_delays_ms[source_key]
-                                runner._log_message(f"[Time-Based Raw] Using raw audio delay: {audio_delay_ms:+.3f}ms from {source_key}")
+                                total_delay_with_global_ms = ctx.delays.raw_source_delays_ms[source_key]
+                                runner._log_message(f"[Time-Based Raw] Total delay (with global): {total_delay_with_global_ms:+.3f}ms from {source_key}")
+
+                            # Get global shift separately for logging breakdown
+                            raw_global_shift_ms = 0.0
+                            if ctx.delays:
+                                raw_global_shift_ms = ctx.delays.raw_global_shift_ms
+                                runner._log_message(f"[Time-Based Raw] Global shift: {raw_global_shift_ms:+.3f}ms")
 
                             runner._log_message(f"[Time-Based Raw] Applying to track {item.track.id} ({item.track.props.name or 'Unnamed'})")
 
                             frame_sync_report = apply_raw_delay_sync(
                                 str(item.extracted_path),
-                                audio_delay_ms,
+                                total_delay_with_global_ms,
+                                raw_global_shift_ms,
                                 runner,
                                 ctx.settings_dict
                             )

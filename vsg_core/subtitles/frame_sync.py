@@ -927,10 +927,10 @@ def validate_frame_alignment(
 
 def apply_raw_delay_sync(
     subtitle_path: str,
-    delay_ms: float,
+    total_delay_with_global_ms: float,
+    raw_global_shift_ms: float,
     runner,
-    config: dict = None,
-    rounding_mode: str = 'floor'
+    config: dict = None
 ) -> Dict[str, Any]:
     """
     Apply raw audio delay using the same logic as correlation-frame-snap mode.
@@ -946,21 +946,27 @@ def apply_raw_delay_sync(
 
     Args:
         subtitle_path: Path to subtitle file (.ass, .srt, .ssa, .vtt)
-        delay_ms: Raw audio delay (unrounded float, full precision)
+        total_delay_with_global_ms: Total delay including global shift (from raw_source_delays_ms)
+        raw_global_shift_ms: Global shift that was applied (for logging breakdown)
         runner: CommandRunner for logging
         config: Optional config dict
-        rounding_mode: How to round final offset (default: 'floor')
 
     Returns:
         Dict with report statistics
     """
     config = config or {}
 
+    # Calculate pure correlation (same as correlation-frame-snap)
+    pure_correlation_ms = total_delay_with_global_ms - raw_global_shift_ms
+
     runner._log_message(f"[Raw Delay Sync] ═══════════════════════════════════════")
     runner._log_message(f"[Raw Delay Sync] Raw Delay Mode (no scene detection)")
     runner._log_message(f"[Raw Delay Sync] ═══════════════════════════════════════")
     runner._log_message(f"[Raw Delay Sync] Loading subtitle: {Path(subtitle_path).name}")
-    runner._log_message(f"[Raw Delay Sync] Raw audio delay: {delay_ms:+.3f}ms")
+    runner._log_message(f"[Raw Delay Sync] Input values:")
+    runner._log_message(f"[Raw Delay Sync]   Total delay (with global): {total_delay_with_global_ms:+.3f}ms")
+    runner._log_message(f"[Raw Delay Sync]   Global shift:              {raw_global_shift_ms:+.3f}ms")
+    runner._log_message(f"[Raw Delay Sync]   Pure correlation:          {pure_correlation_ms:+.3f}ms")
 
     # Capture original metadata before pysubs2 processing
     metadata = SubtitleMetadata(subtitle_path)
@@ -978,20 +984,24 @@ def apply_raw_delay_sync(
         return {
             'success': True,
             'total_events': 0,
-            'raw_delay_ms': delay_ms,
+            'pure_correlation_ms': pure_correlation_ms,
+            'global_shift_ms': raw_global_shift_ms,
             'final_offset_applied': 0
         }
 
     runner._log_message(f"[Raw Delay Sync] Loaded {len(subs.events)} subtitle events")
 
     # Calculate final offset using floor (same as correlation-frame-snap)
-    final_offset_ms = delay_ms
+    final_offset_ms = total_delay_with_global_ms
     final_offset_int = int(math.floor(final_offset_ms))
 
     runner._log_message(f"[Raw Delay Sync] ───────────────────────────────────────")
     runner._log_message(f"[Raw Delay Sync] Final offset calculation:")
-    runner._log_message(f"[Raw Delay Sync]   Raw delay:        {delay_ms:+.3f}ms")
-    runner._log_message(f"[Raw Delay Sync]   Floor applied:    {final_offset_int:+d}ms")
+    runner._log_message(f"[Raw Delay Sync]   Pure correlation:     {pure_correlation_ms:+.3f}ms")
+    runner._log_message(f"[Raw Delay Sync]   + Global shift:       {raw_global_shift_ms:+.3f}ms")
+    runner._log_message(f"[Raw Delay Sync]   ─────────────────────────────────────")
+    runner._log_message(f"[Raw Delay Sync]   = Total delay:        {total_delay_with_global_ms:+.3f}ms")
+    runner._log_message(f"[Raw Delay Sync]   Floor applied:        {final_offset_int:+d}ms")
     runner._log_message(f"[Raw Delay Sync] ───────────────────────────────────────")
 
     # Apply offset to all events (same as correlation-frame-snap)
@@ -1018,7 +1028,8 @@ def apply_raw_delay_sync(
     return {
         'success': True,
         'total_events': len(subs.events),
-        'raw_delay_ms': delay_ms,
+        'pure_correlation_ms': pure_correlation_ms,
+        'global_shift_ms': raw_global_shift_ms,
         'final_offset_ms': final_offset_ms,
         'final_offset_applied': final_offset_int
     }
