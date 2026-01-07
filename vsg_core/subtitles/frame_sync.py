@@ -2511,111 +2511,201 @@ def verify_correlation_with_frame_snap(
     runner._log_message(f"[Correlation+FrameSnap] Subtitle range: {min_sub_time}ms - {max_sub_time}ms ({sub_duration}ms)")
 
     # =========================================================================
-    # SCENE-BASED ALIGNMENT: Match scene change EVENTS between videos
-    # This works even with different encodes because we're matching narrative
-    # events (scene cuts) not visual frames.
+    # SLIDING WINDOW SCENE ALIGNMENT
+    # 1. Detect scene changes in SOURCE only (frame before cut = CENTER)
+    # 2. Get 7-frame window: [CENTER-3, CENTER-2, CENTER-1, CENTER, CENTER+1, CENTER+2, CENTER+3]
+    # 3. Use correlation to predict where CENTER lands in TARGET
+    # 4. Slide the window in TARGET to find best frame hash alignment
+    # 5. Refinement = matched_position - predicted_position
     # =========================================================================
 
     use_scene_checkpoints = config.get('correlation_snap_use_scene_changes', True)
-    refinements_ms = []  # Refinements calculated from scene alignment
+    refinements_ms = []  # Refinements calculated from sliding window alignment
+    window_radius = 3  # 3 frames before and after center = 7 frame window
+    search_range_frames = 5  # Search ±5 frames around predicted position (±~200ms)
+
+    # Import frame matching utilities
+    try:
+        from .frame_matching import VideoReader, compute_frame_hash
+    except ImportError:
+        runner._log_message(f"[Correlation+FrameSnap] ERROR: frame_matching module not available")
+        return {
+            'valid': False,
+            'error': 'frame_matching module not available',
+            'frame_delta': 0,
+            'frame_correction_ms': 0.0
+        }
 
     if use_scene_checkpoints:
         runner._log_message(f"[Correlation+FrameSnap] ─────────────────────────────────────────")
-        runner._log_message(f"[Correlation+FrameSnap] Scene-Based Alignment (matching scene EVENTS)")
+        runner._log_message(f"[Correlation+FrameSnap] Sliding Window Scene Alignment")
+        runner._log_message(f"[Correlation+FrameSnap] Window: {window_radius*2+1} frames (center ±{window_radius})")
+        runner._log_message(f"[Correlation+FrameSnap] Search range: ±{search_range_frames} frames around prediction")
 
-        # Convert time range to frame range
+        # Convert time range to frame range for source
         start_frame = int(min_sub_time * fps / 1000.0)
         end_frame = int(max_sub_time * fps / 1000.0)
 
-        # Also need to search in target video around where we expect scenes
-        # Add buffer for correlation offset
-        target_start_frame = max(0, int((min_sub_time + pure_correlation_delay_ms) * fps / 1000.0) - int(fps * 2))
-        target_end_frame = int((max_sub_time + pure_correlation_delay_ms) * fps / 1000.0) + int(fps * 2)
-
         runner._log_message(f"[Correlation+FrameSnap] Detecting scene changes in SOURCE video...")
-        source_scene_frames = detect_scene_changes(source_video, start_frame, end_frame, runner, max_scenes=10)
+        source_scene_frames = detect_scene_changes(source_video, start_frame, end_frame, runner, max_scenes=5)
 
-        runner._log_message(f"[Correlation+FrameSnap] Detecting scene changes in TARGET video...")
-        target_scene_frames = detect_scene_changes(target_video, target_start_frame, target_end_frame, runner, max_scenes=20)
+        if source_scene_frames:
+            runner._log_message(f"[Correlation+FrameSnap] Found {len(source_scene_frames)} scene anchors in source")
 
-        if source_scene_frames and target_scene_frames:
-            runner._log_message(f"[Correlation+FrameSnap] Source scenes: {len(source_scene_frames)} at frames {source_scene_frames[:5]}{'...' if len(source_scene_frames) > 5 else ''}")
-            runner._log_message(f"[Correlation+FrameSnap] Target scenes: {len(target_scene_frames)} at frames {target_scene_frames[:5]}{'...' if len(target_scene_frames) > 5 else ''}")
+            # Open video readers for frame extraction
+            try:
+                source_reader = VideoReader(source_video, runner)
+                target_reader = VideoReader(target_video, runner)
+            except Exception as e:
+                runner._log_message(f"[Correlation+FrameSnap] ERROR: Failed to open videos: {e}")
+                return {
+                    'valid': False,
+                    'error': f'Failed to open videos: {e}',
+                    'frame_delta': 0,
+                    'frame_correction_ms': 0.0
+                }
 
-            # Convert target scene frames to times for matching
-            target_scene_times_ms = []
-            for tf in target_scene_frames:
-                t_ms = frame_to_time_vfr(tf, target_video, fps, runner, config)
-                if t_ms is None:
-                    t_ms = tf * 1000.0 / fps
-                target_scene_times_ms.append(t_ms)
+            # Process each scene anchor with sliding window
+            for scene_idx, center_frame in enumerate(source_scene_frames[:3]):  # Max 3 scenes
+                runner._log_message(f"[Correlation+FrameSnap] ─────────────────────────────────────────")
+                runner._log_message(f"[Correlation+FrameSnap] Scene {scene_idx+1}: CENTER = frame {center_frame}")
 
-            # For each source scene, find the nearest target scene
-            runner._log_message(f"[Correlation+FrameSnap] Matching source scenes to target scenes...")
+                # Calculate center time using CFR formula (more reliable than VFR lookup here)
+                center_time_ms = center_frame * 1000.0 / fps
+                runner._log_message(f"[Correlation+FrameSnap]   Center time: {center_time_ms:.3f}ms")
 
-            for i, source_frame in enumerate(source_scene_frames[:5]):  # Max 5 checkpoints
-                # Get source scene time
-                source_time_ms = frame_to_time_vfr(source_frame, source_video, fps, runner, config)
-                if source_time_ms is None:
-                    source_time_ms = source_frame * 1000.0 / fps
+                # Build source window: [center-3, center-2, center-1, CENTER, center+1, center+2, center+3]
+                source_window_frames = list(range(center_frame - window_radius, center_frame + window_radius + 1))
+                runner._log_message(f"[Correlation+FrameSnap]   Source window frames: {source_window_frames}")
 
-                # Predict where this scene should be in target (using correlation)
-                predicted_target_time_ms = source_time_ms + pure_correlation_delay_ms
+                # Skip if window would include negative frames
+                if source_window_frames[0] < 0:
+                    runner._log_message(f"[Correlation+FrameSnap]   Skipping - window starts before frame 0")
+                    continue
 
-                # Find NEAREST actual scene change in target
-                best_target_time_ms = None
-                best_distance_ms = float('inf')
-                best_target_frame = None
+                # Compute hashes for source window
+                source_hashes = []
+                source_window_valid = True
+                for sf in source_window_frames:
+                    img = source_reader.get_frame_at_index(sf)
+                    if img is None:
+                        runner._log_message(f"[Correlation+FrameSnap]   ERROR: Could not read source frame {sf}")
+                        source_window_valid = False
+                        break
+                    h = compute_frame_hash(img, hash_size=hash_size, method=hash_algorithm)
+                    if h is None:
+                        runner._log_message(f"[Correlation+FrameSnap]   ERROR: Could not hash source frame {sf}")
+                        source_window_valid = False
+                        break
+                    source_hashes.append(h)
 
-                for j, target_time_ms in enumerate(target_scene_times_ms):
-                    distance_ms = abs(target_time_ms - predicted_target_time_ms)
-                    if distance_ms < best_distance_ms:
-                        best_distance_ms = distance_ms
-                        best_target_time_ms = target_time_ms
-                        best_target_frame = target_scene_frames[j]
+                if not source_window_valid:
+                    continue
 
-                if best_target_time_ms is not None:
-                    # Calculate the ACTUAL offset from scene alignment
-                    actual_offset_ms = best_target_time_ms - source_time_ms
+                # Predict where center should be in target using correlation
+                predicted_target_center_time_ms = center_time_ms + pure_correlation_delay_ms
+                predicted_target_center_frame = int(predicted_target_center_time_ms * fps / 1000.0)
+                runner._log_message(f"[Correlation+FrameSnap]   Predicted target center: frame {predicted_target_center_frame} ({predicted_target_center_time_ms:.3f}ms)")
 
-                    # How far off was correlation from the actual scene alignment?
-                    refinement_ms = actual_offset_ms - pure_correlation_delay_ms
+                # Search range in target: predicted ± search_range_frames
+                search_start = predicted_target_center_frame - search_range_frames
+                search_end = predicted_target_center_frame + search_range_frames
 
-                    # Only accept if the scene is reasonably close (within 1 second of prediction)
-                    # This prevents matching to wrong scenes
-                    if best_distance_ms <= 1000.0:  # Within 1 second
-                        refinements_ms.append(refinement_ms)
+                if search_start < window_radius:
+                    search_start = window_radius  # Ensure we can build full window
 
-                        runner._log_message(
-                            f"[Correlation+FrameSnap]   Scene {i+1}: source frame {source_frame} ({source_time_ms:.0f}ms)"
-                        )
-                        runner._log_message(
-                            f"[Correlation+FrameSnap]     → Predicted target: {predicted_target_time_ms:.0f}ms"
-                        )
-                        runner._log_message(
-                            f"[Correlation+FrameSnap]     → Actual target scene: frame {best_target_frame} ({best_target_time_ms:.0f}ms)"
-                        )
-                        runner._log_message(
-                            f"[Correlation+FrameSnap]     → Distance from prediction: {best_distance_ms:.1f}ms"
-                        )
-                        runner._log_message(
-                            f"[Correlation+FrameSnap]     → Actual offset: {actual_offset_ms:.3f}ms (correlation: {pure_correlation_delay_ms:.3f}ms)"
-                        )
-                        runner._log_message(
-                            f"[Correlation+FrameSnap]     → Refinement: {refinement_ms:+.3f}ms"
-                        )
-                    else:
-                        runner._log_message(
-                            f"[Correlation+FrameSnap]   Scene {i+1}: No matching target scene within 1s "
-                            f"(nearest was {best_distance_ms:.0f}ms away)"
-                        )
+                runner._log_message(f"[Correlation+FrameSnap]   Searching target frames {search_start} to {search_end}")
+
+                # Slide window through target and find best alignment
+                best_offset_frames = 0  # Offset from predicted position
+                best_total_distance = float('inf')
+                best_matched_center = predicted_target_center_frame
+                offset_scores = {}
+
+                for target_center in range(search_start, search_end + 1):
+                    target_window_frames = list(range(target_center - window_radius, target_center + window_radius + 1))
+
+                    # Compute hashes for this target window position
+                    target_hashes = []
+                    target_window_valid = True
+                    for tf in target_window_frames:
+                        if tf < 0:
+                            target_window_valid = False
+                            break
+                        img = target_reader.get_frame_at_index(tf)
+                        if img is None:
+                            target_window_valid = False
+                            break
+                        h = compute_frame_hash(img, hash_size=hash_size, method=hash_algorithm)
+                        if h is None:
+                            target_window_valid = False
+                            break
+                        target_hashes.append(h)
+
+                    if not target_window_valid:
+                        continue
+
+                    # Calculate total hash distance for this alignment
+                    total_distance = 0
+                    frame_distances = []
+                    for sh, th in zip(source_hashes, target_hashes):
+                        dist = sh - th
+                        total_distance += dist
+                        frame_distances.append(dist)
+
+                    offset = target_center - predicted_target_center_frame
+                    offset_scores[offset] = {
+                        'total_distance': total_distance,
+                        'frame_distances': frame_distances,
+                        'target_center': target_center
+                    }
+
+                    if total_distance < best_total_distance:
+                        best_total_distance = total_distance
+                        best_offset_frames = offset
+                        best_matched_center = target_center
+
+                # Log search results
+                runner._log_message(f"[Correlation+FrameSnap]   Search results:")
+                for offset in sorted(offset_scores.keys()):
+                    info = offset_scores[offset]
+                    marker = " ← BEST" if offset == best_offset_frames else ""
+                    runner._log_message(
+                        f"[Correlation+FrameSnap]     Offset {offset:+d}: total_dist={info['total_distance']}, "
+                        f"per_frame={info['frame_distances']}{marker}"
+                    )
+
+                # Calculate refinement from best alignment
+                # Refinement = how many ms the actual match differs from correlation prediction
+                matched_center_time_ms = best_matched_center * 1000.0 / fps
+                actual_offset_ms = matched_center_time_ms - center_time_ms
+                refinement_ms = actual_offset_ms - pure_correlation_delay_ms
+
+                runner._log_message(f"[Correlation+FrameSnap]   ─────────────────────────────────────")
+                runner._log_message(f"[Correlation+FrameSnap]   Best match: target frame {best_matched_center}")
+                runner._log_message(f"[Correlation+FrameSnap]   Offset from prediction: {best_offset_frames:+d} frames")
+                runner._log_message(f"[Correlation+FrameSnap]   Source center time: {center_time_ms:.3f}ms")
+                runner._log_message(f"[Correlation+FrameSnap]   Matched target time: {matched_center_time_ms:.3f}ms")
+                runner._log_message(f"[Correlation+FrameSnap]   Actual offset: {actual_offset_ms:.3f}ms")
+                runner._log_message(f"[Correlation+FrameSnap]   Correlation predicted: {pure_correlation_delay_ms:.3f}ms")
+                runner._log_message(f"[Correlation+FrameSnap]   REFINEMENT: {refinement_ms:+.3f}ms ({best_offset_frames:+d} frames)")
+
+                # Check if this is a good match (total distance should be low)
+                avg_frame_distance = best_total_distance / (window_radius * 2 + 1)
+                if avg_frame_distance <= hash_threshold * 2:  # Allow some tolerance
+                    refinements_ms.append(refinement_ms)
+                    runner._log_message(f"[Correlation+FrameSnap]   Match quality: GOOD (avg dist={avg_frame_distance:.1f})")
+                else:
+                    runner._log_message(f"[Correlation+FrameSnap]   Match quality: POOR (avg dist={avg_frame_distance:.1f}) - not using")
+
+            # Clean up video readers
+            del source_reader
+            del target_reader
+            gc.collect()
         else:
-            if not source_scene_frames:
-                runner._log_message(f"[Correlation+FrameSnap] No scene changes detected in source video")
-            if not target_scene_frames:
-                runner._log_message(f"[Correlation+FrameSnap] No scene changes detected in target video")
+            runner._log_message(f"[Correlation+FrameSnap] No scene changes detected in source video")
 
-    # Calculate frame correction from scene-based refinements
+    # Calculate frame correction from sliding window refinements
     runner._log_message(f"[Correlation+FrameSnap] ─────────────────────────────────────────")
 
     if refinements_ms and len(refinements_ms) >= 2:
