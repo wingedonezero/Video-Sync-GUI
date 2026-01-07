@@ -217,6 +217,72 @@ class VideoReader:
         else:
             return self._get_frame_ffmpeg(time_ms)
 
+    def get_frame_at_index(self, frame_num: int) -> Optional[Image.Image]:
+        """
+        Extract frame by frame number directly (avoids time-to-frame conversion precision issues).
+
+        This method bypasses the floating-point time conversion that can cause 1-frame
+        offsets with NTSC framerates (23.976fps, 29.97fps) where int(time * fps) may
+        truncate incorrectly (e.g., 1000.9999 -> 1000 instead of 1001).
+
+        Args:
+            frame_num: Frame index (0-based)
+
+        Returns:
+            PIL Image object, or None on failure
+        """
+        if self.use_vapoursynth and self.vs_clip:
+            return self._get_frame_vapoursynth_by_index(frame_num)
+        elif self.use_ffms2 and self.source:
+            return self._get_frame_ffms2_by_index(frame_num)
+        elif self.use_opencv and self.cap:
+            # OpenCV doesn't have reliable frame-accurate seeking by index
+            # Fall back to time-based seeking with best effort
+            time_ms = int(frame_num * 1000.0 / self.fps) if self.fps else 0
+            return self._get_frame_opencv(time_ms)
+        else:
+            # FFmpeg fallback - use time-based
+            time_ms = int(frame_num * 1000.0 / self.fps) if self.fps else 0
+            return self._get_frame_ffmpeg(time_ms)
+
+    def _get_frame_vapoursynth_by_index(self, frame_num: int) -> Optional[Image.Image]:
+        """Extract frame by index using VapourSynth (frame-accurate)."""
+        try:
+            import numpy as np
+
+            # Clamp to valid range
+            frame_num = max(0, min(frame_num, len(self.vs_clip) - 1))
+
+            # Get frame directly by index (no time conversion!)
+            frame = self.vs_clip.get_frame(frame_num)
+
+            # Extract Y (luma) plane as grayscale
+            y_plane = np.asarray(frame[0])
+
+            return Image.fromarray(y_plane, 'L')
+
+        except Exception as e:
+            self.runner._log_message(f"[FrameMatch] ERROR: VapourSynth frame extraction by index failed: {e}")
+            return None
+
+    def _get_frame_ffms2_by_index(self, frame_num: int) -> Optional[Image.Image]:
+        """Extract frame by index using FFMS2 (frame-accurate)."""
+        try:
+            # Clamp to valid range
+            frame_num = max(0, min(frame_num, self.source.properties.NumFrames - 1))
+
+            # Get frame directly by index (no time conversion!)
+            frame = self.source.get_frame(frame_num)
+
+            # Convert to PIL Image
+            frame_array = frame.planes[0]
+
+            return Image.fromarray(frame_array)
+
+        except Exception as e:
+            self.runner._log_message(f"[FrameMatch] ERROR: FFMS2 frame extraction by index failed: {e}")
+            return None
+
     def _get_frame_vapoursynth(self, time_ms: int) -> Optional[Image.Image]:
         """
         Extract frame using VapourSynth (instant indexed seeking with persistent cache).
