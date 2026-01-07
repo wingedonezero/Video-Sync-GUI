@@ -425,6 +425,149 @@ def get_vapoursynth_frame_info(video_path: str, runner) -> Optional[Tuple[int, f
         return None
 
 
+def detect_scene_changes(
+    video_path: str,
+    start_frame: int,
+    end_frame: int,
+    runner,
+    max_scenes: int = 10
+) -> List[int]:
+    """
+    Detect scene changes in a video using VapourSynth.
+
+    Tries multiple methods in order:
+    1. wwxd plugin (fast Xvid-like detection)
+    2. PlaneStatsDiff (frame difference threshold)
+
+    Scene changes are ideal checkpoints because adjacent frames are
+    distinctly different, making frame matching unambiguous.
+
+    Args:
+        video_path: Path to video file
+        start_frame: Start frame to search from
+        end_frame: End frame to search to
+        runner: CommandRunner for logging
+        max_scenes: Maximum number of scene changes to return
+
+    Returns:
+        List of frame numbers where scene changes occur
+    """
+    try:
+        import vapoursynth as vs
+
+        runner._log_message(f"[SceneDetect] Detecting scene changes in {Path(video_path).name}")
+        runner._log_message(f"[SceneDetect] Searching frames {start_frame} to {end_frame}")
+
+        core = vs.core
+
+        # Load video
+        clip = None
+        try:
+            clip = core.lsmas.LWLibavSource(str(video_path))
+        except (AttributeError, Exception):
+            pass
+
+        if clip is None:
+            try:
+                clip = core.ffms2.Source(str(video_path))
+            except Exception as e:
+                runner._log_message(f"[SceneDetect] ERROR: Failed to load video: {e}")
+                return []
+
+        # Limit to search range
+        if end_frame > clip.num_frames:
+            end_frame = clip.num_frames - 1
+        if start_frame < 0:
+            start_frame = 0
+
+        # Trim to region of interest
+        clip = clip[start_frame:end_frame + 1]
+
+        scene_frames = []
+
+        # Try wwxd plugin first (fastest and most reliable)
+        try:
+            wwxd_clip = core.wwxd.WWXD(clip)
+
+            # Request frames and check SceneChange property
+            for i in range(wwxd_clip.num_frames):
+                frame = wwxd_clip.get_frame(i)
+                if frame.props.get('Scenechange', 0) == 1 or frame.props.get('SceneChange', 0) == 1:
+                    actual_frame = start_frame + i
+                    scene_frames.append(actual_frame)
+                    if len(scene_frames) >= max_scenes:
+                        break
+
+            runner._log_message(f"[SceneDetect] Found {len(scene_frames)} scene changes using wwxd")
+
+            # Cleanup
+            del wwxd_clip
+            del clip
+            del core
+            gc.collect()
+
+            return scene_frames
+
+        except AttributeError:
+            runner._log_message(f"[SceneDetect] wwxd plugin not installed, trying PlaneStatsDiff")
+        except Exception as e:
+            runner._log_message(f"[SceneDetect] wwxd failed: {e}, trying PlaneStatsDiff")
+
+        # Fallback: Use PlaneStatsDiff to detect scene changes
+        # Compare each frame to the previous one
+        try:
+            # Convert to grayscale for faster comparison
+            gray = core.std.ShufflePlanes(clip, planes=0, colorfamily=vs.GRAY)
+
+            # Add frame difference statistics
+            diff_clip = core.std.PlaneStats(gray, gray[1:] + gray[-1:])
+
+            # Scene change threshold (higher = more sensitive)
+            # PlaneStatsDiff returns average difference, 0.1 = 10% pixel difference
+            threshold = 0.15
+
+            for i in range(1, diff_clip.num_frames):
+                frame = diff_clip.get_frame(i)
+                diff = frame.props.get('PlaneStatsDiff', 0)
+
+                if diff > threshold:
+                    actual_frame = start_frame + i
+                    scene_frames.append(actual_frame)
+                    if len(scene_frames) >= max_scenes:
+                        break
+
+            runner._log_message(f"[SceneDetect] Found {len(scene_frames)} scene changes using PlaneStatsDiff")
+
+            # Cleanup
+            del diff_clip
+            del gray
+            del clip
+            del core
+            gc.collect()
+
+            return scene_frames
+
+        except Exception as e:
+            runner._log_message(f"[SceneDetect] PlaneStatsDiff failed: {e}")
+
+        # Cleanup on failure
+        try:
+            del clip
+            del core
+        except:
+            pass
+        gc.collect()
+
+        return []
+
+    except ImportError:
+        runner._log_message("[SceneDetect] WARNING: VapourSynth not installed")
+        return []
+    except Exception as e:
+        runner._log_message(f"[SceneDetect] ERROR: {e}")
+        return []
+
+
 def extract_frame_as_image(video_path: str, frame_number: int, runner) -> Optional[bytes]:
     """
     Extract a single frame from video as PNG image data using VapourSynth.
@@ -2385,14 +2528,43 @@ def verify_correlation_with_frame_snap(
     max_sub_time = max(event.end for event in subtitle_events)
     sub_duration = max_sub_time - min_sub_time
 
-    # Select 3 checkpoints: 10%, 50%, 90% of subtitle duration
-    checkpoints = [
-        ('start (10%)', min_sub_time + sub_duration * 0.10),
-        ('middle (50%)', min_sub_time + sub_duration * 0.50),
-        ('end (90%)', min_sub_time + sub_duration * 0.90),
-    ]
-
     runner._log_message(f"[Correlation+FrameSnap] Subtitle range: {min_sub_time}ms - {max_sub_time}ms ({sub_duration}ms)")
+
+    # Try to use scene changes as checkpoints (more reliable than arbitrary positions)
+    use_scene_checkpoints = config.get('correlation_snap_use_scene_changes', True)
+    checkpoints = []
+
+    if use_scene_checkpoints:
+        runner._log_message(f"[Correlation+FrameSnap] Searching for scene changes (unambiguous checkpoints)...")
+
+        # Convert time range to frame range
+        start_frame = int(min_sub_time * fps / 1000.0)
+        end_frame = int(max_sub_time * fps / 1000.0)
+
+        # Detect scene changes in source video
+        scene_frames = detect_scene_changes(source_video, start_frame, end_frame, runner, max_scenes=5)
+
+        if scene_frames and len(scene_frames) >= 2:
+            # Use scene changes as checkpoints
+            runner._log_message(f"[Correlation+FrameSnap] Using {len(scene_frames)} scene changes as checkpoints")
+
+            for i, frame_num in enumerate(scene_frames[:3]):  # Max 3 checkpoints
+                frame_time_ms = frame_to_time_vfr(frame_num, source_video, fps, runner, config)
+                if frame_time_ms is None:
+                    frame_time_ms = frame_num * 1000.0 / fps
+                checkpoints.append((f'scene_{i+1} (frame {frame_num})', float(frame_time_ms)))
+        else:
+            runner._log_message(f"[Correlation+FrameSnap] Not enough scene changes found, using percentage-based checkpoints")
+
+    # Fallback: Select 3 checkpoints at 10%, 50%, 90% of subtitle duration
+    if not checkpoints:
+        checkpoints = [
+            ('start (10%)', min_sub_time + sub_duration * 0.10),
+            ('middle (50%)', min_sub_time + sub_duration * 0.50),
+            ('end (90%)', min_sub_time + sub_duration * 0.90),
+        ]
+        runner._log_message(f"[Correlation+FrameSnap] Using percentage-based checkpoints")
+
     runner._log_message(f"[Correlation+FrameSnap] Checkpoints: {[f'{name}={t:.0f}ms' for name, t in checkpoints]}")
 
     checkpoint_results = []
