@@ -466,6 +466,8 @@ def detect_scene_changes(
         # Open video and get framerate
         video = open_video(str(video_path))
         fps = video.frame_rate
+        # Close video handle to prevent resource leaks in batch processing
+        del video
 
         # Convert frame range to time range for PySceneDetect
         start_time_sec = start_frame / fps
@@ -2463,31 +2465,6 @@ def verify_correlation_with_frame_snap(
 
     runner._log_message(f"[Correlation+FrameSnap] Hash: {hash_algorithm}, size={hash_size}, threshold={hash_threshold}")
 
-    # Import frame matching utilities
-    try:
-        from .frame_matching import VideoReader, compute_frame_hash
-    except ImportError:
-        runner._log_message(f"[Correlation+FrameSnap] ERROR: frame_matching module not available")
-        return {
-            'valid': False,
-            'error': 'frame_matching module not available',
-            'frame_delta': 0,
-            'frame_correction_ms': 0.0
-        }
-
-    # Open video readers
-    try:
-        source_reader = VideoReader(source_video, runner)
-        target_reader = VideoReader(target_video, runner)
-    except Exception as e:
-        runner._log_message(f"[Correlation+FrameSnap] ERROR: Failed to open videos: {e}")
-        return {
-            'valid': False,
-            'error': f'Failed to open videos: {e}',
-            'frame_delta': 0,
-            'frame_correction_ms': 0.0
-        }
-
     # Determine checkpoint times from subtitle events
     if not subtitle_events:
         runner._log_message(f"[Correlation+FrameSnap] ERROR: No subtitle events provided")
@@ -2550,11 +2527,18 @@ def verify_correlation_with_frame_snap(
             runner._log_message(f"[Correlation+FrameSnap] Found {len(source_scene_frames)} scene anchors in source")
 
             # Open video readers for frame extraction
+            source_reader = None
+            target_reader = None
             try:
                 source_reader = VideoReader(source_video, runner)
                 target_reader = VideoReader(target_video, runner)
             except Exception as e:
                 runner._log_message(f"[Correlation+FrameSnap] ERROR: Failed to open videos: {e}")
+                # Clean up any reader that was created before the error
+                if source_reader:
+                    source_reader.close()
+                if target_reader:
+                    target_reader.close()
                 return {
                     'valid': False,
                     'error': f'Failed to open videos: {e}',
@@ -2697,7 +2681,9 @@ def verify_correlation_with_frame_snap(
                 else:
                     runner._log_message(f"[Correlation+FrameSnap]   Match quality: POOR (avg dist={avg_frame_distance:.1f}) - not using")
 
-            # Clean up video readers
+            # Clean up video readers properly to avoid resource leaks in batch processing
+            source_reader.close()
+            target_reader.close()
             del source_reader
             del target_reader
             gc.collect()
