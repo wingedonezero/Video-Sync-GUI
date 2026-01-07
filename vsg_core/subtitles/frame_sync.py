@@ -2493,9 +2493,6 @@ def verify_correlation_with_frame_snap(
     # Determine checkpoint times from subtitle events
     if not subtitle_events:
         runner._log_message(f"[Correlation+FrameSnap] ERROR: No subtitle events provided")
-        del source_reader
-        del target_reader
-        gc.collect()
         return {
             'valid': False,
             'error': 'No subtitle events',
@@ -2665,14 +2662,16 @@ def verify_correlation_with_frame_snap(
                         best_offset_frames = offset
                         best_matched_center = target_center
 
-                # Log search results
+                # Log search results with times
                 runner._log_message(f"[Correlation+FrameSnap]   Search results:")
                 for offset in sorted(offset_scores.keys()):
                     info = offset_scores[offset]
+                    target_center = info['target_center']
+                    target_time_ms = target_center * 1000.0 / fps
                     marker = " ← BEST" if offset == best_offset_frames else ""
                     runner._log_message(
-                        f"[Correlation+FrameSnap]     Offset {offset:+d}: total_dist={info['total_distance']}, "
-                        f"per_frame={info['frame_distances']}{marker}"
+                        f"[Correlation+FrameSnap]     Offset {offset:+d}: frame {target_center} ({target_time_ms:.1f}ms), "
+                        f"total_dist={info['total_distance']}, per_frame={info['frame_distances']}{marker}"
                     )
 
                 # Calculate refinement from best alignment
@@ -2709,56 +2708,53 @@ def verify_correlation_with_frame_snap(
     runner._log_message(f"[Correlation+FrameSnap] ─────────────────────────────────────────")
 
     if refinements_ms and len(refinements_ms) >= 2:
-        runner._log_message(f"[Correlation+FrameSnap] Scene refinements: {[f'{r:+.1f}ms' for r in refinements_ms]}")
+        runner._log_message(f"[Correlation+FrameSnap] Scene refinements: {[f'{r:+.3f}ms' for r in refinements_ms]}")
 
-        # Check if refinements agree (within half a frame)
+        # Check if refinements agree (within 1 frame tolerance)
         min_ref = min(refinements_ms)
         max_ref = max(refinements_ms)
         spread = max_ref - min_ref
 
         if spread <= frame_duration_ms:
-            # Good agreement - use average refinement
+            # Good agreement - use average refinement WITH FULL PRECISION
+            # Like duration mode: keep sub-frame precision, only round at final sync step
             avg_refinement = sum(refinements_ms) / len(refinements_ms)
 
-            # Round to nearest frame
-            frames_off = round(avg_refinement / frame_duration_ms)
-            frame_correction_ms = frames_off * frame_duration_ms
+            # Keep full precision for correlation refinement (like duration mode)
+            # Don't round to frame boundaries here - that happens at final sync
+            frame_correction_ms = avg_refinement
 
-            runner._log_message(f"[Correlation+FrameSnap] Scene checkpoints AGREE (spread={spread:.1f}ms)")
+            runner._log_message(f"[Correlation+FrameSnap] Scene checkpoints AGREE (spread={spread:.3f}ms)")
             runner._log_message(f"[Correlation+FrameSnap] Average refinement: {avg_refinement:+.3f}ms")
-            runner._log_message(f"[Correlation+FrameSnap] Frames off: {frames_off:+d}")
-            runner._log_message(f"[Correlation+FrameSnap] Frame correction: {frame_correction_ms:+.3f}ms")
+            runner._log_message(f"[Correlation+FrameSnap] (~{avg_refinement / frame_duration_ms:+.2f} frames)")
+            runner._log_message(f"[Correlation+FrameSnap] Using PRECISE refinement (no frame rounding)")
 
             valid = True
         else:
             # Disagreement - scenes might not be matching correctly
-            runner._log_message(f"[Correlation+FrameSnap] Scene checkpoints DISAGREE (spread={spread:.1f}ms)")
+            runner._log_message(f"[Correlation+FrameSnap] Scene checkpoints DISAGREE (spread={spread:.3f}ms)")
             runner._log_message(f"[Correlation+FrameSnap] This may indicate different cuts or drift")
 
             # Try using median as it's more robust to outliers
             sorted_refs = sorted(refinements_ms)
             median_refinement = sorted_refs[len(sorted_refs) // 2]
-            frames_off = round(median_refinement / frame_duration_ms)
-            frame_correction_ms = frames_off * frame_duration_ms
 
-            runner._log_message(f"[Correlation+FrameSnap] Using median refinement: {median_refinement:+.3f}ms → {frames_off:+d} frames")
+            # Still keep precision
+            frame_correction_ms = median_refinement
+
+            runner._log_message(f"[Correlation+FrameSnap] Using median refinement: {median_refinement:+.3f}ms")
 
             valid = False  # Mark as uncertain
     elif refinements_ms and len(refinements_ms) == 1:
         # Only one scene matched - use it but mark uncertain
-        frame_correction_ms = round(refinements_ms[0] / frame_duration_ms) * frame_duration_ms
-        runner._log_message(f"[Correlation+FrameSnap] Only 1 scene matched, using refinement: {refinements_ms[0]:+.1f}ms")
+        frame_correction_ms = refinements_ms[0]  # Keep precision
+        runner._log_message(f"[Correlation+FrameSnap] Only 1 scene matched, using refinement: {refinements_ms[0]:+.3f}ms")
         valid = False
     else:
         # No scene matches - trust correlation
         frame_correction_ms = 0.0
         runner._log_message(f"[Correlation+FrameSnap] No scene matches found, trusting correlation")
         valid = False
-
-    # Clean up video readers (we didn't use them for scene-based approach)
-    del source_reader
-    del target_reader
-    gc.collect()
 
     runner._log_message(f"[Correlation+FrameSnap] Final frame correction: {frame_correction_ms:+.3f}ms")
     runner._log_message(f"[Correlation+FrameSnap] ═══════════════════════════════════════")
