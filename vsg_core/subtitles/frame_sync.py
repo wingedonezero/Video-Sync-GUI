@@ -2395,22 +2395,33 @@ def verify_correlation_with_frame_snap(
     for checkpoint_name, checkpoint_time_ms in checkpoints:
         runner._log_message(f"[Correlation+FrameSnap] Checkpoint '{checkpoint_name}' at {checkpoint_time_ms:.0f}ms:")
 
+        # Convert checkpoint time to frame number using VideoTimestamps for precision
+        # This avoids floating point errors like int(1000.9999 * fps / 1000) -> wrong frame
+        checkpoint_frame = time_to_frame_vfr(checkpoint_time_ms, source_video, fps, runner, config)
+        if checkpoint_frame is None:
+            # Fallback if VideoTimestamps unavailable
+            checkpoint_frame = int(checkpoint_time_ms * fps / 1000.0)
+        runner._log_message(f"[Correlation+FrameSnap]   Checkpoint frame: {checkpoint_frame}")
+
         best_delta = 0
         best_score = -float('inf')
         delta_scores = {}
 
         for frame_delta in [-1, 0, +1]:
-            # For this delta, what's the total offset from source to target?
-            # target_time = source_time + correlation + (delta * frame_duration)
-            test_offset_ms = pure_correlation_delay_ms + (frame_delta * frame_duration_ms)
-
-            # Extract adjacent frames from source around the checkpoint
+            # Extract adjacent frames from source around the checkpoint using FRAME INDICES
+            # This avoids the floating-point time conversion that causes 1-frame errors
             source_frame_hashes = []
+            source_frame_nums = {}  # Map adj_offset -> frame_num for target calculation
+
             for adj_offset in range(-adjacent_frames, adjacent_frames + 1):
-                source_time_ms = checkpoint_time_ms + (adj_offset * frame_duration_ms)
-                if source_time_ms < 0:
+                source_frame_num = checkpoint_frame + adj_offset
+                if source_frame_num < 0:
                     continue
-                frame = source_reader.get_frame_at_time(int(source_time_ms))
+
+                source_frame_nums[adj_offset] = source_frame_num
+
+                # Use frame index directly - avoids int(time * fps) precision issues!
+                frame = source_reader.get_frame_at_index(source_frame_num)
                 if frame is not None:
                     frame_hash = compute_frame_hash(frame, hash_size=hash_size, method=hash_algorithm)
                     if frame_hash is not None:
@@ -2426,14 +2437,32 @@ def verify_correlation_with_frame_snap(
             compared_count = 0
 
             for adj_offset, source_hash in source_frame_hashes:
-                # Target time = source_time + test_offset
-                source_time_ms = checkpoint_time_ms + (adj_offset * frame_duration_ms)
-                target_time_ms = source_time_ms + test_offset_ms
+                source_frame_num = source_frame_nums[adj_offset]
+
+                # Get exact timestamp for this source frame using VideoTimestamps
+                source_time_ms = frame_to_time_vfr(source_frame_num, source_video, fps, runner, config)
+                if source_time_ms is None:
+                    source_time_ms = source_frame_num * 1000.0 / fps
+
+                # Target time = source frame time + correlation
+                target_time_ms = source_time_ms + pure_correlation_delay_ms
 
                 if target_time_ms < 0:
                     continue
 
-                target_frame = target_reader.get_frame_at_time(int(target_time_ms))
+                # Convert target time to frame number, then apply delta
+                target_frame_num = time_to_frame_vfr(target_time_ms, target_video, fps, runner, config)
+                if target_frame_num is None:
+                    target_frame_num = int(target_time_ms * fps / 1000.0)
+
+                # Apply frame delta adjustment
+                target_frame_num += frame_delta
+
+                if target_frame_num < 0:
+                    continue
+
+                # Use frame index directly for target too
+                target_frame = target_reader.get_frame_at_index(target_frame_num)
                 if target_frame is not None:
                     target_hash = compute_frame_hash(target_frame, hash_size=hash_size, method=hash_algorithm)
                     if target_hash is not None:
