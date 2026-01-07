@@ -29,6 +29,8 @@ class SubtitlesStep:
             runner._log_message("[WARN] No Source 1 file found for subtitle rescaling reference.")
 
         items_to_add = []
+        _any_no_scene_fallback = False  # Track if any track used raw delay due to no scene matches
+
         for item in ctx.extracted_items:
             if item.track.type != TrackType.SUBTITLES:
                 continue
@@ -328,6 +330,10 @@ class SubtitlesStep:
                                     runner._log_message("------------------------------------------")
                                     # Mark that timestamps have been adjusted
                                     item.frame_adjusted = True
+                                    # Check if this track used raw delay fallback (no scene matches)
+                                    verification = frame_sync_report.get('verification', {})
+                                    if verification.get('num_scene_matches', 0) == 0:
+                                        _any_no_scene_fallback = True
                                 elif frame_sync_report and 'error' in frame_sync_report:
                                     # Sync function returned error
                                     error_msg = frame_sync_report['error']
@@ -376,6 +382,10 @@ class SubtitlesStep:
                     multiply_font_size(str(item.extracted_path), size_mult, runner)
                 else:
                     runner._log_message(f"[Font Size] WARNING: Ignoring unreasonable size multiplier {size_mult:.2f}x for track {item.track.id}. Using 1.0x instead.")
+
+        # Set context flag if any track used raw delay fallback due to no scene matches
+        if _any_no_scene_fallback:
+            ctx.correlation_snap_no_scenes_fallback = True
 
         if items_to_add:
             ctx.extracted_items.extend(items_to_add)

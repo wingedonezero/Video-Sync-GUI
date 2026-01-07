@@ -62,6 +62,10 @@ class Context:
     # Format: {source_key: List[AudioSegment]}
     stepping_edls: Dict[str, List[Any]] = field(default_factory=dict)
 
+    # Flag if any subtitle track used raw delay fallback due to no scene matches
+    # (correlation-frame-snap mode couldn't find scenes to verify against)
+    correlation_snap_no_scenes_fallback: bool = False
+
     # Results/summaries
     out_file: Optional[str] = None
     tokens: Optional[List[str]] = None
