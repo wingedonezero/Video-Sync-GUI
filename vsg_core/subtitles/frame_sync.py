@@ -2460,10 +2460,8 @@ def verify_correlation_with_frame_snap(
     hash_algorithm = config.get('correlation_snap_hash_algorithm', 'dhash')
     hash_size = int(config.get('correlation_snap_hash_size', 8))
     hash_threshold = int(config.get('correlation_snap_hash_threshold', 5))
-    adjacent_frames = int(config.get('correlation_snap_adjacent_frames', 3))
 
     runner._log_message(f"[Correlation+FrameSnap] Hash: {hash_algorithm}, size={hash_size}, threshold={hash_threshold}")
-    runner._log_message(f"[Correlation+FrameSnap] Adjacent frames to check: ±{adjacent_frames}")
 
     # Import frame matching utilities
     try:
@@ -2518,8 +2516,10 @@ def verify_correlation_with_frame_snap(
 
     use_scene_checkpoints = config.get('correlation_snap_use_scene_changes', True)
     refinements_ms = []  # Refinements calculated from sliding window alignment
-    window_radius = 3  # 3 frames before and after center = 7 frame window
-    search_range_frames = 5  # Search ±5 frames around predicted position (±~200ms)
+
+    # Get sliding window parameters from config
+    window_radius = int(config.get('correlation_snap_window_radius', 3))  # 3 = 7 frame window
+    search_range_frames = int(config.get('correlation_snap_search_range', 5))  # Search ±N frames
 
     # Import frame matching utilities
     try:
