@@ -133,7 +133,7 @@ class AnalysisTab(QWidget):
 
         prep_group = QGroupBox("Step 1: Audio Pre-Processing")
         prep_layout = QFormLayout(prep_group)
-        self.widgets['source_separation_model'] = QComboBox(); self.widgets['source_separation_model'].addItems(['None (Use Original Audio)', 'Demucs (Isolate Dialogue)']); self.widgets['source_separation_model'].setToolTip("Uses an AI model to separate dialogue from music/effects.\n(Requires external dependencies and is experimental).")
+        self.widgets['source_separation_model'] = QComboBox(); self.widgets['source_separation_model'].addItems(['None (Use Original Audio)', 'Demucs - Music/Effects (Strip Vocals)', 'Demucs - Vocals Only']); self.widgets['source_separation_model'].setToolTip("Uses Demucs AI to separate audio stems before correlation.\n\n• None - Use original audio (default)\n• Music/Effects (Strip Vocals) - For cross-language sync (JP↔EN)\n  Removes vocals, correlates on music/effects which match across dubs\n• Vocals Only - Isolate dialogue for speech-based correlation\n\nRequires: torch, torchaudio, demucs\nSupports: CUDA, ROCm (AMD), CPU fallback\nNote: Runs in subprocess for guaranteed memory cleanup.")
         self.widgets['filtering_method'] = QComboBox(); self.widgets['filtering_method'].addItems(['None', 'Low-Pass Filter', 'Dialogue Band-Pass Filter']); self.widgets['filtering_method'].setToolTip("Apply a filter to the audio before analysis to improve the signal-to-noise ratio.\n'Dialogue Band-Pass' is recommended for most content.")
         self.cutoff_container = QWidget()
         cutoff_layout = QFormLayout(self.cutoff_container); cutoff_layout.setContentsMargins(0, 0, 0, 0)
