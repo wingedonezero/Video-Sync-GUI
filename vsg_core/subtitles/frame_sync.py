@@ -2108,7 +2108,8 @@ def apply_correlation_frame_snap_sync(
     total_delay_with_global_ms: float,
     raw_global_shift_ms: float,
     runner,
-    config: dict = None
+    config: dict = None,
+    cached_frame_correction: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Correlation + Frame Snap Mode: Apply subtitle sync using anchor-based offset calculation.
@@ -2143,6 +2144,9 @@ def apply_correlation_frame_snap_sync(
         raw_global_shift_ms: Global shift from ctx.delays.raw_global_shift_ms
         runner: CommandRunner for logging
         config: Configuration dict
+        cached_frame_correction: Optional cached result from previous scene detection for same source.
+                                 If provided and valid, skips scene detection and reuses the correction.
+                                 Dict with: frame_correction_ms, num_scene_matches, valid
 
     Returns:
         Dict with sync report
@@ -2190,62 +2194,90 @@ def apply_correlation_frame_snap_sync(
     fps = detect_video_fps(source_video, runner)
     frame_duration_ms = 1000.0 / fps
 
-    # Run frame verification using PURE correlation (without global shift)
-    # because we're comparing against original videos
-    verification_result = verify_correlation_with_frame_snap(
-        source_video,
-        target_video,
-        subs.events,
-        pure_correlation_ms,  # Use pure correlation for verification!
-        fps,
-        runner,
-        config
-    )
+    # Check if we have a valid cached frame correction from a previous subtitle track
+    # This saves ~1 minute of scene detection per additional track from the same source
+    if cached_frame_correction is not None:
+        cached_correction_ms = cached_frame_correction.get('frame_correction_ms', 0.0)
+        cached_num_scenes = cached_frame_correction.get('num_scene_matches', 0)
+        cached_valid = cached_frame_correction.get('valid', False)
 
-    frame_correction_ms = 0.0
-    frame_delta = 0
-    num_scene_matches = verification_result.get('num_scene_matches', 0)
+        runner._log_message(f"[Correlation+FrameSnap] ─────────────────────────────────────────")
+        runner._log_message(f"[Correlation+FrameSnap] REUSING cached scene detection result")
+        runner._log_message(f"[Correlation+FrameSnap] (All subs from same source get same correction)")
+        runner._log_message(f"[Correlation+FrameSnap]   Cached frame correction: {cached_correction_ms:+.3f}ms")
+        runner._log_message(f"[Correlation+FrameSnap]   From {cached_num_scenes} scene matches (valid={cached_valid})")
+        runner._log_message(f"[Correlation+FrameSnap] ─────────────────────────────────────────")
 
-    if verification_result.get('valid'):
-        # Verification passed (2+ scenes, they agree) - use the frame correction
-        frame_delta = verification_result['frame_delta']
-        frame_correction_ms = verification_result['frame_correction_ms']
-        runner._log_message(f"[Correlation+FrameSnap] Frame verification passed ({num_scene_matches} scenes agree)")
-        runner._log_message(f"[Correlation+FrameSnap] Frame correction: {frame_delta:+d} frames = {frame_correction_ms:+.3f}ms")
-    elif num_scene_matches == 1:
-        # Only 1 scene found - can't verify agreement, but use its correction
-        # This is not an error, just insufficient data to cross-verify
-        frame_delta = verification_result['frame_delta']
-        frame_correction_ms = verification_result['frame_correction_ms']
-        runner._log_message(f"[Correlation+FrameSnap] Only 1 scene matched (can't verify agreement)")
-        runner._log_message(f"[Correlation+FrameSnap] Using frame correction from single scene: {frame_correction_ms:+.3f}ms")
-    elif num_scene_matches >= 2:
-        # 2+ scenes found but they DISAGREE - this indicates a real problem
-        # (different cuts, drift, or matching errors) - respect fallback mode
-        fallback_mode = config.get('correlation_snap_fallback_mode', 'snap-to-frame')
+        # Use cached values - skip scene detection entirely
+        frame_correction_ms = cached_correction_ms
+        frame_delta = round(frame_correction_ms / frame_duration_ms) if frame_duration_ms > 0 else 0
+        num_scene_matches = cached_num_scenes
 
-        runner._log_message(f"[Correlation+FrameSnap] Checkpoints DISAGREE ({num_scene_matches} scenes, different refinements)")
-        runner._log_message(f"[Correlation+FrameSnap] This may indicate different cuts or timing drift")
-
-        if fallback_mode == 'abort':
-            runner._log_message(f"[Correlation+FrameSnap] ABORTING: Fallback mode is 'abort'")
-            return {
-                'success': False,
-                'error': f"Frame verification failed: Checkpoints disagree",
-                'verification': verification_result
-            }
-        else:
-            # Use median refinement (already calculated in verification) but warn
-            frame_delta = verification_result['frame_delta']
-            frame_correction_ms = verification_result['frame_correction_ms']
-            runner._log_message(f"[Correlation+FrameSnap] Using median frame correction: {frame_correction_ms:+.3f}ms")
+        # Build a verification result from cached data
+        verification_result = {
+            'valid': cached_valid,
+            'frame_delta': frame_delta,
+            'frame_correction_ms': frame_correction_ms,
+            'num_scene_matches': num_scene_matches,
+            'reused_from_cache': True
+        }
     else:
-        # No scenes found at all (0 matches) - use raw delay, just warn
-        # Don't abort even if fallback is 'abort' - this isn't an error, just sparse content
-        runner._log_message(f"[Correlation+FrameSnap] No scene matches found in subtitle range")
-        runner._log_message(f"[Correlation+FrameSnap] Using raw delay (no frame correction) - no scenes to verify against")
+        # Run frame verification using PURE correlation (without global shift)
+        # because we're comparing against original videos
+        verification_result = verify_correlation_with_frame_snap(
+            source_video,
+            target_video,
+            subs.events,
+            pure_correlation_ms,  # Use pure correlation for verification!
+            fps,
+            runner,
+            config
+        )
+
         frame_correction_ms = 0.0
         frame_delta = 0
+        num_scene_matches = verification_result.get('num_scene_matches', 0)
+
+        if verification_result.get('valid'):
+            # Verification passed (2+ scenes, they agree) - use the frame correction
+            frame_delta = verification_result['frame_delta']
+            frame_correction_ms = verification_result['frame_correction_ms']
+            runner._log_message(f"[Correlation+FrameSnap] Frame verification passed ({num_scene_matches} scenes agree)")
+            runner._log_message(f"[Correlation+FrameSnap] Frame correction: {frame_delta:+d} frames = {frame_correction_ms:+.3f}ms")
+        elif num_scene_matches == 1:
+            # Only 1 scene found - can't verify agreement, but use its correction
+            # This is not an error, just insufficient data to cross-verify
+            frame_delta = verification_result['frame_delta']
+            frame_correction_ms = verification_result['frame_correction_ms']
+            runner._log_message(f"[Correlation+FrameSnap] Only 1 scene matched (can't verify agreement)")
+            runner._log_message(f"[Correlation+FrameSnap] Using frame correction from single scene: {frame_correction_ms:+.3f}ms")
+        elif num_scene_matches >= 2:
+            # 2+ scenes found but they DISAGREE - this indicates a real problem
+            # (different cuts, drift, or matching errors) - respect fallback mode
+            fallback_mode = config.get('correlation_snap_fallback_mode', 'snap-to-frame')
+
+            runner._log_message(f"[Correlation+FrameSnap] Checkpoints DISAGREE ({num_scene_matches} scenes, different refinements)")
+            runner._log_message(f"[Correlation+FrameSnap] This may indicate different cuts or timing drift")
+
+            if fallback_mode == 'abort':
+                runner._log_message(f"[Correlation+FrameSnap] ABORTING: Fallback mode is 'abort'")
+                return {
+                    'success': False,
+                    'error': f"Frame verification failed: Checkpoints disagree",
+                    'verification': verification_result
+                }
+            else:
+                # Use median refinement (already calculated in verification) but warn
+                frame_delta = verification_result['frame_delta']
+                frame_correction_ms = verification_result['frame_correction_ms']
+                runner._log_message(f"[Correlation+FrameSnap] Using median frame correction: {frame_correction_ms:+.3f}ms")
+        else:
+            # No scenes found at all (0 matches) - use raw delay, just warn
+            # Don't abort even if fallback is 'abort' - this isn't an error, just sparse content
+            runner._log_message(f"[Correlation+FrameSnap] No scene matches found in subtitle range")
+            runner._log_message(f"[Correlation+FrameSnap] Using raw delay (no frame correction) - no scenes to verify against")
+            frame_correction_ms = 0.0
+            frame_delta = 0
 
     # Calculate final offset
     # IMPORTANT: total_delay_with_global_ms already has global_shift baked in

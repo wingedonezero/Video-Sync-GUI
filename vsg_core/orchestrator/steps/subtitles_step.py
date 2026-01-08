@@ -31,6 +31,12 @@ class SubtitlesStep:
         items_to_add = []
         _any_no_scene_fallback = False  # Track if any track used raw delay due to no scene matches
 
+        # Cache for scene detection results per source
+        # All subtitle tracks from the same source get the same frame correction
+        # since they're all synced to the same video. This saves ~1 min per extra track.
+        # Key: source_key, Value: dict with frame_correction_ms, num_scene_matches, valid
+        _scene_detection_cache = {}
+
         for item in ctx.extracted_items:
             if item.track.type != TrackType.SUBTITLES:
                 continue
@@ -321,6 +327,10 @@ class SubtitlesStep:
                                 runner._log_message(f"[Correlation+FrameSnap] Source video: {Path(source_video).name}")
                                 runner._log_message(f"[Correlation+FrameSnap] Target video: {Path(target_video).name}")
 
+                                # Check if we have a cached scene detection result for this source
+                                # All subs from same source are synced to same video, so they get same correction
+                                cached_correction = _scene_detection_cache.get(source_key)
+
                                 frame_sync_report = apply_correlation_frame_snap_sync(
                                     str(item.extracted_path),
                                     str(source_video),
@@ -328,7 +338,8 @@ class SubtitlesStep:
                                     total_delay_with_global_ms,  # ALREADY includes global_shift
                                     raw_global_shift_ms,          # Passed separately for pure correlation calculation
                                     runner,
-                                    ctx.settings_dict
+                                    ctx.settings_dict,
+                                    cached_frame_correction=cached_correction  # Reuse if available
                                 )
 
                                 if frame_sync_report and frame_sync_report.get('success'):
@@ -339,10 +350,39 @@ class SubtitlesStep:
                                     runner._log_message("------------------------------------------")
                                     # Mark that timestamps have been adjusted
                                     item.frame_adjusted = True
-                                    # Check if this track used raw delay fallback (no scene matches)
+
+                                    # Check verification results for caching and fallback tracking
                                     verification = frame_sync_report.get('verification', {})
-                                    if verification.get('num_scene_matches', 0) == 0:
+                                    num_scene_matches = verification.get('num_scene_matches', 0)
+                                    valid = verification.get('valid', False)
+
+                                    # Track if this used raw delay fallback (no scene matches)
+                                    if num_scene_matches == 0:
                                         _any_no_scene_fallback = True
+
+                                    # Cache the result if it meets quality criteria for reuse:
+                                    # - At least 2 scene matches (can verify agreement)
+                                    # - Checkpoints agreed (valid=True) OR only 1 scene matched
+                                    # - Not already cached (don't overwrite with reused data)
+                                    if source_key not in _scene_detection_cache:
+                                        # Criteria for caching: need confident result
+                                        # - 2+ scenes that agree (valid=True), OR
+                                        # - 3+ scenes even if they used median (robust enough)
+                                        should_cache = (
+                                            (num_scene_matches >= 2 and valid) or
+                                            (num_scene_matches >= 3)
+                                        )
+
+                                        if should_cache:
+                                            _scene_detection_cache[source_key] = {
+                                                'frame_correction_ms': frame_sync_report.get('frame_correction_ms', 0.0),
+                                                'num_scene_matches': num_scene_matches,
+                                                'valid': valid
+                                            }
+                                            runner._log_message(f"[Correlation+FrameSnap] Cached scene detection result for {source_key} ({num_scene_matches} scenes, valid={valid})")
+                                        elif num_scene_matches < 2:
+                                            runner._log_message(f"[Correlation+FrameSnap] Not caching: only {num_scene_matches} scene(s) - each track will run its own detection")
+
                                 elif frame_sync_report and 'error' in frame_sync_report:
                                     # Sync function returned error
                                     error_msg = frame_sync_report['error']
