@@ -136,7 +136,10 @@ class MkvmergeOptionsBuilder:
 
         # Source 1 AUDIO: Preserve individual container delays + add global shift
         if tr.source == "Source 1" and tr.type == TrackType.AUDIO:
-            container_delay = int(item.container_delay_ms)
+            # Use round() for proper rounding of negative values
+            # int() truncates toward zero: int(-1001.825) = -1001 (wrong)
+            # round() rounds to nearest: round(-1001.825) = -1002 (correct)
+            container_delay = round(item.container_delay_ms)
             global_shift = plan.delays.global_shift_ms
             final_delay = container_delay + global_shift
             return final_delay
@@ -169,4 +172,5 @@ class MkvmergeOptionsBuilder:
 
         sync_key = item.sync_to if tr.source == 'External' else tr.source
         delay = plan.delays.source_delays_ms.get(sync_key, 0)
-        return int(delay)
+        # Use round() for proper rounding of negative values (safety for future refactoring)
+        return round(delay)

@@ -198,7 +198,10 @@ def get_stream_info_with_delays(mkv_path: str, runner: CommandRunner, tool_paths
                 min_timestamp = props.get('minimum_timestamp', 0)
 
                 if min_timestamp:
-                    track['container_delay_ms'] = min_timestamp / 1_000_000
+                    # Use round() for proper rounding of negative values
+                    # int() truncates toward zero: int(-1001.825) = -1001 (wrong)
+                    # round() rounds to nearest: round(-1001.825) = -1002 (correct)
+                    track['container_delay_ms'] = round(min_timestamp / 1_000_000)
                 else:
                     track['container_delay_ms'] = 0
             else:
