@@ -191,12 +191,16 @@ def _choose_final_delay_raw(results: List[Dict[str, Any]], config: Dict, runner:
         return raw_avg
 
     else:  # Mode (Most Common) - default
-        # Find raw value for most common rounded delay
+        # Average raw values from all chunks matching the most common rounded delay
         counts = Counter(delays)
         winner_rounded = counts.most_common(1)[0][0]
-        for r in accepted:
-            if r.get('delay') == winner_rounded:
-                return r.get('raw_delay', float(winner_rounded))
+        matching_raw_values = [
+            r.get('raw_delay', float(winner_rounded))
+            for r in accepted
+            if r.get('delay') == winner_rounded
+        ]
+        if matching_raw_values:
+            return sum(matching_raw_values) / len(matching_raw_values)
         return float(winner_rounded)
 
 
@@ -362,6 +366,7 @@ class AnalysisStep:
             diagnosis = None
             details = {}
             stepping_override_delay = None
+            stepping_override_delay_raw = None
             stepping_enabled = config.get('segmented_enabled', False)
 
             # ALWAYS run diagnosis to detect stepping (even if correction is disabled)
@@ -393,11 +398,14 @@ class AnalysisStep:
                             'first_stable_min_chunks': config.get('stepping_first_stable_min_chunks', 3),
                             'first_stable_skip_unstable': config.get('stepping_first_stable_skip_unstable', True)
                         }
-                        first_segment_delay = _find_first_stable_segment_delay(results, runner, stepping_config)
+                        # Get both rounded (for mkvmerge) and raw (for subtitle precision)
+                        first_segment_delay = _find_first_stable_segment_delay(results, runner, stepping_config, return_raw=False)
+                        first_segment_delay_raw = _find_first_stable_segment_delay(results, runner, stepping_config, return_raw=True)
                         if first_segment_delay is not None:
                             stepping_override_delay = first_segment_delay
+                            stepping_override_delay_raw = first_segment_delay_raw
                             runner._log_message(f"[Stepping Detected] Found stepping in {source_key}")
-                            runner._log_message(f"[Stepping Override] Using first segment's delay: {stepping_override_delay}ms")
+                            runner._log_message(f"[Stepping Override] Using first segment's delay: {stepping_override_delay:+d}ms (raw: {stepping_override_delay_raw:.3f}ms)")
                             runner._log_message(f"[Stepping Override] This delay will be used for ALL tracks (audio + subtitles) from {source_key}")
                             runner._log_message(f"[Stepping Override] Stepping correction will be applied to audio tracks during processing")
                     else:
@@ -422,7 +430,7 @@ class AnalysisStep:
             # Get both rounded (for mkvmerge/audio) and raw (for subtitle sync precision)
             if stepping_override_delay is not None:
                 correlation_delay_ms = stepping_override_delay
-                correlation_delay_raw = float(stepping_override_delay)
+                correlation_delay_raw = stepping_override_delay_raw  # Use true raw, not float(int)
                 runner._log_message(f"{source_key.capitalize()} delay determined: {correlation_delay_ms:+d} ms (first segment, stepping corrected).")
             else:
                 correlation_delay_ms = _choose_final_delay(results, config, runner, source_key)
