@@ -11,7 +11,7 @@ from vsg_core.analysis.audio_corr import run_audio_correlation
 from vsg_core.analysis.drift_detection import diagnose_audio_issue
 from vsg_core.extraction.tracks import get_stream_info, get_stream_info_with_delays
 
-def _find_first_stable_segment_delay(results: List[Dict[str, Any]], runner: CommandRunner, config: Dict) -> Optional[int]:
+def _find_first_stable_segment_delay(results: List[Dict[str, Any]], runner: CommandRunner, config: Dict, return_raw: bool = False) -> Optional[int | float]:
     """
     Find the delay from the first stable segment of chunks.
 
@@ -19,9 +19,10 @@ def _find_first_stable_segment_delay(results: List[Dict[str, Any]], runner: Comm
     and returns the delay from the first such stable group that meets stability criteria.
 
     Args:
-        results: List of correlation results with 'delay', 'accepted', and 'start' keys
+        results: List of correlation results with 'delay', 'raw_delay', 'accepted', and 'start' keys
         runner: CommandRunner for logging
         config: Configuration dictionary with 'first_stable_min_chunks' and 'first_stable_skip_unstable'
+        return_raw: If True, return the raw (unrounded) delay value
 
     Returns:
         The delay value from the first stable segment, or None if no stable segment found
@@ -34,31 +35,48 @@ def _find_first_stable_segment_delay(results: List[Dict[str, Any]], runner: Comm
         return None
 
     # Group consecutive chunks with the same delay (within 1ms tolerance)
+    # Track both rounded and raw delays for each segment
     segments = []
-    current_segment = {'delay': accepted[0]['delay'], 'count': 1, 'start_time': accepted[0]['start']}
+    current_segment = {
+        'delay': accepted[0]['delay'],
+        'raw_delays': [accepted[0].get('raw_delay', float(accepted[0]['delay']))],
+        'count': 1,
+        'start_time': accepted[0]['start']
+    }
 
     for i in range(1, len(accepted)):
         if abs(accepted[i]['delay'] - current_segment['delay']) <= 1:
-            # Same segment continues
+            # Same segment continues - accumulate raw delays for averaging
             current_segment['count'] += 1
+            current_segment['raw_delays'].append(accepted[i].get('raw_delay', float(accepted[i]['delay'])))
         else:
             # New segment starts
             segments.append(current_segment)
-            current_segment = {'delay': accepted[i]['delay'], 'count': 1, 'start_time': accepted[i]['start']}
+            current_segment = {
+                'delay': accepted[i]['delay'],
+                'raw_delays': [accepted[i].get('raw_delay', float(accepted[i]['delay']))],
+                'count': 1,
+                'start_time': accepted[i]['start']
+            }
 
     # Don't forget the last segment
     segments.append(current_segment)
+
+    # Helper to get raw value from segment (average of all raw delays in segment)
+    def get_segment_raw(segment):
+        return sum(segment['raw_delays']) / len(segment['raw_delays'])
 
     # Find the first stable segment based on configuration
     if skip_unstable:
         # Skip segments that don't meet minimum chunk count
         for segment in segments:
             if segment['count'] >= min_chunks:
+                raw_avg = get_segment_raw(segment)
                 runner._log_message(
                     f"[First Stable] Found stable segment: {segment['count']} chunks at {segment['delay']}ms "
-                    f"(starting at {segment['start_time']:.1f}s)"
+                    f"(raw avg: {raw_avg:.3f}ms, starting at {segment['start_time']:.1f}s)"
                 )
-                return segment['delay']
+                return raw_avg if return_raw else segment['delay']
 
         # No segment met the minimum chunk count
         runner._log_message(
@@ -70,6 +88,7 @@ def _find_first_stable_segment_delay(results: List[Dict[str, Any]], runner: Comm
         # Use the first segment regardless of chunk count
         if segments:
             first_segment = segments[0]
+            raw_avg = get_segment_raw(first_segment)
             if first_segment['count'] < min_chunks:
                 runner._log_message(
                     f"[First Stable] Warning: First segment has only {first_segment['count']} chunks "
@@ -77,14 +96,17 @@ def _find_first_stable_segment_delay(results: List[Dict[str, Any]], runner: Comm
                 )
             runner._log_message(
                 f"[First Stable] Using first segment: {first_segment['count']} chunks at {first_segment['delay']}ms "
-                f"(starting at {first_segment['start_time']:.1f}s)"
+                f"(raw avg: {raw_avg:.3f}ms, starting at {first_segment['start_time']:.1f}s)"
             )
-            return first_segment['delay']
+            return raw_avg if return_raw else first_segment['delay']
 
     return None
 
 def _choose_final_delay(results: List[Dict[str, Any]], config: Dict, runner: CommandRunner, role_tag: str) -> Optional[int]:
-    min_match_pct = float(config.get('min_match_pct', 5.0))
+    """
+    Select final delay from correlation results using configured mode.
+    Returns rounded integer for mkvmerge compatibility.
+    """
     min_accepted_chunks = int(config.get('min_accepted_chunks', 3))
     delay_mode = config.get('delay_selection_mode', 'Mode (Most Common)')
 
@@ -94,10 +116,11 @@ def _choose_final_delay(results: List[Dict[str, Any]], config: Dict, runner: Com
         return None
 
     delays = [r['delay'] for r in accepted]
+    raw_delays = [r.get('raw_delay', float(r['delay'])) for r in accepted]
 
     if delay_mode == 'First Stable':
         # Use proper stability detection to find first stable segment
-        winner = _find_first_stable_segment_delay(results, runner, config)
+        winner = _find_first_stable_segment_delay(results, runner, config, return_raw=False)
         if winner is None:
             # Fallback to mode if no stable segment found
             runner._log_message(f"[WARNING] No stable segment found, falling back to mode.")
@@ -107,7 +130,10 @@ def _choose_final_delay(results: List[Dict[str, Any]], config: Dict, runner: Com
         else:
             method_label = "first stable"
     elif delay_mode == 'Average':
-        winner = round(sum(delays) / len(delays))
+        # Average the RAW float values, then round once at the end
+        raw_avg = sum(raw_delays) / len(raw_delays)
+        winner = round(raw_avg)
+        runner._log_message(f"[Delay Selection] Average of {len(raw_delays)} raw values: {raw_avg:.3f}ms → rounded to {winner}ms")
         method_label = "average"
     else:  # Mode (Most Common) - default
         counts = Counter(delays)
@@ -120,24 +146,51 @@ def _choose_final_delay(results: List[Dict[str, Any]], config: Dict, runner: Com
 
 def _choose_final_delay_raw(results: List[Dict[str, Any]], config: Dict, runner: CommandRunner, role_tag: str) -> Optional[float]:
     """
-    Same as _choose_final_delay but returns raw float value without rounding.
-    Used for VideoTimestamps modes to preserve precision and prevent triple-rounding.
-    Extracts the 'raw_delay' field from the same chunk that was selected by _choose_final_delay.
+    Select final delay from correlation results, returning raw float value.
+    Used for subtitle sync modes that need precision (defers rounding to final application).
+
+    For each mode:
+    - First Stable: Returns average of raw delays in the stable segment
+    - Average: Returns true average of all raw delays (no intermediate rounding)
+    - Mode: Returns raw delay from the first chunk matching the most common rounded value
     """
-    # First, get the winning delay using the exact same logic as _choose_final_delay
-    winner_rounded = _choose_final_delay(results, config, runner, role_tag)
-    if winner_rounded is None:
+    min_accepted_chunks = int(config.get('min_accepted_chunks', 3))
+    delay_mode = config.get('delay_selection_mode', 'Mode (Most Common)')
+
+    accepted = [r for r in results if r.get('accepted', False)]
+    if len(accepted) < min_accepted_chunks:
         return None
 
-    # Now find the first accepted chunk with this delay and return its raw value
-    accepted = [r for r in results if r.get('accepted', False)]
-    for r in accepted:
-        if r.get('delay') == winner_rounded:
-            # Return raw_delay if it exists, otherwise convert rounded to float
-            return r.get('raw_delay', float(winner_rounded))
+    delays = [r['delay'] for r in accepted]
+    raw_delays = [r.get('raw_delay', float(r['delay'])) for r in accepted]
 
-    # Fallback: convert rounded to float
-    return float(winner_rounded)
+    if delay_mode == 'First Stable':
+        # Get raw average from first stable segment
+        winner_raw = _find_first_stable_segment_delay(results, runner, config, return_raw=True)
+        if winner_raw is None:
+            # Fallback to mode - find raw value for most common rounded delay
+            counts = Counter(delays)
+            winner_rounded = counts.most_common(1)[0][0]
+            for r in accepted:
+                if r.get('delay') == winner_rounded:
+                    return r.get('raw_delay', float(winner_rounded))
+            return float(winner_rounded)
+        return winner_raw
+
+    elif delay_mode == 'Average':
+        # True average of raw floats - NO intermediate rounding!
+        raw_avg = sum(raw_delays) / len(raw_delays)
+        runner._log_message(f"[Delay Selection Raw] True average of {len(raw_delays)} raw values: {raw_avg:.3f}ms")
+        return raw_avg
+
+    else:  # Mode (Most Common) - default
+        # Find raw value for most common rounded delay
+        counts = Counter(delays)
+        winner_rounded = counts.most_common(1)[0][0]
+        for r in accepted:
+            if r.get('delay') == winner_rounded:
+                return r.get('raw_delay', float(winner_rounded))
+        return float(winner_rounded)
 
 
 class AnalysisStep:
@@ -358,16 +411,16 @@ class AnalysisStep:
                     # Use normal delay selection mode
                     # Don't set stepping_override_delay - let normal flow handle it
 
-            # Use stepping override if available, otherwise calculate mode
-            # Get both rounded (for mkvmerge/audio) and raw (for VideoTimestamps precision)
+            # Use stepping override if available, otherwise calculate using configured mode
+            # Get both rounded (for mkvmerge/audio) and raw (for subtitle sync precision)
             if stepping_override_delay is not None:
-                raw_delay_ms = stepping_override_delay
-                raw_delay_ms_unrounded = float(stepping_override_delay)
-                runner._log_message(f"{source_key.capitalize()} delay determined: {raw_delay_ms:+d} ms (first segment, stepping corrected).")
+                correlation_delay_ms = stepping_override_delay
+                correlation_delay_raw = float(stepping_override_delay)
+                runner._log_message(f"{source_key.capitalize()} delay determined: {correlation_delay_ms:+d} ms (first segment, stepping corrected).")
             else:
-                raw_delay_ms = _choose_final_delay(results, config, runner, source_key)
-                raw_delay_ms_unrounded = _choose_final_delay_raw(results, config, runner, source_key)
-                if raw_delay_ms is None:
+                correlation_delay_ms = _choose_final_delay(results, config, runner, source_key)
+                correlation_delay_raw = _choose_final_delay_raw(results, config, runner, source_key)
+                if correlation_delay_ms is None:
                     # ENHANCED ERROR MESSAGE
                     accepted_count = len([r for r in results if r.get('accepted', False)])
                     min_required = config.get('min_accepted_chunks', 3)
@@ -395,17 +448,19 @@ class AnalysisStep:
                     )
 
             # Calculate final delay including container delay chain correction
-            # Store both rounded (for mkvmerge) and raw (for VideoTimestamps precision)
-            final_delay_ms = round(raw_delay_ms + source1_audio_container_delay)
-            raw_final_delay_ms = raw_delay_ms_unrounded + source1_audio_container_delay
+            # Store both rounded (for mkvmerge) and raw (for subtitle sync precision)
+            final_delay_ms = round(correlation_delay_ms + source1_audio_container_delay)
+            final_delay_raw = correlation_delay_raw + source1_audio_container_delay
 
+            # Log the delay calculation chain for transparency
+            runner._log_message(f"[Delay Calculation] {source_key} delay chain:")
+            runner._log_message(f"[Delay Calculation]   Correlation delay: {correlation_delay_raw:+.3f}ms (raw) → {correlation_delay_ms:+d}ms (rounded)")
             if source1_audio_container_delay != 0:
-                runner._log_message(f"[Delay Chain] {source_key} raw correlation: {raw_delay_ms:+d}ms (rounded), {raw_delay_ms_unrounded:+.3f}ms (raw)")
-                runner._log_message(f"[Delay Chain] Adding Source 1 audio container delay: {source1_audio_container_delay:+.1f}ms")
-                runner._log_message(f"[Delay Chain] Final delay for {source_key}: {final_delay_ms:+d}ms (rounded), {raw_final_delay_ms:+.3f}ms (raw)")
+                runner._log_message(f"[Delay Calculation]   + Container delay:  {source1_audio_container_delay:+.3f}ms")
+                runner._log_message(f"[Delay Calculation]   = Final delay:      {final_delay_raw:+.3f}ms (raw) → {final_delay_ms:+d}ms (rounded)")
 
             source_delays[source_key] = final_delay_ms
-            raw_source_delays[source_key] = raw_final_delay_ms
+            raw_source_delays[source_key] = final_delay_raw
 
             # --- Handle drift detection flags ---
             if diagnosis:
