@@ -9,6 +9,7 @@ from the same source need their timestamps adjusted to stay in sync.
 from __future__ import annotations
 from typing import List
 from pathlib import Path
+import math
 import pysubs2
 from .metadata_preserver import SubtitleMetadata
 
@@ -84,15 +85,16 @@ def apply_stepping_to_subtitles(subtitle_path: str, edl: List, runner, config: d
             original_start_s = original_start_ms / 1000.0
             original_end_s = original_end_ms / 1000.0
 
-            # Calculate cumulative offset based on boundary mode
-            offset_ms = _get_offset_at_time(original_start_s, original_end_s, sorted_edl, boundary_mode)
+            # Calculate cumulative offset based on boundary mode (returns raw float)
+            offset_raw = _get_offset_at_time(original_start_s, original_end_s, sorted_edl, boundary_mode)
 
             # Check if this subtitle spans a boundary (for stats)
             if _spans_boundary(original_start_s, original_end_s, sorted_edl):
                 spanning_count += 1
 
-            # Apply offset
-            if offset_ms != 0:
+            # Apply offset with floor() at final step (single rounding point)
+            if offset_raw != 0.0:
+                offset_ms = int(math.floor(offset_raw))
                 event.start += offset_ms
                 event.end += offset_ms
                 adjusted_count += 1
@@ -152,7 +154,7 @@ def _spans_boundary(start_s: float, end_s: float, edl: List) -> bool:
     return False
 
 
-def _get_offset_at_time(start_s: float, end_s: float, edl: List, mode: str = 'start') -> int:
+def _get_offset_at_time(start_s: float, end_s: float, edl: List, mode: str = 'start') -> float:
     """
     Calculate the cumulative offset (in milliseconds) for a subtitle.
 
@@ -166,17 +168,18 @@ def _get_offset_at_time(start_s: float, end_s: float, edl: List, mode: str = 'st
         mode: Boundary spanning mode - 'start', 'majority', or 'midpoint'
 
     Returns:
-        int: Cumulative offset in milliseconds
+        float: Cumulative offset in milliseconds (raw, unrounded)
     """
-    # Helper function to get delay at a specific time
-    def get_delay_at_time(time_s: float) -> int:
+    # Helper function to get raw delay at a specific time
+    def get_delay_at_time(time_s: float) -> float:
         if time_s < edl[0].start_s:
-            return 0
+            return 0.0
 
-        current_offset = 0
+        current_offset = 0.0
         for segment in edl:
             if segment.start_s <= time_s:
-                current_offset = segment.delay_ms
+                # Use raw delay if available, otherwise fall back to integer
+                current_offset = getattr(segment, 'delay_raw', float(segment.delay_ms))
             else:
                 break
         return current_offset
@@ -196,7 +199,7 @@ def _get_offset_at_time(start_s: float, end_s: float, edl: List, mode: str = 'st
         if duration <= 0:
             return get_delay_at_time(start_s)
 
-        # Track duration in each delay region
+        # Track duration in each delay region (keyed by raw delay)
         region_durations = {}
 
         # Build a list of all relevant boundaries

@@ -37,6 +37,7 @@ class AudioSegment:
     start_s: float
     end_s: float
     delay_ms: int
+    delay_raw: float = 0.0  # Raw float delay for subtitle precision (avoids double rounding)
     drift_rate_ms_s: float = 0.0
 
 def generate_edl_from_correlation(chunks: List[Dict], config: Dict, runner: CommandRunner, diagnosis_details: Optional[Dict] = None) -> List[AudioSegment]:
@@ -98,24 +99,27 @@ def generate_edl_from_correlation(chunks: List[Dict], config: Dict, runner: Comm
     # Group consecutive chunks by delay (within tolerance)
     tolerance_ms = config.get('segment_triage_std_dev_ms', 50)
     edl = []
-    current_delay = accepted[0]['delay']
-    edl.append(AudioSegment(start_s=0.0, end_s=0.0, delay_ms=current_delay))
+    current_delay_ms = accepted[0]['delay']
+    current_delay_raw = accepted[0].get('raw_delay', float(current_delay_ms))
+    edl.append(AudioSegment(start_s=0.0, end_s=0.0, delay_ms=current_delay_ms, delay_raw=current_delay_raw))
 
-    runner._log_message(f"[EDL Generation] Starting with delay: {current_delay}ms")
+    runner._log_message(f"[EDL Generation] Starting with delay: {current_delay_ms}ms (raw: {current_delay_raw:.3f}ms)")
 
     for chunk in accepted[1:]:
-        delay_diff = abs(chunk['delay'] - current_delay)
+        delay_diff = abs(chunk['delay'] - current_delay_ms)
         if delay_diff > tolerance_ms:
             # Delay change detected - add new segment
             boundary_time_s = chunk['start']  # Chunk start time in seconds
-            current_delay = chunk['delay']
+            current_delay_ms = chunk['delay']
+            current_delay_raw = chunk.get('raw_delay', float(current_delay_ms))
             edl.append(AudioSegment(
                 start_s=boundary_time_s,
                 end_s=boundary_time_s,
-                delay_ms=current_delay,
+                delay_ms=current_delay_ms,
+                delay_raw=current_delay_raw,
                 drift_rate_ms_s=0.0  # No drift analysis for subtitle-only
             ))
-            runner._log_message(f"[EDL Generation] Delay change at {boundary_time_s:.1f}s → {current_delay}ms")
+            runner._log_message(f"[EDL Generation] Delay change at {boundary_time_s:.1f}s → {current_delay_ms}ms (raw: {current_delay_raw:.3f}ms)")
 
     runner._log_message(f"[EDL Generation] Generated EDL with {len(edl)} segment(s)")
     return edl
@@ -162,7 +166,13 @@ class SteppingCorrector:
         self.log(f"[ERROR] SteppingCorrector failed to decode audio stream {stream_index} from '{Path(file_path).name}'")
         return None
 
-    def _get_delay_for_chunk(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, start_sample: int, num_samples: int, sample_rate: int, locality_samples: int) -> Optional[int]:
+    def _get_delay_for_chunk(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, start_sample: int, num_samples: int, sample_rate: int, locality_samples: int) -> Optional[tuple]:
+        """
+        Get delay for a chunk via correlation.
+
+        Returns:
+            tuple of (delay_ms: int, delay_raw: float) or None if detection failed
+        """
         end_sample = start_sample + num_samples
         if end_sample > len(ref_pcm): return None
         ref_chunk = ref_pcm[start_sample:end_sample]
@@ -204,9 +214,17 @@ class SteppingCorrector:
         lag_in_window = k
         absolute_lag_start = search_start + lag_in_window
         delay_samples = absolute_lag_start - start_sample
-        return int(round((delay_samples / sample_rate) * 1000.0))
+        delay_raw = (delay_samples / sample_rate) * 1000.0
+        delay_ms = int(round(delay_raw))
+        return (delay_ms, delay_raw)
 
-    def _perform_coarse_scan(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int) -> List[Tuple[float, int]]:
+    def _perform_coarse_scan(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int) -> List[Tuple[float, int, float]]:
+        """
+        Perform coarse scan to find delay zones.
+
+        Returns:
+            List of (timestamp_s, delay_ms, delay_raw) tuples
+        """
         self.log("  [SteppingCorrector] Stage 1: Performing coarse scan to find delay zones...")
         chunk_duration_s = self.config.get('segment_coarse_chunk_s', 15)
         step_duration_s = self.config.get('segment_coarse_step_s', 60)
@@ -229,11 +247,12 @@ class SteppingCorrector:
         scan_end_point = scan_end_limit - chunk_samples - step_samples
 
         for start_sample in range(start_offset_samples, scan_end_point, step_samples):
-            delay = self._get_delay_for_chunk(ref_pcm, analysis_pcm, start_sample, chunk_samples, sample_rate, locality_samples)
-            if delay is not None:
+            result = self._get_delay_for_chunk(ref_pcm, analysis_pcm, start_sample, chunk_samples, sample_rate, locality_samples)
+            if result is not None:
+                delay_ms, delay_raw = result
                 timestamp_s = start_sample / sample_rate
-                coarse_map.append((timestamp_s, delay))
-                self.log(f"    - Coarse point at {timestamp_s:.1f}s: delay = {delay}ms")
+                coarse_map.append((timestamp_s, delay_ms, delay_raw))
+                self.log(f"    - Coarse point at {timestamp_s:.1f}s: delay = {delay_ms}ms (raw: {delay_raw:.3f}ms)")
         return coarse_map
 
     def _find_boundary_in_zone(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int, zone_start_s: float, zone_end_s: float, delay_before: int, delay_after: int, ref_file_path: Optional[str] = None, analysis_file_path: Optional[str] = None) -> float:
@@ -270,10 +289,11 @@ class SteppingCorrector:
         for _ in range(iterations):
             if high - low < chunk_samples: break
             mid = (low + high) // 2
-            delay = self._get_delay_for_chunk(ref_pcm, analysis_pcm, mid, chunk_samples, sample_rate, locality_samples)
-            if delay is not None:
+            result = self._get_delay_for_chunk(ref_pcm, analysis_pcm, mid, chunk_samples, sample_rate, locality_samples)
+            if result is not None:
+                delay_ms, _ = result  # Only need rounded for boundary comparison
                 # Move search window based on which delay this chunk matches
-                if abs(delay - delay_before) < abs(delay - delay_after): low = mid
+                if abs(delay_ms - delay_before) < abs(delay_ms - delay_after): low = mid
                 else: high = mid
             else: low += chunk_samples
 
@@ -1117,10 +1137,11 @@ class SteppingCorrector:
                 t_s_ref = t_s_target - base_delay_s
                 start_sample_ref = int(t_s_ref * sample_rate)
 
-                delay = self._get_delay_for_chunk(ref_pcm, analysis_pcm, start_sample_ref, chunk_samples, sample_rate, locality_samples)
-                if delay is not None:
+                result = self._get_delay_for_chunk(ref_pcm, analysis_pcm, start_sample_ref, chunk_samples, sample_rate, locality_samples)
+                if result is not None:
+                    delay_ms, _ = result  # Only need rounded for drift analysis
                     times.append(t_s_ref)
-                    delays.append(delay)
+                    delays.append(delay_ms)
 
             if len(times) < 4:
                 final_edl.append(current_segment)
@@ -1375,10 +1396,10 @@ class SteppingCorrector:
 
     def _filter_coarse_map_by_clusters(
         self,
-        coarse_map: List[Tuple[float, int]],
+        coarse_map: List[Tuple[float, int, float]],
         diagnosis_details: Dict,
         sample_rate: int
-    ) -> List[Tuple[float, int]]:
+    ) -> List[Tuple[float, int, float]]:
         """
         Filters coarse_map to remove entries that fall within invalid clusters.
         Applies fallback strategy for filtered regions.
@@ -1415,7 +1436,8 @@ class SteppingCorrector:
         filtered_map = []
         skipped_count = 0
 
-        for timestamp_s, delay in coarse_map:
+        for entry in coarse_map:
+            timestamp_s = entry[0]
             # Check if this timestamp falls within any invalid cluster
             in_invalid_cluster = any(
                 start <= timestamp_s <= end
@@ -1423,7 +1445,7 @@ class SteppingCorrector:
             )
 
             if not in_invalid_cluster:
-                filtered_map.append((timestamp_s, delay))
+                filtered_map.append(entry)  # Keep full tuple (timestamp, delay_ms, delay_raw)
             else:
                 skipped_count += 1
 
@@ -1538,20 +1560,21 @@ class SteppingCorrector:
                     return CorrectionResult(CorrectionVerdict.FAILED, {'error': "After filtering invalid clusters, no reliable sync points remain."})
 
             edl: List[AudioSegment] = []
-            anchor_delay = coarse_map[0][1]
-            edl.append(AudioSegment(start_s=0.0, end_s=0.0, delay_ms=anchor_delay))
+            anchor_delay_ms = coarse_map[0][1]
+            anchor_delay_raw = coarse_map[0][2]
+            edl.append(AudioSegment(start_s=0.0, end_s=0.0, delay_ms=anchor_delay_ms, delay_raw=anchor_delay_raw))
 
             triage_std_dev_ms = self.config.get('segment_triage_std_dev_ms', 50)
 
             for i in range(len(coarse_map) - 1):
-                zone_start_s, delay_before = coarse_map[i]
-                zone_end_s, delay_after = coarse_map[i+1]
-                if abs(delay_before - delay_after) < triage_std_dev_ms:
+                zone_start_s, delay_before_ms, delay_before_raw = coarse_map[i]
+                zone_end_s, delay_after_ms, delay_after_raw = coarse_map[i+1]
+                if abs(delay_before_ms - delay_after_ms) < triage_std_dev_ms:
                     continue
 
-                boundary_s_ref = self._find_boundary_in_zone(ref_pcm, analysis_pcm, sample_rate, zone_start_s, zone_end_s, delay_before, delay_after, ref_file_path, analysis_audio_path)
-                boundary_s_target = boundary_s_ref + (delay_before / 1000.0)
-                edl.append(AudioSegment(start_s=boundary_s_target, end_s=boundary_s_target, delay_ms=delay_after))
+                boundary_s_ref = self._find_boundary_in_zone(ref_pcm, analysis_pcm, sample_rate, zone_start_s, zone_end_s, delay_before_ms, delay_after_ms, ref_file_path, analysis_audio_path)
+                boundary_s_target = boundary_s_ref + (delay_before_ms / 1000.0)
+                edl.append(AudioSegment(start_s=boundary_s_target, end_s=boundary_s_target, delay_ms=delay_after_ms, delay_raw=delay_after_raw))
 
             edl = sorted(list(set(edl)), key=lambda x: x.start_s)
 
@@ -1568,7 +1591,7 @@ class SteppingCorrector:
 
             self.log("  [SteppingCorrector] Final Edit Decision List (EDL) for assembly created:")
             for i, seg in enumerate(edl):
-                self.log(f"    - Action {i+1}: At target time {seg.start_s:.3f}s, new total delay is {seg.delay_ms}ms, internal drift is {seg.drift_rate_ms_s:+.2f} ms/s")
+                self.log(f"    - Action {i+1}: At target time {seg.start_s:.3f}s, delay = {seg.delay_ms}ms (raw: {seg.delay_raw:.3f}ms), drift = {seg.drift_rate_ms_s:+.2f} ms/s")
 
             # --- QA Check ---
             self.log("  [SteppingCorrector] Assembling temporary QA track...")
