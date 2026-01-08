@@ -42,29 +42,28 @@ def is_demucs_available() -> Tuple[bool, str]:
         import torch
         torch_version = torch.__version__
 
-        # Check for GPU support
+        # Check for GPU support (works for both CUDA and ROCm)
         if torch.cuda.is_available():
             device_name = torch.cuda.get_device_name(0)
-            gpu_info = f"GPU: {device_name}"
+            # Check if this is ROCm (HIP) or CUDA
+            hip_version = getattr(torch.version, 'hip', None)
+            if hip_version:
+                gpu_info = f"ROCm GPU: {device_name}"
+            else:
+                gpu_info = f"CUDA GPU: {device_name}"
         else:
             gpu_info = "CPU only (no CUDA/ROCm detected)"
 
     except ImportError:
-        return False, "PyTorch not installed. Install with: pip install torch torchaudio"
-
-    try:
-        import torchaudio
-        torchaudio_version = torchaudio.__version__
-    except ImportError:
-        return False, f"torchaudio not installed (torch {torch_version} found). Install with: pip install torchaudio"
+        return False, "PyTorch not installed. Install with: pip install torch"
 
     try:
         import demucs
         demucs_version = getattr(demucs, '__version__', 'unknown')
     except ImportError:
-        return False, f"Demucs not installed (torch {torch_version}, torchaudio {torchaudio_version} found). Install with: pip install demucs"
+        return False, f"Demucs not installed (torch {torch_version} found). Install with: pip install demucs"
 
-    return True, f"Demucs {demucs_version}, torch {torch_version}, torchaudio {torchaudio_version}, {gpu_info}"
+    return True, f"Demucs {demucs_version}, torch {torch_version}, {gpu_info}"
 
 
 # --- Subprocess Worker Script ---
@@ -74,11 +73,22 @@ _WORKER_SCRIPT = '''
 import sys
 import json
 import numpy as np
+from scipy.signal import resample_poly
+from math import gcd
+
+def resample_audio(audio_np, orig_sr, target_sr):
+    """Resample audio using scipy (no torchaudio needed)."""
+    if orig_sr == target_sr:
+        return audio_np
+    # Use rational resampling for better quality
+    g = gcd(orig_sr, target_sr)
+    up = target_sr // g
+    down = orig_sr // g
+    return resample_poly(audio_np, up, down).astype(np.float32)
 
 def run_separation(input_path, output_path, mode, sample_rate, device_preference):
     """Run Demucs separation in isolated process."""
     import torch
-    import torchaudio
     from demucs.pretrained import get_model
     from demucs.apply import apply_model
 
@@ -93,10 +103,16 @@ def run_separation(input_path, output_path, mode, sample_rate, device_preference
     else:
         device = torch.device('cpu')
 
+    print(f"Using device: {device}", file=sys.stderr)
+
     # Load model (htdemucs is good balance of quality/speed)
     model = get_model('htdemucs')
     model.to(device)
     model.eval()
+
+    # Resample to 44100 Hz if needed (Demucs expects 44100 Hz)
+    if sample_rate != 44100:
+        audio = resample_audio(audio, sample_rate, 44100)
 
     # Prepare audio tensor: (batch, channels, samples)
     # Input is mono float32, convert to stereo for Demucs
@@ -105,12 +121,6 @@ def run_separation(input_path, output_path, mode, sample_rate, device_preference
         audio_tensor = audio_tensor.unsqueeze(0).repeat(2, 1)  # mono -> stereo
     audio_tensor = audio_tensor.unsqueeze(0)  # add batch dim
     audio_tensor = audio_tensor.to(device)
-
-    # Resample if needed (Demucs expects 44100 Hz)
-    if sample_rate != 44100:
-        audio_tensor = torchaudio.functional.resample(
-            audio_tensor.squeeze(0), sample_rate, 44100
-        ).unsqueeze(0)
 
     # Apply model
     with torch.no_grad():
@@ -129,14 +139,15 @@ def run_separation(input_path, output_path, mode, sample_rate, device_preference
         # Fallback: return original
         result = sources.sum(dim=0)
 
-    # Convert back to mono and original sample rate
+    # Convert back to mono
     result = result.mean(dim=0)  # stereo -> mono
-
-    if sample_rate != 44100:
-        result = torchaudio.functional.resample(result, 44100, sample_rate)
 
     # Move to CPU and convert to numpy
     result_np = result.cpu().numpy().astype(np.float32)
+
+    # Resample back to original sample rate if needed
+    if sample_rate != 44100:
+        result_np = resample_audio(result_np, 44100, sample_rate)
 
     # Save result
     np.save(output_path, result_np)
