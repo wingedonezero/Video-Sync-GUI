@@ -1210,27 +1210,13 @@ class SubtitleSyncTab(QWidget):
 
         self.widgets['duration_align_fallback_target'] = QComboBox()
         self.widgets['duration_align_fallback_target'].addItems([
-            'dual-videotimestamps',
-            'videotimestamps',
-            'audio-correlation',
-            'frame-snapped',
-            'frame-perfect',
-            'raw-delay'
+            'not-implemented'
         ])
         self.widgets['duration_align_fallback_target'].setToolTip(
             "Fallback sync mode if validation fails:\n\n"
-            "Only used when 'auto-fallback' is selected above.\n\n"
-            "• dual-videotimestamps: Frame-accurate using both videos\n"
-            "  - Good fallback for VFR videos\n"
-            "  - Requires both source and target videos\n\n"
-            "• audio-correlation: Audio-based sync\n"
-            "  - Works when videos not frame-aligned\n"
-            "  - Requires audio tracks\n"
-            "  - Most reliable universal fallback\n\n"
-            "• videotimestamps: Frame-accurate using target video\n"
-            "  - Good for single-video workflows\n\n"
-            "• Others: Less recommended fallbacks\n\n"
-            "Recommended: 'audio-correlation' for most cases."
+            "NOTE: Auto-fallback is not yet implemented.\n"
+            "If 'auto-fallback' is selected above, the system will\n"
+            "fall back to using duration-offset instead."
         )
 
         # Skip validation for generated tracks
