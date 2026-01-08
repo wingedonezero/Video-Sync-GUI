@@ -1726,6 +1726,231 @@ def detect_video_fps(video_path: str, runner) -> float:
         return 23.976
 
 
+def detect_video_properties(video_path: str, runner) -> Dict[str, Any]:
+    """
+    Detect comprehensive video properties for sync strategy selection.
+
+    Detects FPS, interlacing, field order, telecine, duration, and frame count.
+    Used to determine if special handling is needed (deinterlace, scaling, etc.)
+
+    Args:
+        video_path: Path to video file
+        runner: CommandRunner for logging
+
+    Returns:
+        Dict with:
+            - fps: float (e.g., 23.976)
+            - fps_fraction: tuple (num, denom) e.g., (24000, 1001)
+            - interlaced: bool
+            - field_order: str ('progressive', 'tff', 'bff', 'unknown')
+            - scan_type: str ('progressive', 'interlaced', 'telecine', 'unknown')
+            - duration_ms: float
+            - frame_count: int (estimated)
+            - detection_source: str (what method was used)
+    """
+    import subprocess
+    import json
+
+    runner._log_message(f"[VideoProps] Detecting properties for: {Path(video_path).name}")
+
+    # Default/fallback values
+    props = {
+        'fps': 23.976,
+        'fps_fraction': (24000, 1001),
+        'interlaced': False,
+        'field_order': 'progressive',
+        'scan_type': 'progressive',
+        'duration_ms': 0.0,
+        'frame_count': 0,
+        'detection_source': 'fallback',
+    }
+
+    try:
+        # Use ffprobe to get comprehensive stream info
+        cmd = [
+            'ffprobe',
+            '-v', 'quiet',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream=r_frame_rate,avg_frame_rate,field_order,nb_frames,duration,codec_name',
+            '-show_entries', 'stream_side_data=',
+            '-of', 'json',
+            str(video_path)
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+        if result.returncode != 0:
+            runner._log_message(f"[VideoProps] WARNING: ffprobe failed, using defaults")
+            return props
+
+        data = json.loads(result.stdout)
+
+        if not data.get('streams'):
+            runner._log_message(f"[VideoProps] WARNING: No video streams found")
+            return props
+
+        stream = data['streams'][0]
+        props['detection_source'] = 'ffprobe'
+
+        # Parse FPS from r_frame_rate (more reliable than avg_frame_rate)
+        r_frame_rate = stream.get('r_frame_rate', '24000/1001')
+        if '/' in r_frame_rate:
+            num, denom = r_frame_rate.split('/')
+            num, denom = int(num), int(denom)
+            props['fps'] = num / denom
+            props['fps_fraction'] = (num, denom)
+        else:
+            props['fps'] = float(r_frame_rate)
+            props['fps_fraction'] = (int(float(r_frame_rate) * 1000), 1000)
+
+        # Parse field_order for interlacing detection
+        field_order = stream.get('field_order', 'progressive')
+
+        if field_order in ('tt', 'tb'):
+            props['interlaced'] = True
+            props['field_order'] = 'tff'  # Top Field First
+            props['scan_type'] = 'interlaced'
+        elif field_order in ('bb', 'bt'):
+            props['interlaced'] = True
+            props['field_order'] = 'bff'  # Bottom Field First
+            props['scan_type'] = 'interlaced'
+        elif field_order == 'progressive':
+            props['interlaced'] = False
+            props['field_order'] = 'progressive'
+            props['scan_type'] = 'progressive'
+        else:
+            # Unknown - might need deeper analysis
+            props['field_order'] = 'unknown'
+
+        # Parse duration
+        duration_str = stream.get('duration')
+        if duration_str:
+            props['duration_ms'] = float(duration_str) * 1000.0
+
+        # Parse frame count (if available)
+        nb_frames = stream.get('nb_frames')
+        if nb_frames and nb_frames != 'N/A':
+            props['frame_count'] = int(nb_frames)
+        elif props['duration_ms'] > 0 and props['fps'] > 0:
+            # Estimate frame count from duration
+            props['frame_count'] = int(props['duration_ms'] * props['fps'] / 1000.0)
+
+        # Log detected properties
+        runner._log_message(f"[VideoProps] FPS: {props['fps']:.3f} ({props['fps_fraction'][0]}/{props['fps_fraction'][1]})")
+        runner._log_message(f"[VideoProps] Scan type: {props['scan_type']}, Field order: {props['field_order']}")
+        runner._log_message(f"[VideoProps] Duration: {props['duration_ms']:.0f}ms, Frames: {props['frame_count']}")
+
+        # Additional telecine detection for NTSC content
+        # 29.97fps with film content often indicates telecine
+        if abs(props['fps'] - 29.97) < 0.01:
+            # Could be true 29.97, interlaced TV, or telecined film
+            # We'll note this for potential special handling
+            if props['interlaced']:
+                runner._log_message(f"[VideoProps] NOTE: 29.97i content - may be interlaced TV or hard telecine")
+            else:
+                runner._log_message(f"[VideoProps] NOTE: 29.97p content - may be soft telecine or native 30p")
+
+        return props
+
+    except Exception as e:
+        runner._log_message(f"[VideoProps] WARNING: Detection failed: {e}")
+        return props
+
+
+def compare_video_properties(source_props: Dict[str, Any], target_props: Dict[str, Any], runner) -> Dict[str, Any]:
+    """
+    Compare video properties between source and target to determine sync strategy.
+
+    Args:
+        source_props: Properties dict from detect_video_properties() for source
+        target_props: Properties dict from detect_video_properties() for target
+        runner: CommandRunner for logging
+
+    Returns:
+        Dict with:
+            - strategy: str ('frame-based', 'timestamp-based', 'deinterlace', 'scale')
+            - fps_match: bool
+            - fps_ratio: float (source_fps / target_fps)
+            - interlace_mismatch: bool
+            - needs_deinterlace: bool
+            - needs_scaling: bool
+            - scale_factor: float (for PAL speedup etc.)
+            - warnings: list of warning strings
+    """
+    runner._log_message(f"[VideoProps] ─────────────────────────────────────────")
+    runner._log_message(f"[VideoProps] Comparing source vs target properties...")
+
+    result = {
+        'strategy': 'frame-based',  # Default: current mode works
+        'fps_match': True,
+        'fps_ratio': 1.0,
+        'interlace_mismatch': False,
+        'needs_deinterlace': False,
+        'needs_scaling': False,
+        'scale_factor': 1.0,
+        'warnings': [],
+    }
+
+    source_fps = source_props['fps']
+    target_fps = target_props['fps']
+
+    # Check FPS match (within 0.1% tolerance)
+    fps_diff_pct = abs(source_fps - target_fps) / target_fps * 100
+    result['fps_ratio'] = source_fps / target_fps
+
+    if fps_diff_pct < 0.1:
+        # FPS matches
+        result['fps_match'] = True
+        runner._log_message(f"[VideoProps] FPS: MATCH ({source_fps:.3f} ≈ {target_fps:.3f})")
+    else:
+        result['fps_match'] = False
+        runner._log_message(f"[VideoProps] FPS: MISMATCH ({source_fps:.3f} vs {target_fps:.3f}, diff={fps_diff_pct:.2f}%)")
+
+        # Check for PAL speedup (23.976 → 25 = 4.17% faster)
+        if 1.04 < result['fps_ratio'] < 1.05:
+            result['needs_scaling'] = True
+            result['scale_factor'] = target_fps / source_fps  # e.g., 23.976/25 = 0.959
+            result['strategy'] = 'scale'
+            result['warnings'].append(f"PAL speedup detected (ratio={result['fps_ratio']:.4f}), subtitles need scaling")
+            runner._log_message(f"[VideoProps] PAL speedup detected - will need subtitle scaling")
+        elif 0.95 < 1/result['fps_ratio'] < 0.96:
+            # Reverse PAL (25 → 23.976)
+            result['needs_scaling'] = True
+            result['scale_factor'] = target_fps / source_fps
+            result['strategy'] = 'scale'
+            result['warnings'].append(f"Reverse PAL detected, subtitles need scaling")
+            runner._log_message(f"[VideoProps] Reverse PAL detected - will need subtitle scaling")
+        else:
+            # Different framerates, use timestamp-based
+            result['strategy'] = 'timestamp-based'
+            result['warnings'].append(f"Different framerates - frame-based matching may be unreliable")
+            runner._log_message(f"[VideoProps] Different framerates - timestamp-based matching recommended")
+
+    # Check interlacing
+    source_interlaced = source_props['interlaced']
+    target_interlaced = target_props['interlaced']
+
+    if source_interlaced != target_interlaced:
+        result['interlace_mismatch'] = True
+        runner._log_message(f"[VideoProps] Interlacing: MISMATCH (source={source_interlaced}, target={target_interlaced})")
+
+    if source_interlaced or target_interlaced:
+        result['needs_deinterlace'] = True
+        if result['strategy'] == 'frame-based':
+            result['strategy'] = 'deinterlace'
+        result['warnings'].append(f"Interlaced content detected - frame hashing may be less reliable")
+        runner._log_message(f"[VideoProps] Interlaced content - will need deinterlace for frame matching")
+
+    # Summary
+    runner._log_message(f"[VideoProps] Recommended strategy: {result['strategy']}")
+    if result['warnings']:
+        for warn in result['warnings']:
+            runner._log_message(f"[VideoProps] WARNING: {warn}")
+    runner._log_message(f"[VideoProps] ─────────────────────────────────────────")
+
+    return result
+
+
 # ============================================================================
 # CORRELATION + FRAME SNAP MODE
 # ============================================================================
@@ -2190,7 +2415,7 @@ def apply_correlation_frame_snap_sync(
 
     runner._log_message(f"[Correlation+FrameSnap] Loaded {len(subs.events)} subtitle events")
 
-    # Detect FPS
+    # Detect FPS (simple detection for frame duration calculation)
     fps = detect_video_fps(source_video, runner)
     frame_duration_ms = 1000.0 / fps
 
@@ -2222,6 +2447,20 @@ def apply_correlation_frame_snap_sync(
             'reused_from_cache': True
         }
     else:
+        # Detect comprehensive video properties for both videos (first track only)
+        # This helps identify potential issues (interlaced, different FPS, PAL speedup)
+        # Currently for logging/diagnosis only - doesn't change sync behavior yet
+        source_props = detect_video_properties(source_video, runner)
+        target_props = detect_video_properties(target_video, runner)
+        video_comparison = compare_video_properties(source_props, target_props, runner)
+
+        # Log if there are warnings but continue with current behavior
+        if video_comparison.get('warnings'):
+            runner._log_message(f"[Correlation+FrameSnap] NOTE: Video property analysis found potential issues")
+            runner._log_message(f"[Correlation+FrameSnap] Recommended strategy: {video_comparison['strategy']}")
+            runner._log_message(f"[Correlation+FrameSnap] Current mode will proceed with frame-based matching")
+            runner._log_message(f"[Correlation+FrameSnap] (Future versions may adapt based on these properties)")
+
         # Run frame verification using PURE correlation (without global shift)
         # because we're comparing against original videos
         verification_result = verify_correlation_with_frame_snap(
