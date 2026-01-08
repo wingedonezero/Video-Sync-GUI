@@ -188,6 +188,19 @@ def run_audio_correlation(
     ref_pcm = _decode_to_memory(ref_file, idx_ref, DEFAULT_SR, use_soxr, runner, tool_paths)
     tgt_pcm = _decode_to_memory(target_file, idx_tgt, DEFAULT_SR, use_soxr, runner, tool_paths)
 
+    # --- 2b. Source Separation (Optional) ---
+    separation_model = config.get('source_separation_model', 'None (Use Original Audio)')
+    if separation_model and separation_model != 'None (Use Original Audio)':
+        try:
+            from .source_separation import apply_source_separation
+            ref_pcm, tgt_pcm = apply_source_separation(
+                ref_pcm, tgt_pcm, DEFAULT_SR, config, log
+            )
+        except ImportError as e:
+            log(f"[SOURCE SEPARATION] Dependencies not available: {e}")
+        except Exception as e:
+            log(f"[SOURCE SEPARATION] Error during separation: {e}")
+
     # --- 3. Pre-processing (Filtering) ---
     filtering_method = config.get('filtering_method', 'None')
     if filtering_method == 'Dialogue Band-Pass Filter':
