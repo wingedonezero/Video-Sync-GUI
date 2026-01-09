@@ -461,3 +461,199 @@ def run_audio_correlation(
             'match': match, 'start': t0, 'accepted': accepted
         })
     return results
+
+
+# --- Method name to config key mapping ---
+MULTI_CORR_METHODS = [
+    ('Standard Correlation (SCC)', 'multi_corr_scc'),
+    ('Phase Correlation (GCC-PHAT)', 'multi_corr_gcc_phat'),
+    ('Onset Detection', 'multi_corr_onset'),
+    ('GCC-SCOT', 'multi_corr_gcc_scot'),
+    ('DTW (Dynamic Time Warping)', 'multi_corr_dtw'),
+    ('Spectrogram Correlation', 'multi_corr_spectrogram'),
+]
+
+
+def _run_method_on_chunks(
+    method_name: str,
+    chunks: List[Tuple[int, float, np.ndarray, np.ndarray]],
+    sr: int,
+    min_match: float,
+    peak_fit: bool,
+    log: Callable
+) -> List[Dict]:
+    """
+    Runs a specific correlation method on pre-extracted chunks.
+
+    Args:
+        method_name: Name of the correlation method
+        chunks: List of (chunk_index, start_time, ref_chunk, tgt_chunk) tuples
+        sr: Sample rate
+        min_match: Minimum match percentage threshold
+        peak_fit: Whether to use peak fitting (SCC only)
+        log: Logging function
+
+    Returns:
+        List of chunk results
+    """
+    results = []
+    chunk_count = len(chunks)
+
+    for i, t0, ref_chunk, tgt_chunk in chunks:
+        if 'Phase Correlation (GCC-PHAT)' in method_name:
+            raw_ms, match = _find_delay_gcc_phat(ref_chunk, tgt_chunk, sr)
+        elif 'Onset Detection' in method_name:
+            raw_ms, match = _find_delay_onset(ref_chunk, tgt_chunk, sr)
+        elif 'GCC-SCOT' in method_name:
+            raw_ms, match = _find_delay_gcc_scot(ref_chunk, tgt_chunk, sr)
+        elif 'DTW' in method_name:
+            raw_ms, match = _find_delay_dtw(ref_chunk, tgt_chunk, sr)
+        elif 'Spectrogram' in method_name:
+            raw_ms, match = _find_delay_spectrogram(ref_chunk, tgt_chunk, sr)
+        else:
+            raw_ms, match = _find_delay_scc(ref_chunk, tgt_chunk, sr, peak_fit)
+
+        accepted = match >= min_match
+        status_str = "ACCEPTED" if accepted else f"REJECTED (below {min_match:.1f})"
+        log(f"  Chunk {i}/{chunk_count} (@{t0:.1f}s): delay = {int(round(raw_ms)):+d} ms (raw={raw_ms:+.3f}, match={match:.2f}) — {status_str}")
+        results.append({
+            'delay': int(round(raw_ms)), 'raw_delay': raw_ms,
+            'match': match, 'start': t0, 'accepted': accepted
+        })
+
+    return results
+
+
+def run_multi_correlation(
+    ref_file: str,
+    target_file: str,
+    config: Dict,
+    runner: CommandRunner,
+    tool_paths: Dict[str, str],
+    ref_lang: Optional[str],
+    target_lang: Optional[str],
+    role_tag: str
+) -> Dict[str, List[Dict]]:
+    """
+    Runs multiple correlation methods on the same audio chunks for comparison.
+
+    Decodes audio once, extracts chunks once, then runs each enabled correlation
+    method on the same data. Used for Analyze Only mode when multi-correlation
+    comparison is enabled.
+
+    Args:
+        ref_file: Path to reference video file (Source 1)
+        target_file: Path to target video file to analyze
+        config: Configuration dictionary with analysis settings
+        runner: CommandRunner for executing ffmpeg/ffprobe commands
+        tool_paths: Paths to external tools
+        ref_lang: Optional language code for reference audio
+        target_lang: Optional language code for target audio
+        role_tag: Source identifier for logging
+
+    Returns:
+        Dict mapping method names to their chunk result lists
+    """
+    log = runner._log_message
+
+    # Get enabled methods
+    enabled_methods = []
+    for method_name, config_key in MULTI_CORR_METHODS:
+        if config.get(config_key, False):
+            enabled_methods.append(method_name)
+
+    if not enabled_methods:
+        log("[MULTI-CORRELATION] No methods enabled, falling back to single method")
+        return {config.get('correlation_method', 'Standard Correlation (SCC)'):
+                run_audio_correlation(ref_file, target_file, config, runner, tool_paths, ref_lang, target_lang, role_tag)}
+
+    # --- 1. Select streams ---
+    ref_norm, tgt_norm = _normalize_lang(ref_lang), _normalize_lang(target_lang)
+    idx_ref, _ = get_audio_stream_info(ref_file, ref_norm, runner, tool_paths)
+    idx_tgt, id_tgt = get_audio_stream_info(target_file, tgt_norm, runner, tool_paths)
+
+    if idx_ref is None or idx_tgt is None:
+        raise ValueError("Could not locate required audio streams for correlation.")
+    log(f"Selected streams: REF (lang='{ref_norm or 'first'}', index={idx_ref}), "
+        f"{role_tag.upper()} (lang='{tgt_norm or 'first'}', index={idx_tgt}, track_id={id_tgt})")
+
+    # --- 2. Decode ---
+    DEFAULT_SR = 48000
+    use_soxr = config.get('use_soxr', False)
+    ref_pcm = _decode_to_memory(ref_file, idx_ref, DEFAULT_SR, use_soxr, runner, tool_paths)
+    tgt_pcm = _decode_to_memory(target_file, idx_tgt, DEFAULT_SR, use_soxr, runner, tool_paths)
+
+    # --- 2b. Source Separation (Optional) ---
+    separation_model = config.get('source_separation_model', 'None (Use Original Audio)')
+    if separation_model and separation_model != 'None (Use Original Audio)':
+        try:
+            from .source_separation import apply_source_separation
+            ref_pcm, tgt_pcm = apply_source_separation(
+                ref_pcm, tgt_pcm, DEFAULT_SR, config, log
+            )
+        except ImportError as e:
+            log(f"[SOURCE SEPARATION] Dependencies not available: {e}")
+        except Exception as e:
+            log(f"[SOURCE SEPARATION] Error during separation: {e}")
+
+    # --- 3. Pre-processing (Filtering) ---
+    filtering_method = config.get('filtering_method', 'None')
+    if filtering_method == 'Dialogue Band-Pass Filter':
+        log("Applying Dialogue Band-Pass filter...")
+        lowcut = config.get('filter_bandpass_lowcut_hz', 300.0)
+        highcut = config.get('filter_bandpass_highcut_hz', 3400.0)
+        order = config.get('filter_bandpass_order', 5)
+        ref_pcm = _apply_bandpass(ref_pcm, DEFAULT_SR, lowcut, highcut, order)
+        tgt_pcm = _apply_bandpass(tgt_pcm, DEFAULT_SR, lowcut, highcut, order)
+    elif filtering_method == 'Low-Pass Filter':
+        cutoff = int(config.get('audio_bandlimit_hz', 0))
+        if cutoff > 0:
+            log(f"Applying Low-Pass filter at {cutoff} Hz...")
+            taps = config.get('filter_lowpass_taps', 101)
+            ref_pcm = _apply_lowpass(ref_pcm, DEFAULT_SR, cutoff, taps)
+            tgt_pcm = _apply_lowpass(tgt_pcm, DEFAULT_SR, cutoff, taps)
+
+    # --- 4. Extract chunks ONCE ---
+    duration_s = len(ref_pcm) / float(DEFAULT_SR)
+    chunk_count = int(config.get('scan_chunk_count', 10))
+    chunk_dur = float(config.get('scan_chunk_duration', 15.0))
+
+    start_pct = config.get('scan_start_percentage', 5.0)
+    end_pct = config.get('scan_end_percentage', 95.0)
+    if not 0.0 <= start_pct < end_pct <= 100.0:
+        start_pct, end_pct = 5.0, 95.0
+
+    scan_start_s = duration_s * (start_pct / 100.0)
+    scan_end_s = duration_s * (end_pct / 100.0)
+    scan_range = max(0.0, (scan_end_s - scan_start_s) - chunk_dur)
+    start_offset = scan_start_s
+    starts = [start_offset + (scan_range / max(1, chunk_count - 1) * i) for i in range(chunk_count)]
+    chunk_samples = int(round(chunk_dur * DEFAULT_SR))
+
+    # Extract all chunks
+    chunks = []
+    for i, t0 in enumerate(starts, 1):
+        start_sample = int(round(t0 * DEFAULT_SR))
+        end_sample = start_sample + chunk_samples
+        if end_sample > len(ref_pcm) or end_sample > len(tgt_pcm):
+            continue
+        ref_chunk = ref_pcm[start_sample:end_sample]
+        tgt_chunk = tgt_pcm[start_sample:end_sample]
+        chunks.append((i, t0, ref_chunk, tgt_chunk))
+
+    log(f"\n[MULTI-CORRELATION] Running {len(enabled_methods)} methods on {len(chunks)} chunks")
+
+    # --- 5. Run each method on the same chunks ---
+    peak_fit = config.get('audio_peak_fit', False)
+    min_match = float(config.get('min_match_pct', 5.0))
+    all_results = {}
+
+    for method_name in enabled_methods:
+        log(f"\n{'═' * 70}")
+        log(f"  MULTI-CORRELATION: {method_name}")
+        log(f"{'═' * 70}")
+
+        results = _run_method_on_chunks(method_name, chunks, DEFAULT_SR, min_match, peak_fit, log)
+        all_results[method_name] = results
+
+    return all_results

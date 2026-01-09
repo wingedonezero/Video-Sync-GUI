@@ -82,6 +82,15 @@ class AppConfig:
             'min_accepted_chunks': 3,
             'log_audio_drift': True,
 
+            # --- Multi-Correlation Comparison (Analyze Only) ---
+            'multi_correlation_enabled': False,
+            'multi_corr_scc': True,
+            'multi_corr_gcc_phat': True,
+            'multi_corr_onset': False,
+            'multi_corr_gcc_scot': False,
+            'multi_corr_dtw': False,
+            'multi_corr_spectrogram': False,
+
             # --- DSP & Filtering ---
             'filter_bandpass_lowcut_hz': 300.0,
             'filter_bandpass_highcut_hz': 3400.0,
