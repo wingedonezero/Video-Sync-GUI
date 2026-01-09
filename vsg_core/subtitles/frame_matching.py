@@ -259,6 +259,23 @@ class VideoReader:
             # Extract Y (luma) plane as grayscale
             y_plane = np.asarray(frame[0])
 
+            # Normalize bit depth to 8-bit for PIL
+            # VapourSynth can provide 8-bit, 10-bit, 12-bit, or 16-bit data
+            if y_plane.dtype == np.uint16:
+                # For 10-bit (0-1023) or 16-bit (0-65535), normalize to 8-bit (0-255)
+                # Most anime is 10-bit, so values are in 0-1023 range
+                # Right-shift by (bit_depth - 8) to normalize
+                # For 10-bit: shift right by 2 (divide by 4)
+                # For 16-bit: shift right by 8 (divide by 256)
+                max_val = y_plane.max()
+                if max_val <= 1023:  # 10-bit
+                    y_plane = (y_plane >> 2).astype(np.uint8)
+                else:  # 12-bit or 16-bit
+                    y_plane = (y_plane >> 8).astype(np.uint8)
+            elif y_plane.dtype != np.uint8:
+                # Ensure we have uint8
+                y_plane = y_plane.astype(np.uint8)
+
             return Image.fromarray(y_plane, 'L')
 
         except Exception as e:
@@ -268,6 +285,8 @@ class VideoReader:
     def _get_frame_ffms2_by_index(self, frame_num: int) -> Optional[Image.Image]:
         """Extract frame by index using FFMS2 (frame-accurate)."""
         try:
+            import numpy as np
+
             # Clamp to valid range
             frame_num = max(0, min(frame_num, self.source.properties.NumFrames - 1))
 
@@ -275,7 +294,18 @@ class VideoReader:
             frame = self.source.get_frame(frame_num)
 
             # Convert to PIL Image
+            # FFMS2 typically returns Y plane as first plane for grayscale, or RGB
             frame_array = frame.planes[0]
+
+            # Normalize bit depth to 8-bit for PIL if needed
+            if frame_array.dtype == np.uint16:
+                max_val = frame_array.max()
+                if max_val <= 1023:  # 10-bit
+                    frame_array = (frame_array >> 2).astype(np.uint8)
+                else:  # 12-bit or 16-bit
+                    frame_array = (frame_array >> 8).astype(np.uint8)
+            elif frame_array.dtype != np.uint8:
+                frame_array = frame_array.astype(np.uint8)
 
             return Image.fromarray(frame_array)
 
@@ -306,6 +336,23 @@ class VideoReader:
             # frame[0] is the Y (luma) plane, np.asarray handles stride automatically
             y_plane = np.asarray(frame[0])
 
+            # Normalize bit depth to 8-bit for PIL
+            # VapourSynth can provide 8-bit, 10-bit, 12-bit, or 16-bit data
+            if y_plane.dtype == np.uint16:
+                # For 10-bit (0-1023) or 16-bit (0-65535), normalize to 8-bit (0-255)
+                # Most anime is 10-bit, so values are in 0-1023 range
+                # Right-shift by (bit_depth - 8) to normalize
+                # For 10-bit: shift right by 2 (divide by 4)
+                # For 16-bit: shift right by 8 (divide by 256)
+                max_val = y_plane.max()
+                if max_val <= 1023:  # 10-bit
+                    y_plane = (y_plane >> 2).astype(np.uint8)
+                else:  # 12-bit or 16-bit
+                    y_plane = (y_plane >> 8).astype(np.uint8)
+            elif y_plane.dtype != np.uint8:
+                # Ensure we have uint8
+                y_plane = y_plane.astype(np.uint8)
+
             # Convert to PIL Image (grayscale mode 'L')
             return Image.fromarray(y_plane, 'L')
 
@@ -316,6 +363,8 @@ class VideoReader:
     def _get_frame_ffms2(self, time_ms: int) -> Optional[Image.Image]:
         """Extract frame using FFMS2 (instant indexed seeking)."""
         try:
+            import numpy as np
+
             # Convert time to frame number
             frame_num = int((time_ms / 1000.0) * self.fps)
 
@@ -328,6 +377,16 @@ class VideoReader:
             # Convert to PIL Image
             # FFMS2 returns frames as numpy arrays in RGB format
             frame_array = frame.planes[0]  # Get RGB data
+
+            # Normalize bit depth to 8-bit for PIL if needed
+            if frame_array.dtype == np.uint16:
+                max_val = frame_array.max()
+                if max_val <= 1023:  # 10-bit
+                    frame_array = (frame_array >> 2).astype(np.uint8)
+                else:  # 12-bit or 16-bit
+                    frame_array = (frame_array >> 8).astype(np.uint8)
+            elif frame_array.dtype != np.uint8:
+                frame_array = frame_array.astype(np.uint8)
 
             # Create PIL Image from numpy array
             return Image.fromarray(frame_array)
