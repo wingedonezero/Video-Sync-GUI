@@ -111,15 +111,17 @@ class VideoReader:
         """
         Generate cache path for FFMS2 index in job's temp directory.
 
-        Cache key: video filename + size + mtime (unique per file)
+        Cache key: parent_dir + filename + size + mtime (unique per file path)
         Location: {job_temp_dir}/ffindex/{cache_key}.ffindex
 
         The index is created in the job's temp folder so it can be:
-        1. Easily identified by filename
+        1. Easily identified by filename and source
         2. Reused within the job (multiple tracks using same source)
         3. Cleaned up automatically when job completes
+        4. Avoid collisions when different sources have same episode numbers
         """
         import os
+        import hashlib
 
         video_path_obj = Path(video_path)
 
@@ -128,8 +130,16 @@ class VideoReader:
         file_size = stat.st_size
         mtime = int(stat.st_mtime)
 
-        # Generate cache key with filename for easy identification
-        cache_key = f"{video_path_obj.stem}_{file_size}_{mtime}"
+        # Include parent directory to distinguish between sources
+        # E.g., "source1/1.mkv" vs "source2/1.mkv" get different indexes
+        parent_dir = video_path_obj.parent.name
+
+        # If parent is empty/root, use path hash instead
+        if not parent_dir or parent_dir == '.':
+            path_hash = hashlib.md5(str(video_path_obj.resolve()).encode()).hexdigest()[:8]
+            cache_key = f"{video_path_obj.stem}_{path_hash}_{file_size}_{mtime}"
+        else:
+            cache_key = f"{parent_dir}_{video_path_obj.stem}_{file_size}_{mtime}"
 
         # ALWAYS use job's temp_dir for index storage (for cleanup)
         if temp_dir:
