@@ -329,7 +329,53 @@ def time_to_frame_vfr(time_ms: float, video_path: str, fps: float, runner, confi
 # VAPOURSYNTH FRAME INDEXING (Fast & Accurate)
 # ============================================================================
 
-def get_vapoursynth_frame_info(video_path: str, runner) -> Optional[Tuple[int, float]]:
+def _get_ffms2_cache_path(video_path: str, temp_dir: Optional[Path]) -> Path:
+    """
+    Generate cache path for FFMS2 index in job's temp directory.
+
+    Cache key: parent_dir + filename + size + mtime (unique per file path)
+    Location: {job_temp_dir}/ffindex/{cache_key}.ffindex
+
+    The index is created in the job's temp folder so it can be:
+    1. Easily identified by filename and source
+    2. Reused within the job (multiple sync operations on same video)
+    3. Cleaned up automatically when job completes
+    4. Avoid collisions when different sources have same episode numbers
+    """
+    import os
+    import hashlib
+
+    video_path_obj = Path(video_path)
+
+    # Get file metadata for cache invalidation
+    stat = os.stat(video_path)
+    file_size = stat.st_size
+    mtime = int(stat.st_mtime)
+
+    # Include parent directory to distinguish between sources
+    # E.g., "source1/1.mkv" vs "source2/1.mkv" get different indexes
+    parent_dir = video_path_obj.parent.name
+
+    # If parent is empty/root, use path hash instead
+    if not parent_dir or parent_dir == '.':
+        path_hash = hashlib.md5(str(video_path_obj.resolve()).encode()).hexdigest()[:8]
+        cache_key = f"{video_path_obj.stem}_{path_hash}_{file_size}_{mtime}"
+    else:
+        cache_key = f"{parent_dir}_{video_path_obj.stem}_{file_size}_{mtime}"
+
+    # ALWAYS use job's temp_dir for index storage (for cleanup)
+    if temp_dir:
+        cache_dir = temp_dir / "ffindex"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+    else:
+        # Fallback: use system temp (but warn - won't be cleaned up)
+        cache_dir = Path(tempfile.gettempdir()) / "vsg_ffindex"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+    return cache_dir / f"{cache_key}.ffindex"
+
+
+def get_vapoursynth_frame_info(video_path: str, runner, temp_dir: Optional[Path] = None) -> Optional[Tuple[int, float]]:
     """
     Get frame count and last frame timestamp using VapourSynth indexing.
 
@@ -356,6 +402,20 @@ def get_vapoursynth_frame_info(video_path: str, runner) -> Optional[Tuple[int, f
         # Create new core instance for isolation
         core = vs.core
 
+        # Generate cache path for FFMS2 index
+        index_path = _get_ffms2_cache_path(video_path, temp_dir)
+
+        # Show where index is stored
+        if temp_dir:
+            # Show relative path from job temp dir
+            try:
+                rel_path = index_path.relative_to(temp_dir)
+                location_msg = f"job_temp/{rel_path}"
+            except ValueError:
+                location_msg = str(index_path)
+        else:
+            location_msg = str(index_path)
+
         # Load video - this auto-generates index if not present
         # Try L-SMASH first (more accurate), fall back to FFmpegSource2
         clip = None
@@ -370,7 +430,18 @@ def get_vapoursynth_frame_info(video_path: str, runner) -> Optional[Tuple[int, f
 
         if clip is None:
             try:
-                clip = core.ffms2.Source(str(video_path))
+                # Log whether index already exists
+                if index_path.exists():
+                    runner._log_message(f"[VapourSynth] ✓ Reusing existing index from: {location_msg}")
+                else:
+                    runner._log_message(f"[VapourSynth] Creating new index at: {location_msg}")
+                    runner._log_message(f"[VapourSynth] This may take 1-2 minutes...")
+
+                # Use FFMS2 with custom cache path
+                clip = core.ffms2.Source(
+                    source=str(video_path),
+                    cachefile=str(index_path)
+                )
                 runner._log_message(f"[VapourSynth] Using FFmpegSource2")
             except Exception as e:
                 runner._log_message(f"[VapourSynth] ERROR: FFmpegSource2 also failed: {e}")
@@ -549,7 +620,7 @@ def detect_scene_changes(
         return []
 
 
-def extract_frame_as_image(video_path: str, frame_number: int, runner) -> Optional[bytes]:
+def extract_frame_as_image(video_path: str, frame_number: int, runner, temp_dir: Optional[Path] = None) -> Optional[bytes]:
     """
     Extract a single frame from video as PNG image data using VapourSynth.
 
@@ -557,6 +628,7 @@ def extract_frame_as_image(video_path: str, frame_number: int, runner) -> Option
         video_path: Path to video file
         frame_number: Frame index to extract (0-based)
         runner: CommandRunner for logging
+        temp_dir: Optional job temp directory for index storage
 
     Returns:
         PNG image data as bytes, or None on error
@@ -569,6 +641,9 @@ def extract_frame_as_image(video_path: str, frame_number: int, runner) -> Option
 
         core = vs.core
 
+        # Generate cache path for FFMS2 index
+        index_path = _get_ffms2_cache_path(video_path, temp_dir)
+
         # Load video - try L-SMASH first, fall back to FFmpegSource2
         clip = None
         try:
@@ -578,7 +653,11 @@ def extract_frame_as_image(video_path: str, frame_number: int, runner) -> Option
 
         if clip is None:
             try:
-                clip = core.ffms2.Source(str(video_path))
+                # Use FFMS2 with custom cache path
+                clip = core.ffms2.Source(
+                    source=str(video_path),
+                    cachefile=str(index_path)
+                )
             except Exception as e:
                 runner._log_message(f"[VapourSynth] ERROR: Failed to load video: {e}")
                 del core
@@ -709,7 +788,8 @@ def validate_frame_alignment(
     subtitle_events: List,
     duration_offset_ms: float,
     runner,
-    config: dict = None
+    config: dict = None,
+    temp_dir: Optional[Path] = None
 ) -> Dict[str, Any]:
     """
     Validate that videos are frame-aligned by comparing perceptual hashes.
@@ -846,8 +926,8 @@ def validate_frame_alignment(
             tgt_frame_num = target_frame + offset
 
             # Extract frames
-            src_img = extract_frame_as_image(source_video, src_frame_num, runner)
-            tgt_img = extract_frame_as_image(target_video, tgt_frame_num, runner)
+            src_img = extract_frame_as_image(source_video, src_frame_num, runner, temp_dir)
+            tgt_img = extract_frame_as_image(target_video, tgt_frame_num, runner, temp_dir)
 
             if src_img is None or tgt_img is None:
                 runner._log_message(f"[Frame Validation]   Frame {offset:+d}: SKIP (extraction failed)")
@@ -1386,7 +1466,8 @@ def apply_duration_align_sync(
     target_video: str,
     global_shift_ms: float,
     runner,
-    config: dict = None
+    config: dict = None,
+    temp_dir: Optional[Path] = None
 ) -> Dict[str, Any]:
     """
     Align subtitles by total video duration difference (frame alignment).
@@ -1415,6 +1496,7 @@ def apply_duration_align_sync(
         global_shift_ms: Global shift from delays (raw_global_shift_ms)
         runner: CommandRunner for logging
         config: Optional config dict
+        temp_dir: Optional job temp directory for FFMS2 index storage
 
     Returns:
         Dict with report statistics
@@ -1445,14 +1527,14 @@ def apply_duration_align_sync(
         runner._log_message(f"[Duration Align] Using VapourSynth for frame indexing (fast after first run)")
 
         # Get source video info
-        source_info = get_vapoursynth_frame_info(source_video, runner)
+        source_info = get_vapoursynth_frame_info(source_video, runner, temp_dir)
         if source_info:
             source_frame_count, source_duration_ms = source_info
         else:
             runner._log_message(f"[Duration Align] VapourSynth failed for source, falling back to ffprobe")
 
         # Get target video info
-        target_info = get_vapoursynth_frame_info(target_video, runner)
+        target_info = get_vapoursynth_frame_info(target_video, runner, temp_dir)
         if target_info:
             target_frame_count, target_duration_ms = target_info
         else:
@@ -1606,7 +1688,8 @@ def apply_duration_align_sync(
             subs.events,
             duration_offset_ms,
             runner,
-            config
+            config,
+            temp_dir
         )
 
         # If validation failed, handle based on fallback mode
