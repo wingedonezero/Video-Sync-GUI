@@ -2726,6 +2726,12 @@ def apply_subtitle_anchored_frame_snap_sync(
             'error': 'frame_matching module not available'
         }
 
+    # Log actual video paths for debugging
+    from pathlib import Path
+    runner._log_message(f"[SubAnchor FrameSnap] Source video: {Path(source_video).name}")
+    runner._log_message(f"[SubAnchor FrameSnap] Target video: {Path(target_video).name}")
+    runner._log_message(f"[SubAnchor FrameSnap] Same file? {Path(source_video).resolve() == Path(target_video).resolve()}")
+
     # Get video FPS for frame timing calculations
     source_fps = detect_video_fps(source_video, runner)
     target_fps = detect_video_fps(target_video, runner)
@@ -2808,12 +2814,16 @@ def apply_subtitle_anchored_frame_snap_sync(
         best_matched_count = 0
         best_avg_distance = float('inf')
 
+        # Debug: track all distances to diagnose matching issues
+        all_candidates = []
+
         # Search every frame in range (we want precision, not speed here)
         for target_center_frame in range(search_start_frame, search_end_frame + 1):
             # For this candidate, compare all frames in window
             matched_frames = 0
             total_distance = 0
             frames_compared = 0
+            frame_distances = []
 
             for offset, source_hash in source_frame_hashes:
                 target_frame_num = target_center_frame + offset
@@ -2826,6 +2836,7 @@ def apply_subtitle_anchored_frame_snap_sync(
                     if target_hash is not None:
                         distance = source_hash - target_hash
                         frames_compared += 1
+                        frame_distances.append(distance)
 
                         if distance <= hash_threshold:
                             matched_frames += 1
@@ -2835,6 +2846,9 @@ def apply_subtitle_anchored_frame_snap_sync(
             # Calculate aggregate score: prioritize match count, then lower distance
             if frames_compared > 0:
                 avg_distance = total_distance / frames_compared
+                min_distance = min(frame_distances) if frame_distances else 999
+                all_candidates.append((target_center_frame, min_distance, avg_distance, matched_frames))
+
                 # Score = matched * 1000 - avg_distance (higher is better)
                 aggregate_score = (matched_frames * 1000) - avg_distance
 
@@ -2843,6 +2857,13 @@ def apply_subtitle_anchored_frame_snap_sync(
                     best_match_frame = target_center_frame
                     best_matched_count = matched_frames
                     best_avg_distance = avg_distance
+
+        # Debug: show best candidates by min distance to diagnose issues
+        if all_candidates:
+            sorted_by_min = sorted(all_candidates, key=lambda x: x[1])[:5]
+            runner._log_message(f"[SubAnchor FrameSnap]   DEBUG: Top 5 by lowest min_distance:")
+            for frame, min_d, avg_d, matched in sorted_by_min:
+                runner._log_message(f"[SubAnchor FrameSnap]     Frame {frame}: min={min_d}, avg={avg_d:.1f}, matched={matched}/{len(source_frame_hashes)}")
 
         # Step 3: Validate match quality
         min_required_matches = int(len(source_frame_hashes) * 0.70)  # 70% threshold
