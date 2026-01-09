@@ -355,8 +355,8 @@ class AnalysisStep:
                 runner._log_message(f"[WARN] No suitable audio track found in {source_key} for analysis. Skipping.")
                 continue
 
-            # Check if multi-correlation comparison is enabled
-            multi_corr_enabled = config.get('multi_correlation_enabled', False)
+            # Check if multi-correlation comparison is enabled (Analyze Only mode only)
+            multi_corr_enabled = config.get('multi_correlation_enabled', False) and not ctx.and_merge
 
             if multi_corr_enabled:
                 # Run multiple correlation methods for comparison
