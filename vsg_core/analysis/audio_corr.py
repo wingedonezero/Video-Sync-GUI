@@ -185,6 +185,144 @@ def _find_delay_onset(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> 
     return delay_ms, match_confidence
 
 
+def _find_delay_gcc_scot(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> Tuple[float, float]:
+    """
+    Calculates delay using GCC-SCOT (Smoothed Coherence Transform).
+
+    Similar to GCC-PHAT but weights by signal coherence instead of just phase.
+    Better than PHAT when one signal has more noise than the other, as it
+    accounts for the reliability of each frequency bin.
+    """
+    n = len(ref_chunk) + len(tgt_chunk) - 1
+    R = np.fft.fft(ref_chunk, n)
+    T = np.fft.fft(tgt_chunk, n)
+
+    # Cross-power spectrum
+    G = R * np.conj(T)
+
+    # SCOT weighting: normalize by geometric mean of auto-spectra
+    # This gives more weight to frequencies where both signals are strong
+    R_power = np.abs(R) ** 2
+    T_power = np.abs(T) ** 2
+    scot_weight = np.sqrt(R_power * T_power) + 1e-9
+
+    G_scot = G / scot_weight
+    r_scot = np.fft.ifft(G_scot)
+
+    k = np.argmax(np.abs(r_scot))
+    lag_samples = k - n if k > n / 2 else k
+    delay_ms = (lag_samples / float(sr)) * 1000.0
+
+    # Match confidence based on peak prominence
+    match_confidence = np.abs(r_scot[k]) / (np.mean(np.abs(r_scot)) + 1e-9) * 10
+    match_confidence = min(100.0, match_confidence)
+
+    return delay_ms, match_confidence
+
+
+def _find_delay_dtw(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> Tuple[float, float]:
+    """
+    Calculates delay using Dynamic Time Warping on MFCC features.
+
+    DTW finds the optimal alignment between two sequences, handling tempo
+    variations and non-linear time differences. Uses MFCC features which
+    are robust to amplitude and timbral differences.
+
+    Returns the median offset from the warping path as the delay estimate.
+    """
+    try:
+        import librosa
+    except ImportError:
+        raise ImportError("DTW requires librosa. Install with: pip install librosa")
+
+    # Downsample for DTW efficiency (DTW is O(n*m) complexity)
+    # Use a lower sample rate for feature extraction
+    hop_length = 512
+
+    # Extract MFCC features - robust to amplitude/timbre differences
+    ref_mfcc = librosa.feature.mfcc(y=ref_chunk, sr=sr, n_mfcc=13, hop_length=hop_length)
+    tgt_mfcc = librosa.feature.mfcc(y=tgt_chunk, sr=sr, n_mfcc=13, hop_length=hop_length)
+
+    # Compute DTW alignment
+    # D is the accumulated cost matrix, wp is the warping path
+    D, wp = librosa.sequence.dtw(X=ref_mfcc, Y=tgt_mfcc, metric='euclidean')
+
+    # wp is array of (ref_frame, tgt_frame) pairs along optimal path
+    # Calculate the offset at each point in the path
+    offsets_frames = wp[:, 1] - wp[:, 0]  # tgt - ref frame indices
+
+    # Use median offset (robust to outliers at boundaries)
+    median_offset_frames = np.median(offsets_frames)
+
+    # Convert frame offset to milliseconds
+    frame_duration_ms = (hop_length / sr) * 1000.0
+    delay_ms = median_offset_frames * frame_duration_ms
+
+    # Match confidence based on normalized DTW distance
+    # Lower distance = better match
+    path_length = len(wp)
+    avg_cost = D[wp[-1, 0], wp[-1, 1]] / path_length if path_length > 0 else float('inf')
+
+    # Convert to 0-100 scale (lower cost = higher confidence)
+    # Empirically, good matches have avg_cost < 50, poor matches > 200
+    match_confidence = max(0, min(100, 100 - avg_cost * 0.5))
+
+    return delay_ms, match_confidence
+
+
+def _find_delay_spectrogram(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> Tuple[float, float]:
+    """
+    Calculates delay using spectrogram cross-correlation.
+
+    Computes mel spectrograms of both signals and correlates them along the
+    time axis. Captures both frequency and time structure, making it robust
+    to some types of audio differences while maintaining time precision.
+    """
+    try:
+        import librosa
+    except ImportError:
+        raise ImportError("Spectrogram correlation requires librosa. Install with: pip install librosa")
+
+    hop_length = 512
+    n_mels = 64  # Number of mel bands
+
+    # Compute mel spectrograms (log-scaled for better dynamic range)
+    ref_mel = librosa.feature.melspectrogram(y=ref_chunk, sr=sr, hop_length=hop_length, n_mels=n_mels)
+    tgt_mel = librosa.feature.melspectrogram(y=tgt_chunk, sr=sr, hop_length=hop_length, n_mels=n_mels)
+
+    # Convert to log scale (dB)
+    ref_mel_db = librosa.power_to_db(ref_mel, ref=np.max)
+    tgt_mel_db = librosa.power_to_db(tgt_mel, ref=np.max)
+
+    # Flatten spectrograms along frequency axis to get time-series of spectral features
+    # Then correlate these feature vectors
+    ref_flat = ref_mel_db.mean(axis=0)  # Average across mel bands
+    tgt_flat = tgt_mel_db.mean(axis=0)
+
+    # Normalize
+    ref_norm = (ref_flat - np.mean(ref_flat)) / (np.std(ref_flat) + 1e-9)
+    tgt_norm = (tgt_flat - np.mean(tgt_flat)) / (np.std(tgt_flat) + 1e-9)
+
+    # Cross-correlate using GCC-PHAT for robustness
+    n = len(ref_norm) + len(tgt_norm) - 1
+    R = np.fft.fft(ref_norm, n)
+    T = np.fft.fft(tgt_norm, n)
+    G = R * np.conj(T)
+    G_phat = G / (np.abs(G) + 1e-9)
+    r_phat = np.fft.ifft(G_phat)
+
+    k = np.argmax(np.abs(r_phat))
+    lag_frames = k - n if k > n / 2 else k
+
+    # Convert frame lag to milliseconds
+    frame_duration_ms = (hop_length / sr) * 1000.0
+    delay_ms = lag_frames * frame_duration_ms
+
+    match_confidence = np.abs(r_phat[k]) * 100
+
+    return delay_ms, match_confidence
+
+
 # --- Public API ---
 def run_audio_correlation(
     ref_file: str,
@@ -306,6 +444,12 @@ def run_audio_correlation(
             raw_ms, match = _find_delay_gcc_phat(ref_chunk, tgt_chunk, DEFAULT_SR)
         elif 'Onset Detection' in correlation_method:
             raw_ms, match = _find_delay_onset(ref_chunk, tgt_chunk, DEFAULT_SR)
+        elif 'GCC-SCOT' in correlation_method:
+            raw_ms, match = _find_delay_gcc_scot(ref_chunk, tgt_chunk, DEFAULT_SR)
+        elif 'DTW' in correlation_method:
+            raw_ms, match = _find_delay_dtw(ref_chunk, tgt_chunk, DEFAULT_SR)
+        elif 'Spectrogram' in correlation_method:
+            raw_ms, match = _find_delay_spectrogram(ref_chunk, tgt_chunk, DEFAULT_SR)
         else:
             raw_ms, match = _find_delay_scc(ref_chunk, tgt_chunk, DEFAULT_SR, peak_fit)
 
