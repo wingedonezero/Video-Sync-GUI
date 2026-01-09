@@ -7,7 +7,7 @@ from collections import Counter
 from vsg_core.io.runner import CommandRunner
 from vsg_core.orchestrator.steps.context import Context
 from vsg_core.models.jobs import Delays
-from vsg_core.analysis.audio_corr import run_audio_correlation
+from vsg_core.analysis.audio_corr import run_audio_correlation, run_multi_correlation
 from vsg_core.analysis.drift_detection import diagnose_audio_issue
 from vsg_core.extraction.tracks import get_stream_info, get_stream_info_with_delays
 
@@ -355,12 +355,54 @@ class AnalysisStep:
                 runner._log_message(f"[WARN] No suitable audio track found in {source_key} for analysis. Skipping.")
                 continue
 
-            results = run_audio_correlation(
-                str(source1_file), str(source_file), config, runner, ctx.tool_paths,
-                ref_lang=config.get('analysis_lang_source1'),
-                target_lang=tgt_lang,
-                role_tag=source_key
-            )
+            # Check if multi-correlation comparison is enabled
+            multi_corr_enabled = config.get('multi_correlation_enabled', False)
+
+            if multi_corr_enabled:
+                # Run multiple correlation methods for comparison
+                # Returns dict mapping method names to their results
+                all_method_results = run_multi_correlation(
+                    str(source1_file), str(source_file), config, runner, ctx.tool_paths,
+                    ref_lang=config.get('analysis_lang_source1'),
+                    target_lang=tgt_lang,
+                    role_tag=source_key
+                )
+
+                # Log summary for each method
+                runner._log_message(f"\n{'═' * 70}")
+                runner._log_message("  MULTI-CORRELATION SUMMARY")
+                runner._log_message(f"{'═' * 70}")
+
+                for method_name, method_results in all_method_results.items():
+                    accepted = [r for r in method_results if r.get('accepted', False)]
+                    if accepted:
+                        delays = [r['delay'] for r in accepted]
+                        raw_delays = [r['raw_delay'] for r in accepted]
+                        mode_delay = Counter(delays).most_common(1)[0][0]
+                        avg_match = sum(r['match'] for r in accepted) / len(accepted)
+                        avg_raw = sum(raw_delays) / len(raw_delays)
+                        runner._log_message(
+                            f"  {method_name}: {mode_delay:+d}ms (raw avg: {avg_raw:+.3f}ms) | "
+                            f"match: {avg_match:.1f}% | accepted: {len(accepted)}/{len(method_results)}"
+                        )
+                    else:
+                        runner._log_message(f"  {method_name}: NO ACCEPTED CHUNKS")
+
+                runner._log_message(f"{'═' * 70}\n")
+
+                # Use the first method's results for actual processing
+                # (or the dropdown method if we want to be smarter about this)
+                first_method = list(all_method_results.keys())[0]
+                results = all_method_results[first_method]
+                runner._log_message(f"[MULTI-CORRELATION] Using '{first_method}' results for delay calculation")
+            else:
+                # Normal single-method correlation
+                results = run_audio_correlation(
+                    str(source1_file), str(source_file), config, runner, ctx.tool_paths,
+                    ref_lang=config.get('analysis_lang_source1'),
+                    target_lang=tgt_lang,
+                    role_tag=source_key
+                )
 
             # --- CRITICAL FIX: Detect stepping BEFORE calculating mode delay ---
             diagnosis = None

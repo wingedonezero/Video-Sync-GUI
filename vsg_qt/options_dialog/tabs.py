@@ -164,6 +164,42 @@ class AnalysisTab(QWidget):
         core_layout.addRow("  ↳ Skip Unstable Segments:", self.widgets['first_stable_skip_unstable'])
         main_layout.addWidget(core_group)
 
+        # --- Multi-Correlation Comparison (Analyze Only) ---
+        multi_corr_group = QGroupBox("Multi-Correlation Comparison (Analyze Only)")
+        multi_corr_layout = QVBoxLayout(multi_corr_group)
+        self.widgets['multi_correlation_enabled'] = QCheckBox("Enable Multi-Correlation Comparison")
+        self.widgets['multi_correlation_enabled'].setToolTip(
+            "When enabled in Analyze Only mode, runs multiple correlation methods on the same\n"
+            "audio chunks and outputs results for each. Useful for comparing method accuracy.\n\n"
+            "• Only affects Analyze Only mode - real jobs use the Correlation Method dropdown\n"
+            "• Audio is decoded once, chunks extracted once, then each method runs on same data\n"
+            "• Results are labeled by method for easy comparison"
+        )
+        multi_corr_layout.addWidget(self.widgets['multi_correlation_enabled'])
+
+        # Method checkboxes container
+        self.multi_corr_methods_container = QWidget()
+        methods_layout = QVBoxLayout(self.multi_corr_methods_container)
+        methods_layout.setContentsMargins(20, 0, 0, 0)  # Indent
+        self.widgets['multi_corr_scc'] = QCheckBox("Standard Correlation (SCC)")
+        self.widgets['multi_corr_gcc_phat'] = QCheckBox("Phase Correlation (GCC-PHAT)")
+        self.widgets['multi_corr_onset'] = QCheckBox("Onset Detection")
+        self.widgets['multi_corr_gcc_scot'] = QCheckBox("GCC-SCOT")
+        self.widgets['multi_corr_dtw'] = QCheckBox("DTW (Dynamic Time Warping)")
+        self.widgets['multi_corr_spectrogram'] = QCheckBox("Spectrogram Correlation")
+        methods_layout.addWidget(self.widgets['multi_corr_scc'])
+        methods_layout.addWidget(self.widgets['multi_corr_gcc_phat'])
+        methods_layout.addWidget(self.widgets['multi_corr_onset'])
+        methods_layout.addWidget(self.widgets['multi_corr_gcc_scot'])
+        methods_layout.addWidget(self.widgets['multi_corr_dtw'])
+        methods_layout.addWidget(self.widgets['multi_corr_spectrogram'])
+        multi_corr_layout.addWidget(self.multi_corr_methods_container)
+        main_layout.addWidget(multi_corr_group)
+
+        # Connect enable checkbox to show/hide methods
+        self.widgets['multi_correlation_enabled'].toggled.connect(self._update_multi_corr_visibility)
+        self._update_multi_corr_visibility(False)
+
         adv_filter_group = QGroupBox("Step 3: Advanced Filtering & Scan Controls")
         adv_filter_layout = QFormLayout(adv_filter_group)
         self.widgets['scan_start_percentage'] = QDoubleSpinBox(); self.widgets['scan_start_percentage'].setRange(0.0, 99.0); self.widgets['scan_start_percentage'].setSuffix(" %"); self.widgets['scan_start_percentage'].setToolTip("Where to begin the analysis scan, as a percentage of the file's total duration.")
@@ -228,6 +264,9 @@ class AnalysisTab(QWidget):
         is_first_stable = (text == "First Stable")
         self.widgets['first_stable_min_chunks'].setEnabled(is_first_stable)
         self.widgets['first_stable_skip_unstable'].setEnabled(is_first_stable)
+
+    def _update_multi_corr_visibility(self, enabled: bool):
+        self.multi_corr_methods_container.setVisible(enabled)
 
 class SteppingTab(QWidget):
     def __init__(self):
