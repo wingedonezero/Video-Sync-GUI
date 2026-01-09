@@ -422,7 +422,8 @@ class SubtitlesStep:
                                     str(target_video),
                                     global_shift_ms,
                                     runner,
-                                    ctx.settings_dict
+                                    ctx.settings_dict,
+                                    temp_dir=ctx.temp_dir
                                 )
 
                                 if frame_sync_report and frame_sync_report.get('success'):

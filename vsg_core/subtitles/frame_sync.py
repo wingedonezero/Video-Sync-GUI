@@ -2588,7 +2588,8 @@ def apply_subtitle_anchored_frame_snap_sync(
     target_video: str,
     global_shift_ms: float,
     runner,
-    config: dict = None
+    config: dict = None,
+    temp_dir: Path = None
 ) -> Dict[str, Any]:
     """
     Subtitle-Anchored Frame Snap: Visual-only sync using subtitle positions as anchors.
@@ -2635,6 +2636,7 @@ def apply_subtitle_anchored_frame_snap_sync(
             - sub_anchor_agreement_tolerance_ms: checkpoint agreement (default: 100)
             - sub_anchor_fallback_mode: 'abort', 'use-median' (default: 'abort')
             - sub_anchor_use_vapoursynth: use VS for frame extraction (default: True)
+        temp_dir: Job's temporary directory for FFMS2 index storage (auto-cleaned)
 
     Returns:
         Dict with sync report including:
@@ -2740,10 +2742,10 @@ def apply_subtitle_anchored_frame_snap_sync(
     runner._log_message(f"[SubAnchor FrameSnap] Source FPS: {source_fps:.3f} (frame duration: {frame_duration_ms:.3f}ms)")
     runner._log_message(f"[SubAnchor FrameSnap] Target FPS: {target_fps:.3f}")
 
-    # Open video readers
+    # Open video readers (pass temp_dir for job-local index storage)
     try:
-        source_reader = VideoReader(source_video, runner)
-        target_reader = VideoReader(target_video, runner)
+        source_reader = VideoReader(source_video, runner, temp_dir=temp_dir)
+        target_reader = VideoReader(target_video, runner, temp_dir=temp_dir)
     except Exception as e:
         runner._log_message(f"[SubAnchor FrameSnap] ERROR: Failed to open videos: {e}")
         return {

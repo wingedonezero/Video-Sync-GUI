@@ -109,14 +109,15 @@ class VideoReader:
 
     def _get_index_cache_path(self, video_path: str, temp_dir: Path) -> Path:
         """
-        Generate persistent cache path for FFMS2 index.
+        Generate cache path for FFMS2 index in job's temp directory.
 
-        Cache key: video size + mtime (detects file changes, survives renames)
-        Location: {temp_dir}/ffindex/{cache_key}.ffindex
+        Cache key: video filename + size + mtime (unique per file)
+        Location: {job_temp_dir}/ffindex/{cache_key}.ffindex
 
-        NOTE: Filename is excluded from cache key to allow index reuse after
-        renaming files (e.g., with FileBot). The combination of size + mtime
-        is sufficient to uniquely identify a video file's content.
+        The index is created in the job's temp folder so it can be:
+        1. Easily identified by filename
+        2. Reused within the job (multiple tracks using same source)
+        3. Cleaned up automatically when job completes
         """
         import os
 
@@ -127,17 +128,22 @@ class VideoReader:
         file_size = stat.st_size
         mtime = int(stat.st_mtime)
 
-        # Generate cache key (size + mtime only, survives renames)
-        cache_key = f"{file_size}_{mtime}"
+        # Generate cache key with filename for easy identification
+        cache_key = f"{video_path_obj.stem}_{file_size}_{mtime}"
 
-        # Use temp_dir if available, otherwise use system temp
+        # ALWAYS use job's temp_dir for index storage (for cleanup)
         if temp_dir:
             cache_dir = temp_dir / "ffindex"
+            cache_dir.mkdir(parents=True, exist_ok=True)
         else:
+            # Fallback: use system temp (but warn - won't be cleaned up)
             import tempfile
             cache_dir = Path(tempfile.gettempdir()) / "vsg_ffindex"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            self.runner._log_message(f"[FrameMatch] WARNING: No job temp_dir provided, index won't be auto-cleaned")
 
-        return cache_dir / f"{cache_key}.ffindex"
+        index_path = cache_dir / f"{cache_key}.ffindex"
+        return index_path
 
     def _try_vapoursynth(self) -> bool:
         """
@@ -163,14 +169,23 @@ class VideoReader:
             # Generate cache path
             index_path = self._get_index_cache_path(self.video_path, self.temp_dir)
 
-            # Ensure cache directory exists
-            index_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Load video with persistent index caching
-            if index_path.exists():
-                self.runner._log_message(f"[FrameMatch] ✓ Reusing existing index: {index_path.name}")
+            # Show where index is stored
+            if self.temp_dir:
+                # Show relative path from job temp dir
+                try:
+                    rel_path = index_path.relative_to(self.temp_dir)
+                    location_msg = f"job_temp/{rel_path}"
+                except ValueError:
+                    location_msg = str(index_path)
             else:
-                self.runner._log_message(f"[FrameMatch] Creating new index (this may take 1-2 minutes)...")
+                location_msg = str(index_path)
+
+            # Load video with index caching
+            if index_path.exists():
+                self.runner._log_message(f"[FrameMatch] ✓ Reusing existing index from: {location_msg}")
+            else:
+                self.runner._log_message(f"[FrameMatch] Creating new index at: {location_msg}")
+                self.runner._log_message(f"[FrameMatch] This may take 1-2 minutes...")
 
             clip = core.ffms2.Source(
                 source=str(self.video_path),
