@@ -2843,14 +2843,22 @@ def apply_subtitle_anchored_frame_snap_sync(
 
                         total_distance += distance
 
-            # Calculate aggregate score: prioritize match count, then lower distance
+            # Calculate aggregate score: prioritize match count, then lower distance, then proximity
             if frames_compared > 0:
                 avg_distance = total_distance / frames_compared
                 min_distance = min(frame_distances) if frame_distances else 999
                 all_candidates.append((target_center_frame, min_distance, avg_distance, matched_frames))
 
-                # Score = matched * 1000 - avg_distance (higher is better)
-                aggregate_score = (matched_frames * 1000) - avg_distance
+                # Distance from expected position (prefer frames closer to source position)
+                position_distance = abs(target_center_frame - source_center_frame)
+
+                # Multi-tier scoring (higher is better):
+                # 1. Matched frames (most important): * 100000
+                # 2. Average hash distance: * 10 (reduced from 100)
+                # 3. Position proximity: * 10 (increased from 1)
+                # This ensures: more matches > balanced distance/position preference
+                # For same-file matching, position is as important as hash quality
+                aggregate_score = (matched_frames * 100000) - (avg_distance * 10) - (position_distance * 10)
 
                 if aggregate_score > best_aggregate_score:
                     best_aggregate_score = aggregate_score
@@ -2858,12 +2866,28 @@ def apply_subtitle_anchored_frame_snap_sync(
                     best_matched_count = matched_frames
                     best_avg_distance = avg_distance
 
-        # Debug: show best candidates by min distance to diagnose issues
+        # Debug: show best candidates by scoring to diagnose issues
         if all_candidates:
-            sorted_by_min = sorted(all_candidates, key=lambda x: x[1])[:5]
-            runner._log_message(f"[SubAnchor FrameSnap]   DEBUG: Top 5 by lowest min_distance:")
-            for frame, min_d, avg_d, matched in sorted_by_min:
-                runner._log_message(f"[SubAnchor FrameSnap]     Frame {frame}: min={min_d}, avg={avg_d:.1f}, matched={matched}/{len(source_frame_hashes)}")
+            # Show top 5 by the actual scoring algorithm (with position preference)
+            scored_candidates = []
+            for frame, min_d, avg_d, matched in all_candidates:
+                position_distance = abs(frame - source_center_frame)
+                score = (matched * 100000) - (avg_d * 10) - (position_distance * 10)
+                scored_candidates.append((frame, min_d, avg_d, matched, position_distance, score))
+
+            sorted_by_score = sorted(scored_candidates, key=lambda x: x[5], reverse=True)[:10]
+            runner._log_message(f"[SubAnchor FrameSnap]   DEBUG: Top 10 by aggregate score:")
+            for frame, min_d, avg_d, matched, pos_dist, score in sorted_by_score:
+                marker = " ← SELECTED" if frame == best_match_frame else ""
+                runner._log_message(f"[SubAnchor FrameSnap]     Frame {frame}: matched={matched}/{len(source_frame_hashes)}, avg={avg_d:.1f}, pos_offset={pos_dist:+d}{marker}")
+
+            # Also show frames near the expected position for debugging same-file issues
+            runner._log_message(f"[SubAnchor FrameSnap]   DEBUG: Frames near expected position ({source_center_frame}):")
+            near_source = [c for c in scored_candidates if abs(c[4]) <= 5]  # Within ±5 frames
+            near_source_sorted = sorted(near_source, key=lambda x: x[4])  # Sort by position offset
+            for frame, min_d, avg_d, matched, pos_dist, score in near_source_sorted:
+                marker = " ← SELECTED" if frame == best_match_frame else ""
+                runner._log_message(f"[SubAnchor FrameSnap]     Frame {frame}: matched={matched}/{len(source_frame_hashes)}, avg={avg_d:.1f}, pos_offset={pos_dist:+d}{marker}")
 
         # Step 3: Validate match quality
         min_required_matches = int(len(source_frame_hashes) * 0.70)  # 70% threshold
