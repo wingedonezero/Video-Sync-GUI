@@ -111,8 +111,12 @@ class VideoReader:
         """
         Generate persistent cache path for FFMS2 index.
 
-        Cache key: video filename + size + mtime (detects file changes)
+        Cache key: video size + mtime (detects file changes, survives renames)
         Location: {temp_dir}/ffindex/{cache_key}.ffindex
+
+        NOTE: Filename is excluded from cache key to allow index reuse after
+        renaming files (e.g., with FileBot). The combination of size + mtime
+        is sufficient to uniquely identify a video file's content.
         """
         import os
 
@@ -123,8 +127,8 @@ class VideoReader:
         file_size = stat.st_size
         mtime = int(stat.st_mtime)
 
-        # Generate cache key
-        cache_key = f"{video_path_obj.stem}_{file_size}_{mtime}"
+        # Generate cache key (size + mtime only, survives renames)
+        cache_key = f"{file_size}_{mtime}"
 
         # Use temp_dir if available, otherwise use system temp
         if temp_dir:
