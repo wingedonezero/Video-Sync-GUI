@@ -66,6 +66,17 @@ class AppConfig:
             'correlation_snap_search_range': 5,  # Search ±N frames around correlation prediction (increase for encodes)
             'correlation_snap_use_scene_changes': True,  # Use PySceneDetect to find anchor points
 
+            # --- Subtitle-Anchored Frame Snap Settings ---
+            # Visual-only sync using subtitle positions as anchors (no audio correlation dependency)
+            'sub_anchor_search_range_ms': 2000,  # Search ±N ms around expected position (default 2000 = ~48 frames at 24fps)
+            'sub_anchor_hash_algorithm': 'dhash',  # Hash algorithm: 'dhash', 'phash', 'average_hash'
+            'sub_anchor_hash_size': 8,  # Hash size for perceptual hashing (8 = 64-bit)
+            'sub_anchor_hash_threshold': 5,  # Max hamming distance for frame match
+            'sub_anchor_window_radius': 5,  # Frames before/after center (5 = 11 frame window)
+            'sub_anchor_agreement_tolerance_ms': 100,  # Checkpoints must agree within ±N ms
+            'sub_anchor_fallback_mode': 'abort',  # What to do if verification fails: 'abort', 'use-median'
+            'sub_anchor_use_vapoursynth': True,  # Use VapourSynth for frame extraction (faster with cache)
+
             # --- Timing Fix Settings ---
             'timing_fix_enabled': False,
             'timing_fix_overlaps': True,
