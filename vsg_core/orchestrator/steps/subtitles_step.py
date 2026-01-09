@@ -276,7 +276,8 @@ class SubtitlesStep:
                                     str(target_video),
                                     global_shift_ms,
                                     runner,
-                                    sync_config
+                                    sync_config,
+                                    ctx.temp_dir
                                 )
 
                                 if frame_sync_report and 'error' not in frame_sync_report:
