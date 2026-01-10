@@ -356,7 +356,7 @@ class AnalysisStep:
                 continue
 
             # Check if multi-correlation comparison is enabled (Analyze Only mode only)
-            multi_corr_enabled = config.get('multi_correlation_enabled', False) and not ctx.and_merge
+            multi_corr_enabled = bool(config.get('multi_correlation_enabled', False)) and (not ctx.and_merge)
 
             if multi_corr_enabled:
                 # Run multiple correlation methods for comparison
