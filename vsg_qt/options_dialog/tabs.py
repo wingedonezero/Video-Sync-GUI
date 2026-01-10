@@ -1049,6 +1049,28 @@ class SubtitleSyncTab(QWidget):
             "Used when 'Use raw correlation values' is enabled."
         )
 
+        self.widgets['time_based_frame_boundary_correction'] = QCheckBox("Fix frame boundary errors (CFR)")
+        self.widgets['time_based_frame_boundary_correction'].setChecked(True)
+        self.widgets['time_based_frame_boundary_correction'].setToolTip(
+            "Prevent ±1 frame errors from centisecond rounding:\n\n"
+            "• Checked (Default): Apply frame boundary correction\n"
+            "  - Detects when CS rounding pushes subtitles into wrong frame\n"
+            "  - Micro-adjusts by ±10-30ms to keep in correct frame\n"
+            "  - Preserves duration in 90%+ of cases\n"
+            "  - Requires target video file for FPS detection\n"
+            "  - Only works for CFR (constant frame rate) videos\n\n"
+            "• Unchecked: Skip frame boundary correction\n"
+            "  - Faster, but may have ±1 frame timing errors\n"
+            "  - Subtitles may start/end 1 frame too early or late\n\n"
+            "Problem: ASS format uses centiseconds (10ms precision).\n"
+            "Rounding milliseconds to CS can accidentally cross frame boundaries.\n\n"
+            "Example at 23.976fps:\n"
+            "  4171ms is in frame 100\n"
+            "  But CS rounds to 4170ms → frame 99 (wrong!) ❌\n"
+            "  Correction adjusts to 4180ms → frame 100 (fixed!) ✅\n\n"
+            "Only used when 'Use raw correlation values' is enabled."
+        )
+
         # Duration-Align settings
         self.widgets['duration_align_use_vapoursynth'] = QCheckBox("Use VapourSynth indexing")
         self.widgets['duration_align_use_vapoursynth'].setChecked(True)
@@ -1583,6 +1605,7 @@ class SubtitleSyncTab(QWidget):
         # Time-based mode options
         sync_layout.addRow("", self.widgets['time_based_use_raw_values'])
         sync_layout.addRow("Rounding:", self.widgets['raw_delay_rounding'])
+        sync_layout.addRow("", self.widgets['time_based_frame_boundary_correction'])
 
         # Duration-Align mode options
         sync_layout.addRow("", self.widgets['duration_align_use_vapoursynth'])
@@ -1649,6 +1672,7 @@ class SubtitleSyncTab(QWidget):
         self.widgets['time_based_use_raw_values'].setEnabled(is_time_based)
         use_raw = is_time_based and self.widgets['time_based_use_raw_values'].isChecked()
         self.widgets['raw_delay_rounding'].setEnabled(use_raw)
+        self.widgets['time_based_frame_boundary_correction'].setEnabled(use_raw)
 
         # Duration-align mode options
         self.widgets['duration_align_use_vapoursynth'].setEnabled(is_duration_align)

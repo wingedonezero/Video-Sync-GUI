@@ -49,6 +49,7 @@ class AppConfig:
             'subtitle_target_fps': 0.0,
             'time_based_use_raw_values': False,  # Use pysubs instead of mkvmerge --sync
             'raw_delay_rounding': 'floor',  # Rounding for raw/time-based-raw: floor, round, ceil
+            'time_based_frame_boundary_correction': True,  # Fix ±1 frame errors from CS rounding (requires target video)
 
             # --- Duration-Align Sync Settings (Hybrid Mode) ---
             'duration_align_verify_with_frames': False,  # Enable hybrid: duration + sliding window verification
