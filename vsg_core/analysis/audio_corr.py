@@ -556,6 +556,12 @@ def run_multi_correlation(
     """
     log = runner._log_message
 
+    # Safety check: if multi-correlation is disabled, fall back to single method immediately
+    if not config.get('multi_correlation_enabled', False):
+        log("[MULTI-CORRELATION] Feature disabled, using single correlation method")
+        return {config.get('correlation_method', 'Standard Correlation (SCC)'):
+                run_audio_correlation(ref_file, target_file, config, runner, tool_paths, ref_lang, target_lang, role_tag)}
+
     # Get enabled methods
     enabled_methods = []
     for method_name, config_key in MULTI_CORR_METHODS:
