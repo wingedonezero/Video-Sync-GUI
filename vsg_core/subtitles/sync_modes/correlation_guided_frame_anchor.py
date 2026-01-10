@@ -678,8 +678,10 @@ def apply_correlation_guided_frame_anchor_sync(
                         event.end += int(math.floor(final_offset_ms))
                         refinement_stats['fallback'] += 1
             else:
-                # Parallel processing using ProcessPoolExecutor
-                from concurrent.futures import ProcessPoolExecutor
+                # Parallel processing using ThreadPoolExecutor
+                # VapourSynth is thread-safe, so we can share VideoReader instances
+                from concurrent.futures import ThreadPoolExecutor
+                import threading
 
                 # Prepare batches for parallel processing
                 batch_size = max(10, len(subs.events) // (num_workers * 4))  # 4 batches per worker
@@ -687,24 +689,85 @@ def apply_correlation_guided_frame_anchor_sync(
 
                 runner._log_message(f"[CorrGuided Anchor] Processing {len(subs.events)} lines in {len(batches)} batches")
 
-                # Track progress across batches
+                # Track progress across batches (thread-safe)
                 completed_lines = 0
+                progress_lock = threading.Lock()
 
-                # Create batch data with all required parameters
-                # Format: (batch_events, batch_start_idx, source_video, target_video,
-                #          source_fps, target_fps, final_offset_ms, hash_size,
-                #          hash_algorithm, hash_threshold, temp_dir)
-                batch_data = [
-                    (batch, i * batch_size, source_video, target_video,
-                     source_fps, target_fps, final_offset_ms, hash_size,
-                     hash_algorithm, hash_threshold, temp_dir)
-                    for i, batch in enumerate(batches)
-                ]
+                def process_batch_threaded(batch_data):
+                    """Process a batch of subtitle events in a thread (shares VideoReaders)."""
+                    nonlocal completed_lines
+                    batch_events, batch_start_idx = batch_data
 
-                # Process batches in parallel
-                with ProcessPoolExecutor(max_workers=num_workers) as executor:
-                    for batch_results in executor.map(_process_subtitle_batch, batch_data):
-                        # Apply results to subtitle events
+                    results = []
+                    for idx, event in enumerate(batch_events):
+                        original_duration_ms = event.end - event.start
+                        source_start_frame = time_to_frame_floor(event.start, source_fps)
+                        predicted_start_ms = event.start + final_offset_ms
+
+                        refined_start_frame = _find_matching_frame_for_subtitle(
+                            source_reader=source_reader,  # Shared across threads
+                            target_reader=target_reader,  # Shared across threads
+                            source_frame=source_start_frame,
+                            predicted_target_ms=predicted_start_ms,
+                            target_fps=target_fps,
+                            window_radius=5,
+                            hash_size=hash_size,
+                            hash_algorithm=hash_algorithm,
+                            hash_threshold=hash_threshold,
+                            runner=runner
+                        )
+
+                        if refined_start_frame is not None:
+                            refined_start_ms = frame_to_time_floor(refined_start_frame, target_fps)
+                            correction_ms = refined_start_ms - predicted_start_ms
+                            refined_end_ms = refined_start_ms + original_duration_ms
+
+                            if refined_end_ms > refined_start_ms:
+                                results.append({
+                                    'idx': batch_start_idx + idx,
+                                    'start': int(refined_start_ms),
+                                    'end': int(refined_end_ms),
+                                    'refined': True,
+                                    'correction': abs(correction_ms),
+                                    'invalid': False
+                                })
+                            else:
+                                results.append({
+                                    'idx': batch_start_idx + idx,
+                                    'start': event.start + int(math.floor(final_offset_ms)),
+                                    'end': event.end + int(math.floor(final_offset_ms)),
+                                    'refined': False,
+                                    'correction': 0,
+                                    'invalid': True
+                                })
+                        else:
+                            results.append({
+                                'idx': batch_start_idx + idx,
+                                'start': event.start + int(math.floor(final_offset_ms)),
+                                'end': event.end + int(math.floor(final_offset_ms)),
+                                'refined': False,
+                                'correction': 0,
+                                'invalid': False
+                            })
+
+                        # Update progress (thread-safe)
+                        with progress_lock:
+                            completed_lines += 1
+                            if completed_lines in milestones:
+                                progress_pct = (completed_lines / total_events) * 100
+                                runner._log_message(f"[CorrGuided Anchor] Progress: {progress_pct:.0f}% ({completed_lines}/{total_events} lines)")
+
+                    return results
+
+                # Create batch data with indices
+                batch_data = [(batch, i * batch_size) for i, batch in enumerate(batches)]
+
+                # Process batches in parallel using threads
+                with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                    all_results = executor.map(process_batch_threaded, batch_data)
+
+                    # Apply results to subtitle events
+                    for batch_results in all_results:
                         for result in batch_results:
                             subs.events[result['idx']].start = result['start']
                             subs.events[result['idx']].end = result['end']
@@ -718,17 +781,9 @@ def apply_correlation_guided_frame_anchor_sync(
                             if result['invalid']:
                                 refinement_stats['invalid_prevented'] += 1
 
-                            completed_lines += 1
-
-                            # Progress reporting
-                            if completed_lines in milestones:
-                                progress_pct = (completed_lines / total_events) * 100
-                                runner._log_message(f"[CorrGuided Anchor] Progress: {progress_pct:.0f}% ({completed_lines}/{total_events} lines)")
-
-            # Clean up video readers (only if sequential)
-            if num_workers == 1:
-                del source_reader
-                del target_reader
+            # Clean up video readers (always needed for refinement path)
+            del source_reader
+            del target_reader
             gc.collect()
 
             # Report statistics
