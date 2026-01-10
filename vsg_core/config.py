@@ -77,6 +77,18 @@ class AppConfig:
             'sub_anchor_fallback_mode': 'abort',  # What to do if verification fails: 'abort', 'use-median'
             'sub_anchor_use_vapoursynth': True,  # Use VapourSynth for frame extraction (faster with cache)
 
+            # --- Correlation-Guided Frame Anchor Settings ---
+            # Hybrid mode: Uses correlation to guide robust frame matching at time-based anchors
+            'corr_anchor_search_range_ms': 2000,  # Search ±N ms around correlation prediction (default 2000 = ~48 frames)
+            'corr_anchor_hash_algorithm': 'dhash',  # Hash algorithm: 'dhash', 'phash', 'average_hash'
+            'corr_anchor_hash_size': 8,  # Hash size for perceptual hashing (8 = 64-bit)
+            'corr_anchor_hash_threshold': 5,  # Max hamming distance for frame match
+            'corr_anchor_window_radius': 5,  # Frames before/after center (5 = 11 frame window)
+            'corr_anchor_agreement_tolerance_ms': 100,  # Checkpoints must agree within ±N ms
+            'corr_anchor_fallback_mode': 'abort',  # Fallback: 'abort', 'use-median', 'use-correlation'
+            'corr_anchor_use_vapoursynth': True,  # Use VapourSynth for frame extraction (faster with cache)
+            'corr_anchor_anchor_positions': [10, 50, 90],  # % of video duration for anchor points
+
             # --- Timing Fix Settings ---
             'timing_fix_enabled': False,
             'timing_fix_overlaps': True,

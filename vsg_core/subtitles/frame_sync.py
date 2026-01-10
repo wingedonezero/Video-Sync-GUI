@@ -49,6 +49,7 @@ from .sync_modes import (
     apply_correlation_frame_snap_sync,
     verify_correlation_with_frame_snap,
     apply_subtitle_anchored_frame_snap_sync,
+    apply_correlation_guided_frame_anchor_sync,
 )
 
 __all__ = [
@@ -85,4 +86,5 @@ __all__ = [
     'apply_correlation_frame_snap_sync',
     'verify_correlation_with_frame_snap',
     'apply_subtitle_anchored_frame_snap_sync',
+    'apply_correlation_guided_frame_anchor_sync',
 ]
