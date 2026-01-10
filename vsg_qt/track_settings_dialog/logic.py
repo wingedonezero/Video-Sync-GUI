@@ -67,6 +67,13 @@ class TrackSettingsLogic:
             # Enable convert-to-ASS only for SRT tracks
             self.v.cb_convert.setEnabled("S_TEXT/UTF8" in codec_upper)
 
+            # Show sync exclusion button only for ASS/SSA tracks (they have styles)
+            is_ass_or_ssa = 'S_TEXT/ASS' in codec_upper or 'S_TEXT/SSA' in codec_upper
+            self.v.sync_exclusion_btn.setVisible(is_ass_or_ssa)
+        else:
+            # Hide sync exclusion button for non-subtitle tracks
+            self.v.sync_exclusion_btn.setVisible(False)
+
     def apply_initial_values(
         self,
         *,

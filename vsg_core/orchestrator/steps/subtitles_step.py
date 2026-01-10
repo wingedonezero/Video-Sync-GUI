@@ -481,7 +481,9 @@ class SubtitlesStep:
                                     raw_global_shift_ms,
                                     runner,
                                     ctx.settings_dict,
-                                    temp_dir=ctx.temp_dir
+                                    temp_dir=ctx.temp_dir,
+                                    sync_exclusion_styles=item.sync_exclusion_styles,
+                                    sync_exclusion_mode=item.sync_exclusion_mode
                                 )
 
                                 if frame_sync_report and frame_sync_report.get('success'):
