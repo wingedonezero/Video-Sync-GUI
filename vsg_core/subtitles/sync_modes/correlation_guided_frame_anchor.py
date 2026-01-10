@@ -511,97 +511,194 @@ def apply_correlation_guided_frame_anchor_sync(
             refine_per_line = False
 
         if refine_per_line:
+            # Get worker count for parallelization
+            num_workers = int(config.get('corr_anchor_refine_workers', 4))
+            num_workers = max(1, min(num_workers, 16))  # Clamp to 1-16
+
+            runner._log_message(f"[CorrGuided Anchor] Using {num_workers} worker(s) for parallel processing")
+
             # Statistics tracking
             refinement_stats = {
                 'total_lines': 0,
-                'start_refined': 0,
-                'end_refined': 0,
-                'start_fallback': 0,
-                'end_fallback': 0,
-                'corrections': []
+                'refined': 0,
+                'fallback': 0,
+                'corrections': [],
+                'invalid_prevented': 0
             }
 
             # Calculate progress milestones (percentage-based)
             total_events = len(subs.events)
             milestones = {int(total_events * pct / 100) for pct in [10, 25, 50, 75, 90, 100]}
 
-            # Process each subtitle event
-            for idx, event in enumerate(subs.events):
-                refinement_stats['total_lines'] += 1
+            if num_workers == 1:
+                # Sequential processing (simpler, easier to debug)
+                for idx, event in enumerate(subs.events):
+                    refinement_stats['total_lines'] += 1
 
-                # Progress reporting at percentage milestones
-                if (idx + 1) in milestones:
-                    progress_pct = ((idx + 1) / total_events) * 100
-                    runner._log_message(f"[CorrGuided Anchor] Progress: {progress_pct:.0f}% ({idx + 1}/{total_events} lines)")
+                    # Progress reporting at percentage milestones
+                    if (idx + 1) in milestones:
+                        progress_pct = ((idx + 1) / total_events) * 100
+                        runner._log_message(f"[CorrGuided Anchor] Progress: {progress_pct:.0f}% ({idx + 1}/{total_events} lines)")
 
-                # --- REFINE START TIME ---
-                source_start_frame = time_to_frame_floor(event.start, source_fps)
-                predicted_start_ms = event.start + final_offset_ms
+                    # Store original duration (authoring intent - doesn't change)
+                    original_duration_ms = event.end - event.start
 
-                refined_start_frame = _find_matching_frame_for_subtitle(
-                    source_reader=source_reader,
-                    target_reader=target_reader,
-                    source_frame=source_start_frame,
-                    predicted_target_ms=predicted_start_ms,
-                    target_fps=target_fps,
-                    window_radius=5,
-                    hash_size=hash_size,
-                    hash_algorithm=hash_algorithm,
-                    hash_threshold=hash_threshold,
-                    runner=runner
-                )
+                    # --- REFINE START TIME ONLY ---
+                    source_start_frame = time_to_frame_floor(event.start, source_fps)
+                    predicted_start_ms = event.start + final_offset_ms
 
-                if refined_start_frame is not None:
-                    # Use exact frame timing
-                    refined_start_ms = frame_to_time_floor(refined_start_frame, target_fps)
-                    correction_ms = refined_start_ms - predicted_start_ms
-                    refinement_stats['corrections'].append(abs(correction_ms))
-                    event.start = int(refined_start_ms)
-                    refinement_stats['start_refined'] += 1
-                else:
-                    # Fall back to global offset
-                    event.start += int(math.floor(final_offset_ms))
-                    refinement_stats['start_fallback'] += 1
+                    refined_start_frame = _find_matching_frame_for_subtitle(
+                        source_reader=source_reader,
+                        target_reader=target_reader,
+                        source_frame=source_start_frame,
+                        predicted_target_ms=predicted_start_ms,
+                        target_fps=target_fps,
+                        window_radius=5,
+                        hash_size=hash_size,
+                        hash_algorithm=hash_algorithm,
+                        hash_threshold=hash_threshold,
+                        runner=runner
+                    )
 
-                # --- REFINE END TIME ---
-                source_end_frame = time_to_frame_floor(event.end, source_fps)
-                predicted_end_ms = event.end + final_offset_ms
+                    if refined_start_frame is not None:
+                        # Use exact frame timing for start
+                        refined_start_ms = frame_to_time_floor(refined_start_frame, target_fps)
+                        correction_ms = refined_start_ms - predicted_start_ms
+                        refinement_stats['corrections'].append(abs(correction_ms))
 
-                refined_end_frame = _find_matching_frame_for_subtitle(
-                    source_reader=source_reader,
-                    target_reader=target_reader,
-                    source_frame=source_end_frame,
-                    predicted_target_ms=predicted_end_ms,
-                    target_fps=target_fps,
-                    window_radius=5,
-                    hash_size=hash_size,
-                    hash_algorithm=hash_algorithm,
-                    hash_threshold=hash_threshold,
-                    runner=runner
-                )
+                        # Calculate end by preserving original duration
+                        refined_end_ms = refined_start_ms + original_duration_ms
 
-                if refined_end_frame is not None:
-                    # Use exact frame timing
-                    refined_end_ms = frame_to_time_floor(refined_end_frame, target_fps)
-                    correction_ms = refined_end_ms - predicted_end_ms
-                    refinement_stats['corrections'].append(abs(correction_ms))
-                    event.end = int(refined_end_ms)
-                    refinement_stats['end_refined'] += 1
-                else:
-                    # Fall back to global offset
-                    event.end += int(math.floor(final_offset_ms))
-                    refinement_stats['end_fallback'] += 1
+                        # Validate: ensure end > start (should always be true since duration is positive)
+                        if refined_end_ms > refined_start_ms:
+                            event.start = int(refined_start_ms)
+                            event.end = int(refined_end_ms)
+                            refinement_stats['refined'] += 1
+                        else:
+                            # Shouldn't happen, but fall back to global offset
+                            event.start += int(math.floor(final_offset_ms))
+                            event.end += int(math.floor(final_offset_ms))
+                            refinement_stats['fallback'] += 1
+                            refinement_stats['invalid_prevented'] += 1
+                    else:
+                        # Fall back to global offset for both start and end
+                        event.start += int(math.floor(final_offset_ms))
+                        event.end += int(math.floor(final_offset_ms))
+                        refinement_stats['fallback'] += 1
+            else:
+                # Parallel processing using ProcessPoolExecutor
+                from concurrent.futures import ProcessPoolExecutor
+                import multiprocessing
 
-            # Clean up video readers
-            del source_reader
-            del target_reader
+                # Prepare batches for parallel processing
+                batch_size = max(10, len(subs.events) // (num_workers * 4))  # 4 batches per worker
+                batches = [subs.events[i:i+batch_size] for i in range(0, len(subs.events), batch_size)]
+
+                runner._log_message(f"[CorrGuided Anchor] Processing {len(subs.events)} lines in {len(batches)} batches")
+
+                # Track progress across batches
+                completed_lines = 0
+
+                def process_batch(batch_data):
+                    """Process a batch of subtitle events in a separate process."""
+                    batch_events, batch_start_idx = batch_data
+
+                    # Each worker needs its own video readers
+                    from ..frame_matching import VideoReader
+                    worker_source_reader = VideoReader(source_video, runner, temp_dir=temp_dir)
+                    worker_target_reader = VideoReader(target_video, runner, temp_dir=temp_dir)
+
+                    results = []
+                    for idx, event in enumerate(batch_events):
+                        original_duration_ms = event.end - event.start
+                        source_start_frame = time_to_frame_floor(event.start, source_fps)
+                        predicted_start_ms = event.start + final_offset_ms
+
+                        refined_start_frame = _find_matching_frame_for_subtitle(
+                            source_reader=worker_source_reader,
+                            target_reader=worker_target_reader,
+                            source_frame=source_start_frame,
+                            predicted_target_ms=predicted_start_ms,
+                            target_fps=target_fps,
+                            window_radius=5,
+                            hash_size=hash_size,
+                            hash_algorithm=hash_algorithm,
+                            hash_threshold=hash_threshold,
+                            runner=runner
+                        )
+
+                        if refined_start_frame is not None:
+                            refined_start_ms = frame_to_time_floor(refined_start_frame, target_fps)
+                            correction_ms = refined_start_ms - predicted_start_ms
+                            refined_end_ms = refined_start_ms + original_duration_ms
+
+                            if refined_end_ms > refined_start_ms:
+                                results.append({
+                                    'idx': batch_start_idx + idx,
+                                    'start': int(refined_start_ms),
+                                    'end': int(refined_end_ms),
+                                    'refined': True,
+                                    'correction': abs(correction_ms),
+                                    'invalid': False
+                                })
+                            else:
+                                results.append({
+                                    'idx': batch_start_idx + idx,
+                                    'start': event.start + int(math.floor(final_offset_ms)),
+                                    'end': event.end + int(math.floor(final_offset_ms)),
+                                    'refined': False,
+                                    'correction': 0,
+                                    'invalid': True
+                                })
+                        else:
+                            results.append({
+                                'idx': batch_start_idx + idx,
+                                'start': event.start + int(math.floor(final_offset_ms)),
+                                'end': event.end + int(math.floor(final_offset_ms)),
+                                'refined': False,
+                                'correction': 0,
+                                'invalid': False
+                            })
+
+                    del worker_source_reader
+                    del worker_target_reader
+                    return results
+
+                # Create batch data with indices
+                batch_data = [(batch, i * batch_size) for i, batch in enumerate(batches)]
+
+                # Process batches in parallel
+                with ProcessPoolExecutor(max_workers=num_workers) as executor:
+                    for batch_results in executor.map(process_batch, batch_data):
+                        # Apply results to subtitle events
+                        for result in batch_results:
+                            subs.events[result['idx']].start = result['start']
+                            subs.events[result['idx']].end = result['end']
+
+                            refinement_stats['total_lines'] += 1
+                            if result['refined']:
+                                refinement_stats['refined'] += 1
+                                refinement_stats['corrections'].append(result['correction'])
+                            else:
+                                refinement_stats['fallback'] += 1
+                            if result['invalid']:
+                                refinement_stats['invalid_prevented'] += 1
+
+                            completed_lines += 1
+
+                            # Progress reporting
+                            if completed_lines in milestones:
+                                progress_pct = (completed_lines / total_events) * 100
+                                runner._log_message(f"[CorrGuided Anchor] Progress: {progress_pct:.0f}% ({completed_lines}/{total_events} lines)")
+
+            # Clean up video readers (only if sequential)
+            if num_workers == 1:
+                del source_reader
+                del target_reader
             gc.collect()
 
             # Report statistics
-            total_timestamps = refinement_stats['total_lines'] * 2  # start + end
-            total_refined = refinement_stats['start_refined'] + refinement_stats['end_refined']
-            total_fallback = refinement_stats['start_fallback'] + refinement_stats['end_fallback']
-            success_rate = (total_refined / total_timestamps * 100) if total_timestamps > 0 else 0
+            success_rate = (refinement_stats['refined'] / refinement_stats['total_lines'] * 100) if refinement_stats['total_lines'] > 0 else 0
 
             avg_correction = sum(refinement_stats['corrections']) / len(refinement_stats['corrections']) if refinement_stats['corrections'] else 0
             max_correction = max(refinement_stats['corrections']) if refinement_stats['corrections'] else 0
@@ -609,10 +706,10 @@ def apply_correlation_guided_frame_anchor_sync(
             runner._log_message(f"[CorrGuided Anchor] ───────────────────────────────────────")
             runner._log_message(f"[CorrGuided Anchor] Refinement Statistics:")
             runner._log_message(f"[CorrGuided Anchor]   Total subtitle lines: {refinement_stats['total_lines']}")
-            runner._log_message(f"[CorrGuided Anchor]   Start times refined: {refinement_stats['start_refined']}/{refinement_stats['total_lines']} ({refinement_stats['start_refined']/refinement_stats['total_lines']*100:.1f}%)")
-            runner._log_message(f"[CorrGuided Anchor]   End times refined: {refinement_stats['end_refined']}/{refinement_stats['total_lines']} ({refinement_stats['end_refined']/refinement_stats['total_lines']*100:.1f}%)")
-            runner._log_message(f"[CorrGuided Anchor]   Fallback to global: {total_fallback}/{total_timestamps} ({total_fallback/total_timestamps*100:.1f}%)")
-            runner._log_message(f"[CorrGuided Anchor]   Overall success: {total_refined}/{total_timestamps} ({success_rate:.1f}%)")
+            runner._log_message(f"[CorrGuided Anchor]   Start times refined: {refinement_stats['refined']}/{refinement_stats['total_lines']} ({success_rate:.1f}%)")
+            runner._log_message(f"[CorrGuided Anchor]   Fallback to global: {refinement_stats['fallback']}/{refinement_stats['total_lines']} ({refinement_stats['fallback']/refinement_stats['total_lines']*100:.1f}%)")
+            if refinement_stats['invalid_prevented'] > 0:
+                runner._log_message(f"[CorrGuided Anchor]   Invalid timings prevented: {refinement_stats['invalid_prevented']}")
             runner._log_message(f"[CorrGuided Anchor]   Average correction: {avg_correction:.1f}ms")
             runner._log_message(f"[CorrGuided Anchor]   Max correction: {max_correction:.1f}ms")
             runner._log_message(f"[CorrGuided Anchor] ───────────────────────────────────────")
