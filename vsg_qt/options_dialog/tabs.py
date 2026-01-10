@@ -971,7 +971,7 @@ class SubtitleSyncTab(QWidget):
         sync_layout = QFormLayout(sync_group)
 
         self.widgets['subtitle_sync_mode'] = QComboBox()
-        self.widgets['subtitle_sync_mode'].addItems(['time-based', 'duration-align', 'correlation-frame-snap', 'subtitle-anchored-frame-snap'])
+        self.widgets['subtitle_sync_mode'].addItems(['time-based', 'duration-align', 'correlation-frame-snap', 'subtitle-anchored-frame-snap', 'correlation-guided-frame-anchor'])
         self.widgets['subtitle_sync_mode'].setToolTip(
             "Subtitle synchronization method:\n\n"
             "• time-based (Default): Apply delays using millisecond timestamps\n"
@@ -996,13 +996,22 @@ class SubtitleSyncTab(QWidget):
             "  - Uses floor rounding for final timestamps\n"
             "  - Detects drift/stepping via checkpoint disagreement\n"
             "  - Requires both source and target video files\n\n"
-            "• subtitle-anchored-frame-snap: Visual-only sync (RECOMMENDED)\n"
+            "• subtitle-anchored-frame-snap: Visual-only sync\n"
             "  - Uses subtitle positions as frame anchors (not scene detection)\n"
             "  - No dependency on audio correlation - purely visual matching\n"
             "  - Sliding window frame comparison with temporal consistency\n"
             "  - Sub-frame timing precision preserved until final floor\n"
             "  - Best when correlation fails or scene detection picks bad frames\n"
             "  - Uses dialogue events which are stable, content-rich frames\n"
+            "  - Requires both source and target video files\n\n"
+            "• correlation-guided-frame-anchor: Hybrid correlation + robust matching (NEW)\n"
+            "  - Uses correlation to guide frame search (reduces false matches)\n"
+            "  - Time-based anchors (10%, 50%, 90% of video) - not subtitle-dependent\n"
+            "  - Sliding window matching like subtitle-anchor mode\n"
+            "  - Searches ±2000ms around correlation prediction (not blind search)\n"
+            "  - 3-checkpoint agreement verification\n"
+            "  - Best when subtitle-anchor has too many false matches\n"
+            "  - Combines correlation guidance with robust frame matching\n"
             "  - Requires both source and target video files\n\n"
             "Note: Stepping correction (if enabled) takes precedence over this setting."
         )
@@ -1458,6 +1467,83 @@ class SubtitleSyncTab(QWidget):
             "Recommendation: 'abort' for important syncs."
         )
 
+        # Correlation-Guided Frame Anchor settings
+        self.widgets['corr_anchor_search_range_ms'] = QSpinBox()
+        self.widgets['corr_anchor_search_range_ms'].setRange(500, 10000)
+        self.widgets['corr_anchor_search_range_ms'].setValue(2000)
+        self.widgets['corr_anchor_search_range_ms'].setSingleStep(500)
+        self.widgets['corr_anchor_search_range_ms'].setSuffix(" ms")
+        self.widgets['corr_anchor_search_range_ms'].setToolTip(
+            "Search range around correlation prediction (±N ms):\n\n"
+            "How far to search from correlation-predicted position.\n"
+            "Narrows the search compared to subtitle-anchor mode.\n\n"
+            "• 1000ms: Tight search (~24 frames at 24fps)\n"
+            "  - For very accurate correlation\n\n"
+            "• 2000ms (Default): Standard (~48 frames)\n"
+            "  - Good balance for most videos\n\n"
+            "• 5000ms: Wide search (~120 frames)\n"
+            "  - When correlation may be off significantly"
+        )
+
+        self.widgets['corr_anchor_hash_algorithm'] = QComboBox()
+        self.widgets['corr_anchor_hash_algorithm'].addItems(['dhash', 'phash', 'average_hash'])
+        self.widgets['corr_anchor_hash_algorithm'].setToolTip(
+            "Hash algorithm for frame comparison:\n\n"
+            "• dhash (Default): Difference hash - fast and robust\n"
+            "• phash: Perceptual hash - best for heavy re-encoding\n"
+            "• average_hash: Simple averaging - fastest but less accurate"
+        )
+
+        self.widgets['corr_anchor_hash_threshold'] = QSpinBox()
+        self.widgets['corr_anchor_hash_threshold'].setRange(0, 30)
+        self.widgets['corr_anchor_hash_threshold'].setValue(5)
+        self.widgets['corr_anchor_hash_threshold'].setToolTip(
+            "Hash threshold (max hamming distance):\n\n"
+            "Maximum allowed difference between frame hashes.\n\n"
+            "• 0-3: Very strict - requires near-perfect match\n"
+            "• 5 (Default): Balanced - allows minor differences\n"
+            "• 10+: Lenient - for heavily compressed videos"
+        )
+
+        self.widgets['corr_anchor_window_radius'] = QSpinBox()
+        self.widgets['corr_anchor_window_radius'].setRange(3, 10)
+        self.widgets['corr_anchor_window_radius'].setValue(5)
+        self.widgets['corr_anchor_window_radius'].setToolTip(
+            "Frame window radius (frames before/after center):\n\n"
+            "Creates a window of (2*N+1) frames for temporal consistency.\n\n"
+            "• 3: 7-frame window - faster, less robust\n"
+            "• 5 (Default): 11-frame window - good balance\n"
+            "• 7+: 15+ frame window - more robust, slower"
+        )
+
+        self.widgets['corr_anchor_agreement_tolerance_ms'] = QSpinBox()
+        self.widgets['corr_anchor_agreement_tolerance_ms'].setRange(10, 500)
+        self.widgets['corr_anchor_agreement_tolerance_ms'].setValue(100)
+        self.widgets['corr_anchor_agreement_tolerance_ms'].setSingleStep(10)
+        self.widgets['corr_anchor_agreement_tolerance_ms'].setSuffix(" ms")
+        self.widgets['corr_anchor_agreement_tolerance_ms'].setToolTip(
+            "Agreement tolerance for checkpoint measurements:\n\n"
+            "All checkpoints must agree within this tolerance.\n\n"
+            "• 50ms: Strict\n"
+            "  - ~1-2 frames at 24fps\n\n"
+            "• 100ms (Default): Standard\n"
+            "  - ~2-3 frames at 24fps\n\n"
+            "• 200ms: Looser\n"
+            "  - ~5 frames at 24fps"
+        )
+
+        self.widgets['corr_anchor_fallback_mode'] = QComboBox()
+        self.widgets['corr_anchor_fallback_mode'].addItems(['abort', 'use-median', 'use-correlation'])
+        self.widgets['corr_anchor_fallback_mode'].setToolTip(
+            "What to do if frame matching fails or checkpoints disagree:\n\n"
+            "• abort (Default): Fail the job\n"
+            "  - Forces manual review when sync uncertain\n\n"
+            "• use-median: Use median offset anyway\n"
+            "  - May result in incorrect sync\n\n"
+            "• use-correlation: Fall back to raw correlation\n"
+            "  - Uses correlation baseline without frame refinement"
+        )
+
         # Layout - Sync Mode
         sync_layout.addRow("Sync Mode:", self.widgets['subtitle_sync_mode'])
 
@@ -1495,6 +1581,14 @@ class SubtitleSyncTab(QWidget):
         sync_layout.addRow("SubAnchor Tolerance:", self.widgets['sub_anchor_agreement_tolerance_ms'])
         sync_layout.addRow("SubAnchor Fallback:", self.widgets['sub_anchor_fallback_mode'])
 
+        # Correlation-Guided Frame Anchor mode options
+        sync_layout.addRow("CorrGuided Search Range:", self.widgets['corr_anchor_search_range_ms'])
+        sync_layout.addRow("CorrGuided Hash:", self.widgets['corr_anchor_hash_algorithm'])
+        sync_layout.addRow("CorrGuided Threshold:", self.widgets['corr_anchor_hash_threshold'])
+        sync_layout.addRow("CorrGuided Window:", self.widgets['corr_anchor_window_radius'])
+        sync_layout.addRow("CorrGuided Tolerance:", self.widgets['corr_anchor_agreement_tolerance_ms'])
+        sync_layout.addRow("CorrGuided Fallback:", self.widgets['corr_anchor_fallback_mode'])
+
         main_layout.addWidget(sync_group)
         main_layout.addStretch(1)
 
@@ -1514,6 +1608,7 @@ class SubtitleSyncTab(QWidget):
         is_duration_align = (text == 'duration-align')
         is_correlation_snap = (text == 'correlation-frame-snap')
         is_sub_anchor_snap = (text == 'subtitle-anchored-frame-snap')
+        is_corr_guided_anchor = (text == 'correlation-guided-frame-anchor')
 
         # Time-based mode options
         self.widgets['time_based_use_raw_values'].setEnabled(is_time_based)
@@ -1552,6 +1647,14 @@ class SubtitleSyncTab(QWidget):
         self.widgets['sub_anchor_window_radius'].setEnabled(is_sub_anchor_snap)
         self.widgets['sub_anchor_agreement_tolerance_ms'].setEnabled(is_sub_anchor_snap)
         self.widgets['sub_anchor_fallback_mode'].setEnabled(is_sub_anchor_snap)
+
+        # Correlation-guided frame anchor mode options
+        self.widgets['corr_anchor_search_range_ms'].setEnabled(is_corr_guided_anchor)
+        self.widgets['corr_anchor_hash_algorithm'].setEnabled(is_corr_guided_anchor)
+        self.widgets['corr_anchor_hash_threshold'].setEnabled(is_corr_guided_anchor)
+        self.widgets['corr_anchor_window_radius'].setEnabled(is_corr_guided_anchor)
+        self.widgets['corr_anchor_agreement_tolerance_ms'].setEnabled(is_corr_guided_anchor)
+        self.widgets['corr_anchor_fallback_mode'].setEnabled(is_corr_guided_anchor)
 
 class ChaptersTab(QWidget):
     def __init__(self):
