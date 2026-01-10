@@ -81,6 +81,17 @@ def _apply_frame_boundary_correction(subs, fps: float, runner) -> Dict[str, int]
     """
     Apply frame boundary correction to all subtitle events.
 
+    Two-stage correction to preserve duration:
+    1. Correct start time to be in correct frame (adjust by ±10-30ms)
+    2. Apply same adjustment to end (preserve exact duration)
+    3. Re-check if end is now in correct frame
+    4. If end still wrong, apply additional minimal adjustment to only end
+
+    This prioritizes:
+    - Start being frame-accurate (most important)
+    - Duration preservation (second priority)
+    - End being frame-accurate (third priority - minimal change if needed)
+
     Call this AFTER applying correlation offset, BEFORE saving to ASS.
     Ensures centisecond rounding doesn't push subtitles into wrong frames.
 
@@ -97,26 +108,55 @@ def _apply_frame_boundary_correction(subs, fps: float, runner) -> Dict[str, int]
 
     corrected_starts = 0
     corrected_ends = 0
+    duration_preserved = 0
+    duration_changed = 0
 
     for event in subs.events:
-        # Check and correct start time
         original_start = event.start
-        corrected_start = _adjust_for_cs_frame_boundary(event.start, fps)
-        if corrected_start != original_start:
-            event.start = corrected_start
-            corrected_starts += 1
-
-        # Check and correct end time
         original_end = event.end
-        corrected_end = _adjust_for_cs_frame_boundary(event.end, fps)
-        if corrected_end != original_end:
-            event.end = corrected_end
-            corrected_ends += 1
+        original_duration = original_end - original_start
+
+        # Stage 1: Correct start time to be in correct frame
+        corrected_start = _adjust_for_cs_frame_boundary(event.start, fps)
+        start_delta = corrected_start - original_start
+
+        if start_delta != 0:
+            corrected_starts += 1
+            # Stage 2: Apply same adjustment to end (preserve duration)
+            event.start = corrected_start
+            event.end = original_end + start_delta
+
+            # Stage 3: Re-check if end is now in correct frame
+            intended_end_frame = time_to_frame_floor(event.end, fps)
+            cs_end = _simulate_cs_rounding(event.end)
+            actual_end_frame = time_to_frame_floor(cs_end, fps)
+
+            if actual_end_frame != intended_end_frame:
+                # Stage 4: End still wrong, apply additional small adjustment to only end
+                corrected_end = _adjust_for_cs_frame_boundary(event.end, fps)
+                event.end = corrected_end
+                corrected_ends += 1
+                duration_changed += 1
+            else:
+                # End is correct, duration preserved!
+                duration_preserved += 1
+        else:
+            # Start didn't need correction, but check end independently
+            corrected_end = _adjust_for_cs_frame_boundary(event.end, fps)
+            if corrected_end != original_end:
+                event.end = corrected_end
+                corrected_ends += 1
+                duration_changed += 1
+            else:
+                # Neither needed correction
+                pass
 
     return {
         'corrected_starts': corrected_starts,
         'corrected_ends': corrected_ends,
-        'total_events': len(subs.events)
+        'total_events': len(subs.events),
+        'duration_preserved': duration_preserved,
+        'duration_changed': duration_changed
     }
 
 
@@ -233,6 +273,17 @@ def apply_raw_delay_sync(
         if correction_stats['corrected_starts'] > 0 or correction_stats['corrected_ends'] > 0:
             runner._log_message(f"[Raw Delay Sync]   Corrected starts: {correction_stats['corrected_starts']}/{correction_stats['total_events']}")
             runner._log_message(f"[Raw Delay Sync]   Corrected ends:   {correction_stats['corrected_ends']}/{correction_stats['total_events']}")
+
+            # Show duration preservation stats
+            if 'duration_preserved' in correction_stats and 'duration_changed' in correction_stats:
+                preserved = correction_stats['duration_preserved']
+                changed = correction_stats['duration_changed']
+                total_corrected = preserved + changed
+                if total_corrected > 0:
+                    runner._log_message(f"[Raw Delay Sync]   Duration preserved: {preserved}/{total_corrected} events")
+                    if changed > 0:
+                        runner._log_message(f"[Raw Delay Sync]   Duration adjusted:  {changed}/{total_corrected} events (end needed extra fix)")
+
             runner._log_message(f"[Raw Delay Sync]   Prevented CS rounding from causing frame errors")
         else:
             runner._log_message(f"[Raw Delay Sync]   No corrections needed (all times already frame-aligned)")
