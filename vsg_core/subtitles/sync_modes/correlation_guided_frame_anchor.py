@@ -521,13 +521,18 @@ def apply_correlation_guided_frame_anchor_sync(
                 'corrections': []
             }
 
+            # Calculate progress milestones (percentage-based)
+            total_events = len(subs.events)
+            milestones = {int(total_events * pct / 100) for pct in [10, 25, 50, 75, 90, 100]}
+
             # Process each subtitle event
             for idx, event in enumerate(subs.events):
                 refinement_stats['total_lines'] += 1
 
-                # Progress reporting every 50 lines
-                if (idx + 1) % 50 == 0 or idx == 0:
-                    runner._log_message(f"[CorrGuided Anchor] Processing line {idx + 1}/{len(subs.events)}...")
+                # Progress reporting at percentage milestones
+                if (idx + 1) in milestones:
+                    progress_pct = ((idx + 1) / total_events) * 100
+                    runner._log_message(f"[CorrGuided Anchor] Progress: {progress_pct:.0f}% ({idx + 1}/{total_events} lines)")
 
                 # --- REFINE START TIME ---
                 source_start_frame = time_to_frame_floor(event.start, source_fps)
@@ -653,6 +658,12 @@ def apply_correlation_guided_frame_anchor_sync(
 
     runner._log_message(f"[CorrGuided Anchor] Successfully synchronized {len(subs.events)} events")
     runner._log_message(f"[CorrGuided Anchor] ═══════════════════════════════════════")
+
+    # Flush logs to ensure subtitle sync phase is fully written before next phase
+    import logging
+    logger = logging.getLogger('vsg_job')
+    for handler in logger.handlers:
+        handler.flush()
 
     verification_result = {
         'valid': len(measurements) >= 2 and max_deviation <= tolerance_ms if len(measurements) >= 2 else len(measurements) == 1,
