@@ -231,6 +231,9 @@ class SubtitlesStep:
 
                             runner._log_message(f"[Time-Based Raw] Applying to track {item.track.id} ({item.track.props.name or 'Unnamed'})")
 
+                            # Get frame boundary correction setting
+                            enable_frame_correction = ctx.settings_dict.get('time_based_frame_boundary_correction', True)
+
                             frame_sync_report = apply_raw_delay_sync(
                                 str(item.extracted_path),
                                 total_delay_with_global_ms,
@@ -238,7 +241,7 @@ class SubtitlesStep:
                                 runner,
                                 ctx.settings_dict,
                                 target_fps=target_fps,
-                                enable_frame_boundary_correction=True
+                                enable_frame_boundary_correction=enable_frame_correction
                             )
 
                             if frame_sync_report and 'error' not in frame_sync_report:
