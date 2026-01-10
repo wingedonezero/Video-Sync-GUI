@@ -89,6 +89,7 @@ class AppConfig:
             'corr_anchor_use_vapoursynth': True,  # Use VapourSynth for frame extraction (faster with cache)
             'corr_anchor_anchor_positions': [10, 50, 90],  # % of video duration for anchor points
             'corr_anchor_refine_per_line': False,  # Refine each subtitle line to exact frames after checkpoint validation
+            'corr_anchor_refine_workers': 4,  # Number of parallel workers for refinement (1=sequential, 4-8 recommended)
 
             # --- Timing Fix Settings ---
             'timing_fix_enabled': False,
