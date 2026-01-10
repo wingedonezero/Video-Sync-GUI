@@ -21,6 +21,85 @@ from ..frame_utils import (
 )
 
 
+def _find_matching_frame_for_subtitle(
+    source_reader,
+    target_reader,
+    source_frame: int,
+    predicted_target_ms: float,
+    target_fps: float,
+    window_radius: int,
+    hash_size: int,
+    hash_algorithm: str,
+    hash_threshold: int,
+    runner
+) -> Optional[int]:
+    """
+    Find the best matching target frame for a single source frame.
+
+    This is used for per-line refinement to find frame-perfect alignment.
+
+    Args:
+        source_reader: VideoReader for source video
+        target_reader: VideoReader for target video
+        source_frame: Source frame number to match
+        predicted_target_ms: Predicted target time in ms (from global offset)
+        target_fps: Target video FPS
+        window_radius: Frames to search ±center (e.g., 5 = search 11 frames total)
+        hash_size: Hash size for perceptual hashing
+        hash_algorithm: Hash algorithm ('dhash', 'phash', etc.)
+        hash_threshold: Max hamming distance for match
+        runner: CommandRunner for logging
+
+    Returns:
+        Frame number of best match, or None if no good match found
+    """
+    from ..frame_matching import compute_frame_hash
+
+    # Get source frame hash
+    source_frame_img = source_reader.get_frame_at_index(source_frame)
+    if source_frame_img is None:
+        return None
+
+    source_hash = compute_frame_hash(source_frame_img, hash_size=hash_size, method=hash_algorithm)
+    if source_hash is None:
+        return None
+
+    # Calculate search range
+    predicted_center_frame = time_to_frame_floor(predicted_target_ms, target_fps)
+    search_start_frame = max(0, predicted_center_frame - window_radius)
+    search_end_frame = predicted_center_frame + window_radius
+
+    # Find best matching frame
+    best_frame = None
+    best_distance = float('inf')
+
+    for target_frame in range(search_start_frame, search_end_frame + 1):
+        target_frame_img = target_reader.get_frame_at_index(target_frame)
+        if target_frame_img is None:
+            continue
+
+        target_hash = compute_frame_hash(target_frame_img, hash_size=hash_size, method=hash_algorithm)
+        if target_hash is None:
+            continue
+
+        distance = source_hash - target_hash
+
+        # If perfect or very close match, use it immediately
+        if distance <= hash_threshold and distance < best_distance:
+            best_distance = distance
+            best_frame = target_frame
+
+            # Perfect match - no need to search further
+            if distance == 0:
+                break
+
+    # Only return if we found a match within threshold
+    if best_frame is not None and best_distance <= hash_threshold:
+        return best_frame
+
+    return None
+
+
 def apply_correlation_guided_frame_anchor_sync(
     subtitle_path: str,
     source_video: str,
@@ -411,17 +490,145 @@ def apply_correlation_guided_frame_anchor_sync(
     runner._log_message(f"[CorrGuided Anchor]   ─────────────────────────────────────")
     runner._log_message(f"[CorrGuided Anchor]   = FINAL offset:      {final_offset_ms:+.3f}ms")
 
-    # Capture original metadata
-    metadata = SubtitleMetadata(subtitle_path)
-    metadata.capture()
+    # Check if per-line refinement is enabled
+    refine_per_line = config.get('corr_anchor_refine_per_line', False)
 
-    # Apply offset to all subtitle events using FLOOR for final rounding
-    final_offset_int = int(math.floor(final_offset_ms))
-    runner._log_message(f"[CorrGuided Anchor] Applying offset to {len(subs.events)} events (floor: {final_offset_int}ms)")
+    if refine_per_line and len(measurements) > 0:
+        runner._log_message(f"[CorrGuided Anchor] ───────────────────────────────────────")
+        runner._log_message(f"[CorrGuided Anchor] Per-Line Frame Refinement ENABLED")
+        runner._log_message(f"[CorrGuided Anchor] Refining each subtitle to exact frames...")
 
-    for event in subs.events:
-        event.start += final_offset_int
-        event.end += final_offset_int
+        # Re-open video readers for refinement
+        try:
+            source_reader = VideoReader(source_video, runner, temp_dir=temp_dir)
+            target_reader = VideoReader(target_video, runner, temp_dir=temp_dir)
+        except Exception as e:
+            runner._log_message(f"[CorrGuided Anchor] WARNING: Failed to reopen videos for refinement: {e}")
+            runner._log_message(f"[CorrGuided Anchor] Falling back to global offset for all lines")
+            refine_per_line = False
+
+        if refine_per_line:
+            # Statistics tracking
+            refinement_stats = {
+                'total_lines': 0,
+                'start_refined': 0,
+                'end_refined': 0,
+                'start_fallback': 0,
+                'end_fallback': 0,
+                'corrections': []
+            }
+
+            # Process each subtitle event
+            for idx, event in enumerate(subs.events):
+                refinement_stats['total_lines'] += 1
+
+                # Progress reporting every 50 lines
+                if (idx + 1) % 50 == 0 or idx == 0:
+                    runner._log_message(f"[CorrGuided Anchor] Processing line {idx + 1}/{len(subs.events)}...")
+
+                # --- REFINE START TIME ---
+                source_start_frame = time_to_frame_floor(event.start, source_fps)
+                predicted_start_ms = event.start + final_offset_ms
+
+                refined_start_frame = _find_matching_frame_for_subtitle(
+                    source_reader=source_reader,
+                    target_reader=target_reader,
+                    source_frame=source_start_frame,
+                    predicted_target_ms=predicted_start_ms,
+                    target_fps=target_fps,
+                    window_radius=5,
+                    hash_size=hash_size,
+                    hash_algorithm=hash_algorithm,
+                    hash_threshold=hash_threshold,
+                    runner=runner
+                )
+
+                if refined_start_frame is not None:
+                    # Use exact frame timing
+                    refined_start_ms = frame_to_time_floor(refined_start_frame, target_fps)
+                    correction_ms = refined_start_ms - predicted_start_ms
+                    refinement_stats['corrections'].append(abs(correction_ms))
+                    event.start = int(refined_start_ms)
+                    refinement_stats['start_refined'] += 1
+                else:
+                    # Fall back to global offset
+                    event.start += int(math.floor(final_offset_ms))
+                    refinement_stats['start_fallback'] += 1
+
+                # --- REFINE END TIME ---
+                source_end_frame = time_to_frame_floor(event.end, source_fps)
+                predicted_end_ms = event.end + final_offset_ms
+
+                refined_end_frame = _find_matching_frame_for_subtitle(
+                    source_reader=source_reader,
+                    target_reader=target_reader,
+                    source_frame=source_end_frame,
+                    predicted_target_ms=predicted_end_ms,
+                    target_fps=target_fps,
+                    window_radius=5,
+                    hash_size=hash_size,
+                    hash_algorithm=hash_algorithm,
+                    hash_threshold=hash_threshold,
+                    runner=runner
+                )
+
+                if refined_end_frame is not None:
+                    # Use exact frame timing
+                    refined_end_ms = frame_to_time_floor(refined_end_frame, target_fps)
+                    correction_ms = refined_end_ms - predicted_end_ms
+                    refinement_stats['corrections'].append(abs(correction_ms))
+                    event.end = int(refined_end_ms)
+                    refinement_stats['end_refined'] += 1
+                else:
+                    # Fall back to global offset
+                    event.end += int(math.floor(final_offset_ms))
+                    refinement_stats['end_fallback'] += 1
+
+            # Clean up video readers
+            del source_reader
+            del target_reader
+            gc.collect()
+
+            # Report statistics
+            total_timestamps = refinement_stats['total_lines'] * 2  # start + end
+            total_refined = refinement_stats['start_refined'] + refinement_stats['end_refined']
+            total_fallback = refinement_stats['start_fallback'] + refinement_stats['end_fallback']
+            success_rate = (total_refined / total_timestamps * 100) if total_timestamps > 0 else 0
+
+            avg_correction = sum(refinement_stats['corrections']) / len(refinement_stats['corrections']) if refinement_stats['corrections'] else 0
+            max_correction = max(refinement_stats['corrections']) if refinement_stats['corrections'] else 0
+
+            runner._log_message(f"[CorrGuided Anchor] ───────────────────────────────────────")
+            runner._log_message(f"[CorrGuided Anchor] Refinement Statistics:")
+            runner._log_message(f"[CorrGuided Anchor]   Total subtitle lines: {refinement_stats['total_lines']}")
+            runner._log_message(f"[CorrGuided Anchor]   Start times refined: {refinement_stats['start_refined']}/{refinement_stats['total_lines']} ({refinement_stats['start_refined']/refinement_stats['total_lines']*100:.1f}%)")
+            runner._log_message(f"[CorrGuided Anchor]   End times refined: {refinement_stats['end_refined']}/{refinement_stats['total_lines']} ({refinement_stats['end_refined']/refinement_stats['total_lines']*100:.1f}%)")
+            runner._log_message(f"[CorrGuided Anchor]   Fallback to global: {total_fallback}/{total_timestamps} ({total_fallback/total_timestamps*100:.1f}%)")
+            runner._log_message(f"[CorrGuided Anchor]   Overall success: {total_refined}/{total_timestamps} ({success_rate:.1f}%)")
+            runner._log_message(f"[CorrGuided Anchor]   Average correction: {avg_correction:.1f}ms")
+            runner._log_message(f"[CorrGuided Anchor]   Max correction: {max_correction:.1f}ms")
+            runner._log_message(f"[CorrGuided Anchor] ───────────────────────────────────────")
+    else:
+        # Capture original metadata
+        metadata = SubtitleMetadata(subtitle_path)
+        metadata.capture()
+
+        # Apply offset to all subtitle events using FLOOR for final rounding
+        final_offset_int = int(math.floor(final_offset_ms))
+        runner._log_message(f"[CorrGuided Anchor] Applying offset to {len(subs.events)} events (floor: {final_offset_int}ms)")
+
+        for event in subs.events:
+            event.start += final_offset_int
+            event.end += final_offset_int
+
+    # Capture original metadata (if not already done during non-refinement path)
+    if refine_per_line and len(measurements) > 0:
+        metadata = SubtitleMetadata(subtitle_path)
+        metadata.capture()
+    elif 'metadata' not in locals():
+        # Metadata wasn't captured yet (edge case)
+        metadata = SubtitleMetadata(subtitle_path)
+        metadata.capture()
 
     # Save modified subtitle
     runner._log_message(f"[CorrGuided Anchor] Saving modified subtitle file...")
@@ -436,7 +643,12 @@ def apply_correlation_guided_frame_anchor_sync(
         }
 
     # Validate and restore metadata
-    metadata.validate_and_restore(runner, expected_delay_ms=final_offset_int)
+    # For refinement mode, we can't specify expected_delay since each line is different
+    if refine_per_line and len(measurements) > 0:
+        metadata.validate_and_restore(runner, expected_delay_ms=None)
+    else:
+        final_offset_int = int(math.floor(final_offset_ms))
+        metadata.validate_and_restore(runner, expected_delay_ms=final_offset_int)
 
     runner._log_message(f"[CorrGuided Anchor] Successfully synchronized {len(subs.events)} events")
     runner._log_message(f"[CorrGuided Anchor] ═══════════════════════════════════════")

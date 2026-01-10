@@ -1544,6 +1544,24 @@ class SubtitleSyncTab(QWidget):
             "  - Uses correlation baseline without frame refinement"
         )
 
+        self.widgets['corr_anchor_refine_per_line'] = QCheckBox("Refine each subtitle to exact frames")
+        self.widgets['corr_anchor_refine_per_line'].setToolTip(
+            "Per-line frame refinement:\n\n"
+            "After checkpoint validation, refine each subtitle line to exact frames.\n\n"
+            "How it works:\n"
+            "• Uses checkpoint offset as starting point\n"
+            "• Finds exact matching frames for each subtitle start/end\n"
+            "• Corrects rounding errors and minor drift\n"
+            "• Falls back to global offset if frames don't match\n\n"
+            "Benefits:\n"
+            "• Frame-perfect alignment\n"
+            "• Handles NTSC conversions (23.976 fps)\n"
+            "• Corrects encoding drift\n"
+            "• Shows success rate and statistics\n\n"
+            "Ideal for: Videos with 1001/1000 global shift or minor encoding differences.\n"
+            "Performance: Adds ~10-30 seconds for typical subtitle files."
+        )
+
         # Layout - Sync Mode
         sync_layout.addRow("Sync Mode:", self.widgets['subtitle_sync_mode'])
 
@@ -1588,6 +1606,7 @@ class SubtitleSyncTab(QWidget):
         sync_layout.addRow("CorrGuided Window:", self.widgets['corr_anchor_window_radius'])
         sync_layout.addRow("CorrGuided Tolerance:", self.widgets['corr_anchor_agreement_tolerance_ms'])
         sync_layout.addRow("CorrGuided Fallback:", self.widgets['corr_anchor_fallback_mode'])
+        sync_layout.addRow("", self.widgets['corr_anchor_refine_per_line'])
 
         main_layout.addWidget(sync_group)
         main_layout.addStretch(1)
@@ -1655,6 +1674,7 @@ class SubtitleSyncTab(QWidget):
         self.widgets['corr_anchor_window_radius'].setEnabled(is_corr_guided_anchor)
         self.widgets['corr_anchor_agreement_tolerance_ms'].setEnabled(is_corr_guided_anchor)
         self.widgets['corr_anchor_fallback_mode'].setEnabled(is_corr_guided_anchor)
+        self.widgets['corr_anchor_refine_per_line'].setEnabled(is_corr_guided_anchor)
 
 class ChaptersTab(QWidget):
     def __init__(self):
