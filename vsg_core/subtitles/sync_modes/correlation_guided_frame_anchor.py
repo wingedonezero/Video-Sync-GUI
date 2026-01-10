@@ -100,6 +100,98 @@ def _find_matching_frame_for_subtitle(
     return None
 
 
+def _process_subtitle_batch(batch_data):
+    """
+    Process a batch of subtitle events in a separate process.
+
+    This function is at module level (not nested) so it can be pickled
+    for multiprocessing.
+
+    Args:
+        batch_data: Tuple of (batch_events, batch_start_idx, source_video, target_video,
+                             source_fps, target_fps, final_offset_ms, hash_size,
+                             hash_algorithm, hash_threshold, temp_dir)
+
+    Returns:
+        List of result dictionaries with refined timings
+    """
+    (batch_events, batch_start_idx, source_video, target_video,
+     source_fps, target_fps, final_offset_ms, hash_size,
+     hash_algorithm, hash_threshold, temp_dir) = batch_data
+
+    # Each worker needs its own video readers
+    # Import here to avoid pickling issues
+    from ..frame_matching import VideoReader
+    from ..frame_utils import time_to_frame_floor, frame_to_time_floor
+    import math
+
+    # Create a minimal runner for this worker (no logging to avoid conflicts)
+    class DummyRunner:
+        def _log_message(self, msg):
+            pass
+
+    dummy_runner = DummyRunner()
+
+    worker_source_reader = VideoReader(source_video, dummy_runner, temp_dir=temp_dir)
+    worker_target_reader = VideoReader(target_video, dummy_runner, temp_dir=temp_dir)
+
+    results = []
+    for idx, event in enumerate(batch_events):
+        original_duration_ms = event.end - event.start
+        source_start_frame = time_to_frame_floor(event.start, source_fps)
+        predicted_start_ms = event.start + final_offset_ms
+
+        refined_start_frame = _find_matching_frame_for_subtitle(
+            source_reader=worker_source_reader,
+            target_reader=worker_target_reader,
+            source_frame=source_start_frame,
+            predicted_target_ms=predicted_start_ms,
+            target_fps=target_fps,
+            window_radius=5,
+            hash_size=hash_size,
+            hash_algorithm=hash_algorithm,
+            hash_threshold=hash_threshold,
+            runner=dummy_runner
+        )
+
+        if refined_start_frame is not None:
+            refined_start_ms = frame_to_time_floor(refined_start_frame, target_fps)
+            correction_ms = refined_start_ms - predicted_start_ms
+            refined_end_ms = refined_start_ms + original_duration_ms
+
+            if refined_end_ms > refined_start_ms:
+                results.append({
+                    'idx': batch_start_idx + idx,
+                    'start': int(refined_start_ms),
+                    'end': int(refined_end_ms),
+                    'refined': True,
+                    'correction': abs(correction_ms),
+                    'invalid': False
+                })
+            else:
+                results.append({
+                    'idx': batch_start_idx + idx,
+                    'start': event.start + int(math.floor(final_offset_ms)),
+                    'end': event.end + int(math.floor(final_offset_ms)),
+                    'refined': False,
+                    'correction': 0,
+                    'invalid': True
+                })
+        else:
+            results.append({
+                'idx': batch_start_idx + idx,
+                'start': event.start + int(math.floor(final_offset_ms)),
+                'end': event.end + int(math.floor(final_offset_ms)),
+                'refined': False,
+                'correction': 0,
+                'invalid': False
+            })
+
+    del worker_source_reader
+    del worker_target_reader
+    return results
+
+
 def apply_correlation_guided_frame_anchor_sync(
     subtitle_path: str,
     source_video: str,
@@ -588,7 +680,6 @@ def apply_correlation_guided_frame_anchor_sync(
             else:
                 # Parallel processing using ProcessPoolExecutor
                 from concurrent.futures import ProcessPoolExecutor
-                import multiprocessing
 
                 # Prepare batches for parallel processing
                 batch_size = max(10, len(subs.events) // (num_workers * 4))  # 4 batches per worker
@@ -599,77 +690,20 @@ def apply_correlation_guided_frame_anchor_sync(
                 # Track progress across batches
                 completed_lines = 0
 
-                def process_batch(batch_data):
-                    """Process a batch of subtitle events in a separate process."""
-                    batch_events, batch_start_idx = batch_data
-
-                    # Each worker needs its own video readers
-                    from ..frame_matching import VideoReader
-                    worker_source_reader = VideoReader(source_video, runner, temp_dir=temp_dir)
-                    worker_target_reader = VideoReader(target_video, runner, temp_dir=temp_dir)
-
-                    results = []
-                    for idx, event in enumerate(batch_events):
-                        original_duration_ms = event.end - event.start
-                        source_start_frame = time_to_frame_floor(event.start, source_fps)
-                        predicted_start_ms = event.start + final_offset_ms
-
-                        refined_start_frame = _find_matching_frame_for_subtitle(
-                            source_reader=worker_source_reader,
-                            target_reader=worker_target_reader,
-                            source_frame=source_start_frame,
-                            predicted_target_ms=predicted_start_ms,
-                            target_fps=target_fps,
-                            window_radius=5,
-                            hash_size=hash_size,
-                            hash_algorithm=hash_algorithm,
-                            hash_threshold=hash_threshold,
-                            runner=runner
-                        )
-
-                        if refined_start_frame is not None:
-                            refined_start_ms = frame_to_time_floor(refined_start_frame, target_fps)
-                            correction_ms = refined_start_ms - predicted_start_ms
-                            refined_end_ms = refined_start_ms + original_duration_ms
-
-                            if refined_end_ms > refined_start_ms:
-                                results.append({
-                                    'idx': batch_start_idx + idx,
-                                    'start': int(refined_start_ms),
-                                    'end': int(refined_end_ms),
-                                    'refined': True,
-                                    'correction': abs(correction_ms),
-                                    'invalid': False
-                                })
-                            else:
-                                results.append({
-                                    'idx': batch_start_idx + idx,
-                                    'start': event.start + int(math.floor(final_offset_ms)),
-                                    'end': event.end + int(math.floor(final_offset_ms)),
-                                    'refined': False,
-                                    'correction': 0,
-                                    'invalid': True
-                                })
-                        else:
-                            results.append({
-                                'idx': batch_start_idx + idx,
-                                'start': event.start + int(math.floor(final_offset_ms)),
-                                'end': event.end + int(math.floor(final_offset_ms)),
-                                'refined': False,
-                                'correction': 0,
-                                'invalid': False
-                            })
-
-                    del worker_source_reader
-                    del worker_target_reader
-                    return results
-
-                # Create batch data with indices
-                batch_data = [(batch, i * batch_size) for i, batch in enumerate(batches)]
+                # Create batch data with all required parameters
+                # Format: (batch_events, batch_start_idx, source_video, target_video,
+                #          source_fps, target_fps, final_offset_ms, hash_size,
+                #          hash_algorithm, hash_threshold, temp_dir)
+                batch_data = [
+                    (batch, i * batch_size, source_video, target_video,
+                     source_fps, target_fps, final_offset_ms, hash_size,
+                     hash_algorithm, hash_threshold, temp_dir)
+                    for i, batch in enumerate(batches)
+                ]
 
                 # Process batches in parallel
                 with ProcessPoolExecutor(max_workers=num_workers) as executor:
-                    for batch_results in executor.map(process_batch, batch_data):
+                    for batch_results in executor.map(_process_subtitle_batch, batch_data):
                         # Apply results to subtitle events
                         for result in batch_results:
                             subs.events[result['idx']].start = result['start']
