@@ -490,6 +490,9 @@ def apply_correlation_guided_frame_anchor_sync(
     runner._log_message(f"[CorrGuided Anchor]   ─────────────────────────────────────")
     runner._log_message(f"[CorrGuided Anchor]   = FINAL offset:      {final_offset_ms:+.3f}ms")
 
+    # Calculate final_offset_int for reporting (used even if refinement applies individual offsets)
+    final_offset_int = int(math.floor(final_offset_ms))
+
     # Check if per-line refinement is enabled
     refine_per_line = config.get('corr_anchor_refine_per_line', False)
 
@@ -614,7 +617,6 @@ def apply_correlation_guided_frame_anchor_sync(
         metadata.capture()
 
         # Apply offset to all subtitle events using FLOOR for final rounding
-        final_offset_int = int(math.floor(final_offset_ms))
         runner._log_message(f"[CorrGuided Anchor] Applying offset to {len(subs.events)} events (floor: {final_offset_int}ms)")
 
         for event in subs.events:
@@ -647,7 +649,6 @@ def apply_correlation_guided_frame_anchor_sync(
     if refine_per_line and len(measurements) > 0:
         metadata.validate_and_restore(runner, expected_delay_ms=None)
     else:
-        final_offset_int = int(math.floor(final_offset_ms))
         metadata.validate_and_restore(runner, expected_delay_ms=final_offset_int)
 
     runner._log_message(f"[CorrGuided Anchor] Successfully synchronized {len(subs.events)} events")
