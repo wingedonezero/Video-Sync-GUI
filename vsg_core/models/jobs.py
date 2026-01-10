@@ -52,6 +52,11 @@ class PlanItem:
     generated_verify_only_lines_removed: bool = True  # Verify only event lines removed, nothing else changed
     skip_frame_validation: bool = False  # Skip duration-align frame validation (for generated tracks)
 
+    # Sync exclusion fields (for excluding styles from frame matching in anchor mode)
+    sync_exclusion_styles: List[str] = field(default_factory=list)  # Style names to exclude/include from frame sync
+    sync_exclusion_mode: str = 'exclude'  # 'exclude' or 'include' styles
+    sync_exclusion_original_style_list: List[str] = field(default_factory=list)  # Complete style list for validation
+
 @dataclass(frozen=True)
 class MergePlan:
     items: list[PlanItem]

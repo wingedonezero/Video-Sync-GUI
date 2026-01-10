@@ -93,6 +93,7 @@ class TrackWidget(QWidget):
         dialog = TrackSettingsDialog(
             track_type=self.track_type,
             codec_id=self.codec_id,
+            track_data=self.track_data,
             **current_config
         )
 
@@ -118,6 +119,18 @@ class TrackWidget(QWidget):
                 self.track_data['custom_name'] = custom_name
             elif 'custom_name' in self.track_data:
                 del self.track_data['custom_name']
+
+            # NEW: Store sync exclusion config in track_data
+            sync_exclusion_styles = new_config.get('sync_exclusion_styles', [])
+            if sync_exclusion_styles:
+                self.track_data['sync_exclusion_styles'] = sync_exclusion_styles
+                self.track_data['sync_exclusion_mode'] = new_config.get('sync_exclusion_mode', 'exclude')
+                self.track_data['sync_exclusion_original_style_list'] = new_config.get('sync_exclusion_original_style_list', [])
+            else:
+                # Clear sync exclusion fields if no styles selected
+                self.track_data.pop('sync_exclusion_styles', None)
+                self.track_data.pop('sync_exclusion_mode', None)
+                self.track_data.pop('sync_exclusion_original_style_list', None)
 
             self.logic.refresh_badges()
             self.logic.refresh_summary()

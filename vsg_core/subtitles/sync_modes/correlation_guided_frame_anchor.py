@@ -108,7 +108,9 @@ def apply_correlation_guided_frame_anchor_sync(
     raw_global_shift_ms: float,
     runner,
     config: dict = None,
-    temp_dir: Path = None
+    temp_dir: Path = None,
+    sync_exclusion_styles: List[str] = None,
+    sync_exclusion_mode: str = 'exclude'
 ) -> Dict[str, Any]:
     """
     Correlation-Guided Frame Anchor: Use correlation to guide robust frame matching.
@@ -154,11 +156,14 @@ def apply_correlation_guided_frame_anchor_sync(
             - corr_anchor_use_vapoursynth: use VS for extraction (default: True)
             - corr_anchor_anchor_positions: [early%, mid%, late%] (default: [10, 50, 90])
         temp_dir: Job's temporary directory for FFMS2 index storage
+        sync_exclusion_styles: List of style names to exclude/include from frame sync (optional)
+        sync_exclusion_mode: 'exclude' or 'include' - how to apply sync_exclusion_styles (default: 'exclude')
 
     Returns:
         Dict with sync report
     """
     config = config or {}
+    sync_exclusion_styles = sync_exclusion_styles or []
 
     # Calculate pure correlation (without global shift)
     pure_correlation_ms = total_delay_with_global_ms - raw_global_shift_ms
@@ -543,48 +548,65 @@ def apply_correlation_guided_frame_anchor_sync(
                     # Store original duration (authoring intent - doesn't change)
                     original_duration_ms = event.end - event.start
 
-                    # --- REFINE START TIME ONLY ---
-                    source_start_frame = time_to_frame_floor(event.start, source_fps)
-                    predicted_start_ms = event.start + final_offset_ms
+                    # Check if this style should be excluded from frame sync
+                    should_exclude_from_sync = False
+                    if sync_exclusion_styles:
+                        event_style = event.style if hasattr(event, 'style') else 'Default'
+                        if sync_exclusion_mode == 'exclude':
+                            # Exclude mode: skip frame sync if style is in the exclusion list
+                            should_exclude_from_sync = event_style in sync_exclusion_styles
+                        else:  # include mode
+                            # Include mode: skip frame sync if style is NOT in the inclusion list
+                            should_exclude_from_sync = event_style not in sync_exclusion_styles
 
-                    refined_start_frame = _find_matching_frame_for_subtitle(
-                        source_reader=source_reader,
-                        target_reader=target_reader,
-                        source_frame=source_start_frame,
-                        predicted_target_ms=predicted_start_ms,
-                        target_fps=target_fps,
-                        window_radius=5,
-                        hash_size=hash_size,
-                        hash_algorithm=hash_algorithm,
-                        hash_threshold=hash_threshold,
-                        runner=runner
-                    )
-
-                    if refined_start_frame is not None:
-                        # Use exact frame timing for start
-                        refined_start_ms = frame_to_time_floor(refined_start_frame, target_fps)
-                        correction_ms = refined_start_ms - predicted_start_ms
-                        refinement_stats['corrections'].append(abs(correction_ms))
-
-                        # Calculate end by preserving original duration
-                        refined_end_ms = refined_start_ms + original_duration_ms
-
-                        # Validate: ensure end > start (should always be true since duration is positive)
-                        if refined_end_ms > refined_start_ms:
-                            event.start = int(refined_start_ms)
-                            event.end = int(refined_end_ms)
-                            refinement_stats['refined'] += 1
-                        else:
-                            # Shouldn't happen, but fall back to global offset
-                            event.start += int(math.floor(final_offset_ms))
-                            event.end += int(math.floor(final_offset_ms))
-                            refinement_stats['fallback'] += 1
-                            refinement_stats['invalid_prevented'] += 1
-                    else:
-                        # Fall back to global offset for both start and end
+                    if should_exclude_from_sync:
+                        # Use corrected offset only (no frame matching)
                         event.start += int(math.floor(final_offset_ms))
                         event.end += int(math.floor(final_offset_ms))
                         refinement_stats['fallback'] += 1
+                    else:
+                        # --- REFINE START TIME ONLY ---
+                        source_start_frame = time_to_frame_floor(event.start, source_fps)
+                        predicted_start_ms = event.start + final_offset_ms
+
+                        refined_start_frame = _find_matching_frame_for_subtitle(
+                            source_reader=source_reader,
+                            target_reader=target_reader,
+                            source_frame=source_start_frame,
+                            predicted_target_ms=predicted_start_ms,
+                            target_fps=target_fps,
+                            window_radius=5,
+                            hash_size=hash_size,
+                            hash_algorithm=hash_algorithm,
+                            hash_threshold=hash_threshold,
+                            runner=runner
+                        )
+
+                        if refined_start_frame is not None:
+                            # Use exact frame timing for start
+                            refined_start_ms = frame_to_time_floor(refined_start_frame, target_fps)
+                            correction_ms = refined_start_ms - predicted_start_ms
+                            refinement_stats['corrections'].append(abs(correction_ms))
+
+                            # Calculate end by preserving original duration
+                            refined_end_ms = refined_start_ms + original_duration_ms
+
+                            # Validate: ensure end > start (should always be true since duration is positive)
+                            if refined_end_ms > refined_start_ms:
+                                event.start = int(refined_start_ms)
+                                event.end = int(refined_end_ms)
+                                refinement_stats['refined'] += 1
+                            else:
+                                # Shouldn't happen, but fall back to global offset
+                                event.start += int(math.floor(final_offset_ms))
+                                event.end += int(math.floor(final_offset_ms))
+                                refinement_stats['fallback'] += 1
+                                refinement_stats['invalid_prevented'] += 1
+                        else:
+                            # Fall back to global offset for both start and end
+                            event.start += int(math.floor(final_offset_ms))
+                            event.end += int(math.floor(final_offset_ms))
+                            refinement_stats['fallback'] += 1
             else:
                 # Parallel processing using ThreadPoolExecutor
                 # VapourSynth is thread-safe, so we can share VideoReader instances
@@ -609,46 +631,18 @@ def apply_correlation_guided_frame_anchor_sync(
                     results = []
                     for idx, event in enumerate(batch_events):
                         original_duration_ms = event.end - event.start
-                        source_start_frame = time_to_frame_floor(event.start, source_fps)
-                        predicted_start_ms = event.start + final_offset_ms
 
-                        refined_start_frame = _find_matching_frame_for_subtitle(
-                            source_reader=source_reader,  # Shared across threads
-                            target_reader=target_reader,  # Shared across threads
-                            source_frame=source_start_frame,
-                            predicted_target_ms=predicted_start_ms,
-                            target_fps=target_fps,
-                            window_radius=5,
-                            hash_size=hash_size,
-                            hash_algorithm=hash_algorithm,
-                            hash_threshold=hash_threshold,
-                            runner=runner
-                        )
+                        # Check if this style should be excluded from frame sync
+                        should_exclude_from_sync = False
+                        if sync_exclusion_styles:
+                            event_style = event.style if hasattr(event, 'style') else 'Default'
+                            if sync_exclusion_mode == 'exclude':
+                                should_exclude_from_sync = event_style in sync_exclusion_styles
+                            else:  # include mode
+                                should_exclude_from_sync = event_style not in sync_exclusion_styles
 
-                        if refined_start_frame is not None:
-                            refined_start_ms = frame_to_time_floor(refined_start_frame, target_fps)
-                            correction_ms = refined_start_ms - predicted_start_ms
-                            refined_end_ms = refined_start_ms + original_duration_ms
-
-                            if refined_end_ms > refined_start_ms:
-                                results.append({
-                                    'idx': batch_start_idx + idx,
-                                    'start': int(refined_start_ms),
-                                    'end': int(refined_end_ms),
-                                    'refined': True,
-                                    'correction': abs(correction_ms),
-                                    'invalid': False
-                                })
-                            else:
-                                results.append({
-                                    'idx': batch_start_idx + idx,
-                                    'start': event.start + int(math.floor(final_offset_ms)),
-                                    'end': event.end + int(math.floor(final_offset_ms)),
-                                    'refined': False,
-                                    'correction': 0,
-                                    'invalid': True
-                                })
-                        else:
+                        if should_exclude_from_sync:
+                            # Use corrected offset only (no frame matching)
                             results.append({
                                 'idx': batch_start_idx + idx,
                                 'start': event.start + int(math.floor(final_offset_ms)),
@@ -657,6 +651,55 @@ def apply_correlation_guided_frame_anchor_sync(
                                 'correction': 0,
                                 'invalid': False
                             })
+                        else:
+                            source_start_frame = time_to_frame_floor(event.start, source_fps)
+                            predicted_start_ms = event.start + final_offset_ms
+
+                            refined_start_frame = _find_matching_frame_for_subtitle(
+                                source_reader=source_reader,  # Shared across threads
+                                target_reader=target_reader,  # Shared across threads
+                                source_frame=source_start_frame,
+                                predicted_target_ms=predicted_start_ms,
+                                target_fps=target_fps,
+                                window_radius=5,
+                                hash_size=hash_size,
+                                hash_algorithm=hash_algorithm,
+                                hash_threshold=hash_threshold,
+                                runner=runner
+                            )
+
+                            if refined_start_frame is not None:
+                                refined_start_ms = frame_to_time_floor(refined_start_frame, target_fps)
+                                correction_ms = refined_start_ms - predicted_start_ms
+                                refined_end_ms = refined_start_ms + original_duration_ms
+
+                                if refined_end_ms > refined_start_ms:
+                                    results.append({
+                                        'idx': batch_start_idx + idx,
+                                        'start': int(refined_start_ms),
+                                        'end': int(refined_end_ms),
+                                        'refined': True,
+                                        'correction': abs(correction_ms),
+                                        'invalid': False
+                                    })
+                                else:
+                                    results.append({
+                                        'idx': batch_start_idx + idx,
+                                        'start': event.start + int(math.floor(final_offset_ms)),
+                                        'end': event.end + int(math.floor(final_offset_ms)),
+                                        'refined': False,
+                                        'correction': 0,
+                                        'invalid': True
+                                    })
+                            else:
+                                results.append({
+                                    'idx': batch_start_idx + idx,
+                                    'start': event.start + int(math.floor(final_offset_ms)),
+                                    'end': event.end + int(math.floor(final_offset_ms)),
+                                    'refined': False,
+                                    'correction': 0,
+                                    'invalid': False
+                                })
 
                         # Update progress (thread-safe)
                         with progress_lock:

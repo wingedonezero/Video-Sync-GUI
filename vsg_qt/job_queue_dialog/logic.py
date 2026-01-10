@@ -62,29 +62,37 @@ class JobQueueLogic:
         job_id = self.layout_manager.generate_job_id(job['sources'])
         status_text = "Configured" if self.layout_manager.layout_exists(job_id) else "Needs Configuration"
 
-        # NEW: Additional check for generated tracks (doesn't affect existing validation)
-        generated_track_warning = ""
+        # NEW: Additional check for generated tracks and sync exclusions (doesn't affect existing validation)
+        validation_warning = ""
+        all_issues = []
         if status_text == "Configured":
-            # Only check generated tracks if layout exists
+            # Only check if layout exists
             layout_data = self.layout_manager.load_job_layout(job_id)
             if layout_data:
                 gen_issues = self._validate_generated_tracks(layout_data, job)
+                sync_exclusion_issues = self._validate_sync_exclusions(layout_data, job)
+
                 if gen_issues:
-                    generated_track_warning = " ⚠️"
+                    all_issues.extend([f"Generated: {issue}" for issue in gen_issues])
+                if sync_exclusion_issues:
+                    all_issues.extend([f"Sync Exclusion: {issue}" for issue in sync_exclusion_issues])
+
+                if all_issues:
+                    validation_warning = " ⚠️"
                     # Store issues for tooltip or dialog display
-                    job['generated_track_issues'] = gen_issues
+                    job['validation_issues'] = all_issues
 
         # *** THE FIX IS HERE ***
         # Update the in-memory status to match the on-disk reality.
-        job['status'] = status_text + generated_track_warning
+        job['status'] = status_text + validation_warning
 
         order_item = QTableWidgetItem(str(row + 1)); order_item.setTextAlignment(Qt.AlignCenter)
         self.v.table.setItem(row, 0, order_item)
-        status_item = QTableWidgetItem(status_text + generated_track_warning)
-        if generated_track_warning:
+        status_item = QTableWidgetItem(status_text + validation_warning)
+        if validation_warning:
             # Add tooltip showing what's wrong
-            issues_text = job.get('generated_track_issues', [])
-            status_item.setToolTip("Generated track style warnings:\n" + "\n".join(issues_text))
+            issues_text = job.get('validation_issues', [])
+            status_item.setToolTip("Layout validation warnings:\n" + "\n".join(issues_text))
         self.v.table.setItem(row, 1, status_item)
 
         source_names = [Path(p).name for p in job['sources'].values()]
@@ -200,6 +208,155 @@ class JobQueueLogic:
             except Exception as e:
                 # If validation fails, warn but don't block
                 issues.append(f"'{track_name}': Could not validate styles ({str(e)})")
+
+        # If we auto-fixed any tracks, save the updated layout
+        if layout_modified:
+            job_id = self.layout_manager.generate_job_id(job['sources'])
+            self.layout_manager.persistence.save_layout(job_id, layout_data)
+
+        return issues
+
+    def _validate_sync_exclusions(self, layout_data: Dict, job: Dict) -> List[str]:
+        """
+        Validates that sync exclusion styles in the layout match the current file.
+        This is an ADDITIONAL check that doesn't affect existing layout matching.
+
+        Auto-fixes safe mismatches:
+        - If ONLY missing styles (styles in original but not in current): Auto-update baseline, no warning
+        - If ANY extra styles (styles in current but not in original): Show warning, requires manual review
+
+        Returns list of warning messages if there are issues, empty list if OK.
+        """
+        from vsg_core.subtitles.style_filter import StyleFilterEngine
+
+        issues = []
+        enhanced_layout = layout_data.get('enhanced_layout', [])
+        layout_modified = False
+
+        for track in enhanced_layout:
+            # Skip tracks without sync exclusions
+            if not track.get('sync_exclusion_styles'):
+                continue
+
+            # Skip non-subtitle tracks (shouldn't happen, but be safe)
+            if track.get('type') != 'subtitles':
+                continue
+
+            track_name = track.get('custom_name') or track.get('description', 'Unknown')
+            original_style_list = track.get('sync_exclusion_original_style_list', [])
+
+            if not original_style_list:
+                # No original style list stored - can't validate
+                continue
+
+            # Get the actual subtitle file path
+            source_key = track.get('source')
+            source_file = job['sources'].get(source_key)
+            if not source_file:
+                issues.append(f"'{track_name}': Source '{source_key}' not found")
+                continue
+
+            try:
+                # For sync exclusions, we need to check the current file's styles
+                # If it's a generated track, we need to extract it first
+                # Otherwise, we can check the original path directly
+
+                subtitle_path = None
+                if track.get('is_generated'):
+                    # For generated tracks, we need to extract the source track temporarily
+                    import tempfile
+                    import time
+                    from pathlib import Path
+                    from vsg_core.extraction.tracks import extract_tracks
+
+                    source_id = track.get('id')  # Use the generated track's own ID
+                    job_id = self.layout_manager.generate_job_id(job['sources'])
+                    timestamp = int(time.time() * 1000)
+                    temp_dir = Path(tempfile.gettempdir()) / f"vsg_sync_validate_{job_id}_{source_key}_{source_id}_{timestamp}"
+                    temp_dir.mkdir(parents=True, exist_ok=True)
+
+                    try:
+                        extracted = extract_tracks(source_file, temp_dir, self.runner, self.tool_paths, 'validate', specific_tracks=[source_id])
+                        if extracted:
+                            subtitle_path = extracted[0]['path']
+                    except:
+                        subtitle_path = None
+
+                    if not subtitle_path:
+                        issues.append(f"'{track_name}': Could not extract track for sync exclusion validation")
+                        import shutil
+                        shutil.rmtree(temp_dir, ignore_errors=True)
+                        continue
+                else:
+                    # For non-generated tracks, use the source file directly
+                    # Extract the specific track temporarily
+                    import tempfile
+                    import time
+                    from pathlib import Path
+                    from vsg_core.extraction.tracks import extract_tracks
+
+                    track_id = track.get('id')
+                    job_id = self.layout_manager.generate_job_id(job['sources'])
+                    timestamp = int(time.time() * 1000)
+                    temp_dir = Path(tempfile.gettempdir()) / f"vsg_sync_validate_{job_id}_{source_key}_{track_id}_{timestamp}"
+                    temp_dir.mkdir(parents=True, exist_ok=True)
+
+                    try:
+                        extracted = extract_tracks(source_file, temp_dir, self.runner, self.tool_paths, 'validate', specific_tracks=[track_id])
+                        if extracted:
+                            subtitle_path = extracted[0]['path']
+                    except:
+                        subtitle_path = None
+
+                    if not subtitle_path:
+                        issues.append(f"'{track_name}': Could not extract track for sync exclusion validation")
+                        import shutil
+                        shutil.rmtree(temp_dir, ignore_errors=True)
+                        continue
+
+                try:
+                    # Get available styles from the file
+                    available_styles = StyleFilterEngine.get_styles_from_file(subtitle_path)
+                    available_style_set = set(available_styles.keys())
+
+                    # Validate that the exclusion styles actually exist
+                    exclusion_styles = track.get('sync_exclusion_styles', [])
+                    if exclusion_styles:
+                        missing_exclusion_styles = [s for s in exclusion_styles if s not in available_style_set]
+                        if missing_exclusion_styles:
+                            issues.append(
+                                f"'{track_name}': Sync exclusion styles not found: "
+                                f"{', '.join(missing_exclusion_styles)}"
+                            )
+
+                    # Compare complete style sets
+                    original_style_set = set(original_style_list)
+
+                    if original_style_set != available_style_set:
+                        missing_styles = original_style_set - available_style_set
+                        extra_styles = available_style_set - original_style_set
+
+                        # AUTO-FIX: If ONLY missing styles, update baseline silently
+                        if missing_styles and not extra_styles:
+                            track['sync_exclusion_original_style_list'] = sorted(available_styles.keys())
+                            layout_modified = True
+
+                        # WARN: If ANY extra styles exist, require manual review
+                        elif extra_styles:
+                            warning_parts = []
+                            if missing_styles:
+                                warning_parts.append(f"Missing: {', '.join(sorted(missing_styles))}")
+                            warning_parts.append(f"Extra: {', '.join(sorted(extra_styles))}")
+                            issues.append(f"'{track_name}': Sync exclusion style mismatch ({'; '.join(warning_parts)})")
+
+                finally:
+                    # Clean up temp extraction
+                    import shutil
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+
+            except Exception as e:
+                # If validation fails, warn but don't block
+                issues.append(f"'{track_name}': Could not validate sync exclusion styles ({str(e)})")
 
         # If we auto-fixed any tracks, save the updated layout
         if layout_modified:

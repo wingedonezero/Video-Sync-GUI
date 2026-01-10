@@ -106,6 +106,15 @@ class TrackWidgetLogic:
             if abs(size_mult - 1.0) > 1e-6:
                 parts.append(f"{size_mult:.2f}x Size")
 
+            # Show sync exclusion details
+            sync_exclusion_styles = self.track_data.get('sync_exclusion_styles', [])
+            if sync_exclusion_styles:
+                sync_mode = self.track_data.get('sync_exclusion_mode', 'exclude')
+                styles_str = ', '.join(sync_exclusion_styles[:2])  # Show first 2 styles
+                if len(sync_exclusion_styles) > 2:
+                    styles_str += f" +{len(sync_exclusion_styles) - 2} more"
+                parts.append(f"⚡ {'Excluding' if sync_mode == 'exclude' else 'Including'} sync: {styles_str}")
+
         if not parts:
             self.v.source_label.setText("")
         else:
@@ -123,6 +132,11 @@ class TrackWidgetLogic:
             badges.append("Default")
         if self.track_data.get('type') == 'subtitles' and self.v.cb_forced.isChecked():
             badges.append("Forced")
+
+        # NEW: Add sync exclusion badge
+        if self.track_data.get('sync_exclusion_styles'):
+            badges.append("⚡ Sync Exclusions")
+
         if self.track_data.get('user_modified_path'):
             badges.append("Edited")
         elif self.track_data.get('style_patch'):
@@ -180,6 +194,11 @@ class TrackWidgetLogic:
             "generated_filter_styles": self.track_data.get('generated_filter_styles', []),
             "generated_original_style_list": self.track_data.get('generated_original_style_list', []),
             "generated_verify_only_lines_removed": self.track_data.get('generated_verify_only_lines_removed', True),
+
+            # NEW: Include sync exclusion fields
+            "sync_exclusion_styles": self.track_data.get('sync_exclusion_styles', []),
+            "sync_exclusion_mode": self.track_data.get('sync_exclusion_mode', 'exclude'),
+            "sync_exclusion_original_style_list": self.track_data.get('sync_exclusion_original_style_list', []),
         }
 
         return config
