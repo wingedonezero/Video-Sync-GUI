@@ -217,14 +217,31 @@ class SubtitlesStep:
                                 raw_global_shift_ms = ctx.delays.raw_global_shift_ms
                                 runner._log_message(f"[Time-Based Raw] Global shift: {raw_global_shift_ms:+.3f}ms")
 
+                            # Get target video for frame boundary correction
+                            target_video = source1_file
+                            target_fps = None
+                            if target_video:
+                                from vsg_core.subtitles.frame_sync import detect_video_fps
+                                try:
+                                    target_fps = detect_video_fps(str(target_video), runner)
+                                    runner._log_message(f"[Time-Based Raw] Target video: {Path(target_video).name} ({target_fps:.3f} fps)")
+                                except Exception as e:
+                                    runner._log_message(f"[Time-Based Raw] WARNING: Could not detect target FPS: {e}")
+                                    runner._log_message(f"[Time-Based Raw] Frame boundary correction will be skipped")
+
                             runner._log_message(f"[Time-Based Raw] Applying to track {item.track.id} ({item.track.props.name or 'Unnamed'})")
+
+                            # Get frame boundary correction setting
+                            enable_frame_correction = ctx.settings_dict.get('time_based_frame_boundary_correction', True)
 
                             frame_sync_report = apply_raw_delay_sync(
                                 str(item.extracted_path),
                                 total_delay_with_global_ms,
                                 raw_global_shift_ms,
                                 runner,
-                                ctx.settings_dict
+                                ctx.settings_dict,
+                                target_fps=target_fps,
+                                enable_frame_boundary_correction=enable_frame_correction
                             )
 
                             if frame_sync_report and 'error' not in frame_sync_report:
