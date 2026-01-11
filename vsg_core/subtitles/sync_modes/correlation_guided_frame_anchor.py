@@ -21,6 +21,132 @@ from ..frame_utils import (
 )
 
 
+# Global variables for worker processes (ProcessPoolExecutor)
+_worker_source_reader = None
+_worker_target_reader = None
+
+
+def _init_worker(source_video: str, target_video: str, temp_dir: str):
+    """
+    Initialize video readers in each worker process.
+
+    This is called once per worker process when using ProcessPoolExecutor.
+    Stores readers in global variables to avoid re-initialization for each task.
+    """
+    global _worker_source_reader, _worker_target_reader
+
+    # Create a minimal runner for this worker (no logging to avoid conflicts)
+    class DummyRunner:
+        def _log_message(self, msg):
+            pass
+
+    from ..frame_matching import VideoReader
+    dummy_runner = DummyRunner()
+
+    _worker_source_reader = VideoReader(source_video, dummy_runner, temp_dir=temp_dir)
+    _worker_target_reader = VideoReader(target_video, dummy_runner, temp_dir=temp_dir)
+
+
+def _process_subtitle_batch(batch_data):
+    """
+    Process a batch of subtitle events in a worker process.
+
+    Uses global VideoReaders initialized by _init_worker().
+    This function is at module level so it can be pickled for multiprocessing.
+
+    Args:
+        batch_data: Tuple of (batch_events, batch_start_idx, source_fps, target_fps,
+                             final_offset_ms, hash_size, hash_algorithm, hash_threshold,
+                             sync_exclusion_styles, sync_exclusion_mode)
+
+    Returns:
+        List of result dictionaries with refined timings
+    """
+    global _worker_source_reader, _worker_target_reader
+
+    (batch_events, batch_start_idx, source_fps, target_fps, final_offset_ms,
+     hash_size, hash_algorithm, hash_threshold,
+     sync_exclusion_styles, sync_exclusion_mode) = batch_data
+
+    from ..frame_utils import time_to_frame_floor, frame_to_time_floor
+    import math
+
+    results = []
+    for idx, event in enumerate(batch_events):
+        original_duration_ms = event.end - event.start
+
+        # Check if this style should be excluded from frame sync
+        should_exclude_from_sync = False
+        if sync_exclusion_styles:
+            event_style = event.style if hasattr(event, 'style') else 'Default'
+            if sync_exclusion_mode == 'exclude':
+                should_exclude_from_sync = event_style in sync_exclusion_styles
+            else:  # include mode
+                should_exclude_from_sync = event_style not in sync_exclusion_styles
+
+        if should_exclude_from_sync:
+            # Use corrected offset only (no frame matching)
+            results.append({
+                'idx': batch_start_idx + idx,
+                'start': event.start + int(math.floor(final_offset_ms)),
+                'end': event.end + int(math.floor(final_offset_ms)),
+                'refined': False,
+                'correction': 0,
+                'invalid': False
+            })
+        else:
+            source_start_frame = time_to_frame_floor(event.start, source_fps)
+            predicted_start_ms = event.start + final_offset_ms
+
+            refined_start_frame = _find_matching_frame_for_subtitle(
+                source_reader=_worker_source_reader,
+                target_reader=_worker_target_reader,
+                source_frame=source_start_frame,
+                predicted_target_ms=predicted_start_ms,
+                target_fps=target_fps,
+                window_radius=5,
+                hash_size=hash_size,
+                hash_algorithm=hash_algorithm,
+                hash_threshold=hash_threshold,
+                runner=None  # No logging in worker
+            )
+
+            if refined_start_frame is not None:
+                refined_start_ms = frame_to_time_floor(refined_start_frame, target_fps)
+                correction_ms = refined_start_ms - predicted_start_ms
+                refined_end_ms = refined_start_ms + original_duration_ms
+
+                if refined_end_ms > refined_start_ms:
+                    results.append({
+                        'idx': batch_start_idx + idx,
+                        'start': int(refined_start_ms),
+                        'end': int(refined_end_ms),
+                        'refined': True,
+                        'correction': abs(correction_ms),
+                        'invalid': False
+                    })
+                else:
+                    results.append({
+                        'idx': batch_start_idx + idx,
+                        'start': event.start + int(math.floor(final_offset_ms)),
+                        'end': event.end + int(math.floor(final_offset_ms)),
+                        'refined': False,
+                        'correction': 0,
+                        'invalid': True
+                    })
+            else:
+                results.append({
+                    'idx': batch_start_idx + idx,
+                    'start': event.start + int(math.floor(final_offset_ms)),
+                    'end': event.end + int(math.floor(final_offset_ms)),
+                    'refined': False,
+                    'correction': 0,
+                    'invalid': False
+                })
+
+    return results
+
+
 def _find_matching_frame_for_subtitle(
     source_reader,
     target_reader,
@@ -48,7 +174,7 @@ def _find_matching_frame_for_subtitle(
         hash_size: Hash size for perceptual hashing
         hash_algorithm: Hash algorithm ('dhash', 'phash', etc.)
         hash_threshold: Max hamming distance for match
-        runner: CommandRunner for logging
+        runner: CommandRunner for logging (can be None for workers)
 
     Returns:
         Frame number of best match, or None if no good match found
@@ -608,117 +734,40 @@ def apply_correlation_guided_frame_anchor_sync(
                             event.end += int(math.floor(final_offset_ms))
                             refinement_stats['fallback'] += 1
             else:
-                # Parallel processing using ThreadPoolExecutor
-                # VapourSynth is thread-safe, so we can share VideoReader instances
-                from concurrent.futures import ThreadPoolExecutor
-                import threading
+                # Parallel processing using ProcessPoolExecutor
+                # Each worker process gets its own VideoReaders via initializer
+                from concurrent.futures import ProcessPoolExecutor
 
                 # Prepare batches for parallel processing
                 batch_size = max(10, len(subs.events) // (num_workers * 4))  # 4 batches per worker
                 batches = [subs.events[i:i+batch_size] for i in range(0, len(subs.events), batch_size)]
 
-                runner._log_message(f"[CorrGuided Anchor] Processing {len(subs.events)} lines in {len(batches)} batches")
+                runner._log_message(f"[CorrGuided Anchor] Processing {len(subs.events)} lines in {len(batches)} batches with {num_workers} workers")
 
-                # Track progress across batches (thread-safe)
-                completed_lines = 0
-                progress_lock = threading.Lock()
+                # Create batch data with all required parameters
+                # Format: (batch_events, batch_start_idx, source_fps, target_fps,
+                #          final_offset_ms, hash_size, hash_algorithm, hash_threshold,
+                #          sync_exclusion_styles, sync_exclusion_mode)
+                batch_data = [
+                    (batch, i * batch_size, source_fps, target_fps, final_offset_ms,
+                     hash_size, hash_algorithm, hash_threshold,
+                     sync_exclusion_styles, sync_exclusion_mode)
+                    for i, batch in enumerate(batches)
+                ]
 
-                def process_batch_threaded(batch_data):
-                    """Process a batch of subtitle events in a thread (shares VideoReaders)."""
-                    nonlocal completed_lines
-                    batch_events, batch_start_idx = batch_data
+                # Process batches in parallel using ProcessPoolExecutor
+                # Workers are initialized once with VideoReaders via initializer
+                with ProcessPoolExecutor(
+                    max_workers=num_workers,
+                    initializer=_init_worker,
+                    initargs=(source_video, target_video, temp_dir)
+                ) as executor:
+                    # Track progress
+                    completed_batches = 0
+                    total_batches = len(batch_data)
 
-                    results = []
-                    for idx, event in enumerate(batch_events):
-                        original_duration_ms = event.end - event.start
-
-                        # Check if this style should be excluded from frame sync
-                        should_exclude_from_sync = False
-                        if sync_exclusion_styles:
-                            event_style = event.style if hasattr(event, 'style') else 'Default'
-                            if sync_exclusion_mode == 'exclude':
-                                should_exclude_from_sync = event_style in sync_exclusion_styles
-                            else:  # include mode
-                                should_exclude_from_sync = event_style not in sync_exclusion_styles
-
-                        if should_exclude_from_sync:
-                            # Use corrected offset only (no frame matching)
-                            results.append({
-                                'idx': batch_start_idx + idx,
-                                'start': event.start + int(math.floor(final_offset_ms)),
-                                'end': event.end + int(math.floor(final_offset_ms)),
-                                'refined': False,
-                                'correction': 0,
-                                'invalid': False
-                            })
-                        else:
-                            source_start_frame = time_to_frame_floor(event.start, source_fps)
-                            predicted_start_ms = event.start + final_offset_ms
-
-                            refined_start_frame = _find_matching_frame_for_subtitle(
-                                source_reader=source_reader,  # Shared across threads
-                                target_reader=target_reader,  # Shared across threads
-                                source_frame=source_start_frame,
-                                predicted_target_ms=predicted_start_ms,
-                                target_fps=target_fps,
-                                window_radius=5,
-                                hash_size=hash_size,
-                                hash_algorithm=hash_algorithm,
-                                hash_threshold=hash_threshold,
-                                runner=runner
-                            )
-
-                            if refined_start_frame is not None:
-                                refined_start_ms = frame_to_time_floor(refined_start_frame, target_fps)
-                                correction_ms = refined_start_ms - predicted_start_ms
-                                refined_end_ms = refined_start_ms + original_duration_ms
-
-                                if refined_end_ms > refined_start_ms:
-                                    results.append({
-                                        'idx': batch_start_idx + idx,
-                                        'start': int(refined_start_ms),
-                                        'end': int(refined_end_ms),
-                                        'refined': True,
-                                        'correction': abs(correction_ms),
-                                        'invalid': False
-                                    })
-                                else:
-                                    results.append({
-                                        'idx': batch_start_idx + idx,
-                                        'start': event.start + int(math.floor(final_offset_ms)),
-                                        'end': event.end + int(math.floor(final_offset_ms)),
-                                        'refined': False,
-                                        'correction': 0,
-                                        'invalid': True
-                                    })
-                            else:
-                                results.append({
-                                    'idx': batch_start_idx + idx,
-                                    'start': event.start + int(math.floor(final_offset_ms)),
-                                    'end': event.end + int(math.floor(final_offset_ms)),
-                                    'refined': False,
-                                    'correction': 0,
-                                    'invalid': False
-                                })
-
-                        # Update progress (thread-safe)
-                        with progress_lock:
-                            completed_lines += 1
-                            if completed_lines in milestones:
-                                progress_pct = (completed_lines / total_events) * 100
-                                runner._log_message(f"[CorrGuided Anchor] Progress: {progress_pct:.0f}% ({completed_lines}/{total_events} lines)")
-
-                    return results
-
-                # Create batch data with indices
-                batch_data = [(batch, i * batch_size) for i, batch in enumerate(batches)]
-
-                # Process batches in parallel using threads
-                with ThreadPoolExecutor(max_workers=num_workers) as executor:
-                    all_results = executor.map(process_batch_threaded, batch_data)
-
-                    # Apply results to subtitle events
-                    for batch_results in all_results:
+                    for batch_results in executor.map(_process_subtitle_batch, batch_data):
+                        # Apply results to subtitle events
                         for result in batch_results:
                             subs.events[result['idx']].start = result['start']
                             subs.events[result['idx']].end = result['end']
@@ -732,10 +781,18 @@ def apply_correlation_guided_frame_anchor_sync(
                             if result['invalid']:
                                 refinement_stats['invalid_prevented'] += 1
 
-            # Clean up video readers (always needed for refinement path)
-            del source_reader
-            del target_reader
-            gc.collect()
+                        # Progress reporting per batch
+                        completed_batches += 1
+                        if completed_batches in [total_batches // 4, total_batches // 2, (3 * total_batches) // 4, total_batches]:
+                            progress_pct = (refinement_stats['total_lines'] / total_events) * 100
+                            runner._log_message(f"[CorrGuided Anchor] Progress: {progress_pct:.0f}% ({refinement_stats['total_lines']}/{total_events} lines)")
+
+            # Clean up video readers (not needed for parallel path since workers have their own)
+            # Only sequential path uses these readers
+            if num_workers == 1:
+                del source_reader
+                del target_reader
+                gc.collect()
 
             # Report statistics
             success_rate = (refinement_stats['refined'] / refinement_stats['total_lines'] * 100) if refinement_stats['total_lines'] > 0 else 0
