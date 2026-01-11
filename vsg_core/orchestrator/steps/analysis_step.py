@@ -556,6 +556,10 @@ class AnalysisStep:
                         item.get('source') == source_key and item.get('type') == 'audio'
                         for item in ctx.manual_layout
                     )
+                    source_has_subs_in_layout = any(
+                        item.get('source') == source_key and item.get('type') == 'subtitles'
+                        for item in ctx.manual_layout
+                    )
 
                     if source_has_audio_in_layout:
                         # Store stepping correction info with the corrected delay and cluster diagnostics
@@ -566,46 +570,38 @@ class AnalysisStep:
                             'invalid_clusters': details.get('invalid_clusters', {}),
                             'validation_results': details.get('validation_results', {}),
                             'correction_mode': details.get('correction_mode', 'full'),
-                            'fallback_mode': details.get('fallback_mode', 'nearest')
+                            'fallback_mode': details.get('fallback_mode', 'nearest'),
+                            'subs_only': False
                         }
                         runner._log_message(
                             f"[Stepping] Stepping correction will be applied to audio tracks from {source_key}."
                         )
-                    else:
-                        # No audio tracks from this source - check if subtitle-only stepping is enabled
+                    elif source_has_subs_in_layout and config.get('stepping_adjust_subtitles_no_audio', True):
+                        # No audio but subs exist - run full stepping correction to get verified EDL
                         runner._log_message(
-                            f"[Stepping Detected] Stepping detected in {source_key}, but no audio tracks "
-                            f"from this source are being used."
+                            f"[Stepping Detected] Stepping detected in {source_key}. No audio tracks "
+                            f"from this source, but subtitles will use verified stepping EDL."
                         )
-
-                        # Generate simplified EDL for subtitle adjustment if enabled
-                        if config.get('stepping_adjust_subtitles_no_audio', True):
-                            from vsg_core.correction.stepping import generate_edl_from_correlation
-
-                            # Pass diagnosis details for filtered stepping support
-                            diagnosis_details = {
-                                'valid_clusters': details.get('valid_clusters', {}),
-                                'invalid_clusters': details.get('invalid_clusters', {}),
-                                'validation_results': details.get('validation_results', {}),
-                                'correction_mode': details.get('correction_mode', 'full'),
-                                'fallback_mode': details.get('fallback_mode', 'nearest')
-                            }
-
-                            edl = generate_edl_from_correlation(results, config, runner, diagnosis_details)
-                            if edl:
-                                ctx.stepping_edls[source_key] = edl
-                                runner._log_message(
-                                    f"[Stepping] Generated EDL with {len(edl)} segment(s) for subtitle adjustment:"
-                                )
-                                for i, seg in enumerate(edl):
-                                    runner._log_message(
-                                        f"  - Segment {i+1}: @{seg.start_s:.1f}s → delay={seg.delay_ms:+d}ms"
-                                    )
-                        else:
-                            runner._log_message(
-                                f"[Stepping] Subtitle-only stepping correction is disabled in settings. "
-                                f"Subtitles will use delay_selection_mode instead."
-                            )
+                        # Set segment_flags so stepping correction step runs full analysis
+                        ctx.segment_flags[analysis_track_key] = {
+                            'base_delay': final_delay_ms,
+                            'cluster_details': details.get('cluster_details', []),
+                            'valid_clusters': details.get('valid_clusters', {}),
+                            'invalid_clusters': details.get('invalid_clusters', {}),
+                            'validation_results': details.get('validation_results', {}),
+                            'correction_mode': details.get('correction_mode', 'full'),
+                            'fallback_mode': details.get('fallback_mode', 'nearest'),
+                            'subs_only': True  # Flag to indicate no audio application needed
+                        }
+                        runner._log_message(
+                            f"[Stepping] Full stepping analysis will run for verified subtitle EDL."
+                        )
+                    else:
+                        # No audio and no subs (or setting disabled)
+                        runner._log_message(
+                            f"[Stepping Detected] Stepping detected in {source_key}, but no audio or subtitle tracks "
+                            f"from this source are being used. Skipping stepping correction."
+                        )
 
         # Store stepping sources in context for final report
         ctx.stepping_sources = stepping_sources

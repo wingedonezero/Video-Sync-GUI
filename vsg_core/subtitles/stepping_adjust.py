@@ -76,9 +76,10 @@ def apply_stepping_to_subtitles(subtitle_path: str, edl: List, runner, config: d
         adjusted_count = 0
         max_adjustment_ms = 0
         spanning_count = 0  # Count subs that span boundaries
+        spanning_details = []  # Detailed info for boundary-spanning subs
 
         # Process each subtitle
-        for event in subs:
+        for idx, event in enumerate(subs):
             # Get original timestamps (pysubs2 uses milliseconds)
             original_start_ms = event.start
             original_end_ms = event.end
@@ -88,9 +89,22 @@ def apply_stepping_to_subtitles(subtitle_path: str, edl: List, runner, config: d
             # Calculate cumulative offset based on boundary mode (returns raw float)
             offset_raw = _get_offset_at_time(original_start_s, original_end_s, sorted_edl, boundary_mode)
 
-            # Check if this subtitle spans a boundary (for stats)
-            if _spans_boundary(original_start_s, original_end_s, sorted_edl):
+            # Check if this subtitle spans a boundary (for stats and logging)
+            spanning_info = _get_spanning_details(original_start_s, original_end_s, sorted_edl)
+            if spanning_info:
                 spanning_count += 1
+                # Get subtitle text preview (first 40 chars, clean of tags)
+                text_preview = event.plaintext[:40].replace('\n', ' ') if hasattr(event, 'plaintext') else event.text[:40].replace('\n', ' ')
+                if len(event.plaintext if hasattr(event, 'plaintext') else event.text) > 40:
+                    text_preview += "..."
+                spanning_details.append({
+                    'index': idx + 1,
+                    'start_s': original_start_s,
+                    'end_s': original_end_s,
+                    'boundaries_crossed': spanning_info['boundaries'],
+                    'delay_applied_ms': int(math.floor(offset_raw)) if offset_raw != 0.0 else 0,
+                    'text': text_preview
+                })
 
             # Apply offset with floor() at final step (single rounding point)
             if offset_raw != 0.0:
@@ -122,8 +136,20 @@ def apply_stepping_to_subtitles(subtitle_path: str, edl: List, runner, config: d
         )
         if spanning_count > 0:
             runner._log_message(
-                f"[SteppingAdjust] {spanning_count} subtitle(s) span stepping boundaries"
+                f"[SteppingAdjust] {spanning_count} subtitle(s) span stepping boundaries:"
             )
+            # Log details for each spanning subtitle (limit to first 10 to avoid log spam)
+            for detail in spanning_details[:10]:
+                boundaries_str = ", ".join([f"{b:.1f}s" for b in detail['boundaries_crossed']])
+                runner._log_message(
+                    f"[SteppingAdjust]   - #{detail['index']} [{detail['start_s']:.1f}s-{detail['end_s']:.1f}s]: "
+                    f"crosses [{boundaries_str}], applied {detail['delay_applied_ms']:+d}ms "
+                    f"| \"{detail['text']}\""
+                )
+            if len(spanning_details) > 10:
+                runner._log_message(
+                    f"[SteppingAdjust]   ... and {len(spanning_details) - 10} more boundary-spanning subtitles"
+                )
 
         return report
 
@@ -152,6 +178,32 @@ def _spans_boundary(start_s: float, end_s: float, edl: List) -> bool:
         if start_s < segment.start_s < end_s:
             return True
     return False
+
+
+def _get_spanning_details(start_s: float, end_s: float, edl: List) -> dict:
+    """
+    Get details about which boundaries a subtitle spans.
+
+    Args:
+        start_s: Subtitle start time in seconds
+        end_s: Subtitle end time in seconds
+        edl: Sorted list of AudioSegment objects
+
+    Returns:
+        dict with 'boundaries' list if subtitle spans boundaries, None otherwise
+    """
+    if len(edl) <= 1:
+        return None
+
+    # Find all boundaries that fall within [start_s, end_s]
+    crossed_boundaries = []
+    for segment in edl[1:]:  # Skip first segment (always at 0.0s)
+        if start_s < segment.start_s < end_s:
+            crossed_boundaries.append(segment.start_s)
+
+    if crossed_boundaries:
+        return {'boundaries': crossed_boundaries}
+    return None
 
 
 def _get_offset_at_time(start_s: float, end_s: float, edl: List, mode: str = 'start') -> float:

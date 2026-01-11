@@ -1675,15 +1675,19 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
     for analysis_track_key, flag_info in ctx.segment_flags.items():
         source_key = analysis_track_key.split('_')[0]
         base_delay_ms = flag_info['base_delay']
+        subs_only = flag_info.get('subs_only', False)
 
         target_items = [
             item for item in ctx.extracted_items
             if item.track.source == source_key and item.track.type == TrackType.AUDIO and not item.is_preserved
         ]
 
-        if not target_items:
+        if not target_items and not subs_only:
             runner._log_message(f"[SteppingCorrection] Skipping {source_key}: No audio tracks found in layout to correct.")
             continue
+
+        if subs_only:
+            runner._log_message(f"[SteppingCorrection] Running full analysis for {source_key} (subs-only mode - no audio to apply).")
 
         analysis_item = extracted_audio_map.get(analysis_track_key)
         if not analysis_item:
@@ -1728,7 +1732,6 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
         elif result.verdict == CorrectionVerdict.STEPPED:
             edl = result.data['edl']
             audit_metadata = result.data.get('audit_metadata', [])
-            runner._log_message(f"[SteppingCorrection] Analysis successful. Applying correction plan to {len(target_items)} audio track(s) from {source_key}.")
 
             # Store EDL in context for subtitle adjustment
             ctx.stepping_edls[source_key] = edl
@@ -1736,6 +1739,15 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
             # Store audit metadata in segment_flags for final audit
             if analysis_track_key in ctx.segment_flags:
                 ctx.segment_flags[analysis_track_key]['audit_metadata'] = audit_metadata
+
+            if subs_only:
+                # Subs-only mode: EDL stored for subtitle use, no audio to apply
+                runner._log_message(f"[SteppingCorrection] Analysis successful (subs-only). Verified EDL with {len(edl)} segment(s) stored for subtitle adjustment:")
+                for i, seg in enumerate(edl):
+                    runner._log_message(f"  - Segment {i+1}: @{seg.start_s:.1f}s → delay={seg.delay_ms:+d}ms (raw: {seg.delay_raw:.3f}ms)")
+            else:
+                # Normal mode: Apply correction to audio tracks
+                runner._log_message(f"[SteppingCorrection] Analysis successful. Applying correction plan to {len(target_items)} audio track(s) from {source_key}.")
 
             for target_item in target_items:
                 corrected_path = corrector.apply_plan_to_file(str(target_item.extracted_path), edl, ctx.temp_dir, ref_file_path=ref_file_path)
