@@ -80,7 +80,8 @@ def _frame_snap_subtitle_event(
     event,
     vts,
     runner,
-    stats: Dict[str, int]
+    stats: Dict[str, int],
+    log_first_n: int = 5
 ):
     """
     Frame-snap a single subtitle event using TARGET VideoTimestamps.
@@ -95,50 +96,73 @@ def _frame_snap_subtitle_event(
         vts: VideoTimestamps handler (from TARGET video)
         runner: CommandRunner for logging
         stats: Dict to track snapping statistics
+        log_first_n: Log details for first N events
 
     Modifies event.start and event.end in place.
     """
     try:
         from video_timestamps import TimeType
 
-        original_start = event.start
-        original_end = event.end
+        original_start = event.start  # int (milliseconds)
+        original_end = event.end      # int (milliseconds)
         original_duration = original_end - original_start
 
         # 1. Snap START to TARGET frame boundary
         start_frac = Fraction(int(event.start), 1)
         start_frame = vts.time_to_frame(start_frac, TimeType.EXACT)  # Which frame does start land in?
-        snapped_start_ms = vts.frame_to_time(start_frame, TimeType.START)  # Exact frame start
+        snapped_start_frac = vts.frame_to_time(start_frame, TimeType.START)  # Exact frame start (Fraction)
+
+        # Convert Fraction to float for calculations, then to int for pysubs2
+        snapped_start_ms = int(float(snapped_start_frac))
 
         # 2. Preserve duration
-        start_delta = float(snapped_start_ms) - original_start
+        start_delta = snapped_start_ms - original_start
         snapped_end_ms = original_end + start_delta
 
         # 3. Safety check: Ensure end is in a later frame than start
         end_frac = Fraction(int(snapped_end_ms), 1)
         end_frame = vts.time_to_frame(end_frac, TimeType.EXACT)
 
+        end_adjusted = False
         if end_frame <= start_frame:
             # End is in same or earlier frame - push to next frame START
-            snapped_end_ms = vts.frame_to_time(start_frame + 1, TimeType.START)
+            snapped_end_frac = vts.frame_to_time(start_frame + 1, TimeType.START)
+            snapped_end_ms = int(float(snapped_end_frac))
             stats['duration_adjusted'] += 1
-            runner._log_message(
-                f"[FrameLocked] Event at {original_start}ms: End pushed to next frame "
-                f"(was frame {end_frame}, now frame {start_frame + 1})"
-            )
+            end_adjusted = True
 
         # Apply snapped times
-        event.start = int(snapped_start_ms)
-        event.end = int(snapped_end_ms)
+        event.start = snapped_start_ms
+        event.end = snapped_end_ms
 
         # Track statistics
-        if abs(start_delta) > 0.5:  # If start moved more than 0.5ms
+        start_changed = (start_delta != 0)
+        end_delta = event.end - (original_end + start_delta)
+        end_changed = (abs(end_delta) > 0.5)
+        duration_preserved = (abs((event.end - event.start) - original_duration) < 0.5)
+
+        if start_changed:
             stats['start_snapped'] += 1
-        if abs((event.end - event.start) - original_duration) > 0.5:  # If duration changed
+        if end_changed:
+            stats['end_snapped'] += 1
+        if not duration_preserved:
             stats['duration_changed'] += 1
+
+        # Log first few events for debugging
+        if stats['events_processed'] < log_first_n and (start_changed or end_changed):
+            runner._log_message(
+                f"[FrameLocked] Event #{stats['events_processed']}: "
+                f"start {original_start}ms→{event.start}ms (Δ{start_delta:+d}ms, frame {start_frame}), "
+                f"end {original_end}ms→{event.end}ms (Δ{event.end - original_end:+d}ms, frame {end_frame})"
+                + (f" [end adjusted]" if end_adjusted else "")
+            )
+
+        stats['events_processed'] += 1
 
     except Exception as e:
         runner._log_message(f"[FrameLocked] WARNING: Frame snap failed for event at {event.start}ms: {e}")
+        import traceback
+        runner._log_message(f"[FrameLocked] Traceback: {traceback.format_exc()}")
         # Keep original times if snapping fails
 
 
@@ -172,26 +196,30 @@ def _validate_post_ass_quantization(
             # Check if start is at or after its TARGET frame start boundary
             start_frac = Fraction(int(event.start), 1)
             start_frame = vts.time_to_frame(start_frac, TimeType.EXACT)
-            frame_start_ms = vts.frame_to_time(start_frame, TimeType.START)
+            frame_start_frac = vts.frame_to_time(start_frame, TimeType.START)
+            frame_start_ms = int(float(frame_start_frac))
 
             # If start is before frame boundary, snap forward
             if event.start < frame_start_ms:
-                event.start = int(frame_start_ms)
+                event.start = frame_start_ms
                 stats['post_ass_start_fixed'] += 1
-                runner._log_message(
-                    f"[FrameLocked] Post-ASS fix: Start {original_start}ms → {event.start}ms "
-                    f"(snapped to frame {start_frame} boundary)"
-                )
+                if stats['post_ass_start_fixed'] <= 3:  # Log first 3
+                    runner._log_message(
+                        f"[FrameLocked] Post-ASS fix: Start {original_start}ms → {event.start}ms "
+                        f"(snapped to frame {start_frame} boundary)"
+                    )
 
             # Check if end is after start (safety check)
             if event.end <= event.start:
                 # Push end to next frame
-                event.end = int(vts.frame_to_time(start_frame + 1, TimeType.START))
+                next_frame_frac = vts.frame_to_time(start_frame + 1, TimeType.START)
+                event.end = int(float(next_frame_frac))
                 stats['post_ass_end_fixed'] += 1
-                runner._log_message(
-                    f"[FrameLocked] Post-ASS fix: End {original_end}ms → {event.end}ms "
-                    f"(pushed to frame {start_frame + 1})"
-                )
+                if stats['post_ass_end_fixed'] <= 3:  # Log first 3
+                    runner._log_message(
+                        f"[FrameLocked] Post-ASS fix: End {original_end}ms → {event.end}ms "
+                        f"(pushed to frame {start_frame + 1})"
+                    )
 
     except Exception as e:
         runner._log_message(f"[FrameLocked] WARNING: Post-ASS validation failed: {e}")
@@ -232,9 +260,7 @@ def apply_timebase_frame_locked_sync(
     """
     config = config or {}
 
-    runner._log_message(f"[FrameLocked] ========================================")
-    runner._log_message(f"[FrameLocked] Time-Based + Frame-Locked Timestamps Sync")
-    runner._log_message(f"[FrameLocked] ========================================")
+    runner._log_message(f"[FrameLocked] === Time-Based + Frame-Locked Timestamps Sync ===")
     runner._log_message(f"[FrameLocked] Subtitle: {Path(subtitle_path).name}")
     runner._log_message(f"[FrameLocked] TARGET video: {Path(target_video).name} ({target_fps:.3f} fps)")
 
@@ -294,7 +320,9 @@ def apply_timebase_frame_locked_sync(
 
     stats = {
         'total_events': len(subs.events),
+        'events_processed': 0,
         'start_snapped': 0,
+        'end_snapped': 0,
         'duration_changed': 0,
         'duration_adjusted': 0,
         'post_ass_start_fixed': 0,
@@ -308,9 +336,10 @@ def apply_timebase_frame_locked_sync(
         _frame_snap_subtitle_event(event, vts, runner, stats)
 
     runner._log_message(f"[FrameLocked] Snapping complete:")
-    runner._log_message(f"[FrameLocked]   - Events with start snapped: {stats['start_snapped']}/{stats['total_events']}")
-    runner._log_message(f"[FrameLocked]   - Events with duration changed: {stats['duration_changed']}/{stats['total_events']}")
-    runner._log_message(f"[FrameLocked]   - Events with duration adjusted (safety): {stats['duration_adjusted']}/{stats['total_events']}")
+    runner._log_message(f"[FrameLocked]   - Start times snapped: {stats['start_snapped']}/{stats['total_events']}")
+    runner._log_message(f"[FrameLocked]   - End times adjusted: {stats['end_snapped']}/{stats['total_events']}")
+    runner._log_message(f"[FrameLocked]   - Durations changed: {stats['duration_changed']}/{stats['total_events']}")
+    runner._log_message(f"[FrameLocked]   - Safety adjustments (end→next frame): {stats['duration_adjusted']}/{stats['total_events']}")
 
     # Step 4: Save to ASS (pysubs2 auto-quantizes to centiseconds)
     runner._log_message(f"[FrameLocked] Saving subtitle file (ASS centisecond quantization will occur)...")
@@ -339,7 +368,7 @@ def apply_timebase_frame_locked_sync(
 
     # Step 6: Re-save if fixes were applied
     if stats['post_ass_start_fixed'] > 0 or stats['post_ass_end_fixed'] > 0:
-        runner._log_message(f"[FrameLocked] Re-saving after post-ASS fixes...")
+        runner._log_message(f"[FrameLocked] Post-ASS fixes applied - re-saving:")
         runner._log_message(f"[FrameLocked]   - Start times fixed: {stats['post_ass_start_fixed']}")
         runner._log_message(f"[FrameLocked]   - End times fixed: {stats['post_ass_end_fixed']}")
 
@@ -349,10 +378,8 @@ def apply_timebase_frame_locked_sync(
         except Exception as e:
             runner._log_message(f"[FrameLocked] WARNING: Failed to re-save: {e}")
     else:
-        runner._log_message(f"[FrameLocked] No post-ASS fixes needed - frame alignment maintained!")
+        runner._log_message(f"[FrameLocked] Post-ASS validation: Frame alignment maintained (no fixes needed)")
 
-    runner._log_message(f"[FrameLocked] ========================================")
-    runner._log_message(f"[FrameLocked] Sync complete!")
-    runner._log_message(f"[FrameLocked] ========================================")
+    runner._log_message(f"[FrameLocked] === Sync Complete ===")
 
     return stats
