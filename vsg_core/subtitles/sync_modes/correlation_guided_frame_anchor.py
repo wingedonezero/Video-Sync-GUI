@@ -737,6 +737,12 @@ def apply_correlation_guided_frame_anchor_sync(
                 # Parallel processing using ProcessPoolExecutor
                 # Each worker process gets its own VideoReaders via initializer
                 from concurrent.futures import ProcessPoolExecutor
+                import multiprocessing
+
+                # Use 'spawn' method to avoid fork() deadlocks with VapourSynth/FFMS2
+                # fork() causes hanging because FFMS2 uses internal threading and locks
+                # that get copied to child processes but the threads holding them don't
+                mp_context = multiprocessing.get_context('spawn')
 
                 # Prepare batches for parallel processing
                 batch_size = max(10, len(subs.events) // (num_workers * 4))  # 4 batches per worker
@@ -755,10 +761,11 @@ def apply_correlation_guided_frame_anchor_sync(
                     for i, batch in enumerate(batches)
                 ]
 
-                # Process batches in parallel using ProcessPoolExecutor
+                # Process batches in parallel using ProcessPoolExecutor with spawn context
                 # Workers are initialized once with VideoReaders via initializer
                 with ProcessPoolExecutor(
                     max_workers=num_workers,
+                    mp_context=mp_context,
                     initializer=_init_worker,
                     initargs=(source_video, target_video, temp_dir)
                 ) as executor:
