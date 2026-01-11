@@ -194,9 +194,14 @@ def _validate_post_ass_quantization(
     try:
         from video_timestamps import TimeType
 
-        for event in subs.events:
+        for idx, event in enumerate(subs.events, start=1):
             original_start = event.start
             original_end = event.end
+
+            # Get subtitle text for logging (truncate if too long)
+            subtitle_text = event.text.replace('\n', ' ').replace('\\N', ' ')
+            if len(subtitle_text) > 60:
+                subtitle_text = subtitle_text[:57] + '...'
 
             # Check if start is at or after its TARGET frame start boundary
             start_frac = Fraction(int(event.start), 1)
@@ -210,9 +215,10 @@ def _validate_post_ass_quantization(
                 stats['post_ass_start_fixed'] += 1
                 if log_corrections:
                     runner._log_message(
-                        f"[FrameLocked] Post-ASS fix: Start {original_start}ms → {event.start}ms "
-                        f"(Δ{event.start - original_start:+d}ms, snapped to frame {start_frame} boundary)"
+                        f"[FrameLocked] Post-ASS fix #{idx}: Start {original_start}ms → {event.start}ms "
+                        f"(Δ{event.start - original_start:+d}ms, frame {start_frame})"
                     )
+                    runner._log_message(f"[FrameLocked]   Text: \"{subtitle_text}\"")
 
             # Check if end is after start (safety check)
             if event.end <= event.start:
@@ -222,9 +228,10 @@ def _validate_post_ass_quantization(
                 stats['post_ass_end_fixed'] += 1
                 if log_corrections:
                     runner._log_message(
-                        f"[FrameLocked] Post-ASS fix: End {original_end}ms → {event.end}ms "
-                        f"(Δ{event.end - original_end:+d}ms, pushed to frame {start_frame + 1} boundary)"
+                        f"[FrameLocked] Post-ASS fix #{idx}: End {original_end}ms → {event.end}ms "
+                        f"(Δ{event.end - original_end:+d}ms, frame {start_frame + 1})"
                     )
+                    runner._log_message(f"[FrameLocked]   Text: \"{subtitle_text}\"")
 
     except Exception as e:
         runner._log_message(f"[FrameLocked] WARNING: Post-ASS validation failed: {e}")
