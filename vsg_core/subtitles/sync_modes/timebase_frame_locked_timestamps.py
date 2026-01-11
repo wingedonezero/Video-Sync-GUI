@@ -143,6 +143,8 @@ def _frame_snap_subtitle_event(
 
         if start_changed:
             stats['start_snapped'] += 1
+        else:
+            stats['start_already_aligned'] += 1
         if end_changed:
             stats['end_snapped'] += 1
         if not duration_preserved:
@@ -337,6 +339,7 @@ def apply_timebase_frame_locked_sync(
         'total_events': total_events,
         'events_processed': 0,
         'start_snapped': 0,
+        'start_already_aligned': 0,
         'end_snapped': 0,
         'duration_changed': 0,
         'duration_adjusted': 0,
@@ -351,7 +354,8 @@ def apply_timebase_frame_locked_sync(
         _frame_snap_subtitle_event(event, vts, runner, stats, sample_indices)
 
     runner._log_message(f"[FrameLocked] Snapping complete:")
-    runner._log_message(f"[FrameLocked]   - Start times snapped: {stats['start_snapped']}/{stats['total_events']}")
+    runner._log_message(f"[FrameLocked]   - Start times adjusted: {stats['start_snapped']}/{stats['total_events']}")
+    runner._log_message(f"[FrameLocked]   - Start times already aligned: {stats['start_already_aligned']}/{stats['total_events']}")
     runner._log_message(f"[FrameLocked]   - End times adjusted: {stats['end_snapped']}/{stats['total_events']}")
     runner._log_message(f"[FrameLocked]   - Durations changed: {stats['duration_changed']}/{stats['total_events']}")
     runner._log_message(f"[FrameLocked]   - Safety adjustments (end→next frame): {stats['duration_adjusted']}/{stats['total_events']}")
