@@ -51,6 +51,9 @@ class AppConfig:
             'raw_delay_rounding': 'floor',  # Rounding for raw/time-based-raw: floor, round, ceil
             'time_based_frame_boundary_correction': True,  # Fix ±1 frame errors from CS rounding (requires target video)
 
+            # --- Time-Based Frame-Locked Timestamps Settings ---
+            'videotimestamps_rounding': 'floor',  # VideoTimestamps rounding method: 'floor' or 'round'
+
             # --- Duration-Align Sync Settings (Hybrid Mode) ---
             'duration_align_verify_with_frames': False,  # Enable hybrid: duration + sliding window verification
             'duration_align_verify_search_window_ms': 2000,  # Search window for sliding window (±2 seconds)
