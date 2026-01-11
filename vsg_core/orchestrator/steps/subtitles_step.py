@@ -264,7 +264,8 @@ class SubtitlesStep:
                 elif subtitle_sync_mode == 'timebase-frame-locked-timestamps':
                     # Time-based + VideoTimestamps frame locking
                     # IMPORTANT: This mode runs EVEN AFTER stepping (complementary)
-                    # Stepping just makes the timeline continuous - final delay still needs to be applied
+                    # When stepping is applied: subtitles are already aligned, only need frame-snap (no delay)
+                    # When stepping is NOT applied: subtitles need both delay + frame-snap
                     ext = item.extracted_path.suffix.lower()
                     supported_formats = ['.ass', '.ssa', '.srt', '.vtt']
 
@@ -272,19 +273,22 @@ class SubtitlesStep:
                         source_key = item.sync_to if item.track.source == 'External' else item.track.source
 
                         if item.stepping_adjusted:
-                            runner._log_message(f"[FrameLocked] Stepping already applied - now applying final delay + frame-snap")
+                            # Stepping already aligned subtitles - only frame-snap needed (no additional delay)
+                            runner._log_message(f"[FrameLocked] Stepping already applied - subtitles aligned, only applying frame-snap")
+                            total_delay_with_global_ms = 0.0
+                            raw_global_shift_ms = 0.0
+                        else:
+                            # Get total delay (already includes global shift)
+                            total_delay_with_global_ms = 0.0
+                            if ctx.delays and source_key in ctx.delays.raw_source_delays_ms:
+                                total_delay_with_global_ms = ctx.delays.raw_source_delays_ms[source_key]
+                                runner._log_message(f"[FrameLocked] Total delay (with global): {total_delay_with_global_ms:+.3f}ms from {source_key}")
 
-                        # Get total delay (already includes global shift)
-                        total_delay_with_global_ms = 0.0
-                        if ctx.delays and source_key in ctx.delays.raw_source_delays_ms:
-                            total_delay_with_global_ms = ctx.delays.raw_source_delays_ms[source_key]
-                            runner._log_message(f"[FrameLocked] Total delay (with global): {total_delay_with_global_ms:+.3f}ms from {source_key}")
-
-                        # Get global shift separately for logging breakdown
-                        raw_global_shift_ms = 0.0
-                        if ctx.delays:
-                            raw_global_shift_ms = ctx.delays.raw_global_shift_ms
-                            runner._log_message(f"[FrameLocked] Global shift: {raw_global_shift_ms:+.3f}ms")
+                            # Get global shift separately for logging breakdown
+                            raw_global_shift_ms = 0.0
+                            if ctx.delays:
+                                raw_global_shift_ms = ctx.delays.raw_global_shift_ms
+                                runner._log_message(f"[FrameLocked] Global shift: {raw_global_shift_ms:+.3f}ms")
 
                         # Get target video and FPS
                         target_video = source1_file
