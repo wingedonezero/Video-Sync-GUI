@@ -1102,6 +1102,39 @@ class SubtitleSyncTab(QWidget):
             "Only used when 'timebase-frame-locked-timestamps' mode is selected."
         )
 
+        self.widgets['framelocked_enable_post_ass_correction'] = QCheckBox("Enable post-ASS correction")
+        self.widgets['framelocked_enable_post_ass_correction'].setChecked(True)
+        self.widgets['framelocked_enable_post_ass_correction'].setToolTip(
+            "Apply post-ASS validation and correction (timebase-frame-locked-timestamps mode):\n\n"
+            "• Checked (Default): Validate and fix frame alignment after ASS save\n"
+            "  - ASS format rounds to centiseconds (10ms), which can break frame alignment\n"
+            "  - Post-correction re-validates and fixes any quantization damage\n"
+            "  - Ensures subtitles stay in correct frames after ASS rounding\n"
+            "  - Example: If CS rounding pushes end time into same frame as start,\n"
+            "    post-correction pushes it back to next frame\n\n"
+            "• Unchecked: Skip post-ASS validation\n"
+            "  - Slightly faster (no reload/re-save)\n"
+            "  - May have ±1 frame errors from CS quantization\n"
+            "  - Only disable if you're sure CS rounding won't cause issues\n\n"
+            "Only used when 'timebase-frame-locked-timestamps' mode is selected."
+        )
+
+        self.widgets['framelocked_log_post_ass_corrections'] = QCheckBox("Log post-ASS corrections")
+        self.widgets['framelocked_log_post_ass_corrections'].setChecked(False)
+        self.widgets['framelocked_log_post_ass_corrections'].setToolTip(
+            "Log detailed post-ASS correction changes (timebase-frame-locked-timestamps mode):\n\n"
+            "• Unchecked (Default): Only log summary statistics\n"
+            "  - Shows total count of corrections\n"
+            "  - Minimal log output\n\n"
+            "• Checked: Log every correction with before/after values\n"
+            "  - Shows exact timestamp changes\n"
+            "  - Useful for debugging and verification\n"
+            "  - Can generate significant log output for large subtitle files\n"
+            "  - Example: 'Start 4170ms → 4171ms (frame 100)'\n\n"
+            "Only used when 'timebase-frame-locked-timestamps' mode is selected\n"
+            "and 'Enable post-ASS correction' is checked."
+        )
+
         # Duration-Align settings
         self.widgets['duration_align_use_vapoursynth'] = QCheckBox("Use VapourSynth indexing")
         self.widgets['duration_align_use_vapoursynth'].setChecked(True)
@@ -1640,6 +1673,8 @@ class SubtitleSyncTab(QWidget):
 
         # VideoTimestamps Frame-Locked mode options
         sync_layout.addRow("VTS Rounding:", self.widgets['videotimestamps_rounding'])
+        sync_layout.addRow("", self.widgets['framelocked_enable_post_ass_correction'])
+        sync_layout.addRow("", self.widgets['framelocked_log_post_ass_corrections'])
 
         # Duration-Align mode options
         sync_layout.addRow("", self.widgets['duration_align_use_vapoursynth'])
@@ -1689,6 +1724,9 @@ class SubtitleSyncTab(QWidget):
         self.widgets['time_based_use_raw_values'].toggled.connect(
             lambda: self._update_mode_visibility(self.widgets['subtitle_sync_mode'].currentText())
         )
+        self.widgets['framelocked_enable_post_ass_correction'].toggled.connect(
+            lambda: self._update_mode_visibility(self.widgets['subtitle_sync_mode'].currentText())
+        )
         self.widgets['duration_align_verify_with_frames'].toggled.connect(
             lambda: self._update_mode_visibility(self.widgets['subtitle_sync_mode'].currentText())
         )
@@ -1711,6 +1749,10 @@ class SubtitleSyncTab(QWidget):
 
         # VideoTimestamps Frame-Locked mode options
         self.widgets['videotimestamps_rounding'].setEnabled(is_frame_locked)
+        self.widgets['framelocked_enable_post_ass_correction'].setEnabled(is_frame_locked)
+        # Log option only enabled if both frame-locked mode AND post-correction are enabled
+        post_correction_enabled = is_frame_locked and self.widgets['framelocked_enable_post_ass_correction'].isChecked()
+        self.widgets['framelocked_log_post_ass_corrections'].setEnabled(post_correction_enabled)
 
         # Duration-align mode options
         self.widgets['duration_align_use_vapoursynth'].setEnabled(is_duration_align)
