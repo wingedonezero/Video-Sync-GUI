@@ -787,12 +787,12 @@ def apply_correlation_guided_frame_anchor_sync(
                             progress_pct = (refinement_stats['total_lines'] / total_events) * 100
                             runner._log_message(f"[CorrGuided Anchor] Progress: {progress_pct:.0f}% ({refinement_stats['total_lines']}/{total_events} lines)")
 
-            # Clean up video readers (not needed for parallel path since workers have their own)
-            # Only sequential path uses these readers
-            if num_workers == 1:
-                del source_reader
-                del target_reader
-                gc.collect()
+            # Clean up video readers
+            # Sequential path: these readers were used for processing
+            # Parallel path: these readers were created but unused (workers have their own)
+            del source_reader
+            del target_reader
+            gc.collect()
 
             # Report statistics
             success_rate = (refinement_stats['refined'] / refinement_stats['total_lines'] * 100) if refinement_stats['total_lines'] > 0 else 0
