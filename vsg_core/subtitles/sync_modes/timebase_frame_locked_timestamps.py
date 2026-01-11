@@ -174,7 +174,8 @@ def _validate_post_ass_quantization(
     vts,
     runner,
     stats: Dict[str, int],
-    log_corrections: bool = False
+    log_corrections: bool = False,
+    original_timestamps: list = None
 ):
     """
     Validate frame alignment after ASS centisecond quantization.
@@ -188,6 +189,7 @@ def _validate_post_ass_quantization(
         runner: CommandRunner for logging
         stats: Dict to track validation statistics
         log_corrections: If True, log every correction with details. If False, only log summary.
+        original_timestamps: List of dicts with original start/end/text before ANY modifications
 
     Modifies event times in place if quantization broke frame alignment.
     """
@@ -195,8 +197,14 @@ def _validate_post_ass_quantization(
         from video_timestamps import TimeType
 
         for idx, event in enumerate(subs.events, start=1):
-            original_start = event.start
-            original_end = event.end
+            # Get ORIGINAL pre-sync timestamps for logging comparison
+            orig_data = original_timestamps[idx - 1] if original_timestamps else None
+            orig_start = orig_data['start'] if orig_data else None
+            orig_end = orig_data['end'] if orig_data else None
+
+            # Capture current state (after first save, before post-ASS fixes)
+            before_fix_start = event.start
+            before_fix_end = event.end
 
             # Get subtitle text for logging (truncate if too long)
             subtitle_text = event.text.replace('\n', ' ').replace('\\N', ' ')
@@ -213,10 +221,11 @@ def _validate_post_ass_quantization(
             if event.start < frame_start_ms:
                 event.start = frame_start_ms
                 stats['post_ass_start_fixed'] += 1
-                if log_corrections:
+                if log_corrections and orig_start is not None:
+                    total_delta = event.start - orig_start
                     runner._log_message(
-                        f"[FrameLocked] Post-ASS fix #{idx}: Start {original_start}ms → {event.start}ms "
-                        f"(Δ{event.start - original_start:+d}ms, frame {start_frame})"
+                        f"[FrameLocked] Post-ASS fix #{idx}: Start {orig_start}ms → {event.start}ms "
+                        f"(Δ{total_delta:+d}ms, frame {start_frame})"
                     )
                     runner._log_message(f"[FrameLocked]   Text: \"{subtitle_text}\"")
 
@@ -226,10 +235,11 @@ def _validate_post_ass_quantization(
                 next_frame_frac = vts.frame_to_time(start_frame + 1, TimeType.START)
                 event.end = int(float(next_frame_frac))
                 stats['post_ass_end_fixed'] += 1
-                if log_corrections:
+                if log_corrections and orig_end is not None:
+                    total_delta = event.end - orig_end
                     runner._log_message(
-                        f"[FrameLocked] Post-ASS fix #{idx}: End {original_end}ms → {event.end}ms "
-                        f"(Δ{event.end - original_end:+d}ms, frame {start_frame + 1})"
+                        f"[FrameLocked] Post-ASS fix #{idx}: End {orig_end}ms → {event.end}ms "
+                        f"(Δ{total_delta:+d}ms, frame {start_frame + 1})"
                     )
                     runner._log_message(f"[FrameLocked]   Text: \"{subtitle_text}\"")
 
@@ -309,6 +319,12 @@ def apply_timebase_frame_locked_sync(
         }
 
     runner._log_message(f"[FrameLocked] Loaded {len(subs.events)} subtitle events")
+
+    # Capture ORIGINAL timestamps before ANY modifications (for logging comparison)
+    original_timestamps = [
+        {'start': event.start, 'end': event.end, 'text': event.text}
+        for event in subs.events
+    ]
 
     # Step 1: Frame-align the global shift
     frame_aligned_delay = _frame_align_global_shift(
@@ -395,7 +411,7 @@ def apply_timebase_frame_locked_sync(
         if log_post_corrections:
             runner._log_message(f"[FrameLocked] Post-ASS detailed logging enabled")
 
-        _validate_post_ass_quantization(subs_reloaded, vts, runner, stats, log_post_corrections)
+        _validate_post_ass_quantization(subs_reloaded, vts, runner, stats, log_post_corrections, original_timestamps)
 
         # Step 6: Re-save if fixes were applied
         if stats['post_ass_start_fixed'] > 0 or stats['post_ass_end_fixed'] > 0:
