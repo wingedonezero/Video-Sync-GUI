@@ -222,34 +222,47 @@ def _get_offset_at_time(start_s: float, end_s: float, edl: List, mode: str = 'st
     Returns:
         float: Cumulative offset in milliseconds (raw, unrounded)
     """
-    # Helper function to get raw delay at a specific time
-    def get_delay_at_time(time_s: float) -> float:
+    # Helper function to get cumulative offset at a specific time
+    def get_cumulative_offset_at_time(time_s: float) -> float:
+        """
+        Calculate cumulative offset from stepping corrections (insertions/removals).
+
+        This mimics what the audio assembly does: sum up all the (segment.delay - previous.delay)
+        for segments before the given time.
+        """
         if time_s < edl[0].start_s:
             return 0.0
 
-        current_offset = 0.0
-        for segment in edl:
+        # Start with no offset (first segment is the baseline)
+        cumulative_offset = 0.0
+        base_delay = edl[0].delay_raw
+
+        for i in range(1, len(edl)):
+            segment = edl[i]
             if segment.start_s <= time_s:
-                # Use raw delay if available, otherwise fall back to integer
-                current_offset = getattr(segment, 'delay_raw', float(segment.delay_ms))
+                # Add the difference (this is what gets inserted/removed)
+                segment_delay_raw = getattr(segment, 'delay_raw', float(segment.delay_ms))
+                cumulative_offset += (segment_delay_raw - base_delay)
+                base_delay = segment_delay_raw
             else:
                 break
-        return current_offset
+
+        return cumulative_offset
 
     if mode == 'start':
         # Use start time only (original behavior)
-        return get_delay_at_time(start_s)
+        return get_cumulative_offset_at_time(start_s)
 
     elif mode == 'midpoint':
         # Use the middle timestamp
         midpoint_s = (start_s + end_s) / 2.0
-        return get_delay_at_time(midpoint_s)
+        return get_cumulative_offset_at_time(midpoint_s)
 
     elif mode == 'majority':
         # Calculate which region the subtitle spends the most time in
         duration = end_s - start_s
         if duration <= 0:
-            return get_delay_at_time(start_s)
+            return get_cumulative_offset_at_time(start_s)
 
         # Track duration in each delay region (keyed by raw delay)
         region_durations = {}
@@ -260,7 +273,7 @@ def _get_offset_at_time(start_s: float, end_s: float, edl: List, mode: str = 'st
 
         # If no boundaries within subtitle range, it's entirely in one region
         if not boundaries or (len(boundaries) == 1 and boundaries[0] == end_s):
-            return get_delay_at_time(start_s)
+            return get_cumulative_offset_at_time(start_s)
 
         # Calculate duration in each region
         current_time = start_s
@@ -269,7 +282,7 @@ def _get_offset_at_time(start_s: float, end_s: float, edl: List, mode: str = 'st
                 continue
 
             # Find which delay applies to this region
-            region_delay = get_delay_at_time(current_time)
+            region_delay = get_cumulative_offset_at_time(current_time)
 
             # Calculate duration in this region
             segment_duration = min(boundary, end_s) - current_time
@@ -286,8 +299,8 @@ def _get_offset_at_time(start_s: float, end_s: float, edl: List, mode: str = 'st
         if region_durations:
             return max(region_durations.items(), key=lambda x: x[1])[0]
         else:
-            return get_delay_at_time(start_s)
+            return get_cumulative_offset_at_time(start_s)
 
     else:
         # Unknown mode, default to start
-        return get_delay_at_time(start_s)
+        return get_cumulative_offset_at_time(start_s)
