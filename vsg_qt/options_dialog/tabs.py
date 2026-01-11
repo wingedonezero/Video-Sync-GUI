@@ -971,7 +971,7 @@ class SubtitleSyncTab(QWidget):
         sync_layout = QFormLayout(sync_group)
 
         self.widgets['subtitle_sync_mode'] = QComboBox()
-        self.widgets['subtitle_sync_mode'].addItems(['time-based', 'duration-align', 'correlation-frame-snap', 'subtitle-anchored-frame-snap', 'correlation-guided-frame-anchor'])
+        self.widgets['subtitle_sync_mode'].addItems(['time-based', 'timebase-frame-locked-timestamps', 'duration-align', 'correlation-frame-snap', 'subtitle-anchored-frame-snap', 'correlation-guided-frame-anchor'])
         self.widgets['subtitle_sync_mode'].setToolTip(
             "Subtitle synchronization method:\n\n"
             "• time-based (Default): Apply delays using millisecond timestamps\n"
@@ -979,6 +979,15 @@ class SubtitleSyncTab(QWidget):
             "  - Optional: Enable 'Use raw correlation values' to embed\n"
             "    delay directly in subtitle file using pysubs2\n"
             "  - Works with all subtitle formats\n\n"
+            "• timebase-frame-locked-timestamps (NEW): Time-based + VideoTimestamps\n"
+            "  - Starts from time-based mode (audio correlation → delay)\n"
+            "  - Frame-aligns global shift using TARGET video (no drift)\n"
+            "  - Deterministic frame-snapping using VideoTimestamps library\n"
+            "  - Eliminates fractional-frame errors over long content\n"
+            "  - Post-ASS-quantization validation with safety checks\n"
+            "  - More accurate than time-based for frame precision\n"
+            "  - Requires VideoTimestamps library: pip install VideoTimestamps\n"
+            "  - Requires target video file\n\n"
             "• duration-align: Frame alignment via total duration difference\n"
             "  - Calculates: target_duration - source_duration\n"
             "  - Applies this offset to all subtitle times\n"
@@ -1004,7 +1013,7 @@ class SubtitleSyncTab(QWidget):
             "  - Best when correlation fails or scene detection picks bad frames\n"
             "  - Uses dialogue events which are stable, content-rich frames\n"
             "  - Requires both source and target video files\n\n"
-            "• correlation-guided-frame-anchor: Hybrid correlation + robust matching (NEW)\n"
+            "• correlation-guided-frame-anchor: Hybrid correlation + robust matching\n"
             "  - Uses correlation to guide frame search (reduces false matches)\n"
             "  - Time-based anchors (10%, 50%, 90% of video) - not subtitle-dependent\n"
             "  - Sliding window matching like subtitle-anchor mode\n"
@@ -1069,6 +1078,28 @@ class SubtitleSyncTab(QWidget):
             "  But CS rounds to 4170ms → frame 99 (wrong!) ❌\n"
             "  Correction adjusts to 4180ms → frame 100 (fixed!) ✅\n\n"
             "Only used when 'Use raw correlation values' is enabled."
+        )
+
+        # VideoTimestamps Frame-Locked mode settings
+        self.widgets['videotimestamps_rounding'] = QComboBox()
+        self.widgets['videotimestamps_rounding'].addItems(['floor', 'round'])
+        self.widgets['videotimestamps_rounding'].setCurrentIndex(0)  # Default to floor
+        self.widgets['videotimestamps_rounding'].setToolTip(
+            "VideoTimestamps rounding method (timebase-frame-locked-timestamps mode):\n\n"
+            "Controls how VideoTimestamps converts between frames and time.\n\n"
+            "• floor (Default): Round timestamps down\n"
+            "  - Conservative (subtitles never appear too late)\n"
+            "  - Preferred for most use cases\n"
+            "  - Ensures subtitles don't bleed into next frame\n"
+            "  - Example: frame 100 at 23.976fps → 4170.8ms → 4170ms\n\n"
+            "• round: Standard mathematical rounding\n"
+            "  - Rounds to nearest millisecond\n"
+            "  - Statistically balanced\n"
+            "  - Example: 4170.8ms → 4171ms\n\n"
+            "This setting is separate from 'raw_delay_rounding' which controls\n"
+            "ASS centisecond quantization. VideoTimestamps rounding happens\n"
+            "during frame-to-time conversions before ASS export.\n\n"
+            "Only used when 'timebase-frame-locked-timestamps' mode is selected."
         )
 
         # Duration-Align settings
@@ -1607,6 +1638,9 @@ class SubtitleSyncTab(QWidget):
         sync_layout.addRow("Rounding:", self.widgets['raw_delay_rounding'])
         sync_layout.addRow("", self.widgets['time_based_frame_boundary_correction'])
 
+        # VideoTimestamps Frame-Locked mode options
+        sync_layout.addRow("VTS Rounding:", self.widgets['videotimestamps_rounding'])
+
         # Duration-Align mode options
         sync_layout.addRow("", self.widgets['duration_align_use_vapoursynth'])
         sync_layout.addRow("", self.widgets['duration_align_validate'])
@@ -1663,6 +1697,7 @@ class SubtitleSyncTab(QWidget):
     def _update_mode_visibility(self, text: str):
         """Show/hide settings based on selected sync mode."""
         is_time_based = (text == 'time-based')
+        is_frame_locked = (text == 'timebase-frame-locked-timestamps')
         is_duration_align = (text == 'duration-align')
         is_correlation_snap = (text == 'correlation-frame-snap')
         is_sub_anchor_snap = (text == 'subtitle-anchored-frame-snap')
@@ -1673,6 +1708,9 @@ class SubtitleSyncTab(QWidget):
         use_raw = is_time_based and self.widgets['time_based_use_raw_values'].isChecked()
         self.widgets['raw_delay_rounding'].setEnabled(use_raw)
         self.widgets['time_based_frame_boundary_correction'].setEnabled(use_raw)
+
+        # VideoTimestamps Frame-Locked mode options
+        self.widgets['videotimestamps_rounding'].setEnabled(is_frame_locked)
 
         # Duration-align mode options
         self.widgets['duration_align_use_vapoursynth'].setEnabled(is_duration_align)

@@ -17,7 +17,7 @@ from vsg_core.subtitles.ocr import run_ocr
 from vsg_core.subtitles.cleanup import run_cleanup
 from vsg_core.subtitles.timing import fix_subtitle_timing
 from vsg_core.subtitles.stepping_adjust import apply_stepping_to_subtitles
-from vsg_core.subtitles.frame_sync import apply_raw_delay_sync, apply_duration_align_sync, apply_correlation_frame_snap_sync, apply_subtitle_anchored_frame_snap_sync, apply_correlation_guided_frame_anchor_sync
+from vsg_core.subtitles.frame_sync import apply_raw_delay_sync, apply_duration_align_sync, apply_correlation_frame_snap_sync, apply_subtitle_anchored_frame_snap_sync, apply_correlation_guided_frame_anchor_sync, apply_timebase_frame_locked_sync
 
 class SubtitlesStep:
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
@@ -256,6 +256,66 @@ class SubtitlesStep:
                         else:
                             runner._log_message(f"[Time-Based Raw] Skipping track {item.track.id} - format {ext} not supported")
                     # else: default time-based mode uses mkvmerge --sync, no processing needed here
+
+                elif subtitle_sync_mode == 'timebase-frame-locked-timestamps':
+                    # Time-based + VideoTimestamps frame locking
+                    ext = item.extracted_path.suffix.lower()
+                    supported_formats = ['.ass', '.ssa', '.srt', '.vtt']
+
+                    if ext in supported_formats:
+                        source_key = item.sync_to if item.track.source == 'External' else item.track.source
+
+                        # Get total delay (already includes global shift)
+                        total_delay_with_global_ms = 0.0
+                        if ctx.delays and source_key in ctx.delays.raw_source_delays_ms:
+                            total_delay_with_global_ms = ctx.delays.raw_source_delays_ms[source_key]
+                            runner._log_message(f"[FrameLocked] Total delay (with global): {total_delay_with_global_ms:+.3f}ms from {source_key}")
+
+                        # Get global shift separately for logging breakdown
+                        raw_global_shift_ms = 0.0
+                        if ctx.delays:
+                            raw_global_shift_ms = ctx.delays.raw_global_shift_ms
+                            runner._log_message(f"[FrameLocked] Global shift: {raw_global_shift_ms:+.3f}ms")
+
+                        # Get target video and FPS
+                        target_video = source1_file
+                        target_fps = None
+                        if target_video:
+                            from vsg_core.subtitles.frame_sync import detect_video_fps
+                            try:
+                                target_fps = detect_video_fps(str(target_video), runner)
+                                runner._log_message(f"[FrameLocked] Target video: {Path(target_video).name} ({target_fps:.3f} fps)")
+                            except Exception as e:
+                                runner._log_message(f"[FrameLocked] ERROR: Could not detect target FPS: {e}")
+                                runner._log_message(f"[FrameLocked] Frame-locked mode requires target video FPS")
+                                raise RuntimeError(f"Frame-locked sync failed: Could not detect target FPS: {e}")
+
+                        if target_video and target_fps:
+                            runner._log_message(f"[FrameLocked] Applying to track {item.track.id} ({item.track.props.name or 'Unnamed'})")
+
+                            frame_sync_report = apply_timebase_frame_locked_sync(
+                                str(item.extracted_path),
+                                total_delay_with_global_ms,
+                                raw_global_shift_ms,
+                                str(target_video),
+                                target_fps,
+                                runner,
+                                ctx.settings_dict
+                            )
+
+                            if frame_sync_report and 'error' not in frame_sync_report:
+                                runner._log_message(f"--- Frame-Locked Timestamps Sync Report ---")
+                                for key, value in frame_sync_report.items():
+                                    runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
+                                runner._log_message("------------------------------------------")
+                                # Mark that timestamps have been adjusted (so mux uses --sync 0:0)
+                                item.frame_adjusted = True
+                            else:
+                                runner._log_message(f"[FrameLocked] WARNING: Sync failed for track {item.track.id}")
+                        else:
+                            runner._log_message(f"[FrameLocked] ERROR: Missing target video")
+                    else:
+                        runner._log_message(f"[FrameLocked] Skipping track {item.track.id} - format {ext} not supported")
 
                 elif subtitle_sync_mode in ['duration-align', 'correlation-frame-snap', 'subtitle-anchored-frame-snap', 'correlation-guided-frame-anchor']:
                     # Check if this subtitle format supports advanced sync
