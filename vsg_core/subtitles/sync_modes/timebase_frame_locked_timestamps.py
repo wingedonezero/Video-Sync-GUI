@@ -81,7 +81,7 @@ def _frame_snap_subtitle_event(
     vts,
     runner,
     stats: Dict[str, int],
-    log_first_n: int = 5
+    sample_indices: set
 ):
     """
     Frame-snap a single subtitle event using TARGET VideoTimestamps.
@@ -96,7 +96,7 @@ def _frame_snap_subtitle_event(
         vts: VideoTimestamps handler (from TARGET video)
         runner: CommandRunner for logging
         stats: Dict to track snapping statistics
-        log_first_n: Log details for first N events
+        sample_indices: Set of event indices to log (for sampling across file)
 
     Modifies event.start and event.end in place.
     """
@@ -148,10 +148,11 @@ def _frame_snap_subtitle_event(
         if not duration_preserved:
             stats['duration_changed'] += 1
 
-        # Log first few events for debugging
-        if stats['events_processed'] < log_first_n and (start_changed or end_changed):
+        # Log sample events distributed across the file
+        if stats['events_processed'] in sample_indices and (start_changed or end_changed):
+            percent = (stats['events_processed'] / stats['total_events']) * 100
             runner._log_message(
-                f"[FrameLocked] Event #{stats['events_processed']}: "
+                f"[FrameLocked] Sample at {percent:.0f}% (event #{stats['events_processed']}): "
                 f"start {original_start}ms→{event.start}ms (Δ{start_delta:+d}ms, frame {start_frame}), "
                 f"end {original_end}ms→{event.end}ms (Δ{event.end - original_end:+d}ms, frame {end_frame})"
                 + (f" [end adjusted]" if end_adjusted else "")
@@ -318,8 +319,22 @@ def apply_timebase_frame_locked_sync(
     # Step 3: Frame-snap each event using TARGET VideoTimestamps
     runner._log_message(f"[FrameLocked] Frame-snapping {len(subs.events)} events to TARGET video frames...")
 
+    # Calculate sample indices distributed across the file
+    # Sample at 10%, 20%, 30%, ..., 100% (up to 10 samples max, or all events if < 10)
+    total_events = len(subs.events)
+    if total_events <= 10:
+        # Show all events if there are 10 or fewer
+        sample_indices = set(range(total_events))
+    else:
+        # Sample at 10% intervals (10%, 20%, ..., 100%)
+        sample_indices = set()
+        for pct in range(10, 101, 10):
+            idx = int((pct / 100.0) * total_events) - 1
+            if idx >= 0 and idx < total_events:
+                sample_indices.add(idx)
+
     stats = {
-        'total_events': len(subs.events),
+        'total_events': total_events,
         'events_processed': 0,
         'start_snapped': 0,
         'end_snapped': 0,
@@ -333,7 +348,7 @@ def apply_timebase_frame_locked_sync(
     }
 
     for event in subs.events:
-        _frame_snap_subtitle_event(event, vts, runner, stats)
+        _frame_snap_subtitle_event(event, vts, runner, stats, sample_indices)
 
     runner._log_message(f"[FrameLocked] Snapping complete:")
     runner._log_message(f"[FrameLocked]   - Start times snapped: {stats['start_snapped']}/{stats['total_events']}")
@@ -349,12 +364,8 @@ def apply_timebase_frame_locked_sync(
         runner._log_message(f"[FrameLocked] ERROR: Failed to save subtitle file: {e}")
         return {'error': str(e)}
 
-    # Restore metadata if needed
-    if metadata.validate(subtitle_path):
-        runner._log_message(f"[FrameLocked] Metadata preserved successfully")
-    else:
-        runner._log_message(f"[FrameLocked] Restoring lost metadata...")
-        metadata.restore(subtitle_path)
+    # Validate and restore metadata
+    metadata.validate_and_restore(runner, expected_delay_ms=delay_int)
 
     # Step 5: Reload and validate frame alignment (post-ASS-quantization check)
     runner._log_message(f"[FrameLocked] Reloading subtitle for post-ASS validation...")
@@ -374,7 +385,8 @@ def apply_timebase_frame_locked_sync(
 
         try:
             subs_reloaded.save(subtitle_path, encoding='utf-8')
-            metadata.restore(subtitle_path)  # Restore metadata again
+            # Re-validate and restore metadata after second save
+            metadata.validate_and_restore(runner, expected_delay_ms=delay_int)
         except Exception as e:
             runner._log_message(f"[FrameLocked] WARNING: Failed to re-save: {e}")
     else:
