@@ -189,15 +189,19 @@ class SubtitlesStep:
                             # Mark that timestamps have been adjusted (so mux doesn't double-apply delay)
                             item.stepping_adjusted = True
 
-            # Apply subtitle sync mode (when not using stepping)
-            # This applies to both OCR and non-OCR subtitles
-            if item.extracted_path and not item.stepping_adjusted:
+            # Apply subtitle sync mode
+            # NOTE: timebase-frame-locked-timestamps runs AFTER stepping (complementary)
+            # Other modes are skipped if stepping was applied (they would conflict)
+            if item.extracted_path:
                 subtitle_sync_mode = ctx.settings_dict.get('subtitle_sync_mode', 'time-based')
 
-                # Check for time-based with raw values option
-                if subtitle_sync_mode == 'time-based':
+                # For non-frame-locked modes, skip if stepping was already applied
+                if item.stepping_adjusted and subtitle_sync_mode not in ['timebase-frame-locked-timestamps']:
+                    pass  # Skip - stepping already handled timing
+                elif subtitle_sync_mode == 'time-based':
+                    # Check for time-based with raw values option
                     use_raw_values = ctx.settings_dict.get('time_based_use_raw_values', False)
-                    if use_raw_values:
+                    if use_raw_values and not item.stepping_adjusted:
                         # Time-based with raw values - apply delay using pysubs
                         ext = item.extracted_path.suffix.lower()
                         supported_formats = ['.ass', '.ssa', '.srt', '.vtt']
@@ -259,11 +263,16 @@ class SubtitlesStep:
 
                 elif subtitle_sync_mode == 'timebase-frame-locked-timestamps':
                     # Time-based + VideoTimestamps frame locking
+                    # IMPORTANT: This mode runs EVEN AFTER stepping (complementary)
+                    # Stepping just makes the timeline continuous - final delay still needs to be applied
                     ext = item.extracted_path.suffix.lower()
                     supported_formats = ['.ass', '.ssa', '.srt', '.vtt']
 
                     if ext in supported_formats:
                         source_key = item.sync_to if item.track.source == 'External' else item.track.source
+
+                        if item.stepping_adjusted:
+                            runner._log_message(f"[FrameLocked] Stepping already applied - now applying final delay + frame-snap")
 
                         # Get total delay (already includes global shift)
                         total_delay_with_global_ms = 0.0
@@ -317,7 +326,7 @@ class SubtitlesStep:
                     else:
                         runner._log_message(f"[FrameLocked] Skipping track {item.track.id} - format {ext} not supported")
 
-                elif subtitle_sync_mode in ['duration-align', 'correlation-frame-snap', 'subtitle-anchored-frame-snap', 'correlation-guided-frame-anchor']:
+                elif subtitle_sync_mode in ['duration-align', 'correlation-frame-snap', 'subtitle-anchored-frame-snap', 'correlation-guided-frame-anchor'] and not item.stepping_adjusted:
                     # Check if this subtitle format supports advanced sync
                     ext = item.extracted_path.suffix.lower()
                     supported_formats = ['.ass', '.ssa', '.srt', '.vtt']
