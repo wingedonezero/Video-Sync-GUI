@@ -220,40 +220,44 @@ def _validate_post_ass_quantization(
             # If start is before frame boundary, snap forward
             if event.start < frame_start_ms:
                 event.start = frame_start_ms
-                stats['post_ass_start_fixed'] += 1
-                if log_corrections and orig_start is not None:
-                    post_delta = event.start - before_fix_start
-                    total_delta = event.start - orig_start
-                    runner._log_message(
-                        f"[FrameLocked] Post-ASS fix #{idx}: Start"
-                    )
-                    runner._log_message(
-                        f"[FrameLocked]   Original: {orig_start}ms → Final: {event.start}ms (total Δ{total_delta:+d}ms)"
-                    )
-                    runner._log_message(
-                        f"[FrameLocked]   Post-ASS: {before_fix_start}ms → {event.start}ms (Δ{post_delta:+d}ms, frame {start_frame})"
-                    )
-                    runner._log_message(f"[FrameLocked]   Text: \"{subtitle_text}\"")
+                post_delta = event.start - before_fix_start
+                # Only count and log if actually changed
+                if post_delta != 0:
+                    stats['post_ass_start_fixed'] += 1
+                    if log_corrections and orig_start is not None:
+                        total_delta = event.start - orig_start
+                        runner._log_message(
+                            f"[FrameLocked] Post-ASS fix #{idx}: Start"
+                        )
+                        runner._log_message(
+                            f"[FrameLocked]   Original: {orig_start}ms → Final: {event.start}ms (total Δ{total_delta:+d}ms)"
+                        )
+                        runner._log_message(
+                            f"[FrameLocked]   Post-ASS: {before_fix_start}ms → {event.start}ms (Δ{post_delta:+d}ms, frame {start_frame})"
+                        )
+                        runner._log_message(f"[FrameLocked]   Text: \"{subtitle_text}\"")
 
             # Check if end is after start (safety check)
             if event.end <= event.start:
                 # Push end to next frame
                 next_frame_frac = vts.frame_to_time(start_frame + 1, TimeType.START)
                 event.end = int(float(next_frame_frac))
-                stats['post_ass_end_fixed'] += 1
-                if log_corrections and orig_end is not None:
-                    post_delta = event.end - before_fix_end
-                    total_delta = event.end - orig_end
-                    runner._log_message(
-                        f"[FrameLocked] Post-ASS fix #{idx}: End"
-                    )
-                    runner._log_message(
-                        f"[FrameLocked]   Original: {orig_end}ms → Final: {event.end}ms (total Δ{total_delta:+d}ms)"
-                    )
-                    runner._log_message(
-                        f"[FrameLocked]   Post-ASS: {before_fix_end}ms → {event.end}ms (Δ{post_delta:+d}ms, frame {start_frame + 1})"
-                    )
-                    runner._log_message(f"[FrameLocked]   Text: \"{subtitle_text}\"")
+                post_delta = event.end - before_fix_end
+                # Only count and log if actually changed
+                if post_delta != 0:
+                    stats['post_ass_end_fixed'] += 1
+                    if log_corrections and orig_end is not None:
+                        total_delta = event.end - orig_end
+                        runner._log_message(
+                            f"[FrameLocked] Post-ASS fix #{idx}: End"
+                        )
+                        runner._log_message(
+                            f"[FrameLocked]   Original: {orig_end}ms → Final: {event.end}ms (total Δ{total_delta:+d}ms)"
+                        )
+                        runner._log_message(
+                            f"[FrameLocked]   Post-ASS: {before_fix_end}ms → {event.end}ms (Δ{post_delta:+d}ms, frame {start_frame + 1})"
+                        )
+                        runner._log_message(f"[FrameLocked]   Text: \"{subtitle_text}\"")
 
     except Exception as e:
         runner._log_message(f"[FrameLocked] WARNING: Post-ASS validation failed: {e}")
