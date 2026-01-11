@@ -44,6 +44,7 @@ from .checkpoint_selection import select_smart_checkpoints as _select_smart_chec
 # Re-export sync modes
 from .sync_modes import (
     apply_raw_delay_sync,
+    apply_timebase_frame_locked_sync,
     apply_duration_align_sync,
     verify_alignment_with_sliding_window,
     apply_correlation_frame_snap_sync,
@@ -81,6 +82,7 @@ __all__ = [
 
     # Sync modes
     'apply_raw_delay_sync',
+    'apply_timebase_frame_locked_sync',
     'apply_duration_align_sync',
     'verify_alignment_with_sliding_window',
     'apply_correlation_frame_snap_sync',
