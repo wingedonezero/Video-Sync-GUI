@@ -53,6 +53,8 @@ class AppConfig:
 
             # --- Time-Based Frame-Locked Timestamps Settings ---
             'videotimestamps_rounding': 'floor',  # VideoTimestamps rounding method: 'floor' or 'round'
+            'framelocked_enable_post_ass_correction': True,  # Apply post-ASS validation and correction (fixes CS quantization damage)
+            'framelocked_log_post_ass_corrections': False,  # Log detailed post-ASS correction changes
 
             # --- Duration-Align Sync Settings (Hybrid Mode) ---
             'duration_align_verify_with_frames': False,  # Enable hybrid: duration + sliding window verification

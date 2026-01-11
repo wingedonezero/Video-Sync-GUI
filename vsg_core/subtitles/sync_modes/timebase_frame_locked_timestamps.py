@@ -173,7 +173,8 @@ def _validate_post_ass_quantization(
     subs,
     vts,
     runner,
-    stats: Dict[str, int]
+    stats: Dict[str, int],
+    log_corrections: bool = False
 ):
     """
     Validate frame alignment after ASS centisecond quantization.
@@ -186,15 +187,21 @@ def _validate_post_ass_quantization(
         vts: VideoTimestamps handler (from TARGET video)
         runner: CommandRunner for logging
         stats: Dict to track validation statistics
+        log_corrections: If True, log every correction with details. If False, only log summary.
 
     Modifies event times in place if quantization broke frame alignment.
     """
     try:
         from video_timestamps import TimeType
 
-        for event in subs.events:
+        for idx, event in enumerate(subs.events, start=1):
             original_start = event.start
             original_end = event.end
+
+            # Get subtitle text for logging (truncate if too long)
+            subtitle_text = event.text.replace('\n', ' ').replace('\\N', ' ')
+            if len(subtitle_text) > 60:
+                subtitle_text = subtitle_text[:57] + '...'
 
             # Check if start is at or after its TARGET frame start boundary
             start_frac = Fraction(int(event.start), 1)
@@ -206,11 +213,12 @@ def _validate_post_ass_quantization(
             if event.start < frame_start_ms:
                 event.start = frame_start_ms
                 stats['post_ass_start_fixed'] += 1
-                if stats['post_ass_start_fixed'] <= 3:  # Log first 3
+                if log_corrections:
                     runner._log_message(
-                        f"[FrameLocked] Post-ASS fix: Start {original_start}ms → {event.start}ms "
-                        f"(snapped to frame {start_frame} boundary)"
+                        f"[FrameLocked] Post-ASS fix #{idx}: Start {original_start}ms → {event.start}ms "
+                        f"(Δ{event.start - original_start:+d}ms, frame {start_frame})"
                     )
+                    runner._log_message(f"[FrameLocked]   Text: \"{subtitle_text}\"")
 
             # Check if end is after start (safety check)
             if event.end <= event.start:
@@ -218,11 +226,12 @@ def _validate_post_ass_quantization(
                 next_frame_frac = vts.frame_to_time(start_frame + 1, TimeType.START)
                 event.end = int(float(next_frame_frac))
                 stats['post_ass_end_fixed'] += 1
-                if stats['post_ass_end_fixed'] <= 3:  # Log first 3
+                if log_corrections:
                     runner._log_message(
-                        f"[FrameLocked] Post-ASS fix: End {original_end}ms → {event.end}ms "
-                        f"(pushed to frame {start_frame + 1})"
+                        f"[FrameLocked] Post-ASS fix #{idx}: End {original_end}ms → {event.end}ms "
+                        f"(Δ{event.end - original_end:+d}ms, frame {start_frame + 1})"
                     )
+                    runner._log_message(f"[FrameLocked]   Text: \"{subtitle_text}\"")
 
     except Exception as e:
         runner._log_message(f"[FrameLocked] WARNING: Post-ASS validation failed: {e}")
@@ -372,29 +381,38 @@ def apply_timebase_frame_locked_sync(
     metadata.validate_and_restore(runner, expected_delay_ms=delay_int)
 
     # Step 5: Reload and validate frame alignment (post-ASS-quantization check)
-    runner._log_message(f"[FrameLocked] Reloading subtitle for post-ASS validation...")
-    try:
-        subs_reloaded = pysubs2.load(subtitle_path, encoding='utf-8')
-    except Exception as e:
-        runner._log_message(f"[FrameLocked] WARNING: Failed to reload for validation: {e}")
-        return stats  # Return stats from initial processing
+    enable_post_correction = config.get('framelocked_enable_post_ass_correction', True)
+    log_post_corrections = config.get('framelocked_log_post_ass_corrections', False)
 
-    _validate_post_ass_quantization(subs_reloaded, vts, runner, stats)
-
-    # Step 6: Re-save if fixes were applied
-    if stats['post_ass_start_fixed'] > 0 or stats['post_ass_end_fixed'] > 0:
-        runner._log_message(f"[FrameLocked] Post-ASS fixes applied - re-saving:")
-        runner._log_message(f"[FrameLocked]   - Start times fixed: {stats['post_ass_start_fixed']}")
-        runner._log_message(f"[FrameLocked]   - End times fixed: {stats['post_ass_end_fixed']}")
-
+    if enable_post_correction:
+        runner._log_message(f"[FrameLocked] Reloading subtitle for post-ASS validation...")
         try:
-            subs_reloaded.save(subtitle_path, encoding='utf-8')
-            # Re-validate and restore metadata after second save
-            metadata.validate_and_restore(runner, expected_delay_ms=delay_int)
+            subs_reloaded = pysubs2.load(subtitle_path, encoding='utf-8')
         except Exception as e:
-            runner._log_message(f"[FrameLocked] WARNING: Failed to re-save: {e}")
+            runner._log_message(f"[FrameLocked] WARNING: Failed to reload for validation: {e}")
+            return stats  # Return stats from initial processing
+
+        if log_post_corrections:
+            runner._log_message(f"[FrameLocked] Post-ASS detailed logging enabled")
+
+        _validate_post_ass_quantization(subs_reloaded, vts, runner, stats, log_post_corrections)
+
+        # Step 6: Re-save if fixes were applied
+        if stats['post_ass_start_fixed'] > 0 or stats['post_ass_end_fixed'] > 0:
+            runner._log_message(f"[FrameLocked] Post-ASS fixes applied - re-saving:")
+            runner._log_message(f"[FrameLocked]   - Start times fixed: {stats['post_ass_start_fixed']}")
+            runner._log_message(f"[FrameLocked]   - End times fixed: {stats['post_ass_end_fixed']}")
+
+            try:
+                subs_reloaded.save(subtitle_path, encoding='utf-8')
+                # Re-validate and restore metadata after second save
+                metadata.validate_and_restore(runner, expected_delay_ms=delay_int)
+            except Exception as e:
+                runner._log_message(f"[FrameLocked] WARNING: Failed to re-save: {e}")
+        else:
+            runner._log_message(f"[FrameLocked] Post-ASS validation: Frame alignment maintained (no fixes needed)")
     else:
-        runner._log_message(f"[FrameLocked] Post-ASS validation: Frame alignment maintained (no fixes needed)")
+        runner._log_message(f"[FrameLocked] Post-ASS correction disabled (skipping validation)")
 
     runner._log_message(f"[FrameLocked] === Sync Complete ===")
 
