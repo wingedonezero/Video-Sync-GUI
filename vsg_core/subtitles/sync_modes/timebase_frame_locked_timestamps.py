@@ -222,10 +222,16 @@ def _validate_post_ass_quantization(
                 event.start = frame_start_ms
                 stats['post_ass_start_fixed'] += 1
                 if log_corrections and orig_start is not None:
+                    post_delta = event.start - before_fix_start
                     total_delta = event.start - orig_start
                     runner._log_message(
-                        f"[FrameLocked] Post-ASS fix #{idx}: Start {orig_start}ms → {event.start}ms "
-                        f"(Δ{total_delta:+d}ms, frame {start_frame})"
+                        f"[FrameLocked] Post-ASS fix #{idx}: Start"
+                    )
+                    runner._log_message(
+                        f"[FrameLocked]   Original: {orig_start}ms → Final: {event.start}ms (total Δ{total_delta:+d}ms)"
+                    )
+                    runner._log_message(
+                        f"[FrameLocked]   Post-ASS: {before_fix_start}ms → {event.start}ms (Δ{post_delta:+d}ms, frame {start_frame})"
                     )
                     runner._log_message(f"[FrameLocked]   Text: \"{subtitle_text}\"")
 
@@ -236,10 +242,16 @@ def _validate_post_ass_quantization(
                 event.end = int(float(next_frame_frac))
                 stats['post_ass_end_fixed'] += 1
                 if log_corrections and orig_end is not None:
+                    post_delta = event.end - before_fix_end
                     total_delta = event.end - orig_end
                     runner._log_message(
-                        f"[FrameLocked] Post-ASS fix #{idx}: End {orig_end}ms → {event.end}ms "
-                        f"(Δ{total_delta:+d}ms, frame {start_frame + 1})"
+                        f"[FrameLocked] Post-ASS fix #{idx}: End"
+                    )
+                    runner._log_message(
+                        f"[FrameLocked]   Original: {orig_end}ms → Final: {event.end}ms (total Δ{total_delta:+d}ms)"
+                    )
+                    runner._log_message(
+                        f"[FrameLocked]   Post-ASS: {before_fix_end}ms → {event.end}ms (Δ{post_delta:+d}ms, frame {start_frame + 1})"
                     )
                     runner._log_message(f"[FrameLocked]   Text: \"{subtitle_text}\"")
 
