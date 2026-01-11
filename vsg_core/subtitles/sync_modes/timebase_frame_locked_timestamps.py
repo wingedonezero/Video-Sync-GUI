@@ -81,7 +81,9 @@ def _frame_snap_subtitle_event(
     vts,
     runner,
     stats: Dict[str, int],
-    sample_indices: set
+    sample_indices: set,
+    log_initial_snap: bool = False,
+    event_idx: int = 0
 ):
     """
     Frame-snap a single subtitle event using TARGET VideoTimestamps.
@@ -97,6 +99,8 @@ def _frame_snap_subtitle_event(
         runner: CommandRunner for logging
         stats: Dict to track snapping statistics
         sample_indices: Set of event indices to log (for sampling across file)
+        log_initial_snap: If True, log detailed snapping changes. If False, only log samples.
+        event_idx: Event index (1-based) for detailed logging
 
     Modifies event.start and event.end in place.
     """
@@ -150,8 +154,31 @@ def _frame_snap_subtitle_event(
         if not duration_preserved:
             stats['duration_changed'] += 1
 
-        # Log sample events distributed across the file
-        if stats['events_processed'] in sample_indices and (start_changed or end_changed):
+        # Detailed logging if enabled
+        if log_initial_snap and (start_changed or end_changed or not duration_preserved):
+            # Get subtitle text for logging (truncate if too long)
+            subtitle_text = event.text.replace('\n', ' ').replace('\\N', ' ')
+            if len(subtitle_text) > 60:
+                subtitle_text = subtitle_text[:57] + '...'
+
+            new_duration = event.end - event.start
+            runner._log_message(
+                f"[FrameLocked] Initial snap #{event_idx}:"
+            )
+            runner._log_message(
+                f"[FrameLocked]   Start: {original_start}ms → {event.start}ms (Δ{start_delta:+d}ms, frame {start_frame})"
+            )
+            runner._log_message(
+                f"[FrameLocked]   End: {original_end}ms → {event.end}ms (Δ{event.end - original_end:+d}ms, frame {end_frame})"
+            )
+            runner._log_message(
+                f"[FrameLocked]   Duration: {original_duration}ms → {new_duration}ms" +
+                (" [ADJUSTED - pushed to next frame]" if end_adjusted else " [preserved]")
+            )
+            runner._log_message(f"[FrameLocked]   Text: \"{subtitle_text}\"")
+
+        # Log sample events distributed across the file (original sample logging)
+        elif stats['events_processed'] in sample_indices and (start_changed or end_changed):
             percent = (stats['events_processed'] / stats['total_events']) * 100
             runner._log_message(
                 f"[FrameLocked] Sample at {percent:.0f}% (event #{stats['events_processed']}): "
@@ -360,6 +387,9 @@ def apply_timebase_frame_locked_sync(
         event.end += delay_int
 
     # Step 3: Frame-snap each event using TARGET VideoTimestamps
+    log_initial_snap = config.get('framelocked_log_initial_snap', False)
+    if log_initial_snap:
+        runner._log_message(f"[FrameLocked] Initial snap detailed logging enabled")
     runner._log_message(f"[FrameLocked] Frame-snapping {len(subs.events)} events to TARGET video frames...")
 
     # Calculate sample indices distributed across the file
@@ -391,8 +421,8 @@ def apply_timebase_frame_locked_sync(
         'alignment_delta_ms': float(frame_aligned_delay) - total_delay_with_global_ms
     }
 
-    for event in subs.events:
-        _frame_snap_subtitle_event(event, vts, runner, stats, sample_indices)
+    for idx, event in enumerate(subs.events, start=1):
+        _frame_snap_subtitle_event(event, vts, runner, stats, sample_indices, log_initial_snap, idx)
 
     runner._log_message(f"[FrameLocked] Snapping complete:")
     runner._log_message(f"[FrameLocked]   - Start times adjusted: {stats['start_snapped']}/{stats['total_events']}")

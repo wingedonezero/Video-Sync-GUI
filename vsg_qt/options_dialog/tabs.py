@@ -1135,6 +1135,24 @@ class SubtitleSyncTab(QWidget):
             "and 'Enable post-ASS correction' is checked."
         )
 
+        self.widgets['framelocked_log_initial_snap'] = QCheckBox("Log initial frame-snapping")
+        self.widgets['framelocked_log_initial_snap'].setChecked(False)
+        self.widgets['framelocked_log_initial_snap'].setToolTip(
+            "Log detailed initial frame-snapping changes (timebase-frame-locked-timestamps mode):\n\n"
+            "• Unchecked (Default): Only log summary statistics\n"
+            "  - Shows total count of adjustments\n"
+            "  - Minimal log output\n\n"
+            "• Checked: Log every frame-snap adjustment with before/after values\n"
+            "  - Shows original timestamps → snapped timestamps\n"
+            "  - Shows duration preservation and safety adjustments\n"
+            "  - Useful for understanding why durations changed\n"
+            "  - Can generate significant log output for large subtitle files\n"
+            "  - Example: 'Original 60950ms (0ms duration) → Snapped 61920ms-61962ms (42ms duration)'\n\n"
+            "This logs what VideoTimestamps did during initial frame-snapping,\n"
+            "including why zero-duration effects became 1-frame duration.\n\n"
+            "Only used when 'timebase-frame-locked-timestamps' mode is selected."
+        )
+
         # Duration-Align settings
         self.widgets['duration_align_use_vapoursynth'] = QCheckBox("Use VapourSynth indexing")
         self.widgets['duration_align_use_vapoursynth'].setChecked(True)
@@ -1675,6 +1693,7 @@ class SubtitleSyncTab(QWidget):
         sync_layout.addRow("VTS Rounding:", self.widgets['videotimestamps_rounding'])
         sync_layout.addRow("", self.widgets['framelocked_enable_post_ass_correction'])
         sync_layout.addRow("", self.widgets['framelocked_log_post_ass_corrections'])
+        sync_layout.addRow("", self.widgets['framelocked_log_initial_snap'])
 
         # Duration-Align mode options
         sync_layout.addRow("", self.widgets['duration_align_use_vapoursynth'])
@@ -1753,6 +1772,8 @@ class SubtitleSyncTab(QWidget):
         # Log option only enabled if both frame-locked mode AND post-correction are enabled
         post_correction_enabled = is_frame_locked and self.widgets['framelocked_enable_post_ass_correction'].isChecked()
         self.widgets['framelocked_log_post_ass_corrections'].setEnabled(post_correction_enabled)
+        # Initial snap logging only needs frame-locked mode enabled
+        self.widgets['framelocked_log_initial_snap'].setEnabled(is_frame_locked)
 
         # Duration-align mode options
         self.widgets['duration_align_use_vapoursynth'].setEnabled(is_duration_align)
