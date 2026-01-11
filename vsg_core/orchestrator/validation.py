@@ -139,8 +139,19 @@ class StepValidator:
                             f"Linear drift corrected file missing for {source_key}"
                         )
 
-        for analysis_key in ctx.segment_flags:
+        for analysis_key, flag_info in ctx.segment_flags.items():
             source_key = analysis_key.split('_')[0]
+
+            # Skip audio validation for subs-only stepping (no audio to correct)
+            if flag_info.get('subs_only', False):
+                # For subs-only, just verify EDL was stored
+                if source_key not in ctx.stepping_edls:
+                    errors.append(
+                        f"Stepping correction (subs-only) failed for {source_key}: "
+                        f"No EDL stored for subtitle adjustment"
+                    )
+                continue
+
             corrected_items = [
                 item for item in ctx.extracted_items
                 if (item.track.source == source_key and
