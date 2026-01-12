@@ -154,27 +154,32 @@ def _frame_snap_subtitle_event(
         if not duration_preserved:
             stats['duration_changed'] += 1
 
-        # Detailed logging if enabled - ONLY log duration adjustments (end pushed to next frame)
+        # Detailed logging if enabled - ONLY log when duration ACTUALLY changed
+        # If original was zero-duration and stays zero-duration, that's intended (karaoke effects)
         if log_initial_snap and end_adjusted:
-            # Get subtitle text for logging (truncate if too long)
-            subtitle_text = event.text.replace('\n', ' ').replace('\\N', ' ')
-            if len(subtitle_text) > 60:
-                subtitle_text = subtitle_text[:57] + '...'
-
             new_duration = event.end - event.start
-            runner._log_message(
-                f"[FrameLocked] Initial snap #{event_idx}: DURATION ADJUSTED"
-            )
-            runner._log_message(
-                f"[FrameLocked]   Start: {original_start}ms → {event.start}ms (Δ{start_delta:+d}ms, frame {start_frame})"
-            )
-            runner._log_message(
-                f"[FrameLocked]   End: {original_end}ms → {event.end}ms (Δ{event.end - original_end:+d}ms, frame {end_frame})"
-            )
-            runner._log_message(
-                f"[FrameLocked]   Duration: {original_duration}ms → {new_duration}ms [pushed to next frame]"
-            )
-            runner._log_message(f"[FrameLocked]   Text: \"{subtitle_text}\"")
+            # Only log if duration actually changed significantly (>2ms to account for rounding)
+            duration_actually_changed = abs(new_duration - original_duration) > 2
+
+            if duration_actually_changed:
+                # Get subtitle text for logging (truncate if too long)
+                subtitle_text = event.text.replace('\n', ' ').replace('\\N', ' ')
+                if len(subtitle_text) > 60:
+                    subtitle_text = subtitle_text[:57] + '...'
+
+                runner._log_message(
+                    f"[FrameLocked] Initial snap #{event_idx}: DURATION ADJUSTED"
+                )
+                runner._log_message(
+                    f"[FrameLocked]   Start: {original_start}ms → {event.start}ms (Δ{start_delta:+d}ms, frame {start_frame})"
+                )
+                runner._log_message(
+                    f"[FrameLocked]   End: {original_end}ms → {event.end}ms (Δ{event.end - original_end:+d}ms, frame {end_frame})"
+                )
+                runner._log_message(
+                    f"[FrameLocked]   Duration: {original_duration}ms → {new_duration}ms [pushed to next frame]"
+                )
+                runner._log_message(f"[FrameLocked]   Text: \"{subtitle_text}\"")
 
         # Log sample events distributed across the file (original sample logging)
         elif stats['events_processed'] in sample_indices and (start_changed or end_changed):
