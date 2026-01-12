@@ -227,6 +227,11 @@ def _validate_post_ass_quantization(
     try:
         from video_timestamps import TimeType
 
+        # Track actual final changes (original vs final after all rounding/corrections)
+        final_duration_changed = 0
+        final_start_changed = 0
+        final_end_changed = 0
+
         for idx, event in enumerate(subs.events, start=1):
             # Get ORIGINAL pre-sync timestamps for logging comparison
             orig_data = original_timestamps[idx - 1] if original_timestamps else None
@@ -236,6 +241,12 @@ def _validate_post_ass_quantization(
             # Capture current state (after first save, before post-ASS fixes)
             before_fix_start = event.start
             before_fix_end = event.end
+
+            # Calculate original duration for comparison
+            if orig_start is not None and orig_end is not None:
+                orig_duration = orig_end - orig_start
+            else:
+                orig_duration = None
 
             # Get subtitle text for logging (truncate if too long)
             subtitle_text = event.text.replace('\n', ' ').replace('\\N', ' ')
@@ -289,6 +300,28 @@ def _validate_post_ass_quantization(
                             f"[FrameLocked]   Post-ASS: {before_fix_end}ms → {event.end}ms (Δ{post_delta:+d}ms, frame {start_frame + 1})"
                         )
                         runner._log_message(f"[FrameLocked]   Text: \"{subtitle_text}\"")
+
+            # Track actual final changes (compare original vs final after all corrections)
+            if orig_start is not None and orig_end is not None and orig_duration is not None:
+                final_duration = event.end - event.start
+
+                # Check if duration actually changed (>2ms threshold to account for rounding)
+                if abs(final_duration - orig_duration) > 2:
+                    final_duration_changed += 1
+
+                # Check if start changed (moved for frame alignment)
+                # Don't count if it's just the global delay - we expect that
+                # This would need more complex logic, so for now just skip this stat
+
+                # Check if end changed beyond what start changed (duration modification)
+                start_shift = event.start - orig_start
+                expected_end = orig_end + start_shift
+                if abs(event.end - expected_end) > 2:
+                    final_end_changed += 1
+
+        # Add final stats to the stats dict
+        stats['final_duration_changed'] = final_duration_changed
+        stats['final_end_adjusted'] = final_end_changed
 
     except Exception as e:
         runner._log_message(f"[FrameLocked] WARNING: Post-ASS validation failed: {e}")
@@ -428,12 +461,12 @@ def apply_timebase_frame_locked_sync(
     for idx, event in enumerate(subs.events, start=1):
         _frame_snap_subtitle_event(event, vts, runner, stats, sample_indices, log_initial_snap, idx)
 
-    runner._log_message(f"[FrameLocked] Snapping complete:")
+    runner._log_message(f"[FrameLocked] Snapping complete (before ASS centisecond rounding):")
     runner._log_message(f"[FrameLocked]   - Start times adjusted: {stats['start_snapped']}/{stats['total_events']}")
     runner._log_message(f"[FrameLocked]   - Start times already aligned: {stats['start_already_aligned']}/{stats['total_events']}")
     runner._log_message(f"[FrameLocked]   - End times adjusted: {stats['end_snapped']}/{stats['total_events']}")
-    runner._log_message(f"[FrameLocked]   - Durations changed: {stats['duration_changed']}/{stats['total_events']}")
-    runner._log_message(f"[FrameLocked]   - Safety adjustments (end→next frame): {stats['duration_adjusted']}/{stats['total_events']}")
+    runner._log_message(f"[FrameLocked]   - Durations possibly changed: {stats['duration_changed']}/{stats['total_events']} (before CS rounding)")
+    runner._log_message(f"[FrameLocked]   - Safety adjustments attempted: {stats['duration_adjusted']}/{stats['total_events']} (may be undone by CS rounding)")
 
     # Step 4: Save to ASS (pysubs2 auto-quantizes to centiseconds)
     runner._log_message(f"[FrameLocked] Saving subtitle file (ASS centisecond quantization will occur)...")
@@ -477,6 +510,13 @@ def apply_timebase_frame_locked_sync(
                 runner._log_message(f"[FrameLocked] WARNING: Failed to re-save: {e}")
         else:
             runner._log_message(f"[FrameLocked] Post-ASS validation: Frame alignment maintained (no fixes needed)")
+
+        # Log actual final changes (original vs final)
+        runner._log_message(f"[FrameLocked] ───────────────────────────────────────")
+        runner._log_message(f"[FrameLocked] Actual Final Changes (original → final after all corrections):")
+        runner._log_message(f"[FrameLocked]   - Durations actually changed: {stats.get('final_duration_changed', 0)}/{stats['total_events']}")
+        runner._log_message(f"[FrameLocked]   - Ends adjusted beyond delay: {stats.get('final_end_adjusted', 0)}/{stats['total_events']}")
+        runner._log_message(f"[FrameLocked] ───────────────────────────────────────")
     else:
         runner._log_message(f"[FrameLocked] Post-ASS correction disabled (skipping validation)")
 
