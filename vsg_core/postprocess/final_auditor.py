@@ -197,6 +197,9 @@ class FinalAuditor:
         auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
         total_issues += auditor.run(final_mkv_path, final_mkvmerge_data, final_ffprobe_data)
 
+        self.log("\n--- Auditing FrameLocked Subtitle Quality ---")
+        total_issues += self._audit_framelocked_stats()
+
         self.log("\n--- Auditing Chapters ---")
         auditor = ChaptersAuditor(self.ctx, self.runner)
         auditor._source_ffprobe_cache = self._shared_ffprobe_cache
@@ -235,6 +238,51 @@ class FinalAuditor:
             self.log("    Please review the warnings above.")
         self.log("========================================\n")
         return total_issues
+
+    def _audit_framelocked_stats(self) -> int:
+        """Audit FrameLocked subtitle sync quality - report actual final duration changes."""
+        issues = 0
+
+        # Find all subtitle items that used FrameLocked sync
+        framelocked_items = [
+            item for item in self.ctx.extracted_items
+            if hasattr(item, 'framelocked_stats') and item.framelocked_stats
+        ]
+
+        if not framelocked_items:
+            self.log("[INFO] No FrameLocked subtitles found - skipping audit")
+            return 0
+
+        for item in framelocked_items:
+            stats = item.framelocked_stats
+            track_name = item.track.props.name or f"Track {item.track.id}"
+
+            # Get the actual final change stats
+            final_duration_changed = stats.get('final_duration_changed', 0)
+            final_end_adjusted = stats.get('final_end_adjusted', 0)
+            total_events = stats.get('total_events', 0)
+
+            self.log(f"[FrameLocked] {track_name}:")
+            self.log(f"  - Total Events: {total_events}")
+            self.log(f"  - Final Duration Changed: {final_duration_changed}")
+            self.log(f"  - Final End Adjusted: {final_end_adjusted}")
+
+            # Warn if durations were unexpectedly modified
+            if final_duration_changed > 0:
+                self.log(f"[WARNING] {final_duration_changed} subtitle(s) had duration changes")
+                self.log(f"          This may indicate timing issues or intentional zero-duration effects becoming visible")
+                issues += 1
+
+            # Warn if ends were adjusted beyond the global delay
+            if final_end_adjusted > 0:
+                self.log(f"[WARNING] {final_end_adjusted} subtitle(s) had end times adjusted beyond delay")
+                self.log(f"          This may indicate duration modifications for frame visibility")
+                issues += 1
+
+            if final_duration_changed == 0 and final_end_adjusted == 0:
+                self.log(f"[OK] All durations preserved correctly (zero-duration effects stayed zero-duration)")
+
+        return issues
 
     def _get_metadata(self, file_path: str, tool: str) -> Optional[Dict]:
         """Gets metadata using either mkvmerge or ffprobe with enhanced probing for large delays."""
