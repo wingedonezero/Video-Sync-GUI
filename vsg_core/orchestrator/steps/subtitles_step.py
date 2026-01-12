@@ -317,6 +317,8 @@ class SubtitlesStep:
                                 for key, value in frame_sync_report.items():
                                     runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
                                 runner._log_message("------------------------------------------")
+                                # Store FrameLocked stats for final audit
+                                item.framelocked_stats = frame_sync_report
                                 # Mark that timestamps have been adjusted (so mux uses --sync 0:0)
                                 item.frame_adjusted = True
                             else:
