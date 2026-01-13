@@ -50,3 +50,9 @@ i18n-embed-fl = "0.10"
 rust-embed = "8.8"
 once_cell = "1.19"
 unic-langid = "0.9"
+
+[patch.crates-io]
+# Patch i18n-embed with local fix for iterator lifetime error (E0310)
+# Changed '_ lifetime to 'static in filenames_iter trait method to fix
+# "may not live long enough" error with Rust 1.92+
+i18n-embed = { path = "vendor/i18n-embed" }
