@@ -3,7 +3,7 @@
 //! Tabbed dialog for application settings, mirroring the PySide6 OptionsDialog
 
 use cosmic::iced::Length;
-use cosmic::widget::{self, column, row, text, container};
+use cosmic::widget::{self, text, container};
 use cosmic::Element;
 
 use crate::config::AppConfig;
@@ -121,87 +121,82 @@ impl SettingsDialog {
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        column![
-            self.form_row(
+        widget::column()
+            .push(self.form_row(
                 "Output Directory:",
                 widget::text_input("", &output_folder)
                     .on_input(SettingsMessage::OutputFolderChanged),
                 Some(SettingsMessage::BrowseOutputFolder),
-            ),
-            self.form_row(
+            ))
+            .push(self.form_row(
                 "Temporary Directory:",
                 widget::text_input("", &temp_root)
                     .on_input(SettingsMessage::TempRootChanged),
                 Some(SettingsMessage::BrowseTempRoot),
-            ),
-        ]
-        .spacing(8)
-        .into()
+            ))
+            .spacing(8)
+            .into()
     }
 
     fn view_analysis_tab(&self) -> Element<SettingsMessage> {
-        column![
-            text("Step 1: Audio Pre-Processing").size(14),
-            text("Step 2: Core Analysis Engine").size(14),
+        widget::column()
+            .push(text("Step 1: Audio Pre-Processing").size(14))
+            .push(text("Step 2: Core Analysis Engine").size(14))
             // TODO: Add actual form fields
-            text("Analysis settings will be implemented here"),
-        ]
-        .spacing(12)
-        .into()
+            .push(text("Analysis settings will be implemented here"))
+            .spacing(12)
+            .into()
     }
 
     fn view_cleanup_tab(&self) -> Element<SettingsMessage> {
-        column![
-            widget::checkbox(
+        widget::column()
+            .push(widget::checkbox(
                 "Enable post-OCR cleanup",
                 self.config.ocr_cleanup_enabled,
-            ).on_toggle(|_| SettingsMessage::Cancel), // TODO: proper message
-            widget::checkbox(
+            ).on_toggle(|_| SettingsMessage::Cancel)) // TODO: proper message
+            .push(widget::checkbox(
                 "Normalize ellipsis (...)",
                 self.config.ocr_cleanup_normalize_ellipsis,
-            ).on_toggle(|_| SettingsMessage::Cancel),
-        ]
-        .spacing(8)
-        .into()
+            ).on_toggle(|_| SettingsMessage::Cancel))
+            .spacing(8)
+            .into()
     }
 
     fn view_timing_tab(&self) -> Element<SettingsMessage> {
-        column![
-            widget::checkbox(
+        widget::column()
+            .push(widget::checkbox(
                 "Enable subtitle timing corrections",
                 self.config.timing_fix_enabled,
-            ).on_toggle(SettingsMessage::TimingFixEnabledToggled),
+            ).on_toggle(SettingsMessage::TimingFixEnabledToggled))
 
             // Overlaps group
-            text("Fix Overlapping Display Times").size(14),
-            widget::checkbox(
+            .push(text("Fix Overlapping Display Times").size(14))
+            .push(widget::checkbox(
                 "Enable",
                 self.config.timing_fix_overlaps,
-            ).on_toggle(SettingsMessage::OverlapFixEnabledToggled),
+            ).on_toggle(SettingsMessage::OverlapFixEnabledToggled))
 
             // Short durations group
-            text("Fix Short Display Times").size(14),
-            widget::checkbox(
+            .push(text("Fix Short Display Times").size(14))
+            .push(widget::checkbox(
                 "Enable",
                 self.config.timing_fix_short_durations,
-            ).on_toggle(SettingsMessage::ShortDurationFixToggled),
+            ).on_toggle(SettingsMessage::ShortDurationFixToggled))
 
             // Long durations group
-            text("Fix Long Display Times (based on Reading Speed)").size(14),
-            widget::checkbox(
+            .push(text("Fix Long Display Times (based on Reading Speed)").size(14))
+            .push(widget::checkbox(
                 "Enable",
                 self.config.timing_fix_long_durations,
-            ).on_toggle(SettingsMessage::LongDurationFixToggled),
-        ]
-        .spacing(8)
-        .into()
+            ).on_toggle(SettingsMessage::LongDurationFixToggled))
+            .spacing(8)
+            .into()
     }
 
     fn view_placeholder_tab(&self) -> Element<SettingsMessage> {
-        column![
-            text("This tab is not yet implemented"),
-        ]
-        .into()
+        widget::column()
+            .push(text("This tab is not yet implemented"))
+            .into()
     }
 
     /// Create a form row with label, input, and optional browse button
@@ -211,15 +206,14 @@ impl SettingsDialog {
         input: impl Into<Element<'a, SettingsMessage>>,
         browse_msg: Option<SettingsMessage>,
     ) -> Element<'a, SettingsMessage> {
-        let mut r = row![
-            text(label).width(Length::Fixed(150.0)),
-            container(input).width(Length::Fill),
-        ]
-        .spacing(8);
+        let mut r = widget::row()
+            .push(text(label).width(Length::Fixed(150.0)))
+            .push(container(input).width(Length::Fill))
+            .spacing(8);
 
         if let Some(msg) = browse_msg {
             r = r.push(
-                widget::button(text("Browse..."))
+                widget::button::standard(text("Browse..."))
                     .on_press(msg)
             );
         }

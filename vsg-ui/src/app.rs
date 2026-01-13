@@ -3,7 +3,7 @@
 //! Implements the cosmic::Application trait for Video Sync GUI
 
 use cosmic::app::{Core, Task};
-use cosmic::iced::widget::{column, row, text};
+use cosmic::iced::widget::text;
 use cosmic::iced::{Alignment, Length};
 use cosmic::widget::{self, container, text_input};
 use cosmic::{Application, Element};
@@ -405,59 +405,54 @@ impl App {
     /// Main page view
     fn view_main(&self) -> Element<Message> {
         // Settings button row
-        let settings_row = row![
-            widget::button(text("Settings..."))
-                .on_press(Message::OpenSettings),
-            widget::horizontal_space(),
-        ]
-        .spacing(8);
+        let settings_row = widget::row()
+            .push(widget::button::standard(text("Settings..."))
+                .on_press(Message::OpenSettings))
+            .push(widget::horizontal_space())
+            .spacing(8);
 
         // Main workflow group
-        let workflow_content = column![
-            widget::button(text("Open Job Queue for Merging..."))
+        let workflow_content = widget::column()
+            .push(widget::button::standard(text("Open Job Queue for Merging..."))
                 .on_press(Message::OpenJobQueue)
                 .width(Length::Fill)
-                .class(cosmic::theme::Button::Suggested),
-            widget::checkbox(
+                .class(cosmic::theme::Button::Suggested))
+            .push(widget::checkbox(
                 "Archive logs to a zip file on batch completion",
                 self.main_state.archive_logs
             )
-            .on_toggle(Message::ArchiveLogsToggled),
-        ]
-        .spacing(8);
+            .on_toggle(Message::ArchiveLogsToggled))
+            .spacing(8);
 
         let workflow_group = self.group_box("Main Workflow", workflow_content);
 
         // Quick analysis group
-        let analysis_content = column![
-            self.file_input_row("Source 1 (Reference):", &self.main_state.ref_input,
-                Message::RefInputChanged, Message::BrowseRef),
-            self.file_input_row("Source 2:", &self.main_state.sec_input,
-                Message::SecInputChanged, Message::BrowseSec),
-            self.file_input_row("Source 3:", &self.main_state.ter_input,
-                Message::TerInputChanged, Message::BrowseTer),
-            row![
-                widget::horizontal_space(),
-                widget::button(text("Analyze Only"))
-                    .on_press(Message::StartAnalyzeOnly),
-            ],
-        ]
-        .spacing(8);
+        let analysis_content = widget::column()
+            .push(self.file_input_row("Source 1 (Reference):", &self.main_state.ref_input,
+                Message::RefInputChanged, Message::BrowseRef))
+            .push(self.file_input_row("Source 2:", &self.main_state.sec_input,
+                Message::SecInputChanged, Message::BrowseSec))
+            .push(self.file_input_row("Source 3:", &self.main_state.ter_input,
+                Message::TerInputChanged, Message::BrowseTer))
+            .push(widget::row()
+                .push(widget::horizontal_space())
+                .push(widget::button::standard(text("Analyze Only"))
+                    .on_press(Message::StartAnalyzeOnly)))
+            .spacing(8);
 
         let analysis_group = self.group_box("Quick Analysis (Analyze Only)", analysis_content);
 
         // Status row
-        let status_row = row![
-            text("Status:"),
-            text(&self.status).width(Length::Fill),
-            widget::progress_bar(0.0..=100.0, self.progress as f32)
-                .width(Length::Fixed(200.0)),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center);
+        let status_row = widget::row()
+            .push(text("Status:"))
+            .push(text(&self.status).width(Length::Fill))
+            .push(widget::progress_bar(0.0..=100.0, self.progress as f32)
+                .width(Length::Fixed(200.0)))
+            .spacing(8)
+            .align_y(Alignment::Center);
 
         // Results group
-        let mut results_row = row![].spacing(16);
+        let mut results_row = widget::row().spacing(16);
         for (i, delay) in self.main_state.delays.iter().enumerate() {
             let delay_text = match delay {
                 Some(d) => format!("{:.2} ms", d),
@@ -468,15 +463,14 @@ impl App {
         }
         // If no delays yet, show placeholders
         if self.main_state.delays.is_empty() {
-            results_row = row![
-                text("Source 2 Delay:"),
-                text("—"),
-                text("Source 3 Delay:"),
-                text("—"),
-                text("Source 4 Delay:"),
-                text("—"),
-            ]
-            .spacing(16);
+            results_row = widget::row()
+                .push(text("Source 2 Delay:"))
+                .push(text("—"))
+                .push(text("Source 3 Delay:"))
+                .push(text("—"))
+                .push(text("Source 4 Delay:"))
+                .push(text("—"))
+                .spacing(16);
         }
 
         let results_group = self.group_box("Latest Job Results", results_row);
@@ -490,28 +484,26 @@ impl App {
         let log_group = self.group_box("Log", log_viewer);
 
         // Assemble main layout
-        column![
-            settings_row,
-            workflow_group,
-            analysis_group,
-            status_row,
-            results_group,
-            log_group,
-        ]
-        .spacing(12)
-        .width(Length::Fill)
-        .height(Length::Fill)
-        .into()
+        widget::column()
+            .push(settings_row)
+            .push(workflow_group)
+            .push(analysis_group)
+            .push(status_row)
+            .push(results_group)
+            .push(log_group)
+            .spacing(12)
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 
     /// Settings page view (placeholder)
     fn view_settings_page(&self) -> Element<Message> {
-        column![
-            text("Settings").size(20),
-            text("Settings dialog will be implemented here"),
-        ]
-        .spacing(16)
-        .into()
+        widget::column()
+            .push(text("Settings").size(20))
+            .push(text("Settings dialog will be implemented here"))
+            .spacing(16)
+            .into()
     }
 
     /// Create a group box with a title
@@ -544,16 +536,15 @@ impl App {
     where
         F: Fn(String) -> Message + 'a,
     {
-        row![
-            text(label).width(Length::Fixed(150.0)),
-            text_input("", value)
+        widget::row()
+            .push(text(label).width(Length::Fixed(150.0)))
+            .push(text_input("", value)
                 .on_input(on_change)
-                .width(Length::Fill),
-            widget::button(text("Browse..."))
-                .on_press(on_browse),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center)
-        .into()
+                .width(Length::Fill))
+            .push(widget::button::standard(text("Browse..."))
+                .on_press(on_browse))
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .into()
     }
 }

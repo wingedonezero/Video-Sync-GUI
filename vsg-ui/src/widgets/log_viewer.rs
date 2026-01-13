@@ -3,7 +3,7 @@
 //! A scrollable text area for displaying log messages
 
 use cosmic::iced::Length;
-use cosmic::widget::{column, container, scrollable, text};
+use cosmic::widget::{self, container, scrollable, text};
 use cosmic::Element;
 
 /// Log viewer component
@@ -40,7 +40,7 @@ impl<'a> LogViewer<'a> {
             .map(|line| text(*line).size(12).into())
             .collect();
 
-        let log_column = column(log_elements).spacing(2);
+        let log_column = widget::column().extend(log_elements).spacing(2);
 
         container(
             scrollable(log_column)

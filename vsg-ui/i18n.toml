@@ -1,0 +1,6 @@
+# i18n configuration for Video Sync GUI
+fallback_language = "en-US"
+
+# Locale directory for Fluent files
+[fluent]
+assets_dir = "i18n"
