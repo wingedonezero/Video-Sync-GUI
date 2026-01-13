@@ -42,8 +42,18 @@ class OptionsLogic:
             return
         if isinstance(widget, QCheckBox):
             widget.setChecked(bool(value))
-        elif isinstance(widget, (QSpinBox, QDoubleSpinBox)):
-            widget.setValue(value)
+        elif isinstance(widget, QSpinBox):
+            # QSpinBox requires int - coerce if value is string
+            try:
+                widget.setValue(int(float(value)) if isinstance(value, str) else int(value))
+            except (ValueError, TypeError):
+                pass  # Keep current value if coercion fails
+        elif isinstance(widget, QDoubleSpinBox):
+            # QDoubleSpinBox requires float - coerce if value is string
+            try:
+                widget.setValue(float(value) if isinstance(value, str) else value)
+            except (ValueError, TypeError):
+                pass  # Keep current value if coercion fails
         elif isinstance(widget, QComboBox):
             widget.setCurrentText(str(value))
         elif isinstance(widget, QLineEdit):
