@@ -7,7 +7,7 @@ members = [
 
 [workspace.package]
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 license = "MIT"
 repository = "https://github.com/wingedonezero/Video-Sync-GUI"
 
@@ -27,8 +27,9 @@ libcosmic = { git = "https://github.com/pop-os/libcosmic.git", default-features 
     "multi-window",
 ] }
 
-# Python bridge
-pyo3 = { version = "0.23", features = ["auto-initialize"] }
+# Python bridge - PyO3 is optional, initially we use subprocess to call Python
+# This avoids build-time Python version conflicts
+# pyo3 = { version = "0.23", optional = true }
 
 # Async/Utils
 futures-util = "0.3"
@@ -41,3 +42,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "2.0"
 anyhow = "1.0"
+chrono = "0.4"
+
+# i18n
+i18n-embed = { version = "0.16", features = ["fluent-system", "desktop-requester"] }
+i18n-embed-fl = "0.10"
+rust-embed = "8.8"
+once_cell = "1.19"
+unic-langid = "0.9"

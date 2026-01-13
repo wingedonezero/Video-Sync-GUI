@@ -1,0 +1,19 @@
+# Cargo configuration for Video Sync GUI
+#
+# PyO3 Configuration:
+# We skip system Python detection at build time since we bundle our own Python 3.13
+# runtime that gets downloaded on first launch.
+
+[env]
+# Skip Python detection at build time - we provide our own runtime
+PYO3_NO_PYTHON = "1"
+
+[build]
+# Use all available CPU cores for compilation
+jobs = -1
+
+[profile.release]
+# Optimize for size + speed
+lto = "thin"
+codegen-units = 1
+strip = true
