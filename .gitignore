@@ -19,3 +19,12 @@ __pycache__/
 *.so
 .Python
 PHANTOM_SIGNS_TRACK_PLAN.md
+
+# Rust build artifacts
+/target/
+Cargo.lock
+
+# IDE
+.idea/
+*.iml
+.vscode/
