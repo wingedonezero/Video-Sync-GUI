@@ -1,4 +1,9 @@
 # Video Sync GUI Requirements
+
+# ======================================
+# REQUIRED DEPENDENCIES
+# ======================================
+
 # Core GUI Framework
 PySide6
 
@@ -21,3 +26,18 @@ av
 
 # Image Processing
 Pillow
+
+# ======================================
+# OPTIONAL DEPENDENCIES
+# ======================================
+# Uncomment the dependencies below to enable optional features
+
+# Audio Analysis - Advanced Features
+# librosa - Enables onset detection, DTW, and spectrogram correlation for audio analysis
+# librosa
+
+# Audio Source Separation
+# torch - PyTorch for GPU-accelerated audio processing
+# demucs - AI-powered vocal/instrument separation (requires torch)
+# torch
+# demucs
