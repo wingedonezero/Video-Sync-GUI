@@ -22,10 +22,13 @@ into categories:
 The AppConfig class handles loading, saving, migrating old settings, and ensuring
 required directories exist. New settings are automatically added with defaults when
 the config file is loaded.
+
+Validation ensures type safety and catches configuration errors early.
 """
 import json
+import warnings
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional, Set
 
 class AppConfig:
     def __init__(self, settings_filename='settings.json'):
@@ -63,6 +66,15 @@ class AppConfig:
             'duration_align_verify_agreement_tolerance_ms': 100,  # Measurements must agree within ±100ms
             'duration_align_verify_checkpoints': 3,  # Number of checkpoints to verify (1 or 3)
             'duration_align_skip_validation_generated_tracks': True,  # Skip validation for generated tracks (default: True)
+            'duration_align_fallback_mode': 'abort',  # Fallback if verification fails: 'abort', 'use-duration', 'snap-to-frame'
+            'duration_align_fallback_target': 'source1',  # Which video to use for fallback frame snapping
+            'duration_align_hash_algorithm': 'dhash',  # Hash algorithm for frame matching: 'dhash', 'phash', 'average_hash'
+            'duration_align_hash_size': 8,  # Hash size for perceptual hashing (8 = 64-bit hash)
+            'duration_align_hash_threshold': 5,  # Max hamming distance for frame match
+            'duration_align_strictness': 'normal',  # Validation strictness: 'strict', 'normal', 'lenient'
+            'duration_align_use_vapoursynth': True,  # Use VapourSynth for frame extraction (faster with cache)
+            'duration_align_validate': True,  # Enable validation of duration-based sync
+            'duration_align_validate_points': 3,  # Number of validation checkpoints (1 or 3)
 
             # --- Correlation + Frame Snap Settings ---
             'correlation_snap_fallback_mode': 'snap-to-frame',  # What to do if verification fails: 'snap-to-frame', 'use-raw', 'abort'
@@ -72,6 +84,17 @@ class AppConfig:
             'correlation_snap_window_radius': 3,  # Frames before/after center for sliding window (3 = 7 frame window)
             'correlation_snap_search_range': 5,  # Search ±N frames around correlation prediction (increase for encodes)
             'correlation_snap_use_scene_changes': True,  # Use PySceneDetect to find anchor points
+
+            # --- Frame Matching Settings (General) ---
+            'frame_match_method': 'dhash',  # Hash algorithm: 'dhash', 'phash', 'average_hash'
+            'frame_match_hash_size': 8,  # Hash size for perceptual hashing (8 = 64-bit hash)
+            'frame_match_threshold': 5,  # Max hamming distance for acceptable frame match
+            'frame_match_search_window_frames': 10,  # Search ±N frames around expected position
+            'frame_match_search_window_sec': 2.0,  # Search window in seconds (alternative to frames)
+            'frame_match_max_search_frames': 100,  # Maximum frames to search in total
+            'frame_match_skip_unmatched': False,  # Skip unmatched lines instead of failing
+            'frame_match_use_timestamp_prefilter': True,  # Use timestamps to narrow search before hashing
+            'frame_match_workers': 4,  # Number of parallel workers for frame extraction/matching
 
             # --- Subtitle-Anchored Frame Snap Settings ---
             # Visual-only sync using subtitle positions as anchors (no audio correlation dependency)
@@ -109,6 +132,8 @@ class AppConfig:
 
             # --- Flexible Analysis Settings ---
             'source_separation_model': 'None (Use Original Audio)',
+            'source_separation_device': 'cpu',  # Device for source separation: 'cpu', 'cuda', 'mps'
+            'source_separation_timeout': 300,  # Timeout in seconds for source separation (0 = no timeout)
             'filtering_method': 'Dialogue Band-Pass Filter',
             'correlation_method': 'Phase Correlation (GCC-PHAT)',
             'min_accepted_chunks': 3,
@@ -279,8 +304,108 @@ class AppConfig:
             'stepping_filtered_fallback': 'nearest',  # 'nearest', 'interpolate', 'uniform', 'skip', 'reject'
         }
         self.settings = self.defaults.copy()
+        self._accessed_keys: Set[str] = set()  # Track accessed keys for typo detection
+        self._validation_enabled = True  # Can be disabled for backwards compatibility
         self.load()
         self.ensure_dirs_exist()
+
+    def _validate_value(self, key: str, value: Any) -> tuple[bool, Optional[str]]:
+        """
+        Validates a config value against expected type and range.
+
+        Returns:
+            Tuple of (is_valid, error_message)
+        """
+        if not self._validation_enabled:
+            return True, None
+
+        # Type and range validation based on key patterns
+        if key.endswith('_enabled') or key.startswith('log_') and not key.endswith(('_lines', '_step', '_tail')):
+            if not isinstance(value, bool):
+                return False, f"{key} must be bool, got {type(value).__name__}"
+
+        elif key.endswith(('_pct', '_percentage')):
+            if not isinstance(value, (int, float)):
+                return False, f"{key} must be numeric, got {type(value).__name__}"
+            if not (0.0 <= value <= 100.0):
+                return False, f"{key} must be 0-100, got {value}"
+
+        elif key.endswith(('_ms', '_duration_ms', '_gap_ms', '_window_ms', '_tolerance_ms')):
+            if not isinstance(value, (int, float)):
+                return False, f"{key} must be numeric, got {type(value).__name__}"
+            if value < 0:
+                return False, f"{key} cannot be negative, got {value}"
+
+        elif key.endswith(('_hz', '_lowcut_hz', '_highcut_hz', '_bandlimit_hz')):
+            if not isinstance(value, (int, float)):
+                return False, f"{key} must be numeric, got {type(value).__name__}"
+            if value < 0:
+                return False, f"{key} cannot be negative, got {value}"
+
+        elif key.endswith(('_db', '_threshold_db', '_noise')):
+            if not isinstance(value, (int, float)):
+                return False, f"{key} must be numeric, got {type(value).__name__}"
+            if value > 0:
+                warnings.warn(f"{key} is typically negative (dB), got {value}")
+
+        elif key.endswith(('_count', '_chunks', '_samples', '_taps', '_workers', '_points')):
+            if not isinstance(value, int):
+                return False, f"{key} must be int, got {type(value).__name__}"
+            if value < 0:
+                return False, f"{key} cannot be negative, got {value}"
+
+        elif key.endswith(('_threshold', '_ratio')):
+            if not isinstance(value, (int, float)):
+                return False, f"{key} must be numeric, got {type(value).__name__}"
+            if value < 0:
+                return False, f"{key} cannot be negative, got {value}"
+
+        # Enum validation for specific keys
+        if key == 'source_separation_device':
+            valid = ['cpu', 'cuda', 'mps']
+            if value not in valid:
+                return False, f"{key} must be one of {valid}, got '{value}'"
+
+        elif key in ('frame_match_method', 'duration_align_hash_algorithm', 'correlation_snap_hash_algorithm',
+                     'sub_anchor_hash_algorithm', 'corr_anchor_hash_algorithm'):
+            valid = ['dhash', 'phash', 'average_hash']
+            if value not in valid:
+                return False, f"{key} must be one of {valid}, got '{value}'"
+
+        elif key.endswith('_fallback_mode'):
+            # Don't enforce specific values as different modes have different options
+            if not isinstance(value, str):
+                return False, f"{key} must be string, got {type(value).__name__}"
+
+        elif key in ('sync_mode', 'analysis_mode', 'delay_selection_mode'):
+            if not isinstance(value, str):
+                return False, f"{key} must be string, got {type(value).__name__}"
+
+        elif key == 'stepping_silence_detection_method':
+            valid = ['rms_basic', 'ffmpeg_silencedetect', 'smart_fusion']
+            if value not in valid:
+                return False, f"{key} must be one of {valid}, got '{value}'"
+
+        elif key == 'segment_resample_engine':
+            valid = ['aresample', 'rubberband']
+            if value not in valid:
+                return False, f"{key} must be one of {valid}, got '{value}'"
+
+        return True, None
+
+    def validate_all(self) -> list[str]:
+        """
+        Validates all settings and returns list of error messages.
+
+        Returns:
+            List of validation error messages (empty if all valid)
+        """
+        errors = []
+        for key, value in self.settings.items():
+            is_valid, error_msg = self._validate_value(key, value)
+            if not is_valid:
+                errors.append(error_msg)
+        return errors
 
     def load(self):
         changed = False
@@ -308,6 +433,17 @@ class AppConfig:
                         loaded_settings[key] = default_value
                         changed = True
                 self.settings = loaded_settings
+
+                # Validate loaded settings
+                if self._validation_enabled:
+                    validation_errors = self.validate_all()
+                    if validation_errors:
+                        warnings.warn(
+                            f"Config validation found {len(validation_errors)} issue(s):\n" +
+                            "\n".join(f"  - {err}" for err in validation_errors[:5]) +
+                            (f"\n  ... and {len(validation_errors) - 5} more" if len(validation_errors) > 5 else ""),
+                            UserWarning
+                        )
             except (json.JSONDecodeError, IOError):
                 self.settings = self.defaults.copy()
                 changed = True
@@ -328,10 +464,44 @@ class AppConfig:
             print(f"Error saving settings: {e}")
 
     def get(self, key: str, default: Any = None) -> Any:
+        """
+        Gets a config value.
+
+        Tracks accessed keys for typo detection. If a key is not in defaults
+        and no default is provided, warns about potential typo.
+        """
+        self._accessed_keys.add(key)
+
+        # Warn if accessing a key that's not in defaults and no default provided
+        if key not in self.defaults and default is None:
+            warnings.warn(
+                f"Config key '{key}' not found in defaults. Possible typo? Returning None.",
+                UserWarning,
+                stacklevel=2
+            )
+
         return self.settings.get(key, default)
 
     def set(self, key: str, value: Any):
+        """
+        Sets a config value with optional validation.
+
+        Validates the value before setting if validation is enabled.
+        """
+        if self._validation_enabled:
+            is_valid, error_msg = self._validate_value(key, value)
+            if not is_valid:
+                raise ValueError(f"Invalid config value: {error_msg}")
+
         self.settings[key] = value
+
+    def get_unrecognized_keys(self) -> Set[str]:
+        """
+        Returns set of accessed keys that are not in defaults.
+
+        Useful for detecting typos in config access.
+        """
+        return self._accessed_keys - set(self.defaults.keys())
 
     def ensure_dirs_exist(self):
         Path(self.get('output_folder')).mkdir(parents=True, exist_ok=True)

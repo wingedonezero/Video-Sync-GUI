@@ -1496,8 +1496,9 @@ class SteppingCorrector:
             )
             accepted = [r for r in results if r.get('accepted', False)]
 
-            if len(accepted) < qa_config['min_accepted_chunks']:
-                self.log(f"  [QA] FAILED: Not enough confident chunks ({len(accepted)}/{qa_config['min_accepted_chunks']}).")
+            min_accepted = qa_config.get('min_accepted_chunks', 3)
+            if len(accepted) < min_accepted:
+                self.log(f"  [QA] FAILED: Not enough confident chunks ({len(accepted)}/{min_accepted}).")
                 return False
 
             delays = [r['delay'] for r in accepted]
