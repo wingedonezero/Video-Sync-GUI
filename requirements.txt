@@ -1,0 +1,23 @@
+# Video Sync GUI Requirements
+# Core GUI Framework
+PySide6
+
+# Scientific Computing & Analysis
+numpy
+scipy
+scikit-learn
+
+# Subtitle Processing
+pysubs2
+
+# Spell Checking
+pyenchant
+
+# XML Processing
+lxml
+
+# Video/Audio Processing
+av
+
+# Image Processing
+Pillow
