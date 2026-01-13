@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 /// Configuration structure that mirrors vsg_core.config.AppConfig
 /// This allows us to work with config in Rust while syncing with Python
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     // Storage paths
     pub output_folder: Option<PathBuf>,

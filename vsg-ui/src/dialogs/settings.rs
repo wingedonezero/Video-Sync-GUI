@@ -29,7 +29,7 @@ impl Default for SettingsTab {
 }
 
 /// Settings dialog state
-#[derive(Debug, Clone, Default)]
+#[derive(Default)]
 pub struct SettingsDialog {
     /// Currently active tab
     pub active_tab: SettingsTab,
@@ -111,6 +111,7 @@ impl SettingsDialog {
     }
 
     fn view_storage_tab(&self) -> Element<SettingsMessage> {
+        // Build rows directly to avoid lifetime issues with local strings
         let output_folder = self.config.output_folder
             .as_ref()
             .map(|p| p.to_string_lossy().to_string())
@@ -121,19 +122,25 @@ impl SettingsDialog {
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_default();
 
+        let output_row = widget::row()
+            .push(text("Output Directory:").width(Length::Fixed(150.0)))
+            .push(container(widget::text_input("", &output_folder)
+                    .on_input(SettingsMessage::OutputFolderChanged)).width(Length::Fill))
+            .push(widget::button::standard("Browse...")
+                    .on_press(SettingsMessage::BrowseOutputFolder))
+            .spacing(8);
+
+        let temp_row = widget::row()
+            .push(text("Temporary Directory:").width(Length::Fixed(150.0)))
+            .push(container(widget::text_input("", &temp_root)
+                    .on_input(SettingsMessage::TempRootChanged)).width(Length::Fill))
+            .push(widget::button::standard("Browse...")
+                    .on_press(SettingsMessage::BrowseTempRoot))
+            .spacing(8);
+
         widget::column()
-            .push(self.form_row(
-                "Output Directory:",
-                widget::text_input("", &output_folder)
-                    .on_input(SettingsMessage::OutputFolderChanged),
-                Some(SettingsMessage::BrowseOutputFolder),
-            ))
-            .push(self.form_row(
-                "Temporary Directory:",
-                widget::text_input("", &temp_root)
-                    .on_input(SettingsMessage::TempRootChanged),
-                Some(SettingsMessage::BrowseTempRoot),
-            ))
+            .push(output_row)
+            .push(temp_row)
             .spacing(8)
             .into()
     }
@@ -213,7 +220,7 @@ impl SettingsDialog {
 
         if let Some(msg) = browse_msg {
             r = r.push(
-                widget::button::standard(text("Browse..."))
+                widget::button::standard("Browse...")
                     .on_press(msg)
             );
         }

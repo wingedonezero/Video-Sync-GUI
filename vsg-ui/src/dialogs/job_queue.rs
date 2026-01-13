@@ -84,22 +84,22 @@ impl JobQueueDialog {
     /// View the job queue dialog
     pub fn view(&self) -> Element<JobQueueMessage> {
         // Toolbar
-        let mut add_job_btn = widget::button::standard(text("Add Job..."));
+        let mut add_job_btn = widget::button::standard("Add Job...");
         add_job_btn = add_job_btn.on_press(JobQueueMessage::AddJob);
-        add_job_btn = add_job_btn.style(cosmic::theme::Button::Suggested);
+        add_job_btn = add_job_btn.class(cosmic::theme::Button::Suggested);
 
         let start_batch_btn = if !self.batch_running && !self.jobs.is_empty() {
-            widget::button::standard(text("Start Batch"))
+            widget::button::standard("Start Batch")
                 .on_press(JobQueueMessage::StartBatch)
         } else {
-            widget::button::standard(text("Start Batch"))
+            widget::button::standard("Start Batch")
         };
 
         let stop_btn = if self.batch_running {
-            widget::button::standard(text("Stop"))
+            widget::button::standard("Stop")
                 .on_press(JobQueueMessage::StopBatch)
         } else {
-            widget::button::standard(text("Stop"))
+            widget::button::standard("Stop")
         };
 
         let toolbar = widget::row()
@@ -107,7 +107,7 @@ impl JobQueueDialog {
             .push(start_batch_btn)
             .push(stop_btn)
             .push(widget::horizontal_space())
-            .push(widget::button::standard(text("Clear Completed"))
+            .push(widget::button::standard("Clear Completed")
                 .on_press(JobQueueMessage::ClearCompleted))
             .spacing(8);
 
@@ -127,7 +127,7 @@ impl JobQueueDialog {
         // Bottom buttons
         let bottom_row = widget::row()
             .push(widget::horizontal_space())
-            .push(widget::button::standard(text("Close"))
+            .push(widget::button::standard("Close")
                 .on_press(JobQueueMessage::Close));
 
         widget::column()
@@ -155,8 +155,8 @@ impl JobQueueDialog {
         let is_selected = self.selected == Some(idx);
 
         widget::row()
-            .push(text(&ref_name).width(Length::Fill))
-            .push(text(&status_text).width(Length::Fixed(150.0)))
+            .push(text(ref_name).width(Length::Fill))
+            .push(text(status_text).width(Length::Fixed(150.0)))
             .push(widget::button::icon(widget::icon::from_name("user-trash-symbolic"))
                 .on_press(JobQueueMessage::RemoveJob(job.id)))
             .spacing(8)

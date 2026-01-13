@@ -384,15 +384,14 @@ impl App {
             PythonState::Error(_) => 0.0,
         };
 
-        let content = column![
-            text("Video Sync GUI").size(24),
-            text("Setting up Python runtime...").size(14),
-            widget::progress_bar(0.0..=100.0, progress_percent)
-                .width(Length::Fixed(400.0)),
-            text(&status_text).size(12),
-        ]
-        .spacing(16)
-        .align_x(Alignment::Center);
+        let content = widget::column()
+            .push(text("Video Sync GUI").size(24))
+            .push(text("Setting up Python runtime...").size(14))
+            .push(widget::progress_bar(0.0..=100.0, progress_percent)
+                .width(Length::Fixed(400.0)))
+            .push(text(status_text.clone()).size(12))
+            .spacing(16)
+            .align_x(Alignment::Center);
 
         container(content)
             .width(Length::Fill)
@@ -406,14 +405,14 @@ impl App {
     fn view_main(&self) -> Element<Message> {
         // Settings button row
         let settings_row = widget::row()
-            .push(widget::button::standard(text("Settings..."))
+            .push(widget::button::standard("Settings...")
                 .on_press(Message::OpenSettings))
             .push(widget::horizontal_space())
             .spacing(8);
 
         // Main workflow group
         let workflow_content = widget::column()
-            .push(widget::button::standard(text("Open Job Queue for Merging..."))
+            .push(widget::button::standard("Open Job Queue for Merging...")
                 .on_press(Message::OpenJobQueue)
                 .width(Length::Fill)
                 .class(cosmic::theme::Button::Suggested))
@@ -436,7 +435,7 @@ impl App {
                 Message::TerInputChanged, Message::BrowseTer))
             .push(widget::row()
                 .push(widget::horizontal_space())
-                .push(widget::button::standard(text("Analyze Only"))
+                .push(widget::button::standard("Analyze Only")
                     .on_press(Message::StartAnalyzeOnly)))
             .spacing(8);
 
@@ -459,7 +458,7 @@ impl App {
                 None => "—".to_string(),
             };
             results_row = results_row.push(text(format!("Source {} Delay:", i + 2)));
-            results_row = results_row.push(text(&delay_text));
+            results_row = results_row.push(text(delay_text));
         }
         // If no delays yet, show placeholders
         if self.main_state.delays.is_empty() {
@@ -514,15 +513,14 @@ impl App {
     ) -> Element<'a, Message> {
         let header = text(title).size(14);
 
-        column![
-            header,
-            container(content)
+        widget::column()
+            .push(header)
+            .push(container(content)
                 .padding(12)
                 .width(Length::Fill)
-                .style(cosmic::theme::Container::Card),
-        ]
-        .spacing(4)
-        .into()
+                .class(cosmic::theme::Container::Card))
+            .spacing(4)
+            .into()
     }
 
     /// Create a file input row with label, text input, and browse button
@@ -541,7 +539,7 @@ impl App {
             .push(text_input("", value)
                 .on_input(on_change)
                 .width(Length::Fill))
-            .push(widget::button::standard(text("Browse..."))
+            .push(widget::button::standard("Browse...")
                 .on_press(on_browse))
             .spacing(8)
             .align_y(Alignment::Center)
