@@ -307,6 +307,7 @@ class AppConfig:
         self._accessed_keys: Set[str] = set()  # Track accessed keys for typo detection
         self._validation_enabled = True  # Can be disabled for backwards compatibility
         self.load()
+        self._ensure_types_coerced()  # Additional safety: ensure all values have correct types
         self.ensure_dirs_exist()
 
     def _validate_value(self, key: str, value: Any) -> tuple[bool, Optional[str]]:
@@ -436,6 +437,20 @@ class AppConfig:
             )
             return default_value
 
+    def _ensure_types_coerced(self):
+        """
+        Ensures all values in self.settings match the expected types from defaults.
+
+        This provides an additional safety layer for UI code that accesses
+        config.settings dict directly, bypassing the get() method.
+        """
+        for key in list(self.settings.keys()):  # Use list() to avoid dict size change during iteration
+            if key in self.defaults:
+                current_value = self.settings[key]
+                expected_type_value = self.defaults[key]
+                coerced_value = self._coerce_type(key, current_value, expected_type_value)
+                self.settings[key] = coerced_value
+
     def validate_all(self) -> list[str]:
         """
         Validates all settings and returns list of error messages.
@@ -517,10 +532,13 @@ class AppConfig:
 
     def get(self, key: str, default: Any = None) -> Any:
         """
-        Gets a config value.
+        Gets a config value with automatic type coercion.
 
         Tracks accessed keys for typo detection. If a key is not in defaults
         and no default is provided, warns about potential typo.
+
+        Always coerces the value to match the expected type from defaults,
+        providing an additional safety layer against type mismatches.
         """
         self._accessed_keys.add(key)
 
@@ -532,7 +550,13 @@ class AppConfig:
                 stacklevel=2
             )
 
-        return self.settings.get(key, default)
+        value = self.settings.get(key, default)
+
+        # Apply type coercion if we have a default to match against
+        if key in self.defaults and value is not None:
+            value = self._coerce_type(key, value, self.defaults[key])
+
+        return value
 
     def set(self, key: str, value: Any):
         """
