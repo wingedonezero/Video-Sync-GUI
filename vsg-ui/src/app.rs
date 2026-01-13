@@ -2,11 +2,11 @@
 //!
 //! Implements the cosmic::Application trait for Video Sync GUI
 
-use cosmic::app::{context_drawer, Core, Task};
+use cosmic::app::{Core, Task};
 use cosmic::iced::widget::{column, row, text};
-use cosmic::iced::{Alignment, Length, Subscription};
-use cosmic::widget::{self, button, container, text_input, nav_bar};
-use cosmic::{Application, ApplicationExt, Apply, Element};
+use cosmic::iced::{Alignment, Length};
+use cosmic::widget::{self, container, text_input};
+use cosmic::{Application, Element};
 use std::path::PathBuf;
 
 use crate::config::AppConfig;
@@ -343,8 +343,8 @@ impl Application for App {
         Task::none()
     }
 
-    fn subscription(&self) -> Subscription<Self::Message> {
-        Subscription::none()
+    fn subscription(&self) -> cosmic::iced::Subscription<Self::Message> {
+        cosmic::iced::Subscription::none()
     }
 
     fn on_close_requested(&self, _id: cosmic::iced::window::Id) -> Option<Message> {
@@ -388,8 +388,7 @@ impl App {
             text("Video Sync GUI").size(24),
             text("Setting up Python runtime...").size(14),
             widget::progress_bar(0.0..=100.0, progress_percent)
-                .width(Length::Fixed(400.0))
-                .height(Length::Fixed(8.0)),
+                .width(Length::Fixed(400.0)),
             text(&status_text).size(12),
         ]
         .spacing(16)
@@ -407,7 +406,7 @@ impl App {
     fn view_main(&self) -> Element<Message> {
         // Settings button row
         let settings_row = row![
-            button::standard("Settings...")
+            widget::button(text("Settings..."))
                 .on_press(Message::OpenSettings),
             widget::horizontal_space(),
         ]
@@ -415,9 +414,10 @@ impl App {
 
         // Main workflow group
         let workflow_content = column![
-            button::suggested("Open Job Queue for Merging...")
+            widget::button(text("Open Job Queue for Merging..."))
                 .on_press(Message::OpenJobQueue)
-                .width(Length::Fill),
+                .width(Length::Fill)
+                .class(cosmic::theme::Button::Suggested),
             widget::checkbox(
                 "Archive logs to a zip file on batch completion",
                 self.main_state.archive_logs
@@ -438,7 +438,7 @@ impl App {
                 Message::TerInputChanged, Message::BrowseTer),
             row![
                 widget::horizontal_space(),
-                button::standard("Analyze Only")
+                widget::button(text("Analyze Only"))
                     .on_press(Message::StartAnalyzeOnly),
             ],
         ]
@@ -451,8 +451,7 @@ impl App {
             text("Status:"),
             text(&self.status).width(Length::Fill),
             widget::progress_bar(0.0..=100.0, self.progress as f32)
-                .width(Length::Fixed(200.0))
-                .height(Length::Fixed(16.0)),
+                .width(Length::Fixed(200.0)),
         ]
         .spacing(8)
         .align_y(Alignment::Center);
@@ -482,12 +481,13 @@ impl App {
 
         let results_group = self.group_box("Latest Job Results", results_row);
 
-        // Log group
-        let log_content = widget::text_editor::Content::with_text(&self.log_output);
-        let log_editor = widget::text_editor(&log_content)
-            .height(Length::Fill);
+        // Log group - using scrollable text as a simpler alternative to text_editor
+        let log_viewer = widget::scrollable(
+            text(&self.log_output).size(12)
+        )
+        .height(Length::Fill);
 
-        let log_group = self.group_box("Log", column![log_editor]);
+        let log_group = self.group_box("Log", log_viewer);
 
         // Assemble main layout
         column![
@@ -527,7 +527,7 @@ impl App {
             container(content)
                 .padding(12)
                 .width(Length::Fill)
-                .class(cosmic::theme::Container::Card),
+                .style(cosmic::theme::Container::Card),
         ]
         .spacing(4)
         .into()
@@ -549,7 +549,7 @@ impl App {
             text_input("", value)
                 .on_input(on_change)
                 .width(Length::Fill),
-            button::standard("Browse...")
+            widget::button(text("Browse..."))
                 .on_press(on_browse),
         ]
         .spacing(8)

@@ -3,7 +3,7 @@
 //! A text input with browse button for file/directory selection
 
 use cosmic::iced::{Alignment, Length};
-use cosmic::widget::{button, row, text, text_input};
+use cosmic::widget::{self as widget, row, text, text_input};
 use cosmic::Element;
 
 /// File input component
@@ -42,7 +42,7 @@ impl<'a, M: Clone + 'a> FileInput<'a, M> {
             text_input(self.placeholder, self.value)
                 .on_input(self.on_change)
                 .width(Length::Fill),
-            button::standard("Browse...")
+            widget::button(text("Browse..."))
                 .on_press(self.on_browse),
         ]
         .spacing(8)

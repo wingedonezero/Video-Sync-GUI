@@ -2,7 +2,7 @@
 //!
 //! Manages the queue of merge jobs
 
-use cosmic::widget::{self, column, row, text, button};
+use cosmic::widget::{self, column, row, text};
 use cosmic::iced::Length;
 use cosmic::Element;
 use std::path::PathBuf;
@@ -84,27 +84,30 @@ impl JobQueueDialog {
     /// View the job queue dialog
     pub fn view(&self) -> Element<JobQueueMessage> {
         // Toolbar
+        let mut add_job_btn = widget::button(text("Add Job..."));
+        add_job_btn = add_job_btn.on_press(JobQueueMessage::AddJob);
+        add_job_btn = add_job_btn.style(cosmic::theme::Button::Suggested);
+
+        let start_batch_btn = if !self.batch_running && !self.jobs.is_empty() {
+            widget::button(text("Start Batch"))
+                .on_press(JobQueueMessage::StartBatch)
+        } else {
+            widget::button(text("Start Batch"))
+        };
+
+        let stop_btn = if self.batch_running {
+            widget::button(text("Stop"))
+                .on_press(JobQueueMessage::StopBatch)
+        } else {
+            widget::button(text("Stop"))
+        };
+
         let toolbar = row![
-            button::suggested("Add Job...")
-                .on_press(JobQueueMessage::AddJob),
-            button::standard("Start Batch")
-                .on_press_maybe(
-                    if self.batch_running || self.jobs.is_empty() {
-                        None
-                    } else {
-                        Some(JobQueueMessage::StartBatch)
-                    }
-                ),
-            button::standard("Stop")
-                .on_press_maybe(
-                    if self.batch_running {
-                        Some(JobQueueMessage::StopBatch)
-                    } else {
-                        None
-                    }
-                ),
+            add_job_btn,
+            start_batch_btn,
+            stop_btn,
             widget::horizontal_space(),
-            button::standard("Clear Completed")
+            widget::button(text("Clear Completed"))
                 .on_press(JobQueueMessage::ClearCompleted),
         ]
         .spacing(8);
@@ -125,7 +128,7 @@ impl JobQueueDialog {
         // Bottom buttons
         let bottom_row = row![
             widget::horizontal_space(),
-            button::standard("Close")
+            widget::button(text("Close"))
                 .on_press(JobQueueMessage::Close),
         ];
 
@@ -157,7 +160,7 @@ impl JobQueueDialog {
         row![
             text(&ref_name).width(Length::Fill),
             text(&status_text).width(Length::Fixed(150.0)),
-            button::icon(widget::icon::from_name("user-trash-symbolic"))
+            widget::button(widget::icon::from_name("user-trash-symbolic"))
                 .on_press(JobQueueMessage::RemoveJob(job.id)),
         ]
         .spacing(8)
