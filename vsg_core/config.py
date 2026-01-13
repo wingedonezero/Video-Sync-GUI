@@ -393,6 +393,49 @@ class AppConfig:
 
         return True, None
 
+    def _coerce_type(self, key: str, value: Any, default_value: Any) -> Any:
+        """
+        Coerces a loaded value to match the type of its default.
+
+        Handles JSON loading issues where numbers may be stored as strings.
+
+        Args:
+            key: Config key name
+            value: Loaded value (may be wrong type)
+            default_value: Default value (provides expected type)
+
+        Returns:
+            Coerced value matching default's type
+        """
+        # If value is already the correct type, return as-is
+        if type(value) == type(default_value):
+            return value
+
+        # Try to coerce to default's type
+        try:
+            if isinstance(default_value, bool):
+                # Handle bool specially - strings need explicit conversion
+                if isinstance(value, str):
+                    return value.lower() in ('true', '1', 'yes', 'on')
+                return bool(value)
+            elif isinstance(default_value, int):
+                # Convert to float first, then int (handles "10.0" strings)
+                return int(float(value))
+            elif isinstance(default_value, float):
+                return float(value)
+            elif isinstance(default_value, str):
+                return str(value)
+            else:
+                # Unknown type, return as-is
+                return value
+        except (ValueError, TypeError):
+            # Coercion failed, return default value
+            warnings.warn(
+                f"Config key '{key}' has invalid value '{value}', using default: {default_value}",
+                UserWarning
+            )
+            return default_value
+
     def validate_all(self) -> list[str]:
         """
         Validates all settings and returns list of error messages.
@@ -432,6 +475,15 @@ class AppConfig:
                     if key not in loaded_settings:
                         loaded_settings[key] = default_value
                         changed = True
+
+                # Coerce types to match defaults (fixes string numbers from JSON)
+                for key, value in loaded_settings.items():
+                    if key in self.defaults:
+                        coerced = self._coerce_type(key, value, self.defaults[key])
+                        if coerced != value:
+                            loaded_settings[key] = coerced
+                            changed = True
+
                 self.settings = loaded_settings
 
                 # Validate loaded settings
