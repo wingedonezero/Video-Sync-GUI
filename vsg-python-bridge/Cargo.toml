@@ -5,18 +5,32 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-pyo3.workspace = true
-tokio.workspace = true
+# Async runtime
+tokio = { workspace = true, features = ["process", "io-util"] }
+
+# Serialization for data exchange with Python
 serde.workspace = true
 serde_json.workspace = true
+
+# Error handling
 thiserror.workspace = true
 anyhow.workspace = true
+
+# Logging
 tracing.workspace = true
+
+# Paths
 directories.workspace = true
+
+# HTTP client for downloading Python
 reqwest.workspace = true
+futures-util.workspace = true
+
+# Archive handling
 flate2.workspace = true
 tar.workspace = true
 zip.workspace = true
 
-[build-dependencies]
-# We don't use pyo3-build-config since we're embedding Python, not building a Python module
+# Note: PyO3 is NOT used here to avoid build-time Python version conflicts.
+# We use subprocess calls to our bundled Python instead.
+# PyO3 can be added later for performance-critical hot paths.

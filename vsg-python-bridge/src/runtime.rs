@@ -1,12 +1,15 @@
-//! Python runtime wrapper using PyO3
+//! Python runtime wrapper using subprocess
 //!
-//! Provides safe interface to call existing vsg_core Python code.
+//! Calls existing vsg_core Python code via subprocess.
+//! This approach avoids build-time Python version conflicts.
 
 use std::path::{Path, PathBuf};
-use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList, PyModule};
+use std::process::Stdio;
+use tokio::process::Command;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use thiserror::Error;
 use tracing::{info, debug, error};
+use serde::{Deserialize, Serialize};
 
 use crate::RuntimePaths;
 
@@ -15,24 +18,26 @@ pub enum PythonRuntimeError {
     #[error("Python not initialized")]
     NotInitialized,
 
-    #[error("Python error: {0}")]
-    Python(#[from] PyErr),
+    #[error("Python process failed: {0}")]
+    ProcessError(String),
 
-    #[error("Failed to import module {module}: {error}")]
-    ImportError { module: String, error: String },
+    #[error("Failed to parse Python output: {0}")]
+    ParseError(String),
 
-    #[error("Failed to call function {function}: {error}")]
-    CallError { function: String, error: String },
+    #[error("Python script error: {0}")]
+    ScriptError(String),
 
-    #[error("Invalid configuration: {0}")]
-    ConfigError(String),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
 }
 
-/// Wrapper around the Python runtime and vsg_core modules
+/// Wrapper around the Python runtime using subprocess calls
 pub struct PythonRuntime {
     paths: RuntimePaths,
     vsg_core_path: PathBuf,
-    initialized: bool,
 }
 
 impl PythonRuntime {
@@ -45,322 +50,281 @@ impl PythonRuntime {
         Self {
             paths,
             vsg_core_path,
-            initialized: false,
         }
     }
 
-    /// Initialize the Python interpreter with the correct paths
-    pub fn initialize(&mut self) -> Result<(), PythonRuntimeError> {
-        if self.initialized {
-            return Ok(());
+    /// Check if the runtime is ready
+    pub fn is_ready(&self) -> bool {
+        self.paths.is_ready()
+    }
+
+    /// Run a Python script and return its JSON output
+    async fn run_python_script(&self, script: &str) -> Result<String, PythonRuntimeError> {
+        if !self.is_ready() {
+            return Err(PythonRuntimeError::NotInitialized);
         }
-
-        info!("Initializing Python runtime...");
-
-        // Set PYTHONHOME to our isolated Python
-        std::env::set_var("PYTHONHOME", &self.paths.python_dir);
-
-        // Set up the Python path to include:
-        // 1. The venv site-packages
-        // 2. The vsg_core parent directory (so `import vsg_core` works)
-        let site_packages = self.paths.venv_dir.join("lib");
-
-        // Find the actual site-packages directory (it includes Python version)
-        let site_packages = find_site_packages(&site_packages)
-            .unwrap_or_else(|| site_packages.join("python3.13").join("site-packages"));
 
         let vsg_parent = self
             .vsg_core_path
             .parent()
-            .unwrap_or(&self.vsg_core_path)
-            .to_path_buf();
+            .unwrap_or(&self.vsg_core_path);
 
-        // Build PYTHONPATH
-        let python_path = format!(
-            "{}:{}",
-            site_packages.display(),
-            vsg_parent.display()
-        );
-        std::env::set_var("PYTHONPATH", &python_path);
+        let mut cmd = Command::new(&self.paths.venv_python);
+        cmd.arg("-c")
+            .arg(script)
+            .env("PYTHONPATH", vsg_parent)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
 
-        debug!("PYTHONHOME={}", self.paths.python_dir.display());
-        debug!("PYTHONPATH={}", python_path);
+        debug!("Running Python: {:?}", cmd);
 
-        // Initialize Python
-        pyo3::prepare_freethreaded_python();
+        let output = cmd.output().await?;
 
-        self.initialized = true;
-        info!("Python runtime initialized successfully");
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(PythonRuntimeError::ScriptError(stderr.to_string()));
+        }
 
-        Ok(())
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
     /// Load and return the AppConfig from vsg_core.config
-    pub fn load_config(&self) -> Result<serde_json::Value, PythonRuntimeError> {
-        if !self.initialized {
-            return Err(PythonRuntimeError::NotInitialized);
-        }
+    pub async fn load_config(&self) -> Result<serde_json::Value, PythonRuntimeError> {
+        let script = r#"
+import json
+from vsg_core.config import AppConfig
+config = AppConfig()
+print(json.dumps(config.as_dict()))
+"#;
 
-        Python::with_gil(|py| {
-            // Import vsg_core.config
-            let config_module = PyModule::import(py, "vsg_core.config")
-                .map_err(|e| PythonRuntimeError::ImportError {
-                    module: "vsg_core.config".to_string(),
-                    error: e.to_string(),
-                })?;
-
-            // Get AppConfig class and instantiate
-            let app_config_class = config_module.getattr("AppConfig")?;
-            let config_instance = app_config_class.call0()?;
-
-            // Convert to dict and then to JSON
-            let as_dict_method = config_instance.getattr("as_dict")?;
-            let config_dict = as_dict_method.call0()?;
-
-            // Use Python's json module to serialize
-            let json_module = PyModule::import(py, "json")?;
-            let dumps = json_module.getattr("dumps")?;
-            let json_str: String = dumps.call1((config_dict,))?.extract()?;
-
-            serde_json::from_str(&json_str)
-                .map_err(|e| PythonRuntimeError::ConfigError(e.to_string()))
-        })
+        let output = self.run_python_script(script).await?;
+        serde_json::from_str(&output).map_err(|e| PythonRuntimeError::ParseError(e.to_string()))
     }
 
     /// Save configuration back to vsg_core.config
-    pub fn save_config(&self, config_json: &serde_json::Value) -> Result<(), PythonRuntimeError> {
-        if !self.initialized {
-            return Err(PythonRuntimeError::NotInitialized);
-        }
+    pub async fn save_config(&self, config_json: &serde_json::Value) -> Result<(), PythonRuntimeError> {
+        let config_str = serde_json::to_string(config_json)?;
+        let script = format!(
+            r#"
+import json
+from vsg_core.config import AppConfig
+config = AppConfig()
+data = json.loads('''{}''')
+config.from_dict(data)
+config.save()
+print("ok")
+"#,
+            config_str.replace('\'', "\\'")
+        );
 
-        Python::with_gil(|py| {
-            let config_module = PyModule::import(py, "vsg_core.config")
-                .map_err(|e| PythonRuntimeError::ImportError {
-                    module: "vsg_core.config".to_string(),
-                    error: e.to_string(),
-                })?;
-
-            let app_config_class = config_module.getattr("AppConfig")?;
-            let config_instance = app_config_class.call0()?;
-
-            // Convert JSON to Python dict
-            let json_module = PyModule::import(py, "json")?;
-            let loads = json_module.getattr("loads")?;
-            let json_str = serde_json::to_string(config_json)
-                .map_err(|e| PythonRuntimeError::ConfigError(e.to_string()))?;
-            let config_dict = loads.call1((json_str,))?;
-
-            // Update config from dict
-            let from_dict_method = config_instance.getattr("from_dict")?;
-            from_dict_method.call1((config_dict,))?;
-
-            // Save
-            let save_method = config_instance.getattr("save")?;
-            save_method.call0()?;
-
-            Ok(())
-        })
+        self.run_python_script(&script).await?;
+        Ok(())
     }
 
     /// Run audio correlation analysis between two files
-    pub fn analyze_audio_correlation(
+    pub async fn analyze_audio_correlation(
         &self,
         reference_path: &Path,
         secondary_path: &Path,
     ) -> Result<AnalysisResult, PythonRuntimeError> {
-        if !self.initialized {
-            return Err(PythonRuntimeError::NotInitialized);
-        }
+        let script = format!(
+            r#"
+import json
+from vsg_core.analysis.audio_corr import correlate_audio
+result = correlate_audio("{}", "{}")
+print(json.dumps({{"delay_ms": result.delay_ms, "confidence": result.confidence}}))
+"#,
+            reference_path.display(),
+            secondary_path.display()
+        );
 
-        Python::with_gil(|py| {
-            let analysis_module = PyModule::import(py, "vsg_core.analysis.audio_corr")
-                .map_err(|e| PythonRuntimeError::ImportError {
-                    module: "vsg_core.analysis.audio_corr".to_string(),
-                    error: e.to_string(),
-                })?;
+        let output = self.run_python_script(&script).await?;
+        let result: AnalysisResultJson = serde_json::from_str(&output)?;
 
-            // Get the correlation function
-            let correlate_fn = analysis_module.getattr("correlate_audio")?;
-
-            // Call the function
-            let result = correlate_fn
-                .call1((
-                    reference_path.to_str().unwrap(),
-                    secondary_path.to_str().unwrap(),
-                ))
-                .map_err(|e| PythonRuntimeError::CallError {
-                    function: "correlate_audio".to_string(),
-                    error: e.to_string(),
-                })?;
-
-            // Extract result
-            let delay_ms: f64 = result.getattr("delay_ms")?.extract()?;
-            let confidence: f64 = result.getattr("confidence")?.extract()?;
-
-            Ok(AnalysisResult {
-                delay_ms,
-                confidence,
-            })
+        Ok(AnalysisResult {
+            delay_ms: result.delay_ms,
+            confidence: result.confidence,
         })
     }
 
-    /// Run a full job pipeline
-    pub fn run_job(
+    /// Run a full job pipeline with progress streaming
+    pub async fn run_job(
         &self,
         job_config: &serde_json::Value,
-        progress_callback: impl Fn(JobProgress) + Send + 'static,
+        mut progress_callback: impl FnMut(JobProgress),
     ) -> Result<JobResult, PythonRuntimeError> {
-        if !self.initialized {
+        if !self.is_ready() {
             return Err(PythonRuntimeError::NotInitialized);
         }
 
-        Python::with_gil(|py| {
-            let pipeline_module = PyModule::import(py, "vsg_core.pipeline")
-                .map_err(|e| PythonRuntimeError::ImportError {
-                    module: "vsg_core.pipeline".to_string(),
-                    error: e.to_string(),
-                })?;
+        let config_str = serde_json::to_string(job_config)?;
+        let vsg_parent = self
+            .vsg_core_path
+            .parent()
+            .unwrap_or(&self.vsg_core_path);
 
-            // Convert job config to Python dict
-            let json_module = PyModule::import(py, "json")?;
-            let loads = json_module.getattr("loads")?;
-            let job_config_str = serde_json::to_string(job_config)
-                .map_err(|e| PythonRuntimeError::ConfigError(e.to_string()))?;
-            let job_dict = loads.call1((job_config_str,))?;
+        // Create a Python script that streams progress
+        let script = format!(
+            r#"
+import json
+import sys
+from vsg_core.pipeline import JobPipeline
 
-            // Get JobPipeline class
-            let job_pipeline_class = pipeline_module.getattr("JobPipeline")?;
+def progress_callback(stage, percent, message):
+    print(json.dumps({{"stage": stage, "percent": percent, "message": message}}), flush=True)
 
-            // Create and run pipeline
-            let pipeline = job_pipeline_class.call1((job_dict,))?;
-            let run_method = pipeline.getattr("run")?;
+config = json.loads('''{}''')
+pipeline = JobPipeline(config, progress_callback=progress_callback)
+result = pipeline.run()
+print(json.dumps({{"success": result.success, "output_path": str(result.output_path) if result.output_path else None, "error_message": result.error_message}}))
+"#,
+            config_str.replace('\'', "\\'")
+        );
 
-            // Run the pipeline
-            let result = run_method
-                .call0()
-                .map_err(|e| PythonRuntimeError::CallError {
-                    function: "JobPipeline.run".to_string(),
-                    error: e.to_string(),
-                })?;
+        let mut cmd = Command::new(&self.paths.venv_python);
+        cmd.arg("-c")
+            .arg(&script)
+            .env("PYTHONPATH", vsg_parent)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
 
-            // Extract results
-            let success: bool = result.getattr("success")?.extract()?;
-            let output_path: Option<String> = result
-                .getattr("output_path")
-                .ok()
-                .and_then(|p| p.extract().ok());
-            let error_message: Option<String> = result
-                .getattr("error_message")
-                .ok()
-                .and_then(|m| m.extract().ok());
+        let mut child = cmd.spawn()?;
 
-            Ok(JobResult {
-                success,
-                output_path,
-                error_message,
-            })
+        // Stream stdout for progress
+        let stdout = child.stdout.take().expect("Failed to capture stdout");
+        let mut reader = BufReader::new(stdout).lines();
+
+        let mut last_line = String::new();
+        while let Some(line) = reader.next_line().await? {
+            last_line = line.clone();
+
+            // Try to parse as progress update
+            if let Ok(progress) = serde_json::from_str::<ProgressUpdate>(&line) {
+                let job_progress = match progress.stage.as_str() {
+                    "analyzing" => JobProgress::Analyzing { percent: progress.percent },
+                    "extracting" => JobProgress::Extracting { percent: progress.percent },
+                    "processing" => JobProgress::Processing { percent: progress.percent },
+                    "merging" => JobProgress::Merging { percent: progress.percent },
+                    _ => JobProgress::Processing { percent: progress.percent },
+                };
+                progress_callback(job_progress);
+            }
+        }
+
+        let status = child.wait().await?;
+        progress_callback(JobProgress::Done);
+
+        // Parse the final result from last line
+        if !status.success() {
+            return Err(PythonRuntimeError::ProcessError(format!(
+                "Python process exited with status: {}",
+                status
+            )));
+        }
+
+        let result: JobResultJson = serde_json::from_str(&last_line)
+            .map_err(|e| PythonRuntimeError::ParseError(format!("{}: {}", e, last_line)))?;
+
+        Ok(JobResult {
+            success: result.success,
+            output_path: result.output_path,
+            error_message: result.error_message,
         })
     }
 
-    /// Get probe information for a media file
-    pub fn probe_file(&self, path: &Path) -> Result<MediaInfo, PythonRuntimeError> {
-        if !self.initialized {
-            return Err(PythonRuntimeError::NotInitialized);
-        }
-
-        Python::with_gil(|py| {
-            // We'll use ffprobe via subprocess for now
-            // Later this can be moved to a native Rust implementation
-            let subprocess = PyModule::import(py, "subprocess")?;
-            let json_module = PyModule::import(py, "json")?;
-
-            let cmd = vec![
-                "ffprobe",
-                "-v",
-                "quiet",
-                "-print_format",
-                "json",
+    /// Get probe information for a media file using ffprobe
+    pub async fn probe_file(&self, path: &Path) -> Result<MediaInfo, PythonRuntimeError> {
+        // Use ffprobe directly - no need for Python here
+        let output = Command::new("ffprobe")
+            .args([
+                "-v", "quiet",
+                "-print_format", "json",
                 "-show_format",
                 "-show_streams",
                 path.to_str().unwrap(),
-            ];
+            ])
+            .output()
+            .await?;
 
-            let result = subprocess
-                .getattr("run")?
-                .call1((
-                    cmd,
-                    PyDict::new(py)
-                        .set_item("capture_output", true)
-                        .and_then(|_| Ok(PyDict::new(py)))?,
-                ))
-                .map_err(|e| PythonRuntimeError::CallError {
-                    function: "ffprobe".to_string(),
-                    error: e.to_string(),
-                })?;
+        if !output.status.success() {
+            return Err(PythonRuntimeError::ProcessError(
+                String::from_utf8_lossy(&output.stderr).to_string()
+            ));
+        }
 
-            let stdout = result.getattr("stdout")?;
-            let stdout_str: String = stdout.call_method0("decode")?.extract()?;
+        let probe_data: FFProbeOutput = serde_json::from_slice(&output.stdout)?;
 
-            let probe_data = json_module.getattr("loads")?.call1((stdout_str,))?;
+        let mut video_tracks = Vec::new();
+        let mut audio_tracks = Vec::new();
+        let mut subtitle_tracks = Vec::new();
 
-            // Parse streams
-            let streams_list = probe_data.getattr("streams")?;
-            let mut video_tracks = Vec::new();
-            let mut audio_tracks = Vec::new();
-            let mut subtitle_tracks = Vec::new();
-
-            if let Ok(streams) = streams_list.downcast::<PyList>() {
-                for stream in streams.iter() {
-                    let codec_type: String =
-                        stream.get_item("codec_type")?.extract()?;
-                    let index: u32 = stream.get_item("index")?.extract()?;
-
-                    match codec_type.as_str() {
-                        "video" => video_tracks.push(index),
-                        "audio" => audio_tracks.push(index),
-                        "subtitle" => subtitle_tracks.push(index),
-                        _ => {}
-                    }
-                }
+        for stream in &probe_data.streams {
+            match stream.codec_type.as_str() {
+                "video" => video_tracks.push(stream.index),
+                "audio" => audio_tracks.push(stream.index),
+                "subtitle" => subtitle_tracks.push(stream.index),
+                _ => {}
             }
+        }
 
-            // Get format info
-            let format_info = probe_data.getattr("format")?;
-            let duration: Option<f64> = format_info
-                .get_item("duration")
-                .ok()
-                .and_then(|d| d.extract().ok());
-            let filename: String = format_info.get_item("filename")?.extract()?;
+        let duration = probe_data
+            .format
+            .duration
+            .as_ref()
+            .and_then(|d| d.parse::<f64>().ok());
 
-            Ok(MediaInfo {
-                path: PathBuf::from(filename),
-                duration,
-                video_tracks,
-                audio_tracks,
-                subtitle_tracks,
-            })
+        Ok(MediaInfo {
+            path: PathBuf::from(&probe_data.format.filename),
+            duration,
+            video_tracks,
+            audio_tracks,
+            subtitle_tracks,
         })
     }
 }
 
-/// Find the site-packages directory (handles version-specific paths)
-fn find_site_packages(lib_dir: &Path) -> Option<PathBuf> {
-    if let Ok(entries) = std::fs::read_dir(lib_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                let site_packages = path.join("site-packages");
-                if site_packages.exists() {
-                    return Some(site_packages);
-                }
-            }
-        }
-    }
-    None
+// JSON helper structs
+#[derive(Deserialize)]
+struct AnalysisResultJson {
+    delay_ms: f64,
+    confidence: f64,
+}
+
+#[derive(Deserialize)]
+struct ProgressUpdate {
+    stage: String,
+    percent: u8,
+    #[allow(dead_code)]
+    message: String,
+}
+
+#[derive(Deserialize)]
+struct JobResultJson {
+    success: bool,
+    output_path: Option<String>,
+    error_message: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct FFProbeOutput {
+    streams: Vec<FFProbeStream>,
+    format: FFProbeFormat,
+}
+
+#[derive(Deserialize)]
+struct FFProbeStream {
+    index: u32,
+    codec_type: String,
+}
+
+#[derive(Deserialize)]
+struct FFProbeFormat {
+    filename: String,
+    duration: Option<String>,
 }
 
 /// Result from audio correlation analysis
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalysisResult {
     pub delay_ms: f64,
     pub confidence: f64,
@@ -377,7 +341,7 @@ pub enum JobProgress {
 }
 
 /// Result from running a job
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobResult {
     pub success: bool,
     pub output_path: Option<String>,
@@ -385,7 +349,7 @@ pub struct JobResult {
 }
 
 /// Media file information from probing
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MediaInfo {
     pub path: PathBuf,
     pub duration: Option<f64>,
