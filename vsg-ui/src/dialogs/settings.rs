@@ -219,7 +219,7 @@ impl SettingsDialog {
 
         if let Some(msg) = browse_msg {
             r = r.push(
-                widget::button::standard("Browse...")
+                widget::button(text("Browse..."))
                     .on_press(msg)
             );
         }
