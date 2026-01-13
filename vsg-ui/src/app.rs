@@ -175,15 +175,9 @@ impl Application for App {
         };
 
         // Start Python bootstrap in background
-        let bootstrap_task = Task::perform(
-            async {
-                // In a real implementation, this would call the bootstrap
-                // For now, simulate ready state
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                Message::BootstrapComplete
-            },
-            |msg| msg,
-        );
+        // TODO: Implement async bootstrap with Task::perform or similar
+        // For now, just return a no-op task
+        let bootstrap_task = Task::none();
 
         (app, bootstrap_task)
     }
@@ -508,7 +502,7 @@ impl App {
     /// Create a group box with a title
     fn group_box<'a>(
         &self,
-        title: &str,
+        title: &'a str,
         content: impl Into<Element<'a, Message>>,
     ) -> Element<'a, Message> {
         let header = text(title).size(14);
@@ -526,8 +520,8 @@ impl App {
     /// Create a file input row with label, text input, and browse button
     fn file_input_row<'a, F>(
         &self,
-        label: &str,
-        value: &str,
+        label: &'a str,
+        value: &'a str,
         on_change: F,
         on_browse: Message,
     ) -> Element<'a, Message>

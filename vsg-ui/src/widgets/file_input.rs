@@ -3,11 +3,11 @@
 //! A text input with browse button for file/directory selection
 
 use cosmic::iced::{Alignment, Length};
-use cosmic::widget::{self as widget, row, text, text_input};
+use cosmic::widget::{self as widget, text, text_input};
 use cosmic::Element;
 
 /// File input component
-pub struct FileInput<'a, M> {
+pub struct FileInput<'a, M: 'static> {
     label: &'a str,
     value: &'a str,
     on_change: Box<dyn Fn(String) -> M + 'a>,
@@ -37,16 +37,15 @@ impl<'a, M: Clone + 'a> FileInput<'a, M> {
     }
 
     pub fn view(self) -> Element<'a, M> {
-        row![
-            text(self.label).width(Length::Fixed(150.0)),
-            text_input(self.placeholder, self.value)
+        widget::row()
+            .push(text(self.label).width(Length::Fixed(150.0)))
+            .push(text_input(self.placeholder, self.value)
                 .on_input(self.on_change)
-                .width(Length::Fill),
-            widget::button(text("Browse..."))
-                .on_press(self.on_browse),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center)
-        .into()
+                .width(Length::Fill))
+            .push(widget::button::standard("Browse...")
+                .on_press(self.on_browse))
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .into()
     }
 }
