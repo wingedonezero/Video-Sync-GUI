@@ -1,0 +1,22 @@
+[package]
+name = "vsg-python-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pyo3.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+directories.workspace = true
+reqwest.workspace = true
+flate2.workspace = true
+tar.workspace = true
+zip.workspace = true
+
+[build-dependencies]
+# We don't use pyo3-build-config since we're embedding Python, not building a Python module
