@@ -412,6 +412,10 @@ class AppConfig:
         if type(value) == type(default_value):
             return value
 
+        # DEBUG: Temporary debug for duration_align_validate_points issue
+        if key == 'duration_align_validate_points':
+            print(f"DEBUG [{key}]: value={repr(value)} (type={type(value).__name__}), default={repr(default_value)} (type={type(default_value).__name__})")
+
         # Try to coerce to default's type
         try:
             if isinstance(default_value, bool):
