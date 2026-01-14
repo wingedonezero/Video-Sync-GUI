@@ -24,14 +24,20 @@ VENV_DIR="$PROJECT_DIR/venv"
 echo -e "${BLUE}Project Directory:${NC} $PROJECT_DIR"
 echo ""
 
-# Function to check Python version
+# Function to check Python version and verify it works
 check_python_version() {
     local python_cmd=$1
     if command -v "$python_cmd" &> /dev/null; then
+        # Check version
         local version=$("$python_cmd" --version 2>&1 | grep -oP '\d+\.\d+\.\d+')
         if [[ "$version" == 3.13.* ]]; then
-            echo "$python_cmd"
-            return 0
+            # Verify Python actually works by running a simple command
+            if "$python_cmd" -c "import sys; print('OK')" &> /dev/null; then
+                echo "$python_cmd"
+                return 0
+            else
+                echo -e "${YELLOW}Warning: $python_cmd version $version found but appears broken, skipping...${NC}" >&2
+            fi
         fi
     fi
     return 1
@@ -112,6 +118,15 @@ echo -e "${YELLOW}[1/3] Checking for Python 3.13...${NC}"
 
 PYTHON_CMD=""
 
+# Initialize conda if it exists but isn't in PATH
+if [ -z "$(command -v conda)" ] && [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
+    source "$HOME/miniconda3/etc/profile.d/conda.sh"
+elif [ -z "$(command -v conda)" ] && [ -f "$HOME/anaconda3/etc/profile.d/conda.sh" ]; then
+    source "$HOME/anaconda3/etc/profile.d/conda.sh"
+elif [ -z "$(command -v conda)" ] && [ -f "/opt/conda/etc/profile.d/conda.sh" ]; then
+    source "/opt/conda/etc/profile.d/conda.sh"
+fi
+
 # First, try to install via conda if available (preferred method)
 if command -v conda &> /dev/null || command -v mamba &> /dev/null; then
     echo -e "${BLUE}Conda/Mamba detected, installing Python 3.13...${NC}"
@@ -123,6 +138,8 @@ if command -v conda &> /dev/null || command -v mamba &> /dev/null; then
             fi
         done
     fi
+else
+    echo -e "${YELLOW}Conda/Mamba not detected in PATH${NC}"
 fi
 
 # If conda install failed or not available, try to find existing Python 3.13
