@@ -383,17 +383,25 @@ def apply_duration_align_sync(
         import json
 
         try:
+            # Import GPU environment support
+            try:
+                from vsg_core.system.gpu_env import get_subprocess_environment
+                env = get_subprocess_environment()
+            except ImportError:
+                import os
+                env = os.environ.copy()
+
             # Get source video frame count
             cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-count_frames',
                    '-show_entries', 'stream=nb_read_frames', '-print_format', 'json', source_video]
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, env=env)
             source_info = json.loads(result.stdout)
             source_frame_count = int(source_info['streams'][0]['nb_read_frames'])
 
             # Get target video frame count
             cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-count_frames',
                    '-show_entries', 'stream=nb_read_frames', '-print_format', 'json', target_video]
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            result = subprocess.run(cmd, capture_output=True, text=True, env=env)
             target_info = json.loads(result.stdout)
             target_frame_count = int(target_info['streams'][0]['nb_read_frames'])
 

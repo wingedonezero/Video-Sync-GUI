@@ -468,11 +468,20 @@ class VideoReader:
                 tmp_path
             ]
 
+            # Import GPU environment support
+            try:
+                from vsg_core.system.gpu_env import get_subprocess_environment
+                env = get_subprocess_environment()
+            except ImportError:
+                import os
+                env = os.environ.copy()
+
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
-                timeout=30
+                timeout=30,
+                env=env
             )
 
             if result.returncode != 0:

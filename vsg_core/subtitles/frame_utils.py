@@ -805,7 +805,15 @@ def detect_video_fps(video_path: str, runner) -> float:
             str(video_path)
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        # Import GPU environment support
+        try:
+            from vsg_core.system.gpu_env import get_subprocess_environment
+            env = get_subprocess_environment()
+        except ImportError:
+            import os
+            env = os.environ.copy()
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=env)
 
         if result.returncode != 0:
             runner._log_message(f"[FPS Detection] WARNING: ffprobe failed, using default 23.976 fps")
@@ -881,7 +889,15 @@ def detect_video_properties(video_path: str, runner) -> Dict[str, Any]:
             str(video_path)
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        # Import GPU environment support
+        try:
+            from vsg_core.system.gpu_env import get_subprocess_environment
+            env = get_subprocess_environment()
+        except ImportError:
+            import os
+            env = os.environ.copy()
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
 
         if result.returncode != 0:
             runner._log_message(f"[VideoProps] WARNING: ffprobe failed, using defaults")
