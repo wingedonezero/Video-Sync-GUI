@@ -65,8 +65,11 @@ echo ""
 echo -e "${YELLOW}[4/5] Installing dependencies...${NC}"
 echo "This will install all packages from pyproject.toml..."
 
-# Use uv pip to install the project and its dependencies
-uv pip install -e . --python "$VENV_DIR/bin/python"
+# Install dependencies directly (read from pyproject.toml)
+uv pip install \
+    PySide6 numpy scipy scikit-learn librosa pysubs2 pyenchant lxml av Pillow \
+    VideoTimestamps imagehash opencv-python ffms2 VapourSynth scenedetect webrtcvad-wheels \
+    --python "$VENV_DIR/bin/python"
 
 echo -e "${GREEN}✓ All dependencies installed${NC}"
 echo ""
