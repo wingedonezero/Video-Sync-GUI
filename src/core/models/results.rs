@@ -48,6 +48,26 @@ pub enum CoreError {
     Other(String),
 }
 
+// Implement From<String> for CoreError to allow using ? with String errors
+impl From<String> for CoreError {
+    fn from(s: String) -> Self {
+        CoreError::Other(s)
+    }
+}
+
+impl From<&str> for CoreError {
+    fn from(s: &str) -> Self {
+        CoreError::Other(s.to_string())
+    }
+}
+
+// Implement From<quick_xml::Error> for CoreError
+impl From<quick_xml::Error> for CoreError {
+    fn from(e: quick_xml::Error) -> Self {
+        CoreError::ParseError(format!("XML error: {}", e))
+    }
+}
+
 /// Core result type
 pub type CoreResult<T> = Result<T, CoreError>;
 

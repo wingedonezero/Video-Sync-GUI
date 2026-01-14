@@ -106,7 +106,7 @@ impl CommandRunner {
     }
 
     /// Log a message with timestamp
-    fn log(&self, message: &str) {
+    pub fn log(&self, message: &str) {
         if let Some(callback) = &self.log_callback {
             let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
             callback(&format!("[{}] {}", timestamp, message));
