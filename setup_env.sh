@@ -13,7 +13,7 @@ NC='\033[0m' # No Color
 
 # Project directory
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_DIR="$PROJECT_DIR/venv"
+VENV_DIR="$PROJECT_DIR/.venv"
 
 # Function to show main menu
 show_menu() {
@@ -531,7 +531,7 @@ echo ""
     echo -e "  ${BLUE}./run.sh${NC}"
     echo ""
     echo "Or manually activate the environment and run:"
-    echo -e "  ${BLUE}source venv/bin/activate${NC}"
+    echo -e "  ${BLUE}source .venv/bin/activate${NC}"
     echo -e "  ${BLUE}python main.py${NC}"
     echo ""
 }
