@@ -87,5 +87,17 @@ pub enum PipelineError {
     Core(#[from] CoreError),
 }
 
+impl From<String> for PipelineError {
+    fn from(s: String) -> Self {
+        PipelineError::StepFailed(s)
+    }
+}
+
+impl From<&str> for PipelineError {
+    fn from(s: &str) -> Self {
+        PipelineError::StepFailed(s.to_string())
+    }
+}
+
 /// Pipeline result type
 pub type PipelineResult<T> = Result<T, PipelineError>;
