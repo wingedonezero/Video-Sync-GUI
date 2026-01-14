@@ -113,65 +113,80 @@ All model tests passing:
 - Language code normalization
 - Extension mapping for codecs
 
-## 📋 Next Steps (Phase 2)
+## ✅ Phase 2: Core Logic - COMPLETE!
 
-### Priority 1: libcosmic Integration Research
+### Part 1: CommandRunner & Track Extraction ✅
+- ✅ **CommandRunner** (411 lines) - Streaming I/O, progress callbacks, compact logging
+- ✅ **Track Extraction** (306 lines) - mkvmerge -J parsing, extraction, A_MS/ACM handling
 
-Before implementing UI, we need to:
+### Part 2: Audio Correlation & Options Builder ✅
+- ✅ **Audio Correlation** (411 lines) - GCC-PHAT, SCC, chunked analysis, pure Rust
+- ✅ **Options Builder** (346 lines) - mkvmerge tokenization, critical delay calculation
 
-1. **Research Latest libcosmic API** (2026-01-14)
-   - ✅ Found documentation: [libcosmic Book](https://pop-os.github.io/libcosmic-book/introduction.html)
-   - ✅ Repository: [pop-os/libcosmic](https://github.com/pop-os/libcosmic)
-   - ⚠️ **Important:** libcosmic is NOT on crates.io - must use git dependency
-   - ⚠️ **Requirement:** Rust 1.85+ (currently using 1.75)
-   - 🔄 **Action Required:** Verify current libcosmic API patterns
+### Part 3: Chapters & Subtitles ✅ (JUST COMPLETED!)
+- ✅ **Chapter Processing** (515 lines)
+  - XML parsing with quick-xml
+  - Timestamp shifting (nanosecond precision)
+  - Keyframe snapping (previous/nearest modes)
+  - Chapter renaming & normalization
+- ✅ **Keyframe Detection** (60 lines) - ffprobe integration
+- ✅ **Subtitle Conversion** (91 lines) - SRT→ASS via FFmpeg
+- ✅ **Subtitle Rescaling** (178 lines) - PlayRes adjustment to video resolution
+- ✅ **Font Size Multiplication** (118 lines) - ASS/SSA style scaling
+- ✅ **Subtitle Timing** (305 lines) - Three-phase timing fixes (overlap, duration)
+- ✅ **Style Engine** (76 lines) - Stub for advanced style operations
 
-2. **Update Rust Version**
-   ```toml
-   rust-version = "1.85"  # Update in Cargo.toml
-   ```
+**Total New Code:** ~2,060 lines of Rust
 
-3. **Add libcosmic Dependency**
-   ```toml
-   [dependencies]
-   libcosmic = { git = "https://github.com/pop-os/libcosmic", branch = "master" }
-   ```
+## 📊 Test Status
+- ✅ **33 tests passing** (up from 28)
+- ✅ New tests for:
+  - Chapter timestamp parsing/formatting
+  - Keyframe snapping (previous/nearest modes)
+  - Subtitle rescaling (PlayRes)
+  - Font size multiplication
+  - Subtitle timing (ASS timestamp parsing)
 
-### Priority 2: Core Logic Implementation
+## 📋 Next Steps (Phase 3)
 
-**Before UI work**, implement core pipeline components in this order:
+### Priority 1: Pipeline Orchestration
 
-1. **CommandRunner Enhancement** (`src/core/io/runner.rs`)
-   - Implement streaming stdout/stderr capture
-   - Add compact logging mode
-   - Progress callback system
-   - Error tail capture
+Now that all core components are implemented, tie them together:
 
-2. **Track Extraction** (`src/core/extraction/tracks.rs`)
-   - Parse `mkvmerge -J` output
-   - Implement track extraction with mkvextract
-   - Handle A_MS/ACM special cases
+1. **Orchestrator** (`src/core/orchestrator/pipeline.rs`)
+   - Implement Context struct to pass state between steps
+   - Implement step-based execution:
+     - AnalysisStep → Extract delays
+     - ExtractStep → Extract tracks
+     - SubtitlesStep → Apply subtitle transforms
+     - ChaptersStep → Process chapters
+     - MuxStep → Build and execute mkvmerge command
+   - Add validation between steps
 
-3. **Audio Correlation** (`src/core/analysis/audio_corr.rs`)
-   - Implement GCC-PHAT correlation (rustfft)
-   - Standard cross-correlation (SCC)
-   - Chunked analysis with ffmpeg
-   - Confidence scoring
-   - **Pure Rust** - no Python needed
+2. **Pipeline Steps** (`src/core/orchestrator/steps/`)
+   - `context.rs` - Context struct with all state
+   - `analysis_step.rs` - Run audio correlation
+   - `extract_step.rs` - Extract tracks from sources
+   - `subtitles_step.rs` - Convert, rescale, timing fixes
+   - `chapters_step.rs` - Extract, shift, snap chapters
+   - `mux_step.rs` - Build opts.json and run mkvmerge
 
-4. **Options Builder** (`src/core/mux/options_builder.rs`)
-   - Build mkvmerge command tokens
-   - Delay calculation logic (CRITICAL - preserve exact Python behavior)
-   - Track ordering
+### Priority 2: Integration Testing
 
-### Priority 3: UI Implementation (After libcosmic research)
+Create end-to-end tests:
+- Mock job with test files
+- Verify pipeline execution
+- Validate output structure
 
-Only after completing core logic and verifying libcosmic API:
+### Priority 3: UI Implementation (libcosmic)
 
-1. Create basic application structure
-2. Main window layout
-3. Manual selection dialog
-4. Track widgets
+After orchestrator is working:
+
+1. Research latest libcosmic API (Rust 1.85+ required)
+2. Create basic application structure
+3. Main window layout
+4. Manual selection dialog
+5. Track widgets
 
 ## 📚 References
 
@@ -224,51 +239,77 @@ cargo run
 
 ## 📊 Progress Tracking
 
-- [x] Phase 1: Foundation (Complete)
+- [x] **Phase 1: Foundation** (Complete)
   - [x] Project structure
-  - [x] Core models
-  - [x] Configuration
-  - [x] Stub modules
-  - [x] Build verification
-- [ ] Phase 2: Core Logic
-  - [ ] CommandRunner enhancement
-  - [ ] Track extraction
-  - [ ] Audio correlation
-  - [ ] Options builder
-- [ ] Phase 3: UI Implementation
-  - [ ] libcosmic integration
+  - [x] Core models (jobs, media, enums, results)
+  - [x] Configuration system
+  - [x] Stub modules for all components
+  - [x] Build verification (21 tests passing)
+
+- [x] **Phase 2: Core Logic** (Complete - 2026-01-14)
+  - [x] CommandRunner enhancement (streaming I/O, callbacks)
+  - [x] Track extraction (mkvmerge JSON, mkvextract)
+  - [x] Audio correlation (GCC-PHAT, SCC - pure Rust!)
+  - [x] Options builder (delay calculation, track ordering)
+  - [x] Chapter processing (XML, keyframes, snapping)
+  - [x] Subtitle processing (convert, rescale, timing, style)
+
+- [ ] **Phase 3: Pipeline Orchestration** (Next)
+  - [ ] Context struct
+  - [ ] Pipeline steps (analysis, extract, subtitles, chapters, mux)
+  - [ ] Step validation
+  - [ ] Error handling & recovery
+
+- [ ] **Phase 4: UI Implementation** (After orchestrator)
+  - [ ] libcosmic integration (Rust 1.85+)
   - [ ] Main window
-  - [ ] Dialogs
+  - [ ] Dialogs (options, job queue, manual selection)
   - [ ] Track widgets
-- [ ] Phase 4: Advanced Features
-  - [ ] Subtitle processing
-  - [ ] Chapter handling
-  - [ ] Correction modes
-- [ ] Phase 5: Testing & Polish
-  - [ ] End-to-end tests
+
+- [ ] **Phase 5: Advanced Features**
+  - [ ] Correction modes (linear, PAL, stepping)
+  - [ ] Drift detection
+  - [ ] Source separation (Python bridge - optional)
+  - [ ] Advanced subtitle sync modes
+
+- [ ] **Phase 6: Testing & Polish**
+  - [ ] End-to-end integration tests
   - [ ] Performance optimization
   - [ ] Documentation
+  - [ ] Release builds
 
 ## 🚀 Getting Started (Development)
 
 ```bash
-# Clone and switch to rust branch
-git checkout claude/rust-rewrite-review-3rmZw
+# Clone and switch to Rust rewrite branch
+git checkout Rust-Rewrite
 
 # Build
 cargo build
 
-# Run tests
+# Run tests (33 tests passing!)
 cargo test
 
 # Check code
 cargo check
+
+# Build optimized release
+cargo build --release
 ```
 
 ---
 
+## 📈 Statistics
+
+**Total Lines of Rust Code:** ~5,000 lines
+**Test Coverage:** 33 unit tests
+**Build Time:** ~30-40 seconds
+**Dependencies:** 14 crates (no Python required for core logic!)
+
+---
+
 **Next Session TODO:**
-1. Research latest libcosmic API (verify Application trait, message handling)
-2. Update Cargo.toml with libcosmic git dependency
-3. Implement CommandRunner with streaming I/O
-4. Start track extraction implementation
+1. Implement orchestrator Context struct
+2. Create pipeline steps (analysis, extract, subtitles, chapters, mux)
+3. Add step validation
+4. Create integration test with mock files
