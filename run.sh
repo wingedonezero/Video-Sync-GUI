@@ -36,17 +36,24 @@ run_in_current_terminal() {
 
     cd "$PROJECT_DIR"
     source "$VENV_DIR/bin/activate"
-    python main.py
 
-    # Keep terminal open on error
+    # Run Python and capture exit code
+    python main.py 2>&1
     EXIT_CODE=$?
-    if [ $EXIT_CODE -ne 0 ]; then
-        echo ""
+
+    # Always show exit status and wait
+    echo ""
+    if [ $EXIT_CODE -eq 0 ]; then
+        echo -e "${GREEN}Application exited normally${NC}"
+    else
         echo -e "${RED}Application exited with error code: $EXIT_CODE${NC}"
-        echo -e "${YELLOW}Press Enter to close...${NC}"
-        read
     fi
+    echo -e "${YELLOW}Press Enter to close...${NC}"
+    read
 }
+
+# Wrapper script for terminal emulators - ensures errors are shown
+WRAPPER_CMD="cd '$PROJECT_DIR' && source '$VENV_DIR/bin/activate' && echo '=========================================' && echo 'Video Sync GUI' && echo '=========================================' && echo '' && echo 'Starting application...' && echo '' && python main.py 2>&1; EXIT_CODE=\$?; echo ''; if [ \$EXIT_CODE -eq 0 ]; then echo -e '${GREEN}Application exited normally${NC}'; else echo -e '${RED}Application exited with error code:' \$EXIT_CODE'${NC}'; fi; echo -e '${YELLOW}Press Enter to close...${NC}'; read"
 
 # If running from a terminal, just run it
 if [ -t 0 ]; then
@@ -56,22 +63,22 @@ else
     # Detect available terminal emulator
     if command -v konsole &> /dev/null; then
         # KDE Konsole
-        konsole --hold -e bash -c "cd '$PROJECT_DIR' && source '$VENV_DIR/bin/activate' && python main.py || (echo -e '\n${RED}Error occurred. Press Enter to close...${NC}' && read)"
+        konsole -e bash -c "$WRAPPER_CMD"
     elif command -v gnome-terminal &> /dev/null; then
         # GNOME Terminal
-        gnome-terminal -- bash -c "cd '$PROJECT_DIR' && source '$VENV_DIR/bin/activate' && python main.py || (echo -e '\n${RED}Error occurred. Press Enter to close...${NC}' && read); exec bash"
+        gnome-terminal -- bash -c "$WRAPPER_CMD"
     elif command -v xfce4-terminal &> /dev/null; then
         # XFCE Terminal
-        xfce4-terminal --hold -e "bash -c \"cd '$PROJECT_DIR' && source '$VENV_DIR/bin/activate' && python main.py\""
+        xfce4-terminal -e "bash -c \"$WRAPPER_CMD\""
     elif command -v alacritty &> /dev/null; then
         # Alacritty
-        alacritty --hold -e bash -c "cd '$PROJECT_DIR' && source '$VENV_DIR/bin/activate' && python main.py"
+        alacritty -e bash -c "$WRAPPER_CMD"
     elif command -v kitty &> /dev/null; then
         # Kitty
-        kitty --hold bash -c "cd '$PROJECT_DIR' && source '$VENV_DIR/bin/activate' && python main.py"
+        kitty bash -c "$WRAPPER_CMD"
     elif command -v xterm &> /dev/null; then
         # xterm (fallback)
-        xterm -hold -e bash -c "cd '$PROJECT_DIR' && source '$VENV_DIR/bin/activate' && python main.py"
+        xterm -e bash -c "$WRAPPER_CMD"
     else
         # No terminal found, run in current shell
         echo -e "${YELLOW}No suitable terminal emulator found. Running in current shell...${NC}"
