@@ -39,17 +39,27 @@ check_python_version() {
 
 # Function to install Python via conda
 install_python_conda() {
-    echo -e "${YELLOW}Attempting to install Python 3.13.11 via conda...${NC}"
+    echo -e "${YELLOW}Attempting to install Python 3.13 via conda...${NC}"
 
     # Check if conda is available
     if command -v conda &> /dev/null; then
-        echo -e "${BLUE}Found conda, installing Python 3.13.11...${NC}"
-        conda install -y python=3.13.11 -c conda-forge
-        return 0
+        echo -e "${BLUE}Found conda, installing Python 3.13...${NC}"
+        # Try specific version first, fall back to 3.13.* if not available
+        if conda install -y python=3.13.11 -c conda-forge 2>/dev/null || \
+           conda install -y "python>=3.13,<3.14" -c conda-forge; then
+            return 0
+        else
+            return 1
+        fi
     elif command -v mamba &> /dev/null; then
-        echo -e "${BLUE}Found mamba, installing Python 3.13.11...${NC}"
-        mamba install -y python=3.13.11 -c conda-forge
-        return 0
+        echo -e "${BLUE}Found mamba, installing Python 3.13...${NC}"
+        # Try specific version first, fall back to 3.13.* if not available
+        if mamba install -y python=3.13.11 -c conda-forge 2>/dev/null || \
+           mamba install -y "python>=3.13,<3.14" -c conda-forge; then
+            return 0
+        else
+            return 1
+        fi
     else
         echo -e "${YELLOW}conda/mamba not found${NC}"
         return 1
@@ -102,19 +112,9 @@ echo -e "${YELLOW}[1/3] Checking for Python 3.13...${NC}"
 
 PYTHON_CMD=""
 
-# Try to find existing Python 3.13
-for py in python3.13 python3 python; do
-    if PYTHON_CMD=$(check_python_version "$py"); then
-        echo -e "${GREEN}✓ Found Python 3.13: $PYTHON_CMD${NC}"
-        break
-    fi
-done
-
-# If not found, try to install
-if [ -z "$PYTHON_CMD" ]; then
-    echo -e "${YELLOW}Python 3.13 not found. Installing...${NC}"
-
-    # Try conda first
+# First, try to install via conda if available (preferred method)
+if command -v conda &> /dev/null || command -v mamba &> /dev/null; then
+    echo -e "${BLUE}Conda/Mamba detected, installing Python 3.13...${NC}"
     if install_python_conda; then
         for py in python3.13 python3 python; do
             if PYTHON_CMD=$(check_python_version "$py"); then
@@ -123,19 +123,31 @@ if [ -z "$PYTHON_CMD" ]; then
             fi
         done
     fi
+fi
 
-    # If conda failed, try standalone
-    if [ -z "$PYTHON_CMD" ]; then
-        if PYTHON_CMD=$(install_python_standalone); then
-            echo -e "${GREEN}✓ Installed Python 3.13 standalone: $PYTHON_CMD${NC}"
-        else
-            echo -e "${RED}Failed to install Python 3.13${NC}"
-            echo ""
-            echo "Please install Python 3.13 manually:"
-            echo "  - Via conda: conda install python=3.13"
-            echo "  - Or download from: https://www.python.org/downloads/"
-            exit 1
+# If conda install failed or not available, try to find existing Python 3.13
+if [ -z "$PYTHON_CMD" ]; then
+    echo -e "${YELLOW}Checking for existing Python 3.13...${NC}"
+    for py in python3.13 python3 python; do
+        if PYTHON_CMD=$(check_python_version "$py"); then
+            echo -e "${GREEN}✓ Found Python 3.13: $PYTHON_CMD${NC}"
+            break
         fi
+    done
+fi
+
+# If still not found, try standalone as last resort
+if [ -z "$PYTHON_CMD" ]; then
+    echo -e "${YELLOW}Python 3.13 not found. Downloading standalone build...${NC}"
+    if PYTHON_CMD=$(install_python_standalone); then
+        echo -e "${GREEN}✓ Installed Python 3.13 standalone: $PYTHON_CMD${NC}"
+    else
+        echo -e "${RED}Failed to install Python 3.13${NC}"
+        echo ""
+        echo "Please install Python 3.13 manually:"
+        echo "  - Via conda: conda install python=3.13"
+        echo "  - Or download from: https://www.python.org/downloads/"
+        exit 1
     fi
 fi
 
