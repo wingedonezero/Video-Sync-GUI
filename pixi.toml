@@ -1,4 +1,4 @@
-[project]
+[workspace]
 name = "video-sync-gui"
 version = "1.0.0"
 description = "Video Sync GUI - Subtitle synchronization tool"
@@ -42,10 +42,7 @@ pillow = "*"
 # Frame Matching & Scene Detection
 imagehash = "*"
 opencv = "*"
-scenedetect = { version = "*", channel = "conda-forge" }
-
-# Voice Activity Detection
-webrtcvad-wheels = { version = "*", channel = "pypi" }
+scenedetect = "*"
 
 [pypi-dependencies]
 # Packages not available or better from PyPI
@@ -54,11 +51,21 @@ ffms2 = "*"
 VapourSynth = "*"
 webrtcvad-wheels = "*"
 
-[feature.ai-audio-nvidia.dependencies]
-pytorch = { version = "*", channel = "pytorch" }
-pytorch-cuda = { version = "*", channel = "pytorch" }
-demucs = { version = "*", channel = "conda-forge" }
-
-[feature.ai-audio-cpu.dependencies]
+# Optional AI audio features (install with: pixi install -e ai-nvidia or pixi install -e ai-cpu)
+[feature.ai-nvidia.dependencies]
 pytorch = "*"
+pytorch-cuda = "*"
+
+[feature.ai-nvidia.pypi-dependencies]
 demucs = "*"
+
+[feature.ai-cpu.dependencies]
+pytorch = "*"
+
+[feature.ai-cpu.pypi-dependencies]
+demucs = "*"
+
+[environments]
+default = { solve-group = "default" }
+ai-nvidia = { features = ["ai-nvidia"], solve-group = "default" }
+ai-cpu = { features = ["ai-cpu"], solve-group = "default" }
