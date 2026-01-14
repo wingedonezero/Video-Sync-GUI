@@ -3,7 +3,7 @@ name = "video-sync-gui"
 version = "1.0.0"
 description = "Video Sync GUI - Subtitle synchronization tool"
 channels = ["conda-forge"]
-platforms = ["linux-64", "osx-64", "osx-arm64", "win-64"]
+platforms = ["linux-64"]
 
 [tasks]
 start = "python main.py"
