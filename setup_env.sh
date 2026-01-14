@@ -95,7 +95,7 @@ install_python_conda() {
 
 # Function to download and install standalone Python
 install_python_standalone() {
-    echo -e "${YELLOW}Attempting to install Python 3.13.11 standalone build...${NC}"
+    echo -e "${YELLOW}Attempting to install Python 3.13.11 standalone build...${NC}" >&2
 
     local python_dir="$PROJECT_DIR/.python"
     mkdir -p "$python_dir"
@@ -108,19 +108,19 @@ install_python_standalone() {
         if [[ "$arch" == "x86_64" ]]; then
             local python_url="https://github.com/indygreg/python-build-standalone/releases/download/20241016/cpython-3.13.0+20241016-x86_64-unknown-linux-gnu-install_only.tar.gz"
         else
-            echo -e "${RED}Unsupported architecture: $arch${NC}"
+            echo -e "${RED}Unsupported architecture: $arch${NC}" >&2
             return 1
         fi
     else
-        echo -e "${RED}Unsupported OS: $os${NC}"
+        echo -e "${RED}Unsupported OS: $os${NC}" >&2
         return 1
     fi
 
-    echo -e "${BLUE}Downloading Python from: $python_url${NC}"
+    echo -e "${BLUE}Downloading Python from: $python_url${NC}" >&2
     local temp_file=$(mktemp)
-    if curl -L -o "$temp_file" "$python_url"; then
-        echo -e "${BLUE}Extracting Python...${NC}"
-        tar -xzf "$temp_file" -C "$python_dir" --strip-components=1
+    if curl -L -o "$temp_file" "$python_url" 2>&1 | grep -E "^\s*[0-9]+" >&2; then
+        echo -e "${BLUE}Extracting Python...${NC}" >&2
+        tar -xzf "$temp_file" -C "$python_dir" --strip-components=1 2>&2
         rm "$temp_file"
 
         # Check if extraction was successful
@@ -130,7 +130,7 @@ install_python_standalone() {
         fi
     fi
 
-    echo -e "${RED}Failed to download/extract Python${NC}"
+    echo -e "${RED}Failed to download/extract Python${NC}" >&2
     return 1
 }
 
