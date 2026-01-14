@@ -1,0 +1,73 @@
+[package]
+name = "video-sync-gui"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+authors = ["Video-Sync-GUI Contributors"]
+description = "Rust rewrite of Video-Sync-GUI: A/V timing analysis and lossless MKV remux tool"
+license = "MIT"
+
+[dependencies]
+# UI Framework (libcosmic - git dependency, not on crates.io)
+# Note: libcosmic requires Rust 1.85+ but we'll start with 1.75 for compatibility
+# and upgrade when we integrate libcosmic
+# libcosmic = { git = "https://github.com/pop-os/libcosmic", branch = "master" }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Async Runtime (needed for libcosmic later)
+tokio = { version = "1.35", features = ["full"] }
+
+# Audio Processing
+rustfft = "6.1"
+ndarray = "0.15"
+hound = "3.5"  # WAV file I/O
+
+# Scientific/DSP
+# aubio-rs = "0.2"  # For onset detection - uncomment when needed
+
+# File System
+tempfile = "3.8"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error Handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Path handling
+shellexpand = "3.1"
+
+# Process execution
+shell-words = "1.1"
+
+# XML Processing (for chapters)
+quick-xml = "0.31"
+
+# Time handling
+chrono = "0.4"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bin]]
+name = "video-sync-gui"
+path = "src/main.rs"
+
+[lib]
+name = "video_sync_gui"
+path = "src/lib.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true
