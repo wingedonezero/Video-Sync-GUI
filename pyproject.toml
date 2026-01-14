@@ -13,8 +13,9 @@ dependencies = [
     "scikit-learn",
 
     # Audio Analysis - REQUIRED for correlation, onset detection, DTW, spectrogram analysis
-    "librosa>=0.10.2",
-    "numba>=0.61.0",  # Required for Python 3.13 support
+    "librosa",
+    "numba>=0.61.0",      # Force Python 3.13+ compatible version
+    "llvmlite>=0.43.0",   # Force Python 3.13+ compatible version
 
     # Subtitle Processing
     "pysubs2",
