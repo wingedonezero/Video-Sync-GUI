@@ -14,8 +14,8 @@ dependencies = [
 
     # Audio Analysis - REQUIRED for correlation, onset detection, DTW, spectrogram analysis
     "librosa",
-    "numba>=0.61.0",      # Force Python 3.13+ compatible version
-    "llvmlite>=0.43.0",   # Force Python 3.13+ compatible version
+    "numba>=0.61.0",      # librosa allows old versions; force Python 3.13+ compatible
+    "llvmlite>=0.43.0",   # librosa→numba allows old versions; force Python 3.13+ compatible
 
     # Subtitle Processing
     "pysubs2",
@@ -62,3 +62,5 @@ ai-audio-cpu = [
 [tool.uv]
 # Use a local directory for the Python installation
 python-downloads = "manual"
+# Always prefer latest compatible versions instead of oldest
+resolution = "highest"
