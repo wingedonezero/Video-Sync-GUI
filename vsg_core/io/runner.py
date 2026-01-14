@@ -8,6 +8,16 @@ import shlex
 from typing import List, Callable, Optional, Union
 from datetime import datetime
 
+# Import GPU environment support
+try:
+    from vsg_core.system.gpu_env import get_subprocess_environment
+    GPU_ENV_AVAILABLE = True
+except ImportError:
+    GPU_ENV_AVAILABLE = False
+    def get_subprocess_environment():
+        import os
+        return os.environ.copy()
+
 class CommandRunner:
     """Executes external commands and streams output."""
 
@@ -48,9 +58,13 @@ class CommandRunner:
         prog_step = max(1, int(self.config.get('log_progress_step', 100)))
 
         try:
+            # Get environment with GPU support
+            env = get_subprocess_environment()
+
             popen_kwargs = {
                 "stdout": subprocess.PIPE,
                 "stderr": subprocess.STDOUT,
+                "env": env,  # Pass environment with GPU variables
             }
             # (THE FIX IS HERE) Add stdin handling
             if input_data is not None:

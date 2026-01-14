@@ -24,6 +24,13 @@ from typing import Callable, Dict, Optional, Tuple
 
 import numpy as np
 
+# Import GPU environment support
+try:
+    from vsg_core.system.gpu_env import get_subprocess_environment
+except ImportError:
+    def get_subprocess_environment():
+        return os.environ.copy()
+
 # Separation modes available in the UI
 SEPARATION_MODES = {
     'None (Use Original Audio)': None,
@@ -265,16 +272,20 @@ def separate_audio(
             'device': 'cpu' if device == 'cpu' else 'auto'
         }
 
-        # Run subprocess with venv Python
+        # Run subprocess with venv Python and GPU environment
         python_exe = _get_venv_python()
         log(f"[SOURCE SEPARATION] Using Python: {python_exe}")
+
+        # Get environment with GPU support
+        env = get_subprocess_environment()
 
         try:
             result = subprocess.run(
                 [python_exe, str(script_path), json.dumps(args)],
                 capture_output=True,
                 text=True,
-                timeout=timeout_seconds
+                timeout=timeout_seconds,
+                env=env  # Pass environment with ROCm variables
             )
 
             if result.returncode != 0:

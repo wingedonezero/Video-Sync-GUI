@@ -24,6 +24,67 @@ if [ ! -d "$VENV_DIR" ]; then
     exit 1
 fi
 
+# Setup GPU environment variables for ROCm support
+setup_rocm_environment() {
+    # Only set if not already defined (user's custom settings take priority)
+
+    # Detect AMD GPU using rocm-smi or lspci
+    AMD_GPU_DETECTED=false
+    GFX_VERSION=""
+    HSA_VERSION=""
+
+    if command -v rocm-smi &> /dev/null; then
+        GPU_NAME=$(rocm-smi --showproductname 2>/dev/null | head -1)
+        if [[ ! -z "$GPU_NAME" ]]; then
+            AMD_GPU_DETECTED=true
+
+            # Map common GPUs to gfx architecture
+            case "$GPU_NAME" in
+                *"7900"*|*"7800"*|*"7700"*|*"7600"*)
+                    GFX_VERSION="gfx1100"
+                    HSA_VERSION="11.0.0"
+                    ;;
+                *"6900"*|*"6800"*|*"6700"*|*"6600"*)
+                    GFX_VERSION="gfx1030"
+                    HSA_VERSION="10.3.0"
+                    ;;
+                *"890M"*)
+                    GFX_VERSION="gfx1151"
+                    HSA_VERSION="11.5.1"
+                    ;;
+                *"780M"*)
+                    GFX_VERSION="gfx1103"
+                    HSA_VERSION="11.0.3"
+                    ;;
+                *)
+                    # Generic modern Radeon default
+                    GFX_VERSION="gfx1100"
+                    HSA_VERSION="11.0.0"
+                    ;;
+            esac
+        fi
+    elif command -v lspci &> /dev/null; then
+        if lspci -nn 2>/dev/null | grep -iE 'VGA|Display' | grep -iE 'AMD|Radeon' &> /dev/null; then
+            AMD_GPU_DETECTED=true
+            GFX_VERSION="gfx1100"
+            HSA_VERSION="11.0.0"
+        fi
+    fi
+
+    # Set ROCm environment variables if AMD GPU detected
+    if [ "$AMD_GPU_DETECTED" = true ]; then
+        [ -z "$ROCR_VISIBLE_DEVICES" ] && export ROCR_VISIBLE_DEVICES=0
+        [ -z "$HIP_VISIBLE_DEVICES" ] && export HIP_VISIBLE_DEVICES=0
+        [ -z "$HSA_OVERRIDE_GFX_VERSION" ] && export HSA_OVERRIDE_GFX_VERSION="$HSA_VERSION"
+        [ -z "$AMD_VARIANT_PROVIDER_FORCE_GFX_ARCH" ] && export AMD_VARIANT_PROVIDER_FORCE_GFX_ARCH="$GFX_VERSION"
+        [ -z "$AMD_VARIANT_PROVIDER_FORCE_ROCM_VERSION" ] && export AMD_VARIANT_PROVIDER_FORCE_ROCM_VERSION="6.4"
+        [ -z "$AMD_TEE_LOG_PATH" ] && export AMD_TEE_LOG_PATH="/dev/null"  # Suppress amdgpu.ids errors
+    fi
+}
+
+# Setup GPU environment before launching
+setup_rocm_environment
+
 # Function to run in current terminal
 run_in_current_terminal() {
     echo "========================================="
@@ -53,7 +114,8 @@ run_in_current_terminal() {
 }
 
 # Wrapper script for terminal emulators - ensures errors are shown
-WRAPPER_CMD="cd '$PROJECT_DIR' && echo '=========================================' && echo 'Video Sync GUI' && echo '=========================================' && echo '' && echo 'Starting application...' && echo '' && '$VENV_DIR/bin/python' main.py 2>&1; EXIT_CODE=\$?; echo ''; if [ \$EXIT_CODE -eq 0 ]; then echo -e '${GREEN}Application exited normally${NC}'; else echo -e '${RED}Application exited with error code:' \$EXIT_CODE'${NC}'; fi; echo -e '${YELLOW}Press Enter to close...${NC}'; read"
+# Note: GPU environment is set up in parent shell and inherited by subshells
+WRAPPER_CMD="cd '$PROJECT_DIR' && source '$PROJECT_DIR/run.sh' && setup_rocm_environment && echo '=========================================' && echo 'Video Sync GUI' && echo '=========================================' && echo '' && echo 'Starting application...' && echo '' && '$VENV_DIR/bin/python' main.py 2>&1; EXIT_CODE=\$?; echo ''; if [ \$EXIT_CODE -eq 0 ]; then echo -e '${GREEN}Application exited normally${NC}'; else echo -e '${RED}Application exited with error code:' \$EXIT_CODE'${NC}'; fi; echo -e '${YELLOW}Press Enter to close...${NC}'; read"
 
 # If running from a terminal, just run it
 if [ -t 0 ]; then
