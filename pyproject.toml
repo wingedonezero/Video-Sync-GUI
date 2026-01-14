@@ -1,0 +1,57 @@
+[project]
+name = "video-sync-gui"
+version = "1.0.0"
+description = "Video Sync GUI - Subtitle synchronization tool"
+requires-python = ">=3.13"
+dependencies = [
+    # Core GUI Framework
+    "PySide6",
+
+    # Scientific Computing & Analysis
+    "numpy",
+    "scipy",
+    "scikit-learn",
+
+    # Audio Analysis - REQUIRED for correlation, onset detection, DTW, spectrogram analysis
+    "librosa",
+
+    # Subtitle Processing
+    "pysubs2",
+
+    # Spell Checking
+    "pyenchant",
+
+    # XML Processing
+    "lxml",
+
+    # Video/Audio Processing
+    "av",
+
+    # Image Processing
+    "Pillow",
+]
+
+[project.optional-dependencies]
+video-advanced = [
+    "ffms2",
+    "opencv-python",
+]
+frame-matching = [
+    "imagehash",
+    "scenedetect",
+]
+ai-audio = [
+    "torch",
+    "demucs",
+]
+voice-detection = [
+    "webrtcvad-wheels",
+]
+
+[tool.uv]
+# Use a local directory for the Python installation
+python-downloads = "manual"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

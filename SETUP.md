@@ -1,0 +1,161 @@
+# Video Sync GUI - Environment Setup
+
+## Problem Solved
+
+After the Arch Linux Python update, many packages became incompatible with the system Python. This setup creates a **completely self-contained environment** with:
+
+- Python 3.13.11 (downloaded and installed locally in your project)
+- All dependencies installed in `Dependencies/.venv`
+- No interference with system Python
+- Easy to run without manual activation
+
+## What is `uv`?
+
+`uv` is a blazing-fast Python package manager (written in Rust, like Cargo). It:
+- Downloads and manages Python versions for you
+- Replaces pip, virtualenv, and other tools
+- Installs packages 10-100x faster than pip
+- Creates self-contained environments
+
+Think of it as "Cargo for Python" but specifically designed for Python's ecosystem.
+
+## Setup Instructions
+
+### First Time Setup
+
+1. **Run the setup script:**
+   ```bash
+   ./setup_env.sh
+   ```
+
+   This will:
+   - Install `uv` if you don't have it
+   - Download Python 3.13.11 locally
+   - Create a virtual environment in `Dependencies/.venv`
+   - Install all dependencies from `pyproject.toml`
+
+   **Note:** The first run takes a few minutes to download Python and packages. Subsequent runs are much faster.
+
+### Running the Application
+
+2. **Launch the app:**
+   ```bash
+   ./run.sh
+   ```
+
+   This script:
+   - Opens a terminal window automatically
+   - Runs the application
+   - Shows any errors (terminal stays open if something fails)
+   - Works with Konsole, GNOME Terminal, XFCE Terminal, Alacritty, Kitty, or xterm
+
+## Manual Usage (Advanced)
+
+If you prefer to run things manually:
+
+```bash
+# Activate the environment
+source Dependencies/.venv/bin/activate
+
+# Run the application
+python main.py
+
+# When done, deactivate
+deactivate
+```
+
+## Updating Dependencies
+
+If you need to add or update packages:
+
+1. **Edit `pyproject.toml`** and add the package to the `dependencies` list
+2. **Re-run setup:**
+   ```bash
+   ./setup_env.sh
+   ```
+
+Or manually:
+```bash
+source Dependencies/.venv/bin/activate
+uv pip install <package-name>
+```
+
+## Optional Dependencies
+
+Some features require optional dependencies. To install them:
+
+```bash
+source Dependencies/.venv/bin/activate
+
+# For advanced video features (ffms2, opencv)
+uv pip install -e ".[video-advanced]"
+
+# For frame matching (imagehash, scenedetect)
+uv pip install -e ".[frame-matching]"
+
+# For AI audio separation (torch, demucs) - WARNING: Large download
+uv pip install -e ".[ai-audio]"
+
+# For voice detection
+uv pip install -e ".[voice-detection]"
+```
+
+## Troubleshooting
+
+### "uv: command not found" after setup
+```bash
+export PATH="$HOME/.cargo/bin:$PATH"
+```
+
+### Want to completely reset?
+```bash
+rm -rf Dependencies/
+./setup_env.sh
+```
+
+### Check which Python is being used
+```bash
+Dependencies/.venv/bin/python --version
+```
+
+### Verify packages are installed
+```bash
+Dependencies/.venv/bin/python -c "import PySide6; print('PySide6 OK')"
+```
+
+## Directory Structure
+
+```
+Video-Sync-GUI/
+├── Dependencies/              # Self-contained environment (gitignored)
+│   └── .venv/                # Virtual environment with Python 3.13.11
+│       ├── bin/              # Python executable and scripts
+│       ├── lib/              # All installed packages
+│       └── ...
+├── pyproject.toml            # Project configuration and dependencies
+├── setup_env.sh              # Setup script (run once)
+├── run.sh                    # Launch script (run to start app)
+├── main.py                   # Application entry point
+└── ...
+```
+
+## Benefits of This Approach
+
+✅ **Isolated:** No conflicts with system Python
+✅ **Portable:** Everything is in one project directory
+✅ **Fast:** `uv` is significantly faster than pip
+✅ **Version-locked:** Python 3.13.11 won't change unexpectedly
+✅ **Clean:** `Dependencies/` is gitignored, won't bloat your repo
+✅ **Easy:** Just `./run.sh` to launch the app
+
+## How It Works
+
+1. **`uv`** downloads Python 3.13.11 binaries
+2. Creates a virtual environment at `Dependencies/.venv`
+3. Installs all packages using `uv pip` (super fast)
+4. `run.sh` activates the environment and runs `main.py`
+5. Everything is self-contained—no system Python needed
+
+---
+
+**Questions?** Check the `uv` documentation: https://docs.astral.sh/uv/
