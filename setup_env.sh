@@ -1,28 +1,39 @@
 #!/bin/bash
 
 # Video Sync GUI - Environment Setup Script
-# This script sets up a Python virtual environment with all dependencies
-
-set -e  # Exit on error
-
-echo "========================================="
-echo "Video Sync GUI - Environment Setup"
-echo "========================================="
-echo ""
+# Interactive script for managing Python environment and dependencies
 
 # Color codes for output
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Project directory
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="$PROJECT_DIR/venv"
 
-echo -e "${BLUE}Project Directory:${NC} $PROJECT_DIR"
-echo ""
+# Function to show main menu
+show_menu() {
+    echo ""
+    echo "========================================="
+    echo "Video Sync GUI - Environment Setup"
+    echo "========================================="
+    echo ""
+    echo -e "${BLUE}Project Directory:${NC} $PROJECT_DIR"
+    echo ""
+    echo "Please select an option:"
+    echo ""
+    echo -e "  ${CYAN}1)${NC} Full Setup - Install Python 3.13 and all dependencies"
+    echo -e "  ${CYAN}2)${NC} Update Libraries - Check for and install updates"
+    echo -e "  ${CYAN}3)${NC} Install Optional Dependencies (AI audio features)"
+    echo -e "  ${CYAN}4)${NC} Verify Dependencies - Check all packages are installed"
+    echo -e "  ${CYAN}5)${NC} Exit"
+    echo ""
+    echo -n "Enter your choice [1-5]: "
+}
 
 # Function to check Python version and verify it works
 check_python_version() {
@@ -112,6 +123,225 @@ install_python_standalone() {
     echo -e "${RED}Failed to download/extract Python${NC}"
     return 1
 }
+
+# Function to ensure venv exists and is activated
+ensure_venv() {
+    if [ ! -d "$VENV_DIR" ]; then
+        echo -e "${RED}Virtual environment not found!${NC}"
+        echo -e "${YELLOW}Please run 'Full Setup' first (option 1)${NC}"
+        return 1
+    fi
+
+    if [ -z "$VIRTUAL_ENV" ]; then
+        echo -e "${BLUE}Activating virtual environment...${NC}"
+        source "$VENV_DIR/bin/activate"
+    fi
+    return 0
+}
+
+# Function to check for updates
+check_updates() {
+    echo ""
+    echo "========================================="
+    echo "Checking for Updates"
+    echo "========================================="
+    echo ""
+
+    if ! ensure_venv; then
+        return 1
+    fi
+
+    echo -e "${YELLOW}Checking for package updates...${NC}"
+    echo ""
+
+    # Get list of outdated packages
+    outdated=$(pip list --outdated --format=json 2>/dev/null)
+
+    if [ "$outdated" == "[]" ] || [ -z "$outdated" ]; then
+        echo -e "${GREEN}✓ All packages are up to date!${NC}"
+
+        # Check Python version
+        echo ""
+        echo -e "${YELLOW}Checking Python version...${NC}"
+        current_python=$(python --version 2>&1 | grep -oP '\d+\.\d+\.\d+')
+        echo -e "${BLUE}Current Python version: $current_python${NC}"
+        echo -e "${YELLOW}Latest Python 3.13 series will be checked during full setup${NC}"
+        return 0
+    fi
+
+    # Parse and display outdated packages
+    echo -e "${YELLOW}The following packages have updates available:${NC}"
+    echo ""
+    echo "$outdated" | python -c "
+import sys, json
+data = json.load(sys.stdin)
+for pkg in data:
+    print(f\"  {pkg['name']:30s} {pkg['version']:15s} -> {pkg['latest_version']}\")
+"
+
+    echo ""
+    echo -n "Do you want to update these packages? [y/N]: "
+    read -r response
+
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+        echo ""
+        echo -e "${BLUE}Updating packages...${NC}"
+        pip install --upgrade $(echo "$outdated" | python -c "
+import sys, json
+data = json.load(sys.stdin)
+print(' '.join([pkg['name'] for pkg in data]))
+")
+        echo ""
+        echo -e "${GREEN}✓ Packages updated successfully!${NC}"
+    else
+        echo -e "${YELLOW}Update cancelled${NC}"
+    fi
+}
+
+# Function to install optional dependencies
+install_optional() {
+    echo ""
+    echo "========================================="
+    echo "Install Optional Dependencies"
+    echo "========================================="
+    echo ""
+
+    if ! ensure_venv; then
+        return 1
+    fi
+
+    echo "Optional AI audio features (PyTorch + Demucs):"
+    echo "These enable AI-powered vocal/instrument separation"
+    echo "for better cross-language audio correlation."
+    echo ""
+    echo "Select your hardware:"
+    echo ""
+    echo -e "  ${CYAN}1)${NC} NVIDIA GPU (CUDA)"
+    echo -e "  ${CYAN}2)${NC} AMD GPU (ROCm)"
+    echo -e "  ${CYAN}3)${NC} CPU only (slower but works everywhere)"
+    echo -e "  ${CYAN}4)${NC} Cancel"
+    echo ""
+    echo -n "Enter your choice [1-4]: "
+    read -r hw_choice
+
+    case $hw_choice in
+        1)
+            echo ""
+            echo -e "${BLUE}Installing PyTorch (NVIDIA CUDA) + Demucs...${NC}"
+            pip install torch torchvision torchaudio
+            pip install demucs
+            echo -e "${GREEN}✓ NVIDIA GPU support installed${NC}"
+            ;;
+        2)
+            echo ""
+            echo -e "${BLUE}Installing PyTorch (AMD ROCm) + Demucs...${NC}"
+            pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.2
+            pip install demucs
+            echo -e "${GREEN}✓ AMD GPU (ROCm) support installed${NC}"
+            ;;
+        3)
+            echo ""
+            echo -e "${BLUE}Installing PyTorch (CPU only) + Demucs...${NC}"
+            pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+            pip install demucs
+            echo -e "${GREEN}✓ CPU-only support installed${NC}"
+            ;;
+        4)
+            echo -e "${YELLOW}Installation cancelled${NC}"
+            return 0
+            ;;
+        *)
+            echo -e "${RED}Invalid choice${NC}"
+            return 1
+            ;;
+    esac
+}
+
+# Function to verify dependencies
+verify_dependencies() {
+    echo ""
+    echo "========================================="
+    echo "Verify Dependencies"
+    echo "========================================="
+    echo ""
+
+    if ! ensure_venv; then
+        return 1
+    fi
+
+    echo -e "${YELLOW}Checking required dependencies...${NC}"
+    echo ""
+
+    # Read requirements.txt and check each package
+    missing=()
+    installed=()
+
+    while IFS= read -r line; do
+        # Skip comments and empty lines
+        [[ "$line" =~ ^#.*$ ]] && continue
+        [[ -z "$line" ]] && continue
+
+        # Extract package name (before any version specifier)
+        pkg=$(echo "$line" | sed 's/[>=<\[].*$//' | xargs)
+
+        if pip show "$pkg" &> /dev/null; then
+            version=$(pip show "$pkg" 2>/dev/null | grep "^Version:" | cut -d' ' -f2)
+            installed+=("$pkg ($version)")
+        else
+            missing+=("$pkg")
+        fi
+    done < "$PROJECT_DIR/requirements.txt"
+
+    # Display results
+    echo -e "${GREEN}✓ Installed packages: ${#installed[@]}${NC}"
+    for pkg in "${installed[@]}"; do
+        echo "  $pkg"
+    done
+
+    echo ""
+
+    if [ ${#missing[@]} -eq 0 ]; then
+        echo -e "${GREEN}✓ All required dependencies are installed!${NC}"
+    else
+        echo -e "${RED}✗ Missing packages: ${#missing[@]}${NC}"
+        for pkg in "${missing[@]}"; do
+            echo "  $pkg"
+        done
+        echo ""
+        echo -n "Do you want to install missing packages? [y/N]: "
+        read -r response
+
+        if [[ "$response" =~ ^[Yy]$ ]]; then
+            echo ""
+            echo -e "${BLUE}Installing missing packages...${NC}"
+            pip install -r "$PROJECT_DIR/requirements.txt"
+            echo ""
+            echo -e "${GREEN}✓ Missing packages installed${NC}"
+        fi
+    fi
+
+    # Check optional dependencies
+    echo ""
+    echo -e "${YELLOW}Checking optional AI audio dependencies...${NC}"
+    if pip show torch &> /dev/null && pip show demucs &> /dev/null; then
+        torch_version=$(pip show torch 2>/dev/null | grep "^Version:" | cut -d' ' -f2)
+        demucs_version=$(pip show demucs 2>/dev/null | grep "^Version:" | cut -d' ' -f2)
+        echo -e "${GREEN}✓ AI audio features installed${NC}"
+        echo "  torch ($torch_version)"
+        echo "  demucs ($demucs_version)"
+    else
+        echo -e "${YELLOW}○ AI audio features not installed (optional)${NC}"
+        echo "  Use option 3 to install them"
+    fi
+}
+
+# Function for full setup
+full_setup() {
+    echo ""
+    echo "========================================="
+    echo "Full Setup"
+    echo "========================================="
+    echo ""
 
 # Step 1: Find or install Python 3.13
 echo -e "${YELLOW}[1/3] Checking for Python 3.13...${NC}"
@@ -230,14 +460,76 @@ python --version
 echo -e "${GREEN}✓ Setup complete!${NC}"
 echo ""
 
-echo "========================================="
-echo -e "${GREEN}Environment setup successful!${NC}"
-echo "========================================="
-echo ""
-echo "To run the application, use:"
-echo -e "  ${BLUE}./run.sh${NC}"
-echo ""
-echo "Or manually activate the environment and run:"
-echo -e "  ${BLUE}source venv/bin/activate${NC}"
-echo -e "  ${BLUE}python main.py${NC}"
-echo ""
+    echo "========================================="
+    echo -e "${GREEN}Environment setup successful!${NC}"
+    echo "========================================="
+    echo ""
+    echo "To run the application, use:"
+    echo -e "  ${BLUE}./run.sh${NC}"
+    echo ""
+    echo "Or manually activate the environment and run:"
+    echo -e "  ${BLUE}source venv/bin/activate${NC}"
+    echo -e "  ${BLUE}python main.py${NC}"
+    echo ""
+}
+
+# Main script execution
+main() {
+    # If script is run with arguments, execute directly
+    case "$1" in
+        --full-setup)
+            full_setup
+            exit 0
+            ;;
+        --update)
+            check_updates
+            exit 0
+            ;;
+        --optional)
+            install_optional
+            exit 0
+            ;;
+        --verify)
+            verify_dependencies
+            exit 0
+            ;;
+    esac
+
+    # Interactive menu mode
+    while true; do
+        show_menu
+        read -r choice
+
+        case $choice in
+            1)
+                full_setup
+                ;;
+            2)
+                check_updates
+                ;;
+            3)
+                install_optional
+                ;;
+            4)
+                verify_dependencies
+                ;;
+            5)
+                echo ""
+                echo -e "${GREEN}Goodbye!${NC}"
+                echo ""
+                exit 0
+                ;;
+            *)
+                echo ""
+                echo -e "${RED}Invalid choice. Please enter 1-5.${NC}"
+                ;;
+        esac
+
+        echo ""
+        echo -n "Press Enter to return to menu..."
+        read -r
+    done
+}
+
+# Run main function
+main "$@"
