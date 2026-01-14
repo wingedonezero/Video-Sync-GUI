@@ -19,11 +19,10 @@ NC='\033[0m' # No Color
 
 # Project directory
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEPS_DIR="$PROJECT_DIR/Dependencies"
-VENV_DIR="$DEPS_DIR/.venv"
+VENV_DIR="$PROJECT_DIR/.venv"
 
 echo -e "${BLUE}Project Directory:${NC} $PROJECT_DIR"
-echo -e "${BLUE}Dependencies will be installed to:${NC} $DEPS_DIR"
+echo -e "${BLUE}Virtual environment:${NC} $VENV_DIR"
 echo ""
 
 # Step 1: Check for uv installation
@@ -44,38 +43,20 @@ fi
 echo -e "${GREEN}✓ uv is installed${NC}"
 echo ""
 
-# Step 2: Create Dependencies directory
-echo -e "${YELLOW}[2/5] Creating Dependencies directory...${NC}"
-mkdir -p "$DEPS_DIR"
-echo -e "${GREEN}✓ Dependencies directory created${NC}"
-echo ""
-
-# Step 3: Install Python 3.13 and create virtual environment
-echo -e "${YELLOW}[3/5] Setting up Python 3.13 environment...${NC}"
+# Step 2: Install Python 3.13 and dependencies using uv sync
+echo -e "${YELLOW}[2/4] Setting up Python 3.13 environment and installing dependencies...${NC}"
 echo "This may take a few minutes on first run..."
 cd "$PROJECT_DIR"
 
-# Create venv with Python 3.13 (uv will use latest available 3.13.x)
-uv venv "$VENV_DIR" --python 3.13
+# Use uv sync to install from pyproject.toml with lock file
+# This ensures correct versions for Python 3.13
+uv sync --python 3.13
 
-echo -e "${GREEN}✓ Virtual environment created${NC}"
+echo -e "${GREEN}✓ Virtual environment created and dependencies installed${NC}"
 echo ""
 
-# Step 4: Install dependencies
-echo -e "${YELLOW}[4/5] Installing dependencies...${NC}"
-echo "This will install all packages from pyproject.toml..."
-
-# Install dependencies directly (read from pyproject.toml)
-uv pip install \
-    PySide6 numpy scipy scikit-learn librosa pysubs2 pyenchant lxml av Pillow \
-    VideoTimestamps imagehash opencv-python ffms2 VapourSynth scenedetect webrtcvad-wheels \
-    --python "$VENV_DIR/bin/python"
-
-echo -e "${GREEN}✓ All dependencies installed${NC}"
-echo ""
-
-# Step 5: Verify installation
-echo -e "${YELLOW}[5/5] Verifying installation...${NC}"
+# Step 3: Verify installation
+echo -e "${YELLOW}[3/4] Verifying installation...${NC}"
 "$VENV_DIR/bin/python" --version
 echo -e "${GREEN}✓ Setup complete!${NC}"
 echo ""
@@ -88,6 +69,6 @@ echo "To run the application, use:"
 echo -e "  ${BLUE}./run.sh${NC}"
 echo ""
 echo "Or manually activate the environment:"
-echo -e "  ${BLUE}source Dependencies/.venv/bin/activate${NC}"
+echo -e "  ${BLUE}source .venv/bin/activate${NC}"
 echo -e "  ${BLUE}python main.py${NC}"
 echo ""
