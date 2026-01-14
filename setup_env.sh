@@ -50,13 +50,13 @@ mkdir -p "$DEPS_DIR"
 echo -e "${GREEN}✓ Dependencies directory created${NC}"
 echo ""
 
-# Step 3: Install Python 3.13.11 and create virtual environment
-echo -e "${YELLOW}[3/5] Setting up Python 3.13.11 environment...${NC}"
+# Step 3: Install Python 3.13 and create virtual environment
+echo -e "${YELLOW}[3/5] Setting up Python 3.13 environment...${NC}"
 echo "This may take a few minutes on first run..."
 cd "$PROJECT_DIR"
 
-# Create venv with specific Python version
-uv venv "$VENV_DIR" --python 3.13.11
+# Create venv with Python 3.13 (uv will use latest available 3.13.x)
+uv venv "$VENV_DIR" --python 3.13
 
 echo -e "${GREEN}✓ Virtual environment created${NC}"
 echo ""
