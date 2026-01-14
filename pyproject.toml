@@ -29,23 +29,32 @@ dependencies = [
 
     # Image Processing
     "Pillow",
+
+    # Frame/Video Timing - REQUIRED for VFR/CFR frame-accurate timing
+    "VideoTimestamps",
+
+    # Frame Matching & Scene Detection
+    "imagehash",              # Perceptual hashing for frame matching
+    "opencv-python",          # Frame extraction fallback
+    "ffms2",                  # Fast frame seeking (100x speedup)
+    "VapourSynth",            # Best performance for frame indexing
+    "scenedetect",            # Scene detection for sync validation
+
+    # Voice Activity Detection - Used in stepping correction
+    "webrtcvad-wheels",
 ]
 
 [project.optional-dependencies]
-video-advanced = [
-    "ffms2",
-    "opencv-python",
+# AI-powered audio separation for cross-language correlation
+# NOTE: For AMD GPUs with ROCm, install torch separately:
+#   pip install torch --index-url https://download.pytorch.org/whl/rocm6.2
+ai-audio-nvidia = [
+    "torch",                  # PyTorch with CUDA support (NVIDIA GPUs)
+    "demucs",                 # AI vocal/instrument separation
 ]
-frame-matching = [
-    "imagehash",
-    "scenedetect",
-]
-ai-audio = [
-    "torch",
+ai-audio-cpu = [
+    "torch",                  # PyTorch CPU-only (slower but works everywhere)
     "demucs",
-]
-voice-detection = [
-    "webrtcvad-wheels",
 ]
 
 [tool.uv]

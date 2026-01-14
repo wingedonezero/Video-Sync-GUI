@@ -80,25 +80,32 @@ source Dependencies/.venv/bin/activate
 uv pip install <package-name>
 ```
 
-## Optional Dependencies
+## Optional AI Audio Separation (Demucs)
 
-Some features require optional dependencies. To install them:
+The base installation includes everything needed for the app. However, if you want AI-powered audio separation for cross-language sync, install one of these:
 
+### For NVIDIA GPUs (CUDA):
 ```bash
 source Dependencies/.venv/bin/activate
-
-# For advanced video features (ffms2, opencv)
-uv pip install -e ".[video-advanced]"
-
-# For frame matching (imagehash, scenedetect)
-uv pip install -e ".[frame-matching]"
-
-# For AI audio separation (torch, demucs) - WARNING: Large download
-uv pip install -e ".[ai-audio]"
-
-# For voice detection
-uv pip install -e ".[voice-detection]"
+uv pip install -e ".[ai-audio-nvidia]"
 ```
+
+### For AMD GPUs (ROCm):
+```bash
+source Dependencies/.venv/bin/activate
+# Install PyTorch with ROCm support first
+pip install torch --index-url https://download.pytorch.org/whl/rocm6.2
+# Then install demucs
+uv pip install demucs
+```
+
+### For CPU only (slower):
+```bash
+source Dependencies/.venv/bin/activate
+uv pip install -e ".[ai-audio-cpu]"
+```
+
+**Note:** Torch + Demucs is a LARGE download (several GB). Only install if you need cross-language audio separation.
 
 ## Troubleshooting
 
