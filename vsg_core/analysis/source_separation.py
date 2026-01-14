@@ -15,6 +15,7 @@ on music/effects which should be identical between releases.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,24 @@ SEPARATION_MODES = {
     'Demucs - Music/Effects (Strip Vocals)': 'no_vocals',
     'Demucs - Vocals Only': 'vocals_only',
 }
+
+
+def _get_venv_python():
+    """
+    Get the correct Python executable from the current virtual environment.
+
+    Falls back to sys.executable if not in a venv, but prioritizes
+    the venv Python to ensure subprocess has access to installed packages.
+    """
+    # Check if we're in a virtual environment
+    if hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
+        # We're in a venv - use the venv Python
+        venv_python = os.path.join(sys.prefix, 'bin', 'python')
+        if os.path.isfile(venv_python):
+            return venv_python
+
+    # Fallback to sys.executable
+    return sys.executable
 
 
 def is_demucs_available() -> Tuple[bool, str]:
@@ -238,10 +257,11 @@ def separate_audio(
             'device': 'cpu' if device == 'cpu' else 'auto'
         }
 
-        # Run subprocess
+        # Run subprocess with venv Python
+        python_exe = _get_venv_python()
         try:
             result = subprocess.run(
-                [sys.executable, str(script_path), json.dumps(args)],
+                [python_exe, str(script_path), json.dumps(args)],
                 capture_output=True,
                 text=True,
                 timeout=timeout_seconds
@@ -251,7 +271,8 @@ def separate_audio(
                 stderr = result.stderr.strip()
                 stdout = result.stdout.strip()
                 log(f"[SOURCE SEPARATION] Subprocess failed with code {result.returncode}")
-                log(f"[SOURCE SEPARATION] Python executable: {sys.executable}")
+                log(f"[SOURCE SEPARATION] Python executable: {python_exe}")
+                log(f"[SOURCE SEPARATION] sys.executable: {sys.executable}")
                 if stderr:
                     log(f"[SOURCE SEPARATION] STDERR: {stderr}")
                 if stdout:
