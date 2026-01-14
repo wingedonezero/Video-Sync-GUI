@@ -249,7 +249,13 @@ def separate_audio(
 
             if result.returncode != 0:
                 stderr = result.stderr.strip()
-                log(f"[SOURCE SEPARATION] Subprocess failed: {stderr[:500]}")
+                stdout = result.stdout.strip()
+                log(f"[SOURCE SEPARATION] Subprocess failed with code {result.returncode}")
+                log(f"[SOURCE SEPARATION] Python executable: {sys.executable}")
+                if stderr:
+                    log(f"[SOURCE SEPARATION] STDERR: {stderr}")
+                if stdout:
+                    log(f"[SOURCE SEPARATION] STDOUT: {stdout}")
                 return None
 
             # Parse result
