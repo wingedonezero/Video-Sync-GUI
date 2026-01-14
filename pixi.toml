@@ -57,9 +57,14 @@ scenedetect = { version = "*", extras = ["opencv"] }
 # Voice Activity Detection
 webrtcvad-wheels = "*"
 
+# Optional AI audio features - install separately if needed:
+# For AMD GPU:    pixi install -e ai-rocm
+# For NVIDIA GPU: pixi install -e ai-nvidia
+# For CPU only:   pixi install -e ai-cpu
+
 [feature.ai-rocm.pypi-dependencies]
 # AI audio separation for AMD GPUs with ROCm
-torch = { version = "*", index = "https://download.pytorch.org/whl/rocm6.2" }
+torch = "*"
 demucs = "*"
 
 [feature.ai-nvidia.pypi-dependencies]
@@ -73,7 +78,7 @@ torch = "*"
 demucs = "*"
 
 [environments]
-default = { solve-group = "default" }
-ai-rocm = { features = ["ai-rocm"], solve-group = "default" }
-ai-nvidia = { features = ["ai-nvidia"], solve-group = "default" }
-ai-cpu = { features = ["ai-cpu"], solve-group = "default" }
+# Each environment is independent - AI features won't interfere with default install
+ai-rocm = { features = ["ai-rocm"] }
+ai-nvidia = { features = ["ai-nvidia"] }
+ai-cpu = { features = ["ai-cpu"] }
