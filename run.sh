@@ -35,10 +35,10 @@ run_in_current_terminal() {
     echo ""
 
     cd "$PROJECT_DIR"
-    source "$VENV_DIR/bin/activate"
 
-    # Run Python and capture exit code
-    python main.py 2>&1
+    # Use venv Python directly to ensure correct environment
+    # This is more reliable than activating and hoping PATH is correct
+    "$VENV_DIR/bin/python" main.py 2>&1
     EXIT_CODE=$?
 
     # Always show exit status and wait
@@ -53,7 +53,7 @@ run_in_current_terminal() {
 }
 
 # Wrapper script for terminal emulators - ensures errors are shown
-WRAPPER_CMD="cd '$PROJECT_DIR' && source '$VENV_DIR/bin/activate' && echo '=========================================' && echo 'Video Sync GUI' && echo '=========================================' && echo '' && echo 'Starting application...' && echo '' && python main.py 2>&1; EXIT_CODE=\$?; echo ''; if [ \$EXIT_CODE -eq 0 ]; then echo -e '${GREEN}Application exited normally${NC}'; else echo -e '${RED}Application exited with error code:' \$EXIT_CODE'${NC}'; fi; echo -e '${YELLOW}Press Enter to close...${NC}'; read"
+WRAPPER_CMD="cd '$PROJECT_DIR' && echo '=========================================' && echo 'Video Sync GUI' && echo '=========================================' && echo '' && echo 'Starting application...' && echo '' && '$VENV_DIR/bin/python' main.py 2>&1; EXIT_CODE=\$?; echo ''; if [ \$EXIT_CODE -eq 0 ]; then echo -e '${GREEN}Application exited normally${NC}'; else echo -e '${RED}Application exited with error code:' \$EXIT_CODE'${NC}'; fi; echo -e '${YELLOW}Press Enter to close...${NC}'; read"
 
 # If running from a terminal, just run it
 if [ -t 0 ]; then

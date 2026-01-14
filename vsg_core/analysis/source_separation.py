@@ -36,17 +36,25 @@ def _get_venv_python():
     """
     Get the correct Python executable from the current virtual environment.
 
-    Falls back to sys.executable if not in a venv, but prioritizes
-    the venv Python to ensure subprocess has access to installed packages.
+    When running from a properly activated venv, sys.executable already points
+    to the venv Python, so we can just use it directly.
+
+    As a backup, we also check for a .venv directory in the project root.
     """
+    # First priority: if we're running from a venv, sys.executable is correct
     # Check if we're in a virtual environment
     if hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
-        # We're in a venv - use the venv Python
-        venv_python = os.path.join(sys.prefix, 'bin', 'python')
-        if os.path.isfile(venv_python):
-            return venv_python
+        # We're in a venv - sys.executable should point to it
+        return sys.executable
 
-    # Fallback to sys.executable
+    # Backup: Look for .venv in the project directory
+    # (In case the app was launched without properly activating the venv)
+    project_root = Path(__file__).resolve().parent.parent.parent
+    venv_python = project_root / '.venv' / 'bin' / 'python'
+    if venv_python.is_file():
+        return str(venv_python)
+
+    # Last resort: use whatever Python we're running with
     return sys.executable
 
 
@@ -259,6 +267,8 @@ def separate_audio(
 
         # Run subprocess with venv Python
         python_exe = _get_venv_python()
+        log(f"[SOURCE SEPARATION] Using Python: {python_exe}")
+
         try:
             result = subprocess.run(
                 [python_exe, str(script_path), json.dumps(args)],
