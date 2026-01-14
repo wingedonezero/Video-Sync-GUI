@@ -217,11 +217,12 @@ install_optional() {
     echo "Select your hardware:"
     echo ""
     echo -e "  ${CYAN}1)${NC} NVIDIA GPU (CUDA)"
-    echo -e "  ${CYAN}2)${NC} AMD GPU (ROCm)"
-    echo -e "  ${CYAN}3)${NC} CPU only (slower but works everywhere)"
-    echo -e "  ${CYAN}4)${NC} Cancel"
+    echo -e "  ${CYAN}2)${NC} AMD GPU (ROCm 6.4 - Stable)"
+    echo -e "  ${CYAN}3)${NC} AMD GPU (ROCm 7.1 - Latest/Nightly)"
+    echo -e "  ${CYAN}4)${NC} CPU only (slower but works everywhere)"
+    echo -e "  ${CYAN}5)${NC} Cancel"
     echo ""
-    echo -n "Enter your choice [1-4]: "
+    echo -n "Enter your choice [1-5]: "
     read -r hw_choice
 
     case $hw_choice in
@@ -234,19 +235,26 @@ install_optional() {
             ;;
         2)
             echo ""
-            echo -e "${BLUE}Installing PyTorch (AMD ROCm) + Demucs...${NC}"
-            pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.2
+            echo -e "${BLUE}Installing PyTorch (AMD ROCm 6.4 Stable) + Demucs...${NC}"
+            pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.4
             pip install demucs
-            echo -e "${GREEN}✓ AMD GPU (ROCm) support installed${NC}"
+            echo -e "${GREEN}✓ AMD GPU (ROCm 6.4) support installed${NC}"
             ;;
         3)
+            echo ""
+            echo -e "${BLUE}Installing PyTorch (AMD ROCm 7.1 Nightly) + Demucs...${NC}"
+            pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/rocm7.1
+            pip install demucs
+            echo -e "${GREEN}✓ AMD GPU (ROCm 7.1) support installed${NC}"
+            ;;
+        4)
             echo ""
             echo -e "${BLUE}Installing PyTorch (CPU only) + Demucs...${NC}"
             pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
             pip install demucs
             echo -e "${GREEN}✓ CPU-only support installed${NC}"
             ;;
-        4)
+        5)
             echo -e "${YELLOW}Installation cancelled${NC}"
             return 0
             ;;
