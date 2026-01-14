@@ -22,3 +22,8 @@ PHANTOM_SIGNS_TRACK_PLAN.md
 
 # Self-contained Python environment
 Dependencies/
+.venv/
+
+# Pixi
+.pixi/
+pixi.lock

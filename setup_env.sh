@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Video Sync GUI - Environment Setup Script
-# This script sets up a self-contained Python environment with all dependencies
+# This script sets up a self-contained Python environment with all dependencies using pixi
 
 set -e  # Exit on error
 
@@ -19,45 +19,42 @@ NC='\033[0m' # No Color
 
 # Project directory
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_DIR="$PROJECT_DIR/.venv"
 
 echo -e "${BLUE}Project Directory:${NC} $PROJECT_DIR"
-echo -e "${BLUE}Virtual environment:${NC} $VENV_DIR"
 echo ""
 
-# Step 1: Check for uv installation
-echo -e "${YELLOW}[1/5] Checking for uv...${NC}"
-if ! command -v uv &> /dev/null; then
-    echo -e "${YELLOW}uv not found. Installing uv...${NC}"
-    curl -LsSf https://astral.sh/uv/install.sh | sh
+# Step 1: Check for pixi installation
+echo -e "${YELLOW}[1/3] Checking for pixi...${NC}"
+if ! command -v pixi &> /dev/null; then
+    echo -e "${YELLOW}pixi not found. Installing pixi...${NC}"
+    curl -fsSL https://pixi.sh/install.sh | bash
 
-    # Add uv to PATH for this session
-    export PATH="$HOME/.cargo/bin:$PATH"
+    # Add pixi to PATH for this session
+    export PATH="$HOME/.pixi/bin:$PATH"
 
-    if ! command -v uv &> /dev/null; then
-        echo -e "${RED}Failed to install uv. Please install manually:${NC}"
-        echo "  curl -LsSf https://astral.sh/uv/install.sh | sh"
+    if ! command -v pixi &> /dev/null; then
+        echo -e "${RED}Failed to install pixi. Please install manually:${NC}"
+        echo "  curl -fsSL https://pixi.sh/install.sh | bash"
         exit 1
     fi
 fi
-echo -e "${GREEN}✓ uv is installed${NC}"
+echo -e "${GREEN}✓ pixi is installed${NC}"
 echo ""
 
-# Step 2: Install Python 3.13 and dependencies using uv sync
-echo -e "${YELLOW}[2/4] Setting up Python 3.13 environment and installing dependencies...${NC}"
+# Step 2: Install Python 3.13 and dependencies using pixi
+echo -e "${YELLOW}[2/3] Setting up Python 3.13 environment and installing dependencies...${NC}"
 echo "This may take a few minutes on first run..."
 cd "$PROJECT_DIR"
 
-# Use uv sync to install from pyproject.toml with lock file
-# This ensures correct versions for Python 3.13
-uv sync --python 3.13
+# Install all dependencies with pixi
+pixi install
 
-echo -e "${GREEN}✓ Virtual environment created and dependencies installed${NC}"
+echo -e "${GREEN}✓ Environment and dependencies installed${NC}"
 echo ""
 
 # Step 3: Verify installation
-echo -e "${YELLOW}[3/4] Verifying installation...${NC}"
-"$VENV_DIR/bin/python" --version
+echo -e "${YELLOW}[3/3] Verifying installation...${NC}"
+pixi run python --version
 echo -e "${GREEN}✓ Setup complete!${NC}"
 echo ""
 
@@ -68,7 +65,10 @@ echo ""
 echo "To run the application, use:"
 echo -e "  ${BLUE}./run.sh${NC}"
 echo ""
-echo "Or manually activate the environment:"
-echo -e "  ${BLUE}source .venv/bin/activate${NC}"
+echo "Or manually run with pixi:"
+echo -e "  ${BLUE}pixi run start${NC}"
+echo ""
+echo "Or activate the environment and run:"
+echo -e "  ${BLUE}pixi shell${NC}"
 echo -e "  ${BLUE}python main.py${NC}"
 echo ""
