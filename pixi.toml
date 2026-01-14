@@ -11,41 +11,35 @@ start = "python main.py"
 [dependencies]
 python = ">=3.13,<3.14"
 
-# Core GUI Framework
+# Core GUI Framework (conda-forge)
 pyside6 = "*"
 
-# Scientific Computing & Analysis
+# Scientific Computing & Analysis (conda-forge)
 numpy = "*"
 scipy = "*"
 scikit-learn = "*"
 
-# Audio Analysis - REQUIRED for correlation, onset detection, DTW, spectrogram analysis
+# Audio Analysis (conda-forge)
 librosa = "*"
 numba = ">=0.61.0"
 llvmlite = ">=0.43.0"
 
-# Subtitle Processing
-pysubs2 = "*"
-
-# Spell Checking
-pyenchant = "*"
-
-# XML Processing
+# XML Processing (conda-forge)
 lxml = "*"
 
-# Video/Audio Processing
+# Video/Audio Processing (conda-forge)
 av = "*"
 
-# Image Processing
+# Image Processing (conda-forge)
 pillow = "*"
-
-# Frame Matching & Scene Detection
-imagehash = "*"
 opencv = "*"
-scenedetect = "*"
 
 [pypi-dependencies]
-# Packages not available or better from PyPI
+# Packages only available on PyPI
+pysubs2 = "*"
+pyenchant = "*"
+imagehash = "*"
+scenedetect = { version = "*", extras = ["opencv"] }
 VideoTimestamps = "*"
 ffms2 = "*"
 VapourSynth = "*"
