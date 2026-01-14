@@ -51,16 +51,24 @@ VideoTimestamps = "*"
 imagehash = "*"
 opencv-python = "*"
 ffms2 = "*"
-VapourSynth = "*"
 scenedetect = { version = "*", extras = ["opencv"] }
 
 # Voice Activity Detection
 webrtcvad-wheels = "*"
 
-# Optional AI audio features - install separately if needed:
-# For AMD GPU:    pixi install -e ai-rocm
-# For NVIDIA GPU: pixi install -e ai-nvidia
-# For CPU only:   pixi install -e ai-cpu
+# Optional features - install separately if needed:
+# VapourSynth (requires system libvapoursynth):
+#   sudo pacman -S vapoursynth  # Install system package first
+#   pixi install -e vapoursynth
+# AI audio separation:
+#   pixi install -e ai-rocm     # For AMD GPU
+#   pixi install -e ai-nvidia   # For NVIDIA GPU
+#   pixi install -e ai-cpu      # For CPU only
+
+[feature.vapoursynth.pypi-dependencies]
+# High-performance frame indexing (requires system VapourSynth library)
+# Note: Fails if project path contains spaces - use system package instead
+VapourSynth = "*"
 
 [feature.ai-rocm.pypi-dependencies]
 # AI audio separation for AMD GPUs with ROCm
@@ -78,7 +86,8 @@ torch = "*"
 demucs = "*"
 
 [environments]
-# Each environment is independent - AI features won't interfere with default install
+# Each environment is independent - optional features won't interfere with default install
+vapoursynth = { features = ["vapoursynth"] }
 ai-rocm = { features = ["ai-rocm"] }
 ai-nvidia = { features = ["ai-nvidia"] }
 ai-cpu = { features = ["ai-cpu"] }
