@@ -69,16 +69,18 @@ install_python_conda() {
     # Check if conda is available
     if command -v conda &> /dev/null; then
         echo -e "${BLUE}Found conda, installing Python 3.13...${NC}"
-        # Try specific version first, fall back to 3.13.* if not available
-        if conda install -y python=3.13.11 -c conda-forge 2>/dev/null || \
-           conda install -y "python>=3.13,<3.14" -c conda-forge; then
+
+        # Use only conda-forge to avoid TOS issues with default channels
+        # Also disable default channels with --override-channels
+        if conda install -y python=3.13.11 --override-channels -c conda-forge 2>/dev/null || \
+           conda install -y "python>=3.13,<3.14" --override-channels -c conda-forge; then
             return 0
         else
             return 1
         fi
     elif command -v mamba &> /dev/null; then
         echo -e "${BLUE}Found mamba, installing Python 3.13...${NC}"
-        # Try specific version first, fall back to 3.13.* if not available
+        # Mamba doesn't have the same TOS restrictions, but use conda-forge anyway
         if mamba install -y python=3.13.11 -c conda-forge 2>/dev/null || \
            mamba install -y "python>=3.13,<3.14" -c conda-forge; then
             return 0
