@@ -45,7 +45,7 @@ The Python implementation suffers from:
 - **Identical UI** using libcosmic (Iced-based)
 - **Same output formats** (logs, JSON, temp files)
 - **Preserve all business logic** and special cases
-- **Embedded Python 3.13.x** only for unavoidable dependencies (librosa, demucs, torch)
+- **Minimal Python dependency** - only for source separation (demucs/torch), everything else pure Rust
 
 ### 1.3 Non-Goals
 
@@ -239,11 +239,7 @@ video-sync-gui/
 │   │   │   ├── signature.rs
 │   │   │   └── validation.rs
 │   │   │
-│   │   ├── job_discovery.rs
-│   │   │
-│   │   └── system/
-│   │       ├── mod.rs
-│   │       └── gpu_env.rs      # GPU environment detection
+│   │   └── job_discovery.rs
 │   │
 │   ├── ui/                     # vsg_qt equivalent (libcosmic)
 │   │   ├── mod.rs
@@ -310,13 +306,11 @@ video-sync-gui/
 │   │       ├── runner.rs       # Background job execution
 │   │       └── signals.rs      # Thread communication
 │   │
-│   └── python/                 # Python embedding
+│   └── python/                 # Python embedding (optional)
 │       ├── mod.rs
-│       ├── bridge.rs           # PyO3 bridge
-│       └── scripts/            # Embedded Python scripts
-│           ├── audio_analysis.py
-│           ├── source_separation.py
-│           └── ocr_engine.py
+│       ├── bridge.rs           # PyO3 bridge for source separation
+│       └── scripts/
+│           └── source_separation.py  # Only Python dependency
 │
 ├── python/                     # Bundled Python 3.13.x
 │   └── (embedded python runtime)
@@ -487,38 +481,59 @@ pub struct Context {
 |--------|------|-------|
 | lxml | **quick-xml** or **roxmltree** | XML parsing |
 
-### 4.12 REQUIRES PYTHON (Embedded)
+### 4.12 Audio Analysis (Rust Replacements for librosa)
+
+| Python (librosa) | Rust Crate | Notes |
+|------------------|------------|-------|
+| onset_strength | **aubio-rs** | Bindings to aubio library |
+| mfcc | **mfcc** or custom | Mel-frequency cepstral coefficients |
+| dtw | **dtw** | Dynamic time warping |
+| melspectrogram | **mel-spec** or custom | Use rustfft + mel filterbank |
+| power_to_db | Custom | Simple math conversion |
+
+### 4.13 Voice Activity Detection (Rust Replacement for webrtcvad)
+
+| Python | Rust | Notes |
+|--------|------|-------|
+| webrtcvad | **webrtc-vad** | Rust bindings to same underlying C library |
+
+### 4.14 REQUIRES PYTHON (Embedded) - Minimal
 
 | Library | Purpose | Why Python Required |
 |---------|---------|---------------------|
-| **librosa** | Audio analysis, onset detection, MFCC, DTW | Complex DSP algorithms |
-| **demucs** | AI source separation (vocal isolation) | PyTorch model |
-| **torch** | Neural network inference | GPU acceleration |
-| **webrtcvad** | Voice activity detection | C++ bindings via Python |
+| **demucs** | AI source separation (vocal isolation) | PyTorch model, no Rust equivalent |
+| **torch** | Neural network inference for demucs | GPU acceleration |
+
+**Note:** Python embedding is ONLY needed if source separation feature is used. All other audio analysis can be pure Rust.
 
 ---
 
 ## 5. Python Integration Strategy
 
-### 5.1 Embedded Python 3.13.x
+### 5.1 Minimal Python Embedding (Source Separation Only)
 
-We will embed a complete Python 3.13.x runtime for unavoidable dependencies.
+Python is **ONLY** required for the source separation feature (demucs/torch).
+All other functionality can be pure Rust.
 
-**Location:** `python/` directory in the distribution
+**When Python is needed:**
+- User enables source separation in settings
+- demucs model requires PyTorch for inference
+
+**Location:** `python/` directory in the distribution (optional component)
 
 **Crate:** `pyo3` for Rust-Python interop
 
 ### 5.2 Python Bridge Architecture
 
 ```rust
-// src/python/bridge.rs
+// src/python/bridge.rs (only for source separation)
 use pyo3::prelude::*;
 
-pub struct PythonBridge {
-    // Holds the Python GIL and manages calls
+pub struct SourceSeparationBridge {
+    // Lazy-initialized only when source separation is requested
 }
 
-impl PythonBridge {
+impl SourceSeparationBridge {
     pub fn new() -> PyResult<Self> {
         pyo3::prepare_freethreaded_python();
         Ok(Self {})
@@ -537,42 +552,31 @@ impl PythonBridge {
             // ... call Python function
         })
     }
-
-    pub fn run_librosa_analysis(
-        &self,
-        audio_data: &[f32],
-        sample_rate: u32,
-        method: &str,
-    ) -> PyResult<AnalysisResult> {
-        // Similar pattern
-    }
 }
 ```
 
 ### 5.3 Functions Requiring Python
 
-1. **Source Separation** (demucs)
+1. **Source Separation** (demucs) - **ONLY unavoidable Python dependency**
    - `apply_source_separation(ref_pcm, tgt_pcm, sr, config)`
+   - Requires torch, demucs packages
 
-2. **Advanced Audio Analysis** (librosa)
-   - `_find_delay_onset()` - Onset detection envelope correlation
-   - `_find_delay_dtw()` - Dynamic time warping on MFCC
-   - `_find_delay_spectrogram()` - Mel spectrogram correlation
-   - MFCC feature extraction
+### 5.4 Pure Rust Implementations (No Python Needed)
 
-3. **Voice Activity Detection** (webrtcvad)
-   - Used in stepping correction
-   - Speech protection during boundary detection
+**Audio Correlation:**
+- `_find_delay_gcc_phat()` - GCC-PHAT correlation (rustfft)
+- `_find_delay_scc()` - Standard cross-correlation (rustfft)
+- `_find_delay_gcc_scot()` - GCC-SCOT correlation (rustfft)
+- Butterworth/band-pass filtering (biquad crate)
 
-### 5.4 Pure Rust Alternatives (Avoid Python)
+**Audio Analysis (replaces librosa):**
+- Onset detection - aubio-rs crate
+- MFCC extraction - mfcc crate or custom
+- DTW alignment - dtw crate
+- Mel spectrogram - rustfft + custom mel filterbank
 
-These CAN be implemented in pure Rust:
-- `_find_delay_gcc_phat()` - GCC-PHAT correlation
-- `_find_delay_scc()` - Standard cross-correlation
-- `_find_delay_gcc_scot()` - GCC-SCOT correlation
-- Butterworth filtering
-- Band-pass filtering
-- Basic onset detection (simplified)
+**Voice Activity Detection (replaces webrtcvad):**
+- webrtc-vad crate - Rust bindings to same C library
 
 ---
 
@@ -1000,14 +1004,16 @@ When filtering styles:
 
 ### 8.6 Correlation Method Selection
 
-| Method | Rust | Python |
-|--------|------|--------|
-| Standard (SCC) | Yes | No |
-| GCC-PHAT | Yes | No |
-| GCC-SCOT | Yes | No |
-| Onset Detection | No | Yes (librosa) |
-| DTW | No | Yes (librosa) |
-| Spectrogram | No | Yes (librosa) |
+| Method | Implementation | Crate |
+|--------|----------------|-------|
+| Standard (SCC) | Pure Rust | rustfft |
+| GCC-PHAT | Pure Rust | rustfft |
+| GCC-SCOT | Pure Rust | rustfft |
+| Onset Detection | Pure Rust | aubio-rs |
+| DTW | Pure Rust | dtw |
+| Spectrogram | Pure Rust | rustfft + custom |
+
+**All correlation methods can be implemented in pure Rust.**
 
 ### 8.7 Language Normalization
 
@@ -1126,19 +1132,28 @@ cargo test
 cargo run --release
 ```
 
-### 10.3 Embedding Python
+### 10.3 Python Embedding (Optional - Source Separation Only)
 
-The build.rs script will:
-1. Download Python 3.13.x if not present
-2. Set up virtual environment
-3. Install required packages (librosa, demucs, torch, webrtcvad)
-4. Bundle with the binary
+Python is only needed if the source separation feature is used.
+
+**If source separation is enabled:**
+1. Download Python 3.13.x standalone build
+2. Install demucs and torch packages
+3. Bundle as optional component
+
+**Without source separation:**
+- Pure Rust binary, no Python needed
 
 ### 10.4 Distribution
 
-The release artifact will include:
+**Minimal distribution (no source separation):**
 - Single binary executable
-- Bundled Python runtime with dependencies
+- Resource files (icons)
+
+**Full distribution (with source separation):**
+- Single binary executable
+- Bundled Python 3.13.x runtime
+- demucs/torch packages
 - Resource files (icons)
 
 ---
@@ -1176,12 +1191,15 @@ The release artifact will include:
 
 #### Core - Analysis
 - [ ] Audio decoding
-- [ ] SCC correlation
-- [ ] GCC-PHAT correlation
-- [ ] GCC-SCOT correlation
-- [ ] Python bridge for librosa methods
+- [ ] SCC correlation (rustfft)
+- [ ] GCC-PHAT correlation (rustfft)
+- [ ] GCC-SCOT correlation (rustfft)
+- [ ] Onset detection (aubio-rs)
+- [ ] DTW alignment (dtw crate)
+- [ ] Mel spectrogram (rustfft + custom)
+- [ ] Voice activity detection (webrtc-vad)
 - [ ] Drift detection
-- [ ] Source separation (Python bridge)
+- [ ] Source separation (Python bridge - optional)
 
 #### Core - Correction
 - [ ] Linear drift correction
@@ -1217,8 +1235,7 @@ The release artifact will include:
 - [ ] Finalizer
 
 #### Integration
-- [ ] Python embedding
-- [ ] GPU environment detection
+- [ ] Python embedding (optional, for source separation only)
 - [ ] End-to-end testing
 
 ### 11.2 Notes for Updates
