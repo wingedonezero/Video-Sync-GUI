@@ -1,27 +1,34 @@
+# Rust build artifacts
+/target/
+Cargo.lock
 
-todo.txt
+# Python embedded runtime (downloaded at build time)
+/python/
 
-docs/LibreOffice Writer.odt
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
 
-Text File.txt
+# OS
+.DS_Store
+Thumbs.db
 
-docs/ARCHITECTURE.odt
-
-.todo.txt.kate-swp
-
-# User settings
+# Application runtime directories
+/sync_output/
+/temp_work/
+/logs/
 settings.json
 
-# Python cache
-__pycache__/
-*.py[cod]
-*$py.class
+# Build artifacts
+*.pdb
+*.exe
+*.dll
 *.so
-.Python
-PHANTOM_SIGNS_TRACK_PLAN.md
+*.dylib
 
-# Self-contained Python environment
-Dependencies/
-.venv/
-venv/
-.python/
+# Test files
+*.test.mkv
+*.test.mp4
