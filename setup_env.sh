@@ -42,12 +42,20 @@ check_python_version() {
         # Check version
         local version=$("$python_cmd" --version 2>&1 | grep -oP '\d+\.\d+\.\d+')
         if [[ "$version" == 3.13.* ]]; then
-            # Verify Python actually works by running a simple command
-            if "$python_cmd" -c "import sys; print('OK')" &> /dev/null; then
-                echo "$python_cmd"
-                return 0
+            # Verify Python actually works by running multiple checks
+            if "$python_cmd" -c "import sys, encodings; print('OK')" &> /dev/null; then
+                # Also verify it can create a basic venv
+                local test_venv="/tmp/test_venv_$$"
+                if "$python_cmd" -m venv "$test_venv" 2>/dev/null; then
+                    rm -rf "$test_venv"
+                    echo "$python_cmd"
+                    return 0
+                else
+                    rm -rf "$test_venv" 2>/dev/null
+                    echo -e "${YELLOW}Warning: $python_cmd version $version found but cannot create venv, skipping...${NC}" >&2
+                fi
             else
-                echo -e "${YELLOW}Warning: $python_cmd version $version found but appears broken, skipping...${NC}" >&2
+                echo -e "${YELLOW}Warning: $python_cmd version $version found but appears broken (missing encodings), skipping...${NC}" >&2
             fi
         fi
     fi
@@ -357,12 +365,20 @@ echo -e "${YELLOW}[1/3] Checking for Python 3.13...${NC}"
 PYTHON_CMD=""
 
 # Initialize conda if it exists but isn't in PATH
-if [ -z "$(command -v conda)" ] && [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
-    source "$HOME/miniconda3/etc/profile.d/conda.sh"
-elif [ -z "$(command -v conda)" ] && [ -f "$HOME/anaconda3/etc/profile.d/conda.sh" ]; then
-    source "$HOME/anaconda3/etc/profile.d/conda.sh"
-elif [ -z "$(command -v conda)" ] && [ -f "/opt/conda/etc/profile.d/conda.sh" ]; then
-    source "/opt/conda/etc/profile.d/conda.sh"
+# Try common conda installation paths
+if [ -z "$(command -v conda)" ]; then
+    for conda_path in \
+        "$HOME/miniconda3/etc/profile.d/conda.sh" \
+        "$HOME/anaconda3/etc/profile.d/conda.sh" \
+        "/opt/conda/etc/profile.d/conda.sh" \
+        "/opt/miniconda3/etc/profile.d/conda.sh" \
+        "$HOME/.conda/etc/profile.d/conda.sh"; do
+        if [ -f "$conda_path" ]; then
+            echo -e "${BLUE}Found conda at: $conda_path${NC}"
+            source "$conda_path"
+            break
+        fi
+    done
 fi
 
 # First, try to install via conda if available (preferred method)
@@ -423,20 +439,50 @@ echo -e "${BLUE}Creating virtual environment at: $VENV_DIR${NC}"
 
 # Try creating venv with pip first
 if "$PYTHON_CMD" -m venv "$VENV_DIR" 2>/dev/null; then
-    echo -e "${GREEN}✓ Virtual environment created with pip${NC}"
+    echo -e "${GREEN}✓ Virtual environment created${NC}"
 else
     # If that fails (missing ensurepip), create without pip and install manually
     echo -e "${YELLOW}ensurepip not available, creating venv without pip...${NC}"
-    "$PYTHON_CMD" -m venv --without-pip "$VENV_DIR"
+    if ! "$PYTHON_CMD" -m venv --without-pip "$VENV_DIR" 2>/dev/null; then
+        echo -e "${RED}Failed to create virtual environment${NC}"
+        echo -e "${YELLOW}The Python installation appears to be broken or incomplete${NC}"
+        echo ""
+        echo "Attempting to download and install a working Python 3.13..."
+
+        # Remove the broken venv if it exists
+        [ -d "$VENV_DIR" ] && rm -rf "$VENV_DIR"
+
+        # Try standalone Python installation
+        if PYTHON_CMD=$(install_python_standalone); then
+            echo -e "${GREEN}✓ Installed working Python: $PYTHON_CMD${NC}"
+            # Try creating venv again with the new Python
+            if ! "$PYTHON_CMD" -m venv "$VENV_DIR" 2>/dev/null; then
+                echo -e "${RED}Still unable to create virtual environment${NC}"
+                exit 1
+            fi
+        else
+            echo -e "${RED}Failed to install a working Python${NC}"
+            exit 1
+        fi
+    fi
 
     # Activate and install pip manually
     source "$VENV_DIR/bin/activate"
 
+    # Verify venv actually works
+    if ! python -c "import sys; sys.exit(0)" 2>/dev/null; then
+        echo -e "${RED}Virtual environment is broken${NC}"
+        exit 1
+    fi
+
     echo -e "${BLUE}Installing pip manually...${NC}"
-    curl -sS https://bootstrap.pypa.io/get-pip.py | python
+    if ! curl -sS https://bootstrap.pypa.io/get-pip.py | python; then
+        echo -e "${RED}Failed to install pip${NC}"
+        exit 1
+    fi
 
     if ! command -v pip &> /dev/null; then
-        echo -e "${RED}Failed to install pip${NC}"
+        echo -e "${RED}pip is not available after installation${NC}"
         exit 1
     fi
     echo -e "${GREEN}✓ pip installed successfully${NC}"
@@ -444,6 +490,13 @@ fi
 
 # Activate virtual environment
 source "$VENV_DIR/bin/activate"
+
+# Verify the venv is actually working and isolated
+if python -c "import sys; sys.exit(0 if 'site-packages' not in sys.prefix or sys.prefix.startswith('$VENV_DIR') else 1)" 2>/dev/null; then
+    echo -e "${GREEN}✓ Virtual environment activated${NC}"
+else
+    echo -e "${RED}Warning: Virtual environment may not be properly isolated${NC}"
+fi
 
 # Upgrade pip
 echo -e "${BLUE}Upgrading pip...${NC}"
