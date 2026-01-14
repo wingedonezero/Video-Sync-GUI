@@ -29,6 +29,10 @@ class OptionsLogic:
         if isinstance(widget, (QSpinBox, QDoubleSpinBox)):
             return widget.value()
         if isinstance(widget, QComboBox):
+            # If the combo has custom data stored, return that instead of text
+            data = widget.currentData()
+            if data is not None:
+                return data
             return widget.currentText()
         # Composite [QWidget] with (QLineEdit, QPushButton) for file/dir pickers
         if isinstance(widget, QWidget) and widget.layout() and isinstance(widget.layout().itemAt(0).widget(), QLineEdit):
@@ -55,7 +59,13 @@ class OptionsLogic:
             except (ValueError, TypeError):
                 pass  # Keep current value if coercion fails
         elif isinstance(widget, QComboBox):
-            widget.setCurrentText(str(value))
+            # Try to find item by data first (for combos with stored integer/data values)
+            index = widget.findData(value)
+            if index >= 0:
+                widget.setCurrentIndex(index)
+            else:
+                # Fallback to text matching for combos without custom data
+                widget.setCurrentText(str(value))
         elif isinstance(widget, QLineEdit):
             widget.setText(str(value))
         elif isinstance(widget, QWidget) and widget.layout() and isinstance(widget.layout().itemAt(0).widget(), QLineEdit):

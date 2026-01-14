@@ -1187,7 +1187,8 @@ class SubtitleSyncTab(QWidget):
         )
 
         self.widgets['duration_align_validate_points'] = QComboBox()
-        self.widgets['duration_align_validate_points'].addItems(['1 point (fast)', '3 points (thorough)'])
+        self.widgets['duration_align_validate_points'].addItem('1 point (fast)', 1)  # Store integer value
+        self.widgets['duration_align_validate_points'].addItem('3 points (thorough)', 3)  # Store integer value
         self.widgets['duration_align_validate_points'].setCurrentIndex(1)  # Default to 3 points
         self.widgets['duration_align_validate_points'].setToolTip(
             "Number of checkpoints to validate:\n\n"
