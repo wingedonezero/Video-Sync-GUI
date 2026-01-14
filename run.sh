@@ -12,12 +12,20 @@ NC='\033[0m' # No Color
 
 # Project directory
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_DIR="$PROJECT_DIR/.venv"
-PYTHON_BIN="$VENV_DIR/bin/python"
 
-# Check if environment is set up
-if [ ! -f "$PYTHON_BIN" ]; then
-    echo -e "${RED}Error: Environment not set up!${NC}"
+# Check if pixi is installed and environment is set up
+if ! command -v pixi &> /dev/null; then
+    echo -e "${RED}Error: pixi not found!${NC}"
+    echo ""
+    echo "Please run the setup script first:"
+    echo -e "  ${BLUE}./setup_env.sh${NC}"
+    echo ""
+    exit 1
+fi
+
+# Check if pixi.toml exists
+if [ ! -f "$PROJECT_DIR/pixi.toml" ]; then
+    echo -e "${RED}Error: pixi.toml not found!${NC}"
     echo ""
     echo "Please run the setup script first:"
     echo -e "  ${BLUE}./setup_env.sh${NC}"
@@ -36,7 +44,7 @@ run_in_current_terminal() {
     echo ""
 
     cd "$PROJECT_DIR"
-    "$PYTHON_BIN" main.py
+    pixi run python main.py
 
     # Keep terminal open on error
     EXIT_CODE=$?
@@ -56,22 +64,22 @@ else
     # Detect available terminal emulator
     if command -v konsole &> /dev/null; then
         # KDE Konsole
-        konsole --hold -e bash -c "cd '$PROJECT_DIR' && '$PYTHON_BIN' main.py || (echo -e '\n${RED}Error occurred. Press Enter to close...${NC}' && read)"
+        konsole --hold -e bash -c "cd '$PROJECT_DIR' && pixi run python main.py || (echo -e '\n${RED}Error occurred. Press Enter to close...${NC}' && read)"
     elif command -v gnome-terminal &> /dev/null; then
         # GNOME Terminal
-        gnome-terminal -- bash -c "cd '$PROJECT_DIR' && '$PYTHON_BIN' main.py || (echo -e '\n${RED}Error occurred. Press Enter to close...${NC}' && read); exec bash"
+        gnome-terminal -- bash -c "cd '$PROJECT_DIR' && pixi run python main.py || (echo -e '\n${RED}Error occurred. Press Enter to close...${NC}' && read); exec bash"
     elif command -v xfce4-terminal &> /dev/null; then
         # XFCE Terminal
-        xfce4-terminal --hold -e "bash -c \"cd '$PROJECT_DIR' && '$PYTHON_BIN' main.py\""
+        xfce4-terminal --hold -e "bash -c \"cd '$PROJECT_DIR' && pixi run python main.py\""
     elif command -v alacritty &> /dev/null; then
         # Alacritty
-        alacritty --hold -e bash -c "cd '$PROJECT_DIR' && '$PYTHON_BIN' main.py"
+        alacritty --hold -e bash -c "cd '$PROJECT_DIR' && pixi run python main.py"
     elif command -v kitty &> /dev/null; then
         # Kitty
-        kitty --hold bash -c "cd '$PROJECT_DIR' && '$PYTHON_BIN' main.py"
+        kitty --hold bash -c "cd '$PROJECT_DIR' && pixi run python main.py"
     elif command -v xterm &> /dev/null; then
         # xterm (fallback)
-        xterm -hold -e bash -c "cd '$PROJECT_DIR' && '$PYTHON_BIN' main.py"
+        xterm -hold -e bash -c "cd '$PROJECT_DIR' && pixi run python main.py"
     else
         # No terminal found, run in current shell
         echo -e "${YELLOW}No suitable terminal emulator found. Running in current shell...${NC}"
