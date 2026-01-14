@@ -87,7 +87,7 @@ The base installation includes everything needed for the app. However, if you wa
 ### For NVIDIA GPUs (CUDA):
 ```bash
 source Dependencies/.venv/bin/activate
-uv pip install -e ".[ai-audio-nvidia]"
+uv pip install torch demucs
 ```
 
 ### For AMD GPUs (ROCm):
@@ -102,7 +102,8 @@ uv pip install demucs
 ### For CPU only (slower):
 ```bash
 source Dependencies/.venv/bin/activate
-uv pip install -e ".[ai-audio-cpu]"
+# Install CPU-only PyTorch
+uv pip install torch demucs --index-url https://download.pytorch.org/whl/cpu
 ```
 
 **Note:** Torch + Demucs is a LARGE download (several GB). Only install if you need cross-language audio separation.

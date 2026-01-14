@@ -60,7 +60,3 @@ ai-audio-cpu = [
 [tool.uv]
 # Use a local directory for the Python installation
 python-downloads = "manual"
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
