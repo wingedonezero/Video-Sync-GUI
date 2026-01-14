@@ -4,7 +4,7 @@
 
 After the Arch Linux Python update, many packages became incompatible with the system Python. This setup creates a **completely self-contained environment** with:
 
-- Python 3.13.11 (downloaded and installed locally in your project)
+- Python 3.13.x (downloaded and installed locally in your project)
 - All dependencies installed in `Dependencies/.venv`
 - No interference with system Python
 - Easy to run without manual activation
@@ -30,7 +30,7 @@ Think of it as "Cargo for Python" but specifically designed for Python's ecosyst
 
    This will:
    - Install `uv` if you don't have it
-   - Download Python 3.13.11 locally
+   - Download Python 3.13.x locally (latest available)
    - Create a virtual environment in `Dependencies/.venv`
    - Install all dependencies from `pyproject.toml`
 
@@ -135,7 +135,7 @@ Dependencies/.venv/bin/python -c "import PySide6; print('PySide6 OK')"
 ```
 Video-Sync-GUI/
 ├── Dependencies/              # Self-contained environment (gitignored)
-│   └── .venv/                # Virtual environment with Python 3.13.11
+│   └── .venv/                # Virtual environment with Python 3.13.x
 │       ├── bin/              # Python executable and scripts
 │       ├── lib/              # All installed packages
 │       └── ...
@@ -151,13 +151,13 @@ Video-Sync-GUI/
 ✅ **Isolated:** No conflicts with system Python
 ✅ **Portable:** Everything is in one project directory
 ✅ **Fast:** `uv` is significantly faster than pip
-✅ **Version-locked:** Python 3.13.11 won't change unexpectedly
+✅ **Version-locked:** Python 3.13.x won't change unexpectedly
 ✅ **Clean:** `Dependencies/` is gitignored, won't bloat your repo
 ✅ **Easy:** Just `./run.sh` to launch the app
 
 ## How It Works
 
-1. **`uv`** downloads Python 3.13.11 binaries
+1. **`uv`** downloads Python 3.13.x binaries (latest available)
 2. Creates a virtual environment at `Dependencies/.venv`
 3. Installs all packages using `uv pip` (super fast)
 4. `run.sh` activates the environment and runs `main.py`
