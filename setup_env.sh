@@ -153,7 +153,27 @@ if [ -d "$VENV_DIR" ]; then
 fi
 
 echo -e "${BLUE}Creating virtual environment at: $VENV_DIR${NC}"
-"$PYTHON_CMD" -m venv "$VENV_DIR"
+
+# Try creating venv with pip first
+if "$PYTHON_CMD" -m venv "$VENV_DIR" 2>/dev/null; then
+    echo -e "${GREEN}✓ Virtual environment created with pip${NC}"
+else
+    # If that fails (missing ensurepip), create without pip and install manually
+    echo -e "${YELLOW}ensurepip not available, creating venv without pip...${NC}"
+    "$PYTHON_CMD" -m venv --without-pip "$VENV_DIR"
+
+    # Activate and install pip manually
+    source "$VENV_DIR/bin/activate"
+
+    echo -e "${BLUE}Installing pip manually...${NC}"
+    curl -sS https://bootstrap.pypa.io/get-pip.py | python
+
+    if ! command -v pip &> /dev/null; then
+        echo -e "${RED}Failed to install pip${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ pip installed successfully${NC}"
+fi
 
 # Activate virtual environment
 source "$VENV_DIR/bin/activate"
@@ -162,7 +182,7 @@ source "$VENV_DIR/bin/activate"
 echo -e "${BLUE}Upgrading pip...${NC}"
 pip install --upgrade pip
 
-echo -e "${GREEN}✓ Virtual environment created${NC}"
+echo -e "${GREEN}✓ Virtual environment ready${NC}"
 echo ""
 
 # Step 3: Install dependencies
