@@ -133,21 +133,47 @@ class ModelManagerDialog(QDialog):
         self.refresh_btn.setEnabled(False)
         self.refresh_btn.setText("Loading...")
 
-        # Load installed models
-        self.installed_models = get_installed_models(self.model_dir)
+        try:
+            # Load installed models
+            self.installed_models = get_installed_models(self.model_dir)
+            print(f"[Model Manager] Loaded {len(self.installed_models)} installed models")
 
-        # Query audio-separator for all available models
-        self.all_models = get_all_available_models_from_registry()
+            # Query audio-separator for all available models
+            print("[Model Manager] Querying audio-separator registry...")
+            self.all_models = get_all_available_models_from_registry()
+            print(f"[Model Manager] Found {len(self.all_models)} models in registry")
 
-        # Merge: mark which models are installed
-        installed_filenames = {m['filename'] for m in self.installed_models}
-        for model in self.all_models:
-            model['installed'] = model['filename'] in installed_filenames
+            if not self.all_models:
+                QMessageBox.warning(
+                    self,
+                    "No Models Found",
+                    "Failed to load model list from audio-separator.\n\n"
+                    "This could mean:\n"
+                    "• audio-separator is not installed\n"
+                    "• The command timed out\n"
+                    "• There was a network issue\n\n"
+                    "Check the terminal for error messages."
+                )
 
-        self.refresh_btn.setEnabled(True)
-        self.refresh_btn.setText("Refresh List")
+            # Merge: mark which models are installed
+            installed_filenames = {m['filename'] for m in self.installed_models}
+            for model in self.all_models:
+                model['installed'] = model['filename'] in installed_filenames
 
-        self._populate_table()
+            self._populate_table()
+
+        except Exception as e:
+            print(f"[Model Manager] Error loading models: {e}")
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to load models:\n\n{e}"
+            )
+        finally:
+            self.refresh_btn.setEnabled(True)
+            self.refresh_btn.setText("Refresh List")
 
     def _populate_table(self):
         """Populate the table with models."""

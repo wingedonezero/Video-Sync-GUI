@@ -328,9 +328,13 @@ def get_all_available_models_from_registry() -> List[Dict]:
     cli_path = shutil.which('audio-separator')
     if cli_path:
         command = [cli_path, '--list_models', '--list_format=json']
+        print(f"[get_all_available_models] Using audio-separator CLI: {cli_path}")
     else:
         python_exe = _get_venv_python()
         command = [python_exe, '-m', 'audio_separator', '--list_models', '--list_format=json']
+        print(f"[get_all_available_models] Using Python module: {python_exe}")
+
+    print(f"[get_all_available_models] Running command: {' '.join(command)}")
 
     try:
         result = subprocess.run(
@@ -341,20 +345,47 @@ def get_all_available_models_from_registry() -> List[Dict]:
             timeout=30,
         )
 
+        print(f"[get_all_available_models] Command completed with return code: {result.returncode}")
+        print(f"[get_all_available_models] stdout length: {len(result.stdout)} chars")
+
+        if result.stderr:
+            print(f"[get_all_available_models] stderr: {result.stderr[:500]}")
+
         output = result.stdout.strip()
         if not output:
+            print("[get_all_available_models] ERROR: No output from command")
             return []
 
         # Parse the JSON output from audio-separator
-        model_data = json.loads(output)
+        try:
+            model_data = json.loads(output)
+            print(f"[get_all_available_models] Parsed JSON successfully, type: {type(model_data)}")
+        except json.JSONDecodeError as e:
+            print(f"[get_all_available_models] ERROR: JSON decode failed: {e}")
+            print(f"[get_all_available_models] First 500 chars of output: {output[:500]}")
+            return []
 
         # Flatten the nested structure into a simple list
         models = []
         _extract_models_from_registry(model_data, models)
 
+        print(f"[get_all_available_models] Extracted {len(models)} models from registry")
         return models
 
-    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, subprocess.TimeoutExpired):
+    except subprocess.TimeoutExpired as e:
+        print(f"[get_all_available_models] ERROR: Command timed out after 30s")
+        return []
+    except subprocess.CalledProcessError as e:
+        print(f"[get_all_available_models] ERROR: Command failed with code {e.returncode}")
+        print(f"[get_all_available_models] stderr: {e.stderr}")
+        return []
+    except OSError as e:
+        print(f"[get_all_available_models] ERROR: OS error: {e}")
+        return []
+    except Exception as e:
+        print(f"[get_all_available_models] ERROR: Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 
