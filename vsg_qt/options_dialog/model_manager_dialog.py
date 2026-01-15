@@ -24,21 +24,30 @@ from vsg_core.analysis.source_separation import (
 class ModelDownloadThread(QThread):
     """Thread for downloading models without blocking the UI."""
     progress = Signal(int, str)  # (percent, message)
-    finished = Signal(bool)  # (success)
+    finished = Signal(bool, str)  # (success, error_message)
 
     def __init__(self, model_filename: str, model_dir: str):
         super().__init__()
         self.model_filename = model_filename
         self.model_dir = model_dir
+        self.error_message = ""
 
     def run(self):
         """Download the model."""
+        # Capture the last progress message as error message
+        def progress_with_capture(percent: int, message: str):
+            if percent == 0 and "not installed" in message.lower():
+                self.error_message = message
+            elif percent == 0 and "failed" in message.lower():
+                self.error_message = message
+            self.progress.emit(percent, message)
+
         success = download_model(
             self.model_filename,
             self.model_dir,
-            progress_callback=self.progress.emit
+            progress_callback=progress_with_capture
         )
-        self.finished.emit(success)
+        self.finished.emit(success, self.error_message)
 
 
 class ModelManagerDialog(QDialog):
@@ -350,7 +359,7 @@ class ModelManagerDialog(QDialog):
         self.progress_bar.setValue(percent)
         self.progress_label.setText(message)
 
-    def _on_download_finished(self, success: bool):
+    def _on_download_finished(self, success: bool, error_message: str = ""):
         """Handle download completion."""
         self.progress_bar.setVisible(False)
         self.progress_label.setVisible(False)
@@ -367,7 +376,29 @@ class ModelManagerDialog(QDialog):
             # For now, we'll just reload the list
             self._load_models()
         else:
-            QMessageBox.critical(self, "Error", "Failed to download model. Check logs for details.")
+            # Show detailed error message
+            if error_message and "not installed" in error_message.lower():
+                # audio-separator not installed - show helpful message
+                QMessageBox.critical(
+                    self,
+                    "audio-separator Not Installed",
+                    "audio-separator is not installed.\n\n"
+                    "To download models, you need to install audio-separator first:\n\n"
+                    "1. Open a terminal/command prompt\n"
+                    "2. Run one of these commands:\n\n"
+                    "   pip install audio-separator\n\n"
+                    "   OR for GPU support:\n\n"
+                    "   pip install 'audio-separator[gpu]'\n\n"
+                    "After installing, restart this application and try again."
+                )
+            else:
+                # Generic error
+                error_text = "Failed to download model."
+                if error_message:
+                    error_text += f"\n\n{error_message}"
+                else:
+                    error_text += "\n\nCheck the terminal/console for details."
+                QMessageBox.critical(self, "Download Error", error_text)
 
     def _delete_model(self, model: Dict):
         """Delete an installed model."""
