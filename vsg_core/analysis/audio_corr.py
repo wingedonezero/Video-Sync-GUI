@@ -558,6 +558,13 @@ def run_audio_correlation(
             'delay': int(round(raw_ms)), 'raw_delay': raw_ms,
             'match': match, 'start': t0, 'accepted': accepted
         })
+
+    # Release audio arrays immediately after correlation completes
+    ref_pcm = None
+    tgt_pcm = None
+    import gc
+    gc.collect()
+
     return results
 
 
