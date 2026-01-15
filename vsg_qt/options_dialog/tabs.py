@@ -353,6 +353,10 @@ class AnalysisTab(QWidget):
 
     def _get_model_dir(self) -> str:
         """Get the current model directory from the widget."""
+        # Check if the widget exists yet (it might not during initialization)
+        if 'source_separation_model_dir' not in self.widgets:
+            return None
+
         dir_widget = self.widgets['source_separation_model_dir']
         # The directory widget is a custom widget with a QLineEdit child
         line_edit = dir_widget.findChild(QLineEdit)
