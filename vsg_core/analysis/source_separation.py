@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Callable, Dict, Optional, Tuple, List
 
@@ -252,17 +253,257 @@ def _select_model_filename(file_map: Dict) -> Optional[str]:
     return None
 
 
+def get_installed_models_json_path(model_dir: Optional[str] = None) -> Path:
+    """Get path to installed_models.json file."""
+    if model_dir:
+        return Path(model_dir) / 'installed_models.json'
+
+    # Default to project .audio_separator_models directory
+    project_root = Path(__file__).resolve().parent.parent.parent
+    default_dir = project_root / '.audio_separator_models'
+    return default_dir / 'installed_models.json'
+
+
+def get_installed_models(model_dir: Optional[str] = None) -> List[Dict[str, any]]:
+    """
+    Read installed models from local JSON cache.
+
+    Returns:
+        List of model dictionaries with metadata:
+        [{'name': ..., 'filename': ..., 'sdr_vocals': ..., 'sdr_instrumental': ...,
+          'stems': ..., 'type': ..., 'size_mb': ..., 'description': ...}]
+    """
+    json_path = get_installed_models_json_path(model_dir)
+
+    if not json_path.exists():
+        return []
+
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return data.get('models', [])
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def update_installed_models_json(models: List[Dict], model_dir: Optional[str] = None) -> bool:
+    """
+    Write/update the installed_models.json file.
+
+    Args:
+        models: List of model dictionaries
+        model_dir: Model directory path
+
+    Returns:
+        True on success, False on failure
+    """
+    json_path = get_installed_models_json_path(model_dir)
+
+    # Create directory if it doesn't exist
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        data = {
+            'version': '1.0',
+            'last_updated': json.dumps(None),  # Will be timestamp
+            'models': models
+        }
+
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+
+        return True
+    except (OSError, json.JSONEncodeError):
+        return False
+
+
+def get_all_available_models_from_registry() -> List[Dict]:
+    """
+    Query audio-separator for the complete model list with metadata.
+
+    Returns:
+        List of model dictionaries with all available info from registry.
+        Returns empty list if query fails.
+    """
+    cli_path = shutil.which('audio-separator')
+    if cli_path:
+        command = [cli_path, '--list_models', '--list_format=json']
+    else:
+        python_exe = _get_venv_python()
+        command = [python_exe, '-m', 'audio_separator', '--list_models', '--list_format=json']
+
+    try:
+        result = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        output = result.stdout.strip()
+        if not output:
+            return []
+
+        # Parse the JSON output from audio-separator
+        model_data = json.loads(output)
+
+        # Flatten the nested structure into a simple list
+        models = []
+        _extract_models_from_registry(model_data, models)
+
+        return models
+
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, subprocess.TimeoutExpired):
+        return []
+
+
+def _extract_models_from_registry(data: any, models: List[Dict]) -> None:
+    """Recursively extract model info from audio-separator's nested JSON structure."""
+    if isinstance(data, dict):
+        # Check if this looks like a model entry
+        if 'filename' in data or 'model_filename' in data:
+            filename = data.get('filename') or data.get('model_filename')
+            name = data.get('name') or data.get('display_name') or data.get('model_name') or filename
+
+            # Extract SDR scores if available
+            sdr_vocals = None
+            sdr_instrumental = None
+            if 'sdr' in data:
+                if isinstance(data['sdr'], dict):
+                    sdr_vocals = data['sdr'].get('vocals')
+                    sdr_instrumental = data['sdr'].get('instrumental') or data['sdr'].get('other')
+                elif isinstance(data['sdr'], (int, float)):
+                    sdr_vocals = data['sdr']
+
+            # Determine model type from filename
+            model_type = 'Unknown'
+            stems = 'Unknown'
+            if 'demucs' in filename.lower() and 'htdemucs' in filename.lower():
+                model_type = 'Demucs v4'
+                stems = '4-stem (Drums/Bass/Other/Vocals)'
+            elif 'bs_roformer' in filename.lower() or 'bs-roformer' in filename.lower():
+                model_type = 'BS-Roformer'
+                stems = '2-stem (Vocals/Instrumental)'
+            elif 'mel_band_roformer' in filename.lower() or 'melband' in filename.lower():
+                model_type = 'MelBand Roformer'
+                stems = '2-stem (Vocals/Instrumental)'
+            elif 'mdx' in filename.lower():
+                model_type = 'MDX-Net'
+                stems = '2-stem (Vocals/Instrumental)'
+            elif 'vr' in filename.lower():
+                model_type = 'VR Arch'
+                stems = '2-stem'
+
+            models.append({
+                'name': name,
+                'filename': filename,
+                'sdr_vocals': sdr_vocals,
+                'sdr_instrumental': sdr_instrumental,
+                'type': model_type,
+                'stems': stems,
+                'description': data.get('description', ''),
+            })
+        else:
+            # Recurse into nested structures
+            for value in data.values():
+                _extract_models_from_registry(value, models)
+    elif isinstance(data, list):
+        for item in data:
+            _extract_models_from_registry(item, models)
+
+
+def download_model(
+    model_filename: str,
+    model_dir: str,
+    progress_callback: Optional[Callable[[int, str], None]] = None
+) -> bool:
+    """
+    Download a model using audio-separator.
+
+    Args:
+        model_filename: The model filename to download
+        model_dir: Directory to download to
+        progress_callback: Optional callback(percent, message)
+
+    Returns:
+        True on success, False on failure
+    """
+    cli_path = shutil.which('audio-separator')
+    if cli_path:
+        command = [cli_path, '--model_filename', model_filename, '--model_file_dir', model_dir]
+    else:
+        python_exe = _get_venv_python()
+        command = [python_exe, '-m', 'audio_separator', '--model_filename', model_filename,
+                   '--model_file_dir', model_dir, '--list_models']  # List models triggers download
+
+    try:
+        if progress_callback:
+            progress_callback(0, f"Starting download of {model_filename}...")
+
+        # Run the download command
+        # Note: audio-separator downloads models automatically when loading
+        # We can trigger this by trying to load the model
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        # Monitor output for progress
+        while True:
+            if process.poll() is not None:
+                break
+
+            if progress_callback:
+                progress_callback(50, "Downloading...")
+
+            time.sleep(0.5)
+
+        if progress_callback:
+            progress_callback(100, "Download complete")
+
+        return process.returncode == 0
+
+    except (OSError, subprocess.SubprocessError):
+        if progress_callback:
+            progress_callback(0, "Download failed")
+        return False
+
+
 def list_available_models() -> List[Tuple[str, str]]:
     """
-    Get curated model filenames for audio-separator.
+    Get installed models from local JSON cache.
+    Falls back to curated list if no local cache exists.
 
     Returns:
         List of (friendly_name, filename) tuples.
     """
-    return [
-        (f"{model['name']} — {model['description']}", model['filename'])
-        for model in CURATED_MODELS
-    ]
+    installed = get_installed_models()
+
+    if not installed:
+        # Fallback to curated list
+        return [
+            (f"{model['name']} — {model['description']}", model['filename'])
+            for model in CURATED_MODELS
+        ]
+
+    # Build friendly names with metadata
+    result = []
+    for model in installed:
+        name_parts = [model['name']]
+
+        # Add SDR info if available
+        if model.get('sdr_vocals'):
+            name_parts.append(f"SDR {model['sdr_vocals']}")
+
+        name_parts.append(f"({model['filename']})")
+        friendly_name = ' '.join(name_parts)
+
+        result.append((friendly_name, model['filename']))
+
+    return result
 
 
 def _fallback_models() -> Dict[str, str]:
