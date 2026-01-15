@@ -281,14 +281,16 @@ def resample_audio(audio_np: np.ndarray, orig_sr: int, target_sr: int) -> np.nda
 
 _WORKER_SCRIPT = '''
 import json
+import os
 import sys
+from pathlib import Path
 from audio_separator.separator import Separator
 
 def run_separation(args):
+    # Don't use output_single_stem - get all stems and select manually
     separator = Separator(
         output_dir=args['output_dir'],
         output_format='WAV',
-        output_single_stem=args['target_stem'],
         sample_rate=args['sample_rate'],
         model_file_dir=args.get('model_dir') or "/tmp/audio-separator-models/",
     )
@@ -300,10 +302,70 @@ def run_separation(args):
         separator.load_model()
 
     output_files = separator.separate(args['input_path'])
+
+    # Debug: List all files in output directory
+    output_dir = Path(args['output_dir'])
+    all_files = []
+    if output_dir.exists():
+        all_files = list(output_dir.rglob('*.wav'))
+        print(f"DEBUG: Found {len(all_files)} WAV files in {output_dir}", file=sys.stderr)
+        for f in all_files:
+            print(f"DEBUG: - {f.name}", file=sys.stderr)
+
+    # Debug: What separator.separate() returned
+    print(f"DEBUG: separator.separate() returned {len(output_files) if output_files else 0} files", file=sys.stderr)
+    if output_files:
+        for f in output_files:
+            print(f"DEBUG: - {Path(f).name if f else 'None'}", file=sys.stderr)
+
+    # If separator.separate() returned empty, try to find files manually
+    if not output_files and all_files:
+        output_files = [str(f) for f in all_files]
+        print(f"DEBUG: Using manually discovered files instead", file=sys.stderr)
+
     if not output_files:
         raise RuntimeError('No output files produced by audio-separator')
 
-    return output_files[0]
+    # Find the correct output file for the target stem
+    target_stem = args['target_stem']
+    selected_file = None
+
+    # Try to find file matching the target stem (case-insensitive)
+    for f in output_files:
+        if isinstance(f, (str, Path)):
+            f_path = Path(f)
+            if f_path.exists():
+                # Check if filename contains the target stem
+                if target_stem.lower() in f_path.name.lower():
+                    selected_file = str(f_path)
+                    print(f"DEBUG: Selected {f_path.name} for stem {target_stem}", file=sys.stderr)
+                    break
+
+    # For instrumental, also try combining non-vocal stems if available
+    if not selected_file and target_stem.lower() == 'instrumental':
+        # Look for files NOT containing 'vocal'
+        non_vocal_files = [f for f in output_files if 'vocal' not in Path(f).name.lower()]
+        if len(non_vocal_files) == 1:
+            selected_file = non_vocal_files[0]
+            print(f"DEBUG: Using {Path(selected_file).name} as instrumental (only non-vocal file)", file=sys.stderr)
+        elif non_vocal_files:
+            # If multiple non-vocal stems, prefer 'no_vocals' or 'instrumental'
+            for f in non_vocal_files:
+                fname_lower = Path(f).name.lower()
+                if 'no_vocals' in fname_lower or 'instrumental' in fname_lower or 'no_vocal' in fname_lower:
+                    selected_file = f
+                    print(f"DEBUG: Selected {Path(f).name} as instrumental", file=sys.stderr)
+                    break
+
+    # If still no match, use the first file as fallback
+    if not selected_file and output_files:
+        selected_file = str(output_files[0])
+        print(f"DEBUG: Falling back to first file: {Path(selected_file).name}", file=sys.stderr)
+
+    if not selected_file:
+        raise RuntimeError(f'Could not find output file for stem: {target_stem}')
+
+    return selected_file
 
 if __name__ == '__main__':
     args = json.loads(sys.argv[1])
@@ -311,7 +373,8 @@ if __name__ == '__main__':
         output_path = run_separation(args)
         print(json.dumps({'success': True, 'output_path': output_path}))
     except Exception as e:
-        print(json.dumps({'success': False, 'error': str(e)}))
+        import traceback
+        print(json.dumps({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}))
         sys.exit(1)
 '''
 
@@ -362,6 +425,10 @@ def _log_separator_stderr(log: Callable[[str], None], stderr: str) -> None:
         if not line.strip():
             continue
         if miopen_pattern.match(line) or 'MIOpen(HIP): Warning' in line:
+            continue
+        # Always show DEBUG lines
+        if 'DEBUG:' in line:
+            log(f"[SOURCE SEPARATION] {line}")
             continue
         match = progress_pattern.search(line)
         if match:
@@ -481,7 +548,10 @@ def separate_audio(
                 return None
 
             if not response.get('success'):
-                log(f"[SOURCE SEPARATION] Separation failed: {response.get('error', 'unknown error')}")
+                error_msg = response.get('error', 'unknown error')
+                log(f"[SOURCE SEPARATION] Separation failed: {error_msg}")
+                if 'traceback' in response:
+                    log(f"[SOURCE SEPARATION] Traceback:\n{response['traceback']}")
                 return None
 
             output_path = response.get('output_path')
