@@ -998,14 +998,18 @@ def apply_frame_matched_sync(
         # Shared progress tracking (thread-safe)
         progress_lock = threading.Lock()
         progress_counter = {'matched': 0, 'unmatched': 0, 'processed': 0}
+        progress_stop = threading.Event()
 
         # Progress reporter thread
         def log_progress():
-            while progress_counter['processed'] < total_subs:
+            while not progress_stop.is_set():
                 with progress_lock:
                     processed = progress_counter['processed']
                     matched = progress_counter['matched']
                     unmatched = progress_counter['unmatched']
+
+                if processed >= total_subs:
+                    break
 
                 if processed > 0:
                     percent = (processed / total_subs) * 100
@@ -1059,7 +1063,10 @@ def apply_frame_matched_sync(
                 except Exception as e:
                     runner._log_message(f"[FrameMatch] ERROR: Batch {batch_idx} failed: {e}")
 
-        # Wait for progress thread to finish
+        # Stop progress thread to avoid logging after completion
+        with progress_lock:
+            progress_counter['processed'] = total_subs
+        progress_stop.set()
         progress_thread.join(timeout=1)
 
         runner._log_message(f"[FrameMatch] Phase 2 Complete: All workers finished")
