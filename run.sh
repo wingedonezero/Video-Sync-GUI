@@ -82,8 +82,16 @@ setup_rocm_environment() {
     fi
 }
 
-# Setup GPU environment before launching
-setup_rocm_environment
+# Activate virtual environment (ensures PATH/VIRTUAL_ENV/conda libs are set)
+activate_venv() {
+    if [ -f "$VENV_DIR/bin/activate" ]; then
+        # shellcheck disable=SC1091
+        source "$VENV_DIR/bin/activate"
+        return 0
+    fi
+    echo -e "${RED}Error: Failed to activate virtual environment.${NC}"
+    return 1
+}
 
 # Function to run in current terminal
 run_in_current_terminal() {
@@ -97,9 +105,12 @@ run_in_current_terminal() {
 
     cd "$PROJECT_DIR"
 
-    # Use venv Python directly to ensure correct environment
-    # This is more reliable than activating and hoping PATH is correct
-    "$VENV_DIR/bin/python" main.py 2>&1
+    if ! activate_venv; then
+        exit 1
+    fi
+
+    # Use venv Python from PATH (activation ensures correct env/paths)
+    python main.py 2>&1
     EXIT_CODE=$?
 
     # Always show exit status and wait
@@ -113,37 +124,46 @@ run_in_current_terminal() {
     read
 }
 
-# Wrapper script for terminal emulators - ensures errors are shown
-# Note: GPU environment is set up in parent shell and inherited by subshells
-WRAPPER_CMD="cd '$PROJECT_DIR' && source '$PROJECT_DIR/run.sh' && setup_rocm_environment && echo '=========================================' && echo 'Video Sync GUI' && echo '=========================================' && echo '' && echo 'Starting application...' && echo '' && '$VENV_DIR/bin/python' main.py 2>&1; EXIT_CODE=\$?; echo ''; if [ \$EXIT_CODE -eq 0 ]; then echo -e '${GREEN}Application exited normally${NC}'; else echo -e '${RED}Application exited with error code:' \$EXIT_CODE'${NC}'; fi; echo -e '${YELLOW}Press Enter to close...${NC}'; read"
+main() {
+    # Setup GPU environment before launching
+    setup_rocm_environment
 
-# If running from a terminal, just run it
-if [ -t 0 ]; then
-    run_in_current_terminal
-else
-    # Try to open in a new terminal window
-    # Detect available terminal emulator
-    if command -v konsole &> /dev/null; then
-        # KDE Konsole
-        konsole -e bash -c "$WRAPPER_CMD"
-    elif command -v gnome-terminal &> /dev/null; then
-        # GNOME Terminal
-        gnome-terminal -- bash -c "$WRAPPER_CMD"
-    elif command -v xfce4-terminal &> /dev/null; then
-        # XFCE Terminal
-        xfce4-terminal -e "bash -c \"$WRAPPER_CMD\""
-    elif command -v alacritty &> /dev/null; then
-        # Alacritty
-        alacritty -e bash -c "$WRAPPER_CMD"
-    elif command -v kitty &> /dev/null; then
-        # Kitty
-        kitty bash -c "$WRAPPER_CMD"
-    elif command -v xterm &> /dev/null; then
-        # xterm (fallback)
-        xterm -e bash -c "$WRAPPER_CMD"
-    else
-        # No terminal found, run in current shell
-        echo -e "${YELLOW}No suitable terminal emulator found. Running in current shell...${NC}"
+    # Wrapper script for terminal emulators - ensures errors are shown
+    # Note: GPU environment is set up in parent shell and inherited by subshells
+    WRAPPER_CMD="cd '$PROJECT_DIR' && source '$PROJECT_DIR/run.sh' && setup_rocm_environment && activate_venv && echo '=========================================' && echo 'Video Sync GUI' && echo '=========================================' && echo '' && echo 'Starting application...' && echo '' && python main.py 2>&1; EXIT_CODE=\$?; echo ''; if [ \$EXIT_CODE -eq 0 ]; then echo -e '${GREEN}Application exited normally${NC}'; else echo -e '${RED}Application exited with error code:' \$EXIT_CODE'${NC}'; fi; echo -e '${YELLOW}Press Enter to close...${NC}'; read"
+
+    # If running from a terminal, just run it
+    if [ -t 0 ]; then
         run_in_current_terminal
+    else
+        # Try to open in a new terminal window
+        # Detect available terminal emulator
+        if command -v konsole &> /dev/null; then
+            # KDE Konsole
+            konsole -e bash -c "$WRAPPER_CMD"
+        elif command -v gnome-terminal &> /dev/null; then
+            # GNOME Terminal
+            gnome-terminal -- bash -c "$WRAPPER_CMD"
+        elif command -v xfce4-terminal &> /dev/null; then
+            # XFCE Terminal
+            xfce4-terminal -e "bash -c \"$WRAPPER_CMD\""
+        elif command -v alacritty &> /dev/null; then
+            # Alacritty
+            alacritty -e bash -c "$WRAPPER_CMD"
+        elif command -v kitty &> /dev/null; then
+            # Kitty
+            kitty bash -c "$WRAPPER_CMD"
+        elif command -v xterm &> /dev/null; then
+            # xterm (fallback)
+            xterm -e bash -c "$WRAPPER_CMD"
+        else
+            # No terminal found, run in current shell
+            echo -e "${YELLOW}No suitable terminal emulator found. Running in current shell...${NC}"
+            run_in_current_terminal
+        fi
     fi
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
 fi
