@@ -767,13 +767,16 @@ import sys
 sys.path.insert(0, r"{Path(__file__).parent.parent.parent}")
 from audio_separator.separator import Separator
 
-# Initialize separator with the model - this triggers download
+# Initialize separator with config
 print("[download_model] Creating Separator instance...")
 separator = Separator(
     model_file_dir=r"{model_dir}",
-    model_filename="{model_filename}",
     output_dir=r"{model_dir}",
 )
+
+# Load the model - this triggers download if not present
+print("[download_model] Loading model {model_filename}...")
+separator.load_model(model_filename="{model_filename}")
 print("[download_model] Model downloaded successfully")
 sys.exit(0)
 '''
