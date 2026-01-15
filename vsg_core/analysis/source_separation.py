@@ -1293,13 +1293,33 @@ def apply_source_separation(
     tgt_pcm: np.ndarray,
     sample_rate: int,
     config: Dict,
-    log_func: Optional[Callable[[str], None]] = None
+    log_func: Optional[Callable[[str], None]] = None,
+    role_tag: str = "Source 2"
 ) -> Tuple[np.ndarray, np.ndarray]:
     """
-    Apply source separation to both reference and target audio.
+    Apply source separation to both reference and target audio, or neither.
 
     This is the main entry point called from audio_corr.py.
     If separation fails or is disabled, returns original audio unchanged.
+
+    Selection logic:
+    - 'all' → Always separate both sides
+    - 'source_2' → Only separate when comparing Source 1 vs Source 2
+    - 'source_3' → Only separate when comparing Source 1 vs Source 3
+
+    IMPORTANT: Both sides must be treated the same (both separated OR both original)
+    for correlation to work properly. Can't compare separated vs original audio.
+
+    Args:
+        ref_pcm: Reference audio (typically Source 1)
+        tgt_pcm: Target audio (typically Source 2, Source 3, etc.)
+        sample_rate: Sample rate
+        config: Configuration dict
+        log_func: Optional logging function
+        role_tag: Which target is being processed (e.g., "Source 2", "Source 3", "QA")
+
+    Returns:
+        Tuple of (ref_pcm, tgt_pcm) - both separated or both original
     """
     log = log_func or (lambda x: None)
 
@@ -1313,19 +1333,36 @@ def apply_source_separation(
     timeout = config.get('source_separation_timeout', 900)
     model_dir = config.get('source_separation_model_dir') or None
 
-    log(f"[SOURCE SEPARATION] Mode: {mode}")
-    log(f"[SOURCE SEPARATION] Model: {model_filename}")
+    # Check which source was selected
+    apply_to = config.get('source_separation_apply_to', 'all').lower()
 
-    log("[SOURCE SEPARATION] Processing reference audio...")
-    ref_separated = separate_audio(ref_pcm, sample_rate, mode, model_filename, log, device, timeout, model_dir)
-    if ref_separated is None:
-        log("[SOURCE SEPARATION] Reference separation failed, using original audio")
+    # Normalize role_tag to compare (e.g., "Source 2" -> "source_2")
+    role_normalized = role_tag.lower().replace(' ', '_')
+
+    # Determine if we should separate for this comparison
+    # Logic: Separate BOTH sides if 'all' OR if this comparison involves the selected source
+    should_separate = (apply_to == 'all') or (apply_to == role_normalized)
+
+    if not should_separate:
+        log(f"[SOURCE SEPARATION] Skipping separation for Source 1 vs {role_tag} (selected: {apply_to})")
         return ref_pcm, tgt_pcm
 
-    log("[SOURCE SEPARATION] Processing target audio...")
+    log(f"[SOURCE SEPARATION] Mode: {mode}")
+    log(f"[SOURCE SEPARATION] Model: {model_filename}")
+    log(f"[SOURCE SEPARATION] Applying to Source 1 vs {role_tag} comparison")
+
+    # Separate reference (Source 1)
+    log("[SOURCE SEPARATION] Processing reference audio (Source 1)...")
+    ref_separated = separate_audio(ref_pcm, sample_rate, mode, model_filename, log, device, timeout, model_dir)
+    if ref_separated is None:
+        log("[SOURCE SEPARATION] Reference separation failed, using original audio for both")
+        return ref_pcm, tgt_pcm
+
+    # Separate target
+    log(f"[SOURCE SEPARATION] Processing target audio ({role_tag})...")
     tgt_separated = separate_audio(tgt_pcm, sample_rate, mode, model_filename, log, device, timeout, model_dir)
     if tgt_separated is None:
-        log("[SOURCE SEPARATION] Target separation failed, using original audio")
+        log("[SOURCE SEPARATION] Target separation failed, using original audio for both")
         return ref_pcm, tgt_pcm
 
     log("[SOURCE SEPARATION] Both sources processed successfully")
