@@ -131,7 +131,8 @@ class AppConfig:
             'timing_max_cps': 20.0,
 
             # --- Flexible Analysis Settings ---
-            'source_separation_model': 'None (Use Original Audio)',
+            'source_separation_mode': 'none',  # 'none', 'instrumental', 'vocals'
+            'source_separation_model': 'default',  # Model filename or 'default'
             'source_separation_device': 'auto',  # Device for source separation: 'auto', 'cpu', 'cuda', 'rocm', 'mps'
             'source_separation_timeout': 300,  # Timeout in seconds for source separation (0 = no timeout)
             'filtering_method': 'Dialogue Band-Pass Filter',
@@ -366,6 +367,10 @@ class AppConfig:
             valid = ['auto', 'cpu', 'cuda', 'rocm', 'mps']
             if value not in valid:
                 return False, f"{key} must be one of {valid}, got '{value}'"
+        elif key == 'source_separation_mode':
+            valid = ['none', 'instrumental', 'vocals']
+            if value not in valid:
+                return False, f"{key} must be one of {valid}, got '{value}'"
 
         elif key in ('frame_match_method', 'duration_align_hash_algorithm', 'correlation_snap_hash_algorithm',
                      'sub_anchor_hash_algorithm', 'corr_anchor_hash_algorithm'):
@@ -488,6 +493,16 @@ class AppConfig:
 
                 if loaded_settings.get('source_separation_device') == 'cpu':
                     loaded_settings['source_separation_device'] = 'auto'
+                    changed = True
+
+                legacy_separation_map = {
+                    'Demucs - Music/Effects (Strip Vocals)': 'instrumental',
+                    'Demucs - Vocals Only': 'vocals',
+                }
+                legacy_selection = loaded_settings.get('source_separation_model')
+                if legacy_selection in legacy_separation_map:
+                    loaded_settings['source_separation_mode'] = legacy_separation_map[legacy_selection]
+                    loaded_settings['source_separation_model'] = 'default'
                     changed = True
 
                 for key, default_value in self.defaults.items():

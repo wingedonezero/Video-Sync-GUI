@@ -433,8 +433,8 @@ def run_audio_correlation(
     tgt_pcm = _decode_to_memory(target_file, idx_tgt, DEFAULT_SR, use_soxr, runner, tool_paths)
 
     # --- 2b. Source Separation (Optional) ---
-    separation_model = config.get('source_separation_model', 'None (Use Original Audio)')
-    if separation_model and separation_model != 'None (Use Original Audio)':
+    separation_mode = config.get('source_separation_mode', 'none')
+    if separation_mode and separation_mode != 'none':
         try:
             from .source_separation import apply_source_separation
             ref_pcm, tgt_pcm = apply_source_separation(
@@ -646,8 +646,8 @@ def run_multi_correlation(
     tgt_pcm = _decode_to_memory(target_file, idx_tgt, DEFAULT_SR, use_soxr, runner, tool_paths)
 
     # --- 2b. Source Separation (Optional) ---
-    separation_model = config.get('source_separation_model', 'None (Use Original Audio)')
-    if separation_model and separation_model != 'None (Use Original Audio)':
+    separation_mode = config.get('source_separation_mode', 'none')
+    if separation_mode and separation_mode != 'none':
         try:
             from .source_separation import apply_source_separation
             ref_pcm, tgt_pcm = apply_source_separation(

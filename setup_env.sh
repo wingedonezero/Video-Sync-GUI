@@ -221,7 +221,7 @@ install_optional() {
         return 1
     fi
 
-    echo "Optional AI audio features (PyTorch + Demucs):"
+    echo "Optional AI audio features (Audio Separator):"
     echo "These enable AI-powered vocal/instrument separation"
     echo "for better cross-language audio correlation."
     echo ""
@@ -239,30 +239,28 @@ install_optional() {
     case $hw_choice in
         1)
             echo ""
-            echo -e "${BLUE}Installing PyTorch (NVIDIA CUDA) + Demucs...${NC}"
-            pip install torch torchvision torchaudio
-            pip install demucs
+            echo -e "${BLUE}Installing Audio Separator (NVIDIA CUDA)...${NC}"
+            pip install "audio-separator[gpu]"
             echo -e "${GREEN}✓ NVIDIA GPU support installed${NC}"
             ;;
         2)
             echo ""
-            echo -e "${BLUE}Installing PyTorch (AMD ROCm 6.4 Stable) + Demucs...${NC}"
+            echo -e "${BLUE}Installing Audio Separator (AMD ROCm 6.4 Stable)...${NC}"
             pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.4
-            pip install demucs
+            pip install "audio-separator[cpu]"
             echo -e "${GREEN}✓ AMD GPU (ROCm 6.4) support installed${NC}"
             ;;
         3)
             echo ""
-            echo -e "${BLUE}Installing PyTorch (AMD ROCm 7.1 Nightly) + Demucs...${NC}"
+            echo -e "${BLUE}Installing Audio Separator (AMD ROCm 7.1 Nightly)...${NC}"
             pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/rocm7.1
-            pip install demucs
+            pip install "audio-separator[cpu]"
             echo -e "${GREEN}✓ AMD GPU (ROCm 7.1) support installed${NC}"
             ;;
         4)
             echo ""
-            echo -e "${BLUE}Installing PyTorch (CPU only) + Demucs...${NC}"
-            pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-            pip install demucs
+            echo -e "${BLUE}Installing Audio Separator (CPU only)...${NC}"
+            pip install "audio-separator[cpu]"
             echo -e "${GREEN}✓ CPU-only support installed${NC}"
             ;;
         5)
@@ -342,12 +340,10 @@ verify_dependencies() {
     # Check optional dependencies
     echo ""
     echo -e "${YELLOW}Checking optional AI audio dependencies...${NC}"
-    if pip show torch &> /dev/null && pip show demucs &> /dev/null; then
-        torch_version=$(pip show torch 2>/dev/null | grep "^Version:" | cut -d' ' -f2)
-        demucs_version=$(pip show demucs 2>/dev/null | grep "^Version:" | cut -d' ' -f2)
+    if pip show audio-separator &> /dev/null; then
+        sep_version=$(pip show audio-separator 2>/dev/null | grep "^Version:" | cut -d' ' -f2)
         echo -e "${GREEN}✓ AI audio features installed${NC}"
-        echo "  torch ($torch_version)"
-        echo "  demucs ($demucs_version)"
+        echo "  audio-separator ($sep_version)"
     else
         echo -e "${YELLOW}○ AI audio features not installed (optional)${NC}"
         echo "  Use option 3 to install them"

@@ -48,16 +48,32 @@ class SubtitleMetadata:
             # Check if BOM was present
             if raw_bytes.startswith(b'\xef\xbb\xbf'):
                 self.has_bom = True
-                self.encoding = 'utf-8-sig'
             else:
-                self.encoding = 'utf-8'
-
-            try:
-                self.original_content = raw_bytes.decode(self.encoding)
-            except UnicodeDecodeError:
                 self.has_bom = False
-                self.encoding = 'cp1252'
-                self.original_content = raw_bytes.decode(self.encoding)
+
+            encodings = [
+                'utf-8-sig',
+                'utf-8',
+                'cp1252',
+                'latin1',
+                'shift_jis',
+                'gbk'
+            ]
+
+            decoded = None
+            for encoding in encodings:
+                try:
+                    decoded = raw_bytes.decode(encoding)
+                    self.encoding = encoding
+                    break
+                except UnicodeDecodeError:
+                    continue
+
+            if decoded is None:
+                self.encoding = 'utf-8'
+                decoded = raw_bytes.decode(self.encoding, errors='replace')
+
+            self.original_content = decoded
 
             self._extract_sections()
             self._extract_events()
