@@ -147,6 +147,7 @@ class AppConfig:
             'multi_corr_gcc_phat': True,
             'multi_corr_onset': False,
             'multi_corr_gcc_scot': False,
+            'multi_corr_gcc_whiten': False,
             'multi_corr_dtw': False,
             'multi_corr_spectrogram': False,
 

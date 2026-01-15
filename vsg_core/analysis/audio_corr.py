@@ -276,6 +276,48 @@ def _find_delay_gcc_scot(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) 
     return delay_ms, match_confidence
 
 
+def _find_delay_gcc_whiten(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> Tuple[float, float]:
+    """
+    Calculates delay using GCC with Spectral Whitening (Whitened Cross-Correlation).
+
+    Whitening equalizes the magnitude spectrum of both signals before correlation,
+    making it robust to spectral differences caused by processing (like source
+    separation), different recording conditions, or frequency-dependent effects.
+
+    This is particularly useful when comparing audio that has been processed
+    differently (e.g., separated instrumental vs. original mix) as it focuses
+    on timing/phase alignment rather than spectral content matching.
+
+    The whitening process:
+    1. Transform both signals to frequency domain
+    2. Normalize the magnitude spectrum (keeping phase intact)
+    3. Compute cross-correlation in whitened space
+    4. Find peak delay from the correlation result
+    """
+    n = len(ref_chunk) + len(tgt_chunk) - 1
+    R = np.fft.fft(ref_chunk, n)
+    T = np.fft.fft(tgt_chunk, n)
+
+    # Whiten both signals: normalize magnitude while preserving phase
+    # This makes the method robust to spectral differences
+    R_whitened = R / (np.abs(R) + 1e-9)
+    T_whitened = T / (np.abs(T) + 1e-9)
+
+    # Cross-correlation in whitened space
+    G_whitened = R_whitened * np.conj(T_whitened)
+    r_whitened = np.fft.ifft(G_whitened)
+
+    k = np.argmax(np.abs(r_whitened))
+    lag_samples = k - n if k > n / 2 else k
+    delay_ms = (lag_samples / float(sr)) * 1000.0
+
+    # Match confidence based on peak sharpness
+    # Whitening tends to produce sharper peaks for aligned signals
+    match_confidence = _normalize_peak_confidence(r_whitened, k)
+
+    return delay_ms, match_confidence
+
+
 def _find_delay_dtw(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> Tuple[float, float]:
     """
     Calculates delay using Dynamic Time Warping on MFCC features.
@@ -525,6 +567,7 @@ MULTI_CORR_METHODS = [
     ('Phase Correlation (GCC-PHAT)', 'multi_corr_gcc_phat'),
     ('Onset Detection', 'multi_corr_onset'),
     ('GCC-SCOT', 'multi_corr_gcc_scot'),
+    ('Whitened Cross-Correlation', 'multi_corr_gcc_whiten'),
     ('DTW (Dynamic Time Warping)', 'multi_corr_dtw'),
     ('Spectrogram Correlation', 'multi_corr_spectrogram'),
 ]
@@ -562,6 +605,8 @@ def _run_method_on_chunks(
             raw_ms, match = _find_delay_onset(ref_chunk, tgt_chunk, sr)
         elif 'GCC-SCOT' in method_name:
             raw_ms, match = _find_delay_gcc_scot(ref_chunk, tgt_chunk, sr)
+        elif 'Whitened Cross-Correlation' in method_name:
+            raw_ms, match = _find_delay_gcc_whiten(ref_chunk, tgt_chunk, sr)
         elif 'DTW' in method_name:
             raw_ms, match = _find_delay_dtw(ref_chunk, tgt_chunk, sr)
         elif 'Spectrogram' in method_name:
