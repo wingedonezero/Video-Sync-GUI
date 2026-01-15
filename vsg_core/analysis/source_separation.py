@@ -733,46 +733,110 @@ def download_model(
     Returns:
         True on success, False on failure
     """
-    cli_path = shutil.which('audio-separator')
-    if cli_path:
-        command = [cli_path, '--model_filename', model_filename, '--model_file_dir', model_dir]
-    else:
-        python_exe = _get_venv_python()
-        command = [python_exe, '-m', 'audio_separator', '--model_filename', model_filename,
-                   '--model_file_dir', model_dir, '--list_models']  # List models triggers download
+    print(f"[download_model] Attempting to download {model_filename} to {model_dir}")
+
+    # Check if audio-separator is available
+    python_exe = _get_venv_python()
+    if not _module_available_in_python('audio_separator', python_exe):
+        error_msg = (
+            "audio-separator is not installed.\n\n"
+            "To use model downloading, install it with:\n"
+            "  pip install audio-separator\n\n"
+            "Or for GPU support:\n"
+            "  pip install 'audio-separator[gpu]'"
+        )
+        print(f"[download_model] ERROR: {error_msg}")
+        if progress_callback:
+            progress_callback(0, "audio-separator not installed")
+        return False
+
+    # Create model directory if it doesn't exist
+    Path(model_dir).mkdir(parents=True, exist_ok=True)
 
     try:
         if progress_callback:
             progress_callback(0, f"Starting download of {model_filename}...")
 
-        # Run the download command
-        # Note: audio-separator downloads models automatically when loading
-        # We can trigger this by trying to load the model
+        # Use the Python API to download the model
+        # The Separator class automatically downloads models on initialization
+        print(f"[download_model] Importing audio_separator...")
+
+        # Build a Python script to run in subprocess
+        download_script = f'''
+import sys
+sys.path.insert(0, r"{Path(__file__).parent.parent.parent}")
+from audio_separator.separator import Separator
+
+# Initialize separator with the model - this triggers download
+print("[download_model] Creating Separator instance...")
+separator = Separator(
+    model_file_dir=r"{model_dir}",
+    model_filename="{model_filename}",
+    output_dir=r"{model_dir}",
+)
+print("[download_model] Model downloaded successfully")
+sys.exit(0)
+'''
+
+        print(f"[download_model] Running download script...")
         process = subprocess.Popen(
-            command,
+            [python_exe, '-c', download_script],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
         )
 
         # Monitor output for progress
+        stdout_lines = []
+        stderr_lines = []
+
         while True:
             if process.poll() is not None:
                 break
 
+            # Read stdout
+            line = process.stdout.readline()
+            if line:
+                stdout_lines.append(line.strip())
+                print(f"[download_model] {line.strip()}")
+
             if progress_callback:
                 progress_callback(50, "Downloading...")
 
-            time.sleep(0.5)
+            time.sleep(0.1)
 
+        # Read remaining output
+        remaining_stdout, remaining_stderr = process.communicate()
+        if remaining_stdout:
+            stdout_lines.extend(remaining_stdout.strip().split('\n'))
+            for line in remaining_stdout.strip().split('\n'):
+                if line:
+                    print(f"[download_model] {line}")
+        if remaining_stderr:
+            stderr_lines.extend(remaining_stderr.strip().split('\n'))
+            for line in remaining_stderr.strip().split('\n'):
+                if line:
+                    print(f"[download_model] STDERR: {line}")
+
+        if process.returncode == 0:
+            if progress_callback:
+                progress_callback(100, "Download complete")
+            print(f"[download_model] SUCCESS: Model {model_filename} downloaded")
+            return True
+        else:
+            error_output = '\n'.join(stderr_lines[-10:])  # Last 10 lines
+            print(f"[download_model] FAILED with return code {process.returncode}")
+            print(f"[download_model] Error output:\n{error_output}")
+            if progress_callback:
+                progress_callback(0, f"Download failed (exit code {process.returncode})")
+            return False
+
+    except Exception as e:
+        print(f"[download_model] EXCEPTION: {e}")
+        import traceback
+        traceback.print_exc()
         if progress_callback:
-            progress_callback(100, "Download complete")
-
-        return process.returncode == 0
-
-    except (OSError, subprocess.SubprocessError):
-        if progress_callback:
-            progress_callback(0, "Download failed")
+            progress_callback(0, f"Download failed: {str(e)}")
         return False
 
 
