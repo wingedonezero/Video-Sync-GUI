@@ -486,6 +486,10 @@ class AppConfig:
                         del loaded_settings[old_key]
                         changed = True
 
+                if loaded_settings.get('source_separation_device') == 'cpu':
+                    loaded_settings['source_separation_device'] = 'auto'
+                    changed = True
+
                 for key, default_value in self.defaults.items():
                     if key not in loaded_settings:
                         loaded_settings[key] = default_value
