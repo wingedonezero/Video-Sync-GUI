@@ -480,7 +480,7 @@ def run_audio_correlation(
         try:
             from .source_separation import apply_source_separation
             ref_pcm, tgt_pcm = apply_source_separation(
-                ref_pcm, tgt_pcm, DEFAULT_SR, config, log
+                ref_pcm, tgt_pcm, DEFAULT_SR, config, log, role_tag
             )
         except ImportError as e:
             log(f"[SOURCE SEPARATION] Dependencies not available: {e}")
@@ -703,7 +703,7 @@ def run_multi_correlation(
         try:
             from .source_separation import apply_source_separation
             ref_pcm, tgt_pcm = apply_source_separation(
-                ref_pcm, tgt_pcm, DEFAULT_SR, config, log
+                ref_pcm, tgt_pcm, DEFAULT_SR, config, log, role_tag
             )
         except ImportError as e:
             log(f"[SOURCE SEPARATION] Dependencies not available: {e}")

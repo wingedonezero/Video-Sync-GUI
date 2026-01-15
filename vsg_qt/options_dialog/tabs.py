@@ -156,6 +156,22 @@ class AnalysisTab(QWidget):
             "Models are downloaded automatically on first use."
         )
 
+        # Apply To dropdown
+        self.widgets['source_separation_apply_to'] = QComboBox()
+        self.widgets['source_separation_apply_to'].addItem('All Sources', 'all')
+        self.widgets['source_separation_apply_to'].addItem('Source 1 Only', 'source_1')
+        self.widgets['source_separation_apply_to'].addItem('Source 2 Only', 'source_2')
+        self.widgets['source_separation_apply_to'].addItem('Source 3 Only', 'source_3')
+        self.widgets['source_separation_apply_to'].setToolTip(
+            "Select which audio sources to apply separation to:\n\n"
+            "• All Sources - Separate all audio tracks (default)\n"
+            "• Source 1 Only - Only separate the reference (Source 1)\n"
+            "• Source 2 Only - Only separate Source 2 during S1↔S2 comparison\n"
+            "• Source 3 Only - Only separate Source 3 during S1↔S3 comparison\n\n"
+            "Use this to skip separation on clean tracks (e.g., Japanese BD)\n"
+            "and only separate messy tracks (e.g., WEB-DL English)."
+        )
+
         # Manage Models button
         self.manage_models_btn = QPushButton("Manage Models...")
         self.manage_models_btn.setToolTip("Open the model manager to browse, download, and manage audio separation models.")
@@ -169,6 +185,7 @@ class AnalysisTab(QWidget):
         prep_layout.addRow("Source Separation:", self.widgets['source_separation_mode'])
         prep_layout.addRow("Separation Model:", self.widgets['source_separation_model'])
         prep_layout.addRow("Model Directory:", self.widgets['source_separation_model_dir'])
+        prep_layout.addRow("Apply To:", self.widgets['source_separation_apply_to'])
         prep_layout.addRow("", self.manage_models_btn)
         prep_layout.addRow("Audio Filtering:", self.widgets['filtering_method'])
         prep_layout.addRow(self.cutoff_container)
