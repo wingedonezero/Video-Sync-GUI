@@ -156,6 +156,12 @@ class AnalysisTab(QWidget):
             "Requires: audio-separator (with GPU or CPU extras)\n"
             "Note: Runs in subprocess for guaranteed memory cleanup."
         )
+        self.widgets['source_separation_model_dir'] = _dir_input()
+        self.widgets['source_separation_model_dir'].setToolTip(
+            "Directory where audio-separator stores models.\n\n"
+            "Defaults to the application's audio_separator_models folder.\n"
+            "Models are downloaded automatically on first use."
+        )
         self.widgets['filtering_method'] = QComboBox(); self.widgets['filtering_method'].addItems(['None', 'Low-Pass Filter', 'Dialogue Band-Pass Filter']); self.widgets['filtering_method'].setToolTip("Apply a filter to the audio before analysis to improve the signal-to-noise ratio.\n'Dialogue Band-Pass' is recommended for most content.")
         self.cutoff_container = QWidget()
         cutoff_layout = QFormLayout(self.cutoff_container); cutoff_layout.setContentsMargins(0, 0, 0, 0)
@@ -163,6 +169,7 @@ class AnalysisTab(QWidget):
         cutoff_layout.addRow("Low-Pass Cutoff:", self.widgets['audio_bandlimit_hz'])
         prep_layout.addRow("Source Separation:", self.widgets['source_separation_mode'])
         prep_layout.addRow("Separation Model:", self.widgets['source_separation_model'])
+        prep_layout.addRow("Model Directory:", self.widgets['source_separation_model_dir'])
         prep_layout.addRow("Audio Filtering:", self.widgets['filtering_method'])
         prep_layout.addRow(self.cutoff_container)
         main_layout.addWidget(prep_group)
