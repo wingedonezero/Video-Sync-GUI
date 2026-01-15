@@ -132,7 +132,7 @@ class AppConfig:
 
             # --- Flexible Analysis Settings ---
             'source_separation_model': 'None (Use Original Audio)',
-            'source_separation_device': 'cpu',  # Device for source separation: 'cpu', 'cuda', 'mps'
+            'source_separation_device': 'auto',  # Device for source separation: 'auto', 'cpu', 'cuda', 'rocm', 'mps'
             'source_separation_timeout': 300,  # Timeout in seconds for source separation (0 = no timeout)
             'filtering_method': 'Dialogue Band-Pass Filter',
             'correlation_method': 'Phase Correlation (GCC-PHAT)',
@@ -363,7 +363,7 @@ class AppConfig:
 
         # Enum validation for specific keys
         if key == 'source_separation_device':
-            valid = ['cpu', 'cuda', 'mps']
+            valid = ['auto', 'cpu', 'cuda', 'rocm', 'mps']
             if value not in valid:
                 return False, f"{key} must be one of {valid}, got '{value}'"
 
@@ -485,6 +485,10 @@ class AppConfig:
                     if old_key in loaded_settings:
                         del loaded_settings[old_key]
                         changed = True
+
+                if loaded_settings.get('source_separation_device') == 'cpu':
+                    loaded_settings['source_separation_device'] = 'auto'
+                    changed = True
 
                 for key, default_value in self.defaults.items():
                     if key not in loaded_settings:
