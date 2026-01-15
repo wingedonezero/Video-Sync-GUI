@@ -30,9 +30,10 @@ show_menu() {
     echo -e "  ${CYAN}2)${NC} Update Libraries - Check for and install updates"
     echo -e "  ${CYAN}3)${NC} Install Optional Dependencies (AI audio features)"
     echo -e "  ${CYAN}4)${NC} Verify Dependencies - Check all packages are installed"
-    echo -e "  ${CYAN}5)${NC} Exit"
+    echo -e "  ${CYAN}5)${NC} Rebuild PyAV (FFmpeg subtitles support)"
+    echo -e "  ${CYAN}6)${NC} Exit"
     echo ""
-    echo -n "Enter your choice [1-5]: "
+    echo -n "Enter your choice [1-6]: "
 }
 
 # Function to check Python version and verify it works
@@ -353,6 +354,45 @@ verify_dependencies() {
     fi
 }
 
+# Function to rebuild PyAV against system FFmpeg (needed for ASS subtitles)
+rebuild_pyav_from_source() {
+    echo ""
+    echo "========================================="
+    echo "Rebuild PyAV from Source"
+    echo "========================================="
+    echo ""
+
+    if ! ensure_venv; then
+        return 1
+    fi
+
+    if command -v ffmpeg &> /dev/null; then
+        if ffmpeg -filters 2>/dev/null | grep -qE '^\s*T.*\bsubtitles\b'; then
+            echo -e "${GREEN}✓ FFmpeg subtitles filter detected${NC}"
+        else
+            echo -e "${YELLOW}Warning: FFmpeg subtitles filter not detected.${NC}"
+            echo -e "${YELLOW}Make sure FFmpeg is built with libass support.${NC}"
+        fi
+    else
+        echo -e "${YELLOW}Warning: FFmpeg not found in PATH.${NC}"
+        echo -e "${YELLOW}PyAV will still build, but subtitle support may be missing.${NC}"
+    fi
+
+    echo ""
+    echo -e "${BLUE}Rebuilding PyAV against system FFmpeg...${NC}"
+    echo -e "${YELLOW}This can take a few minutes and may require build tools.${NC}"
+    echo ""
+
+    pip uninstall -y av 2>/dev/null
+    if pip install --no-binary av av; then
+        echo -e "${GREEN}✓ PyAV rebuilt from source${NC}"
+    else
+        echo -e "${RED}Failed to build PyAV from source.${NC}"
+        echo -e "${YELLOW}Make sure build tools and FFmpeg dev libraries are installed.${NC}"
+        return 1
+    fi
+}
+
 # Function for full setup
 full_setup() {
     echo ""
@@ -513,6 +553,7 @@ echo "This may take a few minutes..."
 
 cd "$PROJECT_DIR"
 pip install -r requirements.txt
+rebuild_pyav_from_source
 
 echo -e "${GREEN}✓ Dependencies installed${NC}"
 echo ""
@@ -556,6 +597,10 @@ main() {
             verify_dependencies
             exit 0
             ;;
+        --rebuild-pyav)
+            rebuild_pyav_from_source
+            exit 0
+            ;;
     esac
 
     # Interactive menu mode
@@ -577,6 +622,9 @@ main() {
                 verify_dependencies
                 ;;
             5)
+                rebuild_pyav_from_source
+                ;;
+            6)
                 echo ""
                 echo -e "${GREEN}Goodbye!${NC}"
                 echo ""
@@ -584,7 +632,7 @@ main() {
                 ;;
             *)
                 echo ""
-                echo -e "${RED}Invalid choice. Please enter 1-5.${NC}"
+                echo -e "${RED}Invalid choice. Please enter 1-6.${NC}"
                 ;;
         esac
 

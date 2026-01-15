@@ -89,12 +89,8 @@ setup_rocm_environment() {
         AMDGPU_IDS_FILE="/dev/null"
     fi
 
-    if [ -z "$AMDGPU_IDS_PATH" ] || [ ! -e "$AMDGPU_IDS_PATH" ]; then
-        export AMDGPU_IDS_PATH="$AMDGPU_IDS_FILE"
-    fi
-    if [ -z "$LIBDRM_AMDGPU_IDS_PATH" ] || [ ! -e "$LIBDRM_AMDGPU_IDS_PATH" ]; then
-        export LIBDRM_AMDGPU_IDS_PATH="$AMDGPU_IDS_FILE"
-    fi
+    export AMDGPU_IDS_PATH="$AMDGPU_IDS_FILE"
+    export LIBDRM_AMDGPU_IDS_PATH="$AMDGPU_IDS_FILE"
 
     # Set ROCm environment variables if AMD GPU detected
     if [ "$AMD_GPU_DETECTED" = true ]; then
