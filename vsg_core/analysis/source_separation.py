@@ -294,9 +294,11 @@ from pathlib import Path
 from audio_separator.separator import Separator
 
 def run_separation(args):
+    output_dir = Path(args['output_dir'])
+
     # Don't use output_single_stem - get all stems and select manually
     separator = Separator(
-        output_dir=args['output_dir'],
+        output_dir=str(output_dir),
         output_format='WAV',
         sample_rate=args['sample_rate'],
         model_file_dir=args.get('model_dir') or "/tmp/audio-separator-models/",
@@ -310,8 +312,19 @@ def run_separation(args):
 
     output_files = separator.separate(args['input_path'])
 
+    # Convert all paths to absolute paths (separator might return relative paths)
+    if output_files:
+        abs_output_files = []
+        for f in output_files:
+            if f:
+                f_path = Path(f)
+                # If path is not absolute, join with output_dir
+                if not f_path.is_absolute():
+                    f_path = output_dir / f_path
+                abs_output_files.append(str(f_path))
+        output_files = abs_output_files
+
     # Debug: List all files in output directory
-    output_dir = Path(args['output_dir'])
     all_files = []
     if output_dir.exists():
         all_files = list(output_dir.rglob('*.wav'))
@@ -323,7 +336,9 @@ def run_separation(args):
     print(f"DEBUG: separator.separate() returned {len(output_files) if output_files else 0} files", file=sys.stderr)
     if output_files:
         for f in output_files:
-            print(f"DEBUG: - {Path(f).name if f else 'None'}", file=sys.stderr)
+            f_path = Path(f)
+            exists = f_path.exists()
+            print(f"DEBUG: - {f_path.name} (exists={exists})", file=sys.stderr)
 
     # If separator.separate() returned empty, try to find files manually
     if not output_files and all_files:
@@ -353,15 +368,16 @@ def run_separation(args):
         # Look for files NOT containing 'vocal'
         non_vocal_files = [f for f in output_files if 'vocal' not in Path(f).name.lower()]
         if len(non_vocal_files) == 1:
-            selected_file = non_vocal_files[0]
+            selected_file = str(non_vocal_files[0])
             print(f"DEBUG: Using {Path(selected_file).name} as instrumental (only non-vocal file)", file=sys.stderr)
         elif non_vocal_files:
             # If multiple non-vocal stems, prefer 'no_vocals' or 'instrumental'
             for f in non_vocal_files:
-                fname_lower = Path(f).name.lower()
+                f_path = Path(f)
+                fname_lower = f_path.name.lower()
                 if 'no_vocals' in fname_lower or 'instrumental' in fname_lower or 'no_vocal' in fname_lower:
-                    selected_file = f
-                    print(f"DEBUG: Selected {Path(f).name} as instrumental", file=sys.stderr)
+                    selected_file = str(f_path)
+                    print(f"DEBUG: Selected {f_path.name} as instrumental", file=sys.stderr)
                     break
 
     # If still no match, use the first file as fallback
@@ -371,6 +387,10 @@ def run_separation(args):
 
     if not selected_file:
         raise RuntimeError(f'Could not find output file for stem: {target_stem}')
+
+    # Verify the file exists before returning
+    if not Path(selected_file).exists():
+        raise RuntimeError(f'Selected file does not exist: {selected_file}')
 
     return selected_file
 
