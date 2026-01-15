@@ -14,6 +14,7 @@ NC='\033[0m' # No Color
 # Project directory
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="$PROJECT_DIR/.venv"
+VENV_PYTHON="$VENV_DIR/bin/python"
 PYTHON_AUDIO_SEPARATOR_REPO="audio-separator @ git+https://github.com/nomadkaraoke/python-audio-separator.git"
 PYTHON_AUDIO_SEPARATOR_GPU_REPO="audio-separator[gpu] @ git+https://github.com/nomadkaraoke/python-audio-separator.git"
 PYTHON_AUDIO_SEPARATOR_CPU_REPO="audio-separator[cpu] @ git+https://github.com/nomadkaraoke/python-audio-separator.git"
@@ -146,11 +147,27 @@ ensure_venv() {
         return 1
     fi
 
-    if [ -z "$VIRTUAL_ENV" ]; then
-        echo -e "${BLUE}Activating virtual environment...${NC}"
+    if [ -z "$VIRTUAL_ENV" ] || [ "$VIRTUAL_ENV" != "$VENV_DIR" ]; then
+        if [ -n "$VIRTUAL_ENV" ]; then
+            echo -e "${YELLOW}Warning: Another virtual environment is active (${VIRTUAL_ENV}).${NC}"
+            echo -e "${YELLOW}Switching to project venv: $VENV_DIR${NC}"
+        else
+            echo -e "${BLUE}Activating virtual environment...${NC}"
+        fi
         source "$VENV_DIR/bin/activate"
     fi
+
+    if [ ! -x "$VENV_PYTHON" ]; then
+        echo -e "${RED}Virtual environment Python not found at $VENV_PYTHON${NC}"
+        return 1
+    fi
+    echo -e "${BLUE}Active venv python: $VENV_PYTHON${NC}"
+    echo -e "${BLUE}Shell python resolves to: $(command -v python)${NC}"
     return 0
+}
+
+venv_pip() {
+    "$VENV_PYTHON" -m pip "$@"
 }
 
 # Function to check for updates
@@ -169,7 +186,7 @@ check_updates() {
     echo ""
 
     # Get list of outdated packages
-    outdated=$(pip list --outdated --format=json 2>/dev/null)
+    outdated=$(venv_pip list --outdated --format=json 2>/dev/null)
 
     if [ "$outdated" == "[]" ] || [ -z "$outdated" ]; then
         echo -e "${GREEN}✓ All packages are up to date!${NC}"
@@ -186,7 +203,7 @@ check_updates() {
     # Parse and display outdated packages
     echo -e "${YELLOW}The following packages have updates available:${NC}"
     echo ""
-    echo "$outdated" | python -c "
+    echo "$outdated" | "$VENV_PYTHON" -c "
 import sys, json
 data = json.load(sys.stdin)
 for pkg in data:
@@ -200,7 +217,7 @@ for pkg in data:
     if [[ "$response" =~ ^[Yy]$ ]]; then
         echo ""
         echo -e "${BLUE}Updating packages...${NC}"
-        pip install --upgrade $(echo "$outdated" | python -c "
+        venv_pip install --upgrade $(echo "$outdated" | "$VENV_PYTHON" -c "
 import sys, json
 data = json.load(sys.stdin)
 print(' '.join([pkg['name'] for pkg in data]))
@@ -247,28 +264,31 @@ install_optional() {
             echo ""
             echo -e "${BLUE}Installing Audio Separator (NVIDIA CUDA)...${NC}"
             echo -e "${YELLOW}Installing CUDA-enabled PyTorch (cu121)...${NC}"
-            pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-            pip install "$PYTHON_AUDIO_SEPARATOR_GPU_REPO"
+            venv_pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+            venv_pip install "$PYTHON_AUDIO_SEPARATOR_GPU_REPO"
             echo -e "${GREEN}✓ NVIDIA GPU support installed${NC}"
             ;;
         2)
             echo ""
             echo -e "${BLUE}Installing Audio Separator (AMD ROCm 6.4 Stable - GPU via PyTorch)...${NC}"
-            pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.4
-            pip install "$PYTHON_AUDIO_SEPARATOR_CPU_REPO"
+            venv_pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.4
+            venv_pip install --upgrade onnxruntime
+            venv_pip install "$PYTHON_AUDIO_SEPARATOR_CPU_REPO"
             echo -e "${GREEN}✓ AMD GPU (ROCm 6.4) support installed${NC}"
             ;;
         3)
             echo ""
             echo -e "${BLUE}Installing Audio Separator (AMD ROCm 7.1 Nightly - GPU via PyTorch)...${NC}"
-            pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/rocm7.1
-            pip install "$PYTHON_AUDIO_SEPARATOR_CPU_REPO"
+            venv_pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/rocm7.1
+            venv_pip install --upgrade onnxruntime
+            venv_pip install "$PYTHON_AUDIO_SEPARATOR_CPU_REPO"
             echo -e "${GREEN}✓ AMD GPU (ROCm 7.1) support installed${NC}"
             ;;
         4)
             echo ""
             echo -e "${BLUE}Installing Audio Separator (CPU only)...${NC}"
-            pip install "$PYTHON_AUDIO_SEPARATOR_CPU_REPO"
+            venv_pip install --upgrade onnxruntime
+            venv_pip install "$PYTHON_AUDIO_SEPARATOR_CPU_REPO"
             echo -e "${GREEN}✓ CPU-only support installed${NC}"
             ;;
         5)
@@ -309,8 +329,8 @@ verify_dependencies() {
         # Extract package name (before any version specifier)
         pkg=$(echo "$line" | sed 's/[>=<\[].*$//' | xargs)
 
-        if pip show "$pkg" &> /dev/null; then
-            version=$(pip show "$pkg" 2>/dev/null | grep "^Version:" | cut -d' ' -f2)
+        if venv_pip show "$pkg" &> /dev/null; then
+            version=$(venv_pip show "$pkg" 2>/dev/null | grep "^Version:" | cut -d' ' -f2)
             installed+=("$pkg ($version)")
         else
             missing+=("$pkg")
@@ -339,7 +359,7 @@ verify_dependencies() {
         if [[ "$response" =~ ^[Yy]$ ]]; then
             echo ""
             echo -e "${BLUE}Installing missing packages...${NC}"
-            pip install -r "$PROJECT_DIR/requirements.txt"
+            venv_pip install -r "$PROJECT_DIR/requirements.txt"
             echo ""
             echo -e "${GREEN}✓ Missing packages installed${NC}"
         fi
@@ -348,8 +368,8 @@ verify_dependencies() {
     # Check optional dependencies
     echo ""
     echo -e "${YELLOW}Checking optional AI audio dependencies...${NC}"
-    if pip show audio-separator &> /dev/null; then
-        sep_version=$(pip show audio-separator 2>/dev/null | grep "^Version:" | cut -d' ' -f2)
+    if venv_pip show audio-separator &> /dev/null; then
+        sep_version=$(venv_pip show audio-separator 2>/dev/null | grep "^Version:" | cut -d' ' -f2)
         echo -e "${GREEN}✓ AI audio features installed${NC}"
         echo "  audio-separator ($sep_version)"
     else
@@ -387,8 +407,8 @@ rebuild_pyav_from_source() {
     echo -e "${YELLOW}This can take a few minutes and may require build tools.${NC}"
     echo ""
 
-    pip uninstall -y av 2>/dev/null
-    if pip install --no-binary av av; then
+    venv_pip uninstall -y av 2>/dev/null
+    if venv_pip install --no-binary av av; then
         echo -e "${GREEN}✓ PyAV rebuilt from source${NC}"
     else
         echo -e "${RED}Failed to build PyAV from source.${NC}"
@@ -471,6 +491,7 @@ fi
 # Verify Python version
 PYTHON_VERSION=$("$PYTHON_CMD" --version)
 echo -e "${BLUE}Using: $PYTHON_VERSION${NC}"
+echo -e "${BLUE}Base interpreter: $PYTHON_CMD${NC}"
 echo ""
 
 # Step 2: Create virtual environment
@@ -546,7 +567,7 @@ fi
 
 # Upgrade pip
 echo -e "${BLUE}Upgrading pip...${NC}"
-pip install --upgrade pip
+venv_pip install --upgrade pip
 
 echo -e "${GREEN}✓ Virtual environment ready${NC}"
 echo ""
@@ -556,7 +577,7 @@ echo -e "${YELLOW}[3/3] Installing dependencies...${NC}"
 echo "This may take a few minutes..."
 
 cd "$PROJECT_DIR"
-pip install -r requirements.txt
+venv_pip install -r requirements.txt
 rebuild_pyav_from_source
 
 echo -e "${GREEN}✓ Dependencies installed${NC}"
