@@ -14,6 +14,9 @@ NC='\033[0m' # No Color
 # Project directory
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="$PROJECT_DIR/.venv"
+PYTHON_AUDIO_SEPARATOR_REPO="audio-separator @ git+https://github.com/nomadkaraoke/python-audio-separator.git"
+PYTHON_AUDIO_SEPARATOR_GPU_REPO="audio-separator[gpu] @ git+https://github.com/nomadkaraoke/python-audio-separator.git"
+PYTHON_AUDIO_SEPARATOR_CPU_REPO="audio-separator[cpu] @ git+https://github.com/nomadkaraoke/python-audio-separator.git"
 
 # Function to show main menu
 show_menu() {
@@ -225,6 +228,9 @@ install_optional() {
     echo "These enable AI-powered vocal/instrument separation"
     echo "for better cross-language audio correlation."
     echo ""
+    echo "Note: ROCm installs use the CPU extra for audio-separator"
+    echo "because GPU acceleration comes from the ROCm PyTorch build."
+    echo ""
     echo "Select your hardware:"
     echo ""
     echo -e "  ${CYAN}1)${NC} NVIDIA GPU (CUDA)"
@@ -240,27 +246,29 @@ install_optional() {
         1)
             echo ""
             echo -e "${BLUE}Installing Audio Separator (NVIDIA CUDA)...${NC}"
-            pip install "audio-separator[gpu]"
+            echo -e "${YELLOW}Installing CUDA-enabled PyTorch (cu121)...${NC}"
+            pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+            pip install "$PYTHON_AUDIO_SEPARATOR_GPU_REPO"
             echo -e "${GREEN}✓ NVIDIA GPU support installed${NC}"
             ;;
         2)
             echo ""
-            echo -e "${BLUE}Installing Audio Separator (AMD ROCm 6.4 Stable)...${NC}"
+            echo -e "${BLUE}Installing Audio Separator (AMD ROCm 6.4 Stable - GPU via PyTorch)...${NC}"
             pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/rocm6.4
-            pip install "audio-separator[cpu]"
+            pip install "$PYTHON_AUDIO_SEPARATOR_CPU_REPO"
             echo -e "${GREEN}✓ AMD GPU (ROCm 6.4) support installed${NC}"
             ;;
         3)
             echo ""
-            echo -e "${BLUE}Installing Audio Separator (AMD ROCm 7.1 Nightly)...${NC}"
+            echo -e "${BLUE}Installing Audio Separator (AMD ROCm 7.1 Nightly - GPU via PyTorch)...${NC}"
             pip install --pre torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/rocm7.1
-            pip install "audio-separator[cpu]"
+            pip install "$PYTHON_AUDIO_SEPARATOR_CPU_REPO"
             echo -e "${GREEN}✓ AMD GPU (ROCm 7.1) support installed${NC}"
             ;;
         4)
             echo ""
             echo -e "${BLUE}Installing Audio Separator (CPU only)...${NC}"
-            pip install "audio-separator[cpu]"
+            pip install "$PYTHON_AUDIO_SEPARATOR_CPU_REPO"
             echo -e "${GREEN}✓ CPU-only support installed${NC}"
             ;;
         5)
