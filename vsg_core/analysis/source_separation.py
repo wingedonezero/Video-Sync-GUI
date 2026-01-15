@@ -10,9 +10,11 @@ by the OS - solving common PyTorch/ONNX memory leak issues.
 
 from __future__ import annotations
 
+import importlib.resources as resources
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -25,9 +27,9 @@ from scipy.signal import resample_poly
 from math import gcd
 
 # Import GPU environment support
-try:
+if importlib.util.find_spec('vsg_core.system.gpu_env'):
     from vsg_core.system.gpu_env import get_subprocess_environment
-except ImportError:
+else:
     def get_subprocess_environment():
         return os.environ.copy()
 
@@ -75,6 +77,92 @@ def is_audio_separator_available() -> Tuple[bool, str]:
     return True, "audio-separator available"
 
 
+def _load_model_data() -> object:
+    try:
+        root = resources.files('audio_separator')
+    except Exception:
+        return None
+
+    candidates = []
+    try:
+        candidates.append(root / 'models.json')
+        candidates.extend(root.rglob('models.json'))
+    except Exception:
+        candidates = candidates or []
+
+    for candidate in candidates:
+        try:
+            if not candidate.is_file():
+                continue
+            return json.loads(candidate.read_text(encoding='utf-8'))
+        except Exception:
+            continue
+
+    return None
+
+
+def _load_model_data_via_cli() -> object:
+    cli_path = shutil.which('audio-separator')
+    if cli_path:
+        command = [cli_path, '-l', '--list_format=json']
+    else:
+        command = [_get_venv_python(), '-m', 'audio_separator', '-l', '--list_format=json']
+
+    try:
+        result = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+    output = result.stdout.strip()
+    if not output:
+        return None
+
+    try:
+        return json.loads(output)
+    except json.JSONDecodeError:
+        return None
+
+
+def _collect_models_from_dict(model_data: Dict, models: Dict[str, str]) -> None:
+    for key, value in model_data.items():
+        if isinstance(value, dict):
+            if all(isinstance(v, str) for v in value.values()):
+                models.update(value)
+            else:
+                _collect_models_from_dict(value, models)
+        elif isinstance(value, list):
+            _collect_models_from_list(value, models)
+        elif isinstance(value, str):
+            if isinstance(key, str):
+                models[key] = value
+
+
+def _collect_models_from_list(model_list: List, models: Dict[str, str]) -> None:
+    for item in model_list:
+        if isinstance(item, dict):
+            name = (
+                item.get('name')
+                or item.get('display_name')
+                or item.get('model_name')
+            )
+            filename = (
+                item.get('filename')
+                or item.get('model_filename')
+                or item.get('file')
+            )
+            if name and filename:
+                models[name] = filename
+            else:
+                _collect_models_from_dict(item, models)
+        elif isinstance(item, list):
+            _collect_models_from_list(item, models)
+
+
 def list_available_models() -> List[Tuple[str, str]]:
     """
     Get available model filenames from audio-separator's bundled model list.
@@ -82,18 +170,21 @@ def list_available_models() -> List[Tuple[str, str]]:
     Returns:
         List of (friendly_name, filename) tuples.
     """
-    try:
-        import importlib.resources as resources
-
-        with resources.open_text('audio_separator', 'models.json') as f:
-            model_data = json.load(f)
-    except Exception:
+    available, _ = is_audio_separator_available()
+    if not available:
         return []
 
+    model_data = _load_model_data_via_cli()
+    if model_data is None:
+        model_data = _load_model_data()
+        if model_data is None:
+            return []
+
     models: Dict[str, str] = {}
-    for group in model_data.values():
-        if isinstance(group, dict):
-            models.update(group)
+    if isinstance(model_data, dict):
+        _collect_models_from_dict(model_data, models)
+    elif isinstance(model_data, list):
+        _collect_models_from_list(model_data, models)
 
     return sorted(models.items(), key=lambda item: item[0].lower())
 
