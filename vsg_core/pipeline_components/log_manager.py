@@ -49,9 +49,17 @@ class LogManager:
         logger.propagate = False
 
         # Create unified log function
+        gui_callback_ok = True
+
         def log_to_all(message: str):
+            nonlocal gui_callback_ok
             logger.info(message.strip())
-            gui_log_callback(message)
+            if not gui_callback_ok:
+                return
+            try:
+                gui_log_callback(message)
+            except RuntimeError:
+                gui_callback_ok = False
 
         return logger, handler, log_to_all
 

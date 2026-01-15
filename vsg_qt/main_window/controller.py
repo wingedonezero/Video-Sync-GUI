@@ -263,4 +263,7 @@ class MainController:
 
     def on_close(self):
         self.save_ui_to_config()
+        if self.worker:
+            self.worker.disable_gui_signals()
+            QThreadPool.globalInstance().waitForDone()
         self.layout_manager.cleanup_all()
