@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Callable, Dict, Optional, Tuple, List
 
@@ -49,28 +50,28 @@ DEFAULT_MODEL = 'default'
 CURATED_MODELS: List[Dict[str, str]] = [
     {
         'name': 'Demucs v4: htdemucs',
-        'filename': 'htdemucs.yaml',
-        'description': 'Best all-round 4-stem separation with strong balance across vocals and instruments.',
+        'filename': 'htdemucs',
+        'description': 'Best all-round 4-stem separation (drums/bass/other/vocals) with strong balance.',
     },
     {
-        'name': 'Roformer: BandSplit SDR 1053 (Viperx)',
-        'filename': 'config_bs_roformer_ep_937_sdr_10.5309.yaml',
-        'description': 'High-quality Roformer model with excellent overall stem clarity (vocals + instruments).',
+        'name': 'BS-Roformer Viperx 1297 (Highest Quality)',
+        'filename': 'model_bs_roformer_ep_317_sdr_12.9755.ckpt',
+        'description': 'Top quality 2-stem (vocals SDR 12.9, instrumental SDR 17.0). Best overall performance.',
+    },
+    {
+        'name': 'BS-Roformer Viperx 1296',
+        'filename': 'model_bs_roformer_ep_368_sdr_12.9628.ckpt',
+        'description': 'High quality 2-stem (vocals SDR 12.9, instrumental SDR 17.0). Alternative to 1297.',
     },
     {
         'name': 'MDX23C: InstVoc HQ',
-        'filename': 'model_2_stem_full_band_8k.yaml',
-        'description': 'Focused 2-stem instrumental/vocals model; strong for dialogue and music split.',
+        'filename': 'model_mel_band_roformer_ep_3005_sdr_11.4360.ckpt',
+        'description': 'High-quality 2-stem instrumental/vocals separation. Good for dialogue extraction.',
     },
     {
-        'name': 'MDX-Net: Kim Vocal 2',
-        'filename': 'Kim_Vocal_2.onnx',
-        'description': 'Reliable vocals-only extraction for speech-heavy content.',
-    },
-    {
-        'name': 'Bandit v2: Cinematic Multilang',
-        'filename': 'config_dnr_bandit_v2_mus64.yaml',
-        'description': 'Dialogue-friendly model for noisy mixes and multilingual sources.',
+        'name': 'MelBand Roformer Kim',
+        'filename': 'mel_band_roformer_kim_ft_unwa.ckpt',
+        'description': 'Reliable vocals extraction with good instrumental preservation (SDR 12.4).',
     },
 ]
 
@@ -252,17 +253,257 @@ def _select_model_filename(file_map: Dict) -> Optional[str]:
     return None
 
 
+def get_installed_models_json_path(model_dir: Optional[str] = None) -> Path:
+    """Get path to installed_models.json file."""
+    if model_dir:
+        return Path(model_dir) / 'installed_models.json'
+
+    # Default to project .audio_separator_models directory
+    project_root = Path(__file__).resolve().parent.parent.parent
+    default_dir = project_root / '.audio_separator_models'
+    return default_dir / 'installed_models.json'
+
+
+def get_installed_models(model_dir: Optional[str] = None) -> List[Dict[str, any]]:
+    """
+    Read installed models from local JSON cache.
+
+    Returns:
+        List of model dictionaries with metadata:
+        [{'name': ..., 'filename': ..., 'sdr_vocals': ..., 'sdr_instrumental': ...,
+          'stems': ..., 'type': ..., 'size_mb': ..., 'description': ...}]
+    """
+    json_path = get_installed_models_json_path(model_dir)
+
+    if not json_path.exists():
+        return []
+
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return data.get('models', [])
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def update_installed_models_json(models: List[Dict], model_dir: Optional[str] = None) -> bool:
+    """
+    Write/update the installed_models.json file.
+
+    Args:
+        models: List of model dictionaries
+        model_dir: Model directory path
+
+    Returns:
+        True on success, False on failure
+    """
+    json_path = get_installed_models_json_path(model_dir)
+
+    # Create directory if it doesn't exist
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        data = {
+            'version': '1.0',
+            'last_updated': json.dumps(None),  # Will be timestamp
+            'models': models
+        }
+
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+
+        return True
+    except (OSError, json.JSONEncodeError):
+        return False
+
+
+def get_all_available_models_from_registry() -> List[Dict]:
+    """
+    Query audio-separator for the complete model list with metadata.
+
+    Returns:
+        List of model dictionaries with all available info from registry.
+        Returns empty list if query fails.
+    """
+    cli_path = shutil.which('audio-separator')
+    if cli_path:
+        command = [cli_path, '--list_models', '--list_format=json']
+    else:
+        python_exe = _get_venv_python()
+        command = [python_exe, '-m', 'audio_separator', '--list_models', '--list_format=json']
+
+    try:
+        result = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+        output = result.stdout.strip()
+        if not output:
+            return []
+
+        # Parse the JSON output from audio-separator
+        model_data = json.loads(output)
+
+        # Flatten the nested structure into a simple list
+        models = []
+        _extract_models_from_registry(model_data, models)
+
+        return models
+
+    except (OSError, subprocess.SubprocessError, json.JSONDecodeError, subprocess.TimeoutExpired):
+        return []
+
+
+def _extract_models_from_registry(data: any, models: List[Dict]) -> None:
+    """Recursively extract model info from audio-separator's nested JSON structure."""
+    if isinstance(data, dict):
+        # Check if this looks like a model entry
+        if 'filename' in data or 'model_filename' in data:
+            filename = data.get('filename') or data.get('model_filename')
+            name = data.get('name') or data.get('display_name') or data.get('model_name') or filename
+
+            # Extract SDR scores if available
+            sdr_vocals = None
+            sdr_instrumental = None
+            if 'sdr' in data:
+                if isinstance(data['sdr'], dict):
+                    sdr_vocals = data['sdr'].get('vocals')
+                    sdr_instrumental = data['sdr'].get('instrumental') or data['sdr'].get('other')
+                elif isinstance(data['sdr'], (int, float)):
+                    sdr_vocals = data['sdr']
+
+            # Determine model type from filename
+            model_type = 'Unknown'
+            stems = 'Unknown'
+            if 'demucs' in filename.lower() and 'htdemucs' in filename.lower():
+                model_type = 'Demucs v4'
+                stems = '4-stem (Drums/Bass/Other/Vocals)'
+            elif 'bs_roformer' in filename.lower() or 'bs-roformer' in filename.lower():
+                model_type = 'BS-Roformer'
+                stems = '2-stem (Vocals/Instrumental)'
+            elif 'mel_band_roformer' in filename.lower() or 'melband' in filename.lower():
+                model_type = 'MelBand Roformer'
+                stems = '2-stem (Vocals/Instrumental)'
+            elif 'mdx' in filename.lower():
+                model_type = 'MDX-Net'
+                stems = '2-stem (Vocals/Instrumental)'
+            elif 'vr' in filename.lower():
+                model_type = 'VR Arch'
+                stems = '2-stem'
+
+            models.append({
+                'name': name,
+                'filename': filename,
+                'sdr_vocals': sdr_vocals,
+                'sdr_instrumental': sdr_instrumental,
+                'type': model_type,
+                'stems': stems,
+                'description': data.get('description', ''),
+            })
+        else:
+            # Recurse into nested structures
+            for value in data.values():
+                _extract_models_from_registry(value, models)
+    elif isinstance(data, list):
+        for item in data:
+            _extract_models_from_registry(item, models)
+
+
+def download_model(
+    model_filename: str,
+    model_dir: str,
+    progress_callback: Optional[Callable[[int, str], None]] = None
+) -> bool:
+    """
+    Download a model using audio-separator.
+
+    Args:
+        model_filename: The model filename to download
+        model_dir: Directory to download to
+        progress_callback: Optional callback(percent, message)
+
+    Returns:
+        True on success, False on failure
+    """
+    cli_path = shutil.which('audio-separator')
+    if cli_path:
+        command = [cli_path, '--model_filename', model_filename, '--model_file_dir', model_dir]
+    else:
+        python_exe = _get_venv_python()
+        command = [python_exe, '-m', 'audio_separator', '--model_filename', model_filename,
+                   '--model_file_dir', model_dir, '--list_models']  # List models triggers download
+
+    try:
+        if progress_callback:
+            progress_callback(0, f"Starting download of {model_filename}...")
+
+        # Run the download command
+        # Note: audio-separator downloads models automatically when loading
+        # We can trigger this by trying to load the model
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        # Monitor output for progress
+        while True:
+            if process.poll() is not None:
+                break
+
+            if progress_callback:
+                progress_callback(50, "Downloading...")
+
+            time.sleep(0.5)
+
+        if progress_callback:
+            progress_callback(100, "Download complete")
+
+        return process.returncode == 0
+
+    except (OSError, subprocess.SubprocessError):
+        if progress_callback:
+            progress_callback(0, "Download failed")
+        return False
+
+
 def list_available_models() -> List[Tuple[str, str]]:
     """
-    Get curated model filenames for audio-separator.
+    Get installed models from local JSON cache.
+    Falls back to curated list if no local cache exists.
 
     Returns:
         List of (friendly_name, filename) tuples.
     """
-    return [
-        (f"{model['name']} — {model['description']}", model['filename'])
-        for model in CURATED_MODELS
-    ]
+    installed = get_installed_models()
+
+    if not installed:
+        # Fallback to curated list
+        return [
+            (f"{model['name']} — {model['description']}", model['filename'])
+            for model in CURATED_MODELS
+        ]
+
+    # Build friendly names with metadata
+    result = []
+    for model in installed:
+        name_parts = [model['name']]
+
+        # Add SDR info if available
+        if model.get('sdr_vocals'):
+            name_parts.append(f"SDR {model['sdr_vocals']}")
+
+        name_parts.append(f"({model['filename']})")
+        friendly_name = ' '.join(name_parts)
+
+        result.append((friendly_name, model['filename']))
+
+    return result
 
 
 def _fallback_models() -> Dict[str, str]:
@@ -291,12 +532,31 @@ import json
 import os
 import sys
 from pathlib import Path
+import numpy as np
+from scipy.io import wavfile
 from audio_separator.separator import Separator
 
+def load_wav_file(path):
+    """Load WAV file and return float32 mono audio."""
+    sample_rate, data = wavfile.read(path)
+
+    if data.dtype.kind in 'iu':
+        max_val = np.iinfo(data.dtype).max
+        data = data.astype(np.float32) / max_val
+    else:
+        data = data.astype(np.float32)
+
+    if data.ndim > 1:
+        data = data.mean(axis=1)
+
+    return sample_rate, data
+
 def run_separation(args):
+    output_dir = Path(args['output_dir'])
+
     # Don't use output_single_stem - get all stems and select manually
     separator = Separator(
-        output_dir=args['output_dir'],
+        output_dir=str(output_dir),
         output_format='WAV',
         sample_rate=args['sample_rate'],
         model_file_dir=args.get('model_dir') or "/tmp/audio-separator-models/",
@@ -310,8 +570,19 @@ def run_separation(args):
 
     output_files = separator.separate(args['input_path'])
 
+    # Convert all paths to absolute paths (separator might return relative paths)
+    if output_files:
+        abs_output_files = []
+        for f in output_files:
+            if f:
+                f_path = Path(f)
+                # If path is not absolute, join with output_dir
+                if not f_path.is_absolute():
+                    f_path = output_dir / f_path
+                abs_output_files.append(str(f_path))
+        output_files = abs_output_files
+
     # Debug: List all files in output directory
-    output_dir = Path(args['output_dir'])
     all_files = []
     if output_dir.exists():
         all_files = list(output_dir.rglob('*.wav'))
@@ -323,7 +594,9 @@ def run_separation(args):
     print(f"DEBUG: separator.separate() returned {len(output_files) if output_files else 0} files", file=sys.stderr)
     if output_files:
         for f in output_files:
-            print(f"DEBUG: - {Path(f).name if f else 'None'}", file=sys.stderr)
+            f_path = Path(f)
+            exists = f_path.exists()
+            print(f"DEBUG: - {f_path.name} (exists={exists})", file=sys.stderr)
 
     # If separator.separate() returned empty, try to find files manually
     if not output_files and all_files:
@@ -346,23 +619,53 @@ def run_separation(args):
                 if target_stem.lower() in f_path.name.lower():
                     selected_file = str(f_path)
                     print(f"DEBUG: Selected {f_path.name} for stem {target_stem}", file=sys.stderr)
-                    break
+                    return selected_file
 
-    # For instrumental, also try combining non-vocal stems if available
+    # For instrumental, need to mix non-vocal stems together
     if not selected_file and target_stem.lower() == 'instrumental':
         # Look for files NOT containing 'vocal'
         non_vocal_files = [f for f in output_files if 'vocal' not in Path(f).name.lower()]
-        if len(non_vocal_files) == 1:
-            selected_file = non_vocal_files[0]
+
+        if len(non_vocal_files) == 0:
+            raise RuntimeError('No non-vocal stems found for instrumental mode')
+        elif len(non_vocal_files) == 1:
+            # Only one non-vocal file, use it directly
+            selected_file = str(non_vocal_files[0])
             print(f"DEBUG: Using {Path(selected_file).name} as instrumental (only non-vocal file)", file=sys.stderr)
-        elif non_vocal_files:
-            # If multiple non-vocal stems, prefer 'no_vocals' or 'instrumental'
-            for f in non_vocal_files:
-                fname_lower = Path(f).name.lower()
-                if 'no_vocals' in fname_lower or 'instrumental' in fname_lower or 'no_vocal' in fname_lower:
-                    selected_file = f
-                    print(f"DEBUG: Selected {Path(f).name} as instrumental", file=sys.stderr)
-                    break
+            return selected_file
+        else:
+            # Multiple non-vocal stems - need to mix them together (like old Demucs)
+            print(f"DEBUG: Mixing {len(non_vocal_files)} non-vocal stems for instrumental", file=sys.stderr)
+
+            mixed_audio = None
+            sample_rate = None
+
+            for stem_file in non_vocal_files:
+                sr, audio = load_wav_file(Path(stem_file))
+                print(f"DEBUG: - Loading {Path(stem_file).name}", file=sys.stderr)
+
+                if sample_rate is None:
+                    sample_rate = sr
+                    mixed_audio = audio
+                else:
+                    if sr != sample_rate:
+                        raise RuntimeError(f'Sample rate mismatch: {sr} vs {sample_rate}')
+                    mixed_audio = mixed_audio + audio
+
+            # Save mixed audio to a new file
+            mixed_output = output_dir / 'mixed_instrumental.wav'
+            wavfile.write(str(mixed_output), sample_rate, mixed_audio.astype(np.float32))
+            print(f"DEBUG: Saved mixed instrumental to {mixed_output.name}", file=sys.stderr)
+
+            return str(mixed_output)
+
+    # For vocals, look for a file with 'vocal' in the name
+    if not selected_file and target_stem.lower() == 'vocals':
+        vocal_files = [f for f in output_files if 'vocal' in Path(f).name.lower()]
+        if vocal_files:
+            selected_file = str(vocal_files[0])
+            print(f"DEBUG: Selected {Path(selected_file).name} for vocals", file=sys.stderr)
+            return selected_file
 
     # If still no match, use the first file as fallback
     if not selected_file and output_files:
@@ -371,6 +674,10 @@ def run_separation(args):
 
     if not selected_file:
         raise RuntimeError(f'Could not find output file for stem: {target_stem}')
+
+    # Verify the file exists before returning
+    if not Path(selected_file).exists():
+        raise RuntimeError(f'Selected file does not exist: {selected_file}')
 
     return selected_file
 

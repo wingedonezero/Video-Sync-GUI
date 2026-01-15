@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QLineEdit, QPushButton, QFileDialog, QLabel, QGroupBox, QVBoxLayout
 )
 
-from vsg_core.analysis.source_separation import list_available_models
+from vsg_core.analysis.source_separation import get_installed_models, get_installed_models_json_path
 
 # --- Helper functions ---
 def _dir_input() -> QWidget:
@@ -147,21 +147,20 @@ class AnalysisTab(QWidget):
         )
 
         self.widgets['source_separation_model'] = QComboBox()
-        self.widgets['source_separation_model'].addItem('Default (Audio Separator)', 'default')
-        for name, filename in list_available_models():
-            self.widgets['source_separation_model'].addItem(f"{name} ({filename})", filename)
-        self.widgets['source_separation_model'].setToolTip(
-            "Select the audio-separator model to use.\n\n"
-            "Curated models are shown here; download via setup_env.sh if needed.\n"
-            "Requires: audio-separator (with GPU or CPU extras)\n"
-            "Note: Runs in subprocess for guaranteed memory cleanup."
-        )
+        self._populate_model_dropdown()
+
         self.widgets['source_separation_model_dir'] = _dir_input()
         self.widgets['source_separation_model_dir'].setToolTip(
             "Directory where audio-separator stores models.\n\n"
             "Defaults to the application's audio_separator_models folder.\n"
             "Models are downloaded automatically on first use."
         )
+
+        # Manage Models button
+        self.manage_models_btn = QPushButton("Manage Models...")
+        self.manage_models_btn.setToolTip("Open the model manager to browse, download, and manage audio separation models.")
+        self.manage_models_btn.clicked.connect(self._open_model_manager)
+
         self.widgets['filtering_method'] = QComboBox(); self.widgets['filtering_method'].addItems(['None', 'Low-Pass Filter', 'Dialogue Band-Pass Filter']); self.widgets['filtering_method'].setToolTip("Apply a filter to the audio before analysis to improve the signal-to-noise ratio.\n'Dialogue Band-Pass' is recommended for most content.")
         self.cutoff_container = QWidget()
         cutoff_layout = QFormLayout(self.cutoff_container); cutoff_layout.setContentsMargins(0, 0, 0, 0)
@@ -170,6 +169,7 @@ class AnalysisTab(QWidget):
         prep_layout.addRow("Source Separation:", self.widgets['source_separation_mode'])
         prep_layout.addRow("Separation Model:", self.widgets['source_separation_model'])
         prep_layout.addRow("Model Directory:", self.widgets['source_separation_model_dir'])
+        prep_layout.addRow("", self.manage_models_btn)
         prep_layout.addRow("Audio Filtering:", self.widgets['filtering_method'])
         prep_layout.addRow(self.cutoff_container)
         main_layout.addWidget(prep_group)
@@ -297,6 +297,83 @@ class AnalysisTab(QWidget):
 
     def _update_multi_corr_visibility(self, enabled: bool):
         self.multi_corr_methods_container.setVisible(enabled)
+
+    def _populate_model_dropdown(self):
+        """Populate the model dropdown from installed_models.json."""
+        self.widgets['source_separation_model'].clear()
+        self.widgets['source_separation_model'].addItem('Default (Audio Separator)', 'default')
+
+        # Get model directory (may be empty initially)
+        model_dir = self._get_model_dir()
+
+        # Load installed models
+        installed_models = get_installed_models(model_dir)
+
+        if not installed_models:
+            # No models installed - show message
+            self.widgets['source_separation_model'].addItem('(No models installed - click Manage Models)', '')
+            self.widgets['source_separation_model'].setToolTip(
+                "No models are installed yet.\n\n"
+                "Click 'Manage Models...' to browse and download models."
+            )
+        else:
+            # Add installed models with rich tooltips
+            for model in installed_models:
+                # Friendly display name
+                name = model.get('name', model['filename'])
+                self.widgets['source_separation_model'].addItem(name, model['filename'])
+
+                # Build rich tooltip with metadata
+                tooltip_lines = [
+                    f"<b>{name}</b>",
+                    "",
+                    f"<b>File:</b> {model['filename']}",
+                    f"<b>Type:</b> {model.get('type', 'Unknown')}",
+                    f"<b>Stems:</b> {model.get('stems', 'Unknown')}",
+                ]
+
+                if model.get('sdr_vocals'):
+                    tooltip_lines.append(f"<b>Vocal SDR:</b> {model['sdr_vocals']:.1f} dB")
+                if model.get('sdr_instrumental'):
+                    tooltip_lines.append(f"<b>Instrumental SDR:</b> {model['sdr_instrumental']:.1f} dB")
+
+                if model.get('description'):
+                    tooltip_lines.append("")
+                    tooltip_lines.append(model['description'])
+
+                # Set tooltip for this item (note: QComboBox doesn't support per-item tooltips perfectly,
+                # so we set it on the widget which applies to the current selection)
+                # For now, set a general tooltip
+
+            self.widgets['source_separation_model'].setToolTip(
+                "Select an installed audio-separator model.\n\n"
+                "Select a model and view its details in the status bar.\n"
+                "Click 'Manage Models...' to download more models."
+            )
+
+    def _get_model_dir(self) -> str:
+        """Get the current model directory from the widget."""
+        dir_widget = self.widgets['source_separation_model_dir']
+        # The directory widget is a custom widget with a QLineEdit child
+        line_edit = dir_widget.findChild(QLineEdit)
+        if line_edit:
+            dir_path = line_edit.text().strip()
+            if dir_path:
+                return dir_path
+
+        # Return None to use default
+        return None
+
+    def _open_model_manager(self):
+        """Open the model manager dialog."""
+        from vsg_qt.options_dialog.model_manager_dialog import ModelManagerDialog
+
+        model_dir = self._get_model_dir() or str(get_installed_models_json_path().parent)
+
+        dialog = ModelManagerDialog(model_dir, parent=self)
+        if dialog.exec():
+            # Refresh the dropdown after closing the dialog
+            self._populate_model_dropdown()
 
 class SteppingTab(QWidget):
     def __init__(self):
