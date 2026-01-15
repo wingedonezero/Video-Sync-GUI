@@ -14,6 +14,7 @@ import importlib.resources as resources
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -351,6 +352,29 @@ def _resolve_separation_settings(config: Dict) -> Tuple[str, str]:
     return mode, model_filename
 
 
+def _log_separator_stderr(log: Callable[[str], None], stderr: str) -> None:
+    last_progress = -10
+    progress_pattern = re.compile(r'(\d{1,3})%\\|')
+    info_pattern = re.compile(r'^\\d{4}-\\d{2}-\\d{2} .* - INFO - ')
+    warning_pattern = re.compile(r'^\\d{4}-\\d{2}-\\d{2} .* - (WARNING|ERROR|CRITICAL) - ')
+    miopen_pattern = re.compile(r'^MIOpen\\(HIP\\): Warning')
+    for line in stderr.splitlines():
+        if not line.strip():
+            continue
+        if miopen_pattern.match(line) or 'MIOpen(HIP): Warning' in line:
+            continue
+        match = progress_pattern.search(line)
+        if match:
+            percent = int(match.group(1))
+            if percent == 100 or percent - last_progress >= 10:
+                last_progress = percent
+                log(f"[SOURCE SEPARATION] {line}")
+            continue
+        if info_pattern.match(line) and not warning_pattern.match(line):
+            continue
+        log(f"[SOURCE SEPARATION] {line}")
+
+
 def is_separation_enabled(config: Dict) -> bool:
     mode, _ = _resolve_separation_settings(config)
     return SEPARATION_MODES.get(mode) is not None
@@ -442,14 +466,13 @@ def separate_audio(
                 log(f"[SOURCE SEPARATION] Python executable: {python_exe}")
                 log(f"[SOURCE SEPARATION] sys.executable: {sys.executable}")
                 if stderr:
-                    log(f"[SOURCE SEPARATION] STDERR: {stderr}")
+                    _log_separator_stderr(log, stderr)
                 if stdout:
                     log(f"[SOURCE SEPARATION] STDOUT: {stdout}")
                 return None
 
             if result.stderr:
-                for line in result.stderr.splitlines():
-                    log(f"[SOURCE SEPARATION] {line}")
+                _log_separator_stderr(log, result.stderr)
 
             try:
                 response = json.loads(result.stdout.strip())
