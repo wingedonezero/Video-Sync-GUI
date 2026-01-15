@@ -94,6 +94,30 @@ def _get_venv_python() -> str:
     return sys.executable
 
 
+def _module_available_in_python(module: str, python_exe: Optional[str] = None) -> bool:
+    if not python_exe or python_exe == sys.executable:
+        return importlib.util.find_spec(module) is not None
+
+    try:
+        result = subprocess.run(
+            [
+                python_exe,
+                '-c',
+                (
+                    "import importlib.util, sys; "
+                    f"sys.exit(0 if importlib.util.find_spec('{module}') else 1)"
+                ),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+    return result.returncode == 0
+
+
 def is_audio_separator_available() -> Tuple[bool, str]:
     """
     Check if python-audio-separator is available.
@@ -101,10 +125,14 @@ def is_audio_separator_available() -> Tuple[bool, str]:
     Returns:
         Tuple of (available: bool, message: str)
     """
-    if importlib.util.find_spec('audio_separator') is None:
-        return False, "audio-separator not installed. Install with: pip install \"audio-separator[gpu]\""
+    if _module_available_in_python('audio_separator'):
+        return True, "audio-separator available"
 
-    return True, "audio-separator available"
+    venv_python = _get_venv_python()
+    if _module_available_in_python('audio_separator', venv_python):
+        return True, f"audio-separator available via {venv_python}"
+
+    return False, "audio-separator not installed. Install with: pip install \"audio-separator[gpu]\""
 
 
 def _load_model_data() -> object:
