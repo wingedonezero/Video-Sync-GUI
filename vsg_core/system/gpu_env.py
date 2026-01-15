@@ -113,22 +113,26 @@ def get_rocm_environment() -> Dict[str, str]:
     """
     env = {}
 
-    if not os.environ.get('AMDGPU_IDS_PATH') or not os.environ.get('LIBDRM_AMDGPU_IDS_PATH'):
-        amdgpu_ids_path = None
+    amdgpu_ids_path = None
+    existing_ids_path = os.environ.get('AMDGPU_IDS_PATH')
+    existing_libdrm_path = os.environ.get('LIBDRM_AMDGPU_IDS_PATH')
+    if existing_ids_path and os.path.exists(existing_ids_path):
+        amdgpu_ids_path = existing_ids_path
+    elif existing_libdrm_path and os.path.exists(existing_libdrm_path):
+        amdgpu_ids_path = existing_libdrm_path
+    else:
         for candidate in (
             '/opt/amdgpu/share/libdrm/amdgpu.ids',
             '/usr/share/libdrm/amdgpu.ids',
         ):
-            if os.path.isfile(candidate):
+            if os.path.exists(candidate):
                 amdgpu_ids_path = candidate
                 break
         if not amdgpu_ids_path:
             amdgpu_ids_path = '/dev/null'
 
-        if not os.environ.get('AMDGPU_IDS_PATH'):
-            env['AMDGPU_IDS_PATH'] = amdgpu_ids_path
-        if not os.environ.get('LIBDRM_AMDGPU_IDS_PATH'):
-            env['LIBDRM_AMDGPU_IDS_PATH'] = amdgpu_ids_path
+    env['AMDGPU_IDS_PATH'] = amdgpu_ids_path
+    env['LIBDRM_AMDGPU_IDS_PATH'] = amdgpu_ids_path
 
     # Detect AMD GPU
     gpu_info = detect_amd_gpu()

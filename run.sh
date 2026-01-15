@@ -71,20 +71,26 @@ setup_rocm_environment() {
         fi
     fi
 
-    if [ -z "$AMDGPU_IDS_PATH" ] || [ -z "$LIBDRM_AMDGPU_IDS_PATH" ]; then
-        AMDGPU_IDS_FILE=""
+    AMDGPU_IDS_FILE=""
+    if [ -n "$AMDGPU_IDS_PATH" ] && [ -e "$AMDGPU_IDS_PATH" ]; then
+        AMDGPU_IDS_FILE="$AMDGPU_IDS_PATH"
+    elif [ -n "$LIBDRM_AMDGPU_IDS_PATH" ] && [ -e "$LIBDRM_AMDGPU_IDS_PATH" ]; then
+        AMDGPU_IDS_FILE="$LIBDRM_AMDGPU_IDS_PATH"
+    else
         for candidate in "/opt/amdgpu/share/libdrm/amdgpu.ids" "/usr/share/libdrm/amdgpu.ids"; do
-            if [ -f "$candidate" ]; then
+            if [ -e "$candidate" ]; then
                 AMDGPU_IDS_FILE="$candidate"
                 break
             fi
         done
-        if [ -z "$AMDGPU_IDS_FILE" ]; then
-            AMDGPU_IDS_FILE="/dev/null"
-        fi
-        [ -z "$AMDGPU_IDS_PATH" ] && export AMDGPU_IDS_PATH="$AMDGPU_IDS_FILE"
-        [ -z "$LIBDRM_AMDGPU_IDS_PATH" ] && export LIBDRM_AMDGPU_IDS_PATH="$AMDGPU_IDS_FILE"
     fi
+
+    if [ -z "$AMDGPU_IDS_FILE" ]; then
+        AMDGPU_IDS_FILE="/dev/null"
+    fi
+
+    export AMDGPU_IDS_PATH="$AMDGPU_IDS_FILE"
+    export LIBDRM_AMDGPU_IDS_PATH="$AMDGPU_IDS_FILE"
 
     # Set ROCm environment variables if AMD GPU detected
     if [ "$AMD_GPU_DETECTED" = true ]; then
