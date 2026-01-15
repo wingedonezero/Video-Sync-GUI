@@ -271,8 +271,15 @@ def _fallback_models() -> Dict[str, str]:
 
 def resample_audio(audio_np: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
     """Resample audio using scipy (no torchaudio needed)."""
+    if not isinstance(orig_sr, int) or not isinstance(target_sr, int):
+        raise TypeError(f"Sample rates must be integers, got orig_sr={type(orig_sr).__name__}, target_sr={type(target_sr).__name__}")
+
+    if orig_sr <= 0 or target_sr <= 0:
+        raise ValueError(f"Sample rates must be positive, got orig_sr={orig_sr}, target_sr={target_sr}")
+
     if orig_sr == target_sr:
         return audio_np
+
     g = gcd(orig_sr, target_sr)
     up = target_sr // g
     down = orig_sr // g
@@ -417,10 +424,11 @@ def _resolve_separation_settings(config: Dict) -> Tuple[str, str]:
 
 def _log_separator_stderr(log: Callable[[str], None], stderr: str) -> None:
     last_progress = -10
-    progress_pattern = re.compile(r'(\d{1,3})%\\|')
-    info_pattern = re.compile(r'^\\d{4}-\\d{2}-\\d{2} .* - INFO - ')
-    warning_pattern = re.compile(r'^\\d{4}-\\d{2}-\\d{2} .* - (WARNING|ERROR|CRITICAL) - ')
-    miopen_pattern = re.compile(r'^MIOpen\\(HIP\\): Warning')
+    # Fixed regex pattern: single backslash to match pipe character
+    progress_pattern = re.compile(r'(\d{1,3})%\|')
+    info_pattern = re.compile(r'^\d{4}-\d{2}-\d{2} .* - INFO - ')
+    warning_pattern = re.compile(r'^\d{4}-\d{2}-\d{2} .* - (WARNING|ERROR|CRITICAL) - ')
+    miopen_pattern = re.compile(r'^MIOpen\(HIP\): Warning')
     for line in stderr.splitlines():
         if not line.strip():
             continue
@@ -432,10 +440,13 @@ def _log_separator_stderr(log: Callable[[str], None], stderr: str) -> None:
             continue
         match = progress_pattern.search(line)
         if match:
-            percent = int(match.group(1))
-            if percent == 100 or percent - last_progress >= 10:
-                last_progress = percent
-                log(f"[SOURCE SEPARATION] {line}")
+            try:
+                percent = int(match.group(1))
+                if percent == 100 or percent - last_progress >= 10:
+                    last_progress = percent
+                    log(f"[SOURCE SEPARATION] {line}")
+            except (ValueError, TypeError) as e:
+                log(f"[SOURCE SEPARATION] Warning: Failed to parse progress from '{line}': {e}")
             continue
         if info_pattern.match(line) and not warning_pattern.match(line):
             continue
@@ -564,9 +575,26 @@ def separate_audio(
                 log(f"[SOURCE SEPARATION] Output file not found: {output_file}")
                 return None
 
-            output_sr, separated = _read_audio_file(output_file)
+            try:
+                output_sr, separated = _read_audio_file(output_file)
+            except Exception as e:
+                log(f"[SOURCE SEPARATION] Failed to read output file: {e}")
+                return None
+
+            if output_sr is None or separated is None:
+                log(f"[SOURCE SEPARATION] Invalid audio data from output file")
+                return None
+
+            if not isinstance(output_sr, (int, float)) or output_sr <= 0:
+                log(f"[SOURCE SEPARATION] Invalid sample rate from output file: {output_sr}")
+                return None
+
             if output_sr != sample_rate:
-                separated = resample_audio(separated, output_sr, sample_rate)
+                try:
+                    separated = resample_audio(separated, int(output_sr), sample_rate)
+                except Exception as e:
+                    log(f"[SOURCE SEPARATION] Resampling failed: {e}")
+                    return None
 
             log(f"[SOURCE SEPARATION] Separation complete. Output length: {len(separated)} samples")
             return separated
