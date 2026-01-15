@@ -132,12 +132,28 @@ def run_separation(input_path, output_path, mode, sample_rate, device_preference
     # Determine device
     if device_preference == 'cpu':
         device = torch.device('cpu')
+    elif device_preference == 'mps':
+        if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            device = torch.device('mps')
+        else:
+            device = torch.device('cpu')
+    elif device_preference in ('cuda', 'rocm'):
+        if torch.cuda.is_available():
+            device = torch.device('cuda')
+        else:
+            device = torch.device('cpu')
     elif torch.cuda.is_available():
         device = torch.device('cuda')
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        device = torch.device('mps')
     else:
         device = torch.device('cpu')
 
-    print(f"Using device: {device}", file=sys.stderr)
+    device_label = device.type
+    hip_version = getattr(torch.version, 'hip', None)
+    if device.type == 'cuda' and hip_version:
+        device_label = f"rocm ({hip_version})"
+    print(f"Using device: {device_label}", file=sys.stderr)
 
     # Load model (htdemucs is good balance of quality/speed)
     model = get_model('htdemucs')
@@ -264,12 +280,18 @@ def separate_audio(
         script_path.write_text(_WORKER_SCRIPT)
 
         # Prepare arguments
+        device_preference = device
+        if device in ('cuda', 'rocm'):
+            device_preference = 'cuda'
+        elif device not in ('cpu', 'mps', 'auto'):
+            device_preference = 'auto'
+
         args = {
             'input_path': str(input_path),
             'output_path': str(output_path),
             'mode': mode,
             'sample_rate': sample_rate,
-            'device': 'cpu' if device == 'cpu' else 'auto'
+            'device': device_preference
         }
 
         # Run subprocess with venv Python and GPU environment
@@ -299,6 +321,10 @@ def separate_audio(
                 if stdout:
                     log(f"[SOURCE SEPARATION] STDOUT: {stdout}")
                 return None
+
+            if result.stderr:
+                for line in result.stderr.splitlines():
+                    log(f"[SOURCE SEPARATION] {line}")
 
             # Parse result
             try:

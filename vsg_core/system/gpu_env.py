@@ -29,37 +29,45 @@ def detect_amd_gpu() -> Optional[Dict[str, str]]:
         )
 
         if result.returncode == 0:
-            gpu_name = result.stdout.strip()
+            gpu_name = None
+            for line in result.stdout.splitlines():
+                if 'Card Series' in line:
+                    gpu_name = line.split('Card Series', 1)[-1]
+                    gpu_name = gpu_name.split(':', 1)[-1].strip()
+                    break
+            if not gpu_name:
+                gpu_name = result.stdout.strip()
 
-            # Map common AMD GPUs to gfx architecture
-            gfx_map = {
-                'Radeon RX 7900': ('gfx1100', '11.0.0'),
-                'Radeon RX 7800': ('gfx1100', '11.0.0'),
-                'Radeon RX 7700': ('gfx1100', '11.0.0'),
-                'Radeon RX 7600': ('gfx1100', '11.0.0'),
-                'Radeon RX 6900': ('gfx1030', '10.3.0'),
-                'Radeon RX 6800': ('gfx1030', '10.3.0'),
-                'Radeon RX 6700': ('gfx1030', '10.3.0'),
-                'Radeon RX 6600': ('gfx1030', '10.3.0'),
-                'Radeon 890M': ('gfx1151', '11.5.1'),  # Strix Halo
-                'Radeon 780M': ('gfx1103', '11.0.3'),  # Phoenix
-            }
+            if gpu_name:
+                # Map common AMD GPUs to gfx architecture
+                gfx_map = {
+                    'Radeon RX 7900': ('gfx1100', '11.0.0'),
+                    'Radeon RX 7800': ('gfx1100', '11.0.0'),
+                    'Radeon RX 7700': ('gfx1100', '11.0.0'),
+                    'Radeon RX 7600': ('gfx1100', '11.0.0'),
+                    'Radeon RX 6900': ('gfx1030', '10.3.0'),
+                    'Radeon RX 6800': ('gfx1030', '10.3.0'),
+                    'Radeon RX 6700': ('gfx1030', '10.3.0'),
+                    'Radeon RX 6600': ('gfx1030', '10.3.0'),
+                    'Radeon 890M': ('gfx1151', '11.5.1'),  # Strix Halo
+                    'Radeon 780M': ('gfx1103', '11.0.3'),  # Phoenix
+                }
 
-            for pattern, (gfx, hsa) in gfx_map.items():
-                if pattern in gpu_name:
+                for pattern, (gfx, hsa) in gfx_map.items():
+                    if pattern in gpu_name:
+                        return {
+                            'name': gpu_name,
+                            'gfx_version': gfx,
+                            'hsa_version': hsa
+                        }
+
+                # Generic Radeon detection - use safe defaults
+                if 'Radeon' in gpu_name:
                     return {
                         'name': gpu_name,
-                        'gfx_version': gfx,
-                        'hsa_version': hsa
+                        'gfx_version': 'gfx1100',  # Most common modern AMD
+                        'hsa_version': '11.0.0'
                     }
-
-            # Generic Radeon detection - use safe defaults
-            if 'Radeon' in gpu_name:
-                return {
-                    'name': gpu_name,
-                    'gfx_version': 'gfx1100',  # Most common modern AMD
-                    'hsa_version': '11.0.0'
-                }
     except (FileNotFoundError, subprocess.TimeoutExpired):
         pass
 
@@ -145,6 +153,22 @@ def get_rocm_environment() -> Dict[str, str]:
         # Set to empty to disable file lookup that causes errors
         if not os.environ.get('AMD_TEE_LOG_PATH'):
             env['AMD_TEE_LOG_PATH'] = '/dev/null'
+
+        if not os.environ.get('AMDGPU_IDS_PATH') and not os.environ.get('LIBDRM_AMDGPU_IDS_PATH'):
+            ids_path = None
+            for candidate in (
+                '/opt/amdgpu/share/libdrm/amdgpu.ids',
+                '/usr/share/libdrm/amdgpu.ids',
+            ):
+                if os.path.isfile(candidate):
+                    ids_path = candidate
+                    break
+            if ids_path:
+                env['AMDGPU_IDS_PATH'] = ids_path
+                env['LIBDRM_AMDGPU_IDS_PATH'] = ids_path
+            else:
+                env['AMDGPU_IDS_PATH'] = '/dev/null'
+                env['LIBDRM_AMDGPU_IDS_PATH'] = '/dev/null'
 
     return env
 
