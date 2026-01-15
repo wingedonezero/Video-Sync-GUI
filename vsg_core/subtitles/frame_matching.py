@@ -500,6 +500,8 @@ class VideoReader:
 
     def close(self):
         """Release video resources."""
+        import gc
+
         # VapourSynth cleanup
         if self.vs_clip:
             # VapourSynth clips are reference counted, just clear reference
@@ -514,6 +516,9 @@ class VideoReader:
         if self.cap:
             self.cap.release()
             self.cap = None
+
+        # Force garbage collection to release nanobind objects
+        gc.collect()
 
 
 def compute_frame_hash(frame: Image.Image, hash_size: int = 8, method: str = 'phash') -> Optional[Any]:

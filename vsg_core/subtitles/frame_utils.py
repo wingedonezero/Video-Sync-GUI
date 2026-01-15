@@ -181,6 +181,17 @@ def frame_to_time_aegisub(frame_num: int, fps: float) -> int:
 # Cache for VideoTimestamps instances to avoid re-parsing video
 _vfr_cache = {}
 
+def clear_vfr_cache():
+    """
+    Clear the VFR cache to release VideoTimestamps instances.
+
+    This should be called on application shutdown or when clearing resources
+    to prevent nanobind reference leaks.
+    """
+    global _vfr_cache
+    _vfr_cache.clear()
+    gc.collect()  # Force garbage collection to release nanobind objects
+
 def get_vfr_timestamps(video_path: str, fps: float, runner, config: dict = None):
     """
     Get appropriate timestamp handler based on video type.

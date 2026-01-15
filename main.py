@@ -9,7 +9,9 @@ Main application entry point.
 import os
 import sys
 
-os.environ.setdefault("NANOBIND_DISABLE_LEAK_CHECK", "1")
+# Note: NANOBIND_DISABLE_LEAK_CHECK was previously needed due to VideoTimestamps cache leaks
+# This has been fixed by implementing proper cleanup in frame_utils.clear_vfr_cache()
+# os.environ.setdefault("NANOBIND_DISABLE_LEAK_CHECK", "1")
 
 from PySide6.QtWidgets import QApplication
 from vsg_qt.main_window import MainWindow
