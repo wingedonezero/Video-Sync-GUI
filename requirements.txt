@@ -43,5 +43,5 @@ scenedetect[opencv]
 webrtcvad-wheels
 
 # Optional AI audio features - install separately if needed:
-# For AI features (torch + demucs), install with:
-#   pip install torch demucs
+# For AI features (audio-separator), install with:
+#   pip install "audio-separator[gpu]"
