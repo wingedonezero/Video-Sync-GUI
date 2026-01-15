@@ -49,28 +49,28 @@ DEFAULT_MODEL = 'default'
 CURATED_MODELS: List[Dict[str, str]] = [
     {
         'name': 'Demucs v4: htdemucs',
-        'filename': 'htdemucs.yaml',
-        'description': 'Best all-round 4-stem separation with strong balance across vocals and instruments.',
+        'filename': 'htdemucs',
+        'description': 'Best all-round 4-stem separation (drums/bass/other/vocals) with strong balance.',
     },
     {
-        'name': 'Roformer: BandSplit SDR 1053 (Viperx)',
-        'filename': 'config_bs_roformer_ep_937_sdr_10.5309.yaml',
-        'description': 'High-quality Roformer model with excellent overall stem clarity (vocals + instruments).',
+        'name': 'BS-Roformer Viperx 1297 (Highest Quality)',
+        'filename': 'model_bs_roformer_ep_317_sdr_12.9755.ckpt',
+        'description': 'Top quality 2-stem (vocals SDR 12.9, instrumental SDR 17.0). Best overall performance.',
+    },
+    {
+        'name': 'BS-Roformer Viperx 1296',
+        'filename': 'model_bs_roformer_ep_368_sdr_12.9628.ckpt',
+        'description': 'High quality 2-stem (vocals SDR 12.9, instrumental SDR 17.0). Alternative to 1297.',
     },
     {
         'name': 'MDX23C: InstVoc HQ',
-        'filename': 'model_2_stem_full_band_8k.yaml',
-        'description': 'Focused 2-stem instrumental/vocals model; strong for dialogue and music split.',
+        'filename': 'model_mel_band_roformer_ep_3005_sdr_11.4360.ckpt',
+        'description': 'High-quality 2-stem instrumental/vocals separation. Good for dialogue extraction.',
     },
     {
-        'name': 'MDX-Net: Kim Vocal 2',
-        'filename': 'Kim_Vocal_2.onnx',
-        'description': 'Reliable vocals-only extraction for speech-heavy content.',
-    },
-    {
-        'name': 'Bandit v2: Cinematic Multilang',
-        'filename': 'config_dnr_bandit_v2_mus64.yaml',
-        'description': 'Dialogue-friendly model for noisy mixes and multilingual sources.',
+        'name': 'MelBand Roformer Kim',
+        'filename': 'mel_band_roformer_kim_ft_unwa.ckpt',
+        'description': 'Reliable vocals extraction with good instrumental preservation (SDR 12.4).',
     },
 ]
 
