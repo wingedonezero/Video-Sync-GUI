@@ -131,10 +131,19 @@ def _load_model_data_via_cli() -> object:
 def _collect_models_from_dict(model_data: Dict, models: Dict[str, str]) -> None:
     for key, value in model_data.items():
         if isinstance(value, dict):
-            if all(isinstance(v, str) for v in value.values()):
-                models.update(value)
-            else:
-                _collect_models_from_dict(value, models)
+            filename = value.get('filename') if isinstance(value.get('filename'), str) else None
+            if filename and isinstance(key, str):
+                models[key] = filename
+                continue
+
+            is_file_map = all(isinstance(k, str) and isinstance(v, str) for k, v in value.items())
+            if is_file_map and isinstance(key, str):
+                selected = _select_model_filename(value)
+                if selected:
+                    models[key] = selected
+                continue
+
+            _collect_models_from_dict(value, models)
         elif isinstance(value, list):
             _collect_models_from_list(value, models)
         elif isinstance(value, str):
@@ -163,6 +172,27 @@ def _collect_models_from_list(model_list: List, models: Dict[str, str]) -> None:
             _collect_models_from_list(item, models)
 
 
+def _select_model_filename(file_map: Dict) -> Optional[str]:
+    if not isinstance(file_map, dict):
+        return None
+
+    preferred_exts = ('.ckpt', '.onnx', '.pth', '.pt', '.th')
+    for ext in preferred_exts:
+        for candidate in file_map.keys():
+            if isinstance(candidate, str) and candidate.lower().endswith(ext):
+                return candidate
+
+    for candidate in file_map.keys():
+        if isinstance(candidate, str) and candidate.lower().endswith(('.yaml', '.yml')):
+            return candidate
+
+    for candidate in file_map.keys():
+        if isinstance(candidate, str):
+            return candidate
+
+    return None
+
+
 def list_available_models() -> List[Tuple[str, str]]:
     """
     Get available model filenames from audio-separator's bundled model list.
@@ -186,7 +216,18 @@ def list_available_models() -> List[Tuple[str, str]]:
     elif isinstance(model_data, list):
         _collect_models_from_list(model_data, models)
 
+    if not models:
+        models.update(_fallback_models())
+
     return sorted(models.items(), key=lambda item: item[0].lower())
+
+
+def _fallback_models() -> Dict[str, str]:
+    return {
+        'Demucs v4: htdemucs (recommended)': 'htdemucs.yaml',
+        'Roformer: BandSplit SDR 1053 (recommended)': 'model_bs_roformer_ep_937_sdr_10.5309.ckpt',
+        'Roformer: MelBand Karaoke (vocals)': 'mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt',
+    }
 
 
 def resample_audio(audio_np: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
@@ -210,6 +251,7 @@ def run_separation(args):
         output_format='WAV',
         output_single_stem=args['target_stem'],
         sample_rate=args['sample_rate'],
+        model_file_dir=args.get('model_dir') or "/tmp/audio-separator-models/",
     )
 
     model_filename = args.get('model_filename')
@@ -283,7 +325,8 @@ def separate_audio(
     model_filename: str,
     log_func: Optional[Callable[[str], None]] = None,
     device: str = 'auto',
-    timeout_seconds: int = 300
+    timeout_seconds: int = 300,
+    model_dir: Optional[str] = None,
 ) -> Optional[np.ndarray]:
     """
     Separate audio using python-audio-separator in an isolated subprocess.
@@ -314,6 +357,8 @@ def separate_audio(
 
     log(f"[SOURCE SEPARATION] Starting audio-separator (mode={mode}, model={model_filename})...")
     log(f"[SOURCE SEPARATION] {msg}")
+    if model_dir:
+        log(f"[SOURCE SEPARATION] Model directory: {model_dir}")
 
     with tempfile.TemporaryDirectory(prefix='audio_sep_') as temp_dir:
         temp_path = Path(temp_dir)
@@ -330,6 +375,7 @@ def separate_audio(
             'target_stem': target_stem,
             'sample_rate': sample_rate,
             'model_filename': model_filename,
+            'model_dir': model_dir,
         }
 
         python_exe = _get_venv_python()
@@ -425,18 +471,19 @@ def apply_source_separation(
 
     device = config.get('source_separation_device', 'auto')
     timeout = config.get('source_separation_timeout', 300)
+    model_dir = config.get('source_separation_model_dir') or None
 
     log(f"[SOURCE SEPARATION] Mode: {mode}")
     log(f"[SOURCE SEPARATION] Model: {model_filename}")
 
     log("[SOURCE SEPARATION] Processing reference audio...")
-    ref_separated = separate_audio(ref_pcm, sample_rate, mode, model_filename, log, device, timeout)
+    ref_separated = separate_audio(ref_pcm, sample_rate, mode, model_filename, log, device, timeout, model_dir)
     if ref_separated is None:
         log("[SOURCE SEPARATION] Reference separation failed, using original audio")
         return ref_pcm, tgt_pcm
 
     log("[SOURCE SEPARATION] Processing target audio...")
-    tgt_separated = separate_audio(tgt_pcm, sample_rate, mode, model_filename, log, device, timeout)
+    tgt_separated = separate_audio(tgt_pcm, sample_rate, mode, model_filename, log, device, timeout, model_dir)
     if tgt_separated is None:
         log("[SOURCE SEPARATION] Target separation failed, using original audio")
         return ref_pcm, tgt_pcm

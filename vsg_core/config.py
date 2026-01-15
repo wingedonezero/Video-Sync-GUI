@@ -133,6 +133,7 @@ class AppConfig:
             # --- Flexible Analysis Settings ---
             'source_separation_mode': 'none',  # 'none', 'instrumental', 'vocals'
             'source_separation_model': 'default',  # Model filename or 'default'
+            'source_separation_model_dir': str(self.script_dir / 'audio_separator_models'),
             'source_separation_device': 'auto',  # Device for source separation: 'auto', 'cpu', 'cuda', 'rocm', 'mps'
             'source_separation_timeout': 300,  # Timeout in seconds for source separation (0 = no timeout)
             'filtering_method': 'Dialogue Band-Pass Filter',
