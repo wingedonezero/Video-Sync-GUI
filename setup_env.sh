@@ -112,7 +112,7 @@ install_python_standalone() {
 
     if [[ "$os" == "linux" ]]; then
         if [[ "$arch" == "x86_64" ]]; then
-            local python_url="https://github.com/indygreg/python-build-standalone/releases/download/20241016/cpython-3.13.0+20241016-x86_64-unknown-linux-gnu-install_only.tar.gz"
+            local python_url="https://github.com/indygreg/python-build-standalone/releases/download/20251205/cpython-3.13.11+20251205-x86_64-unknown-linux-gnu-install_only.tar.gz"
         else
             echo -e "${RED}Unsupported architecture: $arch${NC}" >&2
             return 1
@@ -131,6 +131,10 @@ install_python_standalone() {
 
         # Check if extraction was successful
         if [ -f "$python_dir/bin/python3" ]; then
+            if ! "$python_dir/bin/python3" -c "import sys; assert sys.version_info[:3] == (3, 13, 11)" &> /dev/null; then
+                echo -e "${RED}Extracted Python version mismatch; expected 3.13.11${NC}" >&2
+                return 1
+            fi
             echo "$python_dir/bin/python3"
             return 0
         fi
