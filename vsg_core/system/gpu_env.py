@@ -113,6 +113,23 @@ def get_rocm_environment() -> Dict[str, str]:
     """
     env = {}
 
+    if not os.environ.get('AMDGPU_IDS_PATH') or not os.environ.get('LIBDRM_AMDGPU_IDS_PATH'):
+        amdgpu_ids_path = None
+        for candidate in (
+            '/opt/amdgpu/share/libdrm/amdgpu.ids',
+            '/usr/share/libdrm/amdgpu.ids',
+        ):
+            if os.path.isfile(candidate):
+                amdgpu_ids_path = candidate
+                break
+        if not amdgpu_ids_path:
+            amdgpu_ids_path = '/dev/null'
+
+        if not os.environ.get('AMDGPU_IDS_PATH'):
+            env['AMDGPU_IDS_PATH'] = amdgpu_ids_path
+        if not os.environ.get('LIBDRM_AMDGPU_IDS_PATH'):
+            env['LIBDRM_AMDGPU_IDS_PATH'] = amdgpu_ids_path
+
     # Detect AMD GPU
     gpu_info = detect_amd_gpu()
 
@@ -153,15 +170,6 @@ def get_rocm_environment() -> Dict[str, str]:
         # Set to empty to disable file lookup that causes errors
         if not os.environ.get('AMD_TEE_LOG_PATH'):
             env['AMD_TEE_LOG_PATH'] = '/dev/null'
-
-        if not os.environ.get('AMDGPU_IDS_PATH'):
-            for candidate in (
-                '/opt/amdgpu/share/libdrm/amdgpu.ids',
-                '/usr/share/libdrm/amdgpu.ids',
-            ):
-                if os.path.isfile(candidate):
-                    env['AMDGPU_IDS_PATH'] = candidate
-                    break
 
     return env
 
