@@ -317,11 +317,25 @@ class AnalysisTab(QWidget):
                 "Click 'Manage Models...' to browse and download models."
             )
         else:
+            # Sort installed models by rank (best first)
+            sorted_models = sorted(
+                installed_models,
+                key=lambda m: (m.get('rank', 999), m.get('name', m.get('filename', '')))
+            )
+
             # Add installed models with rich tooltips
-            for model in installed_models:
-                # Friendly display name
+            for model in sorted_models:
+                # Friendly display name with quality indicator
                 name = model.get('name', model['filename'])
-                self.widgets['source_separation_model'].addItem(name, model['filename'])
+                if model.get('recommended'):
+                    name = f"⭐ {name}"
+
+                display_name = name
+                quality_tier = model.get('quality_tier')
+                if quality_tier and quality_tier in ['S-Tier', 'A-Tier']:
+                    display_name = f"{name} ({quality_tier})"
+
+                self.widgets['source_separation_model'].addItem(display_name, model['filename'])
 
                 # Build rich tooltip with metadata
                 tooltip_lines = [
@@ -329,13 +343,21 @@ class AnalysisTab(QWidget):
                     "",
                     f"<b>File:</b> {model['filename']}",
                     f"<b>Type:</b> {model.get('type', 'Unknown')}",
-                    f"<b>Stems:</b> {model.get('stems', 'Unknown')}",
                 ]
+
+                if quality_tier:
+                    tooltip_lines.append(f"<b>Quality:</b> {quality_tier}")
+
+                tooltip_lines.append(f"<b>Stems:</b> {model.get('stems', 'Unknown')}")
 
                 if model.get('sdr_vocals'):
                     tooltip_lines.append(f"<b>Vocal SDR:</b> {model['sdr_vocals']:.1f} dB")
                 if model.get('sdr_instrumental'):
                     tooltip_lines.append(f"<b>Instrumental SDR:</b> {model['sdr_instrumental']:.1f} dB")
+
+                use_cases = model.get('use_cases', [])
+                if use_cases:
+                    tooltip_lines.append(f"<b>Best For:</b> {', '.join(use_cases)}")
 
                 if model.get('description'):
                     tooltip_lines.append("")
