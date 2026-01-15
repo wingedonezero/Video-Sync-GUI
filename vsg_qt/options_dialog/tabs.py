@@ -7,6 +7,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QLineEdit, QPushButton, QFileDialog, QLabel, QGroupBox, QVBoxLayout
 )
 
+from vsg_core.analysis.source_separation import list_available_models
+
 # --- Helper functions ---
 def _dir_input() -> QWidget:
     w = QWidget()
@@ -133,13 +135,34 @@ class AnalysisTab(QWidget):
 
         prep_group = QGroupBox("Step 1: Audio Pre-Processing")
         prep_layout = QFormLayout(prep_group)
-        self.widgets['source_separation_model'] = QComboBox(); self.widgets['source_separation_model'].addItems(['None (Use Original Audio)', 'Demucs - Music/Effects (Strip Vocals)', 'Demucs - Vocals Only']); self.widgets['source_separation_model'].setToolTip("Uses Demucs AI to separate audio stems before correlation.\n\n• None - Use original audio (default)\n• Music/Effects (Strip Vocals) - For cross-language sync (JP↔EN)\n  Removes vocals, correlates on music/effects which match across dubs\n• Vocals Only - Isolate dialogue for speech-based correlation\n\nRequires: torch, torchaudio, demucs\nSupports: CUDA, ROCm (AMD), CPU fallback\nNote: Runs in subprocess for guaranteed memory cleanup.")
+        self.widgets['source_separation_mode'] = QComboBox()
+        self.widgets['source_separation_mode'].addItem('None (Use Original Audio)', 'none')
+        self.widgets['source_separation_mode'].addItem('Instrumental (No Vocals)', 'instrumental')
+        self.widgets['source_separation_mode'].addItem('Vocals Only', 'vocals')
+        self.widgets['source_separation_mode'].setToolTip(
+            "Enable audio separation before correlation.\n\n"
+            "• None - Use original audio (default)\n"
+            "• Instrumental - Remove vocals for cross-language sync (JP↔EN)\n"
+            "• Vocals Only - Isolate dialogue for speech-based correlation"
+        )
+
+        self.widgets['source_separation_model'] = QComboBox()
+        self.widgets['source_separation_model'].addItem('Default (Audio Separator)', 'default')
+        for name, filename in list_available_models():
+            self.widgets['source_separation_model'].addItem(f"{name} ({filename})", filename)
+        self.widgets['source_separation_model'].setToolTip(
+            "Select the audio-separator model to use.\n\n"
+            "Models are downloaded automatically on first use.\n"
+            "Requires: audio-separator (with GPU or CPU extras)\n"
+            "Note: Runs in subprocess for guaranteed memory cleanup."
+        )
         self.widgets['filtering_method'] = QComboBox(); self.widgets['filtering_method'].addItems(['None', 'Low-Pass Filter', 'Dialogue Band-Pass Filter']); self.widgets['filtering_method'].setToolTip("Apply a filter to the audio before analysis to improve the signal-to-noise ratio.\n'Dialogue Band-Pass' is recommended for most content.")
         self.cutoff_container = QWidget()
         cutoff_layout = QFormLayout(self.cutoff_container); cutoff_layout.setContentsMargins(0, 0, 0, 0)
         self.widgets['audio_bandlimit_hz'] = QSpinBox(); self.widgets['audio_bandlimit_hz'].setRange(0, 22000); self.widgets['audio_bandlimit_hz'].setSuffix(" Hz"); self.widgets['audio_bandlimit_hz'].setToolTip("For the Low-Pass Filter, specifies the frequency (in Hz) above which audio data is cut off.")
         cutoff_layout.addRow("Low-Pass Cutoff:", self.widgets['audio_bandlimit_hz'])
-        prep_layout.addRow("Source Separation:", self.widgets['source_separation_model'])
+        prep_layout.addRow("Source Separation:", self.widgets['source_separation_mode'])
+        prep_layout.addRow("Separation Model:", self.widgets['source_separation_model'])
         prep_layout.addRow("Audio Filtering:", self.widgets['filtering_method'])
         prep_layout.addRow(self.cutoff_container)
         main_layout.addWidget(prep_group)

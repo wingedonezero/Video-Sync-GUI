@@ -3,12 +3,17 @@
 from .audio_corr import run_audio_correlation
 from .videodiff import run_videodiff
 from .drift_detection import diagnose_audio_issue
-from .source_separation import is_demucs_available, SEPARATION_MODES
+from .source_separation import (
+    is_audio_separator_available,
+    list_available_models,
+    SEPARATION_MODES,
+)
 
 __all__ = [
     "run_audio_correlation",
     "run_videodiff",
     "diagnose_audio_issue",
-    "is_demucs_available",
+    "is_audio_separator_available",
+    "list_available_models",
     "SEPARATION_MODES",
 ]

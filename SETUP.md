@@ -80,14 +80,14 @@ source Dependencies/.venv/bin/activate
 uv pip install <package-name>
 ```
 
-## Optional AI Audio Separation (Demucs)
+## Optional AI Audio Separation (Audio Separator)
 
 The base installation includes everything needed for the app. However, if you want AI-powered audio separation for cross-language sync, install one of these:
 
 ### For NVIDIA GPUs (CUDA):
 ```bash
 source Dependencies/.venv/bin/activate
-uv pip install torch demucs
+uv pip install "audio-separator[gpu]"
 ```
 
 ### For AMD GPUs (ROCm):
@@ -95,18 +95,18 @@ uv pip install torch demucs
 source Dependencies/.venv/bin/activate
 # Install PyTorch with ROCm support first
 pip install torch --index-url https://download.pytorch.org/whl/rocm6.2
-# Then install demucs
-uv pip install demucs
+# Then install audio-separator (CPU extra works with ROCm torch)
+uv pip install "audio-separator[cpu]"
 ```
 
 ### For CPU only (slower):
 ```bash
 source Dependencies/.venv/bin/activate
-# Install CPU-only PyTorch
-uv pip install torch demucs --index-url https://download.pytorch.org/whl/cpu
+# Install audio-separator CPU build
+uv pip install "audio-separator[cpu]"
 ```
 
-**Note:** Torch + Demucs is a LARGE download (several GB). Only install if you need cross-language audio separation.
+**Note:** Audio-separator downloads model files automatically on first use. Only install if you need cross-language audio separation.
 
 ## Troubleshooting
 
