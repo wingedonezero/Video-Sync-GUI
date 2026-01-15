@@ -43,6 +43,36 @@ SEPARATION_MODES = {
 
 DEFAULT_MODEL = 'default'
 
+# Curated list of best-performing models for UI selection.
+# These are intentionally limited to avoid overwhelming users with large lists.
+CURATED_MODELS: List[Dict[str, str]] = [
+    {
+        'name': 'Demucs v4: htdemucs',
+        'filename': 'htdemucs.yaml',
+        'description': 'Best all-round 4-stem separation with strong balance across vocals and instruments.',
+    },
+    {
+        'name': 'Roformer: BandSplit SDR 1053 (Viperx)',
+        'filename': 'config_bs_roformer_ep_937_sdr_10.5309.yaml',
+        'description': 'High-quality Roformer model with excellent overall stem clarity (vocals + instruments).',
+    },
+    {
+        'name': 'MDX23C: InstVoc HQ',
+        'filename': 'model_2_stem_full_band_8k.yaml',
+        'description': 'Focused 2-stem instrumental/vocals model; strong for dialogue and music split.',
+    },
+    {
+        'name': 'MDX-Net: Kim Vocal 2',
+        'filename': 'Kim_Vocal_2.onnx',
+        'description': 'Reliable vocals-only extraction for speech-heavy content.',
+    },
+    {
+        'name': 'Bandit v2: Cinematic Multilang',
+        'filename': 'config_dnr_bandit_v2_mus64.yaml',
+        'description': 'Dialogue-friendly model for noisy mixes and multilingual sources.',
+    },
+]
+
 
 def _get_venv_python() -> str:
     """
@@ -195,39 +225,19 @@ def _select_model_filename(file_map: Dict) -> Optional[str]:
 
 def list_available_models() -> List[Tuple[str, str]]:
     """
-    Get available model filenames from audio-separator's bundled model list.
+    Get curated model filenames for audio-separator.
 
     Returns:
         List of (friendly_name, filename) tuples.
     """
-    available, _ = is_audio_separator_available()
-    if not available:
-        return []
-
-    model_data = _load_model_data_via_cli()
-    if model_data is None:
-        model_data = _load_model_data()
-        if model_data is None:
-            return []
-
-    models: Dict[str, str] = {}
-    if isinstance(model_data, dict):
-        _collect_models_from_dict(model_data, models)
-    elif isinstance(model_data, list):
-        _collect_models_from_list(model_data, models)
-
-    if not models:
-        models.update(_fallback_models())
-
-    return sorted(models.items(), key=lambda item: item[0].lower())
+    return [
+        (f"{model['name']} — {model['description']}", model['filename'])
+        for model in CURATED_MODELS
+    ]
 
 
 def _fallback_models() -> Dict[str, str]:
-    return {
-        'Demucs v4: htdemucs (recommended)': 'htdemucs.yaml',
-        'Roformer: BandSplit SDR 1053 (recommended)': 'model_bs_roformer_ep_937_sdr_10.5309.ckpt',
-        'Roformer: MelBand Karaoke (vocals)': 'mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt',
-    }
+    return {model['name']: model['filename'] for model in CURATED_MODELS}
 
 
 def resample_audio(audio_np: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:

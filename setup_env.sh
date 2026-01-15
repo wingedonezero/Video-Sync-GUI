@@ -35,9 +35,10 @@ show_menu() {
     echo -e "  ${CYAN}3)${NC} Install Optional Dependencies (AI audio features)"
     echo -e "  ${CYAN}4)${NC} Verify Dependencies - Check all packages are installed"
     echo -e "  ${CYAN}5)${NC} Rebuild PyAV (FFmpeg subtitles support)"
-    echo -e "  ${CYAN}6)${NC} Exit"
+    echo -e "  ${CYAN}6)${NC} Download curated audio-separator models"
+    echo -e "  ${CYAN}7)${NC} Exit"
     echo ""
-    echo -n "Enter your choice [1-6]: "
+    echo -n "Enter your choice [1-7]: "
 }
 
 # Function to check Python version and verify it works
@@ -168,6 +169,105 @@ ensure_venv() {
 
 venv_pip() {
     "$VENV_PYTHON" -m pip "$@"
+}
+
+get_audio_separator_model_dir() {
+    local settings_file="$PROJECT_DIR/settings.json"
+    local default_dir="$PROJECT_DIR/audio_separator_models"
+
+    if [ -f "$settings_file" ]; then
+        local configured_dir
+        configured_dir=$(python - <<PY
+import json
+from pathlib import Path
+
+settings = Path("$settings_file")
+try:
+    data = json.loads(settings.read_text(encoding="utf-8"))
+except Exception:
+    data = {}
+
+value = data.get("source_separation_model_dir")
+if isinstance(value, str) and value.strip():
+    print(value.strip())
+PY
+)
+        if [ -n "$configured_dir" ]; then
+            echo "$configured_dir"
+            return 0
+        fi
+    fi
+
+    echo "$default_dir"
+}
+
+download_audio_separator_models() {
+    echo ""
+    echo "========================================="
+    echo "Download Curated Audio-Separator Models"
+    echo "========================================="
+    echo ""
+
+    local model_dir
+    model_dir=$(get_audio_separator_model_dir)
+    mkdir -p "$model_dir"
+
+    echo -e "${BLUE}Model directory:${NC} $model_dir"
+    echo ""
+    echo "Models to download:"
+    echo "  • Demucs v4: htdemucs"
+    echo "  • Roformer: BandSplit SDR 1053"
+    echo "  • MDX23C: InstVoc HQ"
+    echo "  • MDX-Net: Kim Vocal 2"
+    echo "  • Bandit v2: Cinematic Multilang"
+    echo ""
+
+    local filenames=(
+        "955717e8-8726e21a.th"
+        "htdemucs.yaml"
+        "model_bs_roformer_ep_937_sdr_10.5309.ckpt"
+        "config_bs_roformer_ep_937_sdr_10.5309.yaml"
+        "MDX23C-8KFFT-InstVoc_HQ.ckpt"
+        "model_2_stem_full_band_8k.yaml"
+        "Kim_Vocal_2.onnx"
+        "checkpoint-multi_fixed.ckpt"
+        "config_dnr_bandit_v2_mus64.yaml"
+    )
+
+    local urls=(
+        "https://huggingface.co/Politrees/UVR_resources/resolve/main/models/Demucs/Demucs_v4/955717e8-8726e21a.th"
+        "https://raw.githubusercontent.com/Bebra777228/UVR_resources/refs/heads/main/UVR_resources/configs/demucs/htdemucs.yaml"
+        "https://huggingface.co/Politrees/UVR_resources/resolve/main/models/Roformer/BandSplit/model_bs_roformer_ep_937_sdr_10.5309.ckpt"
+        "https://raw.githubusercontent.com/Bebra777228/UVR_resources/refs/heads/main/UVR_resources/configs/Roformer/BandSplit/config_bs_roformer_ep_937_sdr_10.5309.yaml"
+        "https://huggingface.co/Politrees/UVR_resources/resolve/main/models/MDX23C/MDX23C-8KFFT-InstVoc_HQ.ckpt"
+        "https://raw.githubusercontent.com/Bebra777228/UVR_resources/refs/heads/main/UVR_resources/configs/MDX23C/model_2_stem_full_band_8k.yaml"
+        "https://huggingface.co/Politrees/UVR_resources/resolve/main/models/MDXNet/Kim_Vocal_2.onnx"
+        "https://huggingface.co/Politrees/UVR_resources/resolve/main/models/Bandit/Bandit_v2/checkpoint-multi_fixed.ckpt"
+        "https://raw.githubusercontent.com/Bebra777228/UVR_resources/refs/heads/main/UVR_resources/configs/Bandit/config_dnr_bandit_v2_mus64.yaml"
+    )
+
+    local count=${#filenames[@]}
+    for ((i=0; i<count; i++)); do
+        local filename="${filenames[$i]}"
+        local url="${urls[$i]}"
+        local target="$model_dir/$filename"
+
+        if [ -f "$target" ]; then
+            echo -e "${GREEN}✓ Already exists:${NC} $filename"
+            continue
+        fi
+
+        echo -e "${BLUE}Downloading:${NC} $filename"
+        if curl -L --fail -o "$target" "$url"; then
+            echo -e "${GREEN}✓ Downloaded:${NC} $filename"
+        else
+            echo -e "${RED}✗ Failed:${NC} $filename"
+            return 1
+        fi
+    done
+
+    echo ""
+    echo -e "${GREEN}✓ Curated models ready!${NC}"
 }
 
 # Function to check for updates
@@ -626,6 +726,10 @@ main() {
             rebuild_pyav_from_source
             exit 0
             ;;
+        --download-models)
+            download_audio_separator_models
+            exit 0
+            ;;
     esac
 
     # Interactive menu mode
@@ -650,6 +754,9 @@ main() {
                 rebuild_pyav_from_source
                 ;;
             6)
+                download_audio_separator_models
+                ;;
+            7)
                 echo ""
                 echo -e "${GREEN}Goodbye!${NC}"
                 echo ""
@@ -657,7 +764,7 @@ main() {
                 ;;
             *)
                 echo ""
-                echo -e "${RED}Invalid choice. Please enter 1-6.${NC}"
+                echo -e "${RED}Invalid choice. Please enter 1-7.${NC}"
                 ;;
         esac
 

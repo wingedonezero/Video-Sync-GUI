@@ -152,7 +152,7 @@ class AnalysisTab(QWidget):
             self.widgets['source_separation_model'].addItem(f"{name} ({filename})", filename)
         self.widgets['source_separation_model'].setToolTip(
             "Select the audio-separator model to use.\n\n"
-            "Models are downloaded automatically on first use.\n"
+            "Curated models are shown here; download via setup_env.sh if needed.\n"
             "Requires: audio-separator (with GPU or CPU extras)\n"
             "Note: Runs in subprocess for guaranteed memory cleanup."
         )
