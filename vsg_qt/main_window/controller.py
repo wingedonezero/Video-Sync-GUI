@@ -262,5 +262,10 @@ class MainController:
             self.append_log(f"[ERROR] Failed to archive logs: {e}")
 
     def on_close(self):
+        # Cancel any running worker to prevent signal crashes
+        if self.worker is not None:
+            self.worker.cancel()
+            self.append_log("[SHUTDOWN] Cancelling background tasks...")
+
         self.save_ui_to_config()
         self.layout_manager.cleanup_all()
