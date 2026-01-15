@@ -17,6 +17,7 @@ import os
 import re
 import shutil
 import subprocess
+import signal
 import sys
 import tempfile
 import time
@@ -1209,18 +1210,34 @@ def separate_audio(
 
         try:
             timeout = None if timeout_seconds <= 0 else timeout_seconds
-            result = subprocess.run(
+            process = subprocess.Popen(
                 [python_exe, str(script_path), json.dumps(args)],
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=timeout,
                 env=env,
+                start_new_session=True,
             )
+            try:
+                stdout, stderr = process.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                log(f"[SOURCE SEPARATION] Timeout after {timeout_seconds}s (high-quality models may need more time)")
+                log(f"[SOURCE SEPARATION] Attempting to terminate audio-separator subprocess")
+                log(f"[SOURCE SEPARATION] Consider using a faster model or increasing the timeout in settings")
+                if hasattr(os, "killpg"):
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                else:
+                    process.kill()
+                stdout, stderr = process.communicate()
+                return None
 
-            if result.returncode != 0:
-                stderr = result.stderr.strip()
-                stdout = result.stdout.strip()
-                log(f"[SOURCE SEPARATION] Subprocess failed with code {result.returncode}")
+            if process.returncode != 0:
+                stderr = (stderr or "").strip()
+                stdout = (stdout or "").strip()
+                log(f"[SOURCE SEPARATION] Subprocess failed with code {process.returncode}")
                 log(f"[SOURCE SEPARATION] Python executable: {python_exe}")
                 log(f"[SOURCE SEPARATION] sys.executable: {sys.executable}")
                 if stderr:
@@ -1229,13 +1246,13 @@ def separate_audio(
                     log(f"[SOURCE SEPARATION] STDOUT: {stdout}")
                 return None
 
-            if result.stderr:
-                _log_separator_stderr(log, result.stderr)
+            if stderr:
+                _log_separator_stderr(log, stderr)
 
             try:
-                response = json.loads(result.stdout.strip())
+                response = json.loads((stdout or "").strip())
             except json.JSONDecodeError:
-                log(f"[SOURCE SEPARATION] Invalid JSON from worker: {result.stdout[:200]}")
+                log(f"[SOURCE SEPARATION] Invalid JSON from worker: {(stdout or '')[:200]}")
                 return None
 
             if not response.get('success'):
@@ -1279,10 +1296,6 @@ def separate_audio(
             log(f"[SOURCE SEPARATION] Separation complete. Output length: {len(separated)} samples")
             return separated
 
-        except subprocess.TimeoutExpired:
-            log(f"[SOURCE SEPARATION] Timeout after {timeout_seconds}s (high-quality models may need more time)")
-            log(f"[SOURCE SEPARATION] Consider using a faster model or increasing the timeout in settings")
-            return None
         except Exception as e:
             log(f"[SOURCE SEPARATION] Error: {e}")
             return None
