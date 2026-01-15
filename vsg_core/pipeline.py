@@ -214,5 +214,13 @@ class JobPipeline:
             # --- 15. Cleanup ---
             if ctx_temp_dir and ctx_temp_dir.exists():
                 shutil.rmtree(ctx_temp_dir, ignore_errors=True)
+
+            # Clear VFR cache after each job to release VideoTimestamps instances
+            try:
+                from vsg_core.subtitles.frame_utils import clear_vfr_cache
+                clear_vfr_cache()
+            except ImportError:
+                pass  # Module might not be loaded
+
             log_to_all('=== Job Finished ===')
             LogManager.cleanup_log(logger, handler)
