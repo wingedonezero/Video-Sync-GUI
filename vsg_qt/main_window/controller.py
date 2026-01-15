@@ -149,6 +149,10 @@ class MainController:
         self.append_log(f"--- Job Summary for {name}: {status.upper()} ---")
 
     def batch_finished(self, all_results: list):
+        if self.worker:
+            self.worker.disable_gui_signals()
+        QThreadPool.globalInstance().waitForDone()
+        self.worker = None
         self.update_status(f'All {len(all_results)} jobs finished.')
         self.v.progress_bar.setValue(100)
 
