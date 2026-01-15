@@ -56,7 +56,7 @@ MODEL_QUALITY_DATABASE = {
         'sdr_instrumental': 17.0,
         'use_cases': ['Instrumental', 'Vocals', 'General Purpose'],
         'recommended': True,
-        'description_override': 'Highest quality vocals/instrumental separation. Best overall performance.',
+        'description_override': 'Highest quality vocals/instrumental separation. Best overall performance. SLOW: 2-5 min for 3-min audio.',
     },
     'model_bs_roformer_ep_368_sdr_12.9628.ckpt': {
         'quality_tier': 'S-Tier',
@@ -65,7 +65,7 @@ MODEL_QUALITY_DATABASE = {
         'sdr_instrumental': 17.0,
         'use_cases': ['Instrumental', 'Vocals', 'General Purpose'],
         'recommended': True,
-        'description_override': 'Excellent vocals/instrumental separation. Very close to ep_317.',
+        'description_override': 'Excellent vocals/instrumental separation. Very close to ep_317. SLOW: 2-5 min for 3-min audio.',
     },
     'deverb_bs_roformer_8_384dim_10depth.ckpt': {
         'quality_tier': 'A-Tier',
@@ -156,7 +156,7 @@ MODEL_QUALITY_DATABASE = {
         'rank': 8,
         'use_cases': ['Instrumental', 'Fast Processing'],
         'recommended': True,
-        'description_override': 'Fastest instrumental separation (~19s for 3min song). Good speed/quality balance.',
+        'description_override': 'Fastest instrumental separation. FAST: ~20 sec for 3-min audio. Good speed/quality balance.',
     },
     '6_HP-Karaoke-UVR.pth': {
         'quality_tier': 'B-Tier',
@@ -184,21 +184,21 @@ MODEL_QUALITY_DATABASE = {
         'use_cases': ['Multi-Instrument', '4-Stem', 'General Purpose'],
         'recommended': True,
         'sdr_vocals': 7.0,  # Approximate, varies by stem
-        'description_override': 'Best all-around 4-stem separation (drums/bass/other/vocals).',
+        'description_override': 'Best all-around 4-stem separation (drums/bass/other/vocals). MEDIUM: ~30-60 sec for 3-min audio.',
     },
     'htdemucs_ft': {
         'quality_tier': 'A-Tier',
         'rank': 20,
         'use_cases': ['Multi-Instrument', '4-Stem'],
         'sdr_vocals': 7.2,  # Approximate, fine-tuned version
-        'description_override': 'Fine-tuned version of htdemucs with slightly better performance.',
+        'description_override': 'Fine-tuned version of htdemucs with slightly better performance. MEDIUM: ~30-60 sec for 3-min audio.',
     },
     'htdemucs_6s': {
         'quality_tier': 'A-Tier',
         'rank': 21,
         'use_cases': ['Multi-Instrument', '6-Stem', 'Advanced'],
         'sdr_vocals': 6.8,  # Approximate
-        'description_override': '6-stem separation including drums/bass/other/vocals/guitar/piano.',
+        'description_override': '6-stem separation including drums/bass/other/vocals/guitar/piano. MEDIUM: ~30-60 sec for 3-min audio.',
     },
     'htdemucs.yaml': {
         'quality_tier': 'A-Tier',
@@ -206,21 +206,21 @@ MODEL_QUALITY_DATABASE = {
         'use_cases': ['Multi-Instrument', '4-Stem', 'General Purpose'],
         'recommended': True,
         'sdr_vocals': 7.0,
-        'description_override': 'Best all-around 4-stem separation (drums/bass/other/vocals).',
+        'description_override': 'Best all-around 4-stem separation (drums/bass/other/vocals). MEDIUM: ~30-60 sec for 3-min audio.',
     },
     'htdemucs_ft.yaml': {
         'quality_tier': 'A-Tier',
         'rank': 20,
         'use_cases': ['Multi-Instrument', '4-Stem'],
         'sdr_vocals': 7.2,
-        'description_override': 'Fine-tuned version of htdemucs with slightly better performance.',
+        'description_override': 'Fine-tuned version of htdemucs with slightly better performance. MEDIUM: ~30-60 sec for 3-min audio.',
     },
     'htdemucs_6s.yaml': {
         'quality_tier': 'A-Tier',
         'rank': 21,
         'use_cases': ['Multi-Instrument', '6-Stem', 'Advanced'],
         'sdr_vocals': 6.8,
-        'description_override': '6-stem separation including drums/bass/other/vocals/guitar/piano.',
+        'description_override': '6-stem separation including drums/bass/other/vocals/guitar/piano. MEDIUM: ~30-60 sec for 3-min audio.',
     },
 }
 
@@ -1143,7 +1143,7 @@ def separate_audio(
     model_filename: str,
     log_func: Optional[Callable[[str], None]] = None,
     device: str = 'auto',
-    timeout_seconds: int = 300,
+    timeout_seconds: int = 900,
     model_dir: Optional[str] = None,
 ) -> Optional[np.ndarray]:
     """
@@ -1156,7 +1156,9 @@ def separate_audio(
         model_filename: Model filename to use (or 'default')
         log_func: Optional logging function
         device: 'auto', 'cpu', 'cuda', 'rocm', or 'mps'
-        timeout_seconds: Maximum time to wait for separation
+        timeout_seconds: Maximum time to wait for separation (default 900s = 15 min)
+                        High-quality models like BS-Roformer can take 5-10 minutes
+                        Fast models like Demucs/VR typically take 30-60 seconds
 
     Returns:
         Separated audio as float32 numpy array, or None on failure
@@ -1278,7 +1280,8 @@ def separate_audio(
             return separated
 
         except subprocess.TimeoutExpired:
-            log(f"[SOURCE SEPARATION] Timeout after {timeout_seconds}s")
+            log(f"[SOURCE SEPARATION] Timeout after {timeout_seconds}s (high-quality models may need more time)")
+            log(f"[SOURCE SEPARATION] Consider using a faster model or increasing the timeout in settings")
             return None
         except Exception as e:
             log(f"[SOURCE SEPARATION] Error: {e}")
@@ -1307,7 +1310,7 @@ def apply_source_separation(
         return ref_pcm, tgt_pcm
 
     device = config.get('source_separation_device', 'auto')
-    timeout = config.get('source_separation_timeout', 300)
+    timeout = config.get('source_separation_timeout', 900)
     model_dir = config.get('source_separation_model_dir') or None
 
     log(f"[SOURCE SEPARATION] Mode: {mode}")
