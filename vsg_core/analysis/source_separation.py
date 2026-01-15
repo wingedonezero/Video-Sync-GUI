@@ -291,7 +291,24 @@ import json
 import os
 import sys
 from pathlib import Path
+import numpy as np
+from scipy.io import wavfile
 from audio_separator.separator import Separator
+
+def load_wav_file(path):
+    """Load WAV file and return float32 mono audio."""
+    sample_rate, data = wavfile.read(path)
+
+    if data.dtype.kind in 'iu':
+        max_val = np.iinfo(data.dtype).max
+        data = data.astype(np.float32) / max_val
+    else:
+        data = data.astype(np.float32)
+
+    if data.ndim > 1:
+        data = data.mean(axis=1)
+
+    return sample_rate, data
 
 def run_separation(args):
     output_dir = Path(args['output_dir'])
@@ -361,24 +378,53 @@ def run_separation(args):
                 if target_stem.lower() in f_path.name.lower():
                     selected_file = str(f_path)
                     print(f"DEBUG: Selected {f_path.name} for stem {target_stem}", file=sys.stderr)
-                    break
+                    return selected_file
 
-    # For instrumental, also try combining non-vocal stems if available
+    # For instrumental, need to mix non-vocal stems together
     if not selected_file and target_stem.lower() == 'instrumental':
         # Look for files NOT containing 'vocal'
         non_vocal_files = [f for f in output_files if 'vocal' not in Path(f).name.lower()]
-        if len(non_vocal_files) == 1:
+
+        if len(non_vocal_files) == 0:
+            raise RuntimeError('No non-vocal stems found for instrumental mode')
+        elif len(non_vocal_files) == 1:
+            # Only one non-vocal file, use it directly
             selected_file = str(non_vocal_files[0])
             print(f"DEBUG: Using {Path(selected_file).name} as instrumental (only non-vocal file)", file=sys.stderr)
-        elif non_vocal_files:
-            # If multiple non-vocal stems, prefer 'no_vocals' or 'instrumental'
-            for f in non_vocal_files:
-                f_path = Path(f)
-                fname_lower = f_path.name.lower()
-                if 'no_vocals' in fname_lower or 'instrumental' in fname_lower or 'no_vocal' in fname_lower:
-                    selected_file = str(f_path)
-                    print(f"DEBUG: Selected {f_path.name} as instrumental", file=sys.stderr)
-                    break
+            return selected_file
+        else:
+            # Multiple non-vocal stems - need to mix them together (like old Demucs)
+            print(f"DEBUG: Mixing {len(non_vocal_files)} non-vocal stems for instrumental", file=sys.stderr)
+
+            mixed_audio = None
+            sample_rate = None
+
+            for stem_file in non_vocal_files:
+                sr, audio = load_wav_file(Path(stem_file))
+                print(f"DEBUG: - Loading {Path(stem_file).name}", file=sys.stderr)
+
+                if sample_rate is None:
+                    sample_rate = sr
+                    mixed_audio = audio
+                else:
+                    if sr != sample_rate:
+                        raise RuntimeError(f'Sample rate mismatch: {sr} vs {sample_rate}')
+                    mixed_audio = mixed_audio + audio
+
+            # Save mixed audio to a new file
+            mixed_output = output_dir / 'mixed_instrumental.wav'
+            wavfile.write(str(mixed_output), sample_rate, mixed_audio.astype(np.float32))
+            print(f"DEBUG: Saved mixed instrumental to {mixed_output.name}", file=sys.stderr)
+
+            return str(mixed_output)
+
+    # For vocals, look for a file with 'vocal' in the name
+    if not selected_file and target_stem.lower() == 'vocals':
+        vocal_files = [f for f in output_files if 'vocal' in Path(f).name.lower()]
+        if vocal_files:
+            selected_file = str(vocal_files[0])
+            print(f"DEBUG: Selected {Path(selected_file).name} for vocals", file=sys.stderr)
+            return selected_file
 
     # If still no match, use the first file as fallback
     if not selected_file and output_files:
