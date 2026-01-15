@@ -86,13 +86,14 @@ class ModelManagerDialog(QDialog):
 
         # Model table
         self.table = QTableWidget()
-        self.table.setColumnCount(6)
-        self.table.setHorizontalHeaderLabels(['Name', 'Type', 'SDR (V/I)', 'Stems', 'Status', 'Action'])
+        self.table.setColumnCount(7)
+        self.table.setHorizontalHeaderLabels(['Name', 'Quality', 'Type', 'SDR (V/I)', 'Stems', 'Status', 'Action'])
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.horizontalHeader().setStretchLastSection(False)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table.setSortingEnabled(True)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
         layout.addWidget(self.table)
 
@@ -179,7 +180,13 @@ class ModelManagerDialog(QDialog):
         """Populate the table with models."""
         self.table.setRowCount(0)
 
-        for model in self.all_models:
+        # Sort models by rank (best first), then by name
+        sorted_models = sorted(
+            self.all_models,
+            key=lambda m: (m.get('rank', 999), m.get('name', m.get('filename', '')))
+        )
+
+        for model in sorted_models:
             self._add_model_row(model)
 
         self._apply_filters()
@@ -189,13 +196,28 @@ class ModelManagerDialog(QDialog):
         row = self.table.rowCount()
         self.table.insertRow(row)
 
-        # Name
-        name_item = QTableWidgetItem(model.get('name', model['filename']))
+        # Name (with star for recommended models)
+        name_text = model.get('name', model['filename'])
+        if model.get('recommended'):
+            name_text = f"⭐ {name_text}"
+        name_item = QTableWidgetItem(name_text)
         name_item.setData(Qt.ItemDataRole.UserRole, model)
         self.table.setItem(row, 0, name_item)
 
+        # Quality tier
+        quality_tier = model.get('quality_tier', 'C-Tier')
+        quality_item = QTableWidgetItem(quality_tier)
+        # Add color coding
+        if quality_tier == 'S-Tier':
+            quality_item.setForeground(Qt.GlobalColor.darkGreen)
+        elif quality_tier == 'A-Tier':
+            quality_item.setForeground(Qt.GlobalColor.darkBlue)
+        elif quality_tier == 'B-Tier':
+            quality_item.setForeground(Qt.GlobalColor.darkYellow)
+        self.table.setItem(row, 1, quality_item)
+
         # Type
-        self.table.setItem(row, 1, QTableWidgetItem(model.get('type', 'Unknown')))
+        self.table.setItem(row, 2, QTableWidgetItem(model.get('type', 'Unknown')))
 
         # SDR scores
         sdr_text = ''
@@ -203,14 +225,14 @@ class ModelManagerDialog(QDialog):
             sdr_text = f"{model['sdr_vocals']:.1f} / {model['sdr_instrumental']:.1f}"
         elif model.get('sdr_vocals'):
             sdr_text = f"{model['sdr_vocals']:.1f}"
-        self.table.setItem(row, 2, QTableWidgetItem(sdr_text))
+        self.table.setItem(row, 3, QTableWidgetItem(sdr_text))
 
         # Stems
-        self.table.setItem(row, 3, QTableWidgetItem(model.get('stems', 'Unknown')))
+        self.table.setItem(row, 4, QTableWidgetItem(model.get('stems', 'Unknown')))
 
         # Status
         status = '✓ Installed' if model.get('installed') else 'Available'
-        self.table.setItem(row, 4, QTableWidgetItem(status))
+        self.table.setItem(row, 5, QTableWidgetItem(status))
 
         # Action button
         action_btn = QPushButton('Delete' if model.get('installed') else 'Download')
@@ -219,7 +241,7 @@ class ModelManagerDialog(QDialog):
             action_btn.clicked.connect(lambda checked, m=model: self._delete_model(m))
         else:
             action_btn.clicked.connect(lambda checked, m=model: self._download_model(m))
-        self.table.setCellWidget(row, 5, action_btn)
+        self.table.setCellWidget(row, 6, action_btn)
 
     def _apply_filters(self):
         """Apply filters to the table."""
@@ -265,11 +287,16 @@ class ModelManagerDialog(QDialog):
         model = item.data(Qt.ItemDataRole.UserRole)
 
         # Build info text
+        name_display = model.get('name', model['filename'])
+        if model.get('recommended'):
+            name_display = f"⭐ {name_display} (Recommended)"
+
         info_lines = [
-            f"<b>{model.get('name', model['filename'])}</b>",
+            f"<b>{name_display}</b>",
             "",
             f"<b>Filename:</b> {model['filename']}",
             f"<b>Type:</b> {model.get('type', 'Unknown')}",
+            f"<b>Quality Tier:</b> {model.get('quality_tier', 'C-Tier')}",
             f"<b>Stems:</b> {model.get('stems', 'Unknown')}",
         ]
 
@@ -277,6 +304,11 @@ class ModelManagerDialog(QDialog):
             info_lines.append(f"<b>Vocal SDR:</b> {model['sdr_vocals']:.1f} dB")
         if model.get('sdr_instrumental'):
             info_lines.append(f"<b>Instrumental SDR:</b> {model['sdr_instrumental']:.1f} dB")
+
+        # Add use cases
+        use_cases = model.get('use_cases', [])
+        if use_cases:
+            info_lines.append(f"<b>Best For:</b> {', '.join(use_cases)}")
 
         if model.get('description'):
             info_lines.append("")
