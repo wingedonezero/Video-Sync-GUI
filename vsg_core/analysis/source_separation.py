@@ -325,68 +325,76 @@ def get_all_available_models_from_registry() -> List[Dict]:
         List of model dictionaries with all available info from registry.
         Returns empty list if query fails.
     """
+    # Method 1: Try using audio-separator CLI
     cli_path = shutil.which('audio-separator')
     if cli_path:
-        command = [cli_path, '--list_models', '--list_format=json']
         print(f"[get_all_available_models] Using audio-separator CLI: {cli_path}")
-    else:
-        python_exe = _get_venv_python()
-        command = [python_exe, '-m', 'audio_separator', '--list_models', '--list_format=json']
-        print(f"[get_all_available_models] Using Python module: {python_exe}")
+        command = [cli_path, '--list_models', '--list_format=json']
 
-    print(f"[get_all_available_models] Running command: {' '.join(command)}")
-
-    try:
-        result = subprocess.run(
-            command,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-
-        print(f"[get_all_available_models] Command completed with return code: {result.returncode}")
-        print(f"[get_all_available_models] stdout length: {len(result.stdout)} chars")
-
-        if result.stderr:
-            print(f"[get_all_available_models] stderr: {result.stderr[:500]}")
-
-        output = result.stdout.strip()
-        if not output:
-            print("[get_all_available_models] ERROR: No output from command")
-            return []
-
-        # Parse the JSON output from audio-separator
         try:
-            model_data = json.loads(output)
-            print(f"[get_all_available_models] Parsed JSON successfully, type: {type(model_data)}")
-        except json.JSONDecodeError as e:
-            print(f"[get_all_available_models] ERROR: JSON decode failed: {e}")
-            print(f"[get_all_available_models] First 500 chars of output: {output[:500]}")
-            return []
+            result = subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
 
-        # Flatten the nested structure into a simple list
-        models = []
-        _extract_models_from_registry(model_data, models)
+            print(f"[get_all_available_models] Command completed with return code: {result.returncode}")
+            output = result.stdout.strip()
 
-        print(f"[get_all_available_models] Extracted {len(models)} models from registry")
-        return models
+            if output:
+                model_data = json.loads(output)
+                models = []
+                _extract_models_from_registry(model_data, models)
+                print(f"[get_all_available_models] Extracted {len(models)} models from CLI")
+                return models
 
-    except subprocess.TimeoutExpired as e:
-        print(f"[get_all_available_models] ERROR: Command timed out after 30s")
-        return []
-    except subprocess.CalledProcessError as e:
-        print(f"[get_all_available_models] ERROR: Command failed with code {e.returncode}")
-        print(f"[get_all_available_models] stderr: {e.stderr}")
-        return []
-    except OSError as e:
-        print(f"[get_all_available_models] ERROR: OS error: {e}")
-        return []
+        except Exception as e:
+            print(f"[get_all_available_models] CLI method failed: {e}")
+
+    # Method 2: Try importing audio-separator directly and loading models.json
+    print("[get_all_available_models] Trying to import audio-separator library...")
+    try:
+        model_data = _load_model_data()
+        if model_data:
+            print("[get_all_available_models] Loaded models.json from library")
+            models = []
+            _extract_models_from_registry(model_data, models)
+            print(f"[get_all_available_models] Extracted {len(models)} models from library")
+            return models
     except Exception as e:
-        print(f"[get_all_available_models] ERROR: Unexpected error: {e}")
-        import traceback
-        traceback.print_exc()
-        return []
+        print(f"[get_all_available_models] Library import method failed: {e}")
+
+    # Method 3: Try using the CLI via the venv Python's Scripts directory
+    python_exe = _get_venv_python()
+    venv_scripts = Path(python_exe).parent / 'audio-separator'
+    if venv_scripts.exists():
+        print(f"[get_all_available_models] Found audio-separator in venv scripts: {venv_scripts}")
+        command = [str(venv_scripts), '--list_models', '--list_format=json']
+
+        try:
+            result = subprocess.run(
+                command,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+
+            output = result.stdout.strip()
+            if output:
+                model_data = json.loads(output)
+                models = []
+                _extract_models_from_registry(model_data, models)
+                print(f"[get_all_available_models] Extracted {len(models)} models from venv script")
+                return models
+
+        except Exception as e:
+            print(f"[get_all_available_models] Venv script method failed: {e}")
+
+    print("[get_all_available_models] ERROR: All methods failed to load models")
+    return []
 
 
 def _extract_models_from_registry(data: any, models: List[Dict]) -> None:
