@@ -79,6 +79,19 @@ setup_rocm_environment() {
         [ -z "$AMD_VARIANT_PROVIDER_FORCE_GFX_ARCH" ] && export AMD_VARIANT_PROVIDER_FORCE_GFX_ARCH="$GFX_VERSION"
         [ -z "$AMD_VARIANT_PROVIDER_FORCE_ROCM_VERSION" ] && export AMD_VARIANT_PROVIDER_FORCE_ROCM_VERSION="6.4"
         [ -z "$AMD_TEE_LOG_PATH" ] && export AMD_TEE_LOG_PATH="/dev/null"  # Suppress amdgpu.ids errors
+
+        if [ -z "$AMDGPU_IDS_PATH" ] && [ -z "$LIBDRM_AMDGPU_IDS_PATH" ]; then
+            if [ -f "/opt/amdgpu/share/libdrm/amdgpu.ids" ]; then
+                export AMDGPU_IDS_PATH="/opt/amdgpu/share/libdrm/amdgpu.ids"
+                export LIBDRM_AMDGPU_IDS_PATH="/opt/amdgpu/share/libdrm/amdgpu.ids"
+            elif [ -f "/usr/share/libdrm/amdgpu.ids" ]; then
+                export AMDGPU_IDS_PATH="/usr/share/libdrm/amdgpu.ids"
+                export LIBDRM_AMDGPU_IDS_PATH="/usr/share/libdrm/amdgpu.ids"
+            else
+                export AMDGPU_IDS_PATH="/dev/null"
+                export LIBDRM_AMDGPU_IDS_PATH="/dev/null"
+            fi
+        fi
     fi
 }
 
