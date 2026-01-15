@@ -149,7 +149,11 @@ def run_separation(input_path, output_path, mode, sample_rate, device_preference
     else:
         device = torch.device('cpu')
 
-    print(f"Using device: {device}", file=sys.stderr)
+    device_label = device.type
+    hip_version = getattr(torch.version, 'hip', None)
+    if device.type == 'cuda' and hip_version:
+        device_label = f"rocm ({hip_version})"
+    print(f"Using device: {device_label}", file=sys.stderr)
 
     # Load model (htdemucs is good balance of quality/speed)
     model = get_model('htdemucs')

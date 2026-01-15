@@ -154,6 +154,15 @@ def get_rocm_environment() -> Dict[str, str]:
         if not os.environ.get('AMD_TEE_LOG_PATH'):
             env['AMD_TEE_LOG_PATH'] = '/dev/null'
 
+        if not os.environ.get('AMDGPU_IDS_PATH'):
+            for candidate in (
+                '/opt/amdgpu/share/libdrm/amdgpu.ids',
+                '/usr/share/libdrm/amdgpu.ids',
+            ):
+                if os.path.isfile(candidate):
+                    env['AMDGPU_IDS_PATH'] = candidate
+                    break
+
     return env
 
 
