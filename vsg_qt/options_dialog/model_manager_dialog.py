@@ -24,11 +24,11 @@ from vsg_core.analysis.source_separation import (
 class ModelDownloadThread(QThread):
     """Thread for downloading models without blocking the UI."""
     progress = Signal(int, str)  # (percent, message)
-    finished = Signal(bool, str)  # (success, error_message)
+    finished = Signal(bool, str, dict)  # (success, error_message, model_metadata)
 
-    def __init__(self, model_filename: str, model_dir: str):
+    def __init__(self, model: Dict, model_dir: str):
         super().__init__()
-        self.model_filename = model_filename
+        self.model = model  # Store full model metadata
         self.model_dir = model_dir
         self.error_message = ""
 
@@ -43,11 +43,11 @@ class ModelDownloadThread(QThread):
             self.progress.emit(percent, message)
 
         success = download_model(
-            self.model_filename,
+            self.model['filename'],
             self.model_dir,
             progress_callback=progress_with_capture
         )
-        self.finished.emit(success, self.error_message)
+        self.finished.emit(success, self.error_message, self.model)
 
 
 class ModelManagerDialog(QDialog):
@@ -349,7 +349,7 @@ class ModelManagerDialog(QDialog):
         self.progress_label.setVisible(True)
         self.refresh_btn.setEnabled(False)
 
-        self.download_thread = ModelDownloadThread(model['filename'], self.model_dir)
+        self.download_thread = ModelDownloadThread(model, self.model_dir)
         self.download_thread.progress.connect(self._on_download_progress)
         self.download_thread.finished.connect(self._on_download_finished)
         self.download_thread.start()
@@ -359,22 +359,38 @@ class ModelManagerDialog(QDialog):
         self.progress_bar.setValue(percent)
         self.progress_label.setText(message)
 
-    def _on_download_finished(self, success: bool, error_message: str = ""):
+    def _on_download_finished(self, success: bool, error_message: str = "", downloaded_model: Dict = None):
         """Handle download completion."""
         self.progress_bar.setVisible(False)
         self.progress_label.setVisible(False)
         self.refresh_btn.setEnabled(True)
 
         if success:
-            QMessageBox.information(self, "Success", "Model downloaded successfully!")
+            print(f"[Model Manager] Download successful: {downloaded_model.get('filename')}")
 
-            # Update installed models JSON
+            # Update installed models JSON with the new model
             installed = get_installed_models(self.model_dir)
+            print(f"[Model Manager] Current installed models: {len(installed)}")
 
-            # Add the new model if not already in the list
-            # (In reality, we'd scan the directory for the actual file)
-            # For now, we'll just reload the list
+            # Add the downloaded model if not already in the list
+            model_filename = downloaded_model['filename']
+            if not any(m['filename'] == model_filename for m in installed):
+                installed.append(downloaded_model)
+                print(f"[Model Manager] Adding {model_filename} to installed list")
+
+                # Save to JSON
+                from vsg_core.analysis.source_separation import update_installed_models_json
+                if update_installed_models_json(installed, self.model_dir):
+                    print(f"[Model Manager] Successfully updated installed_models.json")
+                else:
+                    print(f"[Model Manager] WARNING: Failed to update installed_models.json")
+            else:
+                print(f"[Model Manager] Model {model_filename} already in installed list")
+
+            # Reload the model list to show the model as installed
             self._load_models()
+
+            QMessageBox.information(self, "Success", f"Model downloaded successfully!\n\n{downloaded_model['name']}")
         else:
             # Show detailed error message
             if error_message and "not installed" in error_message.lower():
