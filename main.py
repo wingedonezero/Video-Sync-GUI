@@ -22,7 +22,23 @@ def main():
     app.setApplicationName("Video Sync & Merge")
     window = MainWindow()
     window.show()
-    sys.exit(app.exec())
+
+    exit_code = app.exec()
+
+    # Final cleanup before Python shutdown to prevent nanobind leaks
+    # This runs after Qt cleanup but before Python's module teardown
+    try:
+        from vsg_core.subtitles.frame_utils import clear_vfr_cache
+        clear_vfr_cache()
+    except ImportError:
+        pass
+
+    # Force final garbage collection before exit
+    import gc
+    gc.collect()
+    gc.collect()  # Run twice for good measure
+
+    sys.exit(exit_code)
 
 if __name__ == '__main__':
     main()
