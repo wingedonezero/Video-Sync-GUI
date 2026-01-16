@@ -9,6 +9,7 @@ mod correction;
 mod subtitles;
 mod extraction;
 mod chapters;
+mod mux;
 
 #[pymodule]
 fn vsg_core_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -57,6 +58,10 @@ fn vsg_core_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(shift_chapter_timestamp, m)?)?;
     m.add_function(wrap_pyfunction!(format_chapter_timestamp, m)?)?;
     m.add_function(wrap_pyfunction!(parse_chapter_timestamp, m)?)?;
+
+    // Phase 8: Mux Options functions
+    m.add_function(wrap_pyfunction!(calculate_mux_delay, m)?)?;
+    m.add_function(wrap_pyfunction!(build_mkvmerge_sync_token, m)?)?;
 
     Ok(())
 }
@@ -349,4 +354,77 @@ fn format_chapter_timestamp(ns: i64) -> String {
 fn parse_chapter_timestamp(timestamp: &str) -> PyResult<i64> {
     chapters::parse_ns(timestamp)
         .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+}
+
+// ============================================================================
+// Phase 8: Mux Options Functions (PyO3 Bindings)
+// ============================================================================
+
+/// Calculate the effective delay for a track to be used in mkvmerge
+///
+/// CRITICAL DELAY RULES:
+/// - Source 1 VIDEO: Only global_shift (ignore container delays)
+/// - Source 1 AUDIO: container_delay + global_shift
+/// - Stepping-adjusted subtitles: Return 0 (delay baked in)
+/// - Frame-adjusted subtitles: Return 0 (delay baked in)
+/// - All other tracks: Use correlation delay from source_delays_ms
+///
+/// Args:
+///     track_type: Type of track ("video", "audio", "subtitles")
+///     source_key: Source identifier (e.g., "Source 1", "Source 2")
+///     container_delay_ms: Container delay from track properties
+///     global_shift_ms: Global shift to apply to all tracks
+///     source_delays_ms: Dict mapping source keys to correlation delays
+///     stepping_adjusted: Whether stepping correction was applied (default: False)
+///     frame_adjusted: Whether frame-perfect sync was applied (default: False)
+///
+/// Returns:
+///     Delay in milliseconds (signed integer)
+#[pyfunction]
+#[pyo3(signature = (track_type, source_key, container_delay_ms, global_shift_ms, source_delays_ms, stepping_adjusted=false, frame_adjusted=false))]
+fn calculate_mux_delay(
+    track_type: &str,
+    source_key: &str,
+    container_delay_ms: i32,
+    global_shift_ms: i32,
+    source_delays_ms: std::collections::HashMap<String, i32>,
+    stepping_adjusted: bool,
+    frame_adjusted: bool,
+) -> PyResult<i32> {
+    // Parse track type
+    let track_type_enum = match track_type.to_lowercase().as_str() {
+        "video" => mux::TrackType::Video,
+        "audio" => mux::TrackType::Audio,
+        "subtitles" => mux::TrackType::Subtitles,
+        _ => return Err(pyo3::exceptions::PyValueError::new_err(
+            format!("Invalid track_type: {}. Must be 'video', 'audio', or 'subtitles'", track_type)
+        )),
+    };
+
+    let delay = mux::calculate_track_delay(
+        track_type_enum,
+        source_key,
+        container_delay_ms,
+        global_shift_ms,
+        &source_delays_ms,
+        stepping_adjusted,
+        frame_adjusted,
+    );
+
+    Ok(delay)
+}
+
+/// Build mkvmerge sync token with signed delay format
+///
+/// CRITICAL: Delays must be signed format with explicit '+' or '-'
+///
+/// Args:
+///     track_idx: Track index in mkvmerge (usually 0 for single-track inputs)
+///     delay_ms: Delay in milliseconds (can be negative)
+///
+/// Returns:
+///     List of tokens: ["--sync", "0:+500"]
+#[pyfunction]
+fn build_mkvmerge_sync_token(track_idx: u32, delay_ms: i32) -> Vec<String> {
+    mux::build_sync_token(track_idx, delay_ms)
 }
