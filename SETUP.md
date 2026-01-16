@@ -5,7 +5,7 @@
 After the Arch Linux Python update, many packages became incompatible with the system Python. This setup creates a **completely self-contained environment** with:
 
 - Python 3.13.x (downloaded and installed locally in your project)
-- All dependencies installed in `Dependencies/.venv`
+- All dependencies installed in `python/.venv`
 - No interference with system Python
 - Easy to run without manual activation
 
@@ -25,13 +25,13 @@ Think of it as "Cargo for Python" but specifically designed for Python's ecosyst
 
 1. **Run the setup script:**
    ```bash
-   ./setup_env.sh
+   ./python/setup_env.sh
    ```
 
    This will:
    - Install `uv` if you don't have it
    - Download Python 3.13.x locally (latest available)
-   - Create a virtual environment in `Dependencies/.venv`
+   - Create a virtual environment in `python/.venv`
    - Install all dependencies from `pyproject.toml`
 
    **Note:** The first run takes a few minutes to download Python and packages. Subsequent runs are much faster.
@@ -40,7 +40,7 @@ Think of it as "Cargo for Python" but specifically designed for Python's ecosyst
 
 2. **Launch the app:**
    ```bash
-   ./run.sh
+   ./python/run.sh
    ```
 
    This script:
@@ -55,9 +55,10 @@ If you prefer to run things manually:
 
 ```bash
 # Activate the environment
-source Dependencies/.venv/bin/activate
+source python/.venv/bin/activate
 
 # Run the application
+cd python
 python main.py
 
 # When done, deactivate
@@ -71,12 +72,12 @@ If you need to add or update packages:
 1. **Edit `pyproject.toml`** and add the package to the `dependencies` list
 2. **Re-run setup:**
    ```bash
-   ./setup_env.sh
+   ./python/setup_env.sh
    ```
 
 Or manually:
 ```bash
-source Dependencies/.venv/bin/activate
+source python/.venv/bin/activate
 uv pip install <package-name>
 ```
 
@@ -86,13 +87,13 @@ The base installation includes everything needed for the app. However, if you wa
 
 ### For NVIDIA GPUs (CUDA):
 ```bash
-source Dependencies/.venv/bin/activate
+source python/.venv/bin/activate
 uv pip install "audio-separator[gpu]"
 ```
 
 ### For AMD GPUs (ROCm):
 ```bash
-source Dependencies/.venv/bin/activate
+source python/.venv/bin/activate
 # Install PyTorch with ROCm support first
 pip install torch --index-url https://download.pytorch.org/whl/rocm6.2
 # Then install audio-separator (CPU extra works with ROCm torch)
@@ -101,7 +102,7 @@ uv pip install "audio-separator[cpu]"
 
 ### For CPU only (slower):
 ```bash
-source Dependencies/.venv/bin/activate
+source python/.venv/bin/activate
 # Install audio-separator CPU build
 uv pip install "audio-separator[cpu]"
 ```
@@ -117,33 +118,32 @@ export PATH="$HOME/.cargo/bin:$PATH"
 
 ### Want to completely reset?
 ```bash
-rm -rf Dependencies/
-./setup_env.sh
+rm -rf python/.venv
+./python/setup_env.sh
 ```
 
 ### Check which Python is being used
 ```bash
-Dependencies/.venv/bin/python --version
+python/.venv/bin/python --version
 ```
 
 ### Verify packages are installed
 ```bash
-Dependencies/.venv/bin/python -c "import PySide6; print('PySide6 OK')"
+python/.venv/bin/python -c "import PySide6; print('PySide6 OK')"
 ```
 
 ## Directory Structure
 
 ```
 Video-Sync-GUI/
-├── Dependencies/              # Self-contained environment (gitignored)
-│   └── .venv/                # Virtual environment with Python 3.13.x
-│       ├── bin/              # Python executable and scripts
-│       ├── lib/              # All installed packages
-│       └── ...
-├── pyproject.toml            # Project configuration and dependencies
-├── setup_env.sh              # Setup script (run once)
-├── run.sh                    # Launch script (run to start app)
-├── main.py                   # Application entry point
+├── python/
+│   ├── .venv/                # Virtual environment with Python 3.13.x
+│   │   ├── bin/              # Python executable and scripts
+│   │   ├── lib/              # All installed packages
+│   │   └── ...
+│   ├── setup_env.sh          # Setup script (run once)
+│   ├── run.sh                # Launch script (run to start app)
+│   ├── main.py               # Application entry point
 └── ...
 ```
 
@@ -153,15 +153,15 @@ Video-Sync-GUI/
 ✅ **Portable:** Everything is in one project directory
 ✅ **Fast:** `uv` is significantly faster than pip
 ✅ **Version-locked:** Python 3.13.x won't change unexpectedly
-✅ **Clean:** `Dependencies/` is gitignored, won't bloat your repo
-✅ **Easy:** Just `./run.sh` to launch the app
+✅ **Clean:** `python/.venv` is gitignored, won't bloat your repo
+✅ **Easy:** Just `./python/run.sh` to launch the app
 
 ## How It Works
 
 1. **`uv`** downloads Python 3.13.x binaries (latest available)
-2. Creates a virtual environment at `Dependencies/.venv`
+2. Creates a virtual environment at `python/.venv`
 3. Installs all packages using `uv pip` (super fast)
-4. `run.sh` activates the environment and runs `main.py`
+4. `python/run.sh` activates the environment and runs `main.py`
 5. Everything is self-contained—no system Python needed
 
 ---

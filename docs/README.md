@@ -47,95 +47,102 @@ This document is intentionally **exhaustive**. It explains *what each module doe
 ```
 Directory structure:
 └── wingedonezero-video-sync-gui/
-    ├── main.py
-    ├── vsg_core/
-    │   ├── __init__.py
-    │   ├── config.py
-    │   ├── job_discovery.py
-    │   ├── pipeline.py
-    │   ├── analysis/
+    ├── python/
+    │   ├── main.py
+    │   ├── run.sh
+    │   ├── setup_env.sh
+    │   ├── vsg_core/
     │   │   ├── __init__.py
-    │   │   ├── audio_corr.py
-    │   │   └── videodiff.py
-    │   ├── chapters/
-    │   │   ├── keyframes.py
-    │   │   └── process.py
-    │   ├── extraction/
-    │   │   ├── attachments.py
-    │   │   └── tracks.py
-    │   ├── io/
-    │   │   └── runner.py
-    │   ├── models/
-    │   │   ├── __init__.py
-    │   │   ├── converters.py
-    │   │   ├── enums.py
-    │   │   ├── jobs.py
-    │   │   ├── media.py
-    │   │   └── settings.py
-    │   ├── mux/
-    │   │   └── options_builder.py
-    │   ├── orchestrator/
+    │   │   ├── config.py
+    │   │   ├── job_discovery.py
     │   │   ├── pipeline.py
-    │   │   └── steps/
-    │   │       ├── __init__.py
-    │   │       ├── analysis_step.py
-    │   │       ├── attachments_step.py
-    │   │       ├── chapters_step.py
-    │   │       ├── context.py
-    │   │       ├── extract_step.py
-    │   │       ├── mux_step.py
-    │   │       └── subtitles_step.py
-    │   └── subtitles/
-    │       ├── convert.py
-    │       ├── rescale.py
-    │       ├── style.py
-    │       └── style_engine.py
-    └── vsg_qt/
-        ├── __init__.py
-        ├── add_job_dialog/
-        │   ├── __init__.py
-        │   └── ui.py
-        ├── job_queue_dialog/
-        │   ├── __init__.py
-        │   ├── logic.py
-        │   └── ui.py
-        ├── main_window/
-        │   ├── __init__.py
-        │   ├── controller.py
-        │   ├── helpers.py
-        │   └── window.py
-        ├── manual_selection_dialog/
-        │   ├── __init__.py
-        │   ├── logic.py
-        │   ├── ui.py
-        │   └── widgets.py
-        ├── options_dialog/
-        │   ├── __init__.py
-        │   ├── logic.py
-        │   ├── tabs.py
-        │   └── ui.py
-        ├── resample_dialog/
-        │   ├── __init__.py
-        │   └── ui.py
-        ├── style_editor_dialog/
-        │   ├── __init__.py
-        │   ├── logic.py
-        │   ├── player_thread.py
-        │   ├── ui.py
-        │   └── video_widget.py
-        ├── track_settings_dialog/
-        │   ├── __init__.py
-        │   ├── logic.py
-        │   └── ui.py
-        ├── track_widget/
-        │   ├── __init__.py
-        │   ├── helpers.py
-        │   ├── logic.py
-        │   └── ui.py
-        └── worker/
-            ├── __init__.py
-            ├── runner.py
-            └── signals.py
+    │   │   ├── analysis/
+    │   │   │   ├── __init__.py
+    │   │   │   ├── audio_corr.py
+    │   │   │   └── videodiff.py
+    │   │   ├── chapters/
+    │   │   │   ├── keyframes.py
+    │   │   │   └── process.py
+    │   │   ├── extraction/
+    │   │   │   ├── attachments.py
+    │   │   │   └── tracks.py
+    │   │   ├── io/
+    │   │   │   └── runner.py
+    │   │   ├── models/
+    │   │   │   ├── __init__.py
+    │   │   │   ├── converters.py
+    │   │   │   ├── enums.py
+    │   │   │   ├── jobs.py
+    │   │   │   ├── media.py
+    │   │   │   └── settings.py
+    │   │   ├── mux/
+    │   │   │   └── options_builder.py
+    │   │   ├── orchestrator/
+    │   │   │   ├── pipeline.py
+    │   │   │   └── steps/
+    │   │   │       ├── __init__.py
+    │   │   │       ├── analysis_step.py
+    │   │   │       ├── attachments_step.py
+    │   │   │       ├── chapters_step.py
+    │   │   │       ├── context.py
+    │   │   │       ├── extract_step.py
+    │   │   │       ├── mux_step.py
+    │   │   │       └── subtitles_step.py
+    │   │   └── subtitles/
+    │   │       ├── convert.py
+    │   │       ├── rescale.py
+    │   │       ├── style.py
+    │   │       └── style_engine.py
+    │   └── vsg_qt/
+    │       ├── __init__.py
+    │       ├── add_job_dialog/
+    │       │   ├── __init__.py
+    │       │   └── ui.py
+    │       ├── job_queue_dialog/
+    │       │   ├── __init__.py
+    │       │   ├── logic.py
+    │       │   └── ui.py
+    │       ├── main_window/
+    │       │   ├── __init__.py
+    │       │   ├── controller.py
+    │       │   ├── helpers.py
+    │       │   └── window.py
+    │       ├── manual_selection_dialog/
+    │       │   ├── __init__.py
+    │       │   ├── logic.py
+    │       │   ├── ui.py
+    │       │   └── widgets.py
+    │       ├── options_dialog/
+    │       │   ├── __init__.py
+    │       │   ├── logic.py
+    │       │   ├── tabs.py
+    │       │   └── ui.py
+    │       ├── resample_dialog/
+    │       │   ├── __init__.py
+    │       │   └── ui.py
+    │       ├── style_editor_dialog/
+    │       │   ├── __init__.py
+    │       │   ├── logic.py
+    │       │   ├── player_thread.py
+    │       │   ├── ui.py
+    │       │   └── video_widget.py
+    │       ├── track_settings_dialog/
+    │       │   ├── __init__.py
+    │       │   ├── logic.py
+    │       │   └── ui.py
+    │       ├── track_widget/
+    │       │   ├── __init__.py
+    │       │   ├── helpers.py
+    │       │   ├── logic.py
+    │       │   └── ui.py
+    │       └── worker/
+    │           ├── __init__.py
+    │           ├── runner.py
+    │           └── signals.py
+    └── rust/
+        └── vsg_core_rs/
+            ├── Cargo.toml
+            └── src/
 
 ```
 
@@ -157,9 +164,9 @@ Directory structure:
 
 ---
 
-## 3) Configuration (`vsg_core/config.py`)
+## 3) Configuration (`python/vsg_core/config.py`)
 
-`AppConfig` loads/saves `settings.json` at repo root and guarantees required folders exist.
+`AppConfig` loads/saves `python/settings.json` and guarantees required folders exist.
 
 ### Defaults snapshot
 
@@ -205,7 +212,7 @@ All settings are surfaced in **OptionsDialog** except historical debug toggles t
 
 ---
 
-## 4) Job discovery (`vsg_core/job_discovery.py`)
+## 4) Job discovery (`python/vsg_core/job_discovery.py`)
 
 ### Modes
 - **Single-file mode**: `ref` must be a file. `sec`/`ter` may be files (optional).  
@@ -219,7 +226,7 @@ All settings are surfaced in **OptionsDialog** except historical debug toggles t
 
 ---
 
-## 5) UI: Main window (`vsg_qt/main_window.py`)
+## 5) UI: Main window (`python/vsg_qt/main_window.py`)
 
 ### Key surfaces
 - **Inputs**: Reference / Secondary / Tertiary (file or directory).  
@@ -254,7 +261,7 @@ If signatures differ, we open the **ManualSelectionDialog** (see §6).
 
 ---
 
-## 6) Manual track selection dialog (`vsg_qt/manual_selection_dialog.py`)
+## 6) Manual track selection dialog (`python/vsg_qt/manual_selection_dialog.py`)
 
 ### Layout
 
@@ -334,7 +341,7 @@ The **ID** is the mkvmerge `id` in the *source container*, *not* the index withi
 
 ---
 
-## 7) Worker threading (`vsg_qt/worker.py`)
+## 7) Worker threading (`python/vsg_qt/worker.py`)
 
 `JobWorker` runs on a `QThreadPool`:
 
@@ -349,7 +356,7 @@ No UI blocking while analysis/extraction/muxing run.
 
 ---
 
-## 8) Pipeline (`vsg_core/pipeline.py`)
+## 8) Pipeline (`python/vsg_core/pipeline.py`)
 
 ### Overview
 
@@ -435,7 +442,7 @@ We merge the **extracted record** with the **UI options** (rule):
 - `is_default`, `is_forced_display`, `apply_track_name`
 - Subtitle-only: `convert_to_ass`, `rescale`, `size_multiplier`
 
-#### 8.4 Subtitle transforms (`vsg_core/subtitle_utils.py`)
+#### 8.4 Subtitle transforms (`python/vsg_core/subtitle_utils.py`)
 
 For each plan item of type **subtitles**:
 - **Convert SRT→ASS** (ffmpeg) if requested (and only for SRT). Path is updated to the `.ass` file.
@@ -506,7 +513,7 @@ We read the ASS/SSA file (`utf-8-sig` to absorb BOM if any), then **line-by-line
 
 ---
 
-## 10) Audio correlation math (`vsg_core/analysis.py`)
+## 10) Audio correlation math (`python/vsg_core/analysis.py`)
 
 We compute **delay** of `target` vs `reference` using **normalized cross‑correlation** on several short chunks (default: 10 chunks × 15s).
 
@@ -571,7 +578,7 @@ This avoids overlapping/degenerate chapter ranges.
 
 ---
 
-## 13) Command execution & logging (`vsg_core/process.py`)
+## 13) Command execution & logging (`python/vsg_core/process.py`)
 
 `CommandRunner.run(cmd, tool_paths)`:
 
@@ -710,6 +717,7 @@ The normalizer guarantees end times won’t overlap the next start and are at le
 ## 21) Developer quickstart
 
 ```
+cd python
 python3 -m venv .venv
 . .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install PySide6 numpy scipy librosa

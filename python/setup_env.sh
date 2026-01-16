@@ -15,6 +15,7 @@ NC='\033[0m' # No Color
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="$PROJECT_DIR/.venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
+RUST_PROJECT_DIR="$PROJECT_DIR/../rust/vsg_core_rs"
 PYTHON_AUDIO_SEPARATOR_REPO="audio-separator @ git+https://github.com/nomadkaraoke/python-audio-separator.git"
 PYTHON_AUDIO_SEPARATOR_GPU_REPO="audio-separator[gpu] @ git+https://github.com/nomadkaraoke/python-audio-separator.git"
 PYTHON_AUDIO_SEPARATOR_CPU_REPO="audio-separator[cpu] @ git+https://github.com/nomadkaraoke/python-audio-separator.git"
@@ -701,13 +702,13 @@ fi
 venv_pip install maturin
 
 # Build and install Rust library
-if [ -d "$PROJECT_DIR/vsg_core_rs" ]; then
-    cd "$PROJECT_DIR/vsg_core_rs"
+if [ -d "$RUST_PROJECT_DIR" ]; then
+    cd "$RUST_PROJECT_DIR"
     maturin develop --release
     cd "$PROJECT_DIR"
     echo -e "${GREEN}✓ Rust components built${NC}"
 else
-    echo -e "${YELLOW}No Rust components found (vsg_core_rs/ not present)${NC}"
+    echo -e "${YELLOW}No Rust components found (rust/vsg_core_rs not present)${NC}"
 fi
 
 echo ""
@@ -723,11 +724,11 @@ echo ""
     echo "========================================="
     echo ""
     echo "To run the application, use:"
-    echo -e "  ${BLUE}./run.sh${NC}"
+    echo -e "  ${BLUE}$PROJECT_DIR/run.sh${NC}"
     echo ""
     echo "Or manually activate the environment and run:"
-    echo -e "  ${BLUE}source .venv/bin/activate${NC}"
-    echo -e "  ${BLUE}python main.py${NC}"
+    echo -e "  ${BLUE}source $PROJECT_DIR/.venv/bin/activate${NC}"
+    echo -e "  ${BLUE}python $PROJECT_DIR/main.py${NC}"
     echo ""
 }
 
