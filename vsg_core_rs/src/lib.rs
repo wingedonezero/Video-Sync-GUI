@@ -6,6 +6,7 @@ use numpy::PyReadonlyArray1;
 mod models;
 mod analysis;
 mod correction;
+mod subtitles;
 
 #[pymodule]
 fn vsg_core_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -39,6 +40,14 @@ fn vsg_core_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Phase 2: Audio Correlation functions
     m.add_function(wrap_pyfunction!(analyze_audio_correlation, m)?)?;
+
+    // Phase 6: Frame Utility functions
+    m.add_function(wrap_pyfunction!(time_to_frame_floor, m)?)?;
+    m.add_function(wrap_pyfunction!(frame_to_time_floor, m)?)?;
+    m.add_function(wrap_pyfunction!(time_to_frame_middle, m)?)?;
+    m.add_function(wrap_pyfunction!(frame_to_time_middle, m)?)?;
+    m.add_function(wrap_pyfunction!(time_to_frame_aegisub, m)?)?;
+    m.add_function(wrap_pyfunction!(frame_to_time_aegisub, m)?)?;
 
     Ok(())
 }
@@ -151,4 +160,101 @@ fn analyze_audio_correlation(
     result.set_item("chunks", chunks)?;
 
     Ok(result.into())
+}
+
+// ============================================================================
+// Phase 6: Frame Utility Functions (PyO3 Bindings)
+// ============================================================================
+
+/// Convert timestamp to frame number using FLOOR with epsilon protection (MODE 0)
+///
+/// This gives the frame that is currently displaying at the given time.
+/// Uses epsilon (1e-6) for floating point protection.
+///
+/// Args:
+///     time_ms: Timestamp in milliseconds
+///     fps: Frame rate (e.g., 23.976)
+///
+/// Returns:
+///     Frame number (which frame is displaying at this time)
+#[pyfunction]
+fn time_to_frame_floor(time_ms: f64, fps: f64) -> i64 {
+    subtitles::time_to_frame_floor(time_ms, fps)
+}
+
+/// Convert frame number to its START timestamp (MODE 0)
+///
+/// Frame N starts at exactly N * frame_duration. No rounding.
+///
+/// Args:
+///     frame_num: Frame number
+///     fps: Frame rate (e.g., 23.976)
+///
+/// Returns:
+///     Timestamp in milliseconds (frame START time, as float for precision)
+#[pyfunction]
+fn frame_to_time_floor(frame_num: i64, fps: f64) -> f64 {
+    subtitles::frame_to_time_floor(frame_num, fps)
+}
+
+/// Convert timestamp to frame number with +0.5 offset (MODE 1)
+///
+/// Targets middle of frame window.
+///
+/// Args:
+///     time_ms: Timestamp in milliseconds
+///     fps: Frame rate (e.g., 23.976)
+///
+/// Returns:
+///     Frame number
+#[pyfunction]
+fn time_to_frame_middle(time_ms: f64, fps: f64) -> i64 {
+    subtitles::time_to_frame_middle(time_ms, fps)
+}
+
+/// Convert frame number to middle of its display window (MODE 1)
+///
+/// Returns (frame_num + 0.5) * frame_duration, rounded to integer.
+///
+/// Args:
+///     frame_num: Frame number
+///     fps: Frame rate (e.g., 23.976)
+///
+/// Returns:
+///     Timestamp in milliseconds (rounded to integer)
+#[pyfunction]
+fn frame_to_time_middle(frame_num: i64, fps: f64) -> i64 {
+    subtitles::frame_to_time_middle(frame_num, fps)
+}
+
+/// Convert timestamp to frame number (MODE 2: Aegisub-style)
+///
+/// Uses floor division (which frame is currently displaying).
+/// No epsilon adjustment.
+///
+/// Args:
+///     time_ms: Timestamp in milliseconds
+///     fps: Frame rate
+///
+/// Returns:
+///     Frame number
+#[pyfunction]
+fn time_to_frame_aegisub(time_ms: f64, fps: f64) -> i64 {
+    subtitles::time_to_frame_aegisub(time_ms, fps)
+}
+
+/// Convert frame number to Aegisub-style timestamp (MODE 2)
+///
+/// Calculates exact frame start, then rounds UP to next centisecond
+/// to ensure timestamp falls within the frame.
+///
+/// Args:
+///     frame_num: Frame number
+///     fps: Frame rate
+///
+/// Returns:
+///     Timestamp in milliseconds (rounded up to centisecond)
+#[pyfunction]
+fn frame_to_time_aegisub(frame_num: i64, fps: f64) -> i64 {
+    subtitles::frame_to_time_aegisub(frame_num, fps)
 }
