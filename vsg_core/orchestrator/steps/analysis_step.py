@@ -473,8 +473,21 @@ class AnalysisStep:
                 runner._log_message(f"[MULTI-CORRELATION] Using '{first_method}' results for delay calculation")
             else:
                 # Normal single-method correlation
+                # Check if source separation was applied and override correlation method if needed
+                if _should_use_source_separated_mode(source_key, config):
+                    # Use source-separated correlation method
+                    corr_method = config.get('correlation_method_source_separated', 'Phase Correlation (GCC-PHAT)')
+                    runner._log_message(f"[Correlation] Source separation was applied - using method: {corr_method}")
+                    # Create a modified config with the source-separated correlation method
+                    # All other settings (peak_fit, soxr, filtering, etc.) remain unchanged
+                    config_for_corr = config.copy()
+                    config_for_corr['correlation_method'] = corr_method
+                else:
+                    # Use normal correlation method
+                    config_for_corr = config
+
                 results = run_audio_correlation(
-                    str(source1_file), str(source_file), config, runner, ctx.tool_paths,
+                    str(source1_file), str(source_file), config_for_corr, runner, ctx.tool_paths,
                     ref_lang=config.get('analysis_lang_source1'),
                     target_lang=tgt_lang,
                     role_tag=source_key
