@@ -12,22 +12,23 @@
 1. [Project Overview](#1-project-overview)
 2. [Migration Philosophy](#2-migration-philosophy)
 3. [What Stays in Python](#3-what-stays-in-python)
-4. [Architecture After Migration](#4-architecture-after-migration)
-5. [Migration Phases](#5-migration-phases)
-6. [Phase 1: Core Data Types](#phase-1-core-data-types)
-7. [Phase 2: Audio Correlation Engine](#phase-2-audio-correlation-engine)
-8. [Phase 3: Drift Detection](#phase-3-drift-detection)
-9. [Phase 4: Audio Correction](#phase-4-audio-correction)
-10. [Phase 5: Subtitle Processing Core](#phase-5-subtitle-processing-core)
-11. [Phase 6: Frame Utilities](#phase-6-frame-utilities)
-12. [Phase 7: Extraction Layer](#phase-7-extraction-layer)
-13. [Phase 8: Mux Options Builder](#phase-8-mux-options-builder)
-14. [Phase 9: Pipeline Orchestration](#phase-9-pipeline-orchestration)
-15. [Phase 10: UI Migration](#phase-10-ui-migration)
-16. [Critical Preservation Requirements](#critical-preservation-requirements)
-17. [Testing Strategy](#testing-strategy)
-18. [Completion Tracking](#completion-tracking)
-19. [Instructions for AI Assistants](#instructions-for-ai-assistants)
+4. [Build and Distribution Strategy](#4-build-and-distribution-strategy)
+5. [Architecture After Migration](#5-architecture-after-migration)
+6. [Migration Phases](#6-migration-phases)
+7. [Phase 1: Core Data Types](#phase-1-core-data-types)
+8. [Phase 2: Audio Correlation Engine](#phase-2-audio-correlation-engine)
+9. [Phase 3: Drift Detection](#phase-3-drift-detection)
+10. [Phase 4: Audio Correction](#phase-4-audio-correction)
+11. [Phase 5: Subtitle Processing Core](#phase-5-subtitle-processing-core)
+12. [Phase 6: Frame Utilities](#phase-6-frame-utilities)
+13. [Phase 7: Extraction Layer](#phase-7-extraction-layer)
+14. [Phase 8: Mux Options Builder](#phase-8-mux-options-builder)
+15. [Phase 9: Pipeline Orchestration](#phase-9-pipeline-orchestration)
+16. [Phase 10: UI Migration](#phase-10-ui-migration)
+17. [Critical Preservation Requirements](#critical-preservation-requirements)
+18. [Testing Strategy](#testing-strategy)
+19. [Completion Tracking](#completion-tracking)
+20. [Instructions for AI Assistants](#instructions-for-ai-assistants)
 
 ---
 
@@ -85,7 +86,143 @@ These components will remain in Python for the foreseeable future:
 
 ---
 
-## 4. Architecture After Migration
+## 4. Build and Distribution Strategy
+
+### How Rust Integrates with Current Setup
+
+Your current setup uses:
+- `.venv/` — Python virtual environment
+- `run.sh` — Activates venv, sets ROCm env, runs `python main.py`
+- `setup_env.sh` — Creates venv, installs Python dependencies
+
+The Rust library will be built with **maturin** and installed into the same venv:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Project Directory                         │
+├─────────────────────────────────────────────────────────────┤
+│  run.sh              → Unchanged (runs python main.py)       │
+│  setup_env.sh        → Add Rust build step                   │
+│  main.py             → Unchanged                             │
+│  requirements.txt    → Unchanged                             │
+│                                                              │
+│  .venv/                                                      │
+│  └── lib/python3.13/site-packages/                          │
+│      ├── vsg_core_rs.cpython-313-x86_64-linux-gnu.so  ←NEW  │
+│      ├── numpy/                                              │
+│      ├── scipy/                                              │
+│      └── ... (other packages)                                │
+│                                                              │
+│  vsg_core_rs/        ←NEW (Rust source)                      │
+│  ├── Cargo.toml                                              │
+│  ├── pyproject.toml  (maturin config)                        │
+│  └── src/                                                    │
+│      ├── lib.rs                                              │
+│      └── ...                                                 │
+│                                                              │
+│  vsg_core/           (Python - calls into Rust)              │
+│  vsg_qt/             (Python UI)                             │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Maturin Setup
+
+Create `vsg_core_rs/pyproject.toml`:
+```toml
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "vsg_core_rs"
+version = "0.1.0"
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "python"  # Optional: for Python stubs
+module-name = "vsg_core_rs"
+```
+
+### Build Commands
+
+**Development** (installs into active venv):
+```bash
+cd vsg_core_rs
+maturin develop --release
+```
+
+**Production wheel** (for distribution):
+```bash
+cd vsg_core_rs
+maturin build --release
+# Output: target/wheels/vsg_core_rs-0.1.0-cp313-cp313-linux_x86_64.whl
+```
+
+### Updated setup_env.sh
+
+Add to `full_setup()` after Python dependencies are installed:
+
+```bash
+# Step 4: Build Rust components
+echo -e "${YELLOW}[4/4] Building Rust components...${NC}"
+
+# Check for Rust toolchain
+if ! command -v cargo &> /dev/null; then
+    echo -e "${YELLOW}Rust not found. Installing via rustup...${NC}"
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    source "$HOME/.cargo/env"
+fi
+
+# Ensure maturin is installed
+venv_pip install maturin
+
+# Build and install Rust library
+if [ -d "$PROJECT_DIR/vsg_core_rs" ]; then
+    cd "$PROJECT_DIR/vsg_core_rs"
+    maturin develop --release
+    cd "$PROJECT_DIR"
+    echo -e "${GREEN}✓ Rust components built${NC}"
+else
+    echo -e "${YELLOW}No Rust components found (vsg_core_rs/ not present)${NC}"
+fi
+```
+
+### What Goes Where After Build
+
+| Location | Contents |
+|----------|----------|
+| `vsg_core_rs/target/` | Rust build artifacts (not distributed) |
+| `vsg_core_rs/target/wheels/` | Wheel files if using `maturin build` |
+| `.venv/lib/python3.13/site-packages/vsg_core_rs*.so` | Installed native module |
+
+### Distribution Options
+
+1. **Development/Local**: Use `maturin develop` — builds and installs directly into venv
+2. **Wheel Distribution**: Use `maturin build` — creates `.whl` file users can `pip install`
+3. **Source Distribution**: Ship `vsg_core_rs/` source, users run `maturin develop`
+
+**Recommended for your project**: Option 3 (source distribution) since:
+- Users already run `setup_env.sh`
+- Rust compilation handles platform differences automatically
+- No need to build wheels for every platform
+
+### run.sh and setup_env.sh Stay Mostly Unchanged
+
+- `run.sh` — No changes needed. It activates venv and runs `python main.py`. The Rust library is already in the venv's site-packages.
+- `setup_env.sh` — Add the Rust build step shown above. Everything else stays the same.
+
+### GPU Environment
+
+Your ROCm environment detection in `run.sh` stays exactly as-is. The Rust library doesn't need GPU access directly — source separation (which uses GPU) stays in Python via `audio-separator`.
+
+---
+
+## 5. Architecture After Migration
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -118,7 +255,7 @@ These components will remain in Python for the foreseeable future:
 
 ---
 
-## 5. Migration Phases
+## 6. Migration Phases
 
 | Phase | Component | Est. Files | Priority | Dependencies |
 |-------|-----------|------------|----------|--------------|
@@ -172,14 +309,15 @@ vsg_core_rs/
 name = "vsg_core_rs"
 version = "0.1.0"
 edition = "2021"
+rust-version = "1.74"  # Required by pyo3 0.27+
 
 [lib]
 name = "vsg_core_rs"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-pyo3 = { version = "0.20", features = ["extension-module"] }
-numpy = "0.20"
+pyo3 = { version = "0.27", features = ["extension-module"] }
+numpy = "0.27"  # PyO3 numpy bindings (NOT Python numpy)
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 ```
@@ -390,9 +528,9 @@ vsg_core/analysis/audio_corr.py  →  src/analysis/correlation.rs
 ```toml
 # Cargo.toml additions
 [dependencies]
-rustfft = "6.1"
-ndarray = "0.15"
-rayon = "1.8"
+rustfft = "6.4"
+ndarray = { version = "0.17", features = ["rayon"] }
+rayon = "1.11"
 num-complex = "0.4"
 ```
 
@@ -1263,19 +1401,31 @@ Before marking any phase complete:
 
 ## Appendix A: Rust Crate Recommendations
 
-| Purpose | Crate | Notes |
-|---------|-------|-------|
-| FFT | `rustfft` | Fast, pure Rust |
-| Arrays | `ndarray` | numpy-like |
-| Parallelism | `rayon` | Easy data parallelism |
-| Python bindings | `pyo3` | Mature, well-documented |
-| NumPy interop | `numpy` (pyo3) | Zero-copy when possible |
-| JSON | `serde_json` | Standard |
-| WAV I/O | `hound` | Simple, reliable |
-| Resampling | `rubato` | High quality |
-| Clustering | `linfa-clustering` | DBSCAN support |
-| XML | `quick-xml` | Fast XML parsing |
-| Logging | `log` + `env_logger` | Standard |
+> **Last verified**: 2026-01-16
+
+| Purpose | Crate | Version | Notes |
+|---------|-------|---------|-------|
+| FFT | `rustfft` | 6.4.1 | Fast, pure Rust, SIMD-accelerated |
+| Arrays | `ndarray` | 0.17.1 | numpy-like, with rayon support |
+| Parallelism | `rayon` | 1.11.0 | Easy data parallelism |
+| Python bindings | `pyo3` | 0.27.1 | Mature, requires Rust 1.74+ |
+| NumPy interop | `numpy` | 0.27.0 | PyO3 crate for numpy arrays (NOT Python numpy) |
+| JSON | `serde_json` | 1.0 | Standard |
+| WAV I/O | `hound` | 3.5 | Simple, reliable |
+| Resampling | `rubato` | 0.15 | High quality |
+| Clustering | `linfa-clustering` | 0.8.1 | DBSCAN support |
+| XML | `quick-xml` | 0.37 | Fast XML parsing |
+| Logging | `log` + `env_logger` | 0.4 / 0.11 | Standard |
+| Complex numbers | `num-complex` | 0.4 | For FFT operations |
+
+### Crate Clarifications
+
+**`numpy` crate**: This is the [Rust crate from crates.io](https://crates.io/crates/numpy) that provides PyO3 bindings for NumPy's C-API. It allows Rust to receive and return numpy arrays from Python with zero-copy when possible. This is NOT Python's numpy - it's the Rust interop layer.
+
+**Source separation**: The `audio-separator` Python package provides access to PyTorch/ONNX models (Demucs, Roformer, MDX-Net, etc.). This stays in Python because:
+1. It's already subprocess-isolated in the current codebase
+2. The models are PyTorch/ONNX which have mature Python ecosystems
+3. No equivalent Rust libraries exist for these specific models
 
 ## Appendix B: File Inventory
 
