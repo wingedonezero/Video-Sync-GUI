@@ -80,6 +80,7 @@ These components will remain in Python for the foreseeable future:
 | Component | Reason |
 |-----------|--------|
 | `videotimestamps` library | No Rust equivalent exists |
+| `pysubs2` library + subtitle processing | No Rust equivalent exists for full ASS/SSA/SRT parsing and manipulation |
 | Source separation models | PyTorch/ONNX ecosystem, already subprocess-isolated |
 | Qt UI (`vsg_qt/*`) | Migrated last; PyO3 FFI works well |
 | External tool calls | Already subprocess-based (ffmpeg, mkvmerge, etc.) |
@@ -263,8 +264,8 @@ Your ROCm environment detection in `run.sh` stays exactly as-is. The Rust librar
 | 2 | Audio Correlation | 1 | CRITICAL | Phase 1 |
 | 3 | Drift Detection | 1 | HIGH | Phase 1, 2 |
 | 4 | Audio Correction | 3 | HIGH | Phase 1, 2, 3 |
-| 5 | Subtitle Core | 4 | MEDIUM | Phase 1 |
-| 6 | Frame Utilities | 2 | MEDIUM | Phase 1, 5 |
+| 5 | Subtitle Core | 0 | N/A | **STAYS IN PYTHON** (pysubs2) |
+| 6 | Frame Utilities | 1 (partial) | MEDIUM | Phase 1 |
 | 7 | Extraction Layer | 3 | MEDIUM | Phase 1 |
 | 8 | Mux Options | 1 | MEDIUM | Phase 1, 7 |
 | 9 | Pipeline Orchestration | 8 | LOW | All above |
@@ -913,56 +914,76 @@ pub fn run_pal_correction(
 
 ## Phase 5: Subtitle Processing Core
 
-### Status: [ ] Not Started
+### Status: [N/A] STAYS IN PYTHON
 
-### Files to Migrate
+### Migration Decision: NO MIGRATION NEEDED
+
+**Reason**: All subtitle processing relies heavily on `pysubs2`, which has no Rust equivalent. The `pysubs2` library provides:
+- Full ASS/SSA/SRT/VTT parsing and manipulation
+- Style management with proper color space handling
+- Event timing and text manipulation
+- Format conversion between subtitle formats
+
+**Files that STAY in Python** (all use pysubs2):
 ```
-vsg_core/subtitles/metadata_preserver.py  →  src/subtitles/metadata.rs
-vsg_core/subtitles/style_engine.py        →  src/subtitles/styles.rs
-vsg_core/subtitles/timing.py              →  src/subtitles/timing.rs
-vsg_core/subtitles/cleanup.py             →  src/subtitles/cleanup.rs
+vsg_core/subtitles/metadata_preserver.py  →  KEEP (uses pysubs2)
+vsg_core/subtitles/style_engine.py        →  KEEP (uses pysubs2)
+vsg_core/subtitles/timing.py              →  KEEP (uses pysubs2)
+vsg_core/subtitles/cleanup.py             →  KEEP (uses pysubs2)
+vsg_core/subtitles/frame_matching.py      →  KEEP (uses pysubs2)
+vsg_core/subtitles/rescale.py             →  KEEP (uses pysubs2)
+vsg_core/subtitles/stepping_adjust.py     →  KEEP (uses pysubs2)
+vsg_core/subtitles/style_filter.py        →  KEEP (uses pysubs2)
+vsg_core/subtitles/sync_modes/*.py        →  KEEP (all use pysubs2)
 ```
 
-### Dependencies
-- Phase 1
-- Rust crates: `ass_parser` or custom ASS/SSA parser
+### Alternative Considered and Rejected
 
-### Step 5.1: Subtitle Format Support
+**Option**: Implement custom ASS parser in Rust
+**Rejected because**:
+- ASS/SSA format is complex with many edge cases
+- pysubs2 handles format conversion (SRT↔ASS↔VTT)
+- Aegisub metadata preservation is intricate
+- Color space conversions (pysubs2.Color ↔ Qt hex format)
+- Would require months of work to reach parity
+- High risk of introducing subtitle corruption bugs
 
-**CRITICAL PRESERVATION**:
-- Supported: `.ass`, `.ssa`, `.srt`, `.vtt`
-- Unsupported (skip): PGS, VOB bitmap subtitles
+### Impact on Architecture
 
-### Step 5.2: ASS Parser
+Subtitle processing remains a **Python-only layer** that calls into Rust for:
+- Frame/time conversion utilities (Phase 6)
+- Video analysis and correlation results
 
-If no suitable Rust crate exists, implement custom parser preserving:
-- All style attributes
-- Script info section
-- Aegisub project garbage (comments)
-- Event timing precision (centiseconds)
-
-### Testing Checkpoint 5
-- [ ] Parse and re-serialize ASS without data loss
-- [ ] Style attributes round-trip correctly
-- [ ] Timing precision maintained (centisecond level)
+The Python subtitle modules will:
+- Use correlation results from Rust
+- Use drift detection results from Rust
+- Apply delays calculated by Rust
+- Keep all subtitle parsing/manipulation in Python with pysubs2
 
 ---
 
 ## Phase 6: Frame Utilities
 
-### Status: [ ] Not Started
+### Status: [ ] Not Started (PARTIAL MIGRATION POSSIBLE)
 
-### Files to Migrate
+### Migration Decision: SPLIT - Core utilities to Rust, sync modes stay in Python
+
+**Files to Migrate to Rust** (pure computational logic):
 ```
-vsg_core/subtitles/frame_utils.py  →  src/subtitles/frame_utils.rs
-vsg_core/subtitles/frame_sync.py   →  src/subtitles/frame_sync.rs
+vsg_core/subtitles/frame_utils.py (partial)  →  src/subtitles/frame_utils.rs
+```
+
+**Files to KEEP in Python** (use pysubs2):
+```
+vsg_core/subtitles/frame_sync.py      →  KEEP (re-exports only)
+vsg_core/subtitles/sync_modes/*.py    →  KEEP (all use pysubs2)
 ```
 
 ### Dependencies
-- Phases 1, 5
+- Phase 1
 - Keep `videotimestamps` in Python (no Rust equivalent)
 
-### Step 6.1: Frame Conversion Methods
+### Step 6.1: Frame Conversion Methods (Migrate to Rust)
 
 **CRITICAL PRESERVATION - Multiple modes**:
 
@@ -994,10 +1015,42 @@ pub fn frame_to_time(frame: u64, fps: f64) -> f64 {
 **CRITICAL**: VideoTimestamps integration stays in Python.
 Rust provides CFR utilities; Python wraps for VFR.
 
+### Step 6.3: Python Integration
+
+The Python subtitle processing modules will call Rust for frame conversion utilities:
+
+```python
+# Python: vsg_core/subtitles/sync_modes/time_based.py
+from vsg_core_rs import time_to_frame_floor, frame_to_time_floor
+import pysubs2
+
+def apply_sync(subtitle_path, delay_ms, fps):
+    subs = pysubs2.load(subtitle_path)  # Python handles parsing
+
+    # Use Rust for frame conversions (fast, precise)
+    for event in subs.events:
+        # Python handles subtitle manipulation
+        event.start += delay_ms
+        event.end += delay_ms
+
+    subs.save(subtitle_path)
+```
+
+### What Stays in Python
+
+The following `frame_utils.py` functions **cannot** be migrated (depend on Python libraries):
+- `get_vapoursynth_frame_info()` - Requires VapourSynth Python API
+- `detect_scene_changes()` - Requires PySceneDetect library
+- `extract_frame_as_image()` - Requires VapourSynth + PIL
+- `compute_perceptual_hash()` - Requires imagehash library
+- `detect_video_fps()` - Uses videotimestamps or ffprobe subprocess
+- `get_vfr_timestamps()` - Requires videotimestamps library
+
 ### Testing Checkpoint 6
 - [ ] Frame conversions match Python for all modes
 - [ ] Epsilon protection prevents FP drift issues
 - [ ] Round-trip frame→time→frame is stable
+- [ ] Python subtitle sync modes can call Rust utilities
 
 ---
 
@@ -1322,8 +1375,8 @@ After Phase 2:
 | 2 | [x] | 2026-01-16 | 2026-01-16 | Audio correlation engine with all methods and delay selection |
 | 3 | [x] | 2026-01-16 | 2026-01-16 | Drift detection with custom DBSCAN, PAL/linear drift, quality validation |
 | 4 | [x] | 2026-01-16 | 2026-01-16 | Audio correction with EDL generation, linear/PAL tempo ratios, buffer alignment |
-| 5 | [ ] | - | - | |
-| 6 | [ ] | - | - | |
+| 5 | [N/A] | - | 2026-01-16 | STAYS IN PYTHON - No Rust equivalent for pysubs2 |
+| 6 | [ ] | - | - | PARTIAL - Only frame conversion utilities; sync modes stay in Python |
 | 7 | [ ] | - | - | |
 | 8 | [ ] | - | - | |
 | 9 | [ ] | - | - | |
@@ -1356,6 +1409,7 @@ After Phase 2:
 | 2026-01-16 | 4 | Buffer alignment | PASS | align_buffer for Opus, element_size=4 bytes |
 | 2026-01-16 | 4 | Silence detection | PASS | is_silence with std < 100.0 for int32 PCM |
 | 2026-01-16 | 4 | Unit tests | PASS | 31 tests passed, all Phase 4 logic verified |
+| 2026-01-16 | 5 | Migration decision | N/A | Phase 5 stays in Python - pysubs2 has no Rust equivalent |
 
 ---
 
