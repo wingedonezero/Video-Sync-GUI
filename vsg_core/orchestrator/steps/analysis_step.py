@@ -406,6 +406,28 @@ class AnalysisStep:
             runner._log_message(f"\n[Analyzing {source_key}]")
             tgt_lang = config.get('analysis_lang_others')
 
+            # ===================================================================
+            # CRITICAL DECISION POINT: Determine if source separation was applied
+            # This decision affects correlation method and delay selection mode
+            # Make this decision ONCE and create appropriate config for this source
+            # ===================================================================
+            use_source_separated_settings = _should_use_source_separated_mode(source_key, config)
+
+            if use_source_separated_settings:
+                # Create config with source-separated overrides
+                # Use dict spread to create new dict without modifying original
+                source_config = {
+                    **config,
+                    'correlation_method': config.get('correlation_method_source_separated', 'Phase Correlation (GCC-PHAT)'),
+                    'delay_selection_mode': config.get('delay_selection_mode_source_separated', 'Mode (Clustered)')
+                }
+                runner._log_message(f"[Analysis Config] Source separation detected - using:")
+                runner._log_message(f"  Correlation: {source_config['correlation_method']}")
+                runner._log_message(f"  Delay Mode: {source_config['delay_selection_mode']}")
+            else:
+                # Use original config as-is (no source separation)
+                source_config = config
+
             stream_info = get_stream_info(source_file, runner, ctx.tool_paths)
             if not stream_info:
                 runner._log_message(f"[WARN] Could not get stream info for {source_key}. Skipping.")
@@ -432,14 +454,15 @@ class AnalysisStep:
                 continue
 
             # Check if multi-correlation comparison is enabled (Analyze Only mode only)
-            multi_corr_enabled = bool(config.get('multi_correlation_enabled', False)) and (not ctx.and_merge)
+            multi_corr_enabled = bool(source_config.get('multi_correlation_enabled', False)) and (not ctx.and_merge)
 
             if multi_corr_enabled:
                 # Run multiple correlation methods for comparison
                 # Returns dict mapping method names to their results
+                # Note: Multi-correlation uses its own method selection (checkboxes), ignores correlation_method setting
                 all_method_results = run_multi_correlation(
-                    str(source1_file), str(source_file), config, runner, ctx.tool_paths,
-                    ref_lang=config.get('analysis_lang_source1'),
+                    str(source1_file), str(source_file), source_config, runner, ctx.tool_paths,
+                    ref_lang=source_config.get('analysis_lang_source1'),
                     target_lang=tgt_lang,
                     role_tag=source_key
                 )
@@ -473,45 +496,26 @@ class AnalysisStep:
                 runner._log_message(f"[MULTI-CORRELATION] Using '{first_method}' results for delay calculation")
             else:
                 # Normal single-method correlation
-                # Check if source separation was applied and override correlation method if needed
-                if _should_use_source_separated_mode(source_key, config):
-                    # Use source-separated correlation method
-                    corr_method = config.get('correlation_method_source_separated', 'Phase Correlation (GCC-PHAT)')
-                    runner._log_message(f"[Correlation] Source separation was applied - using method: {corr_method}")
-                    # Temporarily override correlation method
-                    original_corr_method = config.get('correlation_method')
-                    config['correlation_method'] = corr_method
-
-                    results = run_audio_correlation(
-                        str(source1_file), str(source_file), config, runner, ctx.tool_paths,
-                        ref_lang=config.get('analysis_lang_source1'),
-                        target_lang=tgt_lang,
-                        role_tag=source_key
-                    )
-
-                    # Restore original
-                    config['correlation_method'] = original_corr_method
-                else:
-                    # Use normal correlation method
-                    results = run_audio_correlation(
-                        str(source1_file), str(source_file), config, runner, ctx.tool_paths,
-                        ref_lang=config.get('analysis_lang_source1'),
-                        target_lang=tgt_lang,
-                        role_tag=source_key
-                    )
+                # Use source_config which already has the right correlation_method set
+                results = run_audio_correlation(
+                    str(source1_file), str(source_file), source_config, runner, ctx.tool_paths,
+                    ref_lang=source_config.get('analysis_lang_source1'),
+                    target_lang=tgt_lang,
+                    role_tag=source_key
+                )
 
             # --- CRITICAL FIX: Detect stepping BEFORE calculating mode delay ---
             diagnosis = None
             details = {}
             stepping_override_delay = None
             stepping_override_delay_raw = None
-            stepping_enabled = config.get('segmented_enabled', False)
+            stepping_enabled = source_config.get('segmented_enabled', False)
 
             # ALWAYS run diagnosis to detect stepping (even if correction is disabled)
             diagnosis, details = diagnose_audio_issue(
                 video_path=source1_file,
                 chunks=results,
-                config=config,
+                config=source_config,
                 runner=runner,
                 tool_paths=ctx.tool_paths,
                 codec_id=target_codec_id
@@ -533,8 +537,8 @@ class AnalysisStep:
                         # Stepping correction will run, so use first segment delay
                         # Use stepping-specific stability criteria (separate from First Stable delay selection mode)
                         stepping_config = {
-                            'first_stable_min_chunks': config.get('stepping_first_stable_min_chunks', 3),
-                            'first_stable_skip_unstable': config.get('stepping_first_stable_skip_unstable', True)
+                            'first_stable_min_chunks': source_config.get('stepping_first_stable_min_chunks', 3),
+                            'first_stable_skip_unstable': source_config.get('stepping_first_stable_skip_unstable', True)
                         }
                         # Get both rounded (for mkvmerge) and raw (for subtitle precision)
                         first_segment_delay = _find_first_stable_segment_delay(results, runner, stepping_config, return_raw=False)
@@ -549,7 +553,7 @@ class AnalysisStep:
                     else:
                         # No audio tracks from this source - stepping correction won't run
                         # Use normal delay selection mode instead
-                        delay_mode = config.get('delay_selection_mode', 'Mode (Most Common)')
+                        delay_mode = source_config.get('delay_selection_mode', 'Mode (Most Common)')
                         runner._log_message(f"[Stepping Detected] Found stepping in {source_key}")
                         runner._log_message(f"[Stepping] No audio tracks from this source are being merged")
                         runner._log_message(f"[Stepping] Using delay_selection_mode='{delay_mode}' instead of first segment (stepping correction won't run)")
@@ -571,28 +575,14 @@ class AnalysisStep:
                 correlation_delay_raw = stepping_override_delay_raw  # Use true raw, not float(int)
                 runner._log_message(f"{source_key.capitalize()} delay determined: {correlation_delay_ms:+d} ms (first segment, stepping corrected).")
             else:
-                # Determine which delay mode to use based on whether source separation was applied
-                if _should_use_source_separated_mode(source_key, config):
-                    # Use source-separated delay mode
-                    delay_mode = config.get('delay_selection_mode_source_separated', 'Mode (Clustered)')
-                    runner._log_message(f"[Delay Selection] Source separation was applied - using mode: {delay_mode}")
-                    # Temporarily override delay selection mode
-                    original_delay_mode = config.get('delay_selection_mode')
-                    config['delay_selection_mode'] = delay_mode
+                # Use source_config which already has the right delay_selection_mode set
+                correlation_delay_ms = _choose_final_delay(results, source_config, runner, source_key)
+                correlation_delay_raw = _choose_final_delay_raw(results, source_config, runner, source_key)
 
-                    correlation_delay_ms = _choose_final_delay(results, config, runner, source_key)
-                    correlation_delay_raw = _choose_final_delay_raw(results, config, runner, source_key)
-
-                    # Restore original
-                    config['delay_selection_mode'] = original_delay_mode
-                else:
-                    # Use normal delay mode
-                    correlation_delay_ms = _choose_final_delay(results, config, runner, source_key)
-                    correlation_delay_raw = _choose_final_delay_raw(results, config, runner, source_key)
                 if correlation_delay_ms is None:
                     # ENHANCED ERROR MESSAGE
                     accepted_count = len([r for r in results if r.get('accepted', False)])
-                    min_required = config.get('min_accepted_chunks', 3)
+                    min_required = source_config.get('min_accepted_chunks', 3)
                     total_chunks = len(results)
 
                     raise RuntimeError(
@@ -600,7 +590,7 @@ class AnalysisStep:
                         f'  - Accepted chunks: {accepted_count}\n'
                         f'  - Minimum required: {min_required}\n'
                         f'  - Total chunks scanned: {total_chunks}\n'
-                        f'  - Match threshold: {config.get("min_match_pct", 5.0)}%\n'
+                        f'  - Match threshold: {source_config.get("min_match_pct", 5.0)}%\n'
                         f'\n'
                         f'Possible causes:\n'
                         f'  - Audio quality is too poor for reliable correlation\n'
