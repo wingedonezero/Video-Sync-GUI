@@ -530,7 +530,7 @@ full_setup() {
     echo ""
 
 # Step 1: Find or install Python 3.13
-echo -e "${YELLOW}[1/3] Checking for Python 3.13...${NC}"
+echo -e "${YELLOW}[1/4] Checking for Python 3.13...${NC}"
 
 PYTHON_CMD=""
 
@@ -599,7 +599,7 @@ echo -e "${BLUE}Base interpreter: $PYTHON_CMD${NC}"
 echo ""
 
 # Step 2: Create virtual environment
-echo -e "${YELLOW}[2/3] Setting up virtual environment...${NC}"
+echo -e "${YELLOW}[2/4] Setting up virtual environment...${NC}"
 
 if [ -d "$VENV_DIR" ]; then
     echo -e "${YELLOW}Removing existing virtual environment...${NC}"
@@ -677,7 +677,7 @@ echo -e "${GREEN}✓ Virtual environment ready${NC}"
 echo ""
 
 # Step 3: Install dependencies
-echo -e "${YELLOW}[3/3] Installing dependencies...${NC}"
+echo -e "${YELLOW}[3/4] Installing dependencies...${NC}"
 echo "This may take a few minutes..."
 
 cd "$PROJECT_DIR"
@@ -685,6 +685,31 @@ venv_pip install -r requirements.txt
 rebuild_pyav_from_source
 
 echo -e "${GREEN}✓ Dependencies installed${NC}"
+echo ""
+
+# Step 4: Build Rust components
+echo -e "${YELLOW}[4/4] Building Rust components...${NC}"
+
+# Check for Rust toolchain
+if ! command -v cargo &> /dev/null; then
+    echo -e "${YELLOW}Rust not found. Installing via rustup...${NC}"
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+    source "$HOME/.cargo/env"
+fi
+
+# Ensure maturin is installed
+venv_pip install maturin
+
+# Build and install Rust library
+if [ -d "$PROJECT_DIR/vsg_core_rs" ]; then
+    cd "$PROJECT_DIR/vsg_core_rs"
+    maturin develop --release
+    cd "$PROJECT_DIR"
+    echo -e "${GREEN}✓ Rust components built${NC}"
+else
+    echo -e "${YELLOW}No Rust components found (vsg_core_rs/ not present)${NC}"
+fi
+
 echo ""
 
 # Verify installation
