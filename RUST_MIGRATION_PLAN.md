@@ -3,7 +3,7 @@
 > **Document Purpose**: This is the authoritative reference for migrating Video-Sync-GUI from Python to Rust. It must be consulted and updated by any AI or developer working on this migration.
 >
 > **Last Updated**: 2026-01-16
-> **Migration Status**: Phase 4 Complete - Core Data Types + Audio Correlation + Drift Detection + Audio Correction
+> **Migration Status**: Phase 8 Complete - Core Data Types + Audio Correlation + Drift Detection + Audio Correction + Frame Utilities + Extraction + Mux Options Builder
 
 ---
 
@@ -1113,11 +1113,12 @@ pub fn parse_mkvmerge_json(json_str: &str) -> Result<StreamInfo> {
 
 ## Phase 8: Mux Options Builder
 
-### Status: [✓] Completed
+### Status: [x] Completed (2026-01-16)
 
 ### Files to Migrate
 ```
 vsg_core/mux/options_builder.py  →  src/mux/options_builder.rs
+vsg_core/mux/options_builder.py  →  src/mux/delay_calculator.rs (delay logic extraction)
 ```
 
 ### Dependencies
@@ -1200,6 +1201,7 @@ pub fn write_options_file(tokens: &[String], path: &Path) -> Result<()> {
 ### Testing Checkpoint 8
 - [✓] Delay calculation matches Python for all track types
 - [✓] Signed delay format correct (+500, -500)
+- [✓] Options token builder matches Python ordering and flags
 - [✓] JSON output matches Python exactly
 - [✓] UTF-8 track names preserved in JSON
 
@@ -1378,7 +1380,7 @@ After Phase 2:
 | 5 | [N/A] | - | 2026-01-16 | STAYS IN PYTHON - No Rust equivalent for pysubs2 |
 | 6 | [x] | 2026-01-16 | 2026-01-16 | PARTIAL - Frame conversion utilities migrated; VFR/VapourSynth/sync modes stay in Python |
 | 7 | [x] | 2026-01-16 | 2026-01-16 | Container delay calculation, mkvmerge JSON parsing, chapter timestamp manipulation |
-| 8 | [ ] | - | - | |
+| 8 | [x] | 2026-01-16 | 2026-01-16 | Mux options builder and JSON output |
 | 9 | [ ] | - | - | |
 | 10 | [ ] | - | - | |
 
@@ -1437,6 +1439,8 @@ After Phase 2:
 | 2026-01-16 | 8 | Rust unit tests | PASS | 15 new tests passed covering all delay scenarios |
 | 2026-01-16 | 8 | Python integration | PASS | All delay calculations and token building work from Python |
 | 2026-01-16 | 8 | PyO3 bindings | PASS | calculate_mux_delay, build_mkvmerge_sync_token |
+| 2026-01-16 | 8 | Options builder tokens | PASS | Rust options builder mirrors Python token ordering and flags |
+| 2026-01-16 | 8 | JSON options writer | PASS | Single-line UTF-8 JSON output matches Python |
 
 ---
 

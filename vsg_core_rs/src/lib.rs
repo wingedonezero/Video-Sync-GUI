@@ -1,6 +1,6 @@
 // src/lib.rs
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyAny, PyDict};
 use numpy::PyReadonlyArray1;
 
 mod models;
@@ -62,6 +62,8 @@ fn vsg_core_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Phase 8: Mux Options functions
     m.add_function(wrap_pyfunction!(calculate_mux_delay, m)?)?;
     m.add_function(wrap_pyfunction!(build_mkvmerge_sync_token, m)?)?;
+    m.add_function(wrap_pyfunction!(build_mkvmerge_options, m)?)?;
+    m.add_function(wrap_pyfunction!(write_mkvmerge_options_file, m)?)?;
 
     Ok(())
 }
@@ -427,4 +429,39 @@ fn calculate_mux_delay(
 #[pyfunction]
 fn build_mkvmerge_sync_token(track_idx: u32, delay_ms: i32) -> Vec<String> {
     mux::build_sync_token(track_idx, delay_ms)
+}
+
+/// Build mkvmerge options tokens from a MergePlan and AppSettings
+///
+/// Mirrors Python's MkvmergeOptionsBuilder logic.
+///
+/// Args:
+///     plan: MergePlan dataclass
+///     settings: AppSettings dataclass
+///
+/// Returns:
+///     List of mkvmerge tokens
+#[pyfunction]
+fn build_mkvmerge_options(
+    plan: &Bound<'_, PyAny>,
+    settings: &Bound<'_, PyAny>,
+) -> PyResult<Vec<String>> {
+    mux::build_mkvmerge_options(plan, settings)
+}
+
+/// Write mkvmerge options JSON file (single-line UTF-8)
+///
+/// Args:
+///     tokens: List of mkvmerge tokens
+///     path: Output path for JSON options file
+#[pyfunction]
+fn write_mkvmerge_options_file(
+    tokens: Vec<String>,
+    path: &Bound<'_, PyAny>,
+) -> PyResult<()> {
+    let path_str = path.str()?.to_str()?.to_string();
+    let path = std::path::PathBuf::from(path_str);
+    mux::write_options_file(&tokens, &path).map_err(|err| {
+        pyo3::exceptions::PyIOError::new_err(err)
+    })
 }
