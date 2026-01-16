@@ -18,3 +18,5 @@ rustfft = "6.4"
 ndarray = { version = "0.17", features = ["rayon"] }
 rayon = "1.11"
 num-complex = "0.4"
+# Phase 3: Drift Detection dependencies
+# Note: Using custom DBSCAN implementation instead of linfa to avoid version conflicts
