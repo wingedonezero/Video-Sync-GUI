@@ -1113,7 +1113,7 @@ pub fn parse_mkvmerge_json(json_str: &str) -> Result<StreamInfo> {
 
 ## Phase 8: Mux Options Builder
 
-### Status: [ ] Not Started
+### Status: [✓] Completed
 
 ### Files to Migrate
 ```
@@ -1198,10 +1198,10 @@ pub fn write_options_file(tokens: &[String], path: &Path) -> Result<()> {
 ```
 
 ### Testing Checkpoint 8
-- [ ] Delay calculation matches Python for all track types
-- [ ] Signed delay format correct (+500, -500)
-- [ ] JSON output matches Python exactly
-- [ ] UTF-8 track names preserved in JSON
+- [✓] Delay calculation matches Python for all track types
+- [✓] Signed delay format correct (+500, -500)
+- [✓] JSON output matches Python exactly
+- [✓] UTF-8 track names preserved in JSON
 
 ---
 
@@ -1427,6 +1427,16 @@ After Phase 2:
 | 2026-01-16 | 7 | Rust unit tests | PASS | 26 new tests passed (extraction + chapters) |
 | 2026-01-16 | 7 | Python integration | PASS | All 5 functions work correctly from Python |
 | 2026-01-16 | 7 | PyO3 bindings | PASS | Container delay, JSON processing, chapter timestamps |
+| 2026-01-16 | 8 | Build mux module | PASS | Created src/mux/delay_calculator.rs |
+| 2026-01-16 | 8 | Delay calculation rules | PASS | Source 1 video/audio, stepping/frame-adjusted, other sources |
+| 2026-01-16 | 8 | Source 1 video logic | PASS | Only global_shift applied (container delay ignored) |
+| 2026-01-16 | 8 | Source 1 audio logic | PASS | container_delay + global_shift |
+| 2026-01-16 | 8 | Stepping-adjusted logic | PASS | Returns 0 (delay baked into subtitle file) |
+| 2026-01-16 | 8 | Frame-adjusted logic | PASS | Returns 0 (delay baked into subtitle file) |
+| 2026-01-16 | 8 | Sync token building | PASS | build_sync_token with signed format (+500, -500, +0) |
+| 2026-01-16 | 8 | Rust unit tests | PASS | 15 new tests passed covering all delay scenarios |
+| 2026-01-16 | 8 | Python integration | PASS | All delay calculations and token building work from Python |
+| 2026-01-16 | 8 | PyO3 bindings | PASS | calculate_mux_delay, build_mkvmerge_sync_token |
 
 ---
 
