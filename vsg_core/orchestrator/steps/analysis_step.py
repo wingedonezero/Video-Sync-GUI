@@ -142,6 +142,35 @@ def _choose_final_delay(results: List[Dict[str, Any]], config: Dict, runner: Com
         winner = round(raw_avg)
         runner._log_message(f"[Delay Selection] Average of {len(raw_delays)} raw values: {raw_avg:.3f}ms → rounded to {winner}ms")
         method_label = "average"
+    elif delay_mode == 'Mode (Clustered)':
+        # Find most common rounded delay, then include chunks within ±1ms tolerance
+        counts = Counter(delays)
+        mode_winner = counts.most_common(1)[0][0]
+
+        # Collect raw values from chunks within ±1ms of the mode
+        cluster_raw_values = []
+        cluster_delays = []
+        for r in accepted:
+            if abs(r['delay'] - mode_winner) <= 1:
+                cluster_raw_values.append(r.get('raw_delay', float(r['delay'])))
+                cluster_delays.append(r['delay'])
+
+        # Average the clustered raw values
+        if cluster_raw_values:
+            raw_avg = sum(cluster_raw_values) / len(cluster_raw_values)
+            winner = round(raw_avg)
+            cluster_counts = Counter(cluster_delays)
+            runner._log_message(
+                f"[Delay Selection] Mode (Clustered): most common = {mode_winner}ms, "
+                f"cluster [{mode_winner-1} to {mode_winner+1}] contains {len(cluster_raw_values)}/{len(accepted)} chunks "
+                f"(breakdown: {dict(cluster_counts)}), raw avg: {raw_avg:.3f}ms → rounded to {winner}ms"
+            )
+            method_label = "mode (clustered)"
+        else:
+            # Fallback to simple mode if clustering fails
+            winner = mode_winner
+            runner._log_message(f"[Delay Selection] Mode (Clustered): fallback to simple mode = {winner}ms")
+            method_label = "mode (clustered fallback)"
     else:  # Mode (Most Common) - default
         counts = Counter(delays)
         winner = counts.most_common(1)[0][0]
@@ -189,6 +218,27 @@ def _choose_final_delay_raw(results: List[Dict[str, Any]], config: Dict, runner:
         raw_avg = sum(raw_delays) / len(raw_delays)
         runner._log_message(f"[Delay Selection Raw] True average of {len(raw_delays)} raw values: {raw_avg:.3f}ms")
         return raw_avg
+
+    elif delay_mode == 'Mode (Clustered)':
+        # Find most common rounded delay, then include chunks within ±1ms tolerance
+        counts = Counter(delays)
+        mode_winner = counts.most_common(1)[0][0]
+
+        # Collect raw values from chunks within ±1ms of the mode
+        cluster_raw_values = [
+            r.get('raw_delay', float(r['delay']))
+            for r in accepted
+            if abs(r['delay'] - mode_winner) <= 1
+        ]
+
+        # Average the clustered raw values
+        if cluster_raw_values:
+            raw_avg = sum(cluster_raw_values) / len(cluster_raw_values)
+            runner._log_message(f"[Delay Selection Raw] Mode (Clustered): {len(cluster_raw_values)} chunks in cluster, raw avg: {raw_avg:.3f}ms")
+            return raw_avg
+        else:
+            # Fallback to simple mode
+            return float(mode_winner)
 
     else:  # Mode (Most Common) - default
         # Average raw values from all chunks matching the most common rounded delay
