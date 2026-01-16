@@ -478,20 +478,27 @@ class AnalysisStep:
                     # Use source-separated correlation method
                     corr_method = config.get('correlation_method_source_separated', 'Phase Correlation (GCC-PHAT)')
                     runner._log_message(f"[Correlation] Source separation was applied - using method: {corr_method}")
-                    # Create a modified config with the source-separated correlation method
-                    # All other settings (peak_fit, soxr, filtering, etc.) remain unchanged
-                    config_for_corr = config.copy()
-                    config_for_corr['correlation_method'] = corr_method
+                    # Temporarily override correlation method
+                    original_corr_method = config.get('correlation_method')
+                    config['correlation_method'] = corr_method
+
+                    results = run_audio_correlation(
+                        str(source1_file), str(source_file), config, runner, ctx.tool_paths,
+                        ref_lang=config.get('analysis_lang_source1'),
+                        target_lang=tgt_lang,
+                        role_tag=source_key
+                    )
+
+                    # Restore original
+                    config['correlation_method'] = original_corr_method
                 else:
                     # Use normal correlation method
-                    config_for_corr = config
-
-                results = run_audio_correlation(
-                    str(source1_file), str(source_file), config_for_corr, runner, ctx.tool_paths,
-                    ref_lang=config.get('analysis_lang_source1'),
-                    target_lang=tgt_lang,
-                    role_tag=source_key
-                )
+                    results = run_audio_correlation(
+                        str(source1_file), str(source_file), config, runner, ctx.tool_paths,
+                        ref_lang=config.get('analysis_lang_source1'),
+                        target_lang=tgt_lang,
+                        role_tag=source_key
+                    )
 
             # --- CRITICAL FIX: Detect stepping BEFORE calculating mode delay ---
             diagnosis = None
@@ -569,15 +576,19 @@ class AnalysisStep:
                     # Use source-separated delay mode
                     delay_mode = config.get('delay_selection_mode_source_separated', 'Mode (Clustered)')
                     runner._log_message(f"[Delay Selection] Source separation was applied - using mode: {delay_mode}")
-                    # Create a modified config with the source-separated delay mode
-                    config_for_delay = config.copy()
-                    config_for_delay['delay_selection_mode'] = delay_mode
+                    # Temporarily override delay selection mode
+                    original_delay_mode = config.get('delay_selection_mode')
+                    config['delay_selection_mode'] = delay_mode
+
+                    correlation_delay_ms = _choose_final_delay(results, config, runner, source_key)
+                    correlation_delay_raw = _choose_final_delay_raw(results, config, runner, source_key)
+
+                    # Restore original
+                    config['delay_selection_mode'] = original_delay_mode
                 else:
                     # Use normal delay mode
-                    config_for_delay = config
-
-                correlation_delay_ms = _choose_final_delay(results, config_for_delay, runner, source_key)
-                correlation_delay_raw = _choose_final_delay_raw(results, config_for_delay, runner, source_key)
+                    correlation_delay_ms = _choose_final_delay(results, config, runner, source_key)
+                    correlation_delay_raw = _choose_final_delay_raw(results, config, runner, source_key)
                 if correlation_delay_ms is None:
                     # ENHANCED ERROR MESSAGE
                     accepted_count = len([r for r in results if r.get('accepted', False)])
