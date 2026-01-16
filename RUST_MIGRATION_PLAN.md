@@ -3,7 +3,7 @@
 > **Document Purpose**: This is the authoritative reference for migrating Video-Sync-GUI from Python to Rust. It must be consulted and updated by any AI or developer working on this migration.
 >
 > **Last Updated**: 2026-01-16
-> **Migration Status**: Phase 3 Complete - Core Data Types + Audio Correlation Engine + Drift Detection
+> **Migration Status**: Phase 4 Complete - Core Data Types + Audio Correlation + Drift Detection + Audio Correction
 
 ---
 
@@ -777,7 +777,7 @@ fn detect_pal_drift(
 
 ## Phase 4: Audio Correction
 
-### Status: [ ] Not Started
+### Status: [x] Complete
 
 ### Files to Migrate
 ```
@@ -1321,7 +1321,7 @@ After Phase 2:
 | 1 | [x] | 2026-01-16 | 2026-01-16 | Core data types implemented and tested |
 | 2 | [x] | 2026-01-16 | 2026-01-16 | Audio correlation engine with all methods and delay selection |
 | 3 | [x] | 2026-01-16 | 2026-01-16 | Drift detection with custom DBSCAN, PAL/linear drift, quality validation |
-| 4 | [ ] | - | - | |
+| 4 | [x] | 2026-01-16 | 2026-01-16 | Audio correction with EDL generation, linear/PAL tempo ratios, buffer alignment |
 | 5 | [ ] | - | - | |
 | 6 | [ ] | - | - | |
 | 7 | [ ] | - | - | |
@@ -1349,6 +1349,13 @@ After Phase 2:
 | 2026-01-16 | 3 | PAL drift detection | PASS | 25fps ±0.1, 40.9ms/s drift ±5ms tolerance |
 | 2026-01-16 | 3 | Linear drift detection | PASS | R² thresholds, codec-aware slope detection |
 | 2026-01-16 | 3 | Quality validation | PASS | Strict/normal/lenient modes, cluster filtering |
+| 2026-01-16 | 4 | Build correction modules | PASS | EDL, linear, PAL, utils modules compile |
+| 2026-01-16 | 4 | EDL generation | PASS | AudioSegment struct, generate_edl_from_correlation with filtering |
+| 2026-01-16 | 4 | Linear tempo ratio | PASS | Formula: 1000/(1000+drift_rate), rubberband/aresample/atempo |
+| 2026-01-16 | 4 | PAL tempo ratio | PASS | Constant: 0.95904, drift rate: 40.9 ms/s |
+| 2026-01-16 | 4 | Buffer alignment | PASS | align_buffer for Opus, element_size=4 bytes |
+| 2026-01-16 | 4 | Silence detection | PASS | is_silence with std < 100.0 for int32 PCM |
+| 2026-01-16 | 4 | Unit tests | PASS | 31 tests passed, all Phase 4 logic verified |
 
 ---
 
