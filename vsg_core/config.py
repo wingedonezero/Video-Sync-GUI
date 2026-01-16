@@ -138,6 +138,7 @@ class AppConfig:
             'source_separation_timeout': 900,  # Timeout in seconds for source separation (0 = no timeout, default 900s = 15 min)
             'filtering_method': 'Dialogue Band-Pass Filter',
             'correlation_method': 'Phase Correlation (GCC-PHAT)',
+            'correlation_method_source_separated': 'Phase Correlation (GCC-PHAT)',
             'min_accepted_chunks': 3,
             'log_audio_drift': True,
 
