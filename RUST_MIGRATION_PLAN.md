@@ -3,7 +3,32 @@
 > **Document Purpose**: This is the authoritative reference for migrating Video-Sync-GUI from Python to Rust. It must be consulted and updated by any AI or developer working on this migration.
 >
 > **Last Updated**: 2026-01-16
-> **Migration Status**: Phase 4 Complete - Core Data Types + Audio Correlation + Drift Detection + Audio Correction
+> **Migration Status**: Phase 8 Rust Complete - **Python Integration NOT Started**
+
+---
+
+## 🚨 Current State Summary
+
+### What We Have
+| Component | Status | Location |
+|-----------|--------|----------|
+| **Rust implementations** | ✅ Written & tested | `vsg_core_rs/src/` (4,291 lines) |
+| **Python implementations** | ✅ Still working | `vsg_core/` (12,978 lines) |
+| **Python → Rust bridge** | ❌ **DOES NOT EXIST** | Should be `vsg_core/_rust_bridge/` |
+
+### What This Means
+- **Rust code exists but is UNUSED** - Python doesn't import `vsg_core_rs`
+- **Both implementations work independently** - Parallel development
+- **No performance benefit yet** - Still running pure Python
+- **Phase 9 is the critical "tie-in" phase** - Must create integration layer
+
+### Immediate Action Required
+1. Build Rust library: `cd vsg_core_rs && maturin develop --release`
+2. Create `vsg_core/_rust_bridge/` modules
+3. Test Python ↔ Rust parity
+4. Update orchestrator steps to use bridges
+
+---
 
 ---
 
@@ -256,20 +281,97 @@ Your ROCm environment detection in `run.sh` stays exactly as-is. The Rust librar
 
 ---
 
+## 5.1. Current Integration Status
+
+> ⚠️ **CRITICAL**: This section documents what exists vs. what's missing.
+
+### What EXISTS (Rust Side)
+
+```
+vsg_core_rs/src/
+├── lib.rs                    ✅ PyO3 module with all exports
+├── models/                   ✅ All data types (enums, media, jobs, settings)
+├── analysis/
+│   ├── correlation.rs        ✅ GCC-PHAT, SCC, SCOT, Whitened methods
+│   ├── delay_selection.rs    ✅ All 4 selection modes
+│   └── drift_detection.rs    ✅ DBSCAN, PAL/linear diagnosis
+├── correction/
+│   ├── edl.rs               ✅ EDL segment generation
+│   ├── linear.rs            ✅ Tempo ratio calculation
+│   ├── pal.rs               ✅ PAL constants
+│   └── utils.rs             ✅ Buffer alignment, silence detection
+├── subtitles/
+│   └── frame_utils.rs       ✅ 3 frame conversion modes
+├── extraction/
+│   └── tracks.rs            ✅ Container delay calculation
+├── chapters/
+│   └── timestamps.rs        ✅ Nanosecond timestamp manipulation
+└── mux/
+    └── delay_calculator.rs  ✅ Track delay rules + sync tokens
+```
+
+### What's MISSING (Python Integration)
+
+```
+vsg_core/
+├── _rust_bridge/            ❌ DOES NOT EXIST - needs creation
+│   ├── __init__.py
+│   ├── analysis.py          ❌ Would wrap vsg_core_rs.analyze_audio_correlation
+│   ├── correction.py        ❌ Would wrap vsg_core_rs correction functions
+│   ├── extraction.py        ❌ Would wrap vsg_core_rs extraction functions
+│   ├── chapters.py          ❌ Would wrap vsg_core_rs chapter functions
+│   ├── mux.py               ❌ Would wrap vsg_core_rs.calculate_mux_delay
+│   └── frame_utils.py       ❌ Would wrap vsg_core_rs frame utilities
+│
+├── orchestrator/steps/      ❌ Still uses pure Python implementations
+│   ├── analysis_step.py     ❌ Calls vsg_core/analysis/audio_corr.py (Python)
+│   ├── extract_step.py      ❌ Calls vsg_core/extraction/tracks.py (Python)
+│   └── ...                  ❌ All steps use Python, not Rust
+```
+
+### Why This Matters
+
+1. **Rust code is tested but unused** - We have 4,000+ lines of Rust that aren't being called
+2. **Python implementation still runs** - All actual processing uses Python code
+3. **No performance benefit yet** - Until integration, we don't get Rust's speed
+4. **Parallel development risk** - If Python code changes, Rust may diverge
+
+### Integration Priority
+
+| Priority | Bridge Module | Rust Functions | Python Replacement |
+|----------|---------------|----------------|-------------------|
+| 1 | `_rust_bridge/analysis.py` | `analyze_audio_correlation`, `diagnose_drift` | `audio_corr.py`, `drift_detection.py` |
+| 2 | `_rust_bridge/mux.py` | `calculate_mux_delay`, `build_mkvmerge_sync_token` | `options_builder.py` |
+| 3 | `_rust_bridge/extraction.py` | `calculate_container_delay`, `add_container_delays_to_json` | `tracks.py` |
+| 4 | `_rust_bridge/chapters.py` | `shift_chapter_timestamp`, `format_chapter_timestamp` | `process.py` |
+| 5 | `_rust_bridge/frame_utils.py` | 6 frame conversion functions | `frame_utils.py` |
+| 6 | `_rust_bridge/correction.py` | EDL generation, tempo ratios | `stepping.py`, `linear.py` |
+
+---
+
 ## 6. Migration Phases
 
-| Phase | Component | Est. Files | Priority | Dependencies |
-|-------|-----------|------------|----------|--------------|
-| 1 | Core Data Types | 6 | CRITICAL | None |
-| 2 | Audio Correlation | 1 | CRITICAL | Phase 1 |
-| 3 | Drift Detection | 1 | HIGH | Phase 1, 2 |
-| 4 | Audio Correction | 3 | HIGH | Phase 1, 2, 3 |
-| 5 | Subtitle Core | 0 | N/A | **STAYS IN PYTHON** (pysubs2) |
-| 6 | Frame Utilities | 1 (partial) | MEDIUM | Phase 1 |
-| 7 | Extraction Layer | 3 | MEDIUM | Phase 1 |
-| 8 | Mux Options | 1 | MEDIUM | Phase 1, 7 |
-| 9 | Pipeline Orchestration | 8 | LOW | All above |
-| 10 | UI Migration | 41 | LAST | All above |
+> ⚠️ **Note**: Phases 1-8 have Rust implementations, but Python integration is NOT complete.
+> The codebase currently has parallel implementations (Python + Rust) that are not connected.
+
+| Phase | Component | Est. Files | Priority | Rust Status | Python Integration |
+|-------|-----------|------------|----------|-------------|-------------------|
+| 1 | Core Data Types | 6 | CRITICAL | ✅ Complete | ❌ Not integrated |
+| 2 | Audio Correlation | 1 | CRITICAL | ✅ Complete | ❌ Not integrated |
+| 3 | Drift Detection | 1 | HIGH | ✅ Complete | ❌ Not integrated |
+| 4 | Audio Correction | 3 | HIGH | ✅ Complete | ❌ Not integrated |
+| 5 | Subtitle Core | 0 | N/A | N/A | **STAYS IN PYTHON** (pysubs2) |
+| 6 | Frame Utilities | 1 (partial) | MEDIUM | ✅ Complete | ❌ Not integrated |
+| 7 | Extraction Layer | 3 | MEDIUM | ✅ Complete | ❌ Not integrated |
+| 8 | Mux Options | 1 | MEDIUM | ✅ Complete | ❌ Not integrated |
+| **9** | **Integration & Testing** | 8+ | **CRITICAL** | N/A | **CURRENT PHASE** |
+| 10 | UI Migration | 41 | LAST | Not started | Future |
+
+### What "Complete" Means for Phases 1-8
+- ✅ **Rust code written** in `vsg_core_rs/src/`
+- ✅ **PyO3 bindings defined** for Python interop
+- ✅ **Unit tests pass** in Rust
+- ❌ **Python does NOT call Rust yet** - this is Phase 9
 
 ---
 
@@ -1205,68 +1307,189 @@ pub fn write_options_file(tokens: &[String], path: &Path) -> Result<()> {
 
 ---
 
-## Phase 9: Pipeline Orchestration
+## Phase 9: Integration & Testing
 
 ### Status: [ ] Not Started
 
-### Files to Migrate
+> ⚠️ **CRITICAL MISSING PIECE**: Phases 1-8 implemented Rust code, but Python does NOT call it yet!
+> The Rust and Python implementations exist in parallel. This phase creates the integration layer.
+
+### Current State
+- **Rust code exists**: `vsg_core_rs/src/` with all Phase 1-8 implementations
+- **Python code unchanged**: `vsg_core/` still uses pure Python implementations
+- **No integration**: Zero Python files import from `vsg_core_rs`
+
+### Phase 9A: Python Integration Layer
+
+Create wrapper modules that bridge Python → Rust. These go in `vsg_core/` and provide 1:1 naming with existing Python APIs:
+
 ```
-vsg_core/orchestrator/steps/context.py           →  Keep in Python (thin wrapper)
-vsg_core/orchestrator/steps/analysis_step.py     →  Keep in Python (calls Rust)
-vsg_core/orchestrator/steps/extract_step.py      →  Keep in Python
-vsg_core/orchestrator/steps/audio_correction_step.py  →  Keep in Python
-vsg_core/orchestrator/steps/subtitles_step.py    →  Keep in Python
-vsg_core/orchestrator/steps/chapters_step.py     →  Keep in Python
-vsg_core/orchestrator/steps/mux_step.py          →  Keep in Python
-vsg_core/orchestrator/pipeline.py                →  Keep in Python
+vsg_core/
+├── _rust_bridge/                    ← NEW: Integration layer
+│   ├── __init__.py
+│   ├── analysis.py                  ← Wraps vsg_core_rs analysis functions
+│   ├── correction.py                ← Wraps vsg_core_rs correction functions
+│   ├── extraction.py                ← Wraps vsg_core_rs extraction functions
+│   ├── chapters.py                  ← Wraps vsg_core_rs chapter functions
+│   ├── mux.py                       ← Wraps vsg_core_rs mux functions
+│   └── frame_utils.py               ← Wraps vsg_core_rs frame utilities
 ```
 
-### Migration Strategy
-Keep orchestration in Python. Steps call into Rust for heavy computation:
+**Integration Pattern** (keeps Python API stable):
 
 ```python
-# analysis_step.py (Python)
-from vsg_core_rs import analyze_audio_correlation, diagnose_drift
+# vsg_core/_rust_bridge/analysis.py
+"""
+Bridge module: Provides same API as vsg_core/analysis/audio_corr.py
+but delegates to Rust implementation.
+"""
+try:
+    from vsg_core_rs import (
+        analyze_audio_correlation as _rust_correlate,
+        CorrelationMethod,
+        DelaySelectionMode,
+    )
+    RUST_AVAILABLE = True
+except ImportError:
+    RUST_AVAILABLE = False
 
-class AnalysisStep:
-    def run(self, ctx, runner):
-        # Decode audio (Python/FFmpeg)
-        ref_pcm = self._decode_audio(...)
-        tgt_pcm = self._decode_audio(...)
+def run_correlation(ref_audio, tgt_audio, sample_rate, method="gcc_phat", **kwargs):
+    """
+    1:1 API match with existing Python implementation.
+    Delegates to Rust when available.
+    """
+    if RUST_AVAILABLE:
+        return _rust_correlate(ref_audio, tgt_audio, sample_rate, method, **kwargs)
+    else:
+        # Fallback to pure Python (for testing/comparison)
+        from vsg_core.analysis.audio_corr import run_correlation as _py_correlate
+        return _py_correlate(ref_audio, tgt_audio, sample_rate, method, **kwargs)
+```
 
-        # RUST: Heavy correlation
-        result = analyze_audio_correlation(
-            ref_pcm, tgt_pcm,
-            sample_rate=48000,
-            method=ctx.config['correlation_method'],
-            # ...
-        )
+### Phase 9B: Integration Testing
 
-        # RUST: Drift detection
-        diagnosis = diagnose_drift(result['chunks'])
+**Step-by-step validation** to ensure Rust produces identical results:
 
-        # Python: Update context
-        ctx.delays = Delays(...)
+| Test | Python Module | Rust Bridge | Validation |
+|------|---------------|-------------|------------|
+| 1 | `analysis/audio_corr.py` | `_rust_bridge/analysis.py` | Same delay ±0.1ms, same confidence |
+| 2 | `analysis/drift_detection.py` | `_rust_bridge/analysis.py` | Same diagnosis enum |
+| 3 | `correction/stepping.py` | `_rust_bridge/correction.py` | Same EDL segments |
+| 4 | `correction/linear.py` | `_rust_bridge/correction.py` | Same tempo ratio |
+| 5 | `extraction/tracks.py` | `_rust_bridge/extraction.py` | Same container delays |
+| 6 | `chapters/process.py` | `_rust_bridge/chapters.py` | Same shifted timestamps |
+| 7 | `mux/options_builder.py` | `_rust_bridge/mux.py` | Same mkvmerge tokens |
+| 8 | `subtitles/frame_utils.py` | `_rust_bridge/frame_utils.py` | Same frame numbers |
+
+### Phase 9C: Real-World Testing
+
+```
+Test Files Required:
+├── stepping_audio/           ← Audio with known stepping issues
+├── pal_drift_audio/          ← PAL framerate drift samples
+├── linear_drift_audio/       ← Linear drift samples
+├── complex_subtitles/        ← ASS/SSA with styles
+└── vfr_video/                ← Variable framerate test files
+```
+
+**Validation Process**:
+1. Run full pipeline with pure Python
+2. Run full pipeline with Rust bridge
+3. Compare outputs byte-for-byte (muxed file)
+4. Compare intermediate results (delays, EDL, tokens)
+
+### Phase 9D: Switchover
+
+Once testing passes:
+1. Update orchestrator steps to use `_rust_bridge` modules
+2. Keep Python implementations for fallback/comparison
+3. Add `USE_RUST=true` environment variable for gradual rollout
+
+### Files to Create
+
+```
+vsg_core/_rust_bridge/__init__.py
+vsg_core/_rust_bridge/analysis.py
+vsg_core/_rust_bridge/correction.py
+vsg_core/_rust_bridge/extraction.py
+vsg_core/_rust_bridge/chapters.py
+vsg_core/_rust_bridge/mux.py
+vsg_core/_rust_bridge/frame_utils.py
+tests/integration/test_rust_python_parity.py
+```
+
+### Files to Modify
+
+```
+vsg_core/orchestrator/steps/analysis_step.py     →  Import from _rust_bridge
+vsg_core/orchestrator/steps/extract_step.py      →  Import from _rust_bridge
+vsg_core/orchestrator/steps/audio_correction_step.py  →  Import from _rust_bridge
+vsg_core/orchestrator/steps/chapters_step.py     →  Import from _rust_bridge
+vsg_core/orchestrator/steps/mux_step.py          →  Import from _rust_bridge
 ```
 
 ### Testing Checkpoint 9
-- [ ] Full pipeline runs with Rust components
-- [ ] All step validations pass
-- [ ] Output identical to pure-Python version
+- [ ] Build `vsg_core_rs` with `maturin develop`
+- [ ] All bridge modules import successfully
+- [ ] Unit tests: Rust output matches Python for each function
+- [ ] Integration test: Full pipeline produces identical output
+- [ ] Real-world test: Process known test files successfully
+- [ ] No regressions in existing Python-only workflow
 
 ---
 
 ## Phase 10: UI Migration
 
-### Status: [ ] Not Started (LAST)
+### Status: [ ] Not Started (LAST - After Phase 9 Complete)
 
-### Strategy
-1. Keep PySide6 UI
-2. Use PyO3 FFI to call Rust backend
-3. Optionally: Future migration to Tauri/egui
+### Current Strategy (Hybrid)
+1. **Keep PySide6 UI** for now (`vsg_qt/`)
+2. **Use PyO3 FFI** to call Rust backend via `vsg_core_rs`
+3. Benefit: UI continues working while backend transitions to Rust
 
-### Files
-All 41 modules in `vsg_qt/` - migrate last after all backend is stable.
+### Future Strategy (Full Rust GUI)
+
+Once Phase 9 integration is stable and tested, migrate to a Rust-native GUI:
+
+| Framework | Pros | Cons |
+|-----------|------|------|
+| **libcosmic** (System76) | Native look, Iced-based, good for Linux | Linux-focused, newer ecosystem |
+| **Slint** | Declarative, cross-platform, good tooling | Commercial license for some uses |
+| **egui** | Immediate mode, simple, pure Rust | Less native look |
+| **Tauri** | Web technologies (HTML/CSS/JS) | Still uses web renderer |
+| **iced** | Elm-like architecture, pure Rust | Still maturing |
+
+### Migration Path
+
+```
+Current State:
+├── vsg_qt/ (PySide6 Python)
+└── vsg_core_rs/ (Rust library)
+
+Phase 9 Complete:
+├── vsg_qt/ (PySide6 Python) ─→ calls ─→ vsg_core_rs/
+└── vsg_core/ (Python orchestration) ─→ calls ─→ vsg_core_rs/
+
+Phase 10 Complete:
+├── vsg_gui/ (Rust GUI - libcosmic/slint/egui)
+└── vsg_core_rs/ (Rust library - direct calls, no FFI)
+```
+
+### 1:1 Naming Convention
+
+To ensure nothing is missed during migration, maintain identical naming:
+
+| Python (vsg_qt) | Rust GUI (vsg_gui) |
+|-----------------|-------------------|
+| `main_window/window.py` | `main_window/window.rs` |
+| `main_window/controller.py` | `main_window/controller.rs` |
+| `job_queue_dialog/*.py` | `job_queue_dialog/*.rs` |
+| `add_job_dialog/*.py` | `add_job_dialog/*.rs` |
+| `options_dialog/*.py` | `options_dialog/*.rs` |
+| ... | ... |
+
+### Files (41 modules to eventually migrate)
+All modules in `vsg_qt/` - migrate last after Phase 9 is stable and tested.
 
 ---
 
@@ -1367,20 +1590,51 @@ After Phase 2:
 
 ## Completion Tracking
 
+> ⚠️ **Important Clarification**: "Rust Complete" means the Rust code is written and unit-tested.
+> It does **NOT** mean Python is calling Rust. Python integration is tracked separately.
+
 ### Phase Status
 
-| Phase | Status | Started | Completed | Notes |
-|-------|--------|---------|-----------|-------|
-| 1 | [x] | 2026-01-16 | 2026-01-16 | Core data types implemented and tested |
-| 2 | [x] | 2026-01-16 | 2026-01-16 | Audio correlation engine with all methods and delay selection |
-| 3 | [x] | 2026-01-16 | 2026-01-16 | Drift detection with custom DBSCAN, PAL/linear drift, quality validation |
-| 4 | [x] | 2026-01-16 | 2026-01-16 | Audio correction with EDL generation, linear/PAL tempo ratios, buffer alignment |
-| 5 | [N/A] | - | 2026-01-16 | STAYS IN PYTHON - No Rust equivalent for pysubs2 |
-| 6 | [x] | 2026-01-16 | 2026-01-16 | PARTIAL - Frame conversion utilities migrated; VFR/VapourSynth/sync modes stay in Python |
-| 7 | [x] | 2026-01-16 | 2026-01-16 | Container delay calculation, mkvmerge JSON parsing, chapter timestamp manipulation |
-| 8 | [ ] | - | - | |
-| 9 | [ ] | - | - | |
-| 10 | [ ] | - | - | |
+| Phase | Rust Code | Python Integration | Started | Completed | Notes |
+|-------|-----------|-------------------|---------|-----------|-------|
+| 1 | ✅ Complete | ❌ Not started | 2026-01-16 | 2026-01-16 | Core data types in Rust |
+| 2 | ✅ Complete | ❌ Not started | 2026-01-16 | 2026-01-16 | Audio correlation in Rust |
+| 3 | ✅ Complete | ❌ Not started | 2026-01-16 | 2026-01-16 | Drift detection in Rust |
+| 4 | ✅ Complete | ❌ Not started | 2026-01-16 | 2026-01-16 | Audio correction in Rust |
+| 5 | N/A | N/A | - | 2026-01-16 | STAYS IN PYTHON (pysubs2) |
+| 6 | ✅ Complete | ❌ Not started | 2026-01-16 | 2026-01-16 | Frame utils in Rust (partial) |
+| 7 | ✅ Complete | ❌ Not started | 2026-01-16 | 2026-01-16 | Extraction/chapters in Rust |
+| 8 | ✅ Complete | ❌ Not started | 2026-01-16 | 2026-01-16 | Mux delay calc in Rust |
+| **9** | N/A | ❌ **CURRENT** | - | - | **Integration & Testing** |
+| 10 | ❌ Not started | ❌ Not started | - | - | Future GUI migration |
+
+### What's Actually Running
+
+| Component | Currently Uses | Should Use After Phase 9 |
+|-----------|---------------|-------------------------|
+| Audio correlation | `vsg_core/analysis/audio_corr.py` (Python) | `vsg_core_rs.analyze_audio_correlation` (Rust) |
+| Drift detection | `vsg_core/analysis/drift_detection.py` (Python) | `vsg_core_rs.diagnose_drift` (Rust) |
+| Container delays | `vsg_core/extraction/tracks.py` (Python) | `vsg_core_rs.calculate_container_delay` (Rust) |
+| Mux delay calc | `vsg_core/mux/options_builder.py` (Python) | `vsg_core_rs.calculate_mux_delay` (Rust) |
+| Frame conversions | `vsg_core/subtitles/frame_utils.py` (Python) | `vsg_core_rs.time_to_frame_*` (Rust) |
+| Chapter timestamps | `vsg_core/chapters/process.py` (Python) | `vsg_core_rs.shift_chapter_timestamp` (Rust) |
+
+### Integration Gap Identified
+
+| Date | Issue | Impact |
+|------|-------|--------|
+| 2026-01-16 | **Python integration layer missing** | All phases 1-8 have Rust code but Python doesn't call it |
+| 2026-01-16 | **No `_rust_bridge` modules exist** | Orchestrator steps use pure Python implementations |
+| 2026-01-16 | **Parallel development created two implementations** | Both work, neither talks to the other |
+
+### Next Steps (Phase 9)
+
+1. [ ] Build `vsg_core_rs` with `maturin develop` and verify imports work
+2. [ ] Create `vsg_core/_rust_bridge/__init__.py`
+3. [ ] Create bridge modules one at a time, test each
+4. [ ] Update orchestrator steps to use bridges
+5. [ ] Run full pipeline comparison tests
+6. [ ] Validate output matches pure Python version
 
 ### Checkpoint Log
 
