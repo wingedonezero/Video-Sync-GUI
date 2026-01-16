@@ -7,6 +7,8 @@ mod models;
 mod analysis;
 mod correction;
 mod subtitles;
+mod extraction;
+mod chapters;
 
 #[pymodule]
 fn vsg_core_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -48,6 +50,13 @@ fn vsg_core_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(frame_to_time_middle, m)?)?;
     m.add_function(wrap_pyfunction!(time_to_frame_aegisub, m)?)?;
     m.add_function(wrap_pyfunction!(frame_to_time_aegisub, m)?)?;
+
+    // Phase 7: Extraction and Chapter functions
+    m.add_function(wrap_pyfunction!(calculate_container_delay, m)?)?;
+    m.add_function(wrap_pyfunction!(add_container_delays_to_json, m)?)?;
+    m.add_function(wrap_pyfunction!(shift_chapter_timestamp, m)?)?;
+    m.add_function(wrap_pyfunction!(format_chapter_timestamp, m)?)?;
+    m.add_function(wrap_pyfunction!(parse_chapter_timestamp, m)?)?;
 
     Ok(())
 }
@@ -257,4 +266,87 @@ fn time_to_frame_aegisub(time_ms: f64, fps: f64) -> i64 {
 #[pyfunction]
 fn frame_to_time_aegisub(frame_num: i64, fps: f64) -> i64 {
     subtitles::frame_to_time_aegisub(frame_num, fps)
+}
+
+// ============================================================================
+// Phase 7: Extraction and Chapter Functions (PyO3 Bindings)
+// ============================================================================
+
+/// Calculate container delay in milliseconds from minimum_timestamp (nanoseconds)
+///
+/// CRITICAL: Uses round() not int() for proper handling of negative values.
+///
+/// Args:
+///     minimum_timestamp_ns: Timestamp in nanoseconds from mkvmerge -J
+///
+/// Returns:
+///     Container delay in milliseconds (rounded to nearest integer)
+#[pyfunction]
+fn calculate_container_delay(minimum_timestamp_ns: i64) -> i32 {
+    extraction::calculate_container_delay(minimum_timestamp_ns)
+}
+
+/// Process mkvmerge -J JSON output to add container_delay_ms to tracks
+///
+/// Adds container_delay_ms field to each track based on minimum_timestamp.
+/// ONLY audio and video tracks get calculated delays; subtitles always get 0.
+///
+/// Args:
+///     json_str: JSON string from `mkvmerge -J <file>` command
+///
+/// Returns:
+///     Modified JSON with container_delay_ms added to each track
+///
+/// Raises:
+///     ValueError: If JSON is invalid
+#[pyfunction]
+fn add_container_delays_to_json(json_str: &str) -> PyResult<String> {
+    extraction::add_container_delays_to_json(json_str)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
+}
+
+/// Shift a chapter timestamp by a given offset
+///
+/// Timestamps are in nanoseconds; shift is in milliseconds.
+/// Negative results are clamped to 0.
+///
+/// Args:
+///     timestamp_ns: Original timestamp in nanoseconds
+///     shift_ms: Shift amount in milliseconds (can be negative)
+///
+/// Returns:
+///     Shifted timestamp in nanoseconds (clamped to >= 0)
+#[pyfunction]
+fn shift_chapter_timestamp(timestamp_ns: i64, shift_ms: i64) -> i64 {
+    chapters::shift_timestamp_ns(timestamp_ns, shift_ms)
+}
+
+/// Format nanoseconds as HH:MM:SS.nnnnnnnnn
+///
+/// Matches mkvmerge chapter timestamp format.
+///
+/// Args:
+///     ns: Time in nanoseconds
+///
+/// Returns:
+///     Formatted string: "HH:MM:SS.nnnnnnnnn"
+#[pyfunction]
+fn format_chapter_timestamp(ns: i64) -> String {
+    chapters::format_ns(ns)
+}
+
+/// Parse timestamp string (HH:MM:SS.nnnnnnnnn) to nanoseconds
+///
+/// Args:
+///     timestamp: Timestamp string in format "HH:MM:SS.nnnnnnnnn"
+///
+/// Returns:
+///     Time in nanoseconds
+///
+/// Raises:
+///     ValueError: If timestamp format is invalid
+#[pyfunction]
+fn parse_chapter_timestamp(timestamp: &str) -> PyResult<i64> {
+    chapters::parse_ns(timestamp)
+        .map_err(|e| pyo3::exceptions::PyValueError::new_err(e))
 }

@@ -1056,7 +1056,7 @@ The following `frame_utils.py` functions **cannot** be migrated (depend on Pytho
 
 ## Phase 7: Extraction Layer
 
-### Status: [ ] Not Started
+### Status: [x] Completed (2026-01-16)
 
 ### Files to Migrate
 ```
@@ -1377,7 +1377,7 @@ After Phase 2:
 | 4 | [x] | 2026-01-16 | 2026-01-16 | Audio correction with EDL generation, linear/PAL tempo ratios, buffer alignment |
 | 5 | [N/A] | - | 2026-01-16 | STAYS IN PYTHON - No Rust equivalent for pysubs2 |
 | 6 | [x] | 2026-01-16 | 2026-01-16 | PARTIAL - Frame conversion utilities migrated; VFR/VapourSynth/sync modes stay in Python |
-| 7 | [ ] | - | - | |
+| 7 | [x] | 2026-01-16 | 2026-01-16 | Container delay calculation, mkvmerge JSON parsing, chapter timestamp manipulation |
 | 8 | [ ] | - | - | |
 | 9 | [ ] | - | - | |
 | 10 | [ ] | - | - | |
@@ -1417,6 +1417,16 @@ After Phase 2:
 | 2026-01-16 | 6 | Rust unit tests | PASS | 13 tests passed, all modes verified |
 | 2026-01-16 | 6 | Python integration | PASS | All functions match Python implementation exactly |
 | 2026-01-16 | 6 | PyO3 bindings | PASS | All 6 functions callable from Python |
+| 2026-01-16 | 7 | Build extraction module | PASS | Created src/extraction/tracks.rs with container delay calculation |
+| 2026-01-16 | 7 | Container delay formula | PASS | round(ns / 1_000_000) - uses round() not int() for negatives |
+| 2026-01-16 | 7 | mkvmerge JSON parsing | PASS | add_container_delays_to_json processes tracks correctly |
+| 2026-01-16 | 7 | Subtitle delay handling | PASS | Subtitles always get container_delay_ms = 0 |
+| 2026-01-16 | 7 | Build chapters module | PASS | Created src/chapters/timestamps.rs with nanosecond precision |
+| 2026-01-16 | 7 | Timestamp shifting | PASS | shift_timestamp_ns with clamping to 0 |
+| 2026-01-16 | 7 | Timestamp formatting | PASS | format_ns/parse_ns for HH:MM:SS.nnnnnnnnn format |
+| 2026-01-16 | 7 | Rust unit tests | PASS | 26 new tests passed (extraction + chapters) |
+| 2026-01-16 | 7 | Python integration | PASS | All 5 functions work correctly from Python |
+| 2026-01-16 | 7 | PyO3 bindings | PASS | Container delay, JSON processing, chapter timestamps |
 
 ---
 
