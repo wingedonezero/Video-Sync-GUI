@@ -688,7 +688,12 @@ fn analyze_audio_correlation(
 
 ## Phase 3: Drift Detection
 
-### Status: [x] Complete
+### Status: [x] Complete (Implementation Ready, Wiring in Phase 9)
+
+**Implementation Notes (Phase 3)**:
+- Rust implementation exists in `vsg_core_rs/src/analysis/drift_detection.rs`.
+- PyO3 bindings are **not** exposed yet; orchestration still uses Python.
+- Wiring into the pipeline is planned for Phase 9 to keep tie-in centralized.
 
 ### Files to Migrate
 ```
@@ -778,7 +783,12 @@ fn detect_pal_drift(
 
 ## Phase 4: Audio Correction
 
-### Status: [x] Complete
+### Status: [x] Complete (Partial: Core Logic Ready, Wiring in Phase 9)
+
+**Implementation Notes (Phase 4)**:
+- Rust currently provides EDL generation + linear/PAL utilities in `vsg_core_rs/src/correction/`.
+- Full stepping correction (file decode + correction orchestration) remains in Python.
+- PyO3 bindings are not exposed yet; orchestration stays in Python until Phase 9.
 
 ### Files to Migrate
 ```
@@ -1056,7 +1066,12 @@ The following `frame_utils.py` functions **cannot** be migrated (depend on Pytho
 
 ## Phase 7: Extraction Layer
 
-### Status: [x] Completed (2026-01-16)
+### Status: [x] Completed (2026-01-16, Partial: Core Parsing Only)
+
+**Implementation Notes (Phase 7)**:
+- Rust currently includes mkvmerge JSON parsing + container delay calculation (`src/extraction/tracks.rs`).
+- Full attachment extraction and chapter processing remain in Python (`vsg_core/extraction/attachments.py`, `vsg_core/chapters/process.py`).
+- The Phase 9 tie-in will decide which Python-only behaviors remain and which Rust modules should be added.
 
 ### Files to Migrate
 ```
