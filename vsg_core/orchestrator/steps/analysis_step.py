@@ -523,7 +523,9 @@ class AnalysisStep:
 
             # If stepping detected, handle based on whether correction is enabled
             if diagnosis == "STEPPING":
-                if stepping_enabled:
+                # CRITICAL: Stepping correction doesn't work on source-separated audio
+                # Separated stems have fundamentally different waveform characteristics
+                if stepping_enabled and not use_source_separated_settings:
                     # Stepping correction is ENABLED - proceed with correction logic
                     stepping_sources.append(source_key)  # Track for final report
 
@@ -558,8 +560,16 @@ class AnalysisStep:
                         runner._log_message(f"[Stepping] No audio tracks from this source are being merged")
                         runner._log_message(f"[Stepping] Using delay_selection_mode='{delay_mode}' instead of first segment (stepping correction won't run)")
                         # Don't set stepping_override_delay - let normal flow handle it
+                elif use_source_separated_settings:
+                    # Source separation blocks stepping correction (unreliable on separated stems)
+                    delay_mode = source_config.get('delay_selection_mode', 'Mode (Clustered)')
+                    runner._log_message(f"[Stepping Detected] Found stepping in {source_key}")
+                    runner._log_message(f"[Stepping Disabled] Source separation is enabled - stepping correction is unreliable on separated stems")
+                    runner._log_message(f"[Stepping Disabled] Separated stems have different waveform characteristics that break stepping detection")
+                    runner._log_message(f"[Stepping Disabled] Using delay_selection_mode='{delay_mode}' instead")
+                    # Don't set stepping_override_delay - let normal flow handle it with source-separated delay mode
                 else:
-                    # Stepping correction is DISABLED - just warn the user
+                    # Stepping correction is DISABLED globally - just warn the user
                     ctx.stepping_detected_disabled.append(source_key)  # Track for warning
                     runner._log_message(f"⚠️  [Stepping Detected] Found stepping in {source_key}")
                     runner._log_message(f"⚠️  [Stepping Disabled] Stepping correction is disabled - timing may be inconsistent")
