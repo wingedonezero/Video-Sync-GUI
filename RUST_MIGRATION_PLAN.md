@@ -964,7 +964,7 @@ The Python subtitle modules will:
 
 ## Phase 6: Frame Utilities
 
-### Status: [ ] Not Started (PARTIAL MIGRATION POSSIBLE)
+### Status: [x] Completed (2026-01-16) - PARTIAL MIGRATION
 
 ### Migration Decision: SPLIT - Core utilities to Rust, sync modes stay in Python
 
@@ -1376,7 +1376,7 @@ After Phase 2:
 | 3 | [x] | 2026-01-16 | 2026-01-16 | Drift detection with custom DBSCAN, PAL/linear drift, quality validation |
 | 4 | [x] | 2026-01-16 | 2026-01-16 | Audio correction with EDL generation, linear/PAL tempo ratios, buffer alignment |
 | 5 | [N/A] | - | 2026-01-16 | STAYS IN PYTHON - No Rust equivalent for pysubs2 |
-| 6 | [ ] | - | - | PARTIAL - Only frame conversion utilities; sync modes stay in Python |
+| 6 | [x] | 2026-01-16 | 2026-01-16 | PARTIAL - Frame conversion utilities migrated; VFR/VapourSynth/sync modes stay in Python |
 | 7 | [ ] | - | - | |
 | 8 | [ ] | - | - | |
 | 9 | [ ] | - | - | |
@@ -1410,6 +1410,13 @@ After Phase 2:
 | 2026-01-16 | 4 | Silence detection | PASS | is_silence with std < 100.0 for int32 PCM |
 | 2026-01-16 | 4 | Unit tests | PASS | 31 tests passed, all Phase 4 logic verified |
 | 2026-01-16 | 5 | Migration decision | N/A | Phase 5 stays in Python - pysubs2 has no Rust equivalent |
+| 2026-01-16 | 6 | Build frame utilities | PASS | Created src/subtitles/frame_utils.rs with all conversion modes |
+| 2026-01-16 | 6 | MODE 0 implementation | PASS | time_to_frame_floor, frame_to_time_floor with epsilon 1e-6 |
+| 2026-01-16 | 6 | MODE 1 implementation | PASS | time_to_frame_middle, frame_to_time_middle with Python banker's rounding |
+| 2026-01-16 | 6 | MODE 2 implementation | PASS | time_to_frame_aegisub, frame_to_time_aegisub with centisecond rounding |
+| 2026-01-16 | 6 | Rust unit tests | PASS | 13 tests passed, all modes verified |
+| 2026-01-16 | 6 | Python integration | PASS | All functions match Python implementation exactly |
+| 2026-01-16 | 6 | PyO3 bindings | PASS | All 6 functions callable from Python |
 
 ---
 
