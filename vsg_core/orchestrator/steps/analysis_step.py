@@ -11,6 +11,32 @@ from vsg_core.analysis.audio_corr import run_audio_correlation, run_multi_correl
 from vsg_core.analysis.drift_detection import diagnose_audio_issue
 from vsg_core.extraction.tracks import get_stream_info, get_stream_info_with_delays
 
+def _should_use_source_separated_mode(source_key: str, config: Dict) -> bool:
+    """
+    Check if this source used source separation during correlation.
+
+    This mirrors the logic in source_separation.py's apply_source_separation() function
+    to determine if source-separated delay selection mode should be used.
+
+    Args:
+        source_key: The source being analyzed (e.g., "Source 2", "Source 3")
+        config: Configuration dictionary
+
+    Returns:
+        True if source separation was applied to this comparison, False otherwise
+    """
+    separation_mode = config.get('source_separation_mode', 'none')
+    if separation_mode == 'none':
+        return False
+
+    apply_to = config.get('source_separation_apply_to', 'all').lower()
+    if apply_to == 'all':
+        return True  # All comparisons use separation
+
+    # Check if this specific comparison used separation
+    role_normalized = source_key.lower().replace(' ', '_')  # "Source 2" → "source_2"
+    return apply_to == role_normalized
+
 def _find_first_stable_segment_delay(results: List[Dict[str, Any]], runner: CommandRunner, config: Dict, return_raw: bool = False) -> Optional[int | float]:
     """
     Find the delay from the first stable segment of chunks.
@@ -525,8 +551,20 @@ class AnalysisStep:
                 correlation_delay_raw = stepping_override_delay_raw  # Use true raw, not float(int)
                 runner._log_message(f"{source_key.capitalize()} delay determined: {correlation_delay_ms:+d} ms (first segment, stepping corrected).")
             else:
-                correlation_delay_ms = _choose_final_delay(results, config, runner, source_key)
-                correlation_delay_raw = _choose_final_delay_raw(results, config, runner, source_key)
+                # Determine which delay mode to use based on whether source separation was applied
+                if _should_use_source_separated_mode(source_key, config):
+                    # Use source-separated delay mode
+                    delay_mode = config.get('delay_selection_mode_source_separated', 'Mode (Clustered)')
+                    runner._log_message(f"[Delay Selection] Source separation was applied - using mode: {delay_mode}")
+                    # Create a modified config with the source-separated delay mode
+                    config_for_delay = config.copy()
+                    config_for_delay['delay_selection_mode'] = delay_mode
+                else:
+                    # Use normal delay mode
+                    config_for_delay = config
+
+                correlation_delay_ms = _choose_final_delay(results, config_for_delay, runner, source_key)
+                correlation_delay_raw = _choose_final_delay_raw(results, config_for_delay, runner, source_key)
                 if correlation_delay_ms is None:
                     # ENHANCED ERROR MESSAGE
                     accepted_count = len([r for r in results if r.get('accepted', False)])

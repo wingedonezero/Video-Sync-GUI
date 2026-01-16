@@ -166,6 +166,7 @@ class AppConfig:
             'scan_chunk_duration': 15,
             'min_match_pct': 5.0,
             'delay_selection_mode': 'Mode (Most Common)',
+            'delay_selection_mode_source_separated': 'Mode (Clustered)',
             'first_stable_min_chunks': 3,
             'first_stable_skip_unstable': True,
             'videodiff_error_min': 0.0,
