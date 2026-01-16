@@ -5,6 +5,7 @@ use numpy::PyReadonlyArray1;
 
 mod models;
 mod analysis;
+mod correction;
 
 #[pymodule]
 fn vsg_core_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
