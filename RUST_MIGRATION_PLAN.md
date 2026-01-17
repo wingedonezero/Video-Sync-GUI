@@ -11,6 +11,11 @@
 
 ## 🚨 Current State Summary
 
+### Quick Start for New Chats (Read First)
+- **Active Rust crate**: `vsg_core_rs/` at repo root (this is where all new work goes).
+- **Reference snapshot**: `rust/vsg_core_rs/` is **read-only** for comparison.
+- **Phase 9 focus**: Build the core shell first (orchestrator/worker/config/UI wiring), embed Python for unported modules, then migrate leaf modules.
+
 ### What We Have
 | Component | Status | Location |
 |-----------|--------|----------|
