@@ -5,6 +5,10 @@ GPU and hardware acceleration environment setup.
 
 Provides environment variables for subprocesses. PyTorch-specific setup
 is handled by the subprocess that actually imports torch (e.g., source separation).
+
+IMPORTANT: GPU detection results are cached to avoid repeated subprocess calls.
+After heavy GPU work (like source separation), repeatedly calling rocm-smi
+can cause driver state issues leading to segfaults.
 """
 
 import os
@@ -12,13 +16,51 @@ import subprocess
 from typing import Dict, Optional
 
 
-def detect_amd_gpu() -> Optional[Dict[str, str]]:
+# Cache for GPU detection results - prevents repeated rocm-smi/lspci calls
+# which can cause issues after heavy GPU work (e.g., source separation)
+_gpu_detection_cache: Dict[str, Optional[Dict[str, str]]] = {}
+_rocm_env_cache: Optional[Dict[str, str]] = None
+
+
+def clear_gpu_caches() -> None:
+    """
+    Clear all cached GPU detection results.
+
+    Call this if you need to force re-detection of GPU information,
+    for example after changing hardware or for testing purposes.
+    """
+    global _gpu_detection_cache, _rocm_env_cache
+    _gpu_detection_cache.clear()
+    _rocm_env_cache = None
+
+
+def detect_amd_gpu(use_cache: bool = True) -> Optional[Dict[str, str]]:
     """
     Detect AMD GPU and determine appropriate gfx architecture.
+
+    Results are cached by default to avoid repeated subprocess calls to rocm-smi
+    and lspci, which can cause driver state issues after heavy GPU work.
+
+    Args:
+        use_cache: If True (default), return cached results if available.
+                   Set to False to force re-detection.
 
     Returns:
         Dict with 'name', 'gfx_version', 'hsa_version' if AMD GPU found, None otherwise
     """
+    global _gpu_detection_cache
+
+    cache_key = 'amd_gpu'
+    if use_cache and cache_key in _gpu_detection_cache:
+        return _gpu_detection_cache[cache_key]
+
+    result = _detect_amd_gpu_impl()
+    _gpu_detection_cache[cache_key] = result
+    return result
+
+
+def _detect_amd_gpu_impl() -> Optional[Dict[str, str]]:
+    """Internal implementation of AMD GPU detection (uncached)."""
     try:
         # Try rocm-smi first (most reliable)
         result = subprocess.run(
@@ -99,7 +141,7 @@ def detect_amd_gpu() -> Optional[Dict[str, str]]:
     return None
 
 
-def get_rocm_environment() -> Dict[str, str]:
+def get_rocm_environment(use_cache: bool = True) -> Dict[str, str]:
     """
     Get environment variables needed for ROCm GPU support.
 
@@ -107,9 +149,28 @@ def get_rocm_environment() -> Dict[str, str]:
     PyTorch-specific variables (AMD_VARIANT_PROVIDER_*) are set to safe defaults;
     the subprocess that imports torch will configure itself properly.
 
+    Results are cached by default to avoid repeated GPU detection.
+
+    Args:
+        use_cache: If True (default), return cached results if available.
+
     Returns:
         Dict of environment variables to set
     """
+    global _rocm_env_cache
+
+    if use_cache and _rocm_env_cache is not None:
+        return _rocm_env_cache.copy()
+
+    env = _get_rocm_environment_impl()
+
+    # Cache the result
+    _rocm_env_cache = env.copy()
+    return env
+
+
+def _get_rocm_environment_impl() -> Dict[str, str]:
+    """Internal implementation of ROCm environment detection (uncached)."""
     env = {}
 
     # Find amdgpu.ids path to prevent libdrm warnings
@@ -165,18 +226,30 @@ def get_rocm_environment() -> Dict[str, str]:
     return env
 
 
-def get_subprocess_environment() -> Dict[str, str]:
+def get_subprocess_environment(use_cache: bool = True) -> Dict[str, str]:
     """
     Get complete environment for subprocesses with GPU support.
 
     Returns a copy of current environment with ROCm variables added.
     Safe to pass to subprocess.run(env=...) or subprocess.Popen(env=...).
 
+    Results are cached by default. The cache is based on the ROCm environment
+    variables (which are static for the session), combined with a fresh copy
+    of os.environ each time (in case environment variables change).
+
+    IMPORTANT: Caching prevents repeated calls to rocm-smi/lspci which can
+    cause driver state issues after heavy GPU work (like source separation).
+
+    Args:
+        use_cache: If True (default), use cached ROCm environment.
+
     Returns:
         Complete environment dict
     """
+    # Always get a fresh copy of the base environment
     env = os.environ.copy()
-    rocm_env = get_rocm_environment()
+    # Get ROCm vars (cached by default to avoid repeated GPU detection)
+    rocm_env = get_rocm_environment(use_cache=use_cache)
     env.update(rocm_env)
     return env
 
