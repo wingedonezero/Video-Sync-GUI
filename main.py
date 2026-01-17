@@ -9,6 +9,15 @@ Main application entry point.
 import os
 import sys
 
+# Limit BLAS/OpenBLAS threads to prevent threading issues with scipy/numpy
+# This MUST be set before numpy is imported anywhere
+# Helps prevent segfaults when running multiple source separation jobs
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+
 # Note: NANOBIND_DISABLE_LEAK_CHECK was previously needed due to VideoTimestamps cache leaks
 # This has been fixed by implementing proper cleanup in frame_utils.clear_vfr_cache()
 # os.environ.setdefault("NANOBIND_DISABLE_LEAK_CHECK", "1")
