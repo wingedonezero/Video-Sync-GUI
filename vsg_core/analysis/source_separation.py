@@ -1193,7 +1193,14 @@ def separate_audio(
             env['HIP_VISIBLE_DEVICES'] = ''
 
         try:
-            timeout = None if timeout_seconds <= 0 else timeout_seconds
+            # Enforce reasonable timeout bounds to prevent infinite hangs
+            # 0 or negative means "use max timeout" (2 hours), not "no timeout"
+            if timeout_seconds <= 0:
+                timeout = 7200  # 2 hours max
+                log(f"[SOURCE SEPARATION] Using maximum timeout of 2 hours")
+            else:
+                timeout = min(timeout_seconds, 7200)  # Cap at 2 hours
+
             result = subprocess.run(
                 [python_exe, str(script_path), json.dumps(args)],
                 capture_output=True,
@@ -1264,9 +1271,12 @@ def separate_audio(
             log(f"[SOURCE SEPARATION] Separation complete. Output length: {len(separated)} samples")
             return separated
 
-        except subprocess.TimeoutExpired:
-            log(f"[SOURCE SEPARATION] Timeout after {timeout_seconds}s (high-quality models may need more time)")
+        except subprocess.TimeoutExpired as e:
+            log(f"[SOURCE SEPARATION] Timeout after {timeout}s (high-quality models may need more time)")
             log(f"[SOURCE SEPARATION] Consider using a faster model or increasing the timeout in settings")
+            # subprocess.run() automatically kills the process on timeout
+            # Log that the process was terminated
+            log(f"[SOURCE SEPARATION] Subprocess was terminated due to timeout")
             return None
         except Exception as e:
             log(f"[SOURCE SEPARATION] Error: {e}")
