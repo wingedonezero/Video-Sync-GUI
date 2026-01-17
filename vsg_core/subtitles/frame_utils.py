@@ -178,8 +178,12 @@ def frame_to_time_aegisub(frame_num: int, fps: float) -> int:
 # MODE 3: VFR (VideoTimestamps-based)
 # ============================================================================
 
+import threading
+
 # Cache for VideoTimestamps instances to avoid re-parsing video
+# Thread-safe: accessed from ThreadPoolExecutor workers in frame_matching
 _vfr_cache = {}
+_vfr_cache_lock = threading.Lock()
 
 def clear_vfr_cache():
     """
@@ -189,7 +193,8 @@ def clear_vfr_cache():
     to prevent nanobind reference leaks.
     """
     global _vfr_cache
-    _vfr_cache.clear()
+    with _vfr_cache_lock:
+        _vfr_cache.clear()
     gc.collect()  # Force garbage collection to release nanobind objects
 
 def get_vfr_timestamps(video_path: str, fps: float, runner, config: dict = None):
@@ -221,9 +226,10 @@ def get_vfr_timestamps(video_path: str, fps: float, runner, config: dict = None)
         # Create cache key that includes rounding method
         cache_key = f"{video_path}_{rounding_str}"
 
-        # Check cache first
-        if cache_key in _vfr_cache:
-            return _vfr_cache[cache_key]
+        # Thread-safe cache access
+        with _vfr_cache_lock:
+            if cache_key in _vfr_cache:
+                return _vfr_cache[cache_key]
 
         # Try to detect if video is VFR by checking if it's a real video file
         # For now, use FPSTimestamps (lightweight) for CFR videos
@@ -248,7 +254,9 @@ def get_vfr_timestamps(video_path: str, fps: float, runner, config: dict = None)
         runner._log_message(f"[VideoTimestamps] Using FPSTimestamps for CFR video at {fps:.3f} fps")
         runner._log_message(f"[VideoTimestamps] RoundingMethod: {rounding_str}")
 
-        _vfr_cache[cache_key] = vts
+        # Thread-safe cache write
+        with _vfr_cache_lock:
+            _vfr_cache[cache_key] = vts
         return vts
 
     except ImportError:

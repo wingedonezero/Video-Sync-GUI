@@ -1475,18 +1475,19 @@ class SteppingCorrector:
                 self.log(f"  [QA] Note: 'skip' fallback mode is active with {len(invalid_clusters)} filtered cluster(s).")
                 self.log(f"  [QA] Filtered regions retain original timing, so delay stability check will be relaxed.")
 
-        qa_config = self.config.copy()
+        # Create QA config with overrides (use dict spread to avoid shallow copy issues)
         qa_threshold = self.config.get('segmented_qa_threshold', 85.0)
         qa_scan_chunks = self.config.get('segment_qa_chunk_count', 30)
         qa_min_chunks = self.config.get('segment_qa_min_accepted_chunks', 28)
 
-        qa_config.update({
+        qa_config = {
+            **self.config,
             'scan_chunk_count': qa_scan_chunks,
             'min_accepted_chunks': qa_min_chunks,
             'min_match_pct': qa_threshold,
             'scan_start_percentage': self.config.get('scan_start_percentage', 5.0),
             'scan_end_percentage': self.config.get('scan_end_percentage', 95.0)
-        })
+        }
         self.log(f"  [QA] Using minimum match confidence of {qa_threshold:.1f}% within main scan window.")
 
         try:

@@ -452,6 +452,7 @@ class VideoReader:
         import tempfile
         import os
 
+        tmp_path = None
         try:
             time_sec = time_ms / 1000.0
 
@@ -485,18 +486,22 @@ class VideoReader:
             )
 
             if result.returncode != 0:
-                if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
                 return None
 
             frame = Image.open(tmp_path)
             frame.load()
-            os.unlink(tmp_path)
 
             return frame
 
         except Exception:
             return None
+        finally:
+            # Always clean up temp file
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
     def close(self):
         """Release video resources."""
