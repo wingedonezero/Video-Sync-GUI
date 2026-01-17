@@ -1037,6 +1037,18 @@ def run_separation(args):
 
     return selected_file
 
+def cleanup_gpu():
+    """Release GPU resources before subprocess exits."""
+    import gc
+    gc.collect()
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+    except Exception:
+        pass  # torch not available or no GPU
+
 if __name__ == '__main__':
     args = json.loads(sys.argv[1])
     try:
@@ -1045,7 +1057,10 @@ if __name__ == '__main__':
     except Exception as e:
         import traceback
         print(json.dumps({'success': False, 'error': str(e), 'traceback': traceback.format_exc()}))
+        cleanup_gpu()
         sys.exit(1)
+    finally:
+        cleanup_gpu()
 '''
 
 
