@@ -2,7 +2,7 @@
 name = "vsg_core_rs"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.74"  # Required by pyo3 0.27+
+rust-version = "1.85"  # Required by libcosmic 0.1 (2024 edition)
 
 [lib]
 name = "vsg_core_rs"
@@ -20,3 +20,17 @@ rayon = "1.11"
 num-complex = "0.4"
 # Phase 3: Drift Detection dependencies
 # Note: Using custom DBSCAN implementation instead of linfa to avoid version conflicts
+
+[dependencies.libcosmic]
+git = "https://github.com/pop-os/libcosmic.git"
+features = [
+    "a11y",
+    "about",
+    "dbus-config",
+    "multi-window",
+    "single-instance",
+    "tokio",
+    "winit",
+    "wayland",
+    "wgpu",
+]
