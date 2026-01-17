@@ -1,0 +1,22 @@
+[package]
+name = "vsg_core_rs"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.74"  # Required by pyo3 0.27+
+
+[lib]
+name = "vsg_core_rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.27", features = ["extension-module"] }
+numpy = "0.27"  # PyO3 numpy bindings (NOT Python numpy)
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# Phase 2: Audio Correlation Engine dependencies
+rustfft = "6.4"
+ndarray = { version = "0.17", features = ["rayon"] }
+rayon = "1.11"
+num-complex = "0.4"
+# Phase 3: Drift Detection dependencies
+# Note: Using custom DBSCAN implementation instead of linfa to avoid version conflicts

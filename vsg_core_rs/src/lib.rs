@@ -10,6 +10,12 @@ mod subtitles;
 mod extraction;
 mod chapters;
 mod mux;
+mod orchestrator;
+mod pipeline;
+mod pipeline_components;
+mod workers;
+mod config;
+mod ui_bridge;
 
 #[pymodule]
 fn vsg_core_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {

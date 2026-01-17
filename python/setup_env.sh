@@ -15,7 +15,7 @@ NC='\033[0m' # No Color
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_DIR="$PROJECT_DIR/.venv"
 VENV_PYTHON="$VENV_DIR/bin/python"
-RUST_PROJECT_DIR="$PROJECT_DIR/../rust/vsg_core_rs"
+RUST_PROJECT_DIR="$PROJECT_DIR/../vsg_core_rs"
 PYTHON_AUDIO_SEPARATOR_REPO="audio-separator @ git+https://github.com/nomadkaraoke/python-audio-separator.git"
 PYTHON_AUDIO_SEPARATOR_GPU_REPO="audio-separator[gpu] @ git+https://github.com/nomadkaraoke/python-audio-separator.git"
 PYTHON_AUDIO_SEPARATOR_CPU_REPO="audio-separator[cpu] @ git+https://github.com/nomadkaraoke/python-audio-separator.git"
@@ -708,7 +708,7 @@ if [ -d "$RUST_PROJECT_DIR" ]; then
     cd "$PROJECT_DIR"
     echo -e "${GREEN}✓ Rust components built${NC}"
 else
-    echo -e "${YELLOW}No Rust components found (rust/vsg_core_rs not present)${NC}"
+    echo -e "${YELLOW}No Rust components found (vsg_core_rs not present)${NC}"
 fi
 
 echo ""

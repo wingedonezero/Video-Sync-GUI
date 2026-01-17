@@ -14,9 +14,12 @@
 ### What We Have
 | Component | Status | Location |
 |-----------|--------|----------|
-| **Rust implementations** | ✅ Written & tested | `rust/vsg_core_rs/src/` (4,291 lines) |
+| **Rust implementations (active)** | ✅ Written & tested | `vsg_core_rs/src/` (4,291 lines) |
+| **Rust reference snapshot** | ✅ Reference only | `rust/vsg_core_rs/` |
 | **Python implementations** | ✅ Still working | `python/vsg_core/` (12,978 lines) |
 | **Python → Rust bridge** | ❌ **DOES NOT EXIST** | Should be `python/vsg_core/_rust_bridge/` |
+
+**Reference note**: `rust/vsg_core_rs/` is a snapshot for comparison only. Active Rust work happens in `vsg_core_rs/`.
 
 ### What This Means
 - **Rust code exists but is UNUSED** - Python doesn't import `vsg_core_rs`
@@ -27,7 +30,7 @@
 ### Immediate Action Required
 1. Establish Rust **core shell** layout (orchestrator, pipeline, workers, config, UI wiring)
 2. Embed Python for any unported modules to keep behavior intact
-3. Build Rust library: `cd rust/vsg_core_rs && maturin develop --release`
+3. Build Rust library: `cd vsg_core_rs && maturin develop --release`
 4. Create `python/vsg_core/_rust_bridge/` modules (as needed for parity checks)
 5. Test Python ↔ Rust parity **after** core shell is runnable
 
@@ -154,7 +157,7 @@ The Rust library will be built with **maturin** and installed into the same venv
 │      ├── scipy/                                              │
 │      └── ... (other packages)                                │
 │                                                              │
-│  rust/vsg_core_rs/       ←NEW (Rust source)                   │
+│  vsg_core_rs/       ←NEW (Rust source)                   │
 │  ├── Cargo.toml                                              │
 │  ├── pyproject.toml  (maturin config)                        │
 │  └── src/                                                    │
@@ -168,7 +171,7 @@ The Rust library will be built with **maturin** and installed into the same venv
 
 ### Maturin Setup
 
-Create `rust/vsg_core_rs/pyproject.toml`:
+Create `vsg_core_rs/pyproject.toml`:
 ```toml
 [build-system]
 requires = ["maturin>=1.7,<2.0"]
@@ -193,13 +196,13 @@ module-name = "vsg_core_rs"
 
 **Development** (installs into active venv):
 ```bash
-cd rust/vsg_core_rs
+cd vsg_core_rs
 maturin develop --release
 ```
 
 **Production wheel** (for distribution):
 ```bash
-cd rust/vsg_core_rs
+cd vsg_core_rs
 maturin build --release
 # Output: target/wheels/vsg_core_rs-0.1.0-cp313-cp313-linux_x86_64.whl
 ```
@@ -223,14 +226,14 @@ fi
 venv_pip install maturin
 
 # Build and install Rust library
-RUST_PROJECT_DIR="$PROJECT_DIR/../rust/vsg_core_rs"
+RUST_PROJECT_DIR="$PROJECT_DIR/../vsg_core_rs"
 if [ -d "$RUST_PROJECT_DIR" ]; then
     cd "$RUST_PROJECT_DIR"
     maturin develop --release
     cd "$PROJECT_DIR"
     echo -e "${GREEN}✓ Rust components built${NC}"
 else
-    echo -e "${YELLOW}No Rust components found (rust/vsg_core_rs/ not present)${NC}"
+    echo -e "${YELLOW}No Rust components found (vsg_core_rs/ not present)${NC}"
 fi
 ```
 
@@ -238,15 +241,15 @@ fi
 
 | Location | Contents |
 |----------|----------|
-| `rust/vsg_core_rs/target/` | Rust build artifacts (not distributed) |
-| `rust/vsg_core_rs/target/wheels/` | Wheel files if using `maturin build` |
+| `vsg_core_rs/target/` | Rust build artifacts (not distributed) |
+| `vsg_core_rs/target/wheels/` | Wheel files if using `maturin build` |
 | `python/.venv/lib/python3.13/site-packages/vsg_core_rs*.so` | Installed native module |
 
 ### Distribution Options
 
 1. **Development/Local**: Use `maturin develop` — builds and installs directly into venv
 2. **Wheel Distribution**: Use `maturin build` — creates `.whl` file users can `pip install`
-3. **Source Distribution**: Ship `rust/vsg_core_rs/` source, users run `maturin develop`
+3. **Source Distribution**: Ship `vsg_core_rs/` source, users run `maturin develop`
 
 **Recommended for your project**: Option 3 (source distribution) since:
 - Users already run `python/setup_env.sh`
@@ -304,7 +307,7 @@ Your ROCm environment detection in `python/run.sh` stays exactly as-is. The Rust
 ### What EXISTS (Rust Side)
 
 ```
-rust/vsg_core_rs/src/
+vsg_core_rs/src/
 ├── lib.rs                    ✅ PyO3 module with all exports
 ├── models/                   ✅ All data types (enums, media, jobs, settings)
 ├── analysis/
@@ -384,7 +387,7 @@ python/vsg_core/
 | 10 | UI Migration | 41 | LAST | Not started | Future |
 
 ### What "Complete" Means for Phases 1-8
-- ✅ **Rust code written** in `rust/vsg_core_rs/src/`
+- ✅ **Rust code written** in `vsg_core_rs/src/`
 - ✅ **PyO3 bindings defined** for Python interop
 - ✅ **Unit tests pass** in Rust
 - ❌ **Python does NOT call Rust yet** - this is Phase 9
@@ -407,7 +410,7 @@ python/vsg_core/models/converters.py   →  src/models/converters.rs
 
 ### Rust Crate Structure
 ```
-rust/vsg_core_rs/
+vsg_core_rs/
 ├── Cargo.toml
 ├── src/
 │   ├── lib.rs
@@ -1331,7 +1334,7 @@ pub fn write_options_file(tokens: &[String], path: &Path) -> Result<()> {
 > The Rust and Python implementations exist in parallel. This phase establishes the **runnable core shell** first, then integrates modules.
 
 ### Current State
-- **Rust code exists**: `rust/vsg_core_rs/src/` with all Phase 1-8 implementations
+- **Rust code exists**: `vsg_core_rs/src/` with all Phase 1-8 implementations
 - **Python code unchanged**: `python/vsg_core/` still uses pure Python implementations
 - **No integration**: Zero Python files import from `vsg_core_rs`
 
@@ -1340,7 +1343,7 @@ pub fn write_options_file(tokens: &[String], path: &Path) -> Result<()> {
 Deliver a **runnable Rust shell** that mirrors Python structure 1:1. Stubs are acceptable as long as the layout matches.
 
 ```
-rust/vsg_core_rs/src/
+vsg_core_rs/src/
 ├── orchestrator/            # Rust pipeline orchestration
 ├── pipeline/                # Job pipeline coordination
 ├── pipeline_components/     # Logging, result audit, output writer
@@ -1441,12 +1444,12 @@ Once testing passes:
 ### Files to Create
 
 ```
-rust/vsg_core_rs/src/orchestrator/
-rust/vsg_core_rs/src/pipeline/
-rust/vsg_core_rs/src/pipeline_components/
-rust/vsg_core_rs/src/workers/
-rust/vsg_core_rs/src/config/
-rust/vsg_core_rs/src/ui_bridge/
+vsg_core_rs/src/orchestrator/
+vsg_core_rs/src/pipeline/
+vsg_core_rs/src/pipeline_components/
+vsg_core_rs/src/workers/
+vsg_core_rs/src/config/
+vsg_core_rs/src/ui_bridge/
 python/vsg_core/_rust_bridge/__init__.py
 python/vsg_core/_rust_bridge/analysis.py
 python/vsg_core/_rust_bridge/correction.py
@@ -1505,15 +1508,15 @@ Once Phase 9 integration is stable and tested, migrate to a Rust-native GUI:
 ```
 Current State:
 ├── python/vsg_qt/ (PySide6 Python)
-└── rust/vsg_core_rs/ (Rust library)
+└── vsg_core_rs/ (Rust library)
 
 Phase 9 Complete:
-├── python/vsg_qt/ (PySide6 Python) ─→ calls ─→ rust/vsg_core_rs/
-└── python/vsg_core/ (Python orchestration) ─→ calls ─→ rust/vsg_core_rs/
+├── python/vsg_qt/ (PySide6 Python) ─→ calls ─→ vsg_core_rs/
+└── python/vsg_core/ (Python orchestration) ─→ calls ─→ vsg_core_rs/
 
 Phase 10 Complete:
 ├── vsg_gui/ (Rust GUI - libcosmic/slint/egui)
-└── rust/vsg_core_rs/ (Rust library - direct calls, no FFI)
+└── vsg_core_rs/ (Rust library - direct calls, no FFI)
 ```
 
 ### 1:1 Naming Convention
@@ -1673,7 +1676,7 @@ After Phase 2:
 1. [ ] Define Rust core shell folder structure (matching Python layout)
 2. [ ] Implement orchestrator + worker lifecycle with stubbed steps
 3. [ ] Embed Python modules for unported functionality
-4. [ ] Build `rust/vsg_core_rs` with `maturin develop` and verify imports work
+4. [ ] Build `vsg_core_rs` with `maturin develop` and verify imports work
 5. [ ] Create `python/vsg_core/_rust_bridge/__init__.py`
 6. [ ] Create bridge modules one at a time, test each
 7. [ ] Run full pipeline comparison tests

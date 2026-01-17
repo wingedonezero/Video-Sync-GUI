@@ -139,8 +139,11 @@ Directory structure:
     │           ├── __init__.py
     │           ├── runner.py
     │           └── signals.py
+    ├── vsg_core_rs/
+    │   ├── Cargo.toml
+    │   └── src/
     └── rust/
-        └── vsg_core_rs/
+        └── vsg_core_rs/      # Reference snapshot
             ├── Cargo.toml
             └── src/
 
