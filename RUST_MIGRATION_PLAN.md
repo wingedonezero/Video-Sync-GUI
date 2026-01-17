@@ -4,17 +4,27 @@
 >
 > **Last Updated**: 2026-01-16
 > **Migration Status**: Phase 8 Rust Complete - **Python Integration NOT Started**
+>
+> **New Plan (2026-01-16)**: Build the **core shell first** (orchestrator, pipeline, workers, config, UI wiring) with **embedded Python** for anything not yet ported. Leaf/algorithm modules will be integrated **after** the core shell is runnable.
 
 ---
 
 ## 🚨 Current State Summary
 
+### Quick Start for New Chats (Read First)
+- **Active Rust crate**: `vsg_core_rs/` at repo root (this is where all new work goes).
+- **Reference snapshot**: `rust/vsg_core_rs/` is **read-only** for comparison.
+- **Phase 9 focus**: Build the core shell first (orchestrator/worker/config/UI wiring), embed Python for unported modules, then migrate leaf modules.
+
 ### What We Have
 | Component | Status | Location |
 |-----------|--------|----------|
-| **Rust implementations** | ✅ Written & tested | `vsg_core_rs/src/` (4,291 lines) |
-| **Python implementations** | ✅ Still working | `vsg_core/` (12,978 lines) |
-| **Python → Rust bridge** | ❌ **DOES NOT EXIST** | Should be `vsg_core/_rust_bridge/` |
+| **Rust implementations (active)** | ✅ Written & tested | `vsg_core_rs/src/` (4,291 lines) |
+| **Rust reference snapshot** | ✅ Reference only | `rust/vsg_core_rs/` |
+| **Python implementations** | ✅ Still working | `python/vsg_core/` (12,978 lines) |
+| **Python → Rust bridge** | ❌ **DOES NOT EXIST** | Should be `python/vsg_core/_rust_bridge/` |
+
+**Reference note**: `rust/vsg_core_rs/` is a snapshot for comparison only. Active Rust work happens in `vsg_core_rs/`.
 
 ### What This Means
 - **Rust code exists but is UNUSED** - Python doesn't import `vsg_core_rs`
@@ -23,10 +33,11 @@
 - **Phase 9 is the critical "tie-in" phase** - Must create integration layer
 
 ### Immediate Action Required
-1. Build Rust library: `cd vsg_core_rs && maturin develop --release`
-2. Create `vsg_core/_rust_bridge/` modules
-3. Test Python ↔ Rust parity
-4. Update orchestrator steps to use bridges
+1. Establish Rust **core shell** layout (orchestrator, pipeline, workers, config, UI wiring)
+2. Embed Python for any unported modules to keep behavior intact
+3. Build Rust library: `cd vsg_core_rs && maturin develop --release`
+4. Create `python/vsg_core/_rust_bridge/` modules (as needed for parity checks)
+5. Test Python ↔ Rust parity **after** core shell is runnable
 
 ---
 
@@ -48,7 +59,7 @@
 12. [Phase 6: Frame Utilities](#phase-6-frame-utilities)
 13. [Phase 7: Extraction Layer](#phase-7-extraction-layer)
 14. [Phase 8: Mux Options Builder](#phase-8-mux-options-builder)
-15. [Phase 9: Pipeline Orchestration](#phase-9-pipeline-orchestration)
+15. [Phase 9: Core Shell + Embedded Python](#phase-9-core-shell--embedded-python)
 16. [Phase 10: UI Migration](#phase-10-ui-migration)
 17. [Critical Preservation Requirements](#critical-preservation-requirements)
 18. [Testing Strategy](#testing-strategy)
@@ -81,20 +92,32 @@
 
 ## 2. Migration Philosophy
 
-### Principle 1: Bottom-Up Migration
-Start with modules that have **zero internal dependencies**, work upward. This ensures:
+### Principle 1: Core-Shell-First Migration (Updated)
+Start with the **orchestrator + worker + config + UI wiring** so the app is runnable end-to-end, even if many steps are still Python-backed. This ensures:
+- The UI and job lifecycle can be tested early
+- Logging, progress, and pipeline behavior are validated up front
+- Python-backed modules remain available via embedding or bridges
+
+### Principle 2: Bottom-Up Module Migration (Still Applies)
+Once the core shell is runnable, migrate leaf modules in dependency order. This ensures:
 - Each Rust module can be tested independently
-- Python orchestration continues working with Rust components via PyO3
+- The core shell remains stable while internals are replaced
 - No circular dependency issues
 
-### Principle 2: Preserve All Behaviors
+### Principle 3: Preserve All Behaviors
 Every special case, threshold, and edge case handling must be preserved exactly. The migration document includes specific notes about what must not change.
 
-### Principle 3: Small, Testable Steps
+### Principle 4: Small, Testable Steps
 Each phase produces a working system. Never break functionality for more than one phase.
 
-### Principle 4: Hybrid Operation
-During migration, Python calls Rust via PyO3 bindings. Rust handles compute-heavy work; Python handles orchestration and UI.
+### Principle 5: Hybrid Operation (Expanded)
+During migration, **Rust owns the orchestration shell** while **Python remains embedded** for functionality not yet ported. Rust handles:
+- Pipeline orchestration
+- Worker lifecycle & logging
+- Config and job models
+Python continues to handle:
+- Legacy leaf modules and external tool wrappers
+- pysubs2, videotimestamps, and model-dependent code
 
 ---
 
@@ -107,7 +130,7 @@ These components will remain in Python for the foreseeable future:
 | `videotimestamps` library | No Rust equivalent exists |
 | `pysubs2` library + subtitle processing | No Rust equivalent exists for full ASS/SSA/SRT parsing and manipulation |
 | Source separation models | PyTorch/ONNX ecosystem, already subprocess-isolated |
-| Qt UI (`vsg_qt/*`) | Migrated last; PyO3 FFI works well |
+| Qt UI (`python/vsg_qt/*`) | Migrated last; PyO3 FFI works well |
 | External tool calls | Already subprocess-based (ffmpeg, mkvmerge, etc.) |
 
 ---
@@ -117,9 +140,10 @@ These components will remain in Python for the foreseeable future:
 ### How Rust Integrates with Current Setup
 
 Your current setup uses:
-- `.venv/` — Python virtual environment
-- `run.sh` — Activates venv, sets ROCm env, runs `python main.py`
-- `setup_env.sh` — Creates venv, installs Python dependencies
+- `python/.venv/` — Python virtual environment
+- `python/run.sh` — Activates venv, sets ROCm env, runs `python main.py`
+- `python/setup_env.sh` — Creates venv, installs Python dependencies
+- `Cargo.toml` at repo root — Rust workspace (active crate: `vsg_core_rs/`)
 
 The Rust library will be built with **maturin** and installed into the same venv:
 
@@ -127,27 +151,27 @@ The Rust library will be built with **maturin** and installed into the same venv
 ┌─────────────────────────────────────────────────────────────┐
 │                    Project Directory                         │
 ├─────────────────────────────────────────────────────────────┤
-│  run.sh              → Unchanged (runs python main.py)       │
-│  setup_env.sh        → Add Rust build step                   │
-│  main.py             → Unchanged                             │
-│  requirements.txt    → Unchanged                             │
+│  python/run.sh              → Unchanged (runs python main.py) │
+│  python/setup_env.sh        → Add Rust build step             │
+│  python/main.py             → Unchanged                       │
+│  python/requirements.txt    → Unchanged                       │
 │                                                              │
-│  .venv/                                                      │
-│  └── lib/python3.13/site-packages/                          │
+│  python/.venv/                                               │
+│  └── lib/python3.13/site-packages/                           │
 │      ├── vsg_core_rs.cpython-313-x86_64-linux-gnu.so  ←NEW  │
 │      ├── numpy/                                              │
 │      ├── scipy/                                              │
 │      └── ... (other packages)                                │
 │                                                              │
-│  vsg_core_rs/        ←NEW (Rust source)                      │
+│  vsg_core_rs/       ←NEW (Rust source)                   │
 │  ├── Cargo.toml                                              │
 │  ├── pyproject.toml  (maturin config)                        │
 │  └── src/                                                    │
 │      ├── lib.rs                                              │
 │      └── ...                                                 │
 │                                                              │
-│  vsg_core/           (Python - calls into Rust)              │
-│  vsg_qt/             (Python UI)                             │
+│  python/vsg_core/          (Python - calls into Rust)          │
+│  python/vsg_qt/            (Python UI)                         │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -189,7 +213,7 @@ maturin build --release
 # Output: target/wheels/vsg_core_rs-0.1.0-cp313-cp313-linux_x86_64.whl
 ```
 
-### Updated setup_env.sh
+### Updated python/setup_env.sh
 
 Add to `full_setup()` after Python dependencies are installed:
 
@@ -208,8 +232,9 @@ fi
 venv_pip install maturin
 
 # Build and install Rust library
-if [ -d "$PROJECT_DIR/vsg_core_rs" ]; then
-    cd "$PROJECT_DIR/vsg_core_rs"
+RUST_PROJECT_DIR="$PROJECT_DIR/../vsg_core_rs"
+if [ -d "$RUST_PROJECT_DIR" ]; then
+    cd "$RUST_PROJECT_DIR"
     maturin develop --release
     cd "$PROJECT_DIR"
     echo -e "${GREEN}✓ Rust components built${NC}"
@@ -224,7 +249,7 @@ fi
 |----------|----------|
 | `vsg_core_rs/target/` | Rust build artifacts (not distributed) |
 | `vsg_core_rs/target/wheels/` | Wheel files if using `maturin build` |
-| `.venv/lib/python3.13/site-packages/vsg_core_rs*.so` | Installed native module |
+| `python/.venv/lib/python3.13/site-packages/vsg_core_rs*.so` | Installed native module |
 
 ### Distribution Options
 
@@ -233,18 +258,18 @@ fi
 3. **Source Distribution**: Ship `vsg_core_rs/` source, users run `maturin develop`
 
 **Recommended for your project**: Option 3 (source distribution) since:
-- Users already run `setup_env.sh`
+- Users already run `python/setup_env.sh`
 - Rust compilation handles platform differences automatically
 - No need to build wheels for every platform
 
-### run.sh and setup_env.sh Stay Mostly Unchanged
+### python/run.sh and python/setup_env.sh Stay Mostly Unchanged
 
-- `run.sh` — No changes needed. It activates venv and runs `python main.py`. The Rust library is already in the venv's site-packages.
-- `setup_env.sh` — Add the Rust build step shown above. Everything else stays the same.
+- `python/run.sh` — No changes needed. It activates venv and runs `python main.py`. The Rust library is already in the venv's site-packages.
+- `python/setup_env.sh` — Add the Rust build step shown above. Everything else stays the same.
 
 ### GPU Environment
 
-Your ROCm environment detection in `run.sh` stays exactly as-is. The Rust library doesn't need GPU access directly — source separation (which uses GPU) stays in Python via `audio-separator`.
+Your ROCm environment detection in `python/run.sh` stays exactly as-is. The Rust library doesn't need GPU access directly — source separation (which uses GPU) stays in Python via `audio-separator`.
 
 ---
 
@@ -313,7 +338,7 @@ vsg_core_rs/src/
 ### What's MISSING (Python Integration)
 
 ```
-vsg_core/
+python/vsg_core/
 ├── _rust_bridge/            ❌ DOES NOT EXIST - needs creation
 │   ├── __init__.py
 │   ├── analysis.py          ❌ Would wrap vsg_core_rs.analyze_audio_correlation
@@ -324,8 +349,8 @@ vsg_core/
 │   └── frame_utils.py       ❌ Would wrap vsg_core_rs frame utilities
 │
 ├── orchestrator/steps/      ❌ Still uses pure Python implementations
-│   ├── analysis_step.py     ❌ Calls vsg_core/analysis/audio_corr.py (Python)
-│   ├── extract_step.py      ❌ Calls vsg_core/extraction/tracks.py (Python)
+│   ├── analysis_step.py     ❌ Calls python/vsg_core/analysis/audio_corr.py (Python)
+│   ├── extract_step.py      ❌ Calls python/vsg_core/extraction/tracks.py (Python)
 │   └── ...                  ❌ All steps use Python, not Rust
 ```
 
@@ -364,7 +389,7 @@ vsg_core/
 | 6 | Frame Utilities | 1 (partial) | MEDIUM | ✅ Complete | ❌ Not integrated |
 | 7 | Extraction Layer | 3 | MEDIUM | ✅ Complete | ❌ Not integrated |
 | 8 | Mux Options | 1 | MEDIUM | ✅ Complete | ❌ Not integrated |
-| **9** | **Integration & Testing** | 8+ | **CRITICAL** | N/A | **CURRENT PHASE** |
+| **9** | **Core Shell + Embedded Python** | 8+ | **CRITICAL** | N/A | **CURRENT PHASE** |
 | 10 | UI Migration | 41 | LAST | Not started | Future |
 
 ### What "Complete" Means for Phases 1-8
@@ -381,12 +406,12 @@ vsg_core/
 
 ### Files to Migrate
 ```
-vsg_core/models/enums.py        →  src/models/enums.rs
-vsg_core/models/media.py        →  src/models/media.rs
-vsg_core/models/results.py      →  src/models/results.rs
-vsg_core/models/jobs.py         →  src/models/jobs.rs
-vsg_core/models/settings.py     →  src/models/settings.rs
-vsg_core/models/converters.py   →  src/models/converters.rs
+python/vsg_core/models/enums.py        →  src/models/enums.rs
+python/vsg_core/models/media.py        →  src/models/media.rs
+python/vsg_core/models/results.py      →  src/models/results.rs
+python/vsg_core/models/jobs.py         →  src/models/jobs.rs
+python/vsg_core/models/settings.py     →  src/models/settings.rs
+python/vsg_core/models/converters.py   →  src/models/converters.rs
 ```
 
 ### Rust Crate Structure
@@ -620,7 +645,7 @@ fn vsg_core_rs(_py: Python, m: &PyModule) -> PyResult<()> {
 
 ### Files to Migrate
 ```
-vsg_core/analysis/audio_corr.py  →  src/analysis/correlation.rs
+python/vsg_core/analysis/audio_corr.py  →  src/analysis/correlation.rs
 ```
 
 ### Dependencies
@@ -794,7 +819,7 @@ fn analyze_audio_correlation(
 
 ### Files to Migrate
 ```
-vsg_core/analysis/drift_detection.py  →  src/analysis/drift_detection.rs
+python/vsg_core/analysis/drift_detection.py  →  src/analysis/drift_detection.rs
 ```
 
 ### Dependencies
@@ -884,9 +909,9 @@ fn detect_pal_drift(
 
 ### Files to Migrate
 ```
-vsg_core/correction/stepping.py  →  src/correction/stepping.rs
-vsg_core/correction/linear.py    →  src/correction/linear.rs
-vsg_core/correction/pal.py       →  src/correction/pal.rs
+python/vsg_core/correction/stepping.py  →  src/correction/stepping.rs
+python/vsg_core/correction/linear.py    →  src/correction/linear.rs
+python/vsg_core/correction/pal.py       →  src/correction/pal.rs
 ```
 
 ### Dependencies
@@ -1028,15 +1053,15 @@ pub fn run_pal_correction(
 
 **Files that STAY in Python** (all use pysubs2):
 ```
-vsg_core/subtitles/metadata_preserver.py  →  KEEP (uses pysubs2)
-vsg_core/subtitles/style_engine.py        →  KEEP (uses pysubs2)
-vsg_core/subtitles/timing.py              →  KEEP (uses pysubs2)
-vsg_core/subtitles/cleanup.py             →  KEEP (uses pysubs2)
-vsg_core/subtitles/frame_matching.py      →  KEEP (uses pysubs2)
-vsg_core/subtitles/rescale.py             →  KEEP (uses pysubs2)
-vsg_core/subtitles/stepping_adjust.py     →  KEEP (uses pysubs2)
-vsg_core/subtitles/style_filter.py        →  KEEP (uses pysubs2)
-vsg_core/subtitles/sync_modes/*.py        →  KEEP (all use pysubs2)
+python/vsg_core/subtitles/metadata_preserver.py  →  KEEP (uses pysubs2)
+python/vsg_core/subtitles/style_engine.py        →  KEEP (uses pysubs2)
+python/vsg_core/subtitles/timing.py              →  KEEP (uses pysubs2)
+python/vsg_core/subtitles/cleanup.py             →  KEEP (uses pysubs2)
+python/vsg_core/subtitles/frame_matching.py      →  KEEP (uses pysubs2)
+python/vsg_core/subtitles/rescale.py             →  KEEP (uses pysubs2)
+python/vsg_core/subtitles/stepping_adjust.py     →  KEEP (uses pysubs2)
+python/vsg_core/subtitles/style_filter.py        →  KEEP (uses pysubs2)
+python/vsg_core/subtitles/sync_modes/*.py        →  KEEP (all use pysubs2)
 ```
 
 ### Alternative Considered and Rejected
@@ -1072,13 +1097,13 @@ The Python subtitle modules will:
 
 **Files to Migrate to Rust** (pure computational logic):
 ```
-vsg_core/subtitles/frame_utils.py (partial)  →  src/subtitles/frame_utils.rs
+python/vsg_core/subtitles/frame_utils.py (partial)  →  src/subtitles/frame_utils.rs
 ```
 
 **Files to KEEP in Python** (use pysubs2):
 ```
-vsg_core/subtitles/frame_sync.py      →  KEEP (re-exports only)
-vsg_core/subtitles/sync_modes/*.py    →  KEEP (all use pysubs2)
+python/vsg_core/subtitles/frame_sync.py      →  KEEP (re-exports only)
+python/vsg_core/subtitles/sync_modes/*.py    →  KEEP (all use pysubs2)
 ```
 
 ### Dependencies
@@ -1122,7 +1147,7 @@ Rust provides CFR utilities; Python wraps for VFR.
 The Python subtitle processing modules will call Rust for frame conversion utilities:
 
 ```python
-# Python: vsg_core/subtitles/sync_modes/time_based.py
+# Python: python/vsg_core/subtitles/sync_modes/time_based.py
 from vsg_core_rs import time_to_frame_floor, frame_to_time_floor
 import pysubs2
 
@@ -1162,9 +1187,9 @@ The following `frame_utils.py` functions **cannot** be migrated (depend on Pytho
 
 ### Files to Migrate
 ```
-vsg_core/extraction/tracks.py       →  src/extraction/tracks.rs
-vsg_core/extraction/attachments.py  →  src/extraction/attachments.rs
-vsg_core/chapters/process.py        →  src/chapters/process.rs
+python/vsg_core/extraction/tracks.py       →  src/extraction/tracks.rs
+python/vsg_core/extraction/attachments.py  →  src/extraction/attachments.rs
+python/vsg_core/chapters/process.py        →  src/chapters/process.rs
 ```
 
 ### Dependencies
@@ -1219,7 +1244,7 @@ pub fn parse_mkvmerge_json(json_str: &str) -> Result<StreamInfo> {
 
 ### Files to Migrate
 ```
-vsg_core/mux/options_builder.py  →  src/mux/options_builder.rs
+python/vsg_core/mux/options_builder.py  →  src/mux/options_builder.rs
 ```
 
 ### Dependencies
@@ -1307,24 +1332,41 @@ pub fn write_options_file(tokens: &[String], path: &Path) -> Result<()> {
 
 ---
 
-## Phase 9: Integration & Testing
+## Phase 9: Core Shell + Embedded Python
 
 ### Status: [ ] Not Started
 
-> ⚠️ **CRITICAL MISSING PIECE**: Phases 1-8 implemented Rust code, but Python does NOT call it yet!
-> The Rust and Python implementations exist in parallel. This phase creates the integration layer.
+> ⚠️ **CRITICAL MISSING PIECE**: Phases 1-8 implemented Rust code, but Python does NOT call it yet.
+> The Rust and Python implementations exist in parallel. This phase establishes the **runnable core shell** first, then integrates modules.
 
 ### Current State
 - **Rust code exists**: `vsg_core_rs/src/` with all Phase 1-8 implementations
-- **Python code unchanged**: `vsg_core/` still uses pure Python implementations
+- **Python code unchanged**: `python/vsg_core/` still uses pure Python implementations
 - **No integration**: Zero Python files import from `vsg_core_rs`
 
-### Phase 9A: Python Integration Layer
+### Phase 9A: Core Shell First (Required)
 
-Create wrapper modules that bridge Python → Rust. These go in `vsg_core/` and provide 1:1 naming with existing Python APIs:
+Deliver a **runnable Rust shell** that mirrors Python structure 1:1. Stubs are acceptable as long as the layout matches.
 
 ```
-vsg_core/
+vsg_core_rs/src/
+├── orchestrator/            # Rust pipeline orchestration
+├── pipeline/                # Job pipeline coordination
+├── pipeline_components/     # Logging, result audit, output writer
+├── workers/                 # Worker lifecycle + threading
+├── config/                  # Settings, defaults, persistence
+└── ui_bridge/               # Hooks for UI <-> core (if needed)
+```
+
+### Phase 9B: Embedded Python + Bridges
+
+**Primary rule**: If a Rust module is not ready, call the Python implementation directly via embedding.
+Bridges remain useful for parity testing and gradual switchover.
+
+Create wrapper modules that bridge Python → Rust. These go in `python/vsg_core/` and provide 1:1 naming with existing Python APIs:
+
+```
+python/vsg_core/
 ├── _rust_bridge/                    ← NEW: Integration layer
 │   ├── __init__.py
 │   ├── analysis.py                  ← Wraps vsg_core_rs analysis functions
@@ -1338,9 +1380,9 @@ vsg_core/
 **Integration Pattern** (keeps Python API stable):
 
 ```python
-# vsg_core/_rust_bridge/analysis.py
+# python/vsg_core/_rust_bridge/analysis.py
 """
-Bridge module: Provides same API as vsg_core/analysis/audio_corr.py
+Bridge module: Provides same API as python/vsg_core/analysis/audio_corr.py
 but delegates to Rust implementation.
 """
 try:
@@ -1366,7 +1408,7 @@ def run_correlation(ref_audio, tgt_audio, sample_rate, method="gcc_phat", **kwar
         return _py_correlate(ref_audio, tgt_audio, sample_rate, method, **kwargs)
 ```
 
-### Phase 9B: Integration Testing
+### Phase 9C: Integration Testing
 
 **Step-by-step validation** to ensure Rust produces identical results:
 
@@ -1381,7 +1423,7 @@ def run_correlation(ref_audio, tgt_audio, sample_rate, method="gcc_phat", **kwar
 | 7 | `mux/options_builder.py` | `_rust_bridge/mux.py` | Same mkvmerge tokens |
 | 8 | `subtitles/frame_utils.py` | `_rust_bridge/frame_utils.py` | Same frame numbers |
 
-### Phase 9C: Real-World Testing
+### Phase 9D: Real-World Testing
 
 ```
 Test Files Required:
@@ -1398,7 +1440,7 @@ Test Files Required:
 3. Compare outputs byte-for-byte (muxed file)
 4. Compare intermediate results (delays, EDL, tokens)
 
-### Phase 9D: Switchover
+### Phase 9E: Switchover
 
 Once testing passes:
 1. Update orchestrator steps to use `_rust_bridge` modules
@@ -1408,28 +1450,36 @@ Once testing passes:
 ### Files to Create
 
 ```
-vsg_core/_rust_bridge/__init__.py
-vsg_core/_rust_bridge/analysis.py
-vsg_core/_rust_bridge/correction.py
-vsg_core/_rust_bridge/extraction.py
-vsg_core/_rust_bridge/chapters.py
-vsg_core/_rust_bridge/mux.py
-vsg_core/_rust_bridge/frame_utils.py
+vsg_core_rs/src/orchestrator/
+vsg_core_rs/src/pipeline/
+vsg_core_rs/src/pipeline_components/
+vsg_core_rs/src/workers/
+vsg_core_rs/src/config/
+vsg_core_rs/src/ui_bridge/
+python/vsg_core/_rust_bridge/__init__.py
+python/vsg_core/_rust_bridge/analysis.py
+python/vsg_core/_rust_bridge/correction.py
+python/vsg_core/_rust_bridge/extraction.py
+python/vsg_core/_rust_bridge/chapters.py
+python/vsg_core/_rust_bridge/mux.py
+python/vsg_core/_rust_bridge/frame_utils.py
 tests/integration/test_rust_python_parity.py
 ```
 
 ### Files to Modify
 
 ```
-vsg_core/orchestrator/steps/analysis_step.py     →  Import from _rust_bridge
-vsg_core/orchestrator/steps/extract_step.py      →  Import from _rust_bridge
-vsg_core/orchestrator/steps/audio_correction_step.py  →  Import from _rust_bridge
-vsg_core/orchestrator/steps/chapters_step.py     →  Import from _rust_bridge
-vsg_core/orchestrator/steps/mux_step.py          →  Import from _rust_bridge
+python/vsg_core/orchestrator/steps/analysis_step.py     →  Import from _rust_bridge
+python/vsg_core/orchestrator/steps/extract_step.py      →  Import from _rust_bridge
+python/vsg_core/orchestrator/steps/audio_correction_step.py  →  Import from _rust_bridge
+python/vsg_core/orchestrator/steps/chapters_step.py     →  Import from _rust_bridge
+python/vsg_core/orchestrator/steps/mux_step.py          →  Import from _rust_bridge
 ```
 
 ### Testing Checkpoint 9
+- [ ] Core shell compiles with stubbed steps
 - [ ] Build `vsg_core_rs` with `maturin develop`
+- [ ] Embedded Python calls succeed for unported modules
 - [ ] All bridge modules import successfully
 - [ ] Unit tests: Rust output matches Python for each function
 - [ ] Integration test: Full pipeline produces identical output
@@ -1443,7 +1493,7 @@ vsg_core/orchestrator/steps/mux_step.py          →  Import from _rust_bridge
 ### Status: [ ] Not Started (LAST - After Phase 9 Complete)
 
 ### Current Strategy (Hybrid)
-1. **Keep PySide6 UI** for now (`vsg_qt/`)
+1. **Keep PySide6 UI** for now (`python/vsg_qt/`)
 2. **Use PyO3 FFI** to call Rust backend via `vsg_core_rs`
 3. Benefit: UI continues working while backend transitions to Rust
 
@@ -1463,12 +1513,12 @@ Once Phase 9 integration is stable and tested, migrate to a Rust-native GUI:
 
 ```
 Current State:
-├── vsg_qt/ (PySide6 Python)
+├── python/vsg_qt/ (PySide6 Python)
 └── vsg_core_rs/ (Rust library)
 
 Phase 9 Complete:
-├── vsg_qt/ (PySide6 Python) ─→ calls ─→ vsg_core_rs/
-└── vsg_core/ (Python orchestration) ─→ calls ─→ vsg_core_rs/
+├── python/vsg_qt/ (PySide6 Python) ─→ calls ─→ vsg_core_rs/
+└── python/vsg_core/ (Python orchestration) ─→ calls ─→ vsg_core_rs/
 
 Phase 10 Complete:
 ├── vsg_gui/ (Rust GUI - libcosmic/slint/egui)
@@ -1489,7 +1539,7 @@ To ensure nothing is missed during migration, maintain identical naming:
 | ... | ... |
 
 ### Files (41 modules to eventually migrate)
-All modules in `vsg_qt/` - migrate last after Phase 9 is stable and tested.
+All modules in `python/vsg_qt/` - migrate last after Phase 9 is stable and tested.
 
 ---
 
@@ -1605,19 +1655,19 @@ After Phase 2:
 | 6 | ✅ Complete | ❌ Not started | 2026-01-16 | 2026-01-16 | Frame utils in Rust (partial) |
 | 7 | ✅ Complete | ❌ Not started | 2026-01-16 | 2026-01-16 | Extraction/chapters in Rust |
 | 8 | ✅ Complete | ❌ Not started | 2026-01-16 | 2026-01-16 | Mux delay calc in Rust |
-| **9** | N/A | ❌ **CURRENT** | - | - | **Integration & Testing** |
+| **9** | N/A | ❌ **CURRENT** | - | - | **Core Shell + Embedded Python** |
 | 10 | ❌ Not started | ❌ Not started | - | - | Future GUI migration |
 
 ### What's Actually Running
 
 | Component | Currently Uses | Should Use After Phase 9 |
 |-----------|---------------|-------------------------|
-| Audio correlation | `vsg_core/analysis/audio_corr.py` (Python) | `vsg_core_rs.analyze_audio_correlation` (Rust) |
-| Drift detection | `vsg_core/analysis/drift_detection.py` (Python) | `vsg_core_rs.diagnose_drift` (Rust) |
-| Container delays | `vsg_core/extraction/tracks.py` (Python) | `vsg_core_rs.calculate_container_delay` (Rust) |
-| Mux delay calc | `vsg_core/mux/options_builder.py` (Python) | `vsg_core_rs.calculate_mux_delay` (Rust) |
-| Frame conversions | `vsg_core/subtitles/frame_utils.py` (Python) | `vsg_core_rs.time_to_frame_*` (Rust) |
-| Chapter timestamps | `vsg_core/chapters/process.py` (Python) | `vsg_core_rs.shift_chapter_timestamp` (Rust) |
+| Audio correlation | `python/vsg_core/analysis/audio_corr.py` (Python) | `vsg_core_rs.analyze_audio_correlation` (Rust) |
+| Drift detection | `python/vsg_core/analysis/drift_detection.py` (Python) | `vsg_core_rs.diagnose_drift` (Rust) |
+| Container delays | `python/vsg_core/extraction/tracks.py` (Python) | `vsg_core_rs.calculate_container_delay` (Rust) |
+| Mux delay calc | `python/vsg_core/mux/options_builder.py` (Python) | `vsg_core_rs.calculate_mux_delay` (Rust) |
+| Frame conversions | `python/vsg_core/subtitles/frame_utils.py` (Python) | `vsg_core_rs.time_to_frame_*` (Rust) |
+| Chapter timestamps | `python/vsg_core/chapters/process.py` (Python) | `vsg_core_rs.shift_chapter_timestamp` (Rust) |
 
 ### Integration Gap Identified
 
@@ -1629,12 +1679,14 @@ After Phase 2:
 
 ### Next Steps (Phase 9)
 
-1. [ ] Build `vsg_core_rs` with `maturin develop` and verify imports work
-2. [ ] Create `vsg_core/_rust_bridge/__init__.py`
-3. [ ] Create bridge modules one at a time, test each
-4. [ ] Update orchestrator steps to use bridges
-5. [ ] Run full pipeline comparison tests
-6. [ ] Validate output matches pure Python version
+1. [ ] Define Rust core shell folder structure (matching Python layout)
+2. [ ] Implement orchestrator + worker lifecycle with stubbed steps
+3. [ ] Embed Python modules for unported functionality
+4. [ ] Build `vsg_core_rs` with `maturin develop` and verify imports work
+5. [ ] Create `python/vsg_core/_rust_bridge/__init__.py`
+6. [ ] Create bridge modules one at a time, test each
+7. [ ] Run full pipeline comparison tests
+8. [ ] Validate output matches pure Python version
 
 ### Checkpoint Log
 
@@ -1719,6 +1771,16 @@ After Phase 2:
 
 9. **When in doubt, ask**. If something is unclear or seems wrong, discuss with the user before implementing.
 
+10. **Core shell first**: Do not skip orchestrator/worker/config/UI wiring. Leaf modules only move after the shell is runnable.
+
+11. **Embed Python early**: If a Rust module is not ready, call the Python implementation directly via embedding. Do not re-implement logic "just to make it compile."
+
+12. **1:1 Layout Requirement**: Rust directories must mirror Python structure 1:1 (names, nesting). Placeholder modules are acceptable, but the layout must match.
+
+13. **Documentation parity**: Python code uses detailed notes about what sections do and why; Rust code must include equivalent inline notes (where appropriate) so humans and AI can understand intent and constraints.
+
+14. **Formatting discipline**: Do not introduce sloppy formatting. Follow existing code standards and keep formatting consistent with the surrounding codebase.
+
 ### Document Maintenance
 
 When working on this migration:
@@ -1791,7 +1853,7 @@ Before marking any phase complete:
 <summary>Click to expand full list</summary>
 
 ```
-vsg_core/
+python/vsg_core/
 ├── __init__.py
 ├── config.py
 ├── job_discovery.py
@@ -1897,7 +1959,7 @@ vsg_core/
 <summary>Click to expand full list</summary>
 
 ```
-vsg_qt/
+python/vsg_qt/
 ├── __init__.py
 ├── main_window/
 │   ├── __init__.py

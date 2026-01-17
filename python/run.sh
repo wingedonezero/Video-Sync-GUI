@@ -19,7 +19,7 @@ if [ ! -d "$VENV_DIR" ]; then
     echo -e "${RED}Error: Virtual environment not found!${NC}"
     echo ""
     echo "Please run the setup script first:"
-    echo -e "  ${BLUE}./setup_env.sh${NC}"
+    echo -e "  ${BLUE}$PROJECT_DIR/setup_env.sh${NC}"
     echo ""
     exit 1
 fi
