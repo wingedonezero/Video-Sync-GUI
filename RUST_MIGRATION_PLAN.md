@@ -1819,6 +1819,60 @@ After Phase 2:
 
 ---
 
+### Session: 2026-01-21
+**Phase**: 9
+**Work Done**:
+- Added libcosmic-based UI scaffolding in Rust, mirroring the Python `vsg_qt` window and dialog layouts.
+- Implemented placeholder layouts for the main window, job queue, add job, options tabs, manual selection, track widgets/settings, style editor, generated track, sync exclusion, resample, and model manager dialogs.
+- Introduced shared UI helper utilities to keep layout structure consistent across dialogs.
+
+**Test Results**:
+- Not run (UI scaffolding only).
+
+**Changes to Plan**:
+- None.
+
+**Next Steps**:
+- Expand placeholders with interactive state where needed and wire dialogs to real data models.
+- Confirm rendering and behavior for the options tabs with libcosmic widgets once runtime wiring begins.
+
+---
+
+### Session: 2026-01-22
+**Phase**: 9
+**Work Done**:
+- Refined dialog placeholders with radio options and table header scaffolding to better match the Python UI layouts.
+- Added table header layouts for the job queue, model manager, and style editor event list placeholders.
+
+**Test Results**:
+- Not run (UI scaffolding only).
+
+**Changes to Plan**:
+- None.
+
+**Next Steps**:
+- Continue enriching dialog placeholders with dynamic state and dataset-driven widgets as wiring progresses.
+
+---
+
+### Session: 2026-01-23
+**Phase**: 9
+**Work Done**:
+- Introduced dialog state + message handling for libcosmic UI scaffolding so fields are functional and updatable.
+- Added per-dialog state models for the main window, job queue, add job, manual selection, track widgets, track settings, style editor, generated track, sync exclusion, resample, and model manager dialogs.
+- Reworked options dialog scaffolding to use field maps and message updates for all settings keys.
+
+**Test Results**:
+- Not run (UI scaffolding only).
+
+**Changes to Plan**:
+- None.
+
+**Next Steps**:
+- Wire dialog state to core shell data and implement real data sources for tables and lists.
+
+---
+
 ## Instructions for AI Assistants
 
 ### MANDATORY RULES

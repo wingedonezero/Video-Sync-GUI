@@ -16,6 +16,7 @@ mod pipeline_components;
 mod workers;
 mod config;
 mod ui_bridge;
+mod ui;
 
 #[pymodule]
 fn vsg_core_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
