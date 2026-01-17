@@ -21,11 +21,8 @@ def compose_label_text(w) -> str:
             badges.append("📌")
         if w.cb_rescale.isChecked():
             badges.append("📏")
-        try:
-            if abs(float(w.size_multiplier.value()) - 1.0) > 1e-6:
-                badges.append("🔤")
-        except Exception:
-            pass
+        if abs(w.size_multiplier.value() - 1.0) > 1e-6:
+            badges.append("🔤")
         if w.track_data.get('user_modified_path'):
             badges.append("📝")
 
@@ -53,11 +50,8 @@ def build_summary_text(w) -> str:
             parts.append("📌 Forced Display")
         if w.cb_rescale.isChecked():
             parts.append("📏 Rescale")
-        try:
-            if abs(float(w.size_multiplier.value()) - 1.0) > 1e-6:
-                parts.append(f"{w.size_multiplier.value():.2f}x Size")
-        except Exception:
-            pass
+        if abs(w.size_multiplier.value() - 1.0) > 1e-6:
+            parts.append(f"{w.size_multiplier.value():.2f}x Size")
         if w.cb_convert.isChecked():
             parts.append("Convert to ASS")
 

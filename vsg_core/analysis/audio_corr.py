@@ -82,7 +82,7 @@ def _decode_to_memory(file_path: str, a_index: int, out_sr: int, use_soxr: bool,
 
     return np.frombuffer(pcm_bytes, dtype=np.float32)
 
-def _apply_bandpass(waveform: np.ndarray, sr: int, lowcut: float, highcut: float, order: int) -> np.ndarray:
+def _apply_bandpass(waveform: np.ndarray, sr: int, lowcut: float, highcut: float, order: int, log: Optional[Callable] = None) -> np.ndarray:
     """Applies a Butterworth band-pass filter to isolate dialogue frequencies."""
     try:
         nyquist = 0.5 * sr
@@ -90,10 +90,12 @@ def _apply_bandpass(waveform: np.ndarray, sr: int, lowcut: float, highcut: float
         high = highcut / nyquist
         b, a = butter(order, [low, high], btype='band')
         return lfilter(b, a, waveform).astype(np.float32)
-    except Exception:
+    except Exception as e:
+        if log:
+            log(f"[FILTER WARNING] Band-pass filter failed ({e}), using unfiltered waveform")
         return waveform
 
-def _apply_lowpass(waveform: np.ndarray, sr: int, cutoff_hz: int, num_taps: int) -> np.ndarray:
+def _apply_lowpass(waveform: np.ndarray, sr: int, cutoff_hz: int, num_taps: int, log: Optional[Callable] = None) -> np.ndarray:
     """Applies a simple FIR low-pass filter."""
     if cutoff_hz <= 0: return waveform
     try:
@@ -101,7 +103,9 @@ def _apply_lowpass(waveform: np.ndarray, sr: int, cutoff_hz: int, num_taps: int)
         hz = min(cutoff_hz, nyquist - 1)
         h = firwin(num_taps, hz / nyquist)
         return lfilter(h, 1.0, waveform).astype(np.float32)
-    except Exception:
+    except Exception as e:
+        if log:
+            log(f"[FILTER WARNING] Low-pass filter failed ({e}), using unfiltered waveform")
         return waveform
 
 def _normalize_peak_confidence(correlation_array: np.ndarray, peak_idx: int) -> float:
@@ -494,15 +498,15 @@ def run_audio_correlation(
         lowcut = config.get('filter_bandpass_lowcut_hz', 300.0)
         highcut = config.get('filter_bandpass_highcut_hz', 3400.0)
         order = config.get('filter_bandpass_order', 5)
-        ref_pcm = _apply_bandpass(ref_pcm, DEFAULT_SR, lowcut, highcut, order)
-        tgt_pcm = _apply_bandpass(tgt_pcm, DEFAULT_SR, lowcut, highcut, order)
+        ref_pcm = _apply_bandpass(ref_pcm, DEFAULT_SR, lowcut, highcut, order, log)
+        tgt_pcm = _apply_bandpass(tgt_pcm, DEFAULT_SR, lowcut, highcut, order, log)
     elif filtering_method == 'Low-Pass Filter':
         cutoff = int(config.get('audio_bandlimit_hz', 0))
         if cutoff > 0:
             log(f"Applying Low-Pass filter at {cutoff} Hz...")
             taps = config.get('filter_lowpass_taps', 101)
-            ref_pcm = _apply_lowpass(ref_pcm, DEFAULT_SR, cutoff, taps)
-            tgt_pcm = _apply_lowpass(tgt_pcm, DEFAULT_SR, cutoff, taps)
+            ref_pcm = _apply_lowpass(ref_pcm, DEFAULT_SR, cutoff, taps, log)
+            tgt_pcm = _apply_lowpass(tgt_pcm, DEFAULT_SR, cutoff, taps, log)
 
     # --- 4. Per-Chunk Correlation ---
     duration_s = len(ref_pcm) / float(DEFAULT_SR)
@@ -721,15 +725,15 @@ def run_multi_correlation(
         lowcut = config.get('filter_bandpass_lowcut_hz', 300.0)
         highcut = config.get('filter_bandpass_highcut_hz', 3400.0)
         order = config.get('filter_bandpass_order', 5)
-        ref_pcm = _apply_bandpass(ref_pcm, DEFAULT_SR, lowcut, highcut, order)
-        tgt_pcm = _apply_bandpass(tgt_pcm, DEFAULT_SR, lowcut, highcut, order)
+        ref_pcm = _apply_bandpass(ref_pcm, DEFAULT_SR, lowcut, highcut, order, log)
+        tgt_pcm = _apply_bandpass(tgt_pcm, DEFAULT_SR, lowcut, highcut, order, log)
     elif filtering_method == 'Low-Pass Filter':
         cutoff = int(config.get('audio_bandlimit_hz', 0))
         if cutoff > 0:
             log(f"Applying Low-Pass filter at {cutoff} Hz...")
             taps = config.get('filter_lowpass_taps', 101)
-            ref_pcm = _apply_lowpass(ref_pcm, DEFAULT_SR, cutoff, taps)
-            tgt_pcm = _apply_lowpass(tgt_pcm, DEFAULT_SR, cutoff, taps)
+            ref_pcm = _apply_lowpass(ref_pcm, DEFAULT_SR, cutoff, taps, log)
+            tgt_pcm = _apply_lowpass(tgt_pcm, DEFAULT_SR, cutoff, taps, log)
 
     # --- 4. Extract chunks ONCE ---
     duration_s = len(ref_pcm) / float(DEFAULT_SR)

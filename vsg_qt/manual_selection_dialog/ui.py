@@ -178,7 +178,7 @@ class ManualSelectionDialog(QDialog):
             try:
                 out = runner.run([
                     'ffprobe', '-v', 'error', '-select_streams', 's:0',
-                    '-show_entries', 'stream=codec_name,codec_long_name:stream_tags=language',
+                    '-show_entries', 'stream=codec_name,codec_long_name,codec_type:stream_tags=language',
                     '-of', 'json', file_path
                 ], tool_paths)
 
@@ -186,7 +186,16 @@ class ManualSelectionDialog(QDialog):
                     self.log_callback(f"[WARN] ffprobe found no subtitle stream in {Path(file_path).name}")
                     continue
 
-                info = json.loads(out)['streams'][0]
+                streams = json.loads(out).get('streams', [])
+                if not streams:
+                    self.log_callback(f"[WARN] No subtitle streams found in {Path(file_path).name}")
+                    continue
+
+                info = streams[0]
+                # Explicitly verify this is a subtitle stream
+                if info.get('codec_type') != 'subtitle':
+                    self.log_callback(f"[WARN] {Path(file_path).name} stream is not a subtitle (got: {info.get('codec_type')})")
+                    continue
                 codec_id_map = {'subrip': 'S_TEXT/UTF8', 'ssa': 'S_TEXT/SSA', 'ass': 'S_TEXT/ASS', 'hdmv_pgs_subtitle': 'S_HDMV/PGS'}
                 codec_id = codec_id_map.get(info.get('codec_name'), f"S_{info.get('codec_name', 'UNKNOWN').upper()}")
 
