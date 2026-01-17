@@ -4,6 +4,8 @@
 >
 > **Last Updated**: 2026-01-16
 > **Migration Status**: Phase 8 Rust Complete - **Python Integration NOT Started**
+>
+> **New Plan (2026-01-16)**: Build the **core shell first** (orchestrator, pipeline, workers, config, UI wiring) with **embedded Python** for anything not yet ported. Leaf/algorithm modules will be integrated **after** the core shell is runnable.
 
 ---
 
@@ -23,10 +25,11 @@
 - **Phase 9 is the critical "tie-in" phase** - Must create integration layer
 
 ### Immediate Action Required
-1. Build Rust library: `cd rust/vsg_core_rs && maturin develop --release`
-2. Create `python/vsg_core/_rust_bridge/` modules
-3. Test Python ↔ Rust parity
-4. Update orchestrator steps to use bridges
+1. Establish Rust **core shell** layout (orchestrator, pipeline, workers, config, UI wiring)
+2. Embed Python for any unported modules to keep behavior intact
+3. Build Rust library: `cd rust/vsg_core_rs && maturin develop --release`
+4. Create `python/vsg_core/_rust_bridge/` modules (as needed for parity checks)
+5. Test Python ↔ Rust parity **after** core shell is runnable
 
 ---
 
@@ -48,7 +51,7 @@
 12. [Phase 6: Frame Utilities](#phase-6-frame-utilities)
 13. [Phase 7: Extraction Layer](#phase-7-extraction-layer)
 14. [Phase 8: Mux Options Builder](#phase-8-mux-options-builder)
-15. [Phase 9: Pipeline Orchestration](#phase-9-pipeline-orchestration)
+15. [Phase 9: Core Shell + Embedded Python](#phase-9-core-shell--embedded-python)
 16. [Phase 10: UI Migration](#phase-10-ui-migration)
 17. [Critical Preservation Requirements](#critical-preservation-requirements)
 18. [Testing Strategy](#testing-strategy)
@@ -81,20 +84,32 @@
 
 ## 2. Migration Philosophy
 
-### Principle 1: Bottom-Up Migration
-Start with modules that have **zero internal dependencies**, work upward. This ensures:
+### Principle 1: Core-Shell-First Migration (Updated)
+Start with the **orchestrator + worker + config + UI wiring** so the app is runnable end-to-end, even if many steps are still Python-backed. This ensures:
+- The UI and job lifecycle can be tested early
+- Logging, progress, and pipeline behavior are validated up front
+- Python-backed modules remain available via embedding or bridges
+
+### Principle 2: Bottom-Up Module Migration (Still Applies)
+Once the core shell is runnable, migrate leaf modules in dependency order. This ensures:
 - Each Rust module can be tested independently
-- Python orchestration continues working with Rust components via PyO3
+- The core shell remains stable while internals are replaced
 - No circular dependency issues
 
-### Principle 2: Preserve All Behaviors
+### Principle 3: Preserve All Behaviors
 Every special case, threshold, and edge case handling must be preserved exactly. The migration document includes specific notes about what must not change.
 
-### Principle 3: Small, Testable Steps
+### Principle 4: Small, Testable Steps
 Each phase produces a working system. Never break functionality for more than one phase.
 
-### Principle 4: Hybrid Operation
-During migration, Python calls Rust via PyO3 bindings. Rust handles compute-heavy work; Python handles orchestration and UI.
+### Principle 5: Hybrid Operation (Expanded)
+During migration, **Rust owns the orchestration shell** while **Python remains embedded** for functionality not yet ported. Rust handles:
+- Pipeline orchestration
+- Worker lifecycle & logging
+- Config and job models
+Python continues to handle:
+- Legacy leaf modules and external tool wrappers
+- pysubs2, videotimestamps, and model-dependent code
 
 ---
 
@@ -365,7 +380,7 @@ python/vsg_core/
 | 6 | Frame Utilities | 1 (partial) | MEDIUM | ✅ Complete | ❌ Not integrated |
 | 7 | Extraction Layer | 3 | MEDIUM | ✅ Complete | ❌ Not integrated |
 | 8 | Mux Options | 1 | MEDIUM | ✅ Complete | ❌ Not integrated |
-| **9** | **Integration & Testing** | 8+ | **CRITICAL** | N/A | **CURRENT PHASE** |
+| **9** | **Core Shell + Embedded Python** | 8+ | **CRITICAL** | N/A | **CURRENT PHASE** |
 | 10 | UI Migration | 41 | LAST | Not started | Future |
 
 ### What "Complete" Means for Phases 1-8
@@ -1308,19 +1323,36 @@ pub fn write_options_file(tokens: &[String], path: &Path) -> Result<()> {
 
 ---
 
-## Phase 9: Integration & Testing
+## Phase 9: Core Shell + Embedded Python
 
 ### Status: [ ] Not Started
 
-> ⚠️ **CRITICAL MISSING PIECE**: Phases 1-8 implemented Rust code, but Python does NOT call it yet!
-> The Rust and Python implementations exist in parallel. This phase creates the integration layer.
+> ⚠️ **CRITICAL MISSING PIECE**: Phases 1-8 implemented Rust code, but Python does NOT call it yet.
+> The Rust and Python implementations exist in parallel. This phase establishes the **runnable core shell** first, then integrates modules.
 
 ### Current State
 - **Rust code exists**: `rust/vsg_core_rs/src/` with all Phase 1-8 implementations
 - **Python code unchanged**: `python/vsg_core/` still uses pure Python implementations
 - **No integration**: Zero Python files import from `vsg_core_rs`
 
-### Phase 9A: Python Integration Layer
+### Phase 9A: Core Shell First (Required)
+
+Deliver a **runnable Rust shell** that mirrors Python structure 1:1. Stubs are acceptable as long as the layout matches.
+
+```
+rust/vsg_core_rs/src/
+├── orchestrator/            # Rust pipeline orchestration
+├── pipeline/                # Job pipeline coordination
+├── pipeline_components/     # Logging, result audit, output writer
+├── workers/                 # Worker lifecycle + threading
+├── config/                  # Settings, defaults, persistence
+└── ui_bridge/               # Hooks for UI <-> core (if needed)
+```
+
+### Phase 9B: Embedded Python + Bridges
+
+**Primary rule**: If a Rust module is not ready, call the Python implementation directly via embedding.
+Bridges remain useful for parity testing and gradual switchover.
 
 Create wrapper modules that bridge Python → Rust. These go in `python/vsg_core/` and provide 1:1 naming with existing Python APIs:
 
@@ -1367,7 +1399,7 @@ def run_correlation(ref_audio, tgt_audio, sample_rate, method="gcc_phat", **kwar
         return _py_correlate(ref_audio, tgt_audio, sample_rate, method, **kwargs)
 ```
 
-### Phase 9B: Integration Testing
+### Phase 9C: Integration Testing
 
 **Step-by-step validation** to ensure Rust produces identical results:
 
@@ -1382,7 +1414,7 @@ def run_correlation(ref_audio, tgt_audio, sample_rate, method="gcc_phat", **kwar
 | 7 | `mux/options_builder.py` | `_rust_bridge/mux.py` | Same mkvmerge tokens |
 | 8 | `subtitles/frame_utils.py` | `_rust_bridge/frame_utils.py` | Same frame numbers |
 
-### Phase 9C: Real-World Testing
+### Phase 9D: Real-World Testing
 
 ```
 Test Files Required:
@@ -1399,7 +1431,7 @@ Test Files Required:
 3. Compare outputs byte-for-byte (muxed file)
 4. Compare intermediate results (delays, EDL, tokens)
 
-### Phase 9D: Switchover
+### Phase 9E: Switchover
 
 Once testing passes:
 1. Update orchestrator steps to use `_rust_bridge` modules
@@ -1409,6 +1441,12 @@ Once testing passes:
 ### Files to Create
 
 ```
+rust/vsg_core_rs/src/orchestrator/
+rust/vsg_core_rs/src/pipeline/
+rust/vsg_core_rs/src/pipeline_components/
+rust/vsg_core_rs/src/workers/
+rust/vsg_core_rs/src/config/
+rust/vsg_core_rs/src/ui_bridge/
 python/vsg_core/_rust_bridge/__init__.py
 python/vsg_core/_rust_bridge/analysis.py
 python/vsg_core/_rust_bridge/correction.py
@@ -1430,7 +1468,9 @@ python/vsg_core/orchestrator/steps/mux_step.py          →  Import from _rust_b
 ```
 
 ### Testing Checkpoint 9
+- [ ] Core shell compiles with stubbed steps
 - [ ] Build `vsg_core_rs` with `maturin develop`
+- [ ] Embedded Python calls succeed for unported modules
 - [ ] All bridge modules import successfully
 - [ ] Unit tests: Rust output matches Python for each function
 - [ ] Integration test: Full pipeline produces identical output
@@ -1606,7 +1646,7 @@ After Phase 2:
 | 6 | ✅ Complete | ❌ Not started | 2026-01-16 | 2026-01-16 | Frame utils in Rust (partial) |
 | 7 | ✅ Complete | ❌ Not started | 2026-01-16 | 2026-01-16 | Extraction/chapters in Rust |
 | 8 | ✅ Complete | ❌ Not started | 2026-01-16 | 2026-01-16 | Mux delay calc in Rust |
-| **9** | N/A | ❌ **CURRENT** | - | - | **Integration & Testing** |
+| **9** | N/A | ❌ **CURRENT** | - | - | **Core Shell + Embedded Python** |
 | 10 | ❌ Not started | ❌ Not started | - | - | Future GUI migration |
 
 ### What's Actually Running
@@ -1630,12 +1670,14 @@ After Phase 2:
 
 ### Next Steps (Phase 9)
 
-1. [ ] Build `vsg_core_rs` with `maturin develop` and verify imports work
-2. [ ] Create `python/vsg_core/_rust_bridge/__init__.py`
-3. [ ] Create bridge modules one at a time, test each
-4. [ ] Update orchestrator steps to use bridges
-5. [ ] Run full pipeline comparison tests
-6. [ ] Validate output matches pure Python version
+1. [ ] Define Rust core shell folder structure (matching Python layout)
+2. [ ] Implement orchestrator + worker lifecycle with stubbed steps
+3. [ ] Embed Python modules for unported functionality
+4. [ ] Build `rust/vsg_core_rs` with `maturin develop` and verify imports work
+5. [ ] Create `python/vsg_core/_rust_bridge/__init__.py`
+6. [ ] Create bridge modules one at a time, test each
+7. [ ] Run full pipeline comparison tests
+8. [ ] Validate output matches pure Python version
 
 ### Checkpoint Log
 
@@ -1719,6 +1761,12 @@ After Phase 2:
 8. **Test before proceeding**. Each phase has testing checkpoints. All must pass before moving to the next phase.
 
 9. **When in doubt, ask**. If something is unclear or seems wrong, discuss with the user before implementing.
+
+10. **Core shell first**: Do not skip orchestrator/worker/config/UI wiring. Leaf modules only move after the shell is runnable.
+
+11. **Embed Python early**: If a Rust module is not ready, call the Python implementation directly via embedding. Do not re-implement logic "just to make it compile."
+
+12. **1:1 Layout Requirement**: Rust directories must mirror Python structure 1:1 (names, nesting). Placeholder modules are acceptable, but the layout must match.
 
 ### Document Maintenance
 
