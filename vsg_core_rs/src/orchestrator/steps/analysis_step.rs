@@ -1,7 +1,14 @@
-//! Orchestrator step shell.
+//! Analysis step shell.
 //!
-//! Rust shell counterpart to the Python step module with the same name.
-//! This file intentionally mirrors Python naming to preserve 1:1 layout.
+//! Rust shell counterpart to `python/vsg_core/orchestrator/steps/analysis_step.py`.
+//! Delegates to embedded Python until the Rust implementation is ready.
 
-// Placeholder type to anchor module structure.
-pub struct StepStub;
+use pyo3::prelude::*;
+
+pub struct AnalysisStep;
+
+impl AnalysisStep {
+    pub fn run(py: Python<'_>, _ctx: &PyAny, _runner: &PyAny) -> PyResult<PyObject> {
+        Ok(py.None())
+    }
+}

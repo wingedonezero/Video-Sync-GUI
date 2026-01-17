@@ -1,7 +1,33 @@
 //! Orchestrator validation helpers.
 //!
-//! Rust shell counterpart to `python/vsg_core/orchestrator/validation.py`.
-//! Validation rules must remain behavior-identical to the Python version.
+//! Rust-first placeholder until validation rules are ported.
 
-// Placeholder type to anchor module structure.
-pub struct OrchestratorValidation;
+use pyo3::prelude::*;
+
+pub struct StepValidator;
+
+impl StepValidator {
+    pub fn pipeline_validation_error(py: Python<'_>) -> PyResult<Py<PyAny>> {
+        Ok(py.None())
+    }
+
+    pub fn validate_analysis(_py: Python<'_>, _ctx: &PyAny) -> PyResult<()> {
+        Ok(())
+    }
+
+    pub fn validate_extraction(_py: Python<'_>, _ctx: &PyAny) -> PyResult<()> {
+        Ok(())
+    }
+
+    pub fn validate_correction(_py: Python<'_>, _ctx: &PyAny) -> PyResult<()> {
+        Ok(())
+    }
+
+    pub fn validate_subtitles(_py: Python<'_>, _ctx: &PyAny) -> PyResult<()> {
+        Ok(())
+    }
+
+    pub fn validate_mux(_py: Python<'_>, _ctx: &PyAny) -> PyResult<()> {
+        Ok(())
+    }
+}

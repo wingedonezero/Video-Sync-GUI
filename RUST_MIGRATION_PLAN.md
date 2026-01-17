@@ -1744,6 +1744,79 @@ After Phase 2:
 | 2026-01-16 | 8 | Python integration | PASS | All delay calculations and token building work from Python |
 | 2026-01-16 | 8 | PyO3 bindings | PASS | calculate_mux_delay, build_mkvmerge_sync_token |
 
+### Session: 2026-01-17
+**Phase**: 9
+**Work Done**:
+- Implemented Rust core shell wrappers for config, pipeline, orchestrator, pipeline components, and worker lifecycle.
+- Wired embedded Python calls for unported behavior while preserving logging/mkvmerge expectations.
+- Exposed Phase 9 shell types through the PyO3 module for UI integration.
+
+**Test Results**:
+- Not run (scaffolding changes only).
+
+**Changes to Plan**:
+- None.
+
+**Next Steps**:
+- Build via `maturin develop --release` and validate Python imports once ready.
+- Continue Phase 9 wiring and begin bridge module creation.
+
+---
+
+### Session: 2026-01-18
+**Phase**: 9
+**Work Done**:
+- Replaced Phase 9 shells with Rust-first core logic stubs (config, pipeline, worker signals), removing Python module dependencies.
+- Added Rust placeholder implementations for pipeline components to keep the core UI path functional without embedded Python.
+- Simplified orchestrator entry point to a Rust-first placeholder until step logic is implemented.
+
+**Test Results**:
+- Not run (scaffolding changes only).
+
+**Changes to Plan**:
+- Clarified that Python usage is limited to dependency calls, not core logic ownership.
+
+**Next Steps**:
+- Fill in native logging, tool validation, and merge execution logic in Rust.
+- Implement step logic incrementally in Rust, adding Python dependency calls only where required.
+
+---
+
+### Session: 2026-01-19
+**Phase**: 9
+**Work Done**:
+- Implemented Rust-first logging callbacks with file output for job logs.
+- Added PATH-based tool validation in Rust to match required/optional tool checks.
+- Added a minimal Rust merge execution path that writes placeholder output files.
+
+**Test Results**:
+- Not run (scaffolding changes only).
+
+**Changes to Plan**:
+- None.
+
+**Next Steps**:
+- Replace placeholder merge execution with real mkvmerge orchestration.
+- Build out step logic in Rust and remove remaining Python step shells.
+
+---
+
+### Session: 2026-01-20
+**Phase**: 9
+**Work Done**:
+- Fixed PyO3 0.27 binding usage in the Rust core shells to restore a successful build.
+- Replaced Python-dependent orchestrator step/validation calls with Rust-first stubs.
+- Added a dedicated "Next Agent Instructions" section for UI buildout with libcosmic.
+
+**Test Results**:
+- `cargo build` (warnings only).
+
+**Changes to Plan**:
+- Added explicit UI buildout guidance for libcosmic usage and parity with `python/vsg_qt/`.
+
+**Next Steps**:
+- Begin Rust UI implementation using libcosmic per the new instructions.
+
 ---
 
 ## Instructions for AI Assistants
@@ -1982,6 +2055,21 @@ python/vsg_qt/
 └── [other dialog modules]
 ```
 </details>
+
+---
+
+## Next Agent Instructions (UI Buildout)
+- **Read this document first** and follow Phase 9 rules (core shell first, Rust-owned logic).
+- **Build the Rust UI using libcosmic** and **consult the official libcosmic docs before adding components**.
+- Use the **latest available libcosmic version** (verify from docs before adding to Cargo.toml).
+- **Goal:** recreate the full Python UI layout (windows, dialogs, controls, checkboxes) in Rust, even if not yet wired to the pipeline.
+- Focus on structural parity with `python/vsg_qt/` so later wiring is mainly connecting signals/handlers.
+- Keep Python dependency calls limited to external libraries only (no core logic ownership).
+
+### UI Scope Target
+- Main window, job queue dialog, add job dialog, options dialog, manual selection dialog,
+  track widget/settings dialog, style editor dialog, generated track dialog, sync exclusion dialog,
+  resample dialog, and any remaining dialogs listed under `python/vsg_qt/`.
 
 ---
 

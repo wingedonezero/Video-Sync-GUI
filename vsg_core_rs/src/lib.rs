@@ -41,6 +41,13 @@ fn vsg_core_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Settings
     m.add_class::<models::settings::AppSettings>()?;
 
+    // Phase 9: Core shell (config/pipeline/orchestrator/worker)
+    m.add_class::<config::AppConfig>()?;
+    m.add_class::<orchestrator::pipeline::Orchestrator>()?;
+    m.add_class::<pipeline::job_pipeline::JobPipeline>()?;
+    m.add_class::<workers::runner::JobWorker>()?;
+    m.add_class::<workers::signals::WorkerSignals>()?;
+
     // Converter functions
     m.add_function(wrap_pyfunction!(models::converters::track_type_from_str, m)?)?;
     m.add_function(wrap_pyfunction!(models::converters::track_type_to_str, m)?)?;

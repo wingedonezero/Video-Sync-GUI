@@ -1,8 +1,50 @@
 //! Orchestrator pipeline wiring.
 //!
-//! Rust shell counterpart to `python/vsg_core/orchestrator/pipeline.py`.
-//! This will coordinate step execution and delegate to embedded Python
-//! until Rust step implementations are complete.
+//! Rust-first placeholder that defines the orchestration entry point without
+//! relying on embedded Python steps.
 
-// Placeholder type to anchor module structure.
-pub struct OrchestratorPipeline;
+use pyo3::exceptions::PyRuntimeError;
+use pyo3::prelude::*;
+
+#[pyclass]
+pub struct Orchestrator;
+
+#[pymethods]
+impl Orchestrator {
+    #[new]
+    pub fn new() -> Self {
+        Self
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (
+        _settings_dict,
+        _tool_paths,
+        log,
+        progress,
+        _sources,
+        _and_merge,
+        _output_dir,
+        _manual_layout=None,
+        _attachment_sources=None
+    ))]
+    pub fn run(
+        &self,
+        py: Python<'_>,
+        _settings_dict: PyObject,
+        _tool_paths: PyObject,
+        log: PyObject,
+        progress: PyObject,
+        _sources: PyObject,
+        _and_merge: bool,
+        _output_dir: String,
+        _manual_layout: Option<PyObject>,
+        _attachment_sources: Option<PyObject>,
+    ) -> PyResult<PyObject> {
+        log.call1(py, ("[ERROR] Rust orchestrator steps are not implemented yet.",))?;
+        progress.call1(py, (0.0f32,))?;
+        Err(PyRuntimeError::new_err(
+            "Rust orchestrator steps are not implemented yet.",
+        ))
+    }
+}
