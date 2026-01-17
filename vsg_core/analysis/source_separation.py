@@ -1071,7 +1071,11 @@ if __name__ == '__main__':
 
 
 def _read_audio_file(path: Path) -> Tuple[int, np.ndarray]:
-    """Read audio file and return (sample_rate, mono float32 array)."""
+    """Read audio file and return (sample_rate, mono float32 array).
+
+    Returns a contiguous copy of the data to ensure no references to
+    memory-mapped file data remain after the temp file is deleted.
+    """
     sample_rate, data = wavfile.read(path)
 
     if data.dtype.kind in 'iu':
@@ -1083,7 +1087,8 @@ def _read_audio_file(path: Path) -> Tuple[int, np.ndarray]:
     if data.ndim > 1:
         data = data.mean(axis=1)
 
-    return sample_rate, data
+    # Ensure we have a contiguous copy (not a view into memory-mapped file)
+    return sample_rate, np.ascontiguousarray(data)
 
 
 def _resolve_separation_settings(config: Dict) -> Tuple[str, str]:
@@ -1374,12 +1379,23 @@ def apply_source_separation(
         log("[SOURCE SEPARATION] Reference separation failed, using original audio for both")
         return ref_pcm, tgt_pcm
 
+    # Force cleanup between separations to prevent memory/state accumulation
+    import gc
+    gc.collect()
+
     # Separate target
     log(f"[SOURCE SEPARATION] Processing target audio ({role_tag})...")
     tgt_separated = separate_audio(tgt_pcm, sample_rate, mode, model_filename, log, device, timeout, model_dir)
     if tgt_separated is None:
         log("[SOURCE SEPARATION] Target separation failed, using original audio for both")
+        # Clean up ref_separated before returning original
+        del ref_separated
+        gc.collect()
         return ref_pcm, tgt_pcm
 
     log("[SOURCE SEPARATION] Both sources processed successfully")
+
+    # Final cleanup before returning
+    gc.collect()
+
     return ref_separated, tgt_separated
