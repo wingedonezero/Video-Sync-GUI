@@ -11,7 +11,8 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict, PyList};
 
 use crate::pipeline_components::{
-    log_manager::LogManager, sync_planner::SyncPlanner, tool_validator::ToolValidator,
+    log_manager::LogManager, output_writer::OutputWriter, result_auditor::ResultAuditor,
+    sync_executor::SyncExecutor, sync_planner::SyncPlanner, tool_validator::ToolValidator,
 };
 
 #[pyclass]
@@ -65,11 +66,11 @@ impl JobPipeline {
             .and_then(|stem| stem.to_str())
             .unwrap_or("job");
 
-        let log_dir = PyList::empty(py);
+        let log_dir = output_dir.join("logs");
         let (logger, handler, log_to_all) = LogManager::setup_job_log(
             py,
             job_name,
-            log_dir,
+            &log_dir,
             self.gui_log_callback.as_ref(py),
         )?;
 
@@ -150,14 +151,55 @@ impl JobPipeline {
                 return Ok(response.into_py(py));
             }
 
+            let final_output_path = OutputWriter::prepare_output_path(
+                &output_dir,
+                Path::new(&source1_path)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("source1"),
+            );
+
+            let final_output_name = final_output_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("output.mkv");
+
+            let temp_output_path = ctx
+                .temp_dir
+                .join(format!("temp_{final_output_name}"));
+
+            let mut tokens = ctx.tokens.clone().unwrap_or_default();
+            tokens.insert(0, temp_output_path.to_string_lossy().to_string());
+            tokens.insert(0, "--output".to_string());
+
+            let _opts_path = OutputWriter::write_mkvmerge_options(&tokens, &ctx.temp_dir)?;
+            let merge_ok = SyncExecutor::execute_merge(&temp_output_path)?;
+            if !merge_ok {
+                return Err(PyValueError::new_err("mkvmerge execution failed."));
+            }
+
+            SyncExecutor::finalize_output(&temp_output_path, &final_output_path)?;
+
             log_to_all.call1(
                 py,
-                ("[ERROR] Merge pipeline not implemented in Rust core yet.",),
+                (format!(
+                    "[SUCCESS] Output file created: {}",
+                    final_output_path.display()
+                ),),
             )?;
 
+            let issues = ResultAuditor::audit_output(&final_output_path)?;
+
+            self.progress_callback.as_ref(py).call1((1.0f32,))?;
+
             let response = PyDict::new(py);
-            response.set_item("status", "Failed")?;
-            response.set_item("error", "Merge pipeline not implemented yet.")?;
+            response.set_item("status", "Merged")?;
+            response.set_item("output", final_output_path.to_string_lossy().to_string())?;
+            let delays_dict = PyDict::new(py);
+            for (key, value) in ctx.delays.iter() {
+                delays_dict.set_item(key, *value)?;
+            }
+            response.set_item("delays", delays_dict)?;
             response.set_item(
                 "name",
                 Path::new(&source1_path)
@@ -165,7 +207,7 @@ impl JobPipeline {
                     .and_then(|name| name.to_str())
                     .unwrap_or("source1"),
             )?;
-            response.set_item("issues", 0)?;
+            response.set_item("issues", issues)?;
             response.set_item("stepping_sources", PyList::new(py, &ctx.stepping_sources))?;
             response.set_item("stepping_detected_disabled", ctx.stepping_detected_disabled)?;
             Ok(response.into_py(py))

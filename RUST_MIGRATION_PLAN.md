@@ -1782,6 +1782,25 @@ After Phase 2:
 
 ---
 
+### Session: 2026-01-19
+**Phase**: 9
+**Work Done**:
+- Implemented Rust-first logging callbacks with file output for job logs.
+- Added PATH-based tool validation in Rust to match required/optional tool checks.
+- Added a minimal Rust merge execution path that writes placeholder output files.
+
+**Test Results**:
+- Not run (scaffolding changes only).
+
+**Changes to Plan**:
+- None.
+
+**Next Steps**:
+- Replace placeholder merge execution with real mkvmerge orchestration.
+- Build out step logic in Rust and remove remaining Python step shells.
+
+---
+
 ## Instructions for AI Assistants
 
 ### MANDATORY RULES
