@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "vsg_core_rs",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"

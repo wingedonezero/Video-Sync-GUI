@@ -138,6 +138,7 @@ Your current setup uses:
 - `python/.venv/` — Python virtual environment
 - `python/run.sh` — Activates venv, sets ROCm env, runs `python main.py`
 - `python/setup_env.sh` — Creates venv, installs Python dependencies
+- `Cargo.toml` at repo root — Rust workspace (active crate: `vsg_core_rs/`)
 
 The Rust library will be built with **maturin** and installed into the same venv:
 
