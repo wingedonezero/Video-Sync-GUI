@@ -1744,6 +1744,23 @@ After Phase 2:
 | 2026-01-16 | 8 | Python integration | PASS | All delay calculations and token building work from Python |
 | 2026-01-16 | 8 | PyO3 bindings | PASS | calculate_mux_delay, build_mkvmerge_sync_token |
 
+### Session: 2026-01-17
+**Phase**: 9
+**Work Done**:
+- Implemented Rust core shell wrappers for config, pipeline, orchestrator, pipeline components, and worker lifecycle.
+- Wired embedded Python calls for unported behavior while preserving logging/mkvmerge expectations.
+- Exposed Phase 9 shell types through the PyO3 module for UI integration.
+
+**Test Results**:
+- Not run (scaffolding changes only).
+
+**Changes to Plan**:
+- None.
+
+**Next Steps**:
+- Build via `maturin develop --release` and validate Python imports once ready.
+- Continue Phase 9 wiring and begin bridge module creation.
+
 ---
 
 ## Instructions for AI Assistants
