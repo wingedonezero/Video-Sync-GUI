@@ -560,8 +560,12 @@ def run_audio_correlation(
         })
 
     # Release audio arrays immediately after correlation completes
-    ref_pcm = None
-    tgt_pcm = None
+    # Explicit deletion helps prevent memory issues between jobs
+    del ref_pcm
+    del tgt_pcm
+
+    # Force garbage collection to release large numpy arrays
+    # This prevents memory accumulation between source separation jobs
     import gc
     gc.collect()
 

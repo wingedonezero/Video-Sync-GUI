@@ -888,6 +888,12 @@ import json
 import os
 import sys
 from pathlib import Path
+
+# Limit BLAS threads before numpy import to prevent threading issues
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+
 import numpy as np
 from scipy.io import wavfile
 from audio_separator.separator import Separator
