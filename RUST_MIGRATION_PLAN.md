@@ -1768,6 +1768,10 @@ After Phase 2:
 
 12. **1:1 Layout Requirement**: Rust directories must mirror Python structure 1:1 (names, nesting). Placeholder modules are acceptable, but the layout must match.
 
+13. **Documentation parity**: Python code uses detailed notes about what sections do and why; Rust code must include equivalent inline notes (where appropriate) so humans and AI can understand intent and constraints.
+
+14. **Formatting discipline**: Do not introduce sloppy formatting. Follow existing code standards and keep formatting consistent with the surrounding codebase.
+
 ### Document Maintenance
 
 When working on this migration:
