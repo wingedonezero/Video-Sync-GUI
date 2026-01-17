@@ -434,7 +434,9 @@ def run_audio_correlation(
     tool_paths: Dict[str, str],
     ref_lang: Optional[str],
     target_lang: Optional[str],
-    role_tag: str
+    role_tag: str,
+    ref_track_index: Optional[int] = None,
+    use_source_separation: bool = False
 ) -> List[Dict]:
     """
     Runs audio correlation analysis between reference and target files.
@@ -451,6 +453,10 @@ def run_audio_correlation(
         ref_lang: Optional language code to select reference audio stream
         target_lang: Optional language code to select target audio stream
         role_tag: Source identifier for logging (e.g., "Source 2", "Source 3")
+        ref_track_index: Optional explicit track index in Source 1 to use for correlation.
+            When set, bypasses language matching for the reference file.
+        use_source_separation: Whether to apply source separation for this correlation.
+            This is determined by per-source settings in the job layout.
 
     Returns:
         List of chunk result dictionaries, each containing:
@@ -463,13 +469,27 @@ def run_audio_correlation(
     log = runner._log_message
 
     # --- 1. Select streams ---
-    ref_norm, tgt_norm = _normalize_lang(ref_lang), _normalize_lang(target_lang)
-    idx_ref, _ = get_audio_stream_info(ref_file, ref_norm, runner, tool_paths)
+    if ref_track_index is not None:
+        # Explicit track index specified - use it directly (bypasses language matching)
+        idx_ref = ref_track_index
+        log(f"Using explicit reference track index: {ref_track_index}")
+    else:
+        # Use language matching for reference
+        ref_norm = _normalize_lang(ref_lang)
+        idx_ref, _ = get_audio_stream_info(ref_file, ref_norm, runner, tool_paths)
+
+    tgt_norm = _normalize_lang(target_lang)
     idx_tgt, id_tgt = get_audio_stream_info(target_file, tgt_norm, runner, tool_paths)
 
     if idx_ref is None or idx_tgt is None:
         raise ValueError("Could not locate required audio streams for correlation.")
-    log(f"Selected streams: REF (lang='{ref_norm or 'first'}', index={idx_ref}), "
+
+    # Log stream selection
+    if ref_track_index is not None:
+        ref_desc = f"explicit track {ref_track_index}"
+    else:
+        ref_desc = f"lang='{_normalize_lang(ref_lang) or 'first'}'"
+    log(f"Selected streams: REF ({ref_desc}, index={idx_ref}), "
         f"{role_tag.upper()} (lang='{tgt_norm or 'first'}', index={idx_tgt}, track_id={id_tgt})")
 
     # --- 2. Decode ---
@@ -479,8 +499,10 @@ def run_audio_correlation(
     tgt_pcm = _decode_to_memory(target_file, idx_tgt, DEFAULT_SR, use_soxr, runner, tool_paths)
 
     # --- 2b. Source Separation (Optional) ---
+    # Only apply separation if explicitly requested via per-source settings
+    # AND a separation mode is configured in global settings
     separation_mode = config.get('source_separation_mode', 'none')
-    if separation_mode and separation_mode != 'none':
+    if use_source_separation and separation_mode and separation_mode != 'none':
         try:
             from .source_separation import apply_source_separation
             ref_pcm, tgt_pcm = apply_source_separation(
@@ -648,7 +670,9 @@ def run_multi_correlation(
     tool_paths: Dict[str, str],
     ref_lang: Optional[str],
     target_lang: Optional[str],
-    role_tag: str
+    role_tag: str,
+    ref_track_index: Optional[int] = None,
+    use_source_separation: bool = False
 ) -> Dict[str, List[Dict]]:
     """
     Runs multiple correlation methods on the same audio chunks for comparison.
@@ -666,6 +690,8 @@ def run_multi_correlation(
         ref_lang: Optional language code for reference audio
         target_lang: Optional language code for target audio
         role_tag: Source identifier for logging
+        ref_track_index: Optional explicit track index in Source 1 to use for correlation
+        use_source_separation: Whether to apply source separation for this correlation
 
     Returns:
         Dict mapping method names to their chunk result lists
@@ -676,7 +702,7 @@ def run_multi_correlation(
     if not config.get('multi_correlation_enabled', False):
         log("[MULTI-CORRELATION] Feature disabled, using single correlation method")
         return {config.get('correlation_method', 'Standard Correlation (SCC)'):
-                run_audio_correlation(ref_file, target_file, config, runner, tool_paths, ref_lang, target_lang, role_tag)}
+                run_audio_correlation(ref_file, target_file, config, runner, tool_paths, ref_lang, target_lang, role_tag, ref_track_index, use_source_separation)}
 
     # Get enabled methods
     enabled_methods = []
@@ -687,16 +713,30 @@ def run_multi_correlation(
     if not enabled_methods:
         log("[MULTI-CORRELATION] No methods enabled, falling back to single method")
         return {config.get('correlation_method', 'Standard Correlation (SCC)'):
-                run_audio_correlation(ref_file, target_file, config, runner, tool_paths, ref_lang, target_lang, role_tag)}
+                run_audio_correlation(ref_file, target_file, config, runner, tool_paths, ref_lang, target_lang, role_tag, ref_track_index, use_source_separation)}
 
     # --- 1. Select streams ---
-    ref_norm, tgt_norm = _normalize_lang(ref_lang), _normalize_lang(target_lang)
-    idx_ref, _ = get_audio_stream_info(ref_file, ref_norm, runner, tool_paths)
+    if ref_track_index is not None:
+        # Explicit track index specified - use it directly (bypasses language matching)
+        idx_ref = ref_track_index
+        log(f"Using explicit reference track index: {ref_track_index}")
+    else:
+        # Use language matching for reference
+        ref_norm = _normalize_lang(ref_lang)
+        idx_ref, _ = get_audio_stream_info(ref_file, ref_norm, runner, tool_paths)
+
+    tgt_norm = _normalize_lang(target_lang)
     idx_tgt, id_tgt = get_audio_stream_info(target_file, tgt_norm, runner, tool_paths)
 
     if idx_ref is None or idx_tgt is None:
         raise ValueError("Could not locate required audio streams for correlation.")
-    log(f"Selected streams: REF (lang='{ref_norm or 'first'}', index={idx_ref}), "
+
+    # Log stream selection
+    if ref_track_index is not None:
+        ref_desc = f"explicit track {ref_track_index}"
+    else:
+        ref_desc = f"lang='{_normalize_lang(ref_lang) or 'first'}'"
+    log(f"Selected streams: REF ({ref_desc}, index={idx_ref}), "
         f"{role_tag.upper()} (lang='{tgt_norm or 'first'}', index={idx_tgt}, track_id={id_tgt})")
 
     # --- 2. Decode ---
@@ -706,8 +746,10 @@ def run_multi_correlation(
     tgt_pcm = _decode_to_memory(target_file, idx_tgt, DEFAULT_SR, use_soxr, runner, tool_paths)
 
     # --- 2b. Source Separation (Optional) ---
+    # Only apply separation if explicitly requested via per-source settings
+    # AND a separation mode is configured in global settings
     separation_mode = config.get('source_separation_mode', 'none')
-    if separation_mode and separation_mode != 'none':
+    if use_source_separation and separation_mode and separation_mode != 'none':
         try:
             from .source_separation import apply_source_separation
             ref_pcm, tgt_pcm = apply_source_separation(

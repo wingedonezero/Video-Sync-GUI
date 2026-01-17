@@ -156,23 +156,6 @@ class AnalysisTab(QWidget):
             "Models are downloaded automatically on first use."
         )
 
-        # Apply To dropdown
-        self.widgets['source_separation_apply_to'] = QComboBox()
-        self.widgets['source_separation_apply_to'].addItem('All Comparisons', 'all')
-        self.widgets['source_separation_apply_to'].addItem('Only When Comparing Source 2', 'source_2')
-        self.widgets['source_separation_apply_to'].addItem('Only When Comparing Source 3', 'source_3')
-        self.widgets['source_separation_apply_to'].setToolTip(
-            "Select which comparisons should use source separation:\n\n"
-            "• All Comparisons - Always separate BOTH sides before correlation (default)\n"
-            "• Only When Comparing Source 2 - Separate BOTH S1 and S2 for S1↔S2 comparison,\n"
-            "  skip separation entirely for S1↔S3, S1↔S4, etc.\n"
-            "• Only When Comparing Source 3 - Separate BOTH S1 and S3 for S1↔S3 comparison,\n"
-            "  skip separation entirely for S1↔S2, S1↔S4, etc.\n\n"
-            "IMPORTANT: Both sides are always treated the same (both separated OR both original)\n"
-            "to ensure proper correlation. Can't compare separated vs original audio.\n\n"
-            "Use case: Source 2 is WEB-DL with music (needs separation), Source 3 is clean BD (skip separation)"
-        )
-
         # Manage Models button
         self.manage_models_btn = QPushButton("Manage Models...")
         self.manage_models_btn.setToolTip("Open the model manager to browse, download, and manage audio separation models.")
@@ -186,7 +169,6 @@ class AnalysisTab(QWidget):
         prep_layout.addRow("Source Separation:", self.widgets['source_separation_mode'])
         prep_layout.addRow("Separation Model:", self.widgets['source_separation_model'])
         prep_layout.addRow("Model Directory:", self.widgets['source_separation_model_dir'])
-        prep_layout.addRow("Apply To:", self.widgets['source_separation_apply_to'])
         prep_layout.addRow("", self.manage_models_btn)
         prep_layout.addRow("Audio Filtering:", self.widgets['filtering_method'])
         prep_layout.addRow(self.cutoff_container)

@@ -1323,10 +1323,9 @@ def apply_source_separation(
     This is the main entry point called from audio_corr.py.
     If separation fails or is disabled, returns original audio unchanged.
 
-    Selection logic:
-    - 'all' → Always separate both sides
-    - 'source_2' → Only separate when comparing Source 1 vs Source 2
-    - 'source_3' → Only separate when comparing Source 1 vs Source 3
+    NOTE: The decision to use source separation is made at the analysis step level
+    based on per-source settings (use_source_separation flag in job layout).
+    This function is only called when separation has been determined to be needed.
 
     IMPORTANT: Both sides must be treated the same (both separated OR both original)
     for correlation to work properly. Can't compare separated vs original audio.
@@ -1335,7 +1334,7 @@ def apply_source_separation(
         ref_pcm: Reference audio (typically Source 1)
         tgt_pcm: Target audio (typically Source 2, Source 3, etc.)
         sample_rate: Sample rate
-        config: Configuration dict
+        config: Configuration dict (contains separation mode, model, device settings)
         log_func: Optional logging function
         role_tag: Which target is being processed (e.g., "Source 2", "Source 3", "QA")
 
@@ -1353,20 +1352,6 @@ def apply_source_separation(
     device = config.get('source_separation_device', 'auto')
     timeout = config.get('source_separation_timeout', 900)
     model_dir = config.get('source_separation_model_dir') or None
-
-    # Check which source was selected
-    apply_to = config.get('source_separation_apply_to', 'all').lower()
-
-    # Normalize role_tag to compare (e.g., "Source 2" -> "source_2")
-    role_normalized = role_tag.lower().replace(' ', '_')
-
-    # Determine if we should separate for this comparison
-    # Logic: Separate BOTH sides if 'all' OR if this comparison involves the selected source
-    should_separate = (apply_to == 'all') or (apply_to == role_normalized)
-
-    if not should_separate:
-        log(f"[SOURCE SEPARATION] Skipping separation for Source 1 vs {role_tag} (selected: {apply_to})")
-        return ref_pcm, tgt_pcm
 
     log(f"[SOURCE SEPARATION] Mode: {mode}")
     log(f"[SOURCE SEPARATION] Model: {model_filename}")

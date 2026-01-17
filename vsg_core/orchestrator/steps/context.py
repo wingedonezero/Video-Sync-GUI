@@ -23,6 +23,10 @@ class Context:
     manual_layout: List[Dict[str, Any]] = field(default_factory=list)
     attachment_sources: List[str] = field(default_factory=list)
 
+    # Per-source correlation settings (from job layout)
+    # Format: {'Source 2': {'correlation_target_track': 2, 'use_source_separation': True}, ...}
+    source_settings: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+
     # Filled along the pipeline
     delays: Optional[Delays] = None
     extracted_items: Optional[List[PlanItem]] = None

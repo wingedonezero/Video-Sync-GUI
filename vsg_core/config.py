@@ -136,7 +136,6 @@ class AppConfig:
             'source_separation_model_dir': str(self.script_dir / 'audio_separator_models'),
             'source_separation_device': 'auto',  # Device for source separation: 'auto', 'cpu', 'cuda', 'rocm', 'mps'
             'source_separation_timeout': 900,  # Timeout in seconds for source separation (0 = no timeout, default 900s = 15 min)
-            'source_separation_apply_to': 'all',  # 'all', 'source_2', 'source_3' - which comparison to apply separation
             'filtering_method': 'Dialogue Band-Pass Filter',
             'correlation_method': 'Phase Correlation (GCC-PHAT)',
             'correlation_method_source_separated': 'Phase Correlation (GCC-PHAT)',
