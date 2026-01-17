@@ -3,8 +3,8 @@
 """
 GPU and hardware acceleration environment setup.
 
-Automatically detects AMD ROCm GPUs and sets necessary environment variables
-for PyTorch, PyAV, and other GPU-accelerated libraries.
+Provides environment variables for subprocesses. PyTorch-specific setup
+is handled by the subprocess that actually imports torch (e.g., source separation).
 """
 
 import os
@@ -103,16 +103,16 @@ def get_rocm_environment() -> Dict[str, str]:
     """
     Get environment variables needed for ROCm GPU support.
 
-    Detects AMD GPU and returns appropriate environment variables for:
-    - PyTorch ROCm GPU detection
-    - PyAV/FFmpeg GPU access
-    - Fixing common ROCm issues (missing amdgpu.ids, etc.)
+    Sets minimal environment variables to prevent warnings/errors.
+    PyTorch-specific variables (AMD_VARIANT_PROVIDER_*) are set to safe defaults;
+    the subprocess that imports torch will configure itself properly.
 
     Returns:
         Dict of environment variables to set
     """
     env = {}
 
+    # Find amdgpu.ids path to prevent libdrm warnings
     amdgpu_ids_path = None
     existing_ids_path = os.environ.get('AMDGPU_IDS_PATH')
     existing_libdrm_path = os.environ.get('LIBDRM_AMDGPU_IDS_PATH')
@@ -134,7 +134,7 @@ def get_rocm_environment() -> Dict[str, str]:
     env['AMDGPU_IDS_PATH'] = amdgpu_ids_path
     env['LIBDRM_AMDGPU_IDS_PATH'] = amdgpu_ids_path
 
-    # Detect AMD GPU
+    # Detect AMD GPU for architecture settings
     gpu_info = detect_amd_gpu()
 
     if gpu_info:
@@ -149,29 +149,16 @@ def get_rocm_environment() -> Dict[str, str]:
         if not os.environ.get('HSA_OVERRIDE_GFX_VERSION'):
             env['HSA_OVERRIDE_GFX_VERSION'] = gpu_info['hsa_version']
 
-        # PyTorch 2.9+ AMD variant provider variables
+        # PyTorch 2.9+ AMD variant provider variables - use safe defaults
+        # The subprocess that imports torch will configure these properly if needed
         if not os.environ.get('AMD_VARIANT_PROVIDER_FORCE_GFX_ARCH'):
             env['AMD_VARIANT_PROVIDER_FORCE_GFX_ARCH'] = gpu_info['gfx_version']
 
         if not os.environ.get('AMD_VARIANT_PROVIDER_FORCE_ROCM_VERSION'):
-            # Extract ROCm version from torch if available
-            try:
-                import torch
-                if hasattr(torch.version, 'hip'):
-                    hip_version = torch.version.hip
-                    if hip_version:
-                        # Extract major.minor from version string like "6.4.41134"
-                        rocm_version = '.'.join(hip_version.split('.')[:2])
-                        env['AMD_VARIANT_PROVIDER_FORCE_ROCM_VERSION'] = rocm_version
-                    else:
-                        env['AMD_VARIANT_PROVIDER_FORCE_ROCM_VERSION'] = '6.4'
-                else:
-                    env['AMD_VARIANT_PROVIDER_FORCE_ROCM_VERSION'] = '6.4'
-            except ImportError:
-                env['AMD_VARIANT_PROVIDER_FORCE_ROCM_VERSION'] = '6.4'
+            # Use safe default; subprocess with torch will set correct version
+            env['AMD_VARIANT_PROVIDER_FORCE_ROCM_VERSION'] = '6.4'
 
         # Workaround for missing amdgpu.ids file (known ROCm bug)
-        # Set to empty to disable file lookup that causes errors
         if not os.environ.get('AMD_TEE_LOG_PATH'):
             env['AMD_TEE_LOG_PATH'] = '/dev/null'
 
@@ -217,17 +204,21 @@ def log_gpu_environment(log_func=None):
     else:
         log("[GPU] No AMD GPU detected, using CPU only")
 
-    # Check if PyTorch can see GPU
-    try:
-        import torch
-        if torch.cuda.is_available():
-            device_name = torch.cuda.get_device_name(0)
-            hip_version = getattr(torch.version, 'hip', None)
-            if hip_version:
-                log(f"[GPU] PyTorch ROCm {hip_version}: {device_name}")
+    # Check if PyTorch can see GPU (only if already imported)
+    import sys
+    if 'torch' in sys.modules:
+        torch = sys.modules['torch']
+        try:
+            if torch.cuda.is_available():
+                device_name = torch.cuda.get_device_name(0)
+                hip_version = getattr(torch.version, 'hip', None)
+                if hip_version:
+                    log(f"[GPU] PyTorch ROCm {hip_version}: {device_name}")
+                else:
+                    log(f"[GPU] PyTorch CUDA: {device_name}")
             else:
-                log(f"[GPU] PyTorch CUDA: {device_name}")
-        else:
-            log("[GPU] PyTorch: CPU only (no CUDA/ROCm)")
-    except ImportError:
-        log("[GPU] PyTorch not installed")
+                log("[GPU] PyTorch: CPU only (no CUDA/ROCm)")
+        except Exception as e:
+            log(f"[GPU] PyTorch GPU check failed: {e}")
+    else:
+        log("[GPU] PyTorch not loaded in this process")
