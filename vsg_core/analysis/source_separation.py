@@ -782,44 +782,29 @@ sys.exit(0)
 '''
 
         print(f"[download_model] Running download script...")
+        # Redirect stderr to stdout to prevent deadlock from filled stderr buffer
         process = subprocess.Popen(
             [python_exe, '-c', download_script],
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.STDOUT,  # Merge stderr into stdout to prevent deadlock
             text=True,
         )
 
         # Monitor output for progress
-        stdout_lines = []
-        stderr_lines = []
+        output_lines = []
 
-        while True:
-            if process.poll() is not None:
-                break
-
-            # Read stdout
-            line = process.stdout.readline()
+        # Read all output line by line (non-blocking since stderr is merged)
+        for line in process.stdout:
+            line = line.strip()
             if line:
-                stdout_lines.append(line.strip())
-                print(f"[download_model] {line.strip()}")
+                output_lines.append(line)
+                print(f"[download_model] {line}")
 
             if progress_callback:
                 progress_callback(50, "Downloading...")
 
-            time.sleep(0.1)
-
-        # Read remaining output
-        remaining_stdout, remaining_stderr = process.communicate()
-        if remaining_stdout:
-            stdout_lines.extend(remaining_stdout.strip().split('\n'))
-            for line in remaining_stdout.strip().split('\n'):
-                if line:
-                    print(f"[download_model] {line}")
-        if remaining_stderr:
-            stderr_lines.extend(remaining_stderr.strip().split('\n'))
-            for line in remaining_stderr.strip().split('\n'):
-                if line:
-                    print(f"[download_model] STDERR: {line}")
+        # Wait for process to complete
+        process.wait()
 
         if process.returncode == 0:
             if progress_callback:
@@ -827,7 +812,7 @@ sys.exit(0)
             print(f"[download_model] SUCCESS: Model {model_filename} downloaded")
             return True
         else:
-            error_output = '\n'.join(stderr_lines[-10:])  # Last 10 lines
+            error_output = '\n'.join(output_lines[-10:])  # Last 10 lines
             print(f"[download_model] FAILED with return code {process.returncode}")
             print(f"[download_model] Error output:\n{error_output}")
             if progress_callback:
