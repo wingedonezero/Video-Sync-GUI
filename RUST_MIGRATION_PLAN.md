@@ -1801,6 +1801,24 @@ After Phase 2:
 
 ---
 
+### Session: 2026-01-20
+**Phase**: 9
+**Work Done**:
+- Fixed PyO3 0.27 binding usage in the Rust core shells to restore a successful build.
+- Replaced Python-dependent orchestrator step/validation calls with Rust-first stubs.
+- Added a dedicated "Next Agent Instructions" section for UI buildout with libcosmic.
+
+**Test Results**:
+- `cargo build` (warnings only).
+
+**Changes to Plan**:
+- Added explicit UI buildout guidance for libcosmic usage and parity with `python/vsg_qt/`.
+
+**Next Steps**:
+- Begin Rust UI implementation using libcosmic per the new instructions.
+
+---
+
 ## Instructions for AI Assistants
 
 ### MANDATORY RULES
@@ -2037,6 +2055,21 @@ python/vsg_qt/
 └── [other dialog modules]
 ```
 </details>
+
+---
+
+## Next Agent Instructions (UI Buildout)
+- **Read this document first** and follow Phase 9 rules (core shell first, Rust-owned logic).
+- **Build the Rust UI using libcosmic** and **consult the official libcosmic docs before adding components**.
+- Use the **latest available libcosmic version** (verify from docs before adding to Cargo.toml).
+- **Goal:** recreate the full Python UI layout (windows, dialogs, controls, checkboxes) in Rust, even if not yet wired to the pipeline.
+- Focus on structural parity with `python/vsg_qt/` so later wiring is mainly connecting signals/handlers.
+- Keep Python dependency calls limited to external libraries only (no core logic ownership).
+
+### UI Scope Target
+- Main window, job queue dialog, add job dialog, options dialog, manual selection dialog,
+  track widget/settings dialog, style editor dialog, generated track dialog, sync exclusion dialog,
+  resample dialog, and any remaining dialogs listed under `python/vsg_qt/`.
 
 ---
 
