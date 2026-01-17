@@ -385,15 +385,20 @@ class JobQueueLogic:
         existing_layout = self.layout_manager.load_job_layout(job_id)
         previous_layout = self._convert_enhanced_to_dialog_format(existing_layout.get('enhanced_layout')) if existing_layout else []
         previous_attachments = existing_layout.get('attachment_sources', []) if existing_layout else []
+        previous_source_settings = existing_layout.get('source_settings', {}) if existing_layout else {}
 
         dialog = ManualSelectionDialog(
             track_info, config=self.v.config, log_callback=self.v.log_callback, parent=self.v,
-            previous_layout=previous_layout, previous_attachment_sources=previous_attachments
+            previous_layout=previous_layout, previous_attachment_sources=previous_attachments,
+            previous_source_settings=previous_source_settings
         )
         if dialog.exec():
-            layout, attachment_sources = dialog.get_manual_layout_and_attachment_sources()
+            layout, attachment_sources, source_settings = dialog.get_manual_layout_and_attachment_sources()
             if layout:
-                save_ok = self.layout_manager.save_job_layout(job_id, layout, attachment_sources, job['sources'], track_info)
+                save_ok = self.layout_manager.save_job_layout(
+                    job_id, layout, attachment_sources, job['sources'], track_info,
+                    source_settings=source_settings
+                )
                 if save_ok:
                     self._update_row(row, job)
                 else:
