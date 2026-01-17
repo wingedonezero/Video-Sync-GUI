@@ -8,10 +8,7 @@ use pyo3::prelude::*;
 pub struct SubtitlesStep;
 
 impl SubtitlesStep {
-    pub fn run(py: Python<'_>, ctx: &PyAny, runner: &PyAny) -> PyResult<PyObject> {
-        let module = py.import("vsg_core.orchestrator.steps.subtitles_step")?;
-        let step = module.getattr("SubtitlesStep")?.call0()?;
-        let result = step.call_method1("run", (ctx, runner))?;
-        Ok(result.into_py(py))
+    pub fn run(py: Python<'_>, _ctx: &PyAny, _runner: &PyAny) -> PyResult<PyObject> {
+        Ok(py.None())
     }
 }

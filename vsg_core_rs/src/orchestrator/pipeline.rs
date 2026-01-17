@@ -41,10 +41,8 @@ impl Orchestrator {
         _manual_layout: Option<PyObject>,
         _attachment_sources: Option<PyObject>,
     ) -> PyResult<PyObject> {
-        log.as_ref(py).call1((
-            "[ERROR] Rust orchestrator steps are not implemented yet.",
-        ))?;
-        progress.as_ref(py).call1((0.0f32,))?;
+        log.call1(py, ("[ERROR] Rust orchestrator steps are not implemented yet.",))?;
+        progress.call1(py, (0.0f32,))?;
         Err(PyRuntimeError::new_err(
             "Rust orchestrator steps are not implemented yet.",
         ))

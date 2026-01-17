@@ -6,10 +6,34 @@
 use std::path::Path;
 
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList};
+use pyo3::types::{PyAny, PyAnyMethods, PyDict, PyIterator, PyList};
 
 use crate::pipeline::job_pipeline::JobPipeline;
 use crate::workers::signals::WorkerSignals;
+
+#[pyclass]
+struct LogCallback {
+    signals: Py<WorkerSignals>,
+}
+
+#[pymethods]
+impl LogCallback {
+    fn __call__(&self, py: Python<'_>, message: String) -> PyResult<()> {
+        self.signals.borrow(py).emit_log(py, &message)
+    }
+}
+
+#[pyclass]
+struct ProgressCallback {
+    signals: Py<WorkerSignals>,
+}
+
+#[pymethods]
+impl ProgressCallback {
+    fn __call__(&self, py: Python<'_>, value: f32) -> PyResult<()> {
+        self.signals.borrow(py).emit_progress(py, value)
+    }
+}
 
 #[pyclass]
 pub struct JobWorker {
@@ -48,23 +72,34 @@ impl JobWorker {
 
     #[getter]
     pub fn signals(&self, py: Python<'_>) -> PyObject {
-        self.signals.clone_ref(py).into_py(py)
+        self.signals.clone_ref(py).into()
     }
 
     pub fn run(mut slf: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<()> {
-        let worker_obj = slf.to_object(py);
-        let worker_ref = worker_obj.as_ref(py);
-        let log_callback = worker_ref.getattr("_safe_log")?.into_py(py);
-        let progress_callback = worker_ref.getattr("_safe_progress")?.into_py(py);
+        let log_callback: Py<PyAny> = Py::new(
+            py,
+            LogCallback {
+                signals: slf.signals.clone_ref(py),
+            },
+        )?
+        .into();
+        let progress_callback: Py<PyAny> = Py::new(
+            py,
+            ProgressCallback {
+                signals: slf.signals.clone_ref(py),
+            },
+        )?
+        .into();
 
         let mut pipeline = JobPipeline::new(
-            slf.config.clone_ref(py).into_py(py),
+            slf.config.clone_ref(py).into(),
             log_callback,
             progress_callback,
         );
 
-        let jobs_iter = slf.jobs.as_ref(py).iter()?;
-        let total_jobs = slf.jobs.as_ref(py).len()? as i32;
+        let jobs = slf.jobs.bind(py);
+        let jobs_iter = PyIterator::from_object(jobs)?;
+        let total_jobs = jobs.len()? as i32;
 
         let mut all_results: Vec<PyObject> = Vec::new();
 
@@ -79,11 +114,11 @@ impl JobWorker {
                 break;
             }
 
-            let sources_obj = job_data
-                .get_item("sources")?
-                .map(|value| value.into_py(py))
-                .unwrap_or_else(|| PyDict::new(py).into_py(py));
-            let sources = sources_obj.as_ref(py);
+            let sources_obj: Py<PyAny> = match job_data.get_item("sources") {
+                Ok(value) if !value.is_none() => value.into(),
+                _ => PyDict::new(py).into(),
+            };
+            let sources = sources_obj.bind(py);
             let source1_file = sources.get_item("Source 1")?;
             if source1_file.is_none() {
                 slf._safe_log(
@@ -95,7 +130,7 @@ impl JobWorker {
                 continue;
             }
 
-            let source1_path: String = source1_file.unwrap().extract()?;
+            let source1_path: String = source1_file.extract()?;
 
             job_data.set_item("ref_path_for_batch_check", &source1_path)?;
 
@@ -110,28 +145,33 @@ impl JobWorker {
                 ),
             )?;
 
+            let manual_layout = match job_data.get_item("manual_layout") {
+                Ok(value) if !value.is_none() => Some(value.into()),
+                _ => None,
+            };
+            let attachment_sources = match job_data.get_item("attachment_sources") {
+                Ok(value) if !value.is_none() => Some(value.into()),
+                _ => None,
+            };
+
             let result = pipeline.run_job(
                 py,
                 sources_obj,
                 slf.and_merge,
                 slf.output_dir.clone(),
-                job_data.get_item("manual_layout").ok().flatten().map(|v| v.into_py(py)),
-                job_data
-                    .get_item("attachment_sources")
-                    .ok()
-                    .flatten()
-                    .map(|v| v.into_py(py)),
+                manual_layout,
+                attachment_sources,
             )?;
 
-            let result_any = result.as_ref(py);
+            let result_any = result.bind(py);
             result_any.set_item("job_data_for_batch_check", job_data)?;
 
-            slf._safe_finished_job(py, result_any)?;
+            slf._safe_finished_job(py, result.clone_ref(py))?;
             all_results.push(result);
         }
 
-        let all_results_list = PyList::new(py, all_results);
-        slf._safe_finished_all(py, all_results_list)?;
+        let all_results_list = PyList::new(py, all_results)?;
+        slf._safe_finished_all(py, all_results_list.into())?;
         Ok(())
     }
 
@@ -147,11 +187,11 @@ impl JobWorker {
         self.signals.borrow(py).emit_status(py, msg)
     }
 
-    fn _safe_finished_job(&self, py: Python<'_>, result: &PyAny) -> PyResult<()> {
+    fn _safe_finished_job(&self, py: Python<'_>, result: PyObject) -> PyResult<()> {
         self.signals.borrow(py).emit_finished_job(py, result)
     }
 
-    fn _safe_finished_all(&self, py: Python<'_>, results: &PyAny) -> PyResult<()> {
+    fn _safe_finished_all(&self, py: Python<'_>, results: PyObject) -> PyResult<()> {
         self.signals.borrow(py).emit_finished_all(py, results)
     }
 }

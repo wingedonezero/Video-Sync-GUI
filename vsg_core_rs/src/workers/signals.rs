@@ -6,7 +6,7 @@
 use pyo3::prelude::*;
 
 #[pyclass]
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct WorkerSignals {
     log_callback: Option<Py<PyAny>>,
     progress_callback: Option<Py<PyAny>>,
@@ -37,14 +37,14 @@ impl WorkerSignals {
         Ok(())
     }
 
-    pub fn emit_finished_job(&self, py: Python<'_>, result: &PyAny) -> PyResult<()> {
+    pub fn emit_finished_job(&self, py: Python<'_>, result: PyObject) -> PyResult<()> {
         if let Some(cb) = &self.finished_job_callback {
             cb.call1(py, (result,))?;
         }
         Ok(())
     }
 
-    pub fn emit_finished_all(&self, py: Python<'_>, results: &PyAny) -> PyResult<()> {
+    pub fn emit_finished_all(&self, py: Python<'_>, results: PyObject) -> PyResult<()> {
         if let Some(cb) = &self.finished_all_callback {
             cb.call1(py, (results,))?;
         }

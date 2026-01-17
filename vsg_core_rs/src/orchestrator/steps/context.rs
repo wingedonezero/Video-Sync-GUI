@@ -1,60 +1,39 @@
-//! Orchestrator step context shell.
+//! Orchestrator step context stub.
 //!
-//! Rust shell counterpart to `python/vsg_core/orchestrator/steps/context.py`.
-//! The Rust layer owns lifecycle wiring while the underlying context remains a
-//! Python dataclass until fully ported.
+//! Rust-first placeholder until the orchestrator context is fully ported.
 
 use pyo3::prelude::*;
 
-#[derive(Clone)]
-pub struct Context {
-    inner: Py<PyAny>,
-}
+pub struct Context;
 
 impl Context {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        py: Python<'_>,
-        settings: &PyAny,
-        settings_dict: &PyAny,
-        tool_paths: &PyAny,
-        log: &PyAny,
-        progress: &PyAny,
-        output_dir: &str,
-        temp_dir: &PyAny,
-        sources: &PyAny,
-        and_merge: bool,
-        manual_layout: &PyAny,
-        attachment_sources: &PyAny,
+        _py: Python<'_>,
+        _settings: &PyAny,
+        _settings_dict: &PyAny,
+        _tool_paths: &PyAny,
+        _log: &PyAny,
+        _progress: &PyAny,
+        _output_dir: &str,
+        _temp_dir: &PyAny,
+        _sources: &PyAny,
+        _and_merge: bool,
+        _manual_layout: &PyAny,
+        _attachment_sources: &PyAny,
     ) -> PyResult<Self> {
-        let module = py.import("vsg_core.orchestrator.steps.context")?;
-        let class = module.getattr("Context")?;
-        let instance = class.call1((
-            settings,
-            settings_dict,
-            tool_paths,
-            log,
-            progress,
-            output_dir,
-            temp_dir,
-            sources,
-            and_merge,
-            manual_layout,
-            attachment_sources,
-        ))?;
-        Ok(Self {
-            inner: instance.into_py(py),
-        })
+        Ok(Self)
     }
 
-    pub fn from_py(inner: Py<PyAny>) -> Self {
-        Self { inner }
+    pub fn from_py(_inner: Py<PyAny>) -> Self {
+        Self
     }
 
-    pub fn as_py<'py>(&'py self, py: Python<'py>) -> &'py PyAny {
-        self.inner.as_ref(py)
+    pub fn as_py(&self, py: Python<'_>) -> Py<PyAny> {
+        py.None()
     }
 
     pub fn into_py(self, py: Python<'_>) -> PyObject {
-        self.inner.into_py(py)
+        py.None()
     }
 }

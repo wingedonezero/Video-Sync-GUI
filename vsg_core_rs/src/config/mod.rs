@@ -9,7 +9,8 @@ use std::path::PathBuf;
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyBool, PyDict, PyFloat, PyList, PyLong, PyString};
+use pyo3::types::{PyAnyMethods, PyBool, PyDict, PyList};
+use pyo3::IntoPyObject;
 use serde_json::Value;
 
 #[pyclass]
@@ -23,23 +24,24 @@ impl AppConfig {
     fn json_to_py(py: Python<'_>, value: &Value) -> PyResult<PyObject> {
         let py_value = match value {
             Value::Null => py.None(),
-            Value::Bool(v) => PyBool::new(py, *v).into(),
+            Value::Bool(v) => PyBool::new(py, *v).to_owned().into(),
             Value::Number(num) => {
                 if let Some(i) = num.as_i64() {
-                    PyLong::new(py, i).into()
+                    i.into_pyobject(py)?.into_any().unbind()
                 } else if let Some(u) = num.as_u64() {
-                    PyLong::new(py, u).into()
+                    u.into_pyobject(py)?.into_any().unbind()
                 } else if let Some(f) = num.as_f64() {
-                    PyFloat::new(py, f).into()
+                    f.into_pyobject(py)?.into_any().unbind()
                 } else {
                     py.None()
                 }
             }
-            Value::String(s) => PyString::new(py, s).into(),
+            Value::String(s) => s.into_pyobject(py)?.into_any().unbind(),
             Value::Array(values) => {
                 let items: PyResult<Vec<PyObject>> =
                     values.iter().map(|v| Self::json_to_py(py, v)).collect();
-                PyList::new(py, items?).into()
+                let list = PyList::new(py, items?)?;
+                list.into()
             }
             Value::Object(map) => {
                 let dict = PyDict::new(py);
@@ -52,7 +54,7 @@ impl AppConfig {
         Ok(py_value)
     }
 
-    fn py_to_json(py: Python<'_>, value: &PyAny) -> PyResult<Value> {
+    fn py_to_json(_py: Python<'_>, value: &Bound<'_, PyAny>) -> PyResult<Value> {
         if value.is_none() {
             return Ok(Value::Null);
         }
@@ -60,7 +62,7 @@ impl AppConfig {
             return Ok(Value::Bool(val));
         }
         if let Ok(val) = value.extract::<i64>() {
-            return Ok(Value::Number(val.into()));
+            return Ok(Value::Number(serde_json::Number::from(val)));
         }
         if let Ok(val) = value.extract::<f64>() {
             return Ok(serde_json::Number::from_f64(val).map_or(Value::Null, Value::Number));
@@ -71,7 +73,7 @@ impl AppConfig {
         if let Ok(list) = value.downcast::<PyList>() {
             let mut items = Vec::with_capacity(list.len());
             for item in list.iter() {
-                items.push(Self::py_to_json(py, item)?);
+                items.push(Self::py_to_json(_py, &item)?);
             }
             return Ok(Value::Array(items));
         }
@@ -79,7 +81,7 @@ impl AppConfig {
             let mut map = serde_json::Map::new();
             for (key, val) in dict.iter() {
                 let key = key.extract::<String>()?;
-                map.insert(key, Self::py_to_json(py, val)?);
+                map.insert(key, Self::py_to_json(_py, &val)?);
             }
             return Ok(Value::Object(map));
         }
@@ -129,7 +131,8 @@ impl AppConfig {
         if let Some(parent) = self.settings_filename.parent() {
             fs::create_dir_all(parent)?;
         }
-        let json = serde_json::to_string_pretty(&self.data)?;
+        let json = serde_json::to_string_pretty(&self.data)
+            .map_err(|err| PyValueError::new_err(err.to_string()))?;
         fs::write(&self.settings_filename, json)?;
         Ok(())
     }
@@ -153,7 +156,7 @@ impl AppConfig {
     /// Sets a configuration value.
     pub fn set(&mut self, py: Python<'_>, key: String, value: PyObject) -> PyResult<()> {
         let map = self.data_map_mut()?;
-        let json_value = Self::py_to_json(py, value.as_ref(py))?;
+        let json_value = Self::py_to_json(py, &value.bind(py))?;
         map.insert(key, json_value);
         Ok(())
     }
@@ -161,7 +164,8 @@ impl AppConfig {
     /// Returns accessed keys that are not in defaults (typo detection support).
     pub fn get_unrecognized_keys(&self, py: Python<'_>) -> PyResult<PyObject> {
         let list: Vec<String> = Vec::new();
-        Ok(PyList::new(py, list).into())
+        let list = PyList::new(py, list)?;
+        Ok(list.into())
     }
 
     /// Ensures output/temp directories exist on disk.

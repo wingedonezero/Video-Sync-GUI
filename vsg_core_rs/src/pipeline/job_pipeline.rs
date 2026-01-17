@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
-use pyo3::types::{PyAny, PyDict, PyList};
+use pyo3::types::{PyAny, PyAnyMethods, PyDict, PyList};
 
 use crate::pipeline_components::{
     log_manager::LogManager, output_writer::OutputWriter, result_auditor::ResultAuditor,
@@ -52,10 +52,13 @@ impl JobPipeline {
         manual_layout: Option<PyObject>,
         attachment_sources: Option<PyObject>,
     ) -> PyResult<PyObject> {
-        let sources_any = sources.as_ref(py);
-        let source1_file = sources_any
-            .get_item("Source 1")?
-            .ok_or_else(|| PyValueError::new_err("Job is missing Source 1 (Reference)."))?;
+        let sources_any = sources.bind(py);
+        let source1_file = sources_any.get_item("Source 1")?;
+        if source1_file.is_none() {
+            return Err(PyValueError::new_err(
+                "Job is missing Source 1 (Reference).",
+            ));
+        }
         let source1_path: String = source1_file.extract()?;
 
         let output_dir = PathBuf::from(&output_dir_str);
@@ -71,18 +74,23 @@ impl JobPipeline {
             py,
             job_name,
             &log_dir,
-            self.gui_log_callback.as_ref(py),
+            self.gui_log_callback.clone_ref(py).into(),
         )?;
 
         let mut ctx_temp_dir: Option<PathBuf> = None;
         let manual_layout_missing = manual_layout.is_none();
-        let manual_layout = manual_layout.unwrap_or_else(|| PyList::empty(py).into_py(py));
-        let attachment_sources =
-            attachment_sources.unwrap_or_else(|| PyList::empty(py).into_py(py));
+        let manual_layout = match manual_layout {
+            Some(value) => value,
+            None => PyList::empty(py).into(),
+        };
+        let attachment_sources = match attachment_sources {
+            Some(value) => value,
+            None => PyList::empty(py).into(),
+        };
 
         let result = (|| -> PyResult<PyObject> {
             let tool_paths = ToolValidator::validate_tools(py)?;
-            self.tool_paths = Some(tool_paths.into_py(py));
+            self.tool_paths = Some(tool_paths.clone_ref(py));
 
             log_to_all.call1(
                 py,
@@ -94,7 +102,7 @@ impl JobPipeline {
                         .unwrap_or("source1")
                 ),),
             )?;
-            self.progress_callback.as_ref(py).call1((0.0f32,))?;
+            self.progress_callback.call1(py, (0.0f32,))?;
 
             if and_merge && manual_layout_missing {
                 let err_msg = "Manual layout required for merge.";
@@ -109,27 +117,27 @@ impl JobPipeline {
                         .and_then(|name| name.to_str())
                         .unwrap_or("source1"),
                 )?;
-                return Ok(response.into_py(py));
+                return Ok(response.into());
             }
 
             let ctx = SyncPlanner::plan_sync(
                 py,
-                self.config.as_ref(py),
-                self.tool_paths.as_ref().unwrap().as_ref(py),
-                log_to_all.as_ref(py),
-                self.progress_callback.as_ref(py),
-                sources.as_ref(py),
+                self.config.bind(py),
+                self.tool_paths.as_ref().unwrap().bind(py),
+                log_to_all.bind(py),
+                self.progress_callback.bind(py),
+                sources.bind(py),
                 and_merge,
                 &output_dir_str,
-                manual_layout.as_ref(py),
-                attachment_sources.as_ref(py),
+                manual_layout.bind(py),
+                attachment_sources.bind(py),
             )?;
 
             ctx_temp_dir = Some(ctx.temp_dir.clone());
 
             if !and_merge {
                 log_to_all.call1(py, ("--- Analysis Complete (No Merge) ---",))?;
-                self.progress_callback.as_ref(py).call1((1.0f32,))?;
+                self.progress_callback.call1(py, (1.0f32,))?;
 
                 let response = PyDict::new(py);
                 response.set_item("status", "Analyzed")?;
@@ -146,9 +154,10 @@ impl JobPipeline {
                         .unwrap_or("source1"),
                 )?;
                 response.set_item("issues", 0)?;
-                response.set_item("stepping_sources", PyList::new(py, &ctx.stepping_sources))?;
+                let stepping_sources = PyList::new(py, &ctx.stepping_sources)?;
+                response.set_item("stepping_sources", stepping_sources)?;
                 response.set_item("stepping_detected_disabled", ctx.stepping_detected_disabled)?;
-                return Ok(response.into_py(py));
+                return Ok(response.into());
             }
 
             let final_output_path = OutputWriter::prepare_output_path(
@@ -190,7 +199,7 @@ impl JobPipeline {
 
             let issues = ResultAuditor::audit_output(&final_output_path)?;
 
-            self.progress_callback.as_ref(py).call1((1.0f32,))?;
+            self.progress_callback.call1(py, (1.0f32,))?;
 
             let response = PyDict::new(py);
             response.set_item("status", "Merged")?;
@@ -208,9 +217,10 @@ impl JobPipeline {
                     .unwrap_or("source1"),
             )?;
             response.set_item("issues", issues)?;
-            response.set_item("stepping_sources", PyList::new(py, &ctx.stepping_sources))?;
+            let stepping_sources = PyList::new(py, &ctx.stepping_sources)?;
+            response.set_item("stepping_sources", stepping_sources)?;
             response.set_item("stepping_detected_disabled", ctx.stepping_detected_disabled)?;
-            Ok(response.into_py(py))
+            Ok(response.into())
         })();
 
         let final_result = match result {
@@ -232,7 +242,7 @@ impl JobPipeline {
                 response.set_item("issues", 0)?;
                 response.set_item("stepping_sources", PyList::empty(py))?;
                 response.set_item("stepping_detected_disabled", false)?;
-                response.into_py(py)
+                response.into()
             }
         };
 
@@ -241,7 +251,7 @@ impl JobPipeline {
         }
 
         log_to_all.call1(py, ("=== Job Finished ===",))?;
-        LogManager::cleanup_log(py, logger.as_ref(py), handler.as_ref(py))?;
+        LogManager::cleanup_log(py, logger, handler)?;
 
         Ok(final_result)
     }

@@ -22,15 +22,15 @@ impl SyncPlanner {
     #[allow(clippy::too_many_arguments)]
     pub fn plan_sync(
         _py: Python<'_>,
-        _config: &PyAny,
-        _tool_paths: &PyAny,
-        _log_callback: &PyAny,
-        _progress_callback: &PyAny,
-        _sources: &PyAny,
+        _config: &Bound<'_, PyAny>,
+        _tool_paths: &Bound<'_, PyAny>,
+        _log_callback: &Bound<'_, PyAny>,
+        _progress_callback: &Bound<'_, PyAny>,
+        _sources: &Bound<'_, PyAny>,
         _and_merge: bool,
         output_dir: &str,
-        _manual_layout: &PyAny,
-        _attachment_sources: &PyAny,
+        _manual_layout: &Bound<'_, PyAny>,
+        _attachment_sources: &Bound<'_, PyAny>,
     ) -> PyResult<SyncPlanContext> {
         let temp_dir = PathBuf::from(output_dir).join("temp_work");
         std::fs::create_dir_all(&temp_dir)?;

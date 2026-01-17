@@ -35,7 +35,7 @@ impl ToolValidator {
             )?;
         }
 
-        Ok(tool_paths.into_py(py))
+        Ok(tool_paths.into())
     }
 }
 
