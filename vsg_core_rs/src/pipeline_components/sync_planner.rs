@@ -1,40 +1,45 @@
-//! Sync planner component shell.
+//! Sync planner component core.
 //!
-//! Rust shell counterpart to `python/vsg_core/pipeline_components/sync_planner.py`.
-//! Delegates planning to the Rust orchestrator, which embeds Python steps.
+//! Rust-first placeholder that prepares a minimal planning context without
+//! invoking Python modules.
+
+use std::path::PathBuf;
 
 use pyo3::prelude::*;
 
-use crate::orchestrator::pipeline::Orchestrator;
+#[derive(Debug)]
+pub struct SyncPlanContext {
+    pub temp_dir: PathBuf,
+    pub tokens: Option<Vec<String>>,
+    pub delays: Vec<(String, i64)>,
+    pub stepping_sources: Vec<String>,
+    pub stepping_detected_disabled: bool,
+}
 
 pub struct SyncPlanner;
 
 impl SyncPlanner {
     #[allow(clippy::too_many_arguments)]
     pub fn plan_sync(
-        py: Python<'_>,
-        config: &PyAny,
-        tool_paths: &PyAny,
-        log_callback: &PyAny,
-        progress_callback: &PyAny,
-        sources: &PyAny,
-        and_merge: bool,
+        _py: Python<'_>,
+        _config: &PyAny,
+        _tool_paths: &PyAny,
+        _log_callback: &PyAny,
+        _progress_callback: &PyAny,
+        _sources: &PyAny,
+        _and_merge: bool,
         output_dir: &str,
-        manual_layout: &PyAny,
-        attachment_sources: &PyAny,
-    ) -> PyResult<PyObject> {
-        let orchestrator = Orchestrator::new();
-        orchestrator.run(
-            py,
-            config.into_py(py),
-            tool_paths.into_py(py),
-            log_callback.into_py(py),
-            progress_callback.into_py(py),
-            sources.into_py(py),
-            and_merge,
-            output_dir.to_string(),
-            Some(manual_layout.into_py(py)),
-            Some(attachment_sources.into_py(py)),
-        )
+        _manual_layout: &PyAny,
+        _attachment_sources: &PyAny,
+    ) -> PyResult<SyncPlanContext> {
+        let temp_dir = PathBuf::from(output_dir).join("temp_work");
+        std::fs::create_dir_all(&temp_dir)?;
+        Ok(SyncPlanContext {
+            temp_dir,
+            tokens: None,
+            delays: Vec::new(),
+            stepping_sources: Vec::new(),
+            stepping_detected_disabled: false,
+        })
     }
 }

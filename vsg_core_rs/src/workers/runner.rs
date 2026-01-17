@@ -1,7 +1,7 @@
-//! Worker runner shell.
+//! Worker runner core.
 //!
-//! Rust shell counterpart to `python/vsg_qt/worker/runner.py`.
-//! Uses the Rust JobPipeline while emitting Python UI signals.
+//! Rust-first worker runner that emits optional callbacks without depending on
+//! Python UI modules.
 
 use std::path::Path;
 
@@ -17,7 +17,7 @@ pub struct JobWorker {
     jobs: Py<PyAny>,
     and_merge: bool,
     output_dir: String,
-    signals: WorkerSignals,
+    signals: Py<WorkerSignals>,
     cancelled: bool,
 }
 
@@ -31,12 +31,13 @@ impl JobWorker {
         and_merge: bool,
         output_dir: String,
     ) -> PyResult<Self> {
+        let signals = Py::new(py, WorkerSignals::new())?;
         Ok(Self {
             config: config.into(),
             jobs: jobs.into(),
             and_merge,
             output_dir,
-            signals: WorkerSignals::new(py)?,
+            signals,
             cancelled: false,
         })
     }
@@ -47,7 +48,7 @@ impl JobWorker {
 
     #[getter]
     pub fn signals(&self, py: Python<'_>) -> PyObject {
-        self.signals.as_py(py).into_py(py)
+        self.signals.clone_ref(py).into_py(py)
     }
 
     pub fn run(mut slf: PyRefMut<'_, Self>, py: Python<'_>) -> PyResult<()> {
@@ -135,22 +136,22 @@ impl JobWorker {
     }
 
     fn _safe_log(&self, py: Python<'_>, msg: &str) -> PyResult<()> {
-        self.signals.emit_log(py, msg)
+        self.signals.borrow(py).emit_log(py, msg)
     }
 
     fn _safe_progress(&self, py: Python<'_>, value: f32) -> PyResult<()> {
-        self.signals.emit_progress(py, value)
+        self.signals.borrow(py).emit_progress(py, value)
     }
 
     fn _safe_status(&self, py: Python<'_>, msg: &str) -> PyResult<()> {
-        self.signals.emit_status(py, msg)
+        self.signals.borrow(py).emit_status(py, msg)
     }
 
     fn _safe_finished_job(&self, py: Python<'_>, result: &PyAny) -> PyResult<()> {
-        self.signals.emit_finished_job(py, result)
+        self.signals.borrow(py).emit_finished_job(py, result)
     }
 
     fn _safe_finished_all(&self, py: Python<'_>, results: &PyAny) -> PyResult<()> {
-        self.signals.emit_finished_all(py, results)
+        self.signals.borrow(py).emit_finished_all(py, results)
     }
 }

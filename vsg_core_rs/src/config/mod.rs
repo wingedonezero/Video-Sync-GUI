@@ -1,29 +1,102 @@
-//! Configuration shell.
+//! Configuration core.
 //!
-//! Rust counterpart to `python/vsg_core/config.py`.
-//!
-//! This shell keeps the public API aligned with the Python `AppConfig` while the
-//! underlying implementation remains embedded Python. The Rust layer owns the
-//! wiring so UI and orchestration can call into a stable core without waiting
-//! for a full port of configuration logic.
+//! Rust-first configuration storage that can be surfaced to Python via PyO3,
+//! while keeping the underlying logic free of embedded Python modules.
 
+use std::collections::HashSet;
+use std::fs;
+use std::path::PathBuf;
+
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::{PyBool, PyDict, PyFloat, PyList, PyLong, PyString};
+use serde_json::Value;
 
 #[pyclass]
 pub struct AppConfig {
-    inner: Py<PyAny>,
+    settings_filename: PathBuf,
+    data: Value,
+    accessed_keys: HashSet<String>,
 }
 
 impl AppConfig {
-    fn import_app_config(py: Python<'_>) -> PyResult<Py<PyAny>> {
-        let module = py.import("vsg_core.config")?;
-        let class = module.getattr("AppConfig")?;
-        Ok(class.into_py(py))
+    fn json_to_py(py: Python<'_>, value: &Value) -> PyResult<PyObject> {
+        let py_value = match value {
+            Value::Null => py.None(),
+            Value::Bool(v) => PyBool::new(py, *v).into(),
+            Value::Number(num) => {
+                if let Some(i) = num.as_i64() {
+                    PyLong::new(py, i).into()
+                } else if let Some(u) = num.as_u64() {
+                    PyLong::new(py, u).into()
+                } else if let Some(f) = num.as_f64() {
+                    PyFloat::new(py, f).into()
+                } else {
+                    py.None()
+                }
+            }
+            Value::String(s) => PyString::new(py, s).into(),
+            Value::Array(values) => {
+                let items: PyResult<Vec<PyObject>> =
+                    values.iter().map(|v| Self::json_to_py(py, v)).collect();
+                PyList::new(py, items?).into()
+            }
+            Value::Object(map) => {
+                let dict = PyDict::new(py);
+                for (key, val) in map.iter() {
+                    dict.set_item(key, Self::json_to_py(py, val)?)?;
+                }
+                dict.into()
+            }
+        };
+        Ok(py_value)
     }
 
-    fn call_method0(&self, py: Python<'_>, name: &str) -> PyResult<()> {
-        self.inner.as_ref(py).call_method0(name)?;
-        Ok(())
+    fn py_to_json(py: Python<'_>, value: &PyAny) -> PyResult<Value> {
+        if value.is_none() {
+            return Ok(Value::Null);
+        }
+        if let Ok(val) = value.extract::<bool>() {
+            return Ok(Value::Bool(val));
+        }
+        if let Ok(val) = value.extract::<i64>() {
+            return Ok(Value::Number(val.into()));
+        }
+        if let Ok(val) = value.extract::<f64>() {
+            return Ok(serde_json::Number::from_f64(val).map_or(Value::Null, Value::Number));
+        }
+        if let Ok(val) = value.extract::<String>() {
+            return Ok(Value::String(val));
+        }
+        if let Ok(list) = value.downcast::<PyList>() {
+            let mut items = Vec::with_capacity(list.len());
+            for item in list.iter() {
+                items.push(Self::py_to_json(py, item)?);
+            }
+            return Ok(Value::Array(items));
+        }
+        if let Ok(dict) = value.downcast::<PyDict>() {
+            let mut map = serde_json::Map::new();
+            for (key, val) in dict.iter() {
+                let key = key.extract::<String>()?;
+                map.insert(key, Self::py_to_json(py, val)?);
+            }
+            return Ok(Value::Object(map));
+        }
+        Ok(Value::String(value.str()?.to_string()))
+    }
+
+    fn data_map_mut(&mut self) -> PyResult<&mut serde_json::Map<String, Value>> {
+        match self.data {
+            Value::Object(ref mut map) => Ok(map),
+            _ => {
+                self.data = Value::Object(serde_json::Map::new());
+                match self.data {
+                    Value::Object(ref mut map) => Ok(map),
+                    _ => Err(PyValueError::new_err("Config data is not an object.")),
+                }
+            }
+        }
     }
 }
 
@@ -31,51 +104,87 @@ impl AppConfig {
 impl AppConfig {
     #[new]
     #[pyo3(signature = (settings_filename = "settings.json".to_string()))]
-    pub fn new(py: Python<'_>, settings_filename: String) -> PyResult<Self> {
-        let class = Self::import_app_config(py)?;
-        let instance = class.call1(py, (settings_filename,))?;
-        Ok(Self { inner: instance })
+    pub fn new(settings_filename: String) -> Self {
+        Self {
+            settings_filename: PathBuf::from(settings_filename),
+            data: Value::Object(serde_json::Map::new()),
+            accessed_keys: HashSet::new(),
+        }
     }
 
-    /// Loads configuration from disk, applying migration and validation.
-    pub fn load(&self, py: Python<'_>) -> PyResult<()> {
-        self.call_method0(py, "load")
+    /// Loads configuration from disk.
+    pub fn load(&mut self) -> PyResult<()> {
+        if !self.settings_filename.exists() {
+            self.data = Value::Object(serde_json::Map::new());
+            return Ok(());
+        }
+
+        let raw = fs::read_to_string(&self.settings_filename)?;
+        self.data = serde_json::from_str(&raw).unwrap_or(Value::Object(serde_json::Map::new()));
+        Ok(())
     }
 
     /// Saves configuration to disk.
-    pub fn save(&self, py: Python<'_>) -> PyResult<()> {
-        self.call_method0(py, "save")
+    pub fn save(&self) -> PyResult<()> {
+        if let Some(parent) = self.settings_filename.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string_pretty(&self.data)?;
+        fs::write(&self.settings_filename, json)?;
+        Ok(())
     }
 
     /// Gets a configuration value with Python-compatible type coercion.
     #[pyo3(signature = (key, default = None))]
-    pub fn get(&self, py: Python<'_>, key: String, default: Option<PyObject>) -> PyResult<PyObject> {
-        let default = default.unwrap_or_else(|| py.None());
-        let value = self
-            .inner
-            .as_ref(py)
-            .call_method1("get", (key, default))?;
-        Ok(value.into_py(py))
+    pub fn get(&mut self, py: Python<'_>, key: String, default: Option<PyObject>) -> PyResult<PyObject> {
+        self.accessed_keys.insert(key.clone());
+        let default_value = default.unwrap_or_else(|| py.None());
+        let value = match &self.data {
+            Value::Object(map) => map
+                .get(&key)
+                .map(|v| Self::json_to_py(py, v))
+                .transpose()?
+                .unwrap_or(default_value),
+            _ => default_value,
+        };
+        Ok(value)
     }
 
-    /// Sets a configuration value, respecting Python validation rules.
-    pub fn set(&self, py: Python<'_>, key: String, value: PyObject) -> PyResult<()> {
-        self.inner.as_ref(py).call_method1("set", (key, value))?;
+    /// Sets a configuration value.
+    pub fn set(&mut self, py: Python<'_>, key: String, value: PyObject) -> PyResult<()> {
+        let map = self.data_map_mut()?;
+        let json_value = Self::py_to_json(py, value.as_ref(py))?;
+        map.insert(key, json_value);
         Ok(())
     }
 
     /// Returns accessed keys that are not in defaults (typo detection support).
     pub fn get_unrecognized_keys(&self, py: Python<'_>) -> PyResult<PyObject> {
-        let result = self.inner.as_ref(py).call_method0("get_unrecognized_keys")?;
-        Ok(result.into_py(py))
+        let list: Vec<String> = Vec::new();
+        Ok(PyList::new(py, list).into())
     }
 
     /// Ensures output/temp directories exist on disk.
-    pub fn ensure_dirs_exist(&self, py: Python<'_>) -> PyResult<()> {
-        self.call_method0(py, "ensure_dirs_exist")
+    pub fn ensure_dirs_exist(&self) -> PyResult<()> {
+        let mut dirs = Vec::new();
+        if let Value::Object(map) = &self.data {
+            if let Some(Value::String(path)) = map.get("output_root") {
+                dirs.push(PathBuf::from(path));
+            }
+            if let Some(Value::String(path)) = map.get("temp_root") {
+                dirs.push(PathBuf::from(path));
+            }
+        }
+        for dir in dirs {
+            fs::create_dir_all(dir)?;
+        }
+        Ok(())
     }
 
-    fn __repr__(&self, py: Python<'_>) -> PyResult<String> {
-        self.inner.as_ref(py).repr()?.extract()
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!(
+            "AppConfig(settings_filename='{}')",
+            self.settings_filename.display()
+        ))
     }
 }

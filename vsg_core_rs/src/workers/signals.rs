@@ -1,67 +1,81 @@
-//! Worker signal definitions (shell).
+//! Worker signal definitions (core).
 //!
-//! Mirrors `python/vsg_qt/worker/signals.py` for progress/logging events.
-//! Uses embedded Python signals until UI wiring is ported.
+//! Rust-first signals that can optionally call into Python callbacks without
+//! requiring Python UI modules.
 
-use pyo3::exceptions::{PyAttributeError, PyRuntimeError};
 use pyo3::prelude::*;
-use pyo3::types::PyTuple;
 
-#[derive(Clone)]
+#[pyclass]
+#[derive(Clone, Default)]
 pub struct WorkerSignals {
-    inner: Py<PyAny>,
+    log_callback: Option<Py<PyAny>>,
+    progress_callback: Option<Py<PyAny>>,
+    status_callback: Option<Py<PyAny>>,
+    finished_job_callback: Option<Py<PyAny>>,
+    finished_all_callback: Option<Py<PyAny>>,
 }
 
 impl WorkerSignals {
-    pub fn new(py: Python<'_>) -> PyResult<Self> {
-        let module = py.import("vsg_qt.worker.signals")?;
-        let class = module.getattr("WorkerSignals")?;
-        let instance = class.call0()?;
-        Ok(Self {
-            inner: instance.into_py(py),
-        })
-    }
-
     pub fn emit_log(&self, py: Python<'_>, message: &str) -> PyResult<()> {
-        self.emit(py, "log", (message,))
+        if let Some(cb) = &self.log_callback {
+            cb.call1(py, (message,))?;
+        }
+        Ok(())
     }
 
     pub fn emit_progress(&self, py: Python<'_>, value: f32) -> PyResult<()> {
-        self.emit(py, "progress", (value,))
+        if let Some(cb) = &self.progress_callback {
+            cb.call1(py, (value,))?;
+        }
+        Ok(())
     }
 
     pub fn emit_status(&self, py: Python<'_>, message: &str) -> PyResult<()> {
-        self.emit(py, "status", (message,))
+        if let Some(cb) = &self.status_callback {
+            cb.call1(py, (message,))?;
+        }
+        Ok(())
     }
 
     pub fn emit_finished_job(&self, py: Python<'_>, result: &PyAny) -> PyResult<()> {
-        self.emit(py, "finished_job", (result,))
+        if let Some(cb) = &self.finished_job_callback {
+            cb.call1(py, (result,))?;
+        }
+        Ok(())
     }
 
     pub fn emit_finished_all(&self, py: Python<'_>, results: &PyAny) -> PyResult<()> {
-        self.emit(py, "finished_all", (results,))
-    }
-
-    fn emit<A>(&self, py: Python<'_>, name: &str, args: A) -> PyResult<()>
-    where
-        A: IntoPy<Py<PyTuple>>,
-    {
-        let signal = self.inner.as_ref(py).getattr(name)?;
-        match signal.call_method1("emit", args) {
-            Ok(_) => Ok(()),
-            Err(err) => {
-                if err.is_instance(py, PyRuntimeError::type_object(py))?
-                    || err.is_instance(py, PyAttributeError::type_object(py))?
-                {
-                    Ok(())
-                } else {
-                    Err(err)
-                }
-            }
+        if let Some(cb) = &self.finished_all_callback {
+            cb.call1(py, (results,))?;
         }
+        Ok(())
+    }
+}
+
+#[pymethods]
+impl WorkerSignals {
+    #[new]
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    pub fn as_py<'py>(&'py self, py: Python<'py>) -> &'py PyAny {
-        self.inner.as_ref(py)
+    pub fn set_log_callback(&mut self, callback: PyObject) {
+        self.log_callback = Some(callback.into());
+    }
+
+    pub fn set_progress_callback(&mut self, callback: PyObject) {
+        self.progress_callback = Some(callback.into());
+    }
+
+    pub fn set_status_callback(&mut self, callback: PyObject) {
+        self.status_callback = Some(callback.into());
+    }
+
+    pub fn set_finished_job_callback(&mut self, callback: PyObject) {
+        self.finished_job_callback = Some(callback.into());
+    }
+
+    pub fn set_finished_all_callback(&mut self, callback: PyObject) {
+        self.finished_all_callback = Some(callback.into());
     }
 }

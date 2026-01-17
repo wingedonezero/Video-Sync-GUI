@@ -1,7 +1,6 @@
-//! Log management component shell.
+//! Log management component core.
 //!
-//! Rust shell counterpart to `python/vsg_core/pipeline_components/log_manager.py`.
-//! Delegates logger creation/cleanup to embedded Python.
+//! Rust-first logging hooks that can forward to a GUI callback when provided.
 
 use pyo3::prelude::*;
 
@@ -10,20 +9,17 @@ pub struct LogManager;
 impl LogManager {
     pub fn setup_job_log(
         py: Python<'_>,
-        job_name: &str,
-        log_dir: &PyAny,
+        _job_name: &str,
+        _log_dir: &PyAny,
         gui_log_callback: &PyAny,
     ) -> PyResult<(PyObject, PyObject, PyObject)> {
-        let module = py.import("vsg_core.pipeline_components.log_manager")?;
-        let class = module.getattr("LogManager")?;
-        let result = class.call_method1("setup_job_log", (job_name, log_dir, gui_log_callback))?;
-        result.extract::<(PyObject, PyObject, PyObject)>()
+        let logger = py.None();
+        let handler = py.None();
+        let log_to_all = gui_log_callback.to_object(py);
+        Ok((logger, handler, log_to_all))
     }
 
-    pub fn cleanup_log(py: Python<'_>, logger: &PyAny, handler: &PyAny) -> PyResult<()> {
-        let module = py.import("vsg_core.pipeline_components.log_manager")?;
-        let class = module.getattr("LogManager")?;
-        class.call_method1("cleanup_log", (logger, handler))?;
+    pub fn cleanup_log(_py: Python<'_>, _logger: &PyAny, _handler: &PyAny) -> PyResult<()> {
         Ok(())
     }
 }

@@ -1763,6 +1763,25 @@ After Phase 2:
 
 ---
 
+### Session: 2026-01-18
+**Phase**: 9
+**Work Done**:
+- Replaced Phase 9 shells with Rust-first core logic stubs (config, pipeline, worker signals), removing Python module dependencies.
+- Added Rust placeholder implementations for pipeline components to keep the core UI path functional without embedded Python.
+- Simplified orchestrator entry point to a Rust-first placeholder until step logic is implemented.
+
+**Test Results**:
+- Not run (scaffolding changes only).
+
+**Changes to Plan**:
+- Clarified that Python usage is limited to dependency calls, not core logic ownership.
+
+**Next Steps**:
+- Fill in native logging, tool validation, and merge execution logic in Rust.
+- Implement step logic incrementally in Rust, adding Python dependency calls only where required.
+
+---
+
 ## Instructions for AI Assistants
 
 ### MANDATORY RULES

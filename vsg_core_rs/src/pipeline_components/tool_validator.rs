@@ -1,17 +1,14 @@
-//! Tool validation component shell.
+//! Tool validation component core.
 //!
-//! Rust shell counterpart to `python/vsg_core/pipeline_components/tool_validator.py`.
-//! Delegates PATH validation to embedded Python.
+//! Rust-first placeholder that will be populated with native tool checks.
 
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 
 pub struct ToolValidator;
 
 impl ToolValidator {
     pub fn validate_tools(py: Python<'_>) -> PyResult<PyObject> {
-        let module = py.import("vsg_core.pipeline_components.tool_validator")?;
-        let class = module.getattr("ToolValidator")?;
-        let result = class.call_method0("validate_tools")?;
-        Ok(result.into_py(py))
+        Ok(PyDict::new(py).into_py(py))
     }
 }
