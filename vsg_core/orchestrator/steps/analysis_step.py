@@ -634,13 +634,22 @@ class AnalysisStep:
             # CRITICAL: Use the container delay from the ACTUAL track used for correlation
             # If correlation_target_track is set, use that track's delay instead of the global reference
             actual_container_delay = source1_audio_container_delay
-            if correlation_target_track is not None:
-                # Per-source correlation target is set - use that track's container delay
-                actual_container_delay = source1_container_delays.get(correlation_target_track, 0)
-                if actual_container_delay != source1_audio_container_delay:
+            if correlation_target_track is not None and source1_info:
+                # Per-source correlation target is set - map audio index to track ID
+                # correlation_target_track is an audio-only index (0, 1, 2...)
+                # source1_container_delays is keyed by track ID
+                audio_tracks = [t for t in source1_info.get('tracks', []) if t.get('type') == 'audio']
+                if 0 <= correlation_target_track < len(audio_tracks):
+                    target_track_id = audio_tracks[correlation_target_track].get('id')
+                    actual_container_delay = source1_container_delays.get(target_track_id, 0)
+                    if actual_container_delay != source1_audio_container_delay:
+                        runner._log_message(
+                            f"[Container Delay Override] Using audio index {correlation_target_track} (track ID {target_track_id}) delay: "
+                            f"{actual_container_delay:+.3f}ms (global reference was {source1_audio_container_delay:+.3f}ms)"
+                        )
+                else:
                     runner._log_message(
-                        f"[Container Delay Override] Using track {correlation_target_track} delay: "
-                        f"{actual_container_delay:+.3f}ms (global reference was {source1_audio_container_delay:+.3f}ms)"
+                        f"[Container Delay Warning] Invalid audio index {correlation_target_track}, using global reference"
                     )
 
             # Store both rounded (for mkvmerge) and raw (for subtitle sync precision)
