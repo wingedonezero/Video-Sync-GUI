@@ -63,7 +63,10 @@ class CommandRunner:
 
             popen_kwargs = {
                 "stdout": subprocess.PIPE,
-                "stderr": subprocess.STDOUT,
+                # CRITICAL: Don't merge stderr with stdout for binary output!
+                # FFmpeg may output warnings/errors to stderr that would corrupt binary data.
+                # For text output, merging is fine and helps capture all output for logging.
+                "stderr": subprocess.DEVNULL if is_binary else subprocess.STDOUT,
                 "env": env,  # Pass environment with GPU variables
             }
             # (THE FIX IS HERE) Add stdin handling
