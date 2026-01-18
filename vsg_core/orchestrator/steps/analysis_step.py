@@ -443,12 +443,15 @@ class AnalysisStep:
                     'correlation_method': config.get('correlation_method_source_separated', 'Phase Correlation (GCC-PHAT)'),
                     'delay_selection_mode': config.get('delay_selection_mode_source_separated', 'Mode (Clustered)')
                 }
-                runner._log_message(f"[Analysis Config] Source separation detected - using:")
+                runner._log_message(f"[Analysis Config] Source separation enabled - using:")
                 runner._log_message(f"  Correlation: {source_config['correlation_method']}")
                 runner._log_message(f"  Delay Mode: {source_config['delay_selection_mode']}")
             else:
                 # Use original config as-is (no source separation)
                 source_config = config
+                runner._log_message(f"[Analysis Config] Standard mode - using:")
+                runner._log_message(f"  Correlation: {source_config.get('correlation_method', 'SCC (Sliding Cross-Correlation)')}")
+                runner._log_message(f"  Delay Mode: {source_config.get('delay_selection_mode', 'Mode (Most Common)')}")
 
             stream_info = get_stream_info(source_file, runner, ctx.tool_paths)
             if not stream_info:
