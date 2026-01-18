@@ -11,31 +11,29 @@ from vsg_core.analysis.audio_corr import run_audio_correlation, run_multi_correl
 from vsg_core.analysis.drift_detection import diagnose_audio_issue
 from vsg_core.extraction.tracks import get_stream_info, get_stream_info_with_delays
 
-def _should_use_source_separated_mode(source_key: str, config: Dict) -> bool:
+def _should_use_source_separated_mode(source_key: str, config: Dict, source_settings: Dict[str, Dict[str, Any]]) -> bool:
     """
-    Check if this source used source separation during correlation.
+    Check if this source should use source separation during correlation.
 
-    This mirrors the logic in source_separation.py's apply_source_separation() function
-    to determine if source-separated delay selection mode should be used.
+    Uses per-source settings from the job layout. Source separation is only applied
+    when explicitly enabled for the specific source via use_source_separation flag.
 
     Args:
         source_key: The source being analyzed (e.g., "Source 2", "Source 3")
-        config: Configuration dictionary
+        config: Configuration dictionary (for separation mode/model settings)
+        source_settings: Per-source correlation settings from job layout
 
     Returns:
-        True if source separation was applied to this comparison, False otherwise
+        True if source separation should be applied to this comparison, False otherwise
     """
+    # Check if source separation is configured at all (mode must be set)
     separation_mode = config.get('source_separation_mode', 'none')
     if separation_mode == 'none':
         return False
 
-    apply_to = config.get('source_separation_apply_to', 'all').lower()
-    if apply_to == 'all':
-        return True  # All comparisons use separation
-
-    # Check if this specific comparison used separation
-    role_normalized = source_key.lower().replace(' ', '_')  # "Source 2" → "source_2"
-    return apply_to == role_normalized
+    # Check per-source setting - source separation must be explicitly enabled per-source
+    per_source = source_settings.get(source_key, {})
+    return per_source.get('use_source_separation', False)
 
 def _find_first_stable_segment_delay(results: List[Dict[str, Any]], runner: CommandRunner, config: Dict, return_raw: bool = False) -> Optional[int | float]:
     """
@@ -404,14 +402,26 @@ class AnalysisStep:
                 continue
 
             runner._log_message(f"\n[Analyzing {source_key}]")
-            tgt_lang = config.get('analysis_lang_others')
+
+            # Get per-source settings for this source
+            per_source_settings = ctx.source_settings.get(source_key, {})
+
+            # Determine target language - per-source correlation target overrides global language matching
+            correlation_target_track = per_source_settings.get('correlation_target_track')
+            if correlation_target_track is not None:
+                runner._log_message(f"[{source_key}] Using explicit correlation target: Source 1 track {correlation_target_track}")
+                # We'll use the track index directly, language matching is bypassed
+                tgt_lang = None  # Will be handled by correlation_target_track
+            else:
+                # Fall back to global language setting
+                tgt_lang = config.get('analysis_lang_others')
 
             # ===================================================================
             # CRITICAL DECISION POINT: Determine if source separation was applied
             # This decision affects correlation method and delay selection mode
             # Make this decision ONCE and create appropriate config for this source
             # ===================================================================
-            use_source_separated_settings = _should_use_source_separated_mode(source_key, config)
+            use_source_separated_settings = _should_use_source_separated_mode(source_key, config, ctx.source_settings)
 
             if use_source_separated_settings:
                 # Create config with source-separated overrides
@@ -464,7 +474,9 @@ class AnalysisStep:
                     str(source1_file), str(source_file), source_config, runner, ctx.tool_paths,
                     ref_lang=source_config.get('analysis_lang_source1'),
                     target_lang=tgt_lang,
-                    role_tag=source_key
+                    role_tag=source_key,
+                    ref_track_index=correlation_target_track,
+                    use_source_separation=use_source_separated_settings
                 )
 
                 # Log summary for each method
@@ -501,7 +513,9 @@ class AnalysisStep:
                     str(source1_file), str(source_file), source_config, runner, ctx.tool_paths,
                     ref_lang=source_config.get('analysis_lang_source1'),
                     target_lang=tgt_lang,
-                    role_tag=source_key
+                    role_tag=source_key,
+                    ref_track_index=correlation_target_track,
+                    use_source_separation=use_source_separated_settings
                 )
 
             # --- CRITICAL FIX: Detect stepping BEFORE calculating mode delay ---

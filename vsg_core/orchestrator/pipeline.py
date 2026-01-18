@@ -33,7 +33,8 @@ class Orchestrator:
         and_merge: bool,
         output_dir: str,
         manual_layout: List[Dict[str, Any]],
-        attachment_sources: List[str]
+        attachment_sources: List[str],
+        source_settings: Dict[str, Dict[str, Any]] = None
     ) -> Context:
         """
         Executes the pipeline steps with validation.
@@ -61,7 +62,8 @@ class Orchestrator:
             sources=sources,
             and_merge=bool(and_merge),
             manual_layout=manual_layout or [],
-            attachment_sources=attachment_sources
+            attachment_sources=attachment_sources,
+            source_settings=source_settings or {}
         )
 
         log('--- Analysis Phase ---')

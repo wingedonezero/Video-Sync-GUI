@@ -12,7 +12,7 @@ from typing import Dict, List, Any, Optional, Callable, Tuple
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QDialogButtonBox,
-    QGroupBox, QScrollArea, QWidget, QMessageBox, QPushButton, QCheckBox, QFileDialog
+    QGroupBox, QScrollArea, QWidget, QMessageBox, QPushButton, QCheckBox, QFileDialog, QMenu
 )
 
 from .logic import ManualLogic
@@ -29,7 +29,8 @@ class ManualSelectionDialog(QDialog):
     def __init__(self, track_info: Dict[str, List[dict]], *, config: "AppConfig",
                  log_callback: Optional[Callable[[str], None]] = None, parent=None,
                  previous_layout: Optional[List[dict]] = None,
-                 previous_attachment_sources: Optional[List[str]] = None):
+                 previous_attachment_sources: Optional[List[str]] = None,
+                 previous_source_settings: Optional[Dict[str, Dict[str, Any]]] = None):
         super().__init__(parent)
         self.setWindowTitle("Manual Track Selection")
         self.setMinimumSize(1200, 700)
@@ -39,8 +40,10 @@ class ManualSelectionDialog(QDialog):
         self.log_callback = log_callback or (lambda msg: print(f"[Dialog] {msg}"))
         self.manual_layout: Optional[List[dict]] = None
         self.attachment_sources: List[str] = []
+        self.source_settings: Dict[str, Dict[str, Any]] = previous_source_settings or {}
         self._style_clipboard: Optional[List[str]] = None
         self.edited_widget = None
+        self._source_group_boxes: Dict[str, QGroupBox] = {}  # Track group boxes for context menu
 
         # FIX: Instantiate the logic controller
         self._logic = ManualLogic(self)
@@ -82,6 +85,15 @@ class ManualSelectionDialog(QDialog):
             self.source_lists[source_key] = source_list_widget
             group_box = QGroupBox(title)
             group_layout = QVBoxLayout(group_box); group_layout.addWidget(source_list_widget)
+
+            # Add context menu for source settings (not for Source 1)
+            if source_key != "Source 1":
+                group_box.setContextMenuPolicy(Qt.CustomContextMenu)
+                group_box.customContextMenuRequested.connect(
+                    lambda pos, sk=source_key, gb=group_box: self._show_source_context_menu(pos, sk, gb)
+                )
+            self._source_group_boxes[source_key] = group_box
+
             self.left_vbox.addWidget(group_box)
 
         self.external_list = SourceList(dialog=self)
@@ -142,13 +154,71 @@ class ManualSelectionDialog(QDialog):
         if td and not self._logic.is_blocked_video(td):
             self.final_list.add_track_widget(td, preset=('style_patch' in td))
 
-    def get_manual_layout_and_attachment_sources(self) -> Tuple[List[Dict], List[str]]:
-        return self.manual_layout, self.attachment_sources
+    def get_manual_layout_and_attachment_sources(self) -> Tuple[List[Dict], List[str], Dict[str, Dict[str, Any]]]:
+        """Returns (manual_layout, attachment_sources, source_settings)."""
+        return self.manual_layout, self.attachment_sources, self.source_settings
 
     def accept(self):
         # FIX: Call method on the logic instance
         self.manual_layout, self.attachment_sources = self._logic.get_final_layout_and_attachments()
         super().accept()
+
+    def _show_source_context_menu(self, pos, source_key: str, group_box: QGroupBox):
+        """Show context menu for source settings."""
+        menu = QMenu(self)
+
+        # Check if this source has non-default settings
+        current = self.source_settings.get(source_key, {})
+        has_settings = bool(current.get('correlation_target_track') is not None or current.get('use_source_separation'))
+
+        # Configure correlation settings action
+        config_action = menu.addAction("Configure Correlation Settings...")
+        if has_settings:
+            config_action.setText("Configure Correlation Settings... (Modified)")
+
+        # Clear settings action (only if there are settings)
+        clear_action = None
+        if has_settings:
+            menu.addSeparator()
+            clear_action = menu.addAction("Clear Source Settings")
+
+        action = menu.exec(group_box.mapToGlobal(pos))
+        if action == config_action:
+            self._open_source_settings_dialog(source_key)
+        elif clear_action and action == clear_action:
+            self._clear_source_settings(source_key)
+
+    def _open_source_settings_dialog(self, source_key: str):
+        """Open the source settings dialog for the specified source."""
+        from vsg_qt.source_settings_dialog import SourceSettingsDialog
+
+        # Get Source 1's audio tracks for the dropdown
+        source1_tracks = [t for t in self.track_info.get('Source 1', []) if t.get('type') == 'audio']
+
+        dialog = SourceSettingsDialog(
+            source_key=source_key,
+            source1_audio_tracks=source1_tracks,
+            current_settings=self.source_settings.get(source_key),
+            parent=self
+        )
+
+        if dialog.exec():
+            settings = dialog.get_settings()
+            # Store settings if any are non-default
+            if dialog.has_non_default_settings():
+                self.source_settings[source_key] = settings
+                self.info_label.setText(f"Correlation settings configured for {source_key}.")
+                self.info_label.setVisible(True)
+            else:
+                # Remove settings if all are default
+                self.source_settings.pop(source_key, None)
+
+    def _clear_source_settings(self, source_key: str):
+        """Clear source settings for the specified source."""
+        if source_key in self.source_settings:
+            del self.source_settings[source_key]
+            self.info_label.setText(f"Correlation settings cleared for {source_key}.")
+            self.info_label.setVisible(True)
 
     # ... other methods like _add_external_subtitles, keyPressEvent, etc remain the same ...
     # They are omitted here for brevity but should be kept in your file.

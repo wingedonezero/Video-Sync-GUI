@@ -55,7 +55,8 @@ class JobPipeline:
         and_merge: bool,
         output_dir_str: str,
         manual_layout: Optional[List[Dict]] = None,
-        attachment_sources: Optional[List[str]] = None
+        attachment_sources: Optional[List[str]] = None,
+        source_settings: Optional[Dict[str, Dict[str, Any]]] = None
     ) -> Dict[str, Any]:
         """
         Runs a complete sync job.
@@ -66,6 +67,8 @@ class JobPipeline:
             output_dir_str: Output directory path
             manual_layout: Manual layout configuration
             attachment_sources: List of attachment source paths
+            source_settings: Per-source correlation settings, e.g.:
+                {'Source 2': {'correlation_target_track': 2, 'use_source_separation': True}}
 
         Returns:
             Dictionary containing:
@@ -132,7 +135,8 @@ class JobPipeline:
                 and_merge=and_merge,
                 output_dir=str(output_dir),
                 manual_layout=manual_layout or [],
-                attachment_sources=attachment_sources or []
+                attachment_sources=attachment_sources or [],
+                source_settings=source_settings or {}
             )
             ctx_temp_dir = getattr(ctx, 'temp_dir', None)
 

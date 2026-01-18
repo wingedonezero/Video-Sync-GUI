@@ -24,7 +24,8 @@ class SyncPlanner:
         and_merge: bool,
         output_dir: str,
         manual_layout: List[Dict],
-        attachment_sources: List[str]
+        attachment_sources: List[str],
+        source_settings: Optional[Dict[str, Dict[str, Any]]] = None
     ) -> Any:
         """
         Plans the sync operation by analyzing sources and preparing merge tokens.
@@ -41,6 +42,8 @@ class SyncPlanner:
             output_dir: Output directory path
             manual_layout: Manual layout configuration
             attachment_sources: List of attachment source paths
+            source_settings: Per-source correlation settings, e.g.:
+                {'Source 2': {'correlation_target_track': 2, 'use_source_separation': True}}
 
         Returns:
             Context object containing:
@@ -60,5 +63,6 @@ class SyncPlanner:
             and_merge=and_merge,
             output_dir=output_dir,
             manual_layout=manual_layout,
-            attachment_sources=attachment_sources
+            attachment_sources=attachment_sources,
+            source_settings=source_settings or {}
         )

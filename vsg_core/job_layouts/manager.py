@@ -51,9 +51,14 @@ class JobLayoutManager:
 
     def save_job_layout(self, job_id: str, layout: List[Dict[str, Any]],
                         attachment_sources: List[str], sources: Dict[str, str],
-                        track_info: Dict[str, List[Dict]]):
+                        track_info: Dict[str, List[Dict]],
+                        source_settings: Optional[Dict[str, Dict[str, Any]]] = None):
         """
         Saves a job layout, generating fresh signatures and enhancing the layout data.
+
+        Args:
+            source_settings: Per-source correlation settings, e.g.:
+                {'Source 2': {'correlation_target_track': 2, 'use_source_separation': True}}
         """
         try:
             enhanced_layout = self._create_enhanced_layout(layout)
@@ -67,6 +72,7 @@ class JobLayoutManager:
                 'attachment_sources': attachment_sources,
                 'track_signature': track_sig,
                 'structure_signature': struct_sig,
+                'source_settings': source_settings or {},
             }
 
             if self.persistence.save_layout(job_id, layout_data):
@@ -109,8 +115,9 @@ class JobLayoutManager:
         target_layout_data = {
             'job_id': target_job_id,
             'sources': target_sources,
-            'enhanced_layout': source_data['enhanced_layout'], # The core data being copied
+            'enhanced_layout': source_data['enhanced_layout'],  # The core data being copied
             'attachment_sources': source_data.get('attachment_sources', []),
+            'source_settings': source_data.get('source_settings', {}),  # Copy per-source correlation settings
             'track_signature': target_track_sig,
             'structure_signature': target_struct_sig,
             'copied_from': source_job_id
