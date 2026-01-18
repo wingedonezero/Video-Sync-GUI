@@ -667,30 +667,30 @@ class AnalysisStep:
             # Try to determine which Source 1 track was actually used for correlation
             # This is needed when Source 1 has multiple audio tracks with different container delays
             if source1_info:
-                audio_tracks = [t for t in source1_info.get('tracks', []) if t.get('type') == 'audio']
+                source1_audio_tracks = [t for t in source1_info.get('tracks', []) if t.get('type') == 'audio']
 
                 # Priority 1: Explicit per-job track selection
-                if correlation_ref_track is not None and 0 <= correlation_ref_track < len(audio_tracks):
-                    target_track_id = audio_tracks[correlation_ref_track].get('id')
-                    track_container_delay = source1_container_delays.get(target_track_id, 0)
+                if correlation_ref_track is not None and 0 <= correlation_ref_track < len(source1_audio_tracks):
+                    ref_track_id = source1_audio_tracks[correlation_ref_track].get('id')
+                    track_container_delay = source1_container_delays.get(ref_track_id, 0)
                     if track_container_delay != source1_audio_container_delay:
                         actual_container_delay = track_container_delay
                         runner._log_message(
-                            f"[Container Delay Override] Using Source 1 audio index {correlation_ref_track} (track ID {target_track_id}) delay: "
+                            f"[Container Delay Override] Using Source 1 audio index {correlation_ref_track} (track ID {ref_track_id}) delay: "
                             f"{actual_container_delay:+.3f}ms (global reference was {source1_audio_container_delay:+.3f}ms)"
                         )
                 # Priority 2: Language matching fallback
                 elif source_config.get('analysis_lang_source1'):
                     ref_lang = source_config.get('analysis_lang_source1')
-                    for i, track in enumerate(audio_tracks):
+                    for i, track in enumerate(source1_audio_tracks):
                         track_lang = (track.get('properties', {}).get('language', '') or '').strip().lower()
                         if track_lang == ref_lang.strip().lower():
-                            target_track_id = track.get('id')
-                            track_container_delay = source1_container_delays.get(target_track_id, 0)
+                            ref_track_id = track.get('id')
+                            track_container_delay = source1_container_delays.get(ref_track_id, 0)
                             if track_container_delay != source1_audio_container_delay:
                                 actual_container_delay = track_container_delay
                                 runner._log_message(
-                                    f"[Container Delay Override] Using Source 1 audio index {i} (track ID {target_track_id}, lang={ref_lang}) delay: "
+                                    f"[Container Delay Override] Using Source 1 audio index {i} (track ID {ref_track_id}, lang={ref_lang}) delay: "
                                     f"{actual_container_delay:+.3f}ms (global reference was {source1_audio_container_delay:+.3f}ms)"
                                 )
                             break
