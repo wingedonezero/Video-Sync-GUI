@@ -417,7 +417,12 @@ class AnalysisStep:
                 # Fall back to global language setting for target
                 tgt_lang = config.get('analysis_lang_others')
 
-            # Source 1 track selection is always global (via analysis_lang_source1), not per-source
+            # Get Source 1 track selection (can be per-job or global)
+            # Check if Source 1 has per-job track selection configured
+            source1_settings = ctx.source_settings.get('Source 1', {})
+            correlation_ref_track = source1_settings.get('correlation_ref_track')  # Which Source 1 track to use
+            if correlation_ref_track is not None:
+                runner._log_message(f"[Source 1] Using explicit reference track: Source 1 track {correlation_ref_track}")
 
             # ===================================================================
             # CRITICAL DECISION POINT: Determine if source separation was applied
@@ -478,7 +483,7 @@ class AnalysisStep:
                     ref_lang=source_config.get('analysis_lang_source1'),
                     target_lang=tgt_lang,
                     role_tag=source_key,
-                    ref_track_index=None,  # Always use global setting for Source 1
+                    ref_track_index=correlation_ref_track,  # Use per-job setting if configured
                     target_track_index=correlation_source_track,
                     use_source_separation=use_source_separated_settings
                 )
@@ -518,7 +523,7 @@ class AnalysisStep:
                     ref_lang=source_config.get('analysis_lang_source1'),
                     target_lang=tgt_lang,
                     role_tag=source_key,
-                    ref_track_index=None,  # Always use global setting for Source 1
+                    ref_track_index=correlation_ref_track,  # Use per-job setting if configured
                     target_track_index=correlation_source_track,
                     use_source_separation=use_source_separated_settings
                 )
@@ -637,16 +642,26 @@ class AnalysisStep:
 
             # Calculate final delay including container delay chain correction
             # CRITICAL: Use the container delay from the ACTUAL Source 1 track used for correlation
-            # Source 1 track is selected globally via analysis_lang_source1 (not per-source)
             actual_container_delay = source1_audio_container_delay
 
             # Try to determine which Source 1 track was actually used for correlation
             # This is needed when Source 1 has multiple audio tracks with different container delays
             if source1_info:
-                ref_lang = source_config.get('analysis_lang_source1')
-                if ref_lang:
-                    # Find which track matches the language
-                    audio_tracks = [t for t in source1_info.get('tracks', []) if t.get('type') == 'audio']
+                audio_tracks = [t for t in source1_info.get('tracks', []) if t.get('type') == 'audio']
+
+                # Priority 1: Explicit per-job track selection
+                if correlation_ref_track is not None and 0 <= correlation_ref_track < len(audio_tracks):
+                    target_track_id = audio_tracks[correlation_ref_track].get('id')
+                    track_container_delay = source1_container_delays.get(target_track_id, 0)
+                    if track_container_delay != source1_audio_container_delay:
+                        actual_container_delay = track_container_delay
+                        runner._log_message(
+                            f"[Container Delay Override] Using Source 1 audio index {correlation_ref_track} (track ID {target_track_id}) delay: "
+                            f"{actual_container_delay:+.3f}ms (global reference was {source1_audio_container_delay:+.3f}ms)"
+                        )
+                # Priority 2: Language matching fallback
+                elif source_config.get('analysis_lang_source1'):
+                    ref_lang = source_config.get('analysis_lang_source1')
                     for i, track in enumerate(audio_tracks):
                         track_lang = (track.get('properties', {}).get('language', '') or '').strip().lower()
                         if track_lang == ref_lang.strip().lower():

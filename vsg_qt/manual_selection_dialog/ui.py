@@ -169,10 +169,13 @@ class ManualSelectionDialog(QDialog):
 
         # Check if this source has non-default settings
         current = self.source_settings.get(source_key, {})
-        has_settings = bool(
-            current.get('correlation_source_track') is not None or
-            current.get('use_source_separation')
-        )
+        if source_key == "Source 1":
+            has_settings = bool(current.get('correlation_ref_track') is not None)
+        else:
+            has_settings = bool(
+                current.get('correlation_source_track') is not None or
+                current.get('use_source_separation')
+            )
 
         # Configure correlation settings action
         config_action = menu.addAction("Configure Correlation Settings...")
