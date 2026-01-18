@@ -14,11 +14,12 @@ from vsg_qt.track_settings_dialog import TrackSettingsDialog
 
 class TrackWidget(QWidget):
     """A self-contained widget for a single track in the final layout."""
-    def __init__(self, track_data: Dict, available_sources: List[str], parent=None):
+    def __init__(self, track_data: Dict, available_sources: List[str], parent=None, source_settings: Dict = None):
         super().__init__(parent)
         self.track_data = track_data
         self.track_type = track_data.get('type')
         self.codec_id = track_data.get('codec_id')
+        self.source_settings = source_settings or {}
 
         # --- UI Elements ---
         self.summary_label = QLabel("...")

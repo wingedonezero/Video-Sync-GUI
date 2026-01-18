@@ -95,7 +95,11 @@ class FinalList(QListWidget):
         item = QListWidgetItem()
         self.addItem(item)
 
-        widget = TrackWidget(track_data, available_sources=self.dialog.available_sources)
+        widget = TrackWidget(
+            track_data,
+            available_sources=self.dialog.available_sources,
+            source_settings=self.dialog.source_settings
+        )
 
         if hasattr(widget, 'style_editor_btn'):
             widget.style_editor_btn.clicked.connect(lambda checked, w=widget: self.dialog._launch_style_editor(w))

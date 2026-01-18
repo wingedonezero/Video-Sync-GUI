@@ -86,6 +86,21 @@ class TrackWidgetLogic:
         # Update the inline summary (which uses the 'source_label' widget for display)
         parts = []
 
+        # Show correlation settings for audio tracks from Source 2/3
+        if self.track_data.get('type') == 'audio' and self.track_data.get('source', '') != 'Source 1':
+            source_settings = self.v.source_settings.get(self.track_data.get('source', ''), {})
+            corr_parts = []
+
+            target_track = source_settings.get('correlation_target_track')
+            if target_track is not None:
+                corr_parts.append(f"Target: S1 Track {target_track}")
+
+            if source_settings.get('use_source_separation'):
+                corr_parts.append("Source Separation: ON")
+
+            if corr_parts:
+                parts.append("🎯 " + ", ".join(corr_parts))
+
         # Show generated track filter info
         if is_generated:
             gen_mode = self.track_data.get('generated_filter_mode', 'exclude')
@@ -127,6 +142,13 @@ class TrackWidgetLogic:
         # NEW: Add generated track badge first (most important)
         if self.track_data.get('is_generated', False):
             badges.append("🔗 Generated")
+
+        # NEW: Add correlation settings badge for audio tracks from Source 2/3
+        track_source = self.track_data.get('source', '')
+        if self.track_data.get('type') == 'audio' and track_source != 'Source 1':
+            source_settings = self.v.source_settings.get(track_source, {})
+            if source_settings.get('correlation_target_track') is not None or source_settings.get('use_source_separation'):
+                badges.append("🎯 Correlation Settings")
 
         if self.v.cb_default.isChecked():
             badges.append("Default")

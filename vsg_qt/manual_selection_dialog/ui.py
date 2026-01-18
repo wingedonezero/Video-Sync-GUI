@@ -213,12 +213,33 @@ class ManualSelectionDialog(QDialog):
                 # Remove settings if all are default
                 self.source_settings.pop(source_key, None)
 
+            # Refresh badges for all tracks from this source
+            self._refresh_badges_for_source(source_key)
+
     def _clear_source_settings(self, source_key: str):
         """Clear source settings for the specified source."""
         if source_key in self.source_settings:
             del self.source_settings[source_key]
             self.info_label.setText(f"Correlation settings cleared for {source_key}.")
             self.info_label.setVisible(True)
+
+            # Refresh badges for all tracks from this source
+            self._refresh_badges_for_source(source_key)
+
+    def _refresh_badges_for_source(self, source_key: str):
+        """Refresh badges and summary for all audio tracks from the specified source."""
+        if not hasattr(self, 'final_list'):
+            return
+
+        for i in range(self.final_list.count()):
+            widget = self.final_list.itemWidget(self.final_list.item(i))
+            if widget and hasattr(widget, 'track_data') and hasattr(widget, 'logic'):
+                track_source = widget.track_data.get('source', '')
+                track_type = widget.track_data.get('type', '')
+                # Refresh badges and summary for audio tracks from this source
+                if track_source == source_key and track_type == 'audio':
+                    widget.logic.refresh_badges()
+                    widget.logic.refresh_summary()
 
     # ... other methods like _add_external_subtitles, keyPressEvent, etc remain the same ...
     # They are omitted here for brevity but should be kept in your file.
