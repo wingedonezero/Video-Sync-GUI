@@ -63,10 +63,9 @@ class CommandRunner:
 
             popen_kwargs = {
                 "stdout": subprocess.PIPE,
-                # CRITICAL: Don't merge stderr with stdout for binary output!
-                # FFmpeg may output warnings/errors to stderr that would corrupt binary data.
-                # For text output, merging is fine and helps capture all output for logging.
-                "stderr": subprocess.DEVNULL if is_binary else subprocess.STDOUT,
+                # For binary output, capture stderr separately to avoid corrupting binary data
+                # For text output, merge stderr with stdout for unified logging
+                "stderr": subprocess.PIPE if is_binary else subprocess.STDOUT,
                 "env": env,  # Pass environment with GPU variables
             }
             # (THE FIX IS HERE) Add stdin handling
@@ -81,8 +80,17 @@ class CommandRunner:
             proc = subprocess.Popen(full_cmd, **popen_kwargs)
 
             # (THE FIX IS HERE) Pass input_data to communicate
-            stdout_data, _ = proc.communicate(input=input_data)
+            stdout_data, stderr_data = proc.communicate(input=input_data)
             rc = proc.returncode or 0
+
+            # For binary mode, log any stderr separately (don't mix with binary data)
+            if is_binary and stderr_data:
+                try:
+                    stderr_text = stderr_data.decode('utf-8', errors='replace').strip()
+                    if stderr_text:
+                        self._log_message(f'[ffmpeg stderr] {stderr_text}')
+                except Exception:
+                    pass
 
             # Handle text stream for logging if not binary mode
             out_buf_list = []
