@@ -631,15 +631,27 @@ class AnalysisStep:
                     )
 
             # Calculate final delay including container delay chain correction
+            # CRITICAL: Use the container delay from the ACTUAL track used for correlation
+            # If correlation_target_track is set, use that track's delay instead of the global reference
+            actual_container_delay = source1_audio_container_delay
+            if correlation_target_track is not None:
+                # Per-source correlation target is set - use that track's container delay
+                actual_container_delay = source1_container_delays.get(correlation_target_track, 0)
+                if actual_container_delay != source1_audio_container_delay:
+                    runner._log_message(
+                        f"[Container Delay Override] Using track {correlation_target_track} delay: "
+                        f"{actual_container_delay:+.3f}ms (global reference was {source1_audio_container_delay:+.3f}ms)"
+                    )
+
             # Store both rounded (for mkvmerge) and raw (for subtitle sync precision)
-            final_delay_ms = round(correlation_delay_ms + source1_audio_container_delay)
-            final_delay_raw = correlation_delay_raw + source1_audio_container_delay
+            final_delay_ms = round(correlation_delay_ms + actual_container_delay)
+            final_delay_raw = correlation_delay_raw + actual_container_delay
 
             # Log the delay calculation chain for transparency
             runner._log_message(f"[Delay Calculation] {source_key} delay chain:")
             runner._log_message(f"[Delay Calculation]   Correlation delay: {correlation_delay_raw:+.3f}ms (raw) → {correlation_delay_ms:+d}ms (rounded)")
-            if source1_audio_container_delay != 0:
-                runner._log_message(f"[Delay Calculation]   + Container delay:  {source1_audio_container_delay:+.3f}ms")
+            if actual_container_delay != 0:
+                runner._log_message(f"[Delay Calculation]   + Container delay:  {actual_container_delay:+.3f}ms")
                 runner._log_message(f"[Delay Calculation]   = Final delay:      {final_delay_raw:+.3f}ms (raw) → {final_delay_ms:+d}ms (rounded)")
 
             source_delays[source_key] = final_delay_ms
