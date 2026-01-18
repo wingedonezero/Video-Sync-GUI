@@ -1491,9 +1491,11 @@ class SteppingCorrector:
         self.log(f"  [QA] Using minimum match confidence of {qa_threshold:.1f}% within main scan window.")
 
         try:
+            # Use analysis_lang_source1 to select correct Source 1 track for QA comparison
+            ref_lang = self.config.get('analysis_lang_source1')
             results = run_audio_correlation(
                 ref_file=ref_file_path, target_file=corrected_path, config=qa_config,
-                runner=self.runner, tool_paths=self.tool_paths, ref_lang=None, target_lang=None, role_tag="QA"
+                runner=self.runner, tool_paths=self.tool_paths, ref_lang=ref_lang, target_lang=None, role_tag="QA"
             )
             accepted = [r for r in results if r.get('accepted', False)]
 
