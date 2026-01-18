@@ -406,15 +406,23 @@ class AnalysisStep:
             # Get per-source settings for this source
             per_source_settings = ctx.source_settings.get(source_key, {})
 
-            # Determine target language - per-source correlation target overrides global language matching
-            correlation_target_track = per_source_settings.get('correlation_target_track')
-            if correlation_target_track is not None:
-                runner._log_message(f"[{source_key}] Using explicit correlation target: Source 1 track {correlation_target_track}")
-                # We'll use the track index directly, language matching is bypassed
-                tgt_lang = None  # Will be handled by correlation_target_track
+            # Get explicit track index for this source (Source 2/3)
+            correlation_source_track = per_source_settings.get('correlation_source_track')  # Which Source 2/3 track to use
+
+            # Determine target language
+            if correlation_source_track is not None:
+                runner._log_message(f"[{source_key}] Using explicit source track: {source_key} track {correlation_source_track}")
+                tgt_lang = None  # Bypassed by explicit track index
             else:
-                # Fall back to global language setting
+                # Fall back to global language setting for target
                 tgt_lang = config.get('analysis_lang_others')
+
+            # Get Source 1 track selection (can be per-job or global)
+            # Check if Source 1 has per-job track selection configured
+            source1_settings = ctx.source_settings.get('Source 1', {})
+            correlation_ref_track = source1_settings.get('correlation_ref_track')  # Which Source 1 track to use
+            if correlation_ref_track is not None:
+                runner._log_message(f"[Source 1] Using explicit reference track: Source 1 track {correlation_ref_track}")
 
             # ===================================================================
             # CRITICAL DECISION POINT: Determine if source separation was applied
@@ -475,7 +483,8 @@ class AnalysisStep:
                     ref_lang=source_config.get('analysis_lang_source1'),
                     target_lang=tgt_lang,
                     role_tag=source_key,
-                    ref_track_index=correlation_target_track,
+                    ref_track_index=correlation_ref_track,  # Use per-job setting if configured
+                    target_track_index=correlation_source_track,
                     use_source_separation=use_source_separated_settings
                 )
 
@@ -514,7 +523,8 @@ class AnalysisStep:
                     ref_lang=source_config.get('analysis_lang_source1'),
                     target_lang=tgt_lang,
                     role_tag=source_key,
-                    ref_track_index=correlation_target_track,
+                    ref_track_index=correlation_ref_track,  # Use per-job setting if configured
+                    target_track_index=correlation_source_track,
                     use_source_separation=use_source_separated_settings
                 )
 
@@ -631,26 +641,39 @@ class AnalysisStep:
                     )
 
             # Calculate final delay including container delay chain correction
-            # CRITICAL: Use the container delay from the ACTUAL track used for correlation
-            # If correlation_target_track is set, use that track's delay instead of the global reference
+            # CRITICAL: Use the container delay from the ACTUAL Source 1 track used for correlation
             actual_container_delay = source1_audio_container_delay
-            if correlation_target_track is not None and source1_info:
-                # Per-source correlation target is set - map audio index to track ID
-                # correlation_target_track is an audio-only index (0, 1, 2...)
-                # source1_container_delays is keyed by track ID
+
+            # Try to determine which Source 1 track was actually used for correlation
+            # This is needed when Source 1 has multiple audio tracks with different container delays
+            if source1_info:
                 audio_tracks = [t for t in source1_info.get('tracks', []) if t.get('type') == 'audio']
-                if 0 <= correlation_target_track < len(audio_tracks):
-                    target_track_id = audio_tracks[correlation_target_track].get('id')
-                    actual_container_delay = source1_container_delays.get(target_track_id, 0)
-                    if actual_container_delay != source1_audio_container_delay:
+
+                # Priority 1: Explicit per-job track selection
+                if correlation_ref_track is not None and 0 <= correlation_ref_track < len(audio_tracks):
+                    target_track_id = audio_tracks[correlation_ref_track].get('id')
+                    track_container_delay = source1_container_delays.get(target_track_id, 0)
+                    if track_container_delay != source1_audio_container_delay:
+                        actual_container_delay = track_container_delay
                         runner._log_message(
-                            f"[Container Delay Override] Using audio index {correlation_target_track} (track ID {target_track_id}) delay: "
+                            f"[Container Delay Override] Using Source 1 audio index {correlation_ref_track} (track ID {target_track_id}) delay: "
                             f"{actual_container_delay:+.3f}ms (global reference was {source1_audio_container_delay:+.3f}ms)"
                         )
-                else:
-                    runner._log_message(
-                        f"[Container Delay Warning] Invalid audio index {correlation_target_track}, using global reference"
-                    )
+                # Priority 2: Language matching fallback
+                elif source_config.get('analysis_lang_source1'):
+                    ref_lang = source_config.get('analysis_lang_source1')
+                    for i, track in enumerate(audio_tracks):
+                        track_lang = (track.get('properties', {}).get('language', '') or '').strip().lower()
+                        if track_lang == ref_lang.strip().lower():
+                            target_track_id = track.get('id')
+                            track_container_delay = source1_container_delays.get(target_track_id, 0)
+                            if track_container_delay != source1_audio_container_delay:
+                                actual_container_delay = track_container_delay
+                                runner._log_message(
+                                    f"[Container Delay Override] Using Source 1 audio index {i} (track ID {target_track_id}, lang={ref_lang}) delay: "
+                                    f"{actual_container_delay:+.3f}ms (global reference was {source1_audio_container_delay:+.3f}ms)"
+                                )
+                            break
 
             # Store both rounded (for mkvmerge) and raw (for subtitle sync precision)
             final_delay_ms = round(correlation_delay_ms + actual_container_delay)

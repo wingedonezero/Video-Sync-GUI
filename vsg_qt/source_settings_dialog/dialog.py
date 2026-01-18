@@ -15,15 +15,19 @@ class SourceSettingsDialog(QDialog):
     """
     Dialog for configuring per-source correlation settings.
 
-    Allows setting:
-    - Correlation target track: Which Source 1 track to correlate against
+    For Source 2/3:
+    - Correlation source track: Which track from this source to use for correlation
     - Use source separation: Whether to apply source separation for this source
+
+    For Source 1:
+    - Reference track: Which Source 1 track to use as reference for all comparisons
     """
 
     def __init__(
         self,
         source_key: str,
-        source1_audio_tracks: List[Dict[str, Any]],
+        source_audio_tracks: List[Dict[str, Any]],
+        source1_audio_tracks: List[Dict[str, Any]],  # Kept for backwards compatibility
         current_settings: Optional[Dict[str, Any]] = None,
         parent=None
     ):
@@ -31,18 +35,20 @@ class SourceSettingsDialog(QDialog):
         Initialize the source settings dialog.
 
         Args:
-            source_key: The source being configured (e.g., "Source 2")
-            source1_audio_tracks: List of audio track info dicts from Source 1
+            source_key: The source being configured (e.g., "Source 2" or "Source 1")
+            source_audio_tracks: List of audio track info dicts from this source
+            source1_audio_tracks: (Unused, kept for compatibility)
             current_settings: Current settings for this source (if any)
             parent: Parent widget
         """
         super().__init__(parent)
         self.source_key = source_key
-        self.source1_tracks = source1_audio_tracks
+        self.source_tracks = source_audio_tracks
         self.current_settings = current_settings or {}
+        self.is_source1 = (source_key == "Source 1")
 
         self.setWindowTitle(f"{source_key} Correlation Settings")
-        self.setMinimumWidth(450)
+        self.setMinimumWidth(500)
         self.setModal(True)
 
         self._init_ui()
@@ -52,49 +58,69 @@ class SourceSettingsDialog(QDialog):
         """Initialize the dialog UI."""
         layout = QVBoxLayout(self)
 
-        # --- Correlation Target Section ---
-        target_group = QGroupBox("Correlation Target Track")
-        target_layout = QVBoxLayout(target_group)
+        # --- Source Track Selection Section ---
+        if self.is_source1:
+            # Source 1: Show which track to use as reference
+            source_track_group = QGroupBox("Reference Track")
+            source_track_layout = QVBoxLayout(source_track_group)
 
-        # Explanation label
-        explanation = QLabel(
-            "Select which audio track from Source 1 to use for correlation.\n"
-            "'Auto (Language Fallback)' uses global Analysis Language settings."
-        )
-        explanation.setWordWrap(True)
-        explanation.setStyleSheet("color: #666; font-size: 11px;")
-        target_layout.addWidget(explanation)
+            source_explanation = QLabel(
+                "Select which Source 1 audio track to use as reference for ALL correlation comparisons.\n"
+                "'Auto (Language Fallback)' uses the global Analysis Language setting."
+            )
+            source_explanation.setWordWrap(True)
+            source_explanation.setStyleSheet("color: #666; font-size: 11px;")
+            source_track_layout.addWidget(source_explanation)
 
-        # Track dropdown
-        form = QFormLayout()
-        self.target_combo = QComboBox()
-        self._populate_track_combo()
-        form.addRow("Correlation Target:", self.target_combo)
-        target_layout.addLayout(form)
+            source_form = QFormLayout()
+            self.source_track_combo = QComboBox()
+            self._populate_source_track_combo()
+            source_form.addRow("Use as Reference:", self.source_track_combo)
+            source_track_layout.addLayout(source_form)
 
-        layout.addWidget(target_group)
+            layout.addWidget(source_track_group)
+        else:
+            # Source 2/3: Show which track to use for correlation
+            source_track_group = QGroupBox(f"{self.source_key} Audio Track")
+            source_track_layout = QVBoxLayout(source_track_group)
 
-        # --- Source Separation Section ---
-        separation_group = QGroupBox("Source Separation")
-        separation_layout = QVBoxLayout(separation_group)
+            source_explanation = QLabel(
+                f"Select which audio track from {self.source_key} to use for correlation.\n"
+                "'Auto (Language Fallback)' uses the global Analysis Language setting."
+            )
+            source_explanation.setWordWrap(True)
+            source_explanation.setStyleSheet("color: #666; font-size: 11px;")
+            source_track_layout.addWidget(source_explanation)
 
-        self.use_separation_cb = QCheckBox("Use Source Separation for this source")
-        self.use_separation_cb.setToolTip(
-            "When enabled, applies source separation to both Source 1 and this source\n"
-            "during correlation. Uses the separation mode and model configured in Settings.\n\n"
-            "Use this when the audio contains music or effects that interfere with correlation\n"
-            "(e.g., WEB-DL with no clean audio source)."
-        )
-        separation_layout.addWidget(self.use_separation_cb)
+            source_form = QFormLayout()
+            self.source_track_combo = QComboBox()
+            self._populate_source_track_combo()
+            source_form.addRow(f"Use {self.source_key} Track:", self.source_track_combo)
+            source_track_layout.addLayout(source_form)
 
-        separation_note = QLabel(
-            "Note: Requires Source Separation Mode to be configured in Settings > Analysis."
-        )
-        separation_note.setWordWrap(True)
-        separation_note.setStyleSheet("color: #888; font-size: 10px;")
-        separation_layout.addWidget(separation_note)
+            layout.addWidget(source_track_group)
 
-        layout.addWidget(separation_group)
+            # --- Source Separation Section (only for Source 2/3) ---
+            separation_group = QGroupBox("Source Separation")
+            separation_layout = QVBoxLayout(separation_group)
+
+            self.use_separation_cb = QCheckBox("Use Source Separation for this source")
+            self.use_separation_cb.setToolTip(
+                "When enabled, applies source separation to both Source 1 and this source\n"
+                "during correlation. Uses the separation mode and model configured in Settings.\n\n"
+                "Use this when the audio contains music or effects that interfere with correlation\n"
+                "(e.g., WEB-DL with no clean audio source)."
+            )
+            separation_layout.addWidget(self.use_separation_cb)
+
+            separation_note = QLabel(
+                "Note: Requires Source Separation Mode to be configured in Settings > Analysis."
+            )
+            separation_note.setWordWrap(True)
+            separation_note.setStyleSheet("color: #888; font-size: 10px;")
+            separation_layout.addWidget(separation_note)
+
+            layout.addWidget(separation_group)
 
         # --- Buttons ---
         layout.addStretch()
@@ -107,88 +133,96 @@ class SourceSettingsDialog(QDialog):
         buttons.button(QDialogButtonBox.Reset).clicked.connect(self._reset_to_defaults)
         layout.addWidget(buttons)
 
-    def _populate_track_combo(self):
-        """Populate the track dropdown with Source 1's audio tracks."""
-        self.target_combo.clear()
+    def _populate_source_track_combo(self):
+        """Populate the dropdown with this source's audio tracks."""
+        self.source_track_combo.clear()
 
         # Add "Auto" option first
-        self.target_combo.addItem("Auto (Language Fallback)", None)
+        self.source_track_combo.addItem("Auto (Language Fallback)", None)
 
-        # Add each audio track from Source 1
-        # Note: get_track_info_for_dialog() returns flattened structure,
-        # not nested 'properties' dict
-        for i, track in enumerate(self.source1_tracks):
-            # Use flattened fields directly from track record
+        # Add each audio track from this source
+        # Note: get_track_info_for_dialog() returns flattened structure
+        for i, track in enumerate(self.source_tracks):
+            description = track.get('description', '')
             lang = track.get('lang', 'und')
             name = track.get('name', '')
             codec = track.get('codec_id', 'unknown')
             channels = track.get('audio_channels', '')
 
-            # Use the pre-built description if available
-            description = track.get('description', '')
-
             # Build display string
-            parts = [f"Track {i}"]
-            if lang and lang != 'und':
-                parts.append(f"[{lang.upper()}]")
-            if name:
-                parts.append(f'"{name}"')
-            if channels:
-                parts.append(f"({channels}ch)")
-            if codec and not description:
-                # Only show codec if we don't have a full description
-                codec_short = codec.replace('A_', '').split('/')[0]
-                parts.append(f"- {codec_short}")
-
-            # If we have a rich description, use that instead
             if description:
-                # The description already contains codec and channel info
                 display_text = f"Track {i}: {description}"
             else:
+                parts = [f"Track {i}"]
+                if lang and lang != 'und':
+                    parts.append(f"[{lang.upper()}]")
+                if name:
+                    parts.append(f'"{name}"')
+                if channels:
+                    parts.append(f"({channels}ch)")
+                if codec:
+                    codec_short = codec.replace('A_', '').split('/')[0]
+                    parts.append(f"- {codec_short}")
                 display_text = " ".join(parts)
 
-            self.target_combo.addItem(display_text, i)
+            self.source_track_combo.addItem(display_text, i)
 
     def _apply_current_settings(self):
         """Apply current settings to the UI controls."""
-        # Correlation target
-        target_track = self.current_settings.get('correlation_target_track')
-        if target_track is not None:
-            # Find the combo item with this track index
-            for i in range(self.target_combo.count()):
-                if self.target_combo.itemData(i) == target_track:
-                    self.target_combo.setCurrentIndex(i)
+        # Source track - field name depends on source
+        if self.is_source1:
+            source_track = self.current_settings.get('correlation_ref_track')
+        else:
+            source_track = self.current_settings.get('correlation_source_track')
+
+        if source_track is not None:
+            for i in range(self.source_track_combo.count()):
+                if self.source_track_combo.itemData(i) == source_track:
+                    self.source_track_combo.setCurrentIndex(i)
                     break
         else:
-            self.target_combo.setCurrentIndex(0)  # Auto
+            self.source_track_combo.setCurrentIndex(0)  # Auto
 
-        # Source separation
-        use_sep = self.current_settings.get('use_source_separation', False)
-        self.use_separation_cb.setChecked(use_sep)
+        # Source separation (only for Source 2/3)
+        if not self.is_source1:
+            use_sep = self.current_settings.get('use_source_separation', False)
+            self.use_separation_cb.setChecked(use_sep)
 
     def _reset_to_defaults(self):
         """Reset all settings to defaults."""
-        self.target_combo.setCurrentIndex(0)  # Auto
-        self.use_separation_cb.setChecked(False)
+        self.source_track_combo.setCurrentIndex(0)  # Auto
+        if not self.is_source1:
+            self.use_separation_cb.setChecked(False)
 
     def get_settings(self) -> Dict[str, Any]:
         """
         Get the configured settings.
 
         Returns:
-            Dict with:
-            - 'correlation_target_track': int or None (None = auto/language fallback)
+            For Source 1:
+            - 'correlation_ref_track': int or None (Source 1 track index, None = auto)
+
+            For Source 2/3:
+            - 'correlation_source_track': int or None (Source 2/3 track index, None = auto)
             - 'use_source_separation': bool
         """
-        return {
-            'correlation_target_track': self.target_combo.currentData(),
-            'use_source_separation': self.use_separation_cb.isChecked()
-        }
+        if self.is_source1:
+            return {
+                'correlation_ref_track': self.source_track_combo.currentData()
+            }
+        else:
+            return {
+                'correlation_source_track': self.source_track_combo.currentData(),
+                'use_source_separation': self.use_separation_cb.isChecked()
+            }
 
     def has_non_default_settings(self) -> bool:
         """Check if any non-default settings are configured."""
         settings = self.get_settings()
-        return (
-            settings['correlation_target_track'] is not None or
-            settings['use_source_separation']
-        )
+        if self.is_source1:
+            return settings.get('correlation_ref_track') is not None
+        else:
+            return (
+                settings.get('correlation_source_track') is not None or
+                settings.get('use_source_separation', False)
+            )

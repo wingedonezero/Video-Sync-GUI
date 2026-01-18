@@ -436,6 +436,7 @@ def run_audio_correlation(
     target_lang: Optional[str],
     role_tag: str,
     ref_track_index: Optional[int] = None,
+    target_track_index: Optional[int] = None,
     use_source_separation: bool = False
 ) -> List[Dict]:
     """
@@ -455,6 +456,8 @@ def run_audio_correlation(
         role_tag: Source identifier for logging (e.g., "Source 2", "Source 3")
         ref_track_index: Optional explicit track index in Source 1 to use for correlation.
             When set, bypasses language matching for the reference file.
+        target_track_index: Optional explicit track index in target file to use for correlation.
+            When set, bypasses language matching for the target file.
         use_source_separation: Whether to apply source separation for this correlation.
             This is determined by per-source settings in the job layout.
 
@@ -478,8 +481,15 @@ def run_audio_correlation(
         ref_norm = _normalize_lang(ref_lang)
         idx_ref, _ = get_audio_stream_info(ref_file, ref_norm, runner, tool_paths)
 
-    tgt_norm = _normalize_lang(target_lang)
-    idx_tgt, id_tgt = get_audio_stream_info(target_file, tgt_norm, runner, tool_paths)
+    if target_track_index is not None:
+        # Explicit track index specified - use it directly (bypasses language matching)
+        idx_tgt = target_track_index
+        id_tgt = None  # We don't need the track ID when using explicit index
+        log(f"Using explicit target track index: {target_track_index}")
+    else:
+        # Use language matching for target
+        tgt_norm = _normalize_lang(target_lang)
+        idx_tgt, id_tgt = get_audio_stream_info(target_file, tgt_norm, runner, tool_paths)
 
     if idx_ref is None or idx_tgt is None:
         raise ValueError("Could not locate required audio streams for correlation.")
@@ -489,8 +499,14 @@ def run_audio_correlation(
         ref_desc = f"explicit track {ref_track_index}"
     else:
         ref_desc = f"lang='{_normalize_lang(ref_lang) or 'first'}'"
+
+    if target_track_index is not None:
+        tgt_desc = f"explicit track {target_track_index}"
+    else:
+        tgt_desc = f"lang='{_normalize_lang(target_lang) or 'first'}'"
+
     log(f"Selected streams: REF ({ref_desc}, index={idx_ref}), "
-        f"{role_tag.upper()} (lang='{tgt_norm or 'first'}', index={idx_tgt}, track_id={id_tgt})")
+        f"{role_tag.upper()} ({tgt_desc}, index={idx_tgt}" + (f", track_id={id_tgt}" if id_tgt is not None else "") + ")")
 
     # --- 2. Decode ---
     DEFAULT_SR = 48000
@@ -677,6 +693,7 @@ def run_multi_correlation(
     target_lang: Optional[str],
     role_tag: str,
     ref_track_index: Optional[int] = None,
+    target_track_index: Optional[int] = None,
     use_source_separation: bool = False
 ) -> Dict[str, List[Dict]]:
     """
@@ -696,6 +713,7 @@ def run_multi_correlation(
         target_lang: Optional language code for target audio
         role_tag: Source identifier for logging
         ref_track_index: Optional explicit track index in Source 1 to use for correlation
+        target_track_index: Optional explicit track index in target file to use for correlation
         use_source_separation: Whether to apply source separation for this correlation
 
     Returns:
@@ -707,7 +725,7 @@ def run_multi_correlation(
     if not config.get('multi_correlation_enabled', False):
         log("[MULTI-CORRELATION] Feature disabled, using single correlation method")
         return {config.get('correlation_method', 'Standard Correlation (SCC)'):
-                run_audio_correlation(ref_file, target_file, config, runner, tool_paths, ref_lang, target_lang, role_tag, ref_track_index, use_source_separation)}
+                run_audio_correlation(ref_file, target_file, config, runner, tool_paths, ref_lang, target_lang, role_tag, ref_track_index, target_track_index, use_source_separation)}
 
     # Get enabled methods
     enabled_methods = []
@@ -718,7 +736,7 @@ def run_multi_correlation(
     if not enabled_methods:
         log("[MULTI-CORRELATION] No methods enabled, falling back to single method")
         return {config.get('correlation_method', 'Standard Correlation (SCC)'):
-                run_audio_correlation(ref_file, target_file, config, runner, tool_paths, ref_lang, target_lang, role_tag, ref_track_index, use_source_separation)}
+                run_audio_correlation(ref_file, target_file, config, runner, tool_paths, ref_lang, target_lang, role_tag, ref_track_index, target_track_index, use_source_separation)}
 
     # --- 1. Select streams ---
     if ref_track_index is not None:
@@ -730,8 +748,15 @@ def run_multi_correlation(
         ref_norm = _normalize_lang(ref_lang)
         idx_ref, _ = get_audio_stream_info(ref_file, ref_norm, runner, tool_paths)
 
-    tgt_norm = _normalize_lang(target_lang)
-    idx_tgt, id_tgt = get_audio_stream_info(target_file, tgt_norm, runner, tool_paths)
+    if target_track_index is not None:
+        # Explicit track index specified - use it directly (bypasses language matching)
+        idx_tgt = target_track_index
+        id_tgt = None  # We don't need the track ID when using explicit index
+        log(f"Using explicit target track index: {target_track_index}")
+    else:
+        # Use language matching for target
+        tgt_norm = _normalize_lang(target_lang)
+        idx_tgt, id_tgt = get_audio_stream_info(target_file, tgt_norm, runner, tool_paths)
 
     if idx_ref is None or idx_tgt is None:
         raise ValueError("Could not locate required audio streams for correlation.")
@@ -741,8 +766,14 @@ def run_multi_correlation(
         ref_desc = f"explicit track {ref_track_index}"
     else:
         ref_desc = f"lang='{_normalize_lang(ref_lang) or 'first'}'"
+
+    if target_track_index is not None:
+        tgt_desc = f"explicit track {target_track_index}"
+    else:
+        tgt_desc = f"lang='{_normalize_lang(target_lang) or 'first'}'"
+
     log(f"Selected streams: REF ({ref_desc}, index={idx_ref}), "
-        f"{role_tag.upper()} (lang='{tgt_norm or 'first'}', index={idx_tgt}, track_id={id_tgt})")
+        f"{role_tag.upper()} ({tgt_desc}, index={idx_tgt}" + (f", track_id={id_tgt}" if id_tgt is not None else "") + ")")
 
     # --- 2. Decode ---
     DEFAULT_SR = 48000
