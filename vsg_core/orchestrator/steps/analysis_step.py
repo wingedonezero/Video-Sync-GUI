@@ -195,6 +195,81 @@ def _choose_final_delay(results: List[Dict[str, Any]], config: Dict, runner: Com
             winner = mode_winner
             runner._log_message(f"[Delay Selection] Mode (Clustered): fallback to simple mode = {winner}ms")
             method_label = "mode (clustered fallback)"
+    elif delay_mode == 'Mode (Early Cluster)':
+        # Find clusters using ±1ms tolerance, prioritizing early stability
+        early_window = int(config.get('early_cluster_window', 10))
+        early_threshold = int(config.get('early_cluster_threshold', 5))
+
+        # Build clusters: group delays within ±1ms of each other
+        counts = Counter(delays)
+        cluster_info = {}  # key: representative delay, value: {raw_values, early_count, first_chunk_idx}
+
+        for delay_val in counts.keys():
+            # Collect all chunks within ±1ms of this delay value
+            cluster_raw_values = []
+            early_count = 0
+            first_chunk_idx = None
+
+            for idx, r in enumerate(accepted):
+                if abs(r['delay'] - delay_val) <= 1:
+                    cluster_raw_values.append(r.get('raw_delay', float(r['delay'])))
+                    if idx < early_window:
+                        early_count += 1
+                    if first_chunk_idx is None:
+                        first_chunk_idx = idx
+
+            cluster_info[delay_val] = {
+                'raw_values': cluster_raw_values,
+                'early_count': early_count,
+                'first_chunk_idx': first_chunk_idx,
+                'total_count': len(cluster_raw_values)
+            }
+
+        # Find early stable clusters (meet threshold in early window)
+        early_stable_clusters = [
+            (delay_val, info) for delay_val, info in cluster_info.items()
+            if info['early_count'] >= early_threshold
+        ]
+
+        if early_stable_clusters:
+            # Pick the cluster that appears earliest
+            early_stable_clusters.sort(key=lambda x: x[1]['first_chunk_idx'])
+            winner_delay, winner_info = early_stable_clusters[0]
+
+            # Average the raw values in this cluster
+            raw_avg = sum(winner_info['raw_values']) / len(winner_info['raw_values'])
+            winner = round(raw_avg)
+
+            runner._log_message(
+                f"[Delay Selection] Mode (Early Cluster): found {len(early_stable_clusters)} early stable cluster(s), "
+                f"selected cluster at {winner}ms with {winner_info['early_count']}/{early_window} early chunks, "
+                f"total {winner_info['total_count']} chunks, first appears at chunk {winner_info['first_chunk_idx']+1}, "
+                f"raw avg: {raw_avg:.3f}ms → rounded to {winner}ms"
+            )
+            method_label = "mode (early cluster)"
+        else:
+            # No cluster meets early threshold - fall back to Mode (Clustered)
+            mode_winner = counts.most_common(1)[0][0]
+            cluster_raw_values = [
+                r.get('raw_delay', float(r['delay']))
+                for r in accepted
+                if abs(r['delay'] - mode_winner) <= 1
+            ]
+
+            if cluster_raw_values:
+                raw_avg = sum(cluster_raw_values) / len(cluster_raw_values)
+                winner = round(raw_avg)
+                runner._log_message(
+                    f"[Delay Selection] Mode (Early Cluster): no cluster met early threshold ({early_threshold} in first {early_window}), "
+                    f"falling back to Mode (Clustered): {winner}ms (raw avg: {raw_avg:.3f}ms)"
+                )
+                method_label = "mode (early cluster - clustered fallback)"
+            else:
+                winner = mode_winner
+                runner._log_message(
+                    f"[Delay Selection] Mode (Early Cluster): fallback to simple mode = {winner}ms"
+                )
+                method_label = "mode (early cluster - simple fallback)"
     else:  # Mode (Most Common) - default
         counts = Counter(delays)
         winner = counts.most_common(1)[0][0]
@@ -263,6 +338,75 @@ def _choose_final_delay_raw(results: List[Dict[str, Any]], config: Dict, runner:
         else:
             # Fallback to simple mode
             return float(mode_winner)
+
+    elif delay_mode == 'Mode (Early Cluster)':
+        # Find clusters using ±1ms tolerance, prioritizing early stability
+        early_window = int(config.get('early_cluster_window', 10))
+        early_threshold = int(config.get('early_cluster_threshold', 5))
+
+        # Build clusters: group delays within ±1ms of each other
+        counts = Counter(delays)
+        cluster_info = {}  # key: representative delay, value: {raw_values, early_count, first_chunk_idx}
+
+        for delay_val in counts.keys():
+            # Collect all chunks within ±1ms of this delay value
+            cluster_raw_values = []
+            early_count = 0
+            first_chunk_idx = None
+
+            for idx, r in enumerate(accepted):
+                if abs(r['delay'] - delay_val) <= 1:
+                    cluster_raw_values.append(r.get('raw_delay', float(r['delay'])))
+                    if idx < early_window:
+                        early_count += 1
+                    if first_chunk_idx is None:
+                        first_chunk_idx = idx
+
+            cluster_info[delay_val] = {
+                'raw_values': cluster_raw_values,
+                'early_count': early_count,
+                'first_chunk_idx': first_chunk_idx,
+                'total_count': len(cluster_raw_values)
+            }
+
+        # Find early stable clusters (meet threshold in early window)
+        early_stable_clusters = [
+            (delay_val, info) for delay_val, info in cluster_info.items()
+            if info['early_count'] >= early_threshold
+        ]
+
+        if early_stable_clusters:
+            # Pick the cluster that appears earliest
+            early_stable_clusters.sort(key=lambda x: x[1]['first_chunk_idx'])
+            winner_delay, winner_info = early_stable_clusters[0]
+
+            # Average the raw values in this cluster
+            raw_avg = sum(winner_info['raw_values']) / len(winner_info['raw_values'])
+
+            runner._log_message(
+                f"[Delay Selection Raw] Mode (Early Cluster): selected cluster with {winner_info['early_count']}/{early_window} early chunks, "
+                f"total {winner_info['total_count']} chunks, raw avg: {raw_avg:.3f}ms"
+            )
+            return raw_avg
+        else:
+            # No cluster meets early threshold - fall back to Mode (Clustered)
+            mode_winner = counts.most_common(1)[0][0]
+            cluster_raw_values = [
+                r.get('raw_delay', float(r['delay']))
+                for r in accepted
+                if abs(r['delay'] - mode_winner) <= 1
+            ]
+
+            if cluster_raw_values:
+                raw_avg = sum(cluster_raw_values) / len(cluster_raw_values)
+                runner._log_message(
+                    f"[Delay Selection Raw] Mode (Early Cluster): no cluster met early threshold, "
+                    f"falling back to Mode (Clustered): {len(cluster_raw_values)} chunks, raw avg: {raw_avg:.3f}ms"
+                )
+                return raw_avg
+            else:
+                runner._log_message(f"[Delay Selection Raw] Mode (Early Cluster): fallback to simple mode")
+                return float(mode_winner)
 
     else:  # Mode (Most Common) - default
         # Average raw values from all chunks matching the most common rounded delay

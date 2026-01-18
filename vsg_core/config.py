@@ -170,6 +170,8 @@ class AppConfig:
             'delay_selection_mode_source_separated': 'Mode (Clustered)',
             'first_stable_min_chunks': 3,
             'first_stable_skip_unstable': True,
+            'early_cluster_window': 10,
+            'early_cluster_threshold': 5,
             'videodiff_error_min': 0.0,
             'videodiff_error_max': 100.0,
             'use_soxr': False,
