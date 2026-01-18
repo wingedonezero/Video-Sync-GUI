@@ -1177,6 +1177,12 @@ def separate_audio(
     # CRITICAL: Set up log function early to ensure we can log any issues
     log = log_func if log_func is not None else (lambda x: None)
 
+    # DIAGNOSTIC: First thing we do - log entry to help debug crashes
+    log("[SOURCE SEPARATION] DEBUG: Entered separate_audio()")
+    import sys
+    sys.stdout.flush()
+    sys.stderr.flush()
+
     # Validate inputs before any complex operations
     if pcm_data is None:
         log("[SOURCE SEPARATION] ERROR: pcm_data is None")
@@ -1417,6 +1423,14 @@ def apply_source_separation(
 
     # Separate target - tgt_pcm_copy is still valid (was never touched by first separation)
     log(f"[SOURCE SEPARATION] Processing target audio ({role_tag})...")
+
+    # DIAGNOSTIC: Log state before calling separate_audio to help debug crashes
+    log(f"[SOURCE SEPARATION] DEBUG: tgt_pcm_copy shape={tgt_pcm_copy.shape}, dtype={tgt_pcm_copy.dtype}, contiguous={tgt_pcm_copy.flags['C_CONTIGUOUS']}")
+    log(f"[SOURCE SEPARATION] DEBUG: mode={mode}, model={model_filename}, sample_rate={sample_rate}")
+    import sys
+    sys.stdout.flush()
+    sys.stderr.flush()
+
     tgt_separated = separate_audio(tgt_pcm_copy, sample_rate, mode, model_filename, log, device, timeout, model_dir)
 
     # Clean up the copy now that separation is done
