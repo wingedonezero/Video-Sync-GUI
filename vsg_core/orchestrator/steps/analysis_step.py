@@ -409,6 +409,10 @@ class AnalysisStep:
             # Get explicit track index for this source (Source 2/3)
             correlation_source_track = per_source_settings.get('correlation_source_track')  # Which Source 2/3 track to use
 
+            # DEBUG: Log exactly what we got from source_settings
+            runner._log_message(f"[{source_key}] DEBUG: per_source_settings = {per_source_settings}")
+            runner._log_message(f"[{source_key}] DEBUG: correlation_source_track = {correlation_source_track} (type: {type(correlation_source_track).__name__})")
+
             # Determine target language
             if correlation_source_track is not None:
                 runner._log_message(f"[{source_key}] Using explicit source track: {source_key} track {correlation_source_track}")
@@ -459,11 +463,16 @@ class AnalysisStep:
 
             # Priority 1: Explicit track index from per-source settings
             if correlation_source_track is not None:
+                runner._log_message(f"[{source_key}] DEBUG: Found {len(audio_tracks)} audio tracks, requested index {correlation_source_track}")
                 if 0 <= correlation_source_track < len(audio_tracks):
                     target_track_obj = audio_tracks[correlation_source_track]
+                    runner._log_message(f"[{source_key}] DEBUG: Selected track {correlation_source_track}: {target_track_obj.get('properties', {}).get('language', 'und')}")
                 else:
                     runner._log_message(f"[WARN] Invalid track index {correlation_source_track}, falling back to first track")
                     target_track_obj = audio_tracks[0]
+                    # CRITICAL FIX: Also update correlation_source_track to match the fallback!
+                    # Otherwise run_audio_correlation would receive the invalid index
+                    correlation_source_track = 0
             # Priority 2: Language matching
             elif tgt_lang:
                 for track in audio_tracks:
