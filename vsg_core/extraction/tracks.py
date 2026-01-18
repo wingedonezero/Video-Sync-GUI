@@ -483,6 +483,7 @@ def get_track_info_for_dialog(sources: Dict[str, str], runner: CommandRunner, to
                 'source': source_key, 'original_path': filepath, 'id': track['id'],
                 'type': track['type'], 'codec_id': props.get('codec_id', 'N/A'),
                 'lang': props.get('language', 'und'), 'name': props.get('track_name', ''),
+                'audio_channels': props.get('audio_channels', '') if track['type'] == 'audio' else '',
                 'description': _build_track_description(track)
             }
             all_tracks[source_key].append(record)

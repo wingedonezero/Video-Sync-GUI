@@ -115,12 +115,17 @@ class SourceSettingsDialog(QDialog):
         self.target_combo.addItem("Auto (Language Fallback)", None)
 
         # Add each audio track from Source 1
+        # Note: get_track_info_for_dialog() returns flattened structure,
+        # not nested 'properties' dict
         for i, track in enumerate(self.source1_tracks):
-            props = track.get('properties', {})
-            lang = props.get('language', 'und')
-            name = props.get('track_name', '')
-            codec = props.get('codec_id', 'unknown')
-            channels = props.get('audio_channels', '')
+            # Use flattened fields directly from track record
+            lang = track.get('lang', 'und')
+            name = track.get('name', '')
+            codec = track.get('codec_id', 'unknown')
+            channels = track.get('audio_channels', '')
+
+            # Use the pre-built description if available
+            description = track.get('description', '')
 
             # Build display string
             parts = [f"Track {i}"]
@@ -130,11 +135,18 @@ class SourceSettingsDialog(QDialog):
                 parts.append(f'"{name}"')
             if channels:
                 parts.append(f"({channels}ch)")
-            if codec:
+            if codec and not description:
+                # Only show codec if we don't have a full description
                 codec_short = codec.replace('A_', '').split('/')[0]
                 parts.append(f"- {codec_short}")
 
-            display_text = " ".join(parts)
+            # If we have a rich description, use that instead
+            if description:
+                # The description already contains codec and channel info
+                display_text = f"Track {i}: {description}"
+            else:
+                display_text = " ".join(parts)
+
             self.target_combo.addItem(display_text, i)
 
     def _apply_current_settings(self):
