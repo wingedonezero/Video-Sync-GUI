@@ -609,6 +609,8 @@ class AnalysisStep:
                         # Don't set stepping_override_delay - let normal flow handle it
                 elif use_source_separated_settings:
                     # Source separation blocks stepping correction (unreliable on separated stems)
+                    # Track for audit warning - user should manually review this file
+                    ctx.stepping_detected_separated.append(source_key)
                     delay_mode = source_config.get('delay_selection_mode', 'Mode (Clustered)')
                     runner._log_message(f"[Stepping Detected] Found stepping in {source_key}")
                     runner._log_message(f"[Stepping Disabled] Source separation is enabled - stepping correction is unreliable on separated stems")

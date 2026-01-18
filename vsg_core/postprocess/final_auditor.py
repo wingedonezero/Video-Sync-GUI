@@ -230,6 +230,19 @@ class FinalAuditor:
         auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
         total_issues += auditor.run(final_mkv_path, final_mkvmerge_data, final_ffprobe_data)
 
+        # Check for stepping detected in source-separated sources (manual review needed)
+        if self.ctx.stepping_detected_separated:
+            self.log("\n--- WARNING: Stepping Detected in Source-Separated Sources ---")
+            self.log("[WARNING] Stepping patterns were detected in sources using source separation.")
+            self.log("[WARNING] Automatic stepping correction is unreliable on separated stems.")
+            self.log("[WARNING] The following sources may have timing inconsistencies:")
+            for source_key in self.ctx.stepping_detected_separated:
+                self.log(f"  - {source_key}: Stepping detected but correction skipped (source separation enabled)")
+            self.log("[RECOMMENDATION] Manually review sync quality for these sources.")
+            self.log("[RECOMMENDATION] If timing issues exist, consider re-syncing without source separation")
+            self.log("[RECOMMENDATION] if same-language audio tracks are available.")
+            total_issues += len(self.ctx.stepping_detected_separated)
+
         self.log("\n========================================")
         if total_issues == 0:
             self.log("✅ FINAL AUDIT PASSED - NO ISSUES FOUND")
