@@ -24,7 +24,7 @@ class Context:
     attachment_sources: List[str] = field(default_factory=list)
 
     # Per-source correlation settings (from job layout)
-    # Format: {'Source 2': {'correlation_target_track': 2, 'use_source_separation': True}, ...}
+    # Format: {'Source 1': {'correlation_ref_track': 0}, 'Source 2': {'correlation_source_track': 1, 'use_source_separation': True}, ...}
     source_settings: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     # Filled along the pipeline

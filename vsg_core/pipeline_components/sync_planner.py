@@ -43,7 +43,7 @@ class SyncPlanner:
             manual_layout: Manual layout configuration
             attachment_sources: List of attachment source paths
             source_settings: Per-source correlation settings, e.g.:
-                {'Source 2': {'correlation_target_track': 2, 'use_source_separation': True}}
+                {'Source 1': {'correlation_ref_track': 0}, 'Source 2': {'correlation_source_track': 1, 'use_source_separation': True}}
 
         Returns:
             Context object containing:
