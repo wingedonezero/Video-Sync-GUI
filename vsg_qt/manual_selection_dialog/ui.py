@@ -86,12 +86,11 @@ class ManualSelectionDialog(QDialog):
             group_box = QGroupBox(title)
             group_layout = QVBoxLayout(group_box); group_layout.addWidget(source_list_widget)
 
-            # Add context menu for source settings (not for Source 1)
-            if source_key != "Source 1":
-                group_box.setContextMenuPolicy(Qt.CustomContextMenu)
-                group_box.customContextMenuRequested.connect(
-                    lambda pos, sk=source_key, gb=group_box: self._show_source_context_menu(pos, sk, gb)
-                )
+            # Add context menu for source settings (all sources including Source 1)
+            group_box.setContextMenuPolicy(Qt.CustomContextMenu)
+            group_box.customContextMenuRequested.connect(
+                lambda pos, sk=source_key, gb=group_box: self._show_source_context_menu(pos, sk, gb)
+            )
             self._source_group_boxes[source_key] = group_box
 
             self.left_vbox.addWidget(group_box)
