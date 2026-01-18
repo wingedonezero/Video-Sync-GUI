@@ -70,6 +70,20 @@ def _decode_to_memory(file_path: str, a_index: int, out_sr: int, use_soxr: bool,
     if not pcm_bytes or not isinstance(pcm_bytes, bytes):
         raise RuntimeError(f'ffmpeg decode failed for {Path(file_path).name}')
 
+    # DEBUG: Log raw bytes info to diagnose corruption
+    if hasattr(runner, '_log_message'):
+        runner._log_message(f"[DECODE RAW] Received {len(pcm_bytes)} bytes for {Path(file_path).name}")
+        # Show first 100 bytes as hex to detect text/garbage
+        first_bytes = pcm_bytes[:100]
+        hex_dump = ' '.join(f'{b:02x}' for b in first_bytes)
+        runner._log_message(f"[DECODE RAW] First 100 bytes (hex): {hex_dump}")
+        # Check if first bytes look like ASCII text (would indicate stderr mixed in)
+        try:
+            text_check = first_bytes[:50].decode('ascii', errors='strict')
+            runner._log_message(f"[DECODE RAW] WARNING: First bytes decode as ASCII: {repr(text_check)}")
+        except UnicodeDecodeError:
+            pass  # Good - binary data as expected
+
     # Ensure buffer size is a multiple of element size (4 bytes for float32)
     # This fixes issues with Opus and other codecs that may produce unaligned output
     element_size = np.dtype(np.float32).itemsize
