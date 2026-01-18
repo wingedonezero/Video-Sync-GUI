@@ -1538,7 +1538,10 @@ class SteppingCorrector:
         analysis_pcm = None
 
         try:
-            ref_index, _ = get_audio_stream_info(ref_file_path, None, self.runner, self.tool_paths)
+            # Use analysis_lang_source1 from config to select the right Source 1 track
+            # Falls back to first track if no language set or no match found
+            ref_lang = self.config.get('analysis_lang_source1')
+            ref_index, _ = get_audio_stream_info(ref_file_path, ref_lang, self.runner, self.tool_paths)
             analysis_index, _ = get_audio_stream_info(analysis_audio_path, None, self.runner, self.tool_paths)
             if ref_index is None or analysis_index is None:
                 return CorrectionResult(CorrectionVerdict.FAILED, {'error': "Could not find audio streams for analysis."})
@@ -1635,7 +1638,8 @@ class SteppingCorrector:
             # Decode reference audio for Smart Fill if provided
             if ref_file_path:
                 self.log(f"  [SteppingCorrector] Decoding reference audio for Smart Fill capability...")
-                ref_index, _ = get_audio_stream_info(ref_file_path, None, self.runner, self.tool_paths)
+                ref_lang = self.config.get('analysis_lang_source1')
+                ref_index, _ = get_audio_stream_info(ref_file_path, ref_lang, self.runner, self.tool_paths)
                 if ref_index is not None:
                     ref_pcm = self._decode_to_memory(ref_file_path, ref_index, sample_rate)
                     if ref_pcm is None:
