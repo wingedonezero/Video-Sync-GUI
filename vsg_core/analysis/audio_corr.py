@@ -511,8 +511,14 @@ def run_audio_correlation(
     # --- 2. Decode ---
     DEFAULT_SR = 48000
     use_soxr = config.get('use_soxr', False)
+    log(f"[DECODE DEBUG] Decoding ref: -map 0:a:{idx_ref} from {Path(ref_file).name}")
     ref_pcm = _decode_to_memory(ref_file, idx_ref, DEFAULT_SR, use_soxr, runner, tool_paths)
+    log(f"[DECODE DEBUG] Decoding tgt: -map 0:a:{idx_tgt} from {Path(target_file).name}")
     tgt_pcm = _decode_to_memory(target_file, idx_tgt, DEFAULT_SR, use_soxr, runner, tool_paths)
+
+    # Log audio stats to help diagnose 0% correlation issues
+    log(f"[DECODE DEBUG] ref_pcm: shape={ref_pcm.shape}, min={ref_pcm.min():.6f}, max={ref_pcm.max():.6f}, std={ref_pcm.std():.6f}")
+    log(f"[DECODE DEBUG] tgt_pcm: shape={tgt_pcm.shape}, min={tgt_pcm.min():.6f}, max={tgt_pcm.max():.6f}, std={tgt_pcm.std():.6f}")
 
     # --- 2b. Source Separation (Optional) ---
     # Only apply separation if explicitly requested via per-source settings
