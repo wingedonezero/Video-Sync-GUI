@@ -448,7 +448,8 @@ class JobQueueLogic:
                 target_job_id = self.layout_manager.generate_job_id(target_job['sources'])
                 save_ok = self.layout_manager.save_job_layout(
                     target_job_id, new_layout, self._layout_clipboard['attachment_sources'],
-                    target_job['sources'], target_track_info
+                    target_job['sources'], target_track_info,
+                    source_settings=self._layout_clipboard.get('source_settings', {})
                 )
                 if save_ok:
                     self._update_row(target_index, target_job)
@@ -502,6 +503,7 @@ class JobQueueLogic:
             if layout_data:
                 job['manual_layout'] = self._convert_enhanced_to_dialog_format(layout_data['enhanced_layout'])
                 job['attachment_sources'] = layout_data.get('attachment_sources', [])
+                job['source_settings'] = layout_data.get('source_settings', {})
                 final_jobs.append(job)
             else:
                 unconfigured_names.append(Path(job['sources']['Source 1']).name)

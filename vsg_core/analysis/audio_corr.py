@@ -509,9 +509,14 @@ def run_audio_correlation(
                 ref_pcm, tgt_pcm, DEFAULT_SR, config, log, role_tag
             )
         except ImportError as e:
-            log(f"[SOURCE SEPARATION] Dependencies not available: {e}")
+            log(f"⚠️  WARNING: Source separation was enabled but dependencies are not available!")
+            log(f"[SOURCE SEPARATION] Error: {e}")
+            log("[SOURCE SEPARATION] Falling back to standard correlation without separation.")
+            log("[SOURCE SEPARATION] To fix: Install dependencies with 'pip install demucs torch'")
         except Exception as e:
-            log(f"[SOURCE SEPARATION] Error during separation: {e}")
+            log(f"⚠️  WARNING: Source separation failed with an error!")
+            log(f"[SOURCE SEPARATION] Error: {e}")
+            log("[SOURCE SEPARATION] Falling back to standard correlation without separation.")
 
     # --- 3. Pre-processing (Filtering) ---
     filtering_method = config.get('filtering_method', 'None')
@@ -756,9 +761,14 @@ def run_multi_correlation(
                 ref_pcm, tgt_pcm, DEFAULT_SR, config, log, role_tag
             )
         except ImportError as e:
-            log(f"[SOURCE SEPARATION] Dependencies not available: {e}")
+            log(f"⚠️  WARNING: Source separation was enabled but dependencies are not available!")
+            log(f"[SOURCE SEPARATION] Error: {e}")
+            log("[SOURCE SEPARATION] Falling back to standard correlation without separation.")
+            log("[SOURCE SEPARATION] To fix: Install dependencies with 'pip install demucs torch'")
         except Exception as e:
-            log(f"[SOURCE SEPARATION] Error during separation: {e}")
+            log(f"⚠️  WARNING: Source separation failed with an error!")
+            log(f"[SOURCE SEPARATION] Error: {e}")
+            log("[SOURCE SEPARATION] Falling back to standard correlation without separation.")
 
     # --- 3. Pre-processing (Filtering) ---
     filtering_method = config.get('filtering_method', 'None')
