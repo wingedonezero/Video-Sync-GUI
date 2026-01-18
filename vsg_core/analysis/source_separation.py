@@ -1174,14 +1174,45 @@ def separate_audio(
     Returns:
         Separated audio as float32 numpy array, or None on failure
     """
-    log = log_func or (lambda x: None)
+    # CRITICAL: Set up log function early to ensure we can log any issues
+    log = log_func if log_func is not None else (lambda x: None)
+
+    # DIAGNOSTIC: First thing we do - log entry to help debug crashes
+    log("[SOURCE SEPARATION] DEBUG: Entered separate_audio()")
+    import sys
+    sys.stdout.flush()
+    sys.stderr.flush()
+
+    # Validate inputs before any complex operations
+    if pcm_data is None:
+        log("[SOURCE SEPARATION] ERROR: pcm_data is None")
+        return None
+
+    if not isinstance(pcm_data, np.ndarray):
+        log(f"[SOURCE SEPARATION] ERROR: pcm_data is not a numpy array, got {type(pcm_data)}")
+        return None
+
+    # CRITICAL: Ensure pcm_data is a proper contiguous array before proceeding.
+    # This guards against potential memory corruption from previous operations.
+    try:
+        if not pcm_data.flags['C_CONTIGUOUS']:
+            pcm_data = np.ascontiguousarray(pcm_data, dtype=np.float32)
+    except Exception as e:
+        log(f"[SOURCE SEPARATION] ERROR: Failed to ensure contiguous array: {e}")
+        return None
 
     target_stem = SEPARATION_MODES.get(mode)
     if target_stem is None:
         log(f"[SOURCE SEPARATION] Mode '{mode}' disabled, returning original audio")
         return pcm_data
 
-    available, msg = is_audio_separator_available()
+    # Check availability with try/except to catch any potential crashes
+    try:
+        available, msg = is_audio_separator_available()
+    except Exception as e:
+        log(f"[SOURCE SEPARATION] ERROR: Failed to check audio-separator availability: {e}")
+        return None
+
     if not available:
         log(f"[SOURCE SEPARATION] Audio-separator not available: {msg}")
         return None
@@ -1341,6 +1372,8 @@ def apply_source_separation(
     Returns:
         Tuple of (ref_pcm, tgt_pcm) - both separated or both original
     """
+    import gc
+
     log = log_func or (lambda x: None)
 
     mode, model_filename = _resolve_separation_settings(config)
@@ -1357,20 +1390,53 @@ def apply_source_separation(
     log(f"[SOURCE SEPARATION] Model: {model_filename}")
     log(f"[SOURCE SEPARATION] Applying to Source 1 vs {role_tag} comparison")
 
-    # Separate reference (Source 1)
-    log("[SOURCE SEPARATION] Processing reference audio (Source 1)...")
-    ref_separated = separate_audio(ref_pcm, sample_rate, mode, model_filename, log, device, timeout, model_dir)
-    if ref_separated is None:
-        log("[SOURCE SEPARATION] Reference separation failed, using original audio for both")
-        return ref_pcm, tgt_pcm
+    # CRITICAL: Ensure we have true contiguous copies of both arrays before processing.
+    # This prevents potential memory corruption from scipy/numpy internal state issues
+    # that can manifest during gc.collect() between separation calls.
+    # The copy ensures the arrays are independent of any memory-mapped regions or
+    # internal buffers that might be freed during garbage collection.
+    ref_pcm_copy = np.array(ref_pcm, dtype=np.float32, copy=True, order='C')
+    tgt_pcm_copy = np.array(tgt_pcm, dtype=np.float32, copy=True, order='C')
 
-    # Force cleanup between separations to prevent memory/state accumulation
-    import gc
+    # Pre-emptive cleanup to start with clean state
     gc.collect()
 
-    # Separate target
+    # Separate reference (Source 1)
+    log("[SOURCE SEPARATION] Processing reference audio (Source 1)...")
+    ref_separated = separate_audio(ref_pcm_copy, sample_rate, mode, model_filename, log, device, timeout, model_dir)
+    if ref_separated is None:
+        log("[SOURCE SEPARATION] Reference separation failed, using original audio for both")
+        del ref_pcm_copy
+        del tgt_pcm_copy
+        gc.collect()
+        return ref_pcm, tgt_pcm
+
+    # CRITICAL: Force cleanup between separations to prevent memory/state accumulation.
+    # This cleanup must happen AFTER we have a confirmed good result from ref separation.
+    # The ref_separated array is a contiguous copy (from _read_audio_file), so it's safe.
+    del ref_pcm_copy  # No longer needed - separation returned new array
+    gc.collect()
+
+    # Small delay to allow any async cleanup operations to complete.
+    # This can help with race conditions in C extension cleanup.
+    time.sleep(0.1)
+
+    # Separate target - tgt_pcm_copy is still valid (was never touched by first separation)
     log(f"[SOURCE SEPARATION] Processing target audio ({role_tag})...")
-    tgt_separated = separate_audio(tgt_pcm, sample_rate, mode, model_filename, log, device, timeout, model_dir)
+
+    # DIAGNOSTIC: Log state before calling separate_audio to help debug crashes
+    log(f"[SOURCE SEPARATION] DEBUG: tgt_pcm_copy shape={tgt_pcm_copy.shape}, dtype={tgt_pcm_copy.dtype}, contiguous={tgt_pcm_copy.flags['C_CONTIGUOUS']}")
+    log(f"[SOURCE SEPARATION] DEBUG: mode={mode}, model={model_filename}, sample_rate={sample_rate}")
+    import sys
+    sys.stdout.flush()
+    sys.stderr.flush()
+
+    tgt_separated = separate_audio(tgt_pcm_copy, sample_rate, mode, model_filename, log, device, timeout, model_dir)
+
+    # Clean up the copy now that separation is done
+    del tgt_pcm_copy
+    gc.collect()
+
     if tgt_separated is None:
         log("[SOURCE SEPARATION] Target separation failed, using original audio for both")
         # Clean up ref_separated before returning original
