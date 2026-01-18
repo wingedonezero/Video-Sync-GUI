@@ -636,26 +636,29 @@ class AnalysisStep:
                     )
 
             # Calculate final delay including container delay chain correction
-            # CRITICAL: Use the container delay from the ACTUAL track used for correlation
-            # If correlation_target_track is set, use that track's delay instead of the global reference
+            # CRITICAL: Use the container delay from the ACTUAL Source 1 track used for correlation
+            # Source 1 track is selected globally via analysis_lang_source1 (not per-source)
             actual_container_delay = source1_audio_container_delay
-            if correlation_target_track is not None and source1_info:
-                # Per-source correlation target is set - map audio index to track ID
-                # correlation_target_track is an audio-only index (0, 1, 2...)
-                # source1_container_delays is keyed by track ID
-                audio_tracks = [t for t in source1_info.get('tracks', []) if t.get('type') == 'audio']
-                if 0 <= correlation_target_track < len(audio_tracks):
-                    target_track_id = audio_tracks[correlation_target_track].get('id')
-                    actual_container_delay = source1_container_delays.get(target_track_id, 0)
-                    if actual_container_delay != source1_audio_container_delay:
-                        runner._log_message(
-                            f"[Container Delay Override] Using audio index {correlation_target_track} (track ID {target_track_id}) delay: "
-                            f"{actual_container_delay:+.3f}ms (global reference was {source1_audio_container_delay:+.3f}ms)"
-                        )
-                else:
-                    runner._log_message(
-                        f"[Container Delay Warning] Invalid audio index {correlation_target_track}, using global reference"
-                    )
+
+            # Try to determine which Source 1 track was actually used for correlation
+            # This is needed when Source 1 has multiple audio tracks with different container delays
+            if source1_info:
+                ref_lang = source_config.get('analysis_lang_source1')
+                if ref_lang:
+                    # Find which track matches the language
+                    audio_tracks = [t for t in source1_info.get('tracks', []) if t.get('type') == 'audio']
+                    for i, track in enumerate(audio_tracks):
+                        track_lang = (track.get('properties', {}).get('language', '') or '').strip().lower()
+                        if track_lang == ref_lang.strip().lower():
+                            target_track_id = track.get('id')
+                            track_container_delay = source1_container_delays.get(target_track_id, 0)
+                            if track_container_delay != source1_audio_container_delay:
+                                actual_container_delay = track_container_delay
+                                runner._log_message(
+                                    f"[Container Delay Override] Using Source 1 audio index {i} (track ID {target_track_id}, lang={ref_lang}) delay: "
+                                    f"{actual_container_delay:+.3f}ms (global reference was {source1_audio_container_delay:+.3f}ms)"
+                                )
+                            break
 
             # Store both rounded (for mkvmerge) and raw (for subtitle sync precision)
             final_delay_ms = round(correlation_delay_ms + actual_container_delay)
