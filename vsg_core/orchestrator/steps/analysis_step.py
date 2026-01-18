@@ -456,11 +456,22 @@ class AnalysisStep:
             if not audio_tracks:
                 runner._log_message(f"[WARN] No audio tracks found in {source_key}. Skipping.")
                 continue
-            if tgt_lang:
+
+            # Priority 1: Explicit track index from per-source settings
+            if correlation_source_track is not None:
+                if 0 <= correlation_source_track < len(audio_tracks):
+                    target_track_obj = audio_tracks[correlation_source_track]
+                else:
+                    runner._log_message(f"[WARN] Invalid track index {correlation_source_track}, falling back to first track")
+                    target_track_obj = audio_tracks[0]
+            # Priority 2: Language matching
+            elif tgt_lang:
                 for track in audio_tracks:
                     if (track.get('properties', {}).get('language', '') or '').strip().lower() == tgt_lang:
                         target_track_obj = track
                         break
+
+            # Fallback: First track
             if not target_track_obj:
                 target_track_obj = audio_tracks[0]
 
