@@ -406,9 +406,8 @@ class AnalysisStep:
             # Get per-source settings for this source
             per_source_settings = ctx.source_settings.get(source_key, {})
 
-            # Get explicit track indices from per-source settings
+            # Get explicit track index for this source (Source 2/3)
             correlation_source_track = per_source_settings.get('correlation_source_track')  # Which Source 2/3 track to use
-            correlation_ref_track = per_source_settings.get('correlation_ref_track')  # Which Source 1 track to correlate against
 
             # Determine target language
             if correlation_source_track is not None:
@@ -418,9 +417,7 @@ class AnalysisStep:
                 # Fall back to global language setting for target
                 tgt_lang = config.get('analysis_lang_others')
 
-            # Log reference track selection if specified
-            if correlation_ref_track is not None:
-                runner._log_message(f"[{source_key}] Using explicit reference track: Source 1 track {correlation_ref_track}")
+            # Source 1 track selection is always global (via analysis_lang_source1), not per-source
 
             # ===================================================================
             # CRITICAL DECISION POINT: Determine if source separation was applied
@@ -481,7 +478,7 @@ class AnalysisStep:
                     ref_lang=source_config.get('analysis_lang_source1'),
                     target_lang=tgt_lang,
                     role_tag=source_key,
-                    ref_track_index=correlation_ref_track,
+                    ref_track_index=None,  # Always use global setting for Source 1
                     target_track_index=correlation_source_track,
                     use_source_separation=use_source_separated_settings
                 )
@@ -521,7 +518,7 @@ class AnalysisStep:
                     ref_lang=source_config.get('analysis_lang_source1'),
                     target_lang=tgt_lang,
                     role_tag=source_key,
-                    ref_track_index=correlation_ref_track,
+                    ref_track_index=None,  # Always use global setting for Source 1
                     target_track_index=correlation_source_track,
                     use_source_separation=use_source_separated_settings
                 )

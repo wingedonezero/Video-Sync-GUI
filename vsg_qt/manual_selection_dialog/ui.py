@@ -171,7 +171,6 @@ class ManualSelectionDialog(QDialog):
         current = self.source_settings.get(source_key, {})
         has_settings = bool(
             current.get('correlation_source_track') is not None or
-            current.get('correlation_ref_track') is not None or
             current.get('use_source_separation')
         )
 
