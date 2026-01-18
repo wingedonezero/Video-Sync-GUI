@@ -169,7 +169,11 @@ class ManualSelectionDialog(QDialog):
 
         # Check if this source has non-default settings
         current = self.source_settings.get(source_key, {})
-        has_settings = bool(current.get('correlation_target_track') is not None or current.get('use_source_separation'))
+        has_settings = bool(
+            current.get('correlation_source_track') is not None or
+            current.get('correlation_ref_track') is not None or
+            current.get('use_source_separation')
+        )
 
         # Configure correlation settings action
         config_action = menu.addAction("Configure Correlation Settings...")
@@ -192,11 +196,15 @@ class ManualSelectionDialog(QDialog):
         """Open the source settings dialog for the specified source."""
         from vsg_qt.source_settings_dialog import SourceSettingsDialog
 
-        # Get Source 1's audio tracks for the dropdown
+        # Get this source's audio tracks
+        source_tracks = [t for t in self.track_info.get(source_key, []) if t.get('type') == 'audio']
+
+        # Get Source 1's audio tracks
         source1_tracks = [t for t in self.track_info.get('Source 1', []) if t.get('type') == 'audio']
 
         dialog = SourceSettingsDialog(
             source_key=source_key,
+            source_audio_tracks=source_tracks,
             source1_audio_tracks=source1_tracks,
             current_settings=self.source_settings.get(source_key),
             parent=self

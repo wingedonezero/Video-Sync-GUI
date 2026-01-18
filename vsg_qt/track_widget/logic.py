@@ -91,12 +91,16 @@ class TrackWidgetLogic:
             source_settings = self.v.source_settings.get(self.track_data.get('source', ''), {})
             corr_parts = []
 
-            target_track = source_settings.get('correlation_target_track')
-            if target_track is not None:
-                corr_parts.append(f"Target: S1 Track {target_track}")
+            source_track = source_settings.get('correlation_source_track')
+            if source_track is not None:
+                corr_parts.append(f"Using Track {source_track}")
+
+            ref_track = source_settings.get('correlation_ref_track')
+            if ref_track is not None:
+                corr_parts.append(f"vs S1 Track {ref_track}")
 
             if source_settings.get('use_source_separation'):
-                corr_parts.append("Source Separation: ON")
+                corr_parts.append("Source Separation")
 
             if corr_parts:
                 parts.append("🎯 " + ", ".join(corr_parts))
@@ -147,7 +151,9 @@ class TrackWidgetLogic:
         track_source = self.track_data.get('source', '')
         if self.track_data.get('type') == 'audio' and track_source != 'Source 1':
             source_settings = self.v.source_settings.get(track_source, {})
-            if source_settings.get('correlation_target_track') is not None or source_settings.get('use_source_separation'):
+            if (source_settings.get('correlation_source_track') is not None or
+                source_settings.get('correlation_ref_track') is not None or
+                source_settings.get('use_source_separation')):
                 badges.append("🎯 Correlation Settings")
 
         if self.v.cb_default.isChecked():
