@@ -710,88 +710,111 @@ class AnalysisStep:
             raw_source_delays[source_key] = final_delay_raw
 
             # --- Handle drift detection flags ---
+            # CRITICAL: Drift/stepping corrections are NOT compatible with source separation
+            # The separated stems have different waveform characteristics that make
+            # precise timing corrections unreliable
             if diagnosis:
                 analysis_track_key = f"{source_key}_{target_track_id}"
 
                 if diagnosis == "PAL_DRIFT":
-                    source_has_audio_in_layout = any(
-                        item.get('source') == source_key and item.get('type') == 'audio'
-                        for item in ctx.manual_layout
-                    )
-
-                    if source_has_audio_in_layout:
-                        ctx.pal_drift_flags[analysis_track_key] = details
-                    else:
+                    # Block PAL drift correction when source separation is enabled
+                    if use_source_separated_settings:
                         runner._log_message(
-                            f"[PAL Drift Detected] PAL drift detected in {source_key}, but no audio tracks "
-                            f"from this source are being used. Skipping PAL correction for {source_key}."
+                            f"[PAL Drift Detected] PAL drift detected in {source_key}, but source separation "
+                            f"is enabled. PAL correction is unreliable on separated stems - skipping."
                         )
+                    else:
+                        source_has_audio_in_layout = any(
+                            item.get('source') == source_key and item.get('type') == 'audio'
+                            for item in ctx.manual_layout
+                        )
+
+                        if source_has_audio_in_layout:
+                            ctx.pal_drift_flags[analysis_track_key] = details
+                        else:
+                            runner._log_message(
+                                f"[PAL Drift Detected] PAL drift detected in {source_key}, but no audio tracks "
+                                f"from this source are being used. Skipping PAL correction for {source_key}."
+                            )
 
                 elif diagnosis == "LINEAR_DRIFT":
-                    source_has_audio_in_layout = any(
-                        item.get('source') == source_key and item.get('type') == 'audio'
-                        for item in ctx.manual_layout
-                    )
-
-                    if source_has_audio_in_layout:
-                        ctx.linear_drift_flags[analysis_track_key] = details
-                    else:
+                    # Block linear drift correction when source separation is enabled
+                    if use_source_separated_settings:
                         runner._log_message(
-                            f"[Linear Drift Detected] Linear drift detected in {source_key}, but no audio tracks "
-                            f"from this source are being used. Skipping linear drift correction for {source_key}."
+                            f"[Linear Drift Detected] Linear drift detected in {source_key}, but source separation "
+                            f"is enabled. Linear drift correction is unreliable on separated stems - skipping."
                         )
+                    else:
+                        source_has_audio_in_layout = any(
+                            item.get('source') == source_key and item.get('type') == 'audio'
+                            for item in ctx.manual_layout
+                        )
+
+                        if source_has_audio_in_layout:
+                            ctx.linear_drift_flags[analysis_track_key] = details
+                        else:
+                            runner._log_message(
+                                f"[Linear Drift Detected] Linear drift detected in {source_key}, but no audio tracks "
+                                f"from this source are being used. Skipping linear drift correction for {source_key}."
+                            )
 
                 elif diagnosis == "STEPPING":
-                    source_has_audio_in_layout = any(
-                        item.get('source') == source_key and item.get('type') == 'audio'
-                        for item in ctx.manual_layout
-                    )
-                    source_has_subs_in_layout = any(
-                        item.get('source') == source_key and item.get('type') == 'subtitles'
-                        for item in ctx.manual_layout
-                    )
-
-                    if source_has_audio_in_layout:
-                        # Store stepping correction info with the corrected delay and cluster diagnostics
-                        ctx.segment_flags[analysis_track_key] = {
-                            'base_delay': final_delay_ms,
-                            'cluster_details': details.get('cluster_details', []),
-                            'valid_clusters': details.get('valid_clusters', {}),
-                            'invalid_clusters': details.get('invalid_clusters', {}),
-                            'validation_results': details.get('validation_results', {}),
-                            'correction_mode': details.get('correction_mode', 'full'),
-                            'fallback_mode': details.get('fallback_mode', 'nearest'),
-                            'subs_only': False
-                        }
-                        runner._log_message(
-                            f"[Stepping] Stepping correction will be applied to audio tracks from {source_key}."
-                        )
-                    elif source_has_subs_in_layout and config.get('stepping_adjust_subtitles_no_audio', True):
-                        # No audio but subs exist - run full stepping correction to get verified EDL
-                        runner._log_message(
-                            f"[Stepping Detected] Stepping detected in {source_key}. No audio tracks "
-                            f"from this source, but subtitles will use verified stepping EDL."
-                        )
-                        # Set segment_flags so stepping correction step runs full analysis
-                        ctx.segment_flags[analysis_track_key] = {
-                            'base_delay': final_delay_ms,
-                            'cluster_details': details.get('cluster_details', []),
-                            'valid_clusters': details.get('valid_clusters', {}),
-                            'invalid_clusters': details.get('invalid_clusters', {}),
-                            'validation_results': details.get('validation_results', {}),
-                            'correction_mode': details.get('correction_mode', 'full'),
-                            'fallback_mode': details.get('fallback_mode', 'nearest'),
-                            'subs_only': True  # Flag to indicate no audio application needed
-                        }
-                        runner._log_message(
-                            f"[Stepping] Full stepping analysis will run for verified subtitle EDL."
-                        )
+                    # Block stepping correction when source separation is enabled
+                    # (Already handled earlier in the stepping detection block, but also skip flag storage)
+                    if use_source_separated_settings:
+                        # Already logged above, just skip storing flags
+                        pass
                     else:
-                        # No audio and no subs (or setting disabled)
-                        runner._log_message(
-                            f"[Stepping Detected] Stepping detected in {source_key}, but no audio or subtitle tracks "
-                            f"from this source are being used. Skipping stepping correction."
+                        source_has_audio_in_layout = any(
+                            item.get('source') == source_key and item.get('type') == 'audio'
+                            for item in ctx.manual_layout
                         )
+                        source_has_subs_in_layout = any(
+                            item.get('source') == source_key and item.get('type') == 'subtitles'
+                            for item in ctx.manual_layout
+                        )
+
+                        if source_has_audio_in_layout:
+                            # Store stepping correction info with the corrected delay and cluster diagnostics
+                            ctx.segment_flags[analysis_track_key] = {
+                                'base_delay': final_delay_ms,
+                                'cluster_details': details.get('cluster_details', []),
+                                'valid_clusters': details.get('valid_clusters', {}),
+                                'invalid_clusters': details.get('invalid_clusters', {}),
+                                'validation_results': details.get('validation_results', {}),
+                                'correction_mode': details.get('correction_mode', 'full'),
+                                'fallback_mode': details.get('fallback_mode', 'nearest'),
+                                'subs_only': False
+                            }
+                            runner._log_message(
+                                f"[Stepping] Stepping correction will be applied to audio tracks from {source_key}."
+                            )
+                        elif source_has_subs_in_layout and config.get('stepping_adjust_subtitles_no_audio', True):
+                            # No audio but subs exist - run full stepping correction to get verified EDL
+                            runner._log_message(
+                                f"[Stepping Detected] Stepping detected in {source_key}. No audio tracks "
+                                f"from this source, but subtitles will use verified stepping EDL."
+                            )
+                            # Set segment_flags so stepping correction step runs full analysis
+                            ctx.segment_flags[analysis_track_key] = {
+                                'base_delay': final_delay_ms,
+                                'cluster_details': details.get('cluster_details', []),
+                                'valid_clusters': details.get('valid_clusters', {}),
+                                'invalid_clusters': details.get('invalid_clusters', {}),
+                                'validation_results': details.get('validation_results', {}),
+                                'correction_mode': details.get('correction_mode', 'full'),
+                                'fallback_mode': details.get('fallback_mode', 'nearest'),
+                                'subs_only': True  # Flag to indicate no audio application needed
+                            }
+                            runner._log_message(
+                                f"[Stepping] Full stepping analysis will run for verified subtitle EDL."
+                            )
+                        else:
+                            # No audio and no subs (or setting disabled)
+                            runner._log_message(
+                                f"[Stepping Detected] Stepping detected in {source_key}, but no audio or subtitle tracks "
+                                f"from this source are being used. Skipping stepping correction."
+                            )
 
         # Store stepping sources in context for final report
         ctx.stepping_sources = stepping_sources
