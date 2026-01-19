@@ -142,15 +142,15 @@ def _analyze_uniform(
         # Threshold mode: variance must exceed threshold
         variance_detected = max_variance > variance_threshold
 
-    # Build result
+    # Build result - ensure all floats are native Python types for JSON serialization
     result = {
         'source': source_key,
         'variance_detected': variance_detected,
-        'max_variance_ms': round(max_variance, 4),
-        'std_dev_ms': round(std_delay, 4),
-        'mean_delay_ms': round(mean_delay, 4),
-        'min_delay_ms': round(min_delay, 4),
-        'max_delay_ms': round(max_delay, 4),
+        'max_variance_ms': round(_to_float(max_variance), 4),
+        'std_dev_ms': round(_to_float(std_delay), 4),
+        'mean_delay_ms': round(_to_float(mean_delay), 4),
+        'min_delay_ms': round(_to_float(min_delay), 4),
+        'max_delay_ms': round(_to_float(max_delay), 4),
         'chunk_count': len(accepted),
         'outlier_count': len(outliers),
         'outliers': outliers[:10],  # Limit to first 10 outliers
@@ -239,8 +239,8 @@ def _analyze_with_clusters(
         if cluster_outliers:
             cluster_issues.append({
                 'cluster_id': cluster.get('cluster_id', 0),
-                'mean_delay': cluster_mean,
-                'variance': cluster_variance,
+                'mean_delay': _to_float(cluster_mean),
+                'variance': _to_float(cluster_variance),
                 'outlier_count': len(cluster_outliers)
             })
             total_outliers.extend(cluster_outliers)
@@ -255,7 +255,7 @@ def _analyze_with_clusters(
     result = {
         'source': source_key,
         'variance_detected': variance_detected,
-        'max_variance_ms': round(max_cluster_variance, 4),
+        'max_variance_ms': round(_to_float(max_cluster_variance), 4),
         'chunk_count': len(accepted),
         'outlier_count': len(total_outliers),
         'outliers': total_outliers[:10],
