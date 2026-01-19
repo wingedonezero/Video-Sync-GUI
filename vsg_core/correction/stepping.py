@@ -162,7 +162,10 @@ class SteppingCorrector:
                 trimmed_bytes = len(pcm_bytes) - aligned_size
                 self.log(f"[BUFFER ALIGNMENT] Trimmed {trimmed_bytes} bytes from {Path(file_path).name} (likely Opus/other codec)")
                 pcm_bytes = pcm_bytes[:aligned_size]
-            return np.frombuffer(pcm_bytes, dtype=np.int32)
+            # CRITICAL: Return a COPY, not a view over the buffer.
+            # np.frombuffer() creates a view that can become invalid if the underlying
+            # buffer is garbage collected. Using .copy() ensures we own the memory.
+            return np.frombuffer(pcm_bytes, dtype=np.int32).copy()
         self.log(f"[ERROR] SteppingCorrector failed to decode audio stream {stream_index} from '{Path(file_path).name}'")
         return None
 
