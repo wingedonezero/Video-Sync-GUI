@@ -2014,7 +2014,11 @@ class LoggingTab(QWidget):
     def __init__(self):
         super().__init__()
         self.widgets: Dict[str, QWidget] = {}
-        f = QFormLayout(self)
+        main_layout = QVBoxLayout(self)
+
+        # --- Logging Options ---
+        log_group = QGroupBox("Log Output")
+        f = QFormLayout(log_group)
         self.widgets['log_compact'] = QCheckBox('Use compact logging'); self.widgets['log_compact'].setToolTip("Reduce the verbosity of command-line tool output in the log.")
         self.widgets['log_autoscroll'] = QCheckBox('Auto-scroll log view during jobs'); self.widgets['log_autoscroll'].setToolTip("Automatically scroll the log view to the bottom as new messages arrive.")
         step = QSpinBox(); step.setRange(1, 100); step.setSuffix('%'); step.setToolTip("How often to show 'Progress: X%' messages from mkvmerge in the log.\nA value of 20 means it will log at 20%, 40%, 60%, etc.")
@@ -2029,3 +2033,46 @@ class LoggingTab(QWidget):
         f.addRow('Error Tail:', self.widgets['log_error_tail'])
         f.addRow(self.widgets['log_show_options_pretty'])
         f.addRow(self.widgets['log_show_options_json'])
+        main_layout.addWidget(log_group)
+
+        # --- Sync Stability (Correlation Variance Detection) ---
+        stability_group = QGroupBox("Sync Stability Detection")
+        stability_layout = QFormLayout(stability_group)
+
+        self.widgets['sync_stability_enabled'] = QCheckBox('Enable sync stability detection')
+        self.widgets['sync_stability_enabled'].setToolTip("Detect variance in correlation results that may indicate sync issues.\nFlags jobs where chunk delays aren't perfectly consistent.")
+        stability_layout.addRow(self.widgets['sync_stability_enabled'])
+
+        variance_thresh = QDoubleSpinBox()
+        variance_thresh.setRange(0.0, 10.0)
+        variance_thresh.setDecimals(3)
+        variance_thresh.setSingleStep(0.001)
+        variance_thresh.setSuffix(' ms')
+        variance_thresh.setToolTip("Maximum allowed variance in raw delay values.\n0 = flag any variance (strictest)\nHigher values allow more tolerance.")
+        self.widgets['sync_stability_variance_threshold'] = variance_thresh
+        stability_layout.addRow('Variance Threshold:', variance_thresh)
+
+        min_chunks = QSpinBox()
+        min_chunks.setRange(2, 30)
+        min_chunks.setToolTip("Minimum number of chunks needed to calculate variance.\nNeeds at least this many chunks to report stability issues.")
+        self.widgets['sync_stability_min_chunks'] = min_chunks
+        stability_layout.addRow('Min Chunks:', min_chunks)
+
+        outlier_mode = QComboBox()
+        outlier_mode.addItem('Any Variance', 'any')
+        outlier_mode.addItem('Custom Threshold', 'threshold')
+        outlier_mode.setToolTip("How to detect outliers:\n- Any Variance: flag if ANY chunk differs from others\n- Custom Threshold: only flag if difference exceeds threshold")
+        self.widgets['sync_stability_outlier_mode'] = outlier_mode
+        stability_layout.addRow('Outlier Mode:', outlier_mode)
+
+        outlier_thresh = QDoubleSpinBox()
+        outlier_thresh.setRange(0.001, 100.0)
+        outlier_thresh.setDecimals(3)
+        outlier_thresh.setSingleStep(0.1)
+        outlier_thresh.setSuffix(' ms')
+        outlier_thresh.setToolTip("Custom outlier threshold (when mode = Custom Threshold).\nChunks differing by more than this from the mean are flagged as outliers.")
+        self.widgets['sync_stability_outlier_threshold'] = outlier_thresh
+        stability_layout.addRow('Outlier Threshold:', outlier_thresh)
+
+        main_layout.addWidget(stability_group)
+        main_layout.addStretch(1)

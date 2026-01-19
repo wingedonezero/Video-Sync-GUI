@@ -9,6 +9,7 @@ from vsg_core.orchestrator.steps.context import Context
 from vsg_core.models.jobs import Delays
 from vsg_core.analysis.audio_corr import run_audio_correlation, run_multi_correlation
 from vsg_core.analysis.drift_detection import diagnose_audio_issue
+from vsg_core.analysis.sync_stability import analyze_sync_stability
 from vsg_core.extraction.tracks import get_stream_info, get_stream_info_with_delays
 
 
@@ -875,6 +876,24 @@ class AnalysisStep:
                         f'  - Use VideoDiff mode instead of Audio Correlation\n'
                         f'  - Check that both files are from the same video source'
                     )
+
+            # --- Sync Stability Analysis ---
+            # Check for variance in correlation results that may indicate sync issues
+            # Pass stepping cluster info if available to avoid false positives
+            stepping_clusters = None
+            if diagnosis == "STEPPING" and details:
+                stepping_clusters = details.get('cluster_info', [])
+
+            stability_result = analyze_sync_stability(
+                chunk_results=results,
+                source_key=source_key,
+                config=source_config,
+                log=runner._log_message,
+                stepping_clusters=stepping_clusters
+            )
+
+            if stability_result and stability_result.get('variance_detected'):
+                ctx.sync_stability_issues.append(stability_result)
 
             # Calculate final delay including container delay chain correction
             # CRITICAL: Use the container delay from the ACTUAL Source 1 track used for correlation

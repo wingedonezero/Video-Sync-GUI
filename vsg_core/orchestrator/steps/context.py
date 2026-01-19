@@ -74,6 +74,10 @@ class Context:
     # Format: [{'source': str, 'issue_type': str, 'severity': str, 'message': str, 'details': dict}]
     stepping_quality_issues: List[Dict[str, Any]] = field(default_factory=list)
 
+    # Store sync stability issues (correlation variance) for reporting
+    # Format: [{'source': str, 'variance_detected': bool, 'max_variance_ms': float, 'outliers': list, 'details': dict}]
+    sync_stability_issues: List[Dict[str, Any]] = field(default_factory=list)
+
     # Flag if any subtitle track used raw delay fallback due to no scene matches
     # (correlation-frame-snap mode couldn't find scenes to verify against)
     correlation_snap_no_scenes_fallback: bool = False

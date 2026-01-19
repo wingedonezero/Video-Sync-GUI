@@ -127,6 +127,9 @@ class ReportWriter:
                 "details": job_result.get('audit_details', [])
             },
 
+            # Sync stability (correlation variance)
+            "sync_stability": job_result.get('sync_stability_issues', []),
+
             # Validator issues (for future expansion)
             "validator_issues": job_result.get('validator_issues', [])
         }
@@ -155,6 +158,7 @@ class ReportWriter:
         total_issues = 0
         stepping_jobs = []
         stepping_disabled_jobs = []
+        sync_stability_jobs = []
 
         for job in self.report_data.get("jobs", []):
             status = job.get("status", "Unknown")
@@ -183,13 +187,24 @@ class ReportWriter:
                     'sources': stepping.get('detected_disabled', [])
                 })
 
+            # Track sync stability issues
+            sync_stability = job.get("sync_stability", [])
+            if sync_stability:
+                affected_sources = [s.get('source', 'Unknown') for s in sync_stability if s.get('variance_detected')]
+                if affected_sources:
+                    sync_stability_jobs.append({
+                        'name': job.get('name', 'Unknown'),
+                        'sources': affected_sources
+                    })
+
         self.report_data["summary"] = {
             "successful": successful,
             "warnings": warnings,
             "failed": failed,
             "total_issues": total_issues,
             "stepping_jobs": stepping_jobs,
-            "stepping_disabled_jobs": stepping_disabled_jobs
+            "stepping_disabled_jobs": stepping_disabled_jobs,
+            "sync_stability_jobs": sync_stability_jobs
         }
 
         self.report_data["finalized_at"] = datetime.now().isoformat()
@@ -348,5 +363,32 @@ class ReportWriter:
             short_name = source.replace("Source ", "S")
             sign = "+" if delay >= 0 else ""
             parts.append(f"{short_name}: {sign}{delay}ms")
+
+        return ", ".join(parts)
+
+    @staticmethod
+    def get_sync_stability_summary(job: Dict[str, Any]) -> str:
+        """
+        Get a human-readable sync stability summary for a job.
+
+        Args:
+            job: A job entry from the report
+
+        Returns:
+            Stability status string
+        """
+        stability_issues = job.get("sync_stability", [])
+        if not stability_issues:
+            return "-"
+
+        issues_with_variance = [s for s in stability_issues if s.get('variance_detected')]
+        if not issues_with_variance:
+            return "OK"
+
+        parts = []
+        for issue in issues_with_variance:
+            source = issue.get('source', 'Unknown').replace('Source ', 'S')
+            variance = issue.get('max_variance_ms', 0)
+            parts.append(f"{source}: {variance:.3f}ms")
 
         return ", ".join(parts)
