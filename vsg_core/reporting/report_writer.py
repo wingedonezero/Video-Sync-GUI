@@ -15,6 +15,28 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
+try:
+    import numpy as np
+    HAS_NUMPY = True
+except ImportError:
+    HAS_NUMPY = False
+
+
+class NumpyEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles numpy types."""
+
+    def default(self, obj):
+        if HAS_NUMPY:
+            if isinstance(obj, np.integer):
+                return int(obj)
+            if isinstance(obj, np.floating):
+                return float(obj)
+            if isinstance(obj, np.bool_):
+                return bool(obj)
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+        return super().default(obj)
+
 
 class ReportWriter:
     """
@@ -254,7 +276,7 @@ class ReportWriter:
 
         try:
             with open(temp_fd, 'w', encoding='utf-8') as f:
-                json.dump(self.report_data, f, indent=2, ensure_ascii=False)
+                json.dump(self.report_data, f, indent=2, ensure_ascii=False, cls=NumpyEncoder)
 
             # Atomic rename
             shutil.move(temp_path, self.current_report_path)
