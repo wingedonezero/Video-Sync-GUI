@@ -892,7 +892,8 @@ class AnalysisStep:
                 stepping_clusters=stepping_clusters
             )
 
-            if stability_result and stability_result.get('variance_detected'):
+            # Always add result so we can show "OK" vs "Not analyzed" in reports
+            if stability_result:
                 ctx.sync_stability_issues.append(stability_result)
 
             # Calculate final delay including container delay chain correction
