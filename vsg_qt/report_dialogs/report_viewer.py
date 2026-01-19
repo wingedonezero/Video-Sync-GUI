@@ -141,9 +141,9 @@ class ReportViewer(QDialog):
     def _create_table(self) -> QTableWidget:
         """Create the jobs table."""
         table = QTableWidget()
-        table.setColumnCount(6)
+        table.setColumnCount(7)
         table.setHorizontalHeaderLabels([
-            "#", "Name", "Status", "Issues", "Stepping", "Delays"
+            "#", "Name", "Status", "Issues", "Stepping", "Stability", "Delays"
         ])
 
         # Configure table
@@ -159,7 +159,8 @@ class ReportViewer(QDialog):
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Status
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # Issues
         header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # Stepping
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # Delays
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # Stability
+        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # Delays
 
         # Connect selection changed
         table.itemSelectionChanged.connect(self._on_selection_changed)
@@ -234,11 +235,20 @@ class ReportViewer(QDialog):
             stepping_item.setTextAlignment(Qt.AlignCenter)
             self.table.setItem(row, 4, stepping_item)
 
+            # Stability
+            stability_text = ReportWriter.get_sync_stability_summary(job)
+            stability_item = QTableWidgetItem(stability_text)
+            stability_item.setTextAlignment(Qt.AlignCenter)
+            # Color coding for stability issues
+            if stability_text != "-" and stability_text != "OK":
+                stability_item.setForeground(QColor("#856404"))
+            self.table.setItem(row, 5, stability_item)
+
             # Delays
             delays_text = ReportWriter.get_delays_summary(job)
             delays_item = QTableWidgetItem(delays_text)
             delays_item.setTextAlignment(Qt.AlignCenter)
-            self.table.setItem(row, 5, delays_item)
+            self.table.setItem(row, 6, delays_item)
 
         # Select first row if any
         if jobs:
@@ -337,6 +347,30 @@ class ReportViewer(QDialog):
                         lines.append(f"  - {message}")
         else:
             lines.append("<b>Stepping Correction:</b> Not applied")
+
+        lines.append("")
+
+        # Sync stability info
+        sync_stability = job.get("sync_stability", [])
+        if sync_stability:
+            lines.append("<b>Sync Stability (Correlation Variance):</b>")
+            for stability in sync_stability:
+                source = stability.get('source', 'Unknown')
+                variance_detected = stability.get('variance_detected', False)
+                max_variance = stability.get('max_variance_ms', 0)
+                std_dev = stability.get('std_dev_ms', 0)
+                outliers = stability.get('outliers', [])
+
+                if variance_detected:
+                    lines.append(f"  <span style='color: #fd7e14;'>{source}: Variance detected</span>")
+                    lines.append(f"    Max variance: {max_variance:.3f}ms, Std dev: {std_dev:.3f}ms")
+                    if outliers:
+                        outlier_strs = [f"{o.get('delay_ms', 0):.1f}ms" for o in outliers[:5]]
+                        lines.append(f"    Outliers: {', '.join(outlier_strs)}")
+                else:
+                    lines.append(f"  {source}: OK")
+        else:
+            lines.append("<b>Sync Stability:</b> Not analyzed")
 
         lines.append("")
 

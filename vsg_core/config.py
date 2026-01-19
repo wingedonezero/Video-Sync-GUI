@@ -310,6 +310,13 @@ class AppConfig:
 
             # Filtered Region Handling
             'stepping_filtered_fallback': 'nearest',  # 'nearest', 'interpolate', 'uniform', 'skip', 'reject'
+
+            # --- Sync Stability (Correlation Variance Detection) ---
+            'sync_stability_enabled': True,  # Enable variance detection in correlation results
+            'sync_stability_variance_threshold': 0.0,  # Max allowed variance in ms (0 = any variance flagged)
+            'sync_stability_min_chunks': 3,  # Minimum chunks needed to calculate variance
+            'sync_stability_outlier_mode': 'any',  # 'any' = flag any variance, 'threshold' = use custom threshold
+            'sync_stability_outlier_threshold': 1.0,  # Custom outlier threshold in ms (when mode='threshold')
         }
         self.settings = self.defaults.copy()
         self._accessed_keys: Set[str] = set()  # Track accessed keys for typo detection

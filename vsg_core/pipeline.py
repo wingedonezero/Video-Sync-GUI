@@ -152,7 +152,8 @@ class JobPipeline:
                     'stepping_sources': getattr(ctx, 'stepping_sources', []),
                     'stepping_detected_disabled': getattr(ctx, 'stepping_detected_disabled', []),
                     'stepping_detected_separated': getattr(ctx, 'stepping_detected_separated', []),
-                    'stepping_quality_issues': []
+                    'stepping_quality_issues': [],
+                    'sync_stability_issues': getattr(ctx, 'sync_stability_issues', [])
                 }
 
             # --- 7. Validate Merge Tokens ---
@@ -204,7 +205,8 @@ class JobPipeline:
                 'stepping_sources': getattr(ctx, 'stepping_sources', []),
                 'stepping_detected_disabled': getattr(ctx, 'stepping_detected_disabled', []),
                 'stepping_detected_separated': getattr(ctx, 'stepping_detected_separated', []),
-                'stepping_quality_issues': getattr(ctx, 'stepping_quality_issues', [])
+                'stepping_quality_issues': getattr(ctx, 'stepping_quality_issues', []),
+                'sync_stability_issues': getattr(ctx, 'sync_stability_issues', [])
             }
 
         except Exception as e:
@@ -217,7 +219,8 @@ class JobPipeline:
                 'stepping_sources': [],
                 'stepping_detected_disabled': [],
                 'stepping_detected_separated': [],
-                'stepping_quality_issues': []
+                'stepping_quality_issues': [],
+                'sync_stability_issues': []
             }
 
         finally:
