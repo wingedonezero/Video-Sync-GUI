@@ -158,7 +158,7 @@ class BatchCompletionDialog(QDialog):
             stepping_layout.addWidget(stepping_label)
 
             info_label = QLabel("Quality checks performed - see report for details")
-            info_label.setStyleSheet("color: #6c757d; font-style: italic;")
+            info_label.setStyleSheet("font-style: italic;")
             stepping_layout.addWidget(info_label)
 
             # Show first few jobs
@@ -169,7 +169,6 @@ class BatchCompletionDialog(QDialog):
 
             if len(stepping_jobs) > 3:
                 more_label = QLabel(f"  ... and {len(stepping_jobs) - 3} more")
-                more_label.setStyleSheet("color: #6c757d;")
                 stepping_layout.addWidget(more_label)
 
             layout.addWidget(stepping_frame)
@@ -178,17 +177,16 @@ class BatchCompletionDialog(QDialog):
         if stepping_disabled_jobs:
             warning_frame = QFrame()
             warning_frame.setFrameShape(QFrame.StyledPanel)
-            warning_frame.setStyleSheet("QFrame { background-color: #fff3cd; border: 1px solid #ffc107; }")
             warning_layout = QVBoxLayout(warning_frame)
 
             warning_label = QLabel(f"Stepping Detected - Correction Disabled ({len(stepping_disabled_jobs)} job{'s' if len(stepping_disabled_jobs) != 1 else ''})")
             warning_font = QFont()
             warning_font.setBold(True)
             warning_label.setFont(warning_font)
+            warning_label.setStyleSheet("color: #ffc107;")  # Yellow - visible on both themes
             warning_layout.addWidget(warning_label)
 
             warning_text = QLabel("These files have timing inconsistencies.\nMANUAL REVIEW REQUIRED!")
-            warning_text.setStyleSheet("color: #856404;")
             warning_layout.addWidget(warning_text)
 
             layout.addWidget(warning_frame)
@@ -196,7 +194,6 @@ class BatchCompletionDialog(QDialog):
         # Report path info
         if self.report_path:
             report_label = QLabel(f"Report: {self.report_path.name}")
-            report_label.setStyleSheet("color: #6c757d; font-size: 10px;")
             report_label.setToolTip(str(self.report_path))
             layout.addWidget(report_label)
 

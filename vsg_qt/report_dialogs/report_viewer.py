@@ -133,7 +133,6 @@ class ReportViewer(QDialog):
         output_dir = self.report_data.get("output_directory", "")
         if output_dir:
             dir_label = QLabel(f"Output: {Path(output_dir).name}")
-            dir_label.setStyleSheet("color: #6c757d;")
             dir_label.setToolTip(output_dir)
             layout.addWidget(dir_label)
 
@@ -183,7 +182,6 @@ class ReportViewer(QDialog):
         # Details text area
         self.details_text = QTextEdit()
         self.details_text.setReadOnly(True)
-        self.details_text.setStyleSheet("QTextEdit { background-color: #f8f9fa; }")
         layout.addWidget(self.details_text)
 
         return panel
