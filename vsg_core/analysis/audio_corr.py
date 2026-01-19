@@ -94,7 +94,12 @@ def _decode_to_memory(file_path: str, a_index: int, out_sr: int, use_soxr: bool,
             runner._log_message(f"[BUFFER ALIGNMENT] Trimmed {trimmed_bytes} bytes from {Path(file_path).name} (likely Opus/other codec)")
         pcm_bytes = pcm_bytes[:aligned_size]
 
-    return np.frombuffer(pcm_bytes, dtype=np.float32)
+    # CRITICAL: Return a COPY, not a view over the buffer.
+    # np.frombuffer() creates a view that can become invalid if the underlying
+    # buffer is garbage collected. Using .copy() ensures we own the memory and
+    # prevents segfaults in downstream operations like source separation.
+    # The extra memory copy is worth the safety guarantee.
+    return np.frombuffer(pcm_bytes, dtype=np.float32).copy()
 
 def _apply_bandpass(waveform: np.ndarray, sr: int, lowcut: float, highcut: float, order: int, log: Optional[Callable] = None) -> np.ndarray:
     """Applies a Butterworth band-pass filter to isolate dialogue frequencies."""

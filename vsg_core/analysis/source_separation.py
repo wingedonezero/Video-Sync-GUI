@@ -1179,26 +1179,51 @@ def separate_audio(
 
     # DIAGNOSTIC: First thing we do - log entry to help debug crashes
     log("[SOURCE SEPARATION] DEBUG: Entered separate_audio()")
-    import sys
-    sys.stdout.flush()
-    sys.stderr.flush()
 
-    # Validate inputs before any complex operations
+    # Flush outputs to ensure we see the log before any potential crash
+    try:
+        import sys
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except Exception:
+        pass  # Don't fail on flush errors
+
+    # SAFETY: Early validation using only basic Python operations
+    # Avoid touching numpy internals until we've validated the basic object
+    log("[SOURCE SEPARATION] DEBUG: Validating input...")
     if pcm_data is None:
         log("[SOURCE SEPARATION] ERROR: pcm_data is None")
         return None
 
-    if not isinstance(pcm_data, np.ndarray):
-        log(f"[SOURCE SEPARATION] ERROR: pcm_data is not a numpy array, got {type(pcm_data)}")
+    # Check type using string comparison first (safer than isinstance for corrupted objects)
+    try:
+        type_name = type(pcm_data).__name__
+        if type_name != 'ndarray':
+            log(f"[SOURCE SEPARATION] ERROR: pcm_data type is {type_name}, expected ndarray")
+            return None
+    except Exception as e:
+        log(f"[SOURCE SEPARATION] ERROR: Failed to check type: {e}")
         return None
 
-    # CRITICAL: Ensure pcm_data is a proper contiguous array before proceeding.
-    # This guards against potential memory corruption from previous operations.
+    # SAFETY: Validate array before accessing flags (which touches C memory)
     try:
-        if not pcm_data.flags['C_CONTIGUOUS']:
-            pcm_data = np.ascontiguousarray(pcm_data, dtype=np.float32)
+        # First check basic attributes exist
+        if not hasattr(pcm_data, 'flags') or not hasattr(pcm_data, 'dtype'):
+            log("[SOURCE SEPARATION] ERROR: pcm_data missing required array attributes")
+            return None
+
+        # Check dtype before flags (dtype is safer to access)
+        if pcm_data.dtype != np.float32:
+            log(f"[SOURCE SEPARATION] DEBUG: Converting dtype from {pcm_data.dtype} to float32")
+            pcm_data = pcm_data.astype(np.float32)
+
+        # Now check contiguity and make a copy if needed
+        # Making a copy is ALWAYS safer as it ensures we own the memory
+        log("[SOURCE SEPARATION] DEBUG: Creating safe array copy...")
+        pcm_data = np.array(pcm_data, dtype=np.float32, copy=True, order='C')
+        log(f"[SOURCE SEPARATION] DEBUG: Array validated - shape={pcm_data.shape}, size={pcm_data.nbytes} bytes")
     except Exception as e:
-        log(f"[SOURCE SEPARATION] ERROR: Failed to ensure contiguous array: {e}")
+        log(f"[SOURCE SEPARATION] ERROR: Failed during array validation: {e}")
         return None
 
     target_stem = SEPARATION_MODES.get(mode)
@@ -1373,8 +1398,11 @@ def apply_source_separation(
         Tuple of (ref_pcm, tgt_pcm) - both separated or both original
     """
     import gc
+    import sys
 
     log = log_func or (lambda x: None)
+
+    log("[SOURCE SEPARATION] DEBUG: Entered apply_source_separation()")
 
     mode, model_filename = _resolve_separation_settings(config)
 
@@ -1390,63 +1418,82 @@ def apply_source_separation(
     log(f"[SOURCE SEPARATION] Model: {model_filename}")
     log(f"[SOURCE SEPARATION] Applying to Source 1 vs {role_tag} comparison")
 
-    # CRITICAL: Ensure we have true contiguous copies of both arrays before processing.
-    # This prevents potential memory corruption from scipy/numpy internal state issues
-    # that can manifest during gc.collect() between separation calls.
-    # The copy ensures the arrays are independent of any memory-mapped regions or
-    # internal buffers that might be freed during garbage collection.
-    ref_pcm_copy = np.array(ref_pcm, dtype=np.float32, copy=True, order='C')
-    tgt_pcm_copy = np.array(tgt_pcm, dtype=np.float32, copy=True, order='C')
+    # SAFETY: Validate inputs before any numpy operations
+    log("[SOURCE SEPARATION] DEBUG: Validating input arrays...")
+    try:
+        if ref_pcm is None or tgt_pcm is None:
+            log("[SOURCE SEPARATION] ERROR: Input array is None")
+            return ref_pcm, tgt_pcm
 
-    # Pre-emptive cleanup to start with clean state
-    gc.collect()
+        # Quick sanity check on shapes
+        ref_shape = ref_pcm.shape
+        tgt_shape = tgt_pcm.shape
+        log(f"[SOURCE SEPARATION] DEBUG: ref_pcm shape={ref_shape}, tgt_pcm shape={tgt_shape}")
+    except Exception as e:
+        log(f"[SOURCE SEPARATION] ERROR: Failed to validate inputs: {e}")
+        return ref_pcm, tgt_pcm
+
+    # CRITICAL: Create defensive copies FIRST, before ANY gc operations.
+    # This ensures we have clean, owned memory before triggering any cleanup.
+    log("[SOURCE SEPARATION] DEBUG: Creating defensive copies...")
+    try:
+        ref_pcm_copy = np.array(ref_pcm, dtype=np.float32, copy=True, order='C')
+        tgt_pcm_copy = np.array(tgt_pcm, dtype=np.float32, copy=True, order='C')
+        log(f"[SOURCE SEPARATION] DEBUG: Copies created - ref={ref_pcm_copy.nbytes} bytes, tgt={tgt_pcm_copy.nbytes} bytes")
+    except Exception as e:
+        log(f"[SOURCE SEPARATION] ERROR: Failed to create copies: {e}")
+        return ref_pcm, tgt_pcm
+
+    # Flush before any operations that might crash
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except Exception:
+        pass
+
+    # NOTE: We deliberately avoid gc.collect() here as it can trigger buggy
+    # C extension destructors that corrupt memory state.
 
     # Separate reference (Source 1)
     log("[SOURCE SEPARATION] Processing reference audio (Source 1)...")
     ref_separated = separate_audio(ref_pcm_copy, sample_rate, mode, model_filename, log, device, timeout, model_dir)
     if ref_separated is None:
         log("[SOURCE SEPARATION] Reference separation failed, using original audio for both")
-        del ref_pcm_copy
-        del tgt_pcm_copy
-        gc.collect()
+        # Just return originals - let Python handle cleanup naturally
         return ref_pcm, tgt_pcm
 
-    # CRITICAL: Force cleanup between separations to prevent memory/state accumulation.
-    # This cleanup must happen AFTER we have a confirmed good result from ref separation.
-    # The ref_separated array is a contiguous copy (from _read_audio_file), so it's safe.
-    del ref_pcm_copy  # No longer needed - separation returned new array
-    gc.collect()
+    # Release ref copy memory - but do NOT gc.collect() yet
+    del ref_pcm_copy
 
-    # Small delay to allow any async cleanup operations to complete.
-    # This can help with race conditions in C extension cleanup.
-    time.sleep(0.1)
+    # Small delay between separations to allow subprocess cleanup to complete.
+    # This is safer than gc.collect() which can trigger problematic destructors.
+    time.sleep(0.2)
 
-    # Separate target - tgt_pcm_copy is still valid (was never touched by first separation)
+    # Separate target
     log(f"[SOURCE SEPARATION] Processing target audio ({role_tag})...")
+    log(f"[SOURCE SEPARATION] DEBUG: tgt_pcm_copy shape={tgt_pcm_copy.shape}, dtype={tgt_pcm_copy.dtype}")
 
-    # DIAGNOSTIC: Log state before calling separate_audio to help debug crashes
-    log(f"[SOURCE SEPARATION] DEBUG: tgt_pcm_copy shape={tgt_pcm_copy.shape}, dtype={tgt_pcm_copy.dtype}, contiguous={tgt_pcm_copy.flags['C_CONTIGUOUS']}")
-    log(f"[SOURCE SEPARATION] DEBUG: mode={mode}, model={model_filename}, sample_rate={sample_rate}")
-    import sys
-    sys.stdout.flush()
-    sys.stderr.flush()
+    # Flush before second separation
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except Exception:
+        pass
 
     tgt_separated = separate_audio(tgt_pcm_copy, sample_rate, mode, model_filename, log, device, timeout, model_dir)
 
-    # Clean up the copy now that separation is done
+    # Release tgt copy memory
     del tgt_pcm_copy
-    gc.collect()
 
     if tgt_separated is None:
         log("[SOURCE SEPARATION] Target separation failed, using original audio for both")
-        # Clean up ref_separated before returning original
-        del ref_separated
-        gc.collect()
+        # Return originals - separation failed
         return ref_pcm, tgt_pcm
 
     log("[SOURCE SEPARATION] Both sources processed successfully")
 
-    # Final cleanup before returning
+    # Only do gc at the very end, after all operations are complete
+    # and we have valid results to return
     gc.collect()
 
     return ref_separated, tgt_separated

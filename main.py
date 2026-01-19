@@ -9,6 +9,11 @@ Main application entry point.
 import os
 import sys
 
+# Enable faulthandler FIRST to catch segfaults and print tracebacks
+# This helps diagnose crashes in native code (numpy, scipy, torch, etc.)
+import faulthandler
+faulthandler.enable()
+
 # Limit BLAS/OpenBLAS threads to prevent threading issues with scipy/numpy
 # This MUST be set before numpy is imported anywhere
 # Helps prevent segfaults when running multiple source separation jobs
