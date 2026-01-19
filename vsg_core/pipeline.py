@@ -150,7 +150,9 @@ class JobPipeline:
                     'name': Path(source1_file).name,
                     'issues': 0,
                     'stepping_sources': getattr(ctx, 'stepping_sources', []),
-                    'stepping_detected_disabled': getattr(ctx, 'stepping_detected_disabled', [])
+                    'stepping_detected_disabled': getattr(ctx, 'stepping_detected_disabled', []),
+                    'stepping_detected_separated': getattr(ctx, 'stepping_detected_separated', []),
+                    'stepping_quality_issues': []
                 }
 
             # --- 7. Validate Merge Tokens ---
@@ -200,7 +202,9 @@ class JobPipeline:
                 'name': Path(source1_file).name,
                 'issues': issues,
                 'stepping_sources': getattr(ctx, 'stepping_sources', []),
-                'stepping_detected_disabled': getattr(ctx, 'stepping_detected_disabled', [])
+                'stepping_detected_disabled': getattr(ctx, 'stepping_detected_disabled', []),
+                'stepping_detected_separated': getattr(ctx, 'stepping_detected_separated', []),
+                'stepping_quality_issues': getattr(ctx, 'stepping_quality_issues', [])
             }
 
         except Exception as e:
@@ -211,7 +215,9 @@ class JobPipeline:
                 'name': Path(source1_file).name,
                 'issues': 0,
                 'stepping_sources': [],
-                'stepping_detected_disabled': []
+                'stepping_detected_disabled': [],
+                'stepping_detected_separated': [],
+                'stepping_quality_issues': []
             }
 
         finally:

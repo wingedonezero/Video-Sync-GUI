@@ -89,6 +89,9 @@ class SteppingCorrectionAuditor(BaseAuditor):
                     self.log(f"        → Correction applied at raw boundary without silence guarantee")
                     self.log(f"        → High risk of cutting dialogue/music")
                     high_priority_issues.append(f"{source_key} at {target_time_s:.1f}s: No silence zone found")
+                    self._add_quality_issue(source_key, 'no_silence_found', 'high',
+                        f"No silence zone found at {target_time_s:.1f}s",
+                        {'time_s': target_time_s, 'action': action, 'amount_s': amount_s})
                     issues += 1
                     source_issues += 1
 
@@ -101,6 +104,9 @@ class SteppingCorrectionAuditor(BaseAuditor):
                     self.log(f"        Issue: Removal exceeds silence by {overflow_s:.3f}s")
                     self.log(f"        → May cut into dialogue/music")
                     high_priority_issues.append(f"{source_key} at {target_time_s:.1f}s: Silence overflow ({overflow_s:.3f}s)")
+                    self._add_quality_issue(source_key, 'silence_overflow', 'high',
+                        f"Removal exceeds silence by {overflow_s:.3f}s at {target_time_s:.1f}s",
+                        {'time_s': target_time_s, 'overflow_s': overflow_s, 'zone_duration': zone_duration})
                     issues += 1
                     source_issues += 1
 
@@ -112,6 +118,9 @@ class SteppingCorrectionAuditor(BaseAuditor):
                     self.log(f"        Silence: [{zone_start:.1f}s - {zone_end:.1f}s, {avg_db:.1f}dB]")
                     self.log(f"        Issue: Low quality boundary (weak silence)")
                     high_priority_issues.append(f"{source_key} at {target_time_s:.1f}s: Low boundary score ({score:.1f})")
+                    self._add_quality_issue(source_key, 'low_boundary_score', 'high',
+                        f"Low boundary score ({score:.1f}) at {target_time_s:.1f}s",
+                        {'time_s': target_time_s, 'score': score, 'threshold': min_boundary_score})
                     issues += 1
                     source_issues += 1
 
@@ -122,6 +131,9 @@ class SteppingCorrectionAuditor(BaseAuditor):
                     self.log(f"        Issue: Speech detected near boundary")
                     self.log(f"        → May cut dialogue")
                     high_priority_issues.append(f"{source_key} at {target_time_s:.1f}s: Speech detected")
+                    self._add_quality_issue(source_key, 'speech_detected', 'high',
+                        f"Speech detected near boundary at {target_time_s:.1f}s",
+                        {'time_s': target_time_s, 'action': action, 'amount_s': amount_s})
                     issues += 1
                     source_issues += 1
 
@@ -163,3 +175,14 @@ class SteppingCorrectionAuditor(BaseAuditor):
             self.log(f"    {len(self.ctx.stepping_sources)} source(s) corrected with no detected issues")
 
         return issues
+
+    def _add_quality_issue(self, source: str, issue_type: str, severity: str,
+                           message: str, details: dict) -> None:
+        """Add a quality issue to the context for reporting."""
+        self.ctx.stepping_quality_issues.append({
+            'source': source,
+            'issue_type': issue_type,
+            'severity': severity,
+            'message': message,
+            'details': details
+        })
