@@ -11,6 +11,65 @@ from vsg_core.analysis.audio_corr import run_audio_correlation, run_multi_correl
 from vsg_core.analysis.drift_detection import diagnose_audio_issue
 from vsg_core.extraction.tracks import get_stream_info, get_stream_info_with_delays
 
+
+def _format_track_details(track: Dict[str, Any], index: int) -> str:
+    """
+    Format audio track details for logging.
+
+    Args:
+        track: Track dictionary from mkvmerge JSON
+        index: 0-based audio track index
+
+    Returns:
+        Formatted string like "Track 0: Japanese (jpn), FLAC 2.0, 'Commentary'"
+    """
+    props = track.get('properties', {})
+
+    # Language
+    lang = props.get('language', 'und')
+    lang_name = props.get('language_ietf', '') or props.get('track_name', '')
+
+    # Codec - extract readable name from codec_id
+    codec_id = props.get('codec_id', 'unknown')
+    # Common codec_id mappings
+    codec_map = {
+        'A_FLAC': 'FLAC',
+        'A_AAC': 'AAC',
+        'A_AC3': 'AC3',
+        'A_EAC3': 'E-AC3',
+        'A_DTS': 'DTS',
+        'A_TRUEHD': 'TrueHD',
+        'A_OPUS': 'Opus',
+        'A_VORBIS': 'Vorbis',
+        'A_PCM': 'PCM',
+        'A_MP3': 'MP3',
+    }
+    # Try exact match first, then prefix match
+    codec_name = codec_map.get(codec_id)
+    if not codec_name:
+        for prefix, name in codec_map.items():
+            if codec_id.startswith(prefix):
+                codec_name = name
+                break
+    if not codec_name:
+        codec_name = codec_id.replace('A_', '')
+
+    # Channels
+    channels = props.get('audio_channels', 2)
+    channel_str = {1: 'Mono', 2: '2.0', 6: '5.1', 8: '7.1'}.get(channels, f'{channels}ch')
+
+    # Track name (if set)
+    track_name = props.get('track_name', '')
+
+    # Build the string
+    parts = [f"Track {index}: {lang}"]
+    parts.append(f"{codec_name} {channel_str}")
+    if track_name:
+        parts.append(f"'{track_name}'")
+
+    return ", ".join(parts)
+
+
 def _should_use_source_separated_mode(source_key: str, config: Dict, source_settings: Dict[str, Dict[str, Any]]) -> bool:
     """
     Check if this source should use source separation during correlation.
@@ -514,14 +573,20 @@ class AnalysisStep:
 
             audio_tracks = [t for t in source1_info.get('tracks', []) if t.get('type') == 'audio']
 
+            # Log Source 1 track selection for clarity
+            source1_selected_index = None
             if ref_lang:
-                for track in audio_tracks:
+                for idx, track in enumerate(audio_tracks):
                     if (track.get('properties', {}).get('language', '') or '').strip().lower() == ref_lang:
                         source1_audio_track_id = track.get('id')
+                        source1_selected_index = idx
+                        runner._log_message(f"[Source 1] Selected (lang={ref_lang}): {_format_track_details(track, idx)}")
                         break
 
             if source1_audio_track_id is None and audio_tracks:
                 source1_audio_track_id = audio_tracks[0].get('id')
+                source1_selected_index = 0
+                runner._log_message(f"[Source 1] Selected (first track): {_format_track_details(audio_tracks[0], 0)}")
 
             if source1_audio_track_id is not None:
                 # Now get the relative delay (already corrected in the dict)
@@ -553,13 +618,8 @@ class AnalysisStep:
             # Get explicit track index for this source (Source 2/3)
             correlation_source_track = per_source_settings.get('correlation_source_track')  # Which Source 2/3 track to use
 
-            # DEBUG: Log exactly what we got from source_settings
-            runner._log_message(f"[{source_key}] DEBUG: per_source_settings = {per_source_settings}")
-            runner._log_message(f"[{source_key}] DEBUG: correlation_source_track = {correlation_source_track} (type: {type(correlation_source_track).__name__})")
-
             # Determine target language
             if correlation_source_track is not None:
-                runner._log_message(f"[{source_key}] Using explicit source track: {source_key} track {correlation_source_track}")
                 tgt_lang = None  # Bypassed by explicit track index
             else:
                 # Fall back to global language setting for target
@@ -569,8 +629,13 @@ class AnalysisStep:
             # Check if Source 1 has per-job track selection configured
             source1_settings = ctx.source_settings.get('Source 1', {})
             correlation_ref_track = source1_settings.get('correlation_ref_track')  # Which Source 1 track to use
-            if correlation_ref_track is not None:
-                runner._log_message(f"[Source 1] Using explicit reference track: Source 1 track {correlation_ref_track}")
+            if correlation_ref_track is not None and source1_info:
+                source1_audio_tracks = [t for t in source1_info.get('tracks', []) if t.get('type') == 'audio']
+                if 0 <= correlation_ref_track < len(source1_audio_tracks):
+                    ref_track = source1_audio_tracks[correlation_ref_track]
+                    runner._log_message(f"[Source 1] Selected (explicit): {_format_track_details(ref_track, correlation_ref_track)}")
+                else:
+                    runner._log_message(f"[Source 1] WARNING: Invalid track index {correlation_ref_track}, using previously selected track")
 
             # ===================================================================
             # CRITICAL DECISION POINT: Determine if source separation was applied
@@ -610,26 +675,28 @@ class AnalysisStep:
 
             # Priority 1: Explicit track index from per-source settings
             if correlation_source_track is not None:
-                runner._log_message(f"[{source_key}] DEBUG: Found {len(audio_tracks)} audio tracks, requested index {correlation_source_track}")
                 if 0 <= correlation_source_track < len(audio_tracks):
                     target_track_obj = audio_tracks[correlation_source_track]
-                    runner._log_message(f"[{source_key}] DEBUG: Selected track {correlation_source_track}: {target_track_obj.get('properties', {}).get('language', 'und')}")
+                    runner._log_message(f"[{source_key}] Selected (explicit): {_format_track_details(target_track_obj, correlation_source_track)}")
                 else:
                     runner._log_message(f"[WARN] Invalid track index {correlation_source_track}, falling back to first track")
                     target_track_obj = audio_tracks[0]
                     # CRITICAL FIX: Also update correlation_source_track to match the fallback!
                     # Otherwise run_audio_correlation would receive the invalid index
                     correlation_source_track = 0
+                    runner._log_message(f"[{source_key}] Selected (fallback): {_format_track_details(target_track_obj, 0)}")
             # Priority 2: Language matching
             elif tgt_lang:
-                for track in audio_tracks:
+                for idx, track in enumerate(audio_tracks):
                     if (track.get('properties', {}).get('language', '') or '').strip().lower() == tgt_lang:
                         target_track_obj = track
+                        runner._log_message(f"[{source_key}] Selected (lang={tgt_lang}): {_format_track_details(track, idx)}")
                         break
 
             # Fallback: First track
             if not target_track_obj:
                 target_track_obj = audio_tracks[0]
+                runner._log_message(f"[{source_key}] Selected (first track): {_format_track_details(target_track_obj, 0)}")
 
             target_track_id = target_track_obj.get('id')
             target_codec_id = target_track_obj.get('properties', {}).get('codec_id', 'unknown')
