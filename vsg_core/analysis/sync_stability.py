@@ -11,6 +11,11 @@ from typing import List, Dict, Any, Optional, Callable
 from statistics import mean, stdev, variance
 
 
+def _to_float(value) -> float:
+    """Convert numpy types to native Python float for JSON serialization."""
+    return float(value)
+
+
 def analyze_sync_stability(
     chunk_results: List[Dict[str, Any]],
     source_key: str,
@@ -111,9 +116,9 @@ def _analyze_uniform(
             if abs(raw - reference) > 0.0001:  # Allow tiny floating point tolerance
                 outliers.append({
                     'chunk_index': i + 1,
-                    'time_s': chunk.get('start', 0),
-                    'raw_delay': raw,
-                    'deviation': raw - reference
+                    'time_s': _to_float(chunk.get('start', 0)),
+                    'delay_ms': _to_float(raw),
+                    'deviation_ms': _to_float(raw - reference)
                 })
     else:
         # Custom threshold mode - outliers differ from mean by more than threshold
@@ -122,9 +127,9 @@ def _analyze_uniform(
             if deviation > outlier_threshold:
                 outliers.append({
                     'chunk_index': i + 1,
-                    'time_s': chunk.get('start', 0),
-                    'raw_delay': raw,
-                    'deviation': raw - mean_delay
+                    'time_s': _to_float(chunk.get('start', 0)),
+                    'delay_ms': _to_float(raw),
+                    'deviation_ms': _to_float(raw - mean_delay)
                 })
 
     # Determine if variance is detected based on threshold
@@ -163,7 +168,7 @@ def _analyze_uniform(
             if outliers:
                 log(f"  - Outliers: {len(outliers)} chunk(s)")
                 for o in outliers[:3]:
-                    log(f"    * Chunk {o['chunk_index']} (@{o['time_s']:.1f}s): {o['raw_delay']:.4f}ms (deviation: {o['deviation']:+.4f}ms)")
+                    log(f"    * Chunk {o['chunk_index']} (@{o['time_s']:.1f}s): {o['delay_ms']:.4f}ms (deviation: {o['deviation_ms']:+.4f}ms)")
         else:
             log(f"[Sync Stability] {source_key}: OK - consistent results (variance: {max_variance:.4f}ms)")
 
@@ -218,8 +223,8 @@ def _analyze_with_clusters(
                     cluster_outliers.append({
                         'cluster_id': cluster.get('cluster_id', 0),
                         'chunk_index': cluster_chunks[i] if i < len(cluster_chunks) else i + 1,
-                        'raw_delay': raw,
-                        'deviation': raw - reference
+                        'delay_ms': _to_float(raw),
+                        'deviation_ms': _to_float(raw - reference)
                     })
             else:
                 deviation = abs(raw - cluster_mean)
@@ -227,8 +232,8 @@ def _analyze_with_clusters(
                     cluster_outliers.append({
                         'cluster_id': cluster.get('cluster_id', 0),
                         'chunk_index': cluster_chunks[i] if i < len(cluster_chunks) else i + 1,
-                        'raw_delay': raw,
-                        'deviation': raw - cluster_mean
+                        'delay_ms': _to_float(raw),
+                        'deviation_ms': _to_float(raw - cluster_mean)
                     })
 
         if cluster_outliers:
