@@ -11,9 +11,11 @@ from PySide6.QtCore import QTimer, QThreadPool
 from vsg_core.config import AppConfig
 from vsg_core.job_discovery import discover_jobs
 from vsg_core.job_layouts import JobLayoutManager
+from vsg_core.reporting import ReportWriter
 from vsg_qt.worker import JobWorker
 from vsg_qt.options_dialog import OptionsDialog
 from vsg_qt.job_queue_dialog import JobQueueDialog
+from vsg_qt.report_dialogs import BatchCompletionDialog
 
 class MainController:
     def __init__(self, view: "MainWindow"):
@@ -24,6 +26,9 @@ class MainController:
             temp_root=self.config.get('temp_root'),
             log_callback=self.append_log
         )
+        # Report tracking
+        self.report_writer: Optional[ReportWriter] = None
+        self._job_counter: int = 0
 
     def open_options_dialog(self):
         dialog = OptionsDialog(self.config, self.v)
@@ -129,6 +134,27 @@ class MainController:
         for label in self.v.delay_labels:
             label.setText("—")
 
+        # Initialize report writer
+        self._job_counter = 0
+        is_batch = len(jobs) > 1
+        logs_folder = Path(self.config.get('logs_folder'))
+
+        # Determine batch name from first job's Source 1
+        source1_path = Path(jobs[0]['sources']['Source 1'])
+        if is_batch:
+            batch_name = source1_path.parent.name
+        else:
+            batch_name = source1_path.stem
+
+        self.report_writer = ReportWriter(logs_folder)
+        report_path = self.report_writer.create_report(
+            batch_name=batch_name,
+            is_batch=is_batch,
+            output_dir=output_dir,
+            total_jobs=len(jobs)
+        )
+        self.append_log(f"[Report] Created: {report_path}")
+
         self.worker = JobWorker(self.config.settings, jobs, and_merge, output_dir)
         self.worker.signals.log.connect(self.append_log)
         self.worker.signals.progress.connect(self.update_progress)
@@ -148,6 +174,11 @@ class MainController:
         status = result.get('status', 'Unknown')
         self.append_log(f"--- Job Summary for {name}: {status.upper()} ---")
 
+        # Add job to report
+        self._job_counter += 1
+        if self.report_writer:
+            self.report_writer.add_job(result, self._job_counter)
+
     def batch_finished(self, all_results: list):
         self.update_status(f'All {len(all_results)} jobs finished.')
         self.v.progress_bar.setValue(100)
@@ -159,6 +190,13 @@ class MainController:
 
         if is_batch and self.v.archive_logs_check.isChecked() and output_dir:
             QTimer.singleShot(0, lambda: self._archive_logs_for_batch(output_dir))
+
+        # Finalize the report
+        report_path = None
+        if self.report_writer:
+            self.report_writer.finalize()
+            report_path = self.report_writer.get_report_path()
+            self.append_log(f"[Report] Finalized: {report_path}")
 
         successful_jobs = 0
         jobs_with_warnings = 0
@@ -217,30 +255,18 @@ class MainController:
 
         self.append_log(summary_message)
 
-        if failed_jobs > 0:
-            QMessageBox.critical(self.v, "Batch Complete", f"Finished processing {len(all_results)} jobs with {failed_jobs} failure(s).")
-        elif stepping_jobs or stepping_detected_disabled_jobs:
-            # Show info if any jobs used stepping or detected stepping without correction
-            msg_parts = [f"Finished processing {len(all_results)} jobs successfully.\n"]
-
-            if stepping_jobs:
-                stepping_count = len(stepping_jobs)
-                msg_parts.append(f"\nℹ️  Note: {stepping_count} job(s) used stepping correction.")
-                msg_parts.append("Check warnings above for any quality issues requiring review.")
-
-            if stepping_detected_disabled_jobs:
-                detected_count = len(stepping_detected_disabled_jobs)
-                msg_parts.append(f"\n⚠️  WARNING: {detected_count} job(s) have stepping detected but correction is DISABLED!")
-                msg_parts.append("These files may have inconsistent timing throughout.")
-                msg_parts.append("MANUAL REVIEW REQUIRED!")
-
-            msg_parts.append("\nSee log for details.")
-            msg = '\n'.join(msg_parts)
-            QMessageBox.warning(self.v, "Batch Complete - Review Required", msg)
-        elif jobs_with_warnings > 0:
-            QMessageBox.warning(self.v, "Batch Complete", f"Finished processing {len(all_results)} jobs with {jobs_with_warnings} job(s) having warnings.")
-        else:
-            QMessageBox.information(self.v, "Batch Complete", f"Finished processing {len(all_results)} jobs successfully.")
+        # Show completion dialog with Show Report button
+        dialog = BatchCompletionDialog(
+            parent=self.v,
+            total_jobs=len(all_results),
+            successful=successful_jobs,
+            warnings=jobs_with_warnings,
+            failed=failed_jobs,
+            stepping_jobs=stepping_jobs,
+            stepping_disabled_jobs=stepping_detected_disabled_jobs,
+            report_path=report_path
+        )
+        dialog.exec()
 
         # FIX: Cleanup is now called here, after all jobs are finished.
         self.layout_manager.cleanup_all()

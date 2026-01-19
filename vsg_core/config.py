@@ -40,6 +40,7 @@ class AppConfig:
             'last_ter_path': '',
             'output_folder': str(self.script_dir / 'sync_output'),
             'temp_root': str(self.script_dir / 'temp_work'),
+            'logs_folder': str(self.script_dir / 'logs'),
             'videodiff_path': '',
             'subtile_ocr_path': '',
             'subtile_ocr_char_blacklist': '',
@@ -607,3 +608,4 @@ class AppConfig:
     def ensure_dirs_exist(self):
         Path(self.get('output_folder')).mkdir(parents=True, exist_ok=True)
         Path(self.get('temp_root')).mkdir(parents=True, exist_ok=True)
+        Path(self.get('logs_folder')).mkdir(parents=True, exist_ok=True)
