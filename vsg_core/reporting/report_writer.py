@@ -143,7 +143,7 @@ class ReportWriter:
         Calculates summary statistics and marks the report as complete.
 
         Returns:
-            Summary statistics dictionary
+            Complete summary dictionary including stepping info
         """
         if not self.report_data:
             return {}
@@ -153,6 +153,8 @@ class ReportWriter:
         warnings = 0
         failed = 0
         total_issues = 0
+        stepping_jobs = []
+        stepping_disabled_jobs = []
 
         for job in self.report_data.get("jobs", []):
             status = job.get("status", "Unknown")
@@ -167,11 +169,27 @@ class ReportWriter:
 
             total_issues += issues
 
+            # Track stepping jobs
+            stepping = job.get("stepping", {})
+            if stepping.get("applied_to"):
+                stepping_jobs.append({
+                    'name': job.get('name', 'Unknown'),
+                    'sources': stepping.get('applied_to', [])
+                })
+
+            if stepping.get("detected_disabled"):
+                stepping_disabled_jobs.append({
+                    'name': job.get('name', 'Unknown'),
+                    'sources': stepping.get('detected_disabled', [])
+                })
+
         self.report_data["summary"] = {
             "successful": successful,
             "warnings": warnings,
             "failed": failed,
-            "total_issues": total_issues
+            "total_issues": total_issues,
+            "stepping_jobs": stepping_jobs,
+            "stepping_disabled_jobs": stepping_disabled_jobs
         }
 
         self.report_data["finalized_at"] = datetime.now().isoformat()

@@ -191,67 +191,27 @@ class MainController:
         if is_batch and self.v.archive_logs_check.isChecked() and output_dir:
             QTimer.singleShot(0, lambda: self._archive_logs_for_batch(output_dir))
 
-        # Finalize the report
+        # Finalize the report - this is the single source of truth for all stats
         report_path = None
+        summary = {}
         if self.report_writer:
-            self.report_writer.finalize()
+            summary = self.report_writer.finalize()
             report_path = self.report_writer.get_report_path()
-            self.append_log(f"[Report] Finalized: {report_path}")
 
-        successful_jobs = 0
-        jobs_with_warnings = 0
-        failed_jobs = 0
-        stepping_jobs = []  # NEW: Track jobs with stepping
-        stepping_detected_disabled_jobs = []  # NEW: Track jobs with stepping detected but disabled
+        # Get stats from report (single source of truth)
+        successful_jobs = summary.get('successful', 0)
+        jobs_with_warnings = summary.get('warnings', 0)
+        failed_jobs = summary.get('failed', 0)
+        stepping_jobs = summary.get('stepping_jobs', [])
+        stepping_disabled_jobs = summary.get('stepping_disabled_jobs', [])
 
-        for result in all_results:
-            if result.get('status') == 'Failed':
-                failed_jobs += 1
-            elif result.get('issues', 0) > 0:
-                jobs_with_warnings += 1
-            else:
-                successful_jobs += 1
-
-            # NEW: Track jobs that used stepping correction
-            if result.get('stepping_sources'):
-                job_name = result.get('name', 'Unknown')
-                stepping_sources = result.get('stepping_sources', [])
-                stepping_jobs.append({
-                    'name': job_name,
-                    'sources': stepping_sources
-                })
-
-            # NEW: Track jobs with stepping detected but correction disabled
-            if result.get('stepping_detected_disabled'):
-                job_name = result.get('name', 'Unknown')
-                detected_sources = result.get('stepping_detected_disabled', [])
-                stepping_detected_disabled_jobs.append({
-                    'name': job_name,
-                    'sources': detected_sources
-                })
-
+        # Simple log summary - detailed info is in the report
         summary_message = "\n--- Batch Summary ---\n"
         summary_message += f"  - Successful jobs: {successful_jobs}\n"
         summary_message += f"  - Jobs with warnings: {jobs_with_warnings}\n"
         summary_message += f"  - Failed jobs: {failed_jobs}\n"
-
-        # Add stepping detection summary
-        if stepping_jobs:
-            summary_message += f"\nℹ️  Jobs with Stepping Correction ({len(stepping_jobs)}):\n"
-            summary_message += "  (Quality checks performed - warnings above indicate issues)\n"
-            for job_info in stepping_jobs:
-                sources_str = ', '.join(job_info['sources'])
-                summary_message += f"  • {job_info['name']} - Sources: {sources_str}\n"
-
-        # NEW: Add stepping detected but disabled warning
-        if stepping_detected_disabled_jobs:
-            summary_message += f"\n⚠️  Jobs with Stepping Detected (Correction Disabled) ({len(stepping_detected_disabled_jobs)}):\n"
-            summary_message += "  ⚠️  These files have timing inconsistencies but stepping correction is disabled.\n"
-            summary_message += "  ⚠️  MANUAL REVIEW REQUIRED - Check sync quality carefully!\n"
-            summary_message += "  💡 Tip: Enable 'Stepping Correction' in settings for automatic correction.\n"
-            for job_info in stepping_detected_disabled_jobs:
-                sources_str = ', '.join(job_info['sources'])
-                summary_message += f"  • {job_info['name']} - Sources: {sources_str}\n"
+        if report_path:
+            summary_message += f"\n  Report: {report_path}\n"
 
         self.append_log(summary_message)
 
@@ -263,7 +223,7 @@ class MainController:
             warnings=jobs_with_warnings,
             failed=failed_jobs,
             stepping_jobs=stepping_jobs,
-            stepping_disabled_jobs=stepping_detected_disabled_jobs,
+            stepping_disabled_jobs=stepping_disabled_jobs,
             report_path=report_path
         )
         dialog.exec()
