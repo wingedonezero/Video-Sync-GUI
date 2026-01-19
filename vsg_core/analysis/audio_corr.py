@@ -607,8 +607,11 @@ def run_audio_correlation(
         if end_sample > len(ref_pcm) or end_sample > len(tgt_pcm):
             continue
 
-        ref_chunk = ref_pcm[start_sample:end_sample]
-        tgt_chunk = tgt_pcm[start_sample:end_sample]
+        # CRITICAL: Use .copy() to create independent arrays, not views.
+        # numpy's pocketfft can segfault on array views under certain conditions
+        # (memory pressure, specific sizes, threading). Explicit copies are safer.
+        ref_chunk = ref_pcm[start_sample:end_sample].copy()
+        tgt_chunk = tgt_pcm[start_sample:end_sample].copy()
 
         if 'Phase Correlation (GCC-PHAT)' in correlation_method:
             raw_ms, match = _find_delay_gcc_phat(ref_chunk, tgt_chunk, DEFAULT_SR)
@@ -867,8 +870,10 @@ def run_multi_correlation(
         end_sample = start_sample + chunk_samples
         if end_sample > len(ref_pcm) or end_sample > len(tgt_pcm):
             continue
-        ref_chunk = ref_pcm[start_sample:end_sample]
-        tgt_chunk = tgt_pcm[start_sample:end_sample]
+        # CRITICAL: Use .copy() to create independent arrays, not views.
+        # numpy's pocketfft can segfault on array views under certain conditions.
+        ref_chunk = ref_pcm[start_sample:end_sample].copy()
+        tgt_chunk = tgt_pcm[start_sample:end_sample].copy()
         chunks.append((i, t0, ref_chunk, tgt_chunk))
 
     log(f"\n[MULTI-CORRELATION] Running {len(enabled_methods)} methods on {len(chunks)} chunks")
