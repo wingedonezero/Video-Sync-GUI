@@ -144,9 +144,11 @@ class OCRPipeline:
                 # Use new backend system
                 from .engine import create_ocr_engine_v2
                 self._engine = create_ocr_engine_v2(self.settings)
+                self._log_progress(f"Using OCR backend: {self._engine.name}", 0.0)
             else:
                 # Use traditional Tesseract engine
                 self._engine = create_ocr_engine(self.settings)
+                self._log_progress("Using OCR backend: tesseract", 0.0)
         return self._engine
 
     @property
