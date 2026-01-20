@@ -86,8 +86,10 @@ class OCRPostProcessor:
 
     # Unambiguous fixes - these are NEVER valid English text
     # and always represent OCR errors
+    # NOTE: These should be whole-word replacements or use word boundaries
+    # Don't add patterns that could match inside valid words!
     UNAMBIGUOUS_FIXES = {
-        # I/l confusion in contractions
+        # I/l confusion in contractions - these are safe (apostrophe context)
         "l'm": "I'm",
         "l've": "I've",
         "l'll": "I'll",
@@ -97,22 +99,26 @@ class OCRPostProcessor:
         "lt'Il": "It'll",
         "l'II": "I'll",
         "l'Il": "I'll",
-        "lf": "If",
-        "ln": "In",
-        "ls": "Is",
         "lsn't": "Isn't",
-        "lt": "It",
-        "lts": "Its",
-        "lf": "If",
         # Double-I confusion
-        "II": "ll",  # Will handle in context
         "IIl": "Ill",
         "IIi": "Ili",
-        # Common full words
-        "l": "I",  # Standalone l → I (handled specially)
         # Pipe confusion (| read as I or l)
         "|": "I",
         "||": "ll",
+    }
+
+    # Word-boundary fixes - only apply when the pattern is a complete word
+    # These use regex with \b word boundaries
+    WORD_BOUNDARY_FIXES = {
+        "lf": "If",
+        "ln": "In",
+        "ls": "Is",
+        "lt": "It",
+        "lts": "Its",
+        "l": "I",  # Standalone l → I
+        "ll": "ll",  # Keep as-is (valid word ending)
+        "II": "II",  # Context-dependent, handled separately
     }
 
     # Confidence-gated fixes - only apply when confidence is low
@@ -172,7 +178,15 @@ class OCRPostProcessor:
 
     def _init_patterns(self):
         """Compile regex patterns for efficient matching."""
-        # Standalone 'l' that should be 'I'
+        # Compile word boundary patterns for safe replacements
+        self.word_boundary_patterns = {}
+        for wrong, right in self.WORD_BOUNDARY_FIXES.items():
+            # Create case-sensitive word boundary pattern
+            # \b ensures we only match complete words, not substrings
+            pattern = re.compile(r'\b' + re.escape(wrong) + r'\b')
+            self.word_boundary_patterns[wrong] = (pattern, right)
+
+        # Standalone 'l' that should be 'I' (backup, covered by WORD_BOUNDARY_FIXES)
         self.standalone_l_pattern = re.compile(r'\bl\b')
 
         # 'l' at start of sentence (likely 'I')
@@ -193,6 +207,12 @@ class OCRPostProcessor:
 
         # Multiple spaces
         self.multiple_spaces = re.compile(r' {2,}')
+
+        # Trailing OCR artifacts (underscore, tilde, etc. at end of text)
+        self.trailing_artifacts = re.compile(r'[_~`]+\s*$')
+
+        # Leading/trailing underscores on words
+        self.word_underscores = re.compile(r'\b_+(\w+)_*\b|\b(\w+)_+\b')
 
         # II that should be ll (in words)
         self.double_i_pattern = re.compile(r'\b(\w*)II(\w*)\b')
@@ -276,22 +296,22 @@ class OCRPostProcessor:
 
         These patterns are never valid English and always represent OCR errors.
         """
-        # Apply direct replacements
+        # Apply direct replacements (safe patterns that can't appear in valid words)
         for wrong, right in self.UNAMBIGUOUS_FIXES.items():
-            if wrong == 'l':
-                continue  # Handle standalone l separately
             if wrong in text:
                 count = text.count(wrong)
                 text = text.replace(wrong, right)
                 result.fixes_applied[f'{wrong}→{right}'] += count
 
-        # Handle standalone 'l' → 'I' (word boundaries)
-        matches = list(self.standalone_l_pattern.finditer(text))
-        if matches:
-            text = self.standalone_l_pattern.sub('I', text)
-            result.fixes_applied['l→I (standalone)'] += len(matches)
+        # Apply word-boundary replacements (patterns that need \b protection)
+        # This prevents "girls" → "girIs" by only matching standalone "ls"
+        for wrong, (pattern, right) in self.word_boundary_patterns.items():
+            matches = list(pattern.finditer(text))
+            if matches:
+                text = pattern.sub(right, text)
+                result.fixes_applied[f'{wrong}→{right}'] += len(matches)
 
-        # Handle 'l' at sentence start
+        # Handle 'l' at sentence start (additional context check)
         def fix_sentence_start(m):
             return m.group(1) + 'I '
         new_text = self.sentence_start_l_pattern.sub(fix_sentence_start, text)
@@ -443,6 +463,21 @@ class OCRPostProcessor:
         result: ProcessResult
     ) -> str:
         """Apply text normalization fixes."""
+        # Remove trailing OCR artifacts (underscores, tildes at end of text)
+        new_text = self.trailing_artifacts.sub('', text)
+        if new_text != text:
+            result.fixes_applied['trailing artifact removed'] += 1
+            text = new_text
+
+        # Remove underscores attached to words (OCR noise)
+        def fix_word_underscores(m):
+            # Return the word without underscores
+            return m.group(1) or m.group(2) or ''
+        new_text = self.word_underscores.sub(fix_word_underscores, text)
+        if new_text != text:
+            result.fixes_applied['underscore removed'] += 1
+            text = new_text
+
         # Normalize ellipsis
         if self.config.normalize_ellipsis:
             if '…' in text:
