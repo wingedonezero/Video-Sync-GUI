@@ -523,36 +523,35 @@ class VobSubParser(SubtitleImageParser):
             Index 2: Emphasis 1 (outline)
             Index 3: Emphasis 2 (anti-alias/shadow)
 
-        We render ALL colors with alpha > 0, not just the text fill.
-        This matches SubtitleEdit's approach. The preprocessing step
-        will convert to grayscale where both fill and outline become
-        dark, giving solid black text.
+        For OCR, we render ALL non-background pixels as pure BLACK,
+        regardless of their actual palette color. This is critical because:
+        - Some DVDs use light colors for secondary text (translations)
+        - Tesseract needs high contrast black-on-white
+        - The actual color doesn't matter, only the text shape
 
         Returns:
-            RGBA numpy array
+            RGBA numpy array with black text on transparent background
         """
         # Create RGBA image
         image = np.zeros((height, width, 4), dtype=np.uint8)
 
-        # Build color lookup - render ALL colors that have alpha
-        # Only color index 0 (background) should be transparent
+        # Build color lookup - render ALL non-background pixels as BLACK
+        # This is critical for OCR - we need pure black text on white background
+        # The actual palette colors don't matter for OCR, only shape matters
         colors = []
         for i, (idx, alpha) in enumerate(zip(color_indices, alpha_values)):
-            if idx < len(palette):
-                r, g, b = palette[idx]
-            else:
-                r, g, b = 128, 128, 128
-
-            # Render all non-background colors (positions 1, 2, 3)
             # Position 0 is always background -> transparent
+            # All other positions (1, 2, 3) render as solid BLACK if they have alpha
             if i == 0:
-                a = 0  # Background always transparent
+                # Background - fully transparent
+                colors.append((0, 0, 0, 0))
             elif alpha > 0:
-                # Convert 4-bit alpha (0-15) to 8-bit (0-255)
-                a = int(alpha * 255 / 15)
+                # Any text/outline/shadow color -> render as BLACK
+                # This ensures all subtitle elements contribute to OCR
+                colors.append((0, 0, 0, 255))
             else:
-                a = 0
-            colors.append((r, g, b, a))
+                # No alpha = invisible
+                colors.append((0, 0, 0, 0))
 
         # Decode top field (even lines: 0, 2, 4, ...)
         self._decode_rle_field(data, top_offset, image, 0, 2, width, height, colors)
