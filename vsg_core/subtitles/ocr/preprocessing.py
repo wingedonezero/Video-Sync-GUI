@@ -40,8 +40,9 @@ class PreprocessingConfig:
     border_size: int = 10  # White border in pixels
     border_color: Tuple[int, int, int] = (255, 255, 255)  # White
 
-    # Binarization
-    force_binarization: bool = False
+    # Binarization - ALWAYS binarize for subtitle OCR
+    # Pure black on white is optimal for Tesseract
+    force_binarization: bool = True
     binarization_method: str = 'otsu'  # 'otsu', 'adaptive', 'none'
     adaptive_block_size: int = 11
     adaptive_c: int = 2
