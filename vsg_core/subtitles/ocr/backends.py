@@ -325,14 +325,31 @@ class EasyOCRBackend(OCRBackend):
             try:
                 import easyocr
                 from pathlib import Path
+
+                # Auto-detect GPU (CUDA or ROCm)
+                use_gpu = False
+                gpu_info = "CPU"
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        use_gpu = True
+                        # Check if it's ROCm (AMD) or CUDA (NVIDIA)
+                        if hasattr(torch.version, 'hip') and torch.version.hip:
+                            gpu_info = f"ROCm/HIP {torch.version.hip}"
+                        else:
+                            gpu_info = f"CUDA {torch.version.cuda}"
+                except ImportError:
+                    pass
+
                 # Ensure model directory exists
                 Path(self.model_dir).mkdir(parents=True, exist_ok=True)
                 logger.info(f"Initializing EasyOCR Reader with languages: {self.languages}")
                 logger.info(f"Model storage: {self.model_dir}")
+                logger.info(f"GPU: {gpu_info} (enabled: {use_gpu})")
                 logger.info("This may take a moment if models need to be downloaded...")
                 self._reader = easyocr.Reader(
                     self.languages,
-                    gpu=False,
+                    gpu=use_gpu,
                     model_storage_directory=self.model_dir,
                     verbose=True
                 )
