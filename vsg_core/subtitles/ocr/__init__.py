@@ -209,6 +209,7 @@ def _build_ocr_settings(config: dict, lang: str) -> dict:
         'ocr_denoise': config.get('ocr_denoise', False),
 
         # OCR engine
+        'ocr_engine': config.get('ocr_engine', 'tesseract'),
         'ocr_char_blacklist': config.get('ocr_char_blacklist', ''),
         'ocr_low_confidence_threshold': config.get('ocr_low_confidence_threshold', 60.0),
 
