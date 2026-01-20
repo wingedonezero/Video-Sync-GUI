@@ -715,41 +715,97 @@ class PaddleOCRBackend(OCRBackend):
             logger.debug(f"[{self.name}] json_result type: {type(json_result)}")
             logger.debug(f"[{self.name}] json_result keys: {json_result.keys() if isinstance(json_result, dict) else 'N/A'}")
 
-            # Extract data from JSON result
-            rec_texts = json_result.get('rec_texts', []) or []
-            rec_scores = json_result.get('rec_scores', []) or []
-            # rec_boxes is [x_min, y_min, x_max, y_max] format
-            rec_boxes = json_result.get('rec_boxes', []) or []
+            # PaddleOCR 3.x with PaddleX has nested structure: {'res': {...actual data...}}
+            # Handle both old format (flat) and new format (nested under 'res')
+            if 'res' in json_result and isinstance(json_result['res'], dict):
+                actual_result = json_result['res']
+                logger.debug(f"[{self.name}] Using nested 'res' structure, keys: {list(actual_result.keys())}")
+            else:
+                actual_result = json_result
 
-            logger.debug(f"[{self.name}] Found {len(rec_texts)} text regions")
-            if len(rec_texts) == 0:
-                # Log more details to help debug
-                logger.warning(f"[{self.name}] No text detected. json_result sample: {str(json_result)[:500]}")
+            # Log all available keys for debugging
+            logger.info(f"[{self.name}] actual_result keys: {list(actual_result.keys())}")
+
+            # Extract data from result - try multiple possible key names
+            # PaddleOCR/PaddleX has various formats depending on version
+            # Try all known key names for text
+            rec_texts = (
+                actual_result.get('rec_text', []) or
+                actual_result.get('rec_texts', []) or
+                actual_result.get('texts', []) or
+                actual_result.get('text', []) or
+                []
+            )
+            rec_scores = (
+                actual_result.get('rec_score', []) or
+                actual_result.get('rec_scores', []) or
+                actual_result.get('scores', []) or
+                actual_result.get('score', []) or
+                []
+            )
+            # dt_polys is polygon format [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+            # rec_boxes is [x_min, y_min, x_max, y_max] format
+            rec_polys = actual_result.get('dt_polys', []) or []
+            rec_boxes = actual_result.get('rec_boxes', []) or actual_result.get('boxes', []) or []
+
+            logger.info(f"[{self.name}] Found {len(rec_texts)} texts, {len(rec_polys)} polys, {len(rec_scores)} scores")
+
+            if len(rec_texts) == 0 and len(rec_polys) > 0:
+                # Text was detected but not recognized - log full result to find where text is
+                logger.warning(f"[{self.name}] Detection found {len(rec_polys)} regions but no text!")
+                # Log each key and its type/length to find the text
+                for key, val in actual_result.items():
+                    if isinstance(val, (list, tuple)):
+                        logger.warning(f"[{self.name}]   {key}: list[{len(val)}] = {str(val)[:200]}")
+                    elif isinstance(val, dict):
+                        logger.warning(f"[{self.name}]   {key}: dict with keys {list(val.keys())}")
+                    else:
+                        logger.warning(f"[{self.name}]   {key}: {type(val).__name__} = {str(val)[:100]}")
 
             if not rec_texts:
                 return result
+
+            # Use polygons if available (preferred), otherwise boxes
+            position_data = rec_polys if rec_polys else rec_boxes
 
             # Extract detections with position info
             detection_data = []
             for i, text in enumerate(rec_texts):
                 conf = rec_scores[i] if i < len(rec_scores) else 0.0
 
-                # Get bounding box if available
-                # rec_boxes format: [x_min, y_min, x_max, y_max]
-                if i < len(rec_boxes):
+                # Get bounding box from polygon or box
+                if i < len(position_data):
                     try:
-                        box = rec_boxes[i]
-                        if hasattr(box, '__len__') and len(box) >= 4:
-                            x_min, y_min, x_max, y_max = float(box[0]), float(box[1]), float(box[2]), float(box[3])
-                            x_center = (x_min + x_max) / 2
-                            y_center = (y_min + y_max) / 2
-                            height = y_max - y_min
+                        pos = position_data[i]
+                        if rec_polys:
+                            # Polygon format: [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+                            # Convert to bounding box
+                            xs = [p[0] for p in pos]
+                            ys = [p[1] for p in pos]
+                            x_min, x_max = min(xs), max(xs)
+                            y_min, y_max = min(ys), max(ys)
+                        elif hasattr(pos, '__len__') and len(pos) >= 4:
+                            # rec_boxes format: [x_min, y_min, x_max, y_max]
+                            x_min, y_min, x_max, y_max = float(pos[0]), float(pos[1]), float(pos[2]), float(pos[3])
                         else:
                             # Fallback
                             y_center = i * 50
                             x_center = 0
                             height = 30
-                    except (TypeError, IndexError, ValueError):
+                            detection_data.append({
+                                'text': text,
+                                'conf': conf,
+                                'y_center': y_center,
+                                'x_center': x_center,
+                                'height': height
+                            })
+                            continue
+
+                        x_center = (x_min + x_max) / 2
+                        y_center = (y_min + y_max) / 2
+                        height = y_max - y_min
+                    except (TypeError, IndexError, ValueError) as e:
+                        logger.debug(f"[{self.name}] Error parsing position {i}: {e}")
                         y_center = i * 50
                         x_center = 0
                         height = 30
