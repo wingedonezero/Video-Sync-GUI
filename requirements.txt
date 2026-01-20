@@ -23,8 +23,14 @@ fonttools
 # Spell Checking
 pyenchant
 
-# OCR (Tesseract wrapper)
+# OCR (Tesseract wrapper - default)
 pytesseract
+
+# Optional OCR backends - install for better accuracy:
+# EasyOCR (deep learning, better for varied fonts):
+#   pip install easyocr
+# PaddleOCR (state-of-art accuracy):
+#   pip install paddleocr
 
 # XML Processing
 lxml
