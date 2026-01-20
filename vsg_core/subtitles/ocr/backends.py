@@ -654,12 +654,10 @@ class PaddleOCRBackend(OCRBackend):
             # Get the first (and usually only) result
             pred = predictions[0]
 
-            # Access results via json attribute
-            pred_data = pred.json if hasattr(pred, 'json') else {}
-
-            rec_texts = pred_data.get('rec_texts', [])
-            rec_scores = pred_data.get('rec_scores', [])
-            dt_polys = pred_data.get('dt_polys', [])
+            # PaddleOCR 3.0 result attributes accessed directly
+            rec_texts = getattr(pred, 'rec_texts', []) or []
+            rec_scores = getattr(pred, 'rec_scores', []) or []
+            dt_polys = getattr(pred, 'dt_polys', []) or []
 
             if not rec_texts:
                 return result
