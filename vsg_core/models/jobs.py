@@ -29,6 +29,7 @@ class PlanItem:
     rescale: bool = False
     size_multiplier: float = 1.0
     style_patch: Optional[Dict[str, Any]] = None
+    font_replacements: Optional[Dict[str, Any]] = None  # Font replacement mappings from Font Manager
     user_modified_path: Optional[str] = None
     sync_to: Optional[str] = None
     is_preserved: bool = False

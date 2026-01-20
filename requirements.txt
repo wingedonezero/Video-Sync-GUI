@@ -17,6 +17,9 @@ llvmlite>=0.43.0
 # Subtitle Processing
 pysubs2
 
+# Font Parsing (for font replacement feature)
+fonttools
+
 # Spell Checking
 pyenchant
 
