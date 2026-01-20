@@ -430,6 +430,23 @@ class OCREngine:
         return lines
 
 
+def get_available_languages() -> List[str]:
+    """
+    Get list of available Tesseract languages.
+
+    Returns:
+        List of language codes (e.g., ['eng', 'jpn', 'osd'])
+    """
+    if not PYTESSERACT_AVAILABLE:
+        return []
+
+    try:
+        langs = pytesseract.get_languages()
+        return langs
+    except Exception:
+        return ['eng']  # Assume at least English is available
+
+
 def create_ocr_engine(settings_dict: dict) -> OCREngine:
     """
     Create OCR engine from settings dictionary.
@@ -440,13 +457,26 @@ def create_ocr_engine(settings_dict: dict) -> OCREngine:
     Returns:
         Configured OCREngine
     """
+    # Get configured language or auto-detect
+    language = settings_dict.get('ocr_language', 'eng')
+
+    # If language is 'auto', try to use eng+jpn for anime subtitles
+    if language == 'auto':
+        available = get_available_languages()
+        if 'jpn' in available and 'eng' in available:
+            language = 'eng+jpn'
+        elif 'eng' in available:
+            language = 'eng'
+        else:
+            language = available[0] if available else 'eng'
+
     config = OCRConfig(
-        language=settings_dict.get('ocr_language', 'eng'),
+        language=language,
         psm=settings_dict.get('ocr_psm', 7),
         char_whitelist=settings_dict.get('ocr_char_whitelist', ''),
-        char_blacklist=settings_dict.get('ocr_char_blacklist', ''),
+        char_blacklist=settings_dict.get('ocr_char_blacklist', '|'),
         low_confidence_threshold=settings_dict.get('ocr_low_confidence_threshold', 60.0),
-        enable_multi_pass=settings_dict.get('ocr_multi_pass', False),
+        enable_multi_pass=settings_dict.get('ocr_multi_pass', True),
     )
 
     return OCREngine(config)
