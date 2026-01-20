@@ -362,12 +362,28 @@ def create_preprocessor(
     Returns:
         Configured ImagePreprocessor
     """
+    # Check which OCR engine is being used
+    ocr_engine = settings_dict.get('ocr_engine', 'tesseract')
+
+    # Deep learning OCR engines (EasyOCR, PaddleOCR) work better WITHOUT binarization
+    # They're trained on natural images with anti-aliasing and grayscale gradients
+    # Tesseract (traditional) works best WITH binarization (clean black on white)
+    if ocr_engine in ('easyocr', 'paddleocr'):
+        # Skip binarization for deep learning engines
+        force_binarization = False
+        # Also use smaller border - deep learning handles edge text better
+        border_size = settings_dict.get('ocr_border_size', 5)
+    else:
+        # Tesseract: use binarization
+        force_binarization = settings_dict.get('ocr_force_binarization', True)
+        border_size = settings_dict.get('ocr_border_size', 10)
+
     config = PreprocessingConfig(
         auto_detect=settings_dict.get('ocr_preprocess_auto', True),
         upscale_threshold_height=settings_dict.get('ocr_upscale_threshold', 40),
         target_height=settings_dict.get('ocr_target_height', 80),
-        border_size=settings_dict.get('ocr_border_size', 10),
-        force_binarization=settings_dict.get('ocr_force_binarization', True),  # Always binarize for OCR
+        border_size=border_size,
+        force_binarization=force_binarization,
         binarization_method=settings_dict.get('ocr_binarization_method', 'otsu'),
         denoise=settings_dict.get('ocr_denoise', False),
         save_debug_images=settings_dict.get('ocr_save_debug_images', False),
