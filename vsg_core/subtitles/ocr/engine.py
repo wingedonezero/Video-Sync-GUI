@@ -483,3 +483,48 @@ def create_ocr_engine(settings_dict: dict) -> OCREngine:
     )
 
     return OCREngine(config)
+
+
+# =============================================================================
+# New Backend-based Engine Factory
+# =============================================================================
+
+def create_ocr_engine_v2(settings_dict: dict):
+    """
+    Create OCR engine using the new backend system.
+
+    Supports multiple OCR backends: tesseract, easyocr, paddleocr
+
+    Args:
+        settings_dict: Application settings
+
+    Returns:
+        Configured OCRBackend instance
+    """
+    from .backends import create_backend, get_available_backends
+
+    # Get backend preference
+    backend_name = settings_dict.get('ocr_engine', 'tesseract')
+    language = settings_dict.get('ocr_language', 'eng')
+
+    # Check if requested backend is available
+    available = get_available_backends()
+    if backend_name not in available:
+        # Fall back to first available
+        if available:
+            import logging
+            logging.getLogger(__name__).warning(
+                f"OCR backend '{backend_name}' not available. "
+                f"Falling back to '{available[0]}'"
+            )
+            backend_name = available[0]
+        else:
+            raise RuntimeError("No OCR backends available. Install pytesseract or easyocr.")
+
+    # Create backend with language
+    char_blacklist = settings_dict.get('ocr_char_blacklist', '|')
+
+    if backend_name == 'tesseract':
+        return create_backend(backend_name, language=language, char_blacklist=char_blacklist)
+    else:
+        return create_backend(backend_name, language=language)
