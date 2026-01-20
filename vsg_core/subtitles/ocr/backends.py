@@ -558,6 +558,10 @@ class PaddleOCRBackend(OCRBackend):
         os.environ['PADDLEX_HOME'] = self.model_dir
         os.environ['PADDLEOCR_HOME'] = self.model_dir
 
+        # Disable oneDNN/MKLDNN to avoid PIR attribute conversion errors
+        # This is a workaround for PaddlePaddle/PaddleOCR version incompatibilities
+        os.environ['FLAGS_use_mkldnn'] = '0'
+
         logger.info(f"PaddleOCRBackend created with language: {self.language}")
         logger.info(f"PaddleOCR model directory: {self.model_dir}")
 
