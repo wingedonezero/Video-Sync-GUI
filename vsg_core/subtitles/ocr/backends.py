@@ -569,7 +569,8 @@ class PaddleOCRBackend(OCRBackend):
                 os.environ['PADDLEOCR_HOME'] = self.model_dir
 
                 # Detect GPU (PaddleOCR only supports CUDA, not ROCm)
-                use_gpu = False
+                # PaddleOCR 3.0+ uses 'device' parameter instead of 'use_gpu'
+                device = "cpu"
                 gpu_info = "CPU"
                 try:
                     import paddle
@@ -577,21 +578,20 @@ class PaddleOCRBackend(OCRBackend):
                         # Check if CUDA device is available
                         gpu_count = paddle.device.cuda.device_count()
                         if gpu_count > 0:
-                            use_gpu = True
+                            device = "gpu"
                             gpu_info = f"CUDA (PaddlePaddle, {gpu_count} device(s))"
                 except Exception:
                     pass
 
                 logger.info(f"Initializing PaddleOCR with language: {self.language}")
                 logger.info(f"Model storage: {self.model_dir}")
-                logger.info(f"GPU: {gpu_info} (enabled: {use_gpu})")
+                logger.info(f"Device: {gpu_info}")
                 logger.info("This may take a moment if models need to be downloaded...")
 
                 self._ocr = PaddleOCR(
-                    use_angle_cls=False,  # Don't rotate text
+                    use_textline_orientation=False,  # Don't rotate text (replaces use_angle_cls)
                     lang=self.language,
-                    use_gpu=use_gpu,
-                    det_db_score_mode='slow',  # Better accuracy
+                    device=device,  # PaddleOCR 3.0+ API
                 )
                 logger.info("PaddleOCR initialized successfully")
 

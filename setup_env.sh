@@ -350,11 +350,12 @@ print()
 try:
     from paddleocr import PaddleOCR
     print("Initializing PaddleOCR (this downloads models)...")
+    # PaddleOCR 3.0+ uses 'device' instead of 'use_gpu'
+    # and 'use_textline_orientation' instead of 'use_angle_cls'
     ocr = PaddleOCR(
-        use_angle_cls=False,
+        use_textline_orientation=False,
         lang='en',
-        use_gpu=False,  # Use CPU for download
-        det_db_score_mode='slow',
+        device='cpu',  # Use CPU for download
     )
     print()
     print("✓ PaddleOCR models downloaded successfully!")
