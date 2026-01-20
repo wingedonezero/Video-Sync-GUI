@@ -540,15 +540,24 @@ class PaddleOCRBackend(OCRBackend):
     name = "paddleocr"
 
     def __init__(self, language: str = 'en', model_storage_directory: str = None):
+        import os
+        from pathlib import Path
+
         self.language = language
         self._ocr = None
         # Use custom model directory if specified, otherwise use app's .config/ocr/paddleocr_models
         if model_storage_directory:
             self.model_dir = model_storage_directory
         else:
-            from pathlib import Path
             app_dir = Path(__file__).parent.parent.parent.parent  # vsg_core -> project root
             self.model_dir = str(app_dir / '.config' / 'ocr' / 'paddleocr_models')
+
+        # PaddleOCR 3.0 uses PaddleX - set env vars BEFORE any paddleocr imports
+        # These MUST be set at init time, not later when lazily loading
+        Path(self.model_dir).mkdir(parents=True, exist_ok=True)
+        os.environ['PADDLEX_HOME'] = self.model_dir
+        os.environ['PADDLEOCR_HOME'] = self.model_dir
+
         logger.info(f"PaddleOCRBackend created with language: {self.language}")
         logger.info(f"PaddleOCR model directory: {self.model_dir}")
 
@@ -557,19 +566,7 @@ class PaddleOCRBackend(OCRBackend):
         """Lazy initialization of PaddleOCR."""
         if self._ocr is None:
             try:
-                from pathlib import Path
-                import os
-
-                # Ensure model directory exists
-                Path(self.model_dir).mkdir(parents=True, exist_ok=True)
-
-                # PaddleOCR 3.0 uses PaddleX under the hood
-                # Set PADDLEX_HOME to control model download location
-                # MUST be set BEFORE importing paddleocr
-                os.environ['PADDLEX_HOME'] = self.model_dir
-                os.environ['PADDLEOCR_HOME'] = self.model_dir  # Legacy variable
-
-                # Import AFTER setting environment variables
+                # Environment variables already set in __init__
                 from paddleocr import PaddleOCR
 
                 # Detect GPU (PaddleOCR only supports CUDA, not ROCm)
