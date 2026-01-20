@@ -420,7 +420,7 @@ class OCREngine:
         # Extract line images with minimum height filter
         lines = []
         padding = 5  # Add some padding around each line
-        min_line_height = 15  # Minimum height for valid text line (filters noise)
+        min_line_height = 10  # Minimum height for valid text line (filters noise)
 
         for start, end in zip(line_starts, line_ends):
             line_height = end - start
