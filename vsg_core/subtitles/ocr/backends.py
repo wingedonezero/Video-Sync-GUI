@@ -647,6 +647,20 @@ class PaddleOCRBackend(OCRBackend):
         result = OCRResult(text='', backend=self.name)
 
         try:
+            import cv2
+
+            # PaddleOCR expects RGB images (3 channels)
+            # Convert grayscale to RGB if needed
+            if len(image.shape) == 2:
+                # Grayscale image - convert to RGB
+                image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+            elif len(image.shape) == 3 and image.shape[2] == 1:
+                # Single channel image - convert to RGB
+                image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+            elif len(image.shape) == 3 and image.shape[2] == 4:
+                # RGBA - convert to RGB
+                image = cv2.cvtColor(image, cv2.COLOR_RGBA2RGB)
+
             # PaddleOCR 3.x uses predict() which returns a generator
             predictions = self.ocr.predict(image)
 
