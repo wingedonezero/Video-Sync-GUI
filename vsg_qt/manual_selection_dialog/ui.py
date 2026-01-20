@@ -596,9 +596,23 @@ class ManualSelectionDialog(QDialog):
         except Exception as e:
             self.log_callback(f"[WARN] Could not extract fonts: {e}")
 
-        editor = StyleEditorDialog(ref_video_path, editable_sub_path, fonts_dir=fonts_dir, parent=self)
+        # Pass existing font replacements if any
+        existing_font_replacements = track_data.get('font_replacements')
+        editor = StyleEditorDialog(
+            ref_video_path, editable_sub_path,
+            fonts_dir=fonts_dir,
+            existing_font_replacements=existing_font_replacements,
+            parent=self
+        )
         if editor.exec():
             widget.track_data['style_patch'] = editor.get_style_patch()
+            # Store font replacements if any were configured
+            font_replacements = editor.get_font_replacements()
+            if font_replacements:
+                widget.track_data['font_replacements'] = font_replacements
+            elif 'font_replacements' in widget.track_data:
+                # Clear if no replacements (user removed them)
+                del widget.track_data['font_replacements']
             self.edited_widget = widget
             widget.logic.refresh_badges()
             widget.logic.refresh_summary()

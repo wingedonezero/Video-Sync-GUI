@@ -606,6 +606,22 @@ class SubtitlesStep:
                 new_path = convert_srt_to_ass(str(item.extracted_path), runner, ctx.tool_paths)
                 item.extracted_path = Path(new_path)
 
+            # Apply font replacements if configured (before style patches)
+            if item.font_replacements and item.extracted_path:
+                if item.extracted_path.suffix.lower() in ['.ass', '.ssa']:
+                    runner._log_message(f"[Font] Applying font replacements to track {item.track.id}...")
+                    try:
+                        from vsg_core.font_manager import apply_font_replacements_to_subtitle
+                        modified_count = apply_font_replacements_to_subtitle(
+                            str(item.extracted_path),
+                            item.font_replacements
+                        )
+                        runner._log_message(f"[Font] Applied {len(item.font_replacements)} replacement(s) to {modified_count} style(s).")
+                    except Exception as e:
+                        runner._log_message(f"[Font] WARNING: Failed to apply font replacements: {e}")
+                else:
+                    runner._log_message(f"[Font] WARNING: Cannot apply font replacements to {item.extracted_path.suffix} file.")
+
             if item.style_patch and item.extracted_path:
                 if item.extracted_path.suffix.lower() in ['.ass', '.ssa']:
                     runner._log_message(f"[Style] Applying style patch to track {item.track.id}...")

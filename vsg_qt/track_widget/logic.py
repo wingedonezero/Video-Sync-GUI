@@ -130,6 +130,18 @@ class TrackWidgetLogic:
                     styles_str += f" +{len(sync_exclusion_styles) - 2} more"
                 parts.append(f"⚡ {'Excluding' if sync_mode == 'exclude' else 'Including'} sync: {styles_str}")
 
+            # Show font replacement info with validation
+            font_replacements = self.track_data.get('font_replacements')
+            if font_replacements:
+                from vsg_core.font_manager import validate_font_replacements
+                validation = validate_font_replacements(font_replacements)
+                if validation['errors']:
+                    parts.append(f"⚠ Fonts: {len(font_replacements)} ({len(validation['missing_files'])} missing)")
+                elif validation['warnings']:
+                    parts.append(f"Fonts: {len(font_replacements)} (warnings)")
+                else:
+                    parts.append(f"Fonts: {len(font_replacements)}")
+
         if not parts:
             self.v.source_label.setText("")
         else:
@@ -164,6 +176,11 @@ class TrackWidgetLogic:
             badges.append("Edited")
         elif self.track_data.get('style_patch'):
             badges.append("Styled")
+
+        # Add font replacement badge
+        if self.track_data.get('font_replacements'):
+            font_count = len(self.track_data['font_replacements'])
+            badges.append(f"Fonts: {font_count}")
 
         # NEW: Add badge if language was customized
         original_lang = self.track_data.get('lang', 'und')
@@ -204,6 +221,7 @@ class TrackWidgetLogic:
             "rescale": self.v.cb_rescale.isChecked() if is_subs else False,
             "size_multiplier": size_mult_value,
             "style_patch": self.track_data.get('style_patch'),
+            "font_replacements": self.track_data.get('font_replacements'),  # Font Manager replacements
             "user_modified_path": self.track_data.get('user_modified_path'),
             "sync_to": self.v.sync_to_combo.currentData() if (is_subs and self.v.sync_to_combo.isVisible()) else None,
             "custom_lang": self.track_data.get('custom_lang', ''),  # NEW: Include custom language

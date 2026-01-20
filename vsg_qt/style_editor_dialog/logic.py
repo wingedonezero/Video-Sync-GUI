@@ -2,15 +2,20 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 from copy import deepcopy
+from pathlib import Path
 import re
-from PySide6.QtWidgets import QColorDialog
-from PySide6.QtGui import QColor
+from typing import Dict, Any, Optional
+from PySide6.QtWidgets import QColorDialog, QMenu, QInputDialog, QMessageBox
+from PySide6.QtGui import QColor, QAction
 
 from vsg_core.subtitles.style_engine import StyleEngine
+from vsg_core.favorite_colors import FavoriteColorsManager
+from vsg_core.config import AppConfig
 from vsg_qt.resample_dialog import ResampleDialog
 
 class StyleEditorLogic:
-    def __init__(self, view: "StyleEditorDialog", subtitle_path: str):
+    def __init__(self, view: "StyleEditorDialog", subtitle_path: str,
+                 existing_font_replacements: Optional[Dict] = None):
         self.v = view
         self.engine = StyleEngine(subtitle_path)
         self.current_style_name = None
@@ -20,6 +25,11 @@ class StyleEditorLogic:
         self.edit_snapshots = {}
         # NEW: Store the final generated patch of changes
         self.generated_patch = {}
+        # Initialize favorite colors manager
+        config = AppConfig()
+        self.favorites_manager = FavoriteColorsManager(config.get_config_dir())
+        # Font replacements tracking - load existing if provided
+        self.font_replacements: Dict = existing_font_replacements.copy() if existing_font_replacements else {}
 
     def open_resample_dialog(self):
         if not self.engine.subs:
@@ -223,3 +233,88 @@ class StyleEditorLogic:
         self.load_style_attributes(self.current_style_name)
         self.engine.save()
         self.v.player_thread.reload_subtitle_track()
+
+    # --- Favorite Colors Methods ---
+
+    def save_color_to_favorites(self, button, attribute_name: str):
+        """Save the current color from a button to favorites."""
+        current_color = button.palette().button().color()
+        hex_color = current_color.name(QColor.HexArgb)
+
+        # Prompt for a name
+        name, ok = QInputDialog.getText(
+            self.v,
+            "Save to Favorites",
+            "Enter a name for this color:",
+            text=attribute_name.replace('color', '').title()
+        )
+
+        if ok and name:
+            self.favorites_manager.add(name.strip(), hex_color)
+            # Update the star button to show it's saved (filled star)
+            if attribute_name in self.v.favorite_save_btns:
+                self.v.favorite_save_btns[attribute_name].setText("\u2605")  # Filled star
+
+    def show_favorites_menu(self, button, color_button, attribute_name: str):
+        """Show a menu of favorite colors to apply."""
+        menu = QMenu(self.v)
+
+        favorites = self.favorites_manager.get_all()
+
+        if not favorites:
+            no_favorites_action = menu.addAction("No favorites saved")
+            no_favorites_action.setEnabled(False)
+        else:
+            for fav in favorites:
+                # Create action with color swatch in text
+                hex_display = fav['hex']
+                if len(hex_display) == 9:  # #AARRGGBB
+                    hex_display = '#' + hex_display[3:]  # Show as #RRGGBB
+
+                action = menu.addAction(f"{fav['name']} ({hex_display})")
+                action.setData(fav['hex'])
+
+                # Set icon color (create a colored icon would be nice but text works)
+                color = QColor(fav['hex'])
+                # We can't easily add colored icons without more complex code,
+                # so the menu text will suffice
+
+        menu.addSeparator()
+        manage_action = menu.addAction("Manage Favorites...")
+
+        # Show the menu at the button
+        action = menu.exec_(button.mapToGlobal(button.rect().bottomLeft()))
+
+        if action:
+            if action == manage_action:
+                self.open_favorites_manager()
+            elif action.data():
+                self.apply_favorite_color(color_button, attribute_name, action.data())
+
+    def apply_favorite_color(self, button, attribute_name: str, hex_color: str):
+        """Apply a favorite color to a color button."""
+        self._set_color_button_style(button, hex_color)
+        self.update_current_style()
+
+    def open_favorites_manager(self):
+        """Open the Favorites Manager dialog."""
+        from vsg_qt.favorites_dialog import FavoritesManagerDialog
+        dialog = FavoritesManagerDialog(self.favorites_manager, self.v)
+        dialog.exec()
+
+    # --- Font Manager Methods ---
+
+    def open_font_manager(self):
+        """Open the Font Manager dialog."""
+        from vsg_qt.font_manager_dialog import FontManagerDialog
+        dialog = FontManagerDialog(
+            str(self.engine.path),
+            current_replacements=self.font_replacements,
+            parent=self.v
+        )
+        if dialog.exec():
+            self.font_replacements = dialog.get_replacements()
+
+    def get_font_replacements(self) -> Dict[str, Any]:
+        """Get the configured font replacements."""
+        return self.font_replacements
