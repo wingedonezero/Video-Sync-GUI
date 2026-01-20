@@ -15,9 +15,11 @@ from vsg_qt.resample_dialog import ResampleDialog
 
 class StyleEditorLogic:
     def __init__(self, view: "StyleEditorDialog", subtitle_path: str,
-                 existing_font_replacements: Optional[Dict] = None):
+                 existing_font_replacements: Optional[Dict] = None,
+                 fonts_dir: Optional[str] = None):
         self.v = view
         self.engine = StyleEngine(subtitle_path)
+        self.fonts_dir = fonts_dir  # Directory for preview fonts
         self.current_style_name = None
         self.original_styles = deepcopy(self.engine.subs.styles) if self.engine.subs else {}
         self.tag_pattern = re.compile(r'{[^}]+}')
@@ -306,6 +308,7 @@ class StyleEditorLogic:
 
     def open_font_manager(self):
         """Open the Font Manager dialog."""
+        import shutil
         from vsg_qt.font_manager_dialog import FontManagerDialog
         from vsg_core.font_manager import apply_font_replacements_to_subtitle
 
@@ -327,6 +330,18 @@ class StyleEditorLogic:
                 # Apply font name changes to the subtitle file for preview
                 if new_replacements:
                     try:
+                        # Copy only the specific replacement font files to fonts_dir for preview
+                        if self.fonts_dir:
+                            fonts_dir_path = Path(self.fonts_dir)
+                            for repl_data in new_replacements.values():
+                                font_file = repl_data.get('font_file_path')
+                                if font_file:
+                                    src = Path(font_file)
+                                    if src.exists():
+                                        dst = fonts_dir_path / src.name
+                                        if not dst.exists():
+                                            shutil.copy2(src, dst)
+
                         modified = apply_font_replacements_to_subtitle(
                             str(self.engine.path),
                             new_replacements

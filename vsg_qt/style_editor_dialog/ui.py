@@ -24,8 +24,9 @@ class StyleEditorDialog(QDialog):
         self.duration_seconds = 0.0
         self.is_seeking = False
         self.style_widgets: Dict[str, QWidget] = {}
+        self.fonts_dir = fonts_dir  # Store for font replacement copying
         self._build_ui()
-        self._logic = StyleEditorLogic(self, subtitle_path, existing_font_replacements)
+        self._logic = StyleEditorLogic(self, subtitle_path, existing_font_replacements, fonts_dir)
         self._logic.populate_initial_state()
         self.player_thread = PlayerThread(video_path, subtitle_path, self.video_frame.winId(), fonts_dir=fonts_dir, parent=self)
         self._connect_signals()
