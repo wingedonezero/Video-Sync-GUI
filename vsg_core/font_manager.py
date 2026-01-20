@@ -222,7 +222,7 @@ class SubtitleFontAnalyzer:
 
 
 class FontReplacementManager:
-    """Manages font replacement operations."""
+    """Manages font replacement operations (keyed by style name)."""
 
     def __init__(self, fonts_dir: Path):
         self.fonts_dir = Path(fonts_dir)
@@ -231,36 +231,34 @@ class FontReplacementManager:
 
     def add_replacement(
         self,
+        style_name: str,
         original_font: str,
         new_font_name: str,
-        font_file_path: Path,
-        affected_styles: List[str]
+        font_file_path: Optional[Path]
     ) -> str:
         """
-        Add a font replacement.
+        Add a font replacement for a specific style.
 
         Args:
-            original_font: The font name being replaced
+            style_name: The style name to replace the font for
+            original_font: The original font name in the style
             new_font_name: The new font name (internal font name)
             font_file_path: Path to the replacement font file
-            affected_styles: List of style names affected
 
         Returns:
-            A unique key for this replacement
+            The style name as the key
         """
-        key = original_font
-        self._replacements[key] = {
+        self._replacements[style_name] = {
             'original_font': original_font,
             'new_font_name': new_font_name,
-            'font_file_path': str(font_file_path),
-            'affected_styles': affected_styles,
+            'font_file_path': str(font_file_path) if font_file_path else None,
         }
-        return key
+        return style_name
 
-    def remove_replacement(self, original_font: str) -> bool:
-        """Remove a font replacement."""
-        if original_font in self._replacements:
-            del self._replacements[original_font]
+    def remove_replacement(self, style_name: str) -> bool:
+        """Remove a font replacement by style name."""
+        if style_name in self._replacements:
+            del self._replacements[style_name]
             return True
         return False
 
@@ -294,11 +292,11 @@ class FontReplacementManager:
             List of error messages (empty if all valid)
         """
         errors = []
-        for original_font, replacement in self._replacements.items():
-            font_path = Path(replacement['font_file_path'])
-            if not font_path.exists():
+        for style_name, replacement in self._replacements.items():
+            font_path = replacement.get('font_file_path')
+            if font_path and not Path(font_path).exists():
                 errors.append(
-                    f"Font file not found for '{original_font}' replacement: {font_path}"
+                    f"Font file not found for style '{style_name}': {font_path}"
                 )
         return errors
 
@@ -317,11 +315,13 @@ class FontReplacementManager:
 
         copied_files = []
         for replacement in self._replacements.values():
-            src_path = Path(replacement['font_file_path'])
-            if src_path.exists():
-                dst_path = fonts_temp_dir / src_path.name
-                shutil.copy2(src_path, dst_path)
-                copied_files.append(dst_path)
+            font_path = replacement.get('font_file_path')
+            if font_path:
+                src_path = Path(font_path)
+                if src_path.exists():
+                    dst_path = fonts_temp_dir / src_path.name
+                    shutil.copy2(src_path, dst_path)
+                    copied_files.append(dst_path)
 
         return copied_files
 
@@ -331,24 +331,24 @@ def validate_font_replacements(
     subtitle_path: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Validate font replacements.
+    Validate font replacements (keyed by style name).
 
     Args:
-        replacements: Dictionary of font replacements
-        subtitle_path: Optional path to subtitle file for font usage validation
+        replacements: Dictionary of font replacements keyed by style name
+        subtitle_path: Optional path to subtitle file for style validation
 
     Returns:
         Dictionary with:
         - 'valid': bool - True if all validations pass
         - 'missing_files': List of missing font file paths
-        - 'unused_fonts': List of fonts being replaced that aren't in the subtitle file
+        - 'missing_styles': List of styles not found in subtitle file
         - 'warnings': List of warning messages (non-blocking)
         - 'errors': List of error messages (blocking)
     """
     result = {
         'valid': True,
         'missing_files': [],
-        'unused_fonts': [],
+        'missing_styles': [],
         'warnings': [],
         'errors': []
     }
@@ -357,28 +357,30 @@ def validate_font_replacements(
         return result
 
     # Check font files exist
-    for original_font, repl_data in replacements.items():
+    for style_name, repl_data in replacements.items():
         font_file = repl_data.get('font_file_path')
         if font_file:
             if not Path(font_file).exists():
                 result['missing_files'].append(font_file)
-                result['errors'].append(f"Font file not found: {Path(font_file).name}")
+                result['errors'].append(f"Font file not found for style '{style_name}': {Path(font_file).name}")
                 result['valid'] = False
 
-    # Check if fonts are actually used in subtitle file (non-blocking warning)
+    # Check if styles exist in subtitle file (non-blocking warning)
     if subtitle_path and Path(subtitle_path).exists():
         try:
-            analyzer = SubtitleFontAnalyzer(subtitle_path)
-            analysis = analyzer.analyze()
-            fonts_in_file = set(analysis.get('fonts', {}).keys())
-            inline_fonts = set(analysis.get('inline_fonts', []))
-            all_fonts = fonts_in_file | inline_fonts
+            import pysubs2
+            try:
+                subs = pysubs2.load(subtitle_path, encoding='utf-8')
+            except Exception:
+                subs = pysubs2.load(subtitle_path)
 
-            for original_font in replacements.keys():
-                if original_font not in all_fonts:
-                    result['unused_fonts'].append(original_font)
+            existing_styles = set(subs.styles.keys())
+
+            for style_name in replacements.keys():
+                if style_name not in existing_styles:
+                    result['missing_styles'].append(style_name)
                     result['warnings'].append(
-                        f"Font '{original_font}' is not used in this subtitle file"
+                        f"Style '{style_name}' not found in subtitle file"
                     )
         except Exception as e:
             result['warnings'].append(f"Could not analyze subtitle file: {e}")
@@ -395,11 +397,14 @@ def apply_font_replacements_to_subtitle(
 
     Args:
         subtitle_path: Path to the subtitle file
-        replacements: Dictionary of font replacements. Each replacement can have:
-            - new_font_name: The replacement font name
-            - font_file_path: Path to the font file (optional)
-            - affected_styles: List of style names to apply to. If empty or not
-              specified, applies to ALL styles using that font.
+        replacements: Dictionary of font replacements keyed by style name:
+            {
+                "StyleName": {
+                    "original_font": "OriginalFontName",
+                    "new_font_name": "NewFontName",
+                    "font_file_path": "..." (optional)
+                }
+            }
 
     Returns:
         Number of styles modified
@@ -413,34 +418,37 @@ def apply_font_replacements_to_subtitle(
 
     modified_count = 0
 
+    # Apply replacements by style name
     for style_name, style in subs.styles.items():
-        original_font = style.fontname
-        if original_font in replacements:
-            repl_data = replacements[original_font]
-            affected_styles = repl_data.get('affected_styles', [])
-
-            # If affected_styles is specified, only change those styles
-            # If empty/not specified, change all styles using this font
-            if affected_styles and style_name not in affected_styles:
-                continue
-
+        if style_name in replacements:
+            repl_data = replacements[style_name]
             new_font = repl_data['new_font_name']
             style.fontname = new_font
             modified_count += 1
 
-    # Also replace inline \fn tags
-    fn_pattern = re.compile(r'\\fn([^\\}]+)')
+    # Build font mapping for inline \fn tags
+    # Map original_font -> new_font_name for any replacement
+    font_mapping = {}
+    for repl_data in replacements.values():
+        original = repl_data.get('original_font')
+        new_font = repl_data.get('new_font_name')
+        if original and new_font:
+            font_mapping[original] = new_font
 
-    for event in subs.events:
-        def replace_fn(match):
-            font_name = match.group(1).strip()
-            if font_name in replacements:
-                return f"\\fn{replacements[font_name]['new_font_name']}"
-            return match.group(0)
+    # Replace inline \fn tags using the font mapping
+    if font_mapping:
+        fn_pattern = re.compile(r'\\fn([^\\}]+)')
 
-        new_text = fn_pattern.sub(replace_fn, event.text)
-        if new_text != event.text:
-            event.text = new_text
+        for event in subs.events:
+            def replace_fn(match):
+                font_name = match.group(1).strip()
+                if font_name in font_mapping:
+                    return f"\\fn{font_mapping[font_name]}"
+                return match.group(0)
+
+            new_text = fn_pattern.sub(replace_fn, event.text)
+            if new_text != event.text:
+                event.text = new_text
 
     subs.save(subtitle_path, encoding='utf-8')
     return modified_count

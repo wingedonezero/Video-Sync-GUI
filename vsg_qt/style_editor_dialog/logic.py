@@ -325,22 +325,22 @@ class StyleEditorLogic:
 
             # Check if replacements changed
             if new_replacements != original_replacements:
-                # Find removed replacements (need to revert these)
-                removed_fonts = set(original_replacements.keys()) - set(new_replacements.keys())
+                # Find removed replacements (need to revert these styles)
+                removed_styles = set(original_replacements.keys()) - set(new_replacements.keys())
 
                 # Revert removed replacements by applying reverse mapping
-                if removed_fonts:
+                if removed_styles:
                     revert_replacements = {}
-                    for orig_font in removed_fonts:
-                        # The file currently has new_font_name, we need to change it back to orig_font
-                        repl_data = original_replacements[orig_font]
+                    for style_name in removed_styles:
+                        # The style currently has new_font_name, change it back to original_font
+                        repl_data = original_replacements[style_name]
+                        original_font = repl_data.get('original_font')
                         new_font = repl_data.get('new_font_name')
-                        if new_font:
-                            revert_replacements[new_font] = {
-                                'new_font_name': orig_font,
-                                'font_file_path': None,  # No font file needed for revert
-                                # Preserve affected_styles so we only revert specific styles
-                                'affected_styles': repl_data.get('affected_styles', [])
+                        if original_font and new_font:
+                            revert_replacements[style_name] = {
+                                'original_font': new_font,  # Current font in file
+                                'new_font_name': original_font,  # Restore to original
+                                'font_file_path': None
                             }
 
                     if revert_replacements:
