@@ -395,7 +395,11 @@ def apply_font_replacements_to_subtitle(
 
     Args:
         subtitle_path: Path to the subtitle file
-        replacements: Dictionary of font replacements
+        replacements: Dictionary of font replacements. Each replacement can have:
+            - new_font_name: The replacement font name
+            - font_file_path: Path to the font file (optional)
+            - affected_styles: List of style names to apply to. If empty or not
+              specified, applies to ALL styles using that font.
 
     Returns:
         Number of styles modified
@@ -412,7 +416,15 @@ def apply_font_replacements_to_subtitle(
     for style_name, style in subs.styles.items():
         original_font = style.fontname
         if original_font in replacements:
-            new_font = replacements[original_font]['new_font_name']
+            repl_data = replacements[original_font]
+            affected_styles = repl_data.get('affected_styles', [])
+
+            # If affected_styles is specified, only change those styles
+            # If empty/not specified, change all styles using this font
+            if affected_styles and style_name not in affected_styles:
+                continue
+
+            new_font = repl_data['new_font_name']
             style.fontname = new_font
             modified_count += 1
 

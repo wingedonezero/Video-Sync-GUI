@@ -325,9 +325,37 @@ class StyleEditorLogic:
 
             # Check if replacements changed
             if new_replacements != original_replacements:
+                # Find removed replacements (need to revert these)
+                removed_fonts = set(original_replacements.keys()) - set(new_replacements.keys())
+
+                # Revert removed replacements by applying reverse mapping
+                if removed_fonts:
+                    revert_replacements = {}
+                    for orig_font in removed_fonts:
+                        # The file currently has new_font_name, we need to change it back to orig_font
+                        repl_data = original_replacements[orig_font]
+                        new_font = repl_data.get('new_font_name')
+                        if new_font:
+                            revert_replacements[new_font] = {
+                                'new_font_name': orig_font,
+                                'font_file_path': None,  # No font file needed for revert
+                                # Preserve affected_styles so we only revert specific styles
+                                'affected_styles': repl_data.get('affected_styles', [])
+                            }
+
+                    if revert_replacements:
+                        try:
+                            apply_font_replacements_to_subtitle(str(self.engine.path), revert_replacements)
+                        except Exception as e:
+                            QMessageBox.warning(
+                                self.v,
+                                "Font Revert",
+                                f"Could not revert font changes: {e}"
+                            )
+
                 self.font_replacements = new_replacements
 
-                # Apply font name changes to the subtitle file for preview
+                # Apply new replacements if any
                 if new_replacements:
                     try:
                         # Copy only the specific replacement font files to fonts_dir for preview
@@ -342,21 +370,22 @@ class StyleEditorLogic:
                                         if not dst.exists():
                                             shutil.copy2(src, dst)
 
-                        modified = apply_font_replacements_to_subtitle(
+                        apply_font_replacements_to_subtitle(
                             str(self.engine.path),
                             new_replacements
                         )
-                        # Reload the subtitle in the player to show changes
-                        self.v.player_thread.reload_subtitle_track()
-                        # Also reload the engine so UI reflects changes
-                        self.engine = StyleEngine(str(self.engine.path))
-                        self.populate_initial_state()
                     except Exception as e:
                         QMessageBox.warning(
                             self.v,
                             "Font Preview",
                             f"Could not apply font changes to preview: {e}"
                         )
+
+                # Reload the subtitle in the player to show changes
+                self.v.player_thread.reload_subtitle_track()
+                # Also reload the engine so UI reflects changes
+                self.engine = StyleEngine(str(self.engine.path))
+                self.populate_initial_state()
 
     def get_font_replacements(self) -> Dict[str, Any]:
         """Get the configured font replacements."""

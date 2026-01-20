@@ -14,13 +14,94 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QSplitter, QGroupBox,
     QTreeWidget, QTreeWidgetItem, QPushButton, QLabel, QComboBox,
-    QMessageBox, QHeaderView, QFrame
+    QMessageBox, QHeaderView, QFrame, QCheckBox, QDialogButtonBox,
+    QScrollArea, QWidget
 )
 
 from vsg_core.font_manager import (
     FontScanner, SubtitleFontAnalyzer, FontReplacementManager, FontInfo
 )
 from vsg_core.config import AppConfig
+
+
+class StyleSelectionDialog(QDialog):
+    """Dialog to select which styles to apply a font replacement to."""
+
+    def __init__(self, font_name: str, styles: List[str], parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Select Styles")
+        self.setMinimumWidth(300)
+        self.selected_styles: List[str] = []
+        self.checkboxes: Dict[str, QCheckBox] = {}
+
+        layout = QVBoxLayout(self)
+
+        # Header
+        header = QLabel(f"Select which styles using '{font_name}' to replace:")
+        header.setWordWrap(True)
+        layout.addWidget(header)
+
+        # Scrollable area for checkboxes (in case many styles)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setMaximumHeight(200)
+
+        checkbox_widget = QWidget()
+        checkbox_layout = QVBoxLayout(checkbox_widget)
+        checkbox_layout.setContentsMargins(5, 5, 5, 5)
+
+        for style in styles:
+            cb = QCheckBox(style)
+            cb.setChecked(True)  # Default to all selected
+            self.checkboxes[style] = cb
+            checkbox_layout.addWidget(cb)
+
+        checkbox_layout.addStretch()
+        scroll.setWidget(checkbox_widget)
+        layout.addWidget(scroll)
+
+        # Select all / none buttons
+        select_row = QHBoxLayout()
+        select_all_btn = QPushButton("Select All")
+        select_none_btn = QPushButton("Select None")
+        select_all_btn.clicked.connect(self._select_all)
+        select_none_btn.clicked.connect(self._select_none)
+        select_row.addWidget(select_all_btn)
+        select_row.addWidget(select_none_btn)
+        select_row.addStretch()
+        layout.addLayout(select_row)
+
+        # Dialog buttons
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        button_box.accepted.connect(self._on_accept)
+        button_box.rejected.connect(self.reject)
+        layout.addWidget(button_box)
+
+    def _select_all(self):
+        for cb in self.checkboxes.values():
+            cb.setChecked(True)
+
+    def _select_none(self):
+        for cb in self.checkboxes.values():
+            cb.setChecked(False)
+
+    def _on_accept(self):
+        self.selected_styles = [
+            style for style, cb in self.checkboxes.items() if cb.isChecked()
+        ]
+        if not self.selected_styles:
+            QMessageBox.warning(
+                self,
+                "No Styles Selected",
+                "Please select at least one style to apply the replacement to."
+            )
+            return
+        self.accept()
+
+    def get_selected_styles(self) -> List[str]:
+        return self.selected_styles
 
 
 class FontManagerDialog(QDialog):
@@ -372,16 +453,30 @@ class FontManagerDialog(QDialog):
             QMessageBox.warning(self, "Error", "Please select a replacement font.")
             return
 
-        # Get affected styles
+        # Get all styles using this font
         analysis = self.analyzer.analyze()
         fonts_info = analysis.get('fonts', {})
-        affected_styles = fonts_info.get(original_font, {}).get('styles', [])
+        all_styles = fonts_info.get(original_font, {}).get('styles', [])
+
+        if not all_styles:
+            QMessageBox.warning(self, "Error", "No styles found using this font.")
+            return
+
+        # If multiple styles use this font, let user select which to affect
+        if len(all_styles) > 1:
+            dialog = StyleSelectionDialog(original_font, all_styles, self)
+            if not dialog.exec():
+                return  # User cancelled
+            selected_styles = dialog.get_selected_styles()
+        else:
+            # Only one style, use it directly
+            selected_styles = all_styles
 
         self.replacement_manager.add_replacement(
             original_font,
             replacement_font.family_name,
             replacement_font.file_path,
-            affected_styles
+            selected_styles
         )
 
         self._refresh_replacements()
