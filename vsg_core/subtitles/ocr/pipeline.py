@@ -353,7 +353,8 @@ class OCRPipeline:
             end_time=sub_image.end_time,
             text=post_result.text,
             confidence=ocr_result.average_confidence,
-            image=preprocessed.image
+            image=preprocessed.image,
+            raw_ocr_text=raw_ocr_text  # Pass raw OCR before any fixes
         )
 
         # Track unknown words
