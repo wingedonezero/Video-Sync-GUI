@@ -191,6 +191,12 @@ class OCRPipeline:
         try:
             self._log_progress("Starting OCR pipeline", 0.0)
 
+            # Log which OCR engine is being used
+            backend_setting = self.settings.get('ocr_engine', 'tesseract')
+            # Access engine property to initialize it and get the actual backend name
+            engine_name = getattr(self.engine, 'name', 'tesseract')
+            self._log_progress(f"Using OCR engine: {engine_name} (setting: {backend_setting})", 0.02)
+
             # Step 1: Detect and create parser
             self._log_progress("Parsing subtitle file", 0.05)
             parser = SubtitleImageParser.detect_parser(input_path)
