@@ -9,6 +9,11 @@ Improves OCR output through:
     3. Dictionary validation (tracks unknown words, doesn't block fixes)
     4. Custom wordlist support (anime names, romaji, etc.)
 
+Rules are loaded from editable database files in .config/ocr/:
+    - replacements.json: Pattern-based corrections
+    - user_dictionary.txt: Custom valid words
+    - names.txt: Proper names
+
 Key difference from the old cleanup.py:
     - OLD: Dictionary blocks fixes even when OCR is wrong
     - NEW: Confidence drives fix aggressiveness, dictionary just reports unknowns
@@ -19,11 +24,16 @@ The approach is:
     - Dictionary = report unknown words, don't block corrections
 """
 
+import logging
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
+
+from .dictionaries import OCRDictionaries, ReplacementRule, get_dictionaries
+
+logger = logging.getLogger(__name__)
 
 try:
     import enchant
@@ -141,11 +151,25 @@ class OCRPostProcessor:
 
     def __init__(self, config: Optional[PostProcessConfig] = None):
         self.config = config or PostProcessConfig()
-        self._init_dictionary()
-        self._load_custom_wordlist()
+        self._init_dictionaries()
+        self._init_spell_checker()
         self._init_patterns()
 
-    def _init_dictionary(self):
+    def _init_dictionaries(self):
+        """Initialize OCR dictionaries from database."""
+        self.ocr_dicts = get_dictionaries()
+        self.replacement_rules = self.ocr_dicts.load_replacements()
+        self.custom_words = self.ocr_dicts.load_user_dictionary()
+        self.custom_names = self.ocr_dicts.load_names()
+
+        # Combine user dictionary and names for validation
+        self.all_custom_words = self.custom_words | self.custom_names
+
+        logger.debug(f"Loaded {len(self.replacement_rules)} replacement rules")
+        logger.debug(f"Loaded {len(self.custom_words)} user dictionary words")
+        logger.debug(f"Loaded {len(self.custom_names)} names")
+
+    def _init_spell_checker(self):
         """Initialize spell-check dictionary."""
         self.dictionary = None
         if ENCHANT_AVAILABLE and self.config.enable_dictionary_validation:
@@ -154,37 +178,52 @@ class OCRPostProcessor:
                 # Add common subtitle words
                 for word in self.COMMON_WORDS:
                     self.dictionary.add_to_session(word)
+                # Add user dictionary words and names
+                for word in self.all_custom_words:
+                    self.dictionary.add_to_session(word)
             except enchant.errors.DictNotFoundError:
                 pass
 
-    def _load_custom_wordlist(self):
-        """Load custom wordlist from file."""
-        self.custom_words: Set[str] = set()
-
-        if self.config.custom_wordlist_path:
-            path = Path(self.config.custom_wordlist_path)
-            if path.is_file():
-                try:
-                    with open(path, 'r', encoding='utf-8') as f:
-                        for line in f:
-                            word = line.strip()
-                            if word and not word.startswith('#'):
-                                self.custom_words.add(word)
-                                # Also add to enchant dictionary
-                                if self.dictionary:
-                                    self.dictionary.add_to_session(word)
-                except Exception:
-                    pass
-
     def _init_patterns(self):
-        """Compile regex patterns for efficient matching."""
-        # Compile word boundary patterns for safe replacements
-        self.word_boundary_patterns = {}
-        for wrong, right in self.WORD_BOUNDARY_FIXES.items():
-            # Create case-sensitive word boundary pattern
-            # \b ensures we only match complete words, not substrings
-            pattern = re.compile(r'\b' + re.escape(wrong) + r'\b')
-            self.word_boundary_patterns[wrong] = (pattern, right)
+        """Compile regex patterns from database rules."""
+        # Categorize rules by type
+        self.literal_rules = []  # Direct string replacements
+        self.word_boundary_patterns = {}  # Word boundary regex
+        self.word_start_patterns = {}
+        self.word_end_patterns = {}
+        self.word_middle_patterns = {}
+        self.regex_patterns = {}
+        self.confidence_gated_rules = []  # Applied only when confidence is low
+
+        for rule in self.replacement_rules:
+            if not rule.enabled:
+                continue
+
+            if rule.confidence_gated:
+                self.confidence_gated_rules.append(rule)
+                continue
+
+            if rule.rule_type == "literal":
+                self.literal_rules.append(rule)
+            elif rule.rule_type == "word":
+                pattern = re.compile(r'\b' + re.escape(rule.pattern) + r'\b')
+                self.word_boundary_patterns[rule.pattern] = (pattern, rule.replacement)
+            elif rule.rule_type == "word_start":
+                pattern = re.compile(r'\b' + re.escape(rule.pattern))
+                self.word_start_patterns[rule.pattern] = (pattern, rule.replacement)
+            elif rule.rule_type == "word_end":
+                pattern = re.compile(re.escape(rule.pattern) + r'\b')
+                self.word_end_patterns[rule.pattern] = (pattern, rule.replacement)
+            elif rule.rule_type == "word_middle":
+                # Match pattern when not at word boundary
+                pattern = re.compile(r'(?<=[a-zA-Z])' + re.escape(rule.pattern) + r'(?=[a-zA-Z])')
+                self.word_middle_patterns[rule.pattern] = (pattern, rule.replacement)
+            elif rule.rule_type == "regex":
+                try:
+                    pattern = re.compile(rule.pattern)
+                    self.regex_patterns[rule.pattern] = (pattern, rule.replacement)
+                except re.error as e:
+                    logger.warning(f"Invalid regex pattern '{rule.pattern}': {e}")
 
         # Standalone 'l' that should be 'I' (backup, covered by WORD_BOUNDARY_FIXES)
         self.standalone_l_pattern = re.compile(r'\bl\b')
@@ -294,22 +333,42 @@ class OCRPostProcessor:
         """
         Apply fixes that are always correct.
 
-        These patterns are never valid English and always represent OCR errors.
+        These patterns are loaded from the replacements database.
         """
-        # Apply direct replacements (safe patterns that can't appear in valid words)
-        for wrong, right in self.UNAMBIGUOUS_FIXES.items():
-            if wrong in text:
-                count = text.count(wrong)
-                text = text.replace(wrong, right)
-                result.fixes_applied[f'{wrong}→{right}'] += count
+        # Apply literal replacements (exact string match)
+        for rule in self.literal_rules:
+            if rule.pattern in text:
+                count = text.count(rule.pattern)
+                text = text.replace(rule.pattern, rule.replacement)
+                result.fixes_applied[f'{rule.pattern}→{rule.replacement}'] += count
 
-        # Apply word-boundary replacements (patterns that need \b protection)
-        # This prevents "girls" → "girIs" by only matching standalone "ls"
-        for wrong, (pattern, right) in self.word_boundary_patterns.items():
+        # Apply word-boundary replacements
+        for pattern_str, (pattern, replacement) in self.word_boundary_patterns.items():
             matches = list(pattern.finditer(text))
             if matches:
-                text = pattern.sub(right, text)
-                result.fixes_applied[f'{wrong}→{right}'] += len(matches)
+                text = pattern.sub(replacement, text)
+                result.fixes_applied[f'{pattern_str}→{replacement}'] += len(matches)
+
+        # Apply word-start replacements
+        for pattern_str, (pattern, replacement) in self.word_start_patterns.items():
+            matches = list(pattern.finditer(text))
+            if matches:
+                text = pattern.sub(replacement, text)
+                result.fixes_applied[f'{pattern_str}→{replacement} (word start)'] += len(matches)
+
+        # Apply word-end replacements
+        for pattern_str, (pattern, replacement) in self.word_end_patterns.items():
+            matches = list(pattern.finditer(text))
+            if matches:
+                text = pattern.sub(replacement, text)
+                result.fixes_applied[f'{pattern_str}→{replacement} (word end)'] += len(matches)
+
+        # Apply regex replacements
+        for pattern_str, (pattern, replacement) in self.regex_patterns.items():
+            matches = list(pattern.finditer(text))
+            if matches:
+                text = pattern.sub(replacement, text)
+                result.fixes_applied[f'regex:{pattern_str}'] += len(matches)
 
         # Handle 'l' at sentence start (additional context check)
         def fix_sentence_start(m):
@@ -344,7 +403,7 @@ class OCRPostProcessor:
         """
         Apply fixes based on OCR confidence level.
 
-        Low confidence → aggressive fixes
+        Low confidence → aggressive fixes (confidence-gated rules from database)
         High confidence → trust OCR output
         """
         # Skip confidence fixes if confidence is high
@@ -353,7 +412,25 @@ class OCRPostProcessor:
 
         is_very_low = confidence < self.config.very_low_confidence_threshold
 
-        # Apply rn → m fixes (common OCR confusion)
+        # Apply confidence-gated rules from database
+        for rule in self.confidence_gated_rules:
+            if rule.rule_type == "word_middle":
+                # Match pattern when not at word boundary
+                pattern = re.compile(r'(?<=[a-zA-Z])' + re.escape(rule.pattern) + r'(?=[a-zA-Z])')
+                new_text = pattern.sub(rule.replacement, text)
+            elif rule.rule_type == "word":
+                pattern = re.compile(r'\b' + re.escape(rule.pattern) + r'\b')
+                new_text = pattern.sub(rule.replacement, text)
+            elif rule.rule_type == "literal":
+                new_text = text.replace(rule.pattern, rule.replacement)
+            else:
+                continue
+
+            if new_text != text:
+                result.fixes_applied[f'{rule.pattern}→{rule.replacement} (low conf)'] += 1
+                text = new_text
+
+        # Also apply the built-in rn patterns for backward compatibility
         for pattern, replacement in self.rn_patterns:
             if callable(replacement):
                 new_text = pattern.sub(replacement, text)
@@ -532,8 +609,8 @@ class OCRPostProcessor:
         for match in word_pattern.finditer(text):
             word = match.group()
 
-            # Skip if in custom wordlist
-            if word in self.custom_words or word.lower() in self.custom_words:
+            # Skip if in user dictionary or names
+            if self.ocr_dicts.is_known_word(word):
                 continue
 
             # Skip common contractions that might not be in dict
@@ -555,8 +632,8 @@ class OCRPostProcessor:
         if not self.dictionary:
             return True
 
-        # Check custom wordlist first
-        if word in self.custom_words or word.lower() in self.custom_words:
+        # Check user dictionary and names first
+        if self.ocr_dicts.is_known_word(word):
             return True
 
         # Check dictionary
@@ -578,8 +655,8 @@ class OCRPostProcessor:
         if not word:
             return False
 
-        # Custom words always valid
-        if word in self.custom_words or word.lower() in self.custom_words:
+        # Check user dictionary and names first
+        if self.ocr_dicts.is_known_word(word):
             return True
 
         # Dictionary check

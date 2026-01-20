@@ -149,9 +149,20 @@ class OCRTab(QWidget):
         self.widgets['ocr_low_confidence_threshold'].setSuffix(" %")
         self.widgets['ocr_low_confidence_threshold'].setToolTip("Lines with confidence below this will be flagged in the report.")
 
+        # Edit Dictionaries button
+        self.edit_dictionaries_btn = QPushButton("Edit Dictionaries...")
+        self.edit_dictionaries_btn.setToolTip(
+            "Open the dictionary editor to manage:\n"
+            "• Replacement rules (character/pattern corrections)\n"
+            "• User dictionary (custom valid words)\n"
+            "• Names (character names, proper nouns)"
+        )
+        self.edit_dictionaries_btn.clicked.connect(self._open_dictionary_editor)
+
         postprocess_layout.addRow(self.widgets['ocr_cleanup_enabled'])
         postprocess_layout.addRow(self.widgets['ocr_cleanup_normalize_ellipsis'])
         postprocess_layout.addRow("Low Confidence Threshold:", self.widgets['ocr_low_confidence_threshold'])
+        postprocess_layout.addRow("", self.edit_dictionaries_btn)
         main_layout.addWidget(postprocess_group)
 
         # --- Timing Corrections Group ---
@@ -229,6 +240,12 @@ class OCRTab(QWidget):
         main_layout.addWidget(output_group)
 
         main_layout.addStretch(1)
+
+    def _open_dictionary_editor(self):
+        """Open the OCR Dictionary Editor dialog."""
+        from vsg_qt.ocr_dictionary_dialog import OCRDictionaryDialog
+        dialog = OCRDictionaryDialog(self)
+        dialog.exec()
 
 class AnalysisTab(QWidget):
     def __init__(self):
