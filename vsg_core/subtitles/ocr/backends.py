@@ -629,14 +629,10 @@ class PaddleOCRBackend(OCRBackend):
 
     def _do_ocr(self, image: np.ndarray, single_line: bool = False) -> OCRResult:
         """
-        Perform OCR using PaddleOCR 3.x.
+        Perform OCR using PaddleOCR.
 
-        PaddleOCR 3.x uses predict() method and returns result objects.
-        Access the data via the .json property which returns a dict with:
-        - rec_texts: list of recognized text strings
-        - rec_scores: confidence scores for each text segment
-        - rec_boxes: bounding boxes [x_min, y_min, x_max, y_max]
-        - rec_polys: polygon coordinates (optional)
+        Uses the ocr.ocr() method which returns results in format:
+        [[[box_coords], (text, confidence)], ...]
 
         For multi-line subtitles:
         1. Get all detections with bounding boxes
@@ -661,167 +657,82 @@ class PaddleOCRBackend(OCRBackend):
                 # RGBA - convert to RGB
                 image = cv2.cvtColor(image, cv2.COLOR_RGBA2RGB)
 
-            # PaddleOCR 3.x uses predict() which returns a generator
-            logger.info(f"[{self.name}] Calling predict() on image shape: {image.shape}, dtype: {image.dtype}")
-            predictions = self.ocr.predict(image)
-            logger.info(f"[{self.name}] predict() returned: {type(predictions)}")
+            logger.debug(f"[{self.name}] Running OCR on image shape: {image.shape}")
 
-            # Handle generator - get first result
-            pred = None
-            try:
-                for p in predictions:
-                    logger.info(f"[{self.name}] Got prediction object: {type(p)}")
-                    pred = p
-                    break  # Only need first result
-            except (StopIteration, TypeError) as e:
-                logger.warning(f"[{self.name}] Error iterating predictions: {e}")
+            # Use ocr.ocr() method - works in both PaddleOCR 2.x and 3.x
+            # Returns: [[[box], (text, confidence)], ...] or [[result1, result2, ...]]
+            ocr_result = self.ocr.ocr(image, cls=False)
+
+            if not ocr_result:
+                logger.debug(f"[{self.name}] ocr() returned empty result")
                 return result
 
-            if pred is None:
-                logger.warning(f"[{self.name}] predict() returned no results (pred is None)")
-                return result
-
-            # PaddleOCR 3.x: access results via .json property
-            # Log what attributes the prediction object has
-            logger.info(f"[{self.name}] pred type: {type(pred)}, attributes: {[a for a in dir(pred) if not a.startswith('_')][:20]}")
-
-            try:
-                json_result = pred.json
-                logger.info(f"[{self.name}] pred.json type: {type(json_result)}")
-            except AttributeError as e:
-                logger.warning(f"[{self.name}] pred.json not available: {e}")
-                # Fallback: maybe it's already a dict or has different structure
-                if isinstance(pred, dict):
-                    json_result = pred
-                elif hasattr(pred, '__dict__'):
-                    # Try to get dict representation
-                    json_result = pred.__dict__
-                    logger.info(f"[{self.name}] Using pred.__dict__: {list(json_result.keys())[:10]}")
-                else:
-                    logger.error(f"[{self.name}] Unexpected result type: {type(pred)}")
-                    logger.error(f"[{self.name}] pred attributes: {dir(pred)}")
-                    # Try to see what the object contains
-                    try:
-                        logger.error(f"[{self.name}] pred value: {str(pred)[:500]}")
-                    except Exception:
-                        pass
-                    return result
-
-            if not json_result:
-                logger.debug(f"[{self.name}] json_result is empty or None")
-                return result
-
-            # Debug: log the actual structure we received
-            logger.debug(f"[{self.name}] json_result type: {type(json_result)}")
-            logger.debug(f"[{self.name}] json_result keys: {json_result.keys() if isinstance(json_result, dict) else 'N/A'}")
-
-            # PaddleOCR 3.x with PaddleX has nested structure: {'res': {...actual data...}}
-            # Handle both old format (flat) and new format (nested under 'res')
-            if 'res' in json_result and isinstance(json_result['res'], dict):
-                actual_result = json_result['res']
-                logger.debug(f"[{self.name}] Using nested 'res' structure, keys: {list(actual_result.keys())}")
-            else:
-                actual_result = json_result
-
-            # Log all available keys for debugging
-            logger.info(f"[{self.name}] actual_result keys: {list(actual_result.keys())}")
-
-            # Extract data from result - try multiple possible key names
-            # PaddleOCR/PaddleX has various formats depending on version
-            # Try all known key names for text
-            rec_texts = (
-                actual_result.get('rec_text', []) or
-                actual_result.get('rec_texts', []) or
-                actual_result.get('texts', []) or
-                actual_result.get('text', []) or
-                []
-            )
-            rec_scores = (
-                actual_result.get('rec_score', []) or
-                actual_result.get('rec_scores', []) or
-                actual_result.get('scores', []) or
-                actual_result.get('score', []) or
-                []
-            )
-            # dt_polys is polygon format [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
-            # rec_boxes is [x_min, y_min, x_max, y_max] format
-            rec_polys = actual_result.get('dt_polys', []) or []
-            rec_boxes = actual_result.get('rec_boxes', []) or actual_result.get('boxes', []) or []
-
-            logger.info(f"[{self.name}] Found {len(rec_texts)} texts, {len(rec_polys)} polys, {len(rec_scores)} scores")
-
-            if len(rec_texts) == 0 and len(rec_polys) > 0:
-                # Text was detected but not recognized - log full result to find where text is
-                logger.warning(f"[{self.name}] Detection found {len(rec_polys)} regions but no text!")
-                # Log each key and its type/length to find the text
-                for key, val in actual_result.items():
-                    if isinstance(val, (list, tuple)):
-                        logger.warning(f"[{self.name}]   {key}: list[{len(val)}] = {str(val)[:200]}")
-                    elif isinstance(val, dict):
-                        logger.warning(f"[{self.name}]   {key}: dict with keys {list(val.keys())}")
+            # Handle different result formats
+            # PaddleOCR can return [[results]] or [results] depending on version
+            if ocr_result and isinstance(ocr_result[0], list) and len(ocr_result[0]) > 0:
+                if isinstance(ocr_result[0][0], list) and len(ocr_result[0][0]) > 0:
+                    # Check if it's [[[box], (text, conf)], ...] format
+                    first_item = ocr_result[0][0]
+                    if isinstance(first_item, (list, tuple)) and len(first_item) == 2:
+                        # Nested format: [[results]]
+                        detections = ocr_result[0]
                     else:
-                        logger.warning(f"[{self.name}]   {key}: {type(val).__name__} = {str(val)[:100]}")
+                        # Direct format: [[[box], (text, conf)], ...]
+                        detections = ocr_result
+                else:
+                    detections = ocr_result
+            else:
+                detections = ocr_result if ocr_result else []
 
-            if not rec_texts:
+            logger.debug(f"[{self.name}] Got {len(detections) if detections else 0} detections")
+
+            if not detections:
                 return result
 
-            # Use polygons if available (preferred), otherwise boxes
-            position_data = rec_polys if rec_polys else rec_boxes
-
-            # Extract detections with position info
+            # Parse detections into our format
             detection_data = []
-            for i, text in enumerate(rec_texts):
-                conf = rec_scores[i] if i < len(rec_scores) else 0.0
+            for det in detections:
+                if det is None:
+                    continue
 
-                # Get bounding box from polygon or box
-                if i < len(position_data):
-                    try:
-                        pos = position_data[i]
-                        if rec_polys:
-                            # Polygon format: [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
-                            # Convert to bounding box
-                            xs = [p[0] for p in pos]
-                            ys = [p[1] for p in pos]
-                            x_min, x_max = min(xs), max(xs)
-                            y_min, y_max = min(ys), max(ys)
-                        elif hasattr(pos, '__len__') and len(pos) >= 4:
-                            # rec_boxes format: [x_min, y_min, x_max, y_max]
-                            x_min, y_min, x_max, y_max = float(pos[0]), float(pos[1]), float(pos[2]), float(pos[3])
+                try:
+                    # Format: [[x1,y1], [x2,y2], [x3,y3], [x4,y4]], (text, confidence)
+                    # Or: [box_coords, (text, confidence)]
+                    if len(det) >= 2:
+                        box = det[0]
+                        text_conf = det[1]
+
+                        if isinstance(text_conf, (list, tuple)) and len(text_conf) >= 2:
+                            text = str(text_conf[0])
+                            conf = float(text_conf[1])
                         else:
-                            # Fallback
-                            y_center = i * 50
-                            x_center = 0
-                            height = 30
-                            detection_data.append({
-                                'text': text,
-                                'conf': conf,
-                                'y_center': y_center,
-                                'x_center': x_center,
-                                'height': height
-                            })
+                            logger.debug(f"[{self.name}] Unexpected text_conf format: {text_conf}")
                             continue
 
-                        x_center = (x_min + x_max) / 2
-                        y_center = (y_min + y_max) / 2
-                        height = y_max - y_min
-                    except (TypeError, IndexError, ValueError) as e:
-                        logger.debug(f"[{self.name}] Error parsing position {i}: {e}")
-                        y_center = i * 50
-                        x_center = 0
-                        height = 30
-                else:
-                    # No position info, use index as proxy
-                    y_center = i * 50
-                    x_center = 0
-                    height = 30
+                        # Calculate center from polygon box
+                        if box and len(box) >= 4:
+                            xs = [p[0] for p in box]
+                            ys = [p[1] for p in box]
+                            x_center = sum(xs) / len(xs)
+                            y_center = sum(ys) / len(ys)
+                            height = max(ys) - min(ys)
+                        else:
+                            x_center = 0
+                            y_center = len(detection_data) * 50
+                            height = 30
 
-                detection_data.append({
-                    'text': text,
-                    'conf': conf,
-                    'y_center': y_center,
-                    'x_center': x_center,
-                    'height': height
-                })
+                        detection_data.append({
+                            'text': text,
+                            'conf': conf,
+                            'y_center': y_center,
+                            'x_center': x_center,
+                            'height': height
+                        })
+                except (TypeError, IndexError, ValueError) as e:
+                    logger.debug(f"[{self.name}] Error parsing detection: {e}, det={det}")
+                    continue
+
+            logger.debug(f"[{self.name}] Parsed {len(detection_data)} text regions")
 
             if not detection_data:
                 return result
