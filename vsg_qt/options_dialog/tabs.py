@@ -199,11 +199,21 @@ class OCRTab(QWidget):
         self.widgets['ocr_save_debug_images'] = QCheckBox("Save debug images (for troubleshooting)")
         self.widgets['ocr_save_debug_images'].setToolTip("Save preprocessed images to temp folder for debugging OCR issues.")
 
+        self.widgets['ocr_debug_output'] = QCheckBox("Debug VobSub OCR (analyze issues)")
+        self.widgets['ocr_debug_output'].setToolTip(
+            "Save debug output organized by issue type:\n"
+            "• unknown_words/ - Images and text for subtitles with unknown words\n"
+            "• fixes_applied/ - Images showing what fixes were made\n"
+            "• low_confidence/ - Images for low confidence OCR results\n\n"
+            "Creates a folder in logs with the same name as the report."
+        )
+
         output_layout.addRow("Output Format:", self.widgets['ocr_output_format'])
         output_layout.addRow(self.widgets['ocr_preserve_positions'])
         output_layout.addRow("Bottom Threshold:", self.widgets['ocr_bottom_threshold'])
         output_layout.addRow(self.widgets['ocr_generate_report'])
         output_layout.addRow(self.widgets['ocr_save_debug_images'])
+        output_layout.addRow(self.widgets['ocr_debug_output'])
         main_layout.addWidget(output_group)
 
         main_layout.addStretch(1)

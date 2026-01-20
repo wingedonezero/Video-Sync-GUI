@@ -27,6 +27,7 @@ from .engine import OCREngine, OCRConfig, create_ocr_engine
 from .postprocess import OCRPostProcessor, PostProcessConfig, create_postprocessor
 from .output import SubtitleWriter, OutputConfig, SubtitleEntry, create_writer
 from .report import OCRReport, SubtitleOCRResult, create_report
+from .debug import OCRDebugger, create_debugger
 
 
 @dataclass
@@ -46,6 +47,9 @@ class PipelineConfig:
     # Reporting
     generate_report: bool = True
     save_debug_images: bool = False
+
+    # Debug output - saves images and text for problem subtitles
+    debug_output: bool = False
 
     # Processing
     max_workers: int = 1  # For future parallel processing
@@ -115,6 +119,7 @@ class OCRPipeline:
             low_confidence_threshold=self.settings.get('ocr_low_confidence_threshold', 60.0),
             generate_report=self.settings.get('ocr_generate_report', True),
             save_debug_images=self.settings.get('ocr_save_debug_images', False),
+            debug_output=self.settings.get('ocr_debug_output', False),
         )
 
     @property
@@ -196,16 +201,27 @@ class OCRPipeline:
 
             self._log_progress(f"Found {len(subtitle_images)} subtitles", 0.10)
 
-            # Step 3: Initialize report
+            # Step 3: Initialize report and debugger with same timestamp
             if output_path is None:
                 output_path = input_path.with_suffix(
                     '.ass' if self.config.output_format == 'ass' else '.srt'
                 )
 
+            # Generate timestamp for both report and debug output
+            timestamp = time.strftime('%Y%m%d_%H%M%S')
+
             report = create_report(
                 source_file=str(input_path),
                 output_file=str(output_path),
                 language=self.config.language
+            )
+
+            # Create debugger (only active if debug_output is enabled)
+            debugger = create_debugger(
+                logs_dir=self.logs_dir,
+                base_name=input_path.stem,
+                timestamp=timestamp,
+                settings_dict=self.settings
             )
 
             # Step 4: Process each subtitle
@@ -221,7 +237,9 @@ class OCRPipeline:
                     last_logged_percent = current_percent
 
                 try:
-                    entry, sub_result = self._process_single_subtitle(sub_image, report)
+                    entry, sub_result = self._process_single_subtitle(
+                        sub_image, report, debugger
+                    )
                     if entry is not None:
                         output_entries.append(entry)
                         report.add_subtitle_result(sub_result)
@@ -246,10 +264,15 @@ class OCRPipeline:
             # Step 7: Save report
             if self.config.generate_report:
                 self._log_progress("Saving report", 0.96)
-                report_path = self._get_report_path(input_path)
+                report_path = self._get_report_path(input_path, timestamp)
                 report.save(report_path)
                 result.report_path = report_path
                 result.report_summary = report.to_summary()
+
+            # Step 8: Save debug output (if enabled)
+            if self.config.debug_output:
+                self._log_progress("Saving debug output", 0.98)
+                debugger.save()
 
             result.success = True
             result.duration_seconds = time.time() - start_time
@@ -264,7 +287,8 @@ class OCRPipeline:
     def _process_single_subtitle(
         self,
         sub_image: SubtitleImage,
-        report: OCRReport
+        report: OCRReport,
+        debugger: OCRDebugger
     ) -> tuple[Optional[SubtitleEntry], SubtitleOCRResult]:
         """
         Process a single subtitle through the pipeline.
@@ -291,11 +315,24 @@ class OCRPipeline:
                 confidence=0.0,
             )
 
+        # Store raw OCR text before post-processing
+        raw_ocr_text = ocr_result.text
+
         # Post-process text
         post_result = self.postprocessor.process(
             ocr_result.text,
             confidence=ocr_result.average_confidence,
             timestamp=sub_image.start_time
+        )
+
+        # Add to debugger (it checks if enabled internally)
+        debugger.add_subtitle(
+            index=sub_image.index,
+            start_time=sub_image.start_time,
+            end_time=sub_image.end_time,
+            text=post_result.text,
+            confidence=ocr_result.average_confidence,
+            image=preprocessed.image
         )
 
         # Track unknown words
@@ -306,6 +343,18 @@ class OCRPipeline:
                 timestamp=sub_image.start_time,
                 confidence=ocr_result.average_confidence
             )
+            # Also track in debugger
+            debugger.add_unknown_word(sub_image.index, word)
+
+        # Track fixes applied
+        if post_result.was_modified:
+            for fix_name, fix_count in post_result.fixes_applied.items():
+                debugger.add_fix(
+                    sub_image.index,
+                    fix_name,
+                    f"Applied {fix_count} time(s)",
+                    original_text=raw_ocr_text
+                )
 
         # Track low confidence
         if ocr_result.low_confidence:
@@ -352,9 +401,8 @@ class OCRPipeline:
 
         return entry, sub_result
 
-    def _get_report_path(self, input_path: Path) -> Path:
+    def _get_report_path(self, input_path: Path, timestamp: str) -> Path:
         """Generate report file path."""
-        timestamp = time.strftime('%Y%m%d_%H%M%S')
         report_name = f"{input_path.stem}_ocr_report_{timestamp}.json"
         return self.logs_dir / report_name
 
