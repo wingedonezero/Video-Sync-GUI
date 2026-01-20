@@ -444,26 +444,27 @@ class VobSubParser(SubtitleImageParser):
                     pass
 
                 elif cmd == 0x03:
-                    # Palette
+                    # Palette - 4 nibbles map to color slots 3,2,1,0 (SubtitleEdit order)
+                    # RLE color index 0 uses slot 0, index 1 uses slot 1, etc.
                     if pos + 2 <= len(data):
                         b1, b2 = data[pos], data[pos + 1]
                         color_indices = [
-                            (b1 >> 4) & 0x0F,
-                            b1 & 0x0F,
-                            (b2 >> 4) & 0x0F,
-                            b2 & 0x0F
+                            b2 & 0x0F,          # slot 0 (background)
+                            (b2 >> 4) & 0x0F,   # slot 1 (text/pattern)
+                            b1 & 0x0F,          # slot 2 (emphasis1/outline)
+                            (b1 >> 4) & 0x0F    # slot 3 (emphasis2/anti-alias)
                         ]
                         pos += 2
 
                 elif cmd == 0x04:
-                    # Alpha channel
+                    # Alpha channel - same nibble order as palette
                     if pos + 2 <= len(data):
                         b1, b2 = data[pos], data[pos + 1]
                         alpha_values = [
-                            (b1 >> 4) & 0x0F,
-                            b1 & 0x0F,
-                            (b2 >> 4) & 0x0F,
-                            b2 & 0x0F
+                            b2 & 0x0F,          # slot 0 alpha
+                            (b2 >> 4) & 0x0F,   # slot 1 alpha
+                            b1 & 0x0F,          # slot 2 alpha
+                            (b1 >> 4) & 0x0F    # slot 3 alpha
                         ]
                         pos += 2
 
@@ -523,53 +524,67 @@ class VobSubParser(SubtitleImageParser):
             Index 2: Emphasis 1 (outline or secondary text)
             Index 3: Emphasis 2 (anti-alias/shadow)
 
-        Following subtile-ocr/vobsubocr approach:
-        - Render ALL non-background colors with their ACTUAL palette values
-        - Position 0 is always transparent (background)
-        - Positions 1, 2, 3 are rendered with real colors + alpha
-        - The preprocessing step converts to grayscale and binarizes,
-          which naturally filters out light anti-aliasing colors while
-          keeping the darker text colors as black.
+        Following subtile-ocr approach:
+        - Convert palette RGB colors to luminance values
+        - Apply dual thresholding: alpha >= threshold AND luminance >= threshold
+        - Output grayscale image directly (black text on white background)
 
-        This approach works better than forcing specific positions to black
-        because it lets the binarization threshold handle edge cases.
+        This approach produces clean binary output optimized for OCR.
 
         Returns:
-            RGBA numpy array with actual palette colors
+            Grayscale numpy array (black text on white background)
         """
-        # Create RGBA image
-        image = np.zeros((height, width, 4), dtype=np.uint8)
+        # DEBUG: Log color and alpha info for first few subtitles
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"VobSub decode: color_indices={color_indices}, alpha_values={alpha_values}")
+        palette_colors = [palette[idx] if idx < len(palette) else (0,0,0) for idx in color_indices]
+        logger.debug(f"VobSub decode: palette_colors={palette_colors}")
 
-        # Build color lookup - render with ACTUAL palette colors
-        # Position 0 = transparent background
-        # Positions 1, 2, 3 = render as OPAQUE regardless of alpha value
-        #
-        # IMPORTANT: Some VobSubs have alpha=0 for certain text colors,
-        # but we still need to render them for OCR. SubtitleEdit and
-        # other tools render all colors regardless of alpha. The alpha
-        # in VobSub is for display purposes, not to indicate missing text.
-        colors = []
-        for i, (idx, alpha) in enumerate(zip(color_indices, alpha_values)):
-            if idx < len(palette):
-                r, g, b = palette[idx]
-            else:
-                r, g, b = 128, 128, 128  # Fallback gray
+        # Create grayscale image (white background)
+        image = np.full((height, width), 255, dtype=np.uint8)
 
+        # Thresholds for determining text pixels
+        # Alpha threshold: pixel must be at least somewhat visible
+        alpha_threshold = 1  # Minimum alpha (0-15 scale) to be considered visible
+        # Luminance threshold: not used for binarization, any visible non-bg pixel is text
+        # This matches subtile-ocr which treats any visible pixel as text
+
+        # Build color lookup - determine if each position is TEXT or BACKGROUND
+        # Position 0 = always background (transparent)
+        # Positions 1, 2, 3 = text if alpha >= threshold, else background
+        is_text = []
+        for i, alpha in enumerate(alpha_values):
             if i == 0:
                 # Position 0: Background - always transparent
-                colors.append((0, 0, 0, 0))
+                is_text.append(False)
+            elif alpha >= alpha_threshold:
+                # Visible pixel - treat as text
+                is_text.append(True)
             else:
-                # Positions 1, 2, 3: Render with actual color, FULL OPACITY
-                # Ignore alpha value - we need all text visible for OCR
-                colors.append((r, g, b, 255))
+                # Invisible (alpha=0) - treat as background
+                is_text.append(False)
+
+        logger.debug(f"VobSub decode: is_text={is_text}")
+
+        # Convert is_text to grayscale values: True=0 (black), False=255 (white)
+        colors = [(0 if t else 255) for t in is_text]
 
         # Decode top field (even lines: 0, 2, 4, ...)
-        self._decode_rle_field(data, top_offset, image, 0, 2, width, height, colors)
+        self._decode_rle_field_grayscale(data, top_offset, image, 0, 2, width, height, colors)
 
         # Decode bottom field (odd lines: 1, 3, 5, ...)
-        self._decode_rle_field(data, bottom_offset, image, 1, 2, width, height, colors)
+        self._decode_rle_field_grayscale(data, bottom_offset, image, 1, 2, width, height, colors)
 
-        return image
+        # Return as RGBA for compatibility with rest of pipeline
+        # Convert grayscale to RGBA (white bg, black text with full opacity)
+        rgba = np.zeros((height, width, 4), dtype=np.uint8)
+        rgba[:, :, 0] = image  # R
+        rgba[:, :, 1] = image  # G
+        rgba[:, :, 2] = image  # B
+        rgba[:, :, 3] = 255    # Full opacity everywhere
+
+        return rgba
 
     def _decode_rle(
         self,
@@ -714,6 +729,75 @@ class VobSubParser(SubtitleImageParser):
                     image[y, x, 1] = g
                     image[y, x, 2] = b
                     image[y, x, 3] = a
+                x += 1
+
+            # Check if we naturally hit end of line
+            if x >= width:
+                if only_half:
+                    only_half = False
+                    index += 1
+                x = 0
+                y += line_step
+
+    def _decode_rle_field_grayscale(
+        self,
+        data: bytes,
+        offset: int,
+        image: np.ndarray,
+        start_line: int,
+        line_step: int,
+        width: int,
+        height: int,
+        colors: List[int]
+    ):
+        """
+        Decode one RLE field directly to grayscale image.
+
+        Args:
+            data: Raw subtitle data
+            offset: Starting byte offset for this field
+            image: Output grayscale image array (255=white, 0=black)
+            start_line: First line to decode (0 for top, 1 for bottom)
+            line_step: Line increment (2 for interlaced)
+            width: Image width
+            height: Image height
+            colors: 4-element list mapping color index to grayscale (0=black, 255=white)
+        """
+        if offset >= len(data):
+            return
+
+        index = offset
+        only_half = False
+        x = 0
+        y = start_line
+
+        while y < height and index + 2 < len(data):
+            # Decode next run
+            idx_inc, run_length, color, only_half, rest_of_line = self._decode_rle(
+                data, index, only_half
+            )
+            index += idx_inc
+
+            # If end of line, fill rest with this color
+            if rest_of_line:
+                run_length = width - x
+
+            # Get grayscale value for this color index
+            gray = colors[color] if color < len(colors) else 255
+
+            # Draw pixels for this run
+            for i in range(run_length):
+                if x >= width:
+                    # Line wrap - align to byte boundary
+                    if only_half:
+                        only_half = False
+                        index += 1
+                    x = 0
+                    y += line_step
+                    break
+
+                if y < height:
+                    image[y, x] = gray
                 x += 1
 
             # Check if we naturally hit end of line
