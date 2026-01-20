@@ -225,6 +225,9 @@ def _build_ocr_settings(config: dict, lang: str) -> dict:
         # Reporting
         'ocr_generate_report': config.get('ocr_generate_report', True),
         'ocr_save_debug_images': config.get('ocr_save_debug_images', False),
+
+        # Debug output - saves images and text files for problem subtitles
+        'ocr_debug_output': config.get('ocr_debug_output', False),
     }
 
 

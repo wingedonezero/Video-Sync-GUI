@@ -68,6 +68,7 @@ class AppConfig:
             # OCR Reporting
             'ocr_generate_report': True,  # Generate detailed OCR report
             'ocr_save_debug_images': False,  # Save preprocessed images for debugging
+            'ocr_debug_output': False,  # Save debug output by issue type (unknown words, fixes, low confidence)
 
             # --- Subtitle Sync Settings ---
             'subtitle_sync_mode': 'time-based',
