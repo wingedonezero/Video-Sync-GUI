@@ -300,6 +300,7 @@ class EasyOCRBackend(OCRBackend):
     def __init__(self, languages: List[str] = None):
         self.languages = languages or ['en']
         self._reader = None
+        logger.info(f"EasyOCRBackend created with languages: {self.languages}")
 
     @property
     def reader(self):
@@ -307,12 +308,17 @@ class EasyOCRBackend(OCRBackend):
         if self._reader is None:
             try:
                 import easyocr
-                logger.info(f"Initializing EasyOCR with languages: {self.languages}")
-                self._reader = easyocr.Reader(self.languages, gpu=False)
+                logger.info(f"Initializing EasyOCR Reader with languages: {self.languages}")
+                logger.info("This may take a moment if models need to be downloaded...")
+                self._reader = easyocr.Reader(self.languages, gpu=False, verbose=True)
+                logger.info("EasyOCR Reader initialized successfully")
             except ImportError:
                 raise ImportError(
                     "easyocr is not installed. Install with: pip install easyocr"
                 )
+            except Exception as e:
+                logger.error(f"Failed to initialize EasyOCR: {e}")
+                raise
         return self._reader
 
     def ocr_image(self, image: np.ndarray) -> OCRResult:
