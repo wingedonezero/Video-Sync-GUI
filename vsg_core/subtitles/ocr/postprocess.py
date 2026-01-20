@@ -38,11 +38,13 @@ class PostProcessConfig:
     # Confidence thresholds
     low_confidence_threshold: float = 60.0  # Apply aggressive fixes below this
     very_low_confidence_threshold: float = 40.0  # Apply extra aggressive fixes
+    garbage_confidence_threshold: float = 35.0  # Lines below this are likely garbage
 
     # Fix categories
     enable_unambiguous_fixes: bool = True  # Always-apply fixes
     enable_confidence_fixes: bool = True  # Confidence-gated fixes
     enable_dictionary_validation: bool = True  # Track unknown words
+    enable_garbage_detection: bool = True  # Detect and clean garbage OCR
 
     # Normalization
     normalize_ellipsis: bool = False  # Convert … to ...
@@ -195,6 +197,16 @@ class OCRPostProcessor:
         # II that should be ll (in words)
         self.double_i_pattern = re.compile(r'\b(\w*)II(\w*)\b')
 
+        # Garbage patterns - random capital letters with spaces
+        # Matches things like "U B D N TR S A" or "L ol T T T"
+        self.garbage_pattern = re.compile(
+            r'^[A-Z0-9\s\(\)\[\]\-\.,;:!?\'"~]+$'  # All caps/numbers/punctuation
+        )
+        # Pattern for sequences of short "words" (1-2 chars each)
+        self.short_word_sequence = re.compile(
+            r'(?:\b[A-Z]{1,2}\b\s*){3,}'  # 3+ consecutive 1-2 char uppercase "words"
+        )
+
     def process(
         self,
         text: str,
@@ -222,6 +234,15 @@ class OCRPostProcessor:
             return result
 
         current_text = text
+
+        # Step 0: Detect and clean garbage OCR output
+        if self.config.enable_garbage_detection:
+            current_text = self._clean_garbage_from_text(current_text, result)
+            if not current_text.strip():
+                # Entire text was garbage
+                result.text = ""
+                result.was_modified = True
+                return result
 
         # Step 1: Always apply unambiguous fixes
         if self.config.enable_unambiguous_fixes:
@@ -538,6 +559,127 @@ class OCRPostProcessor:
             return True
 
         return False
+
+    def _is_garbage_line(self, text: str, confidence: float = 100.0) -> bool:
+        """
+        Detect if a line is likely OCR garbage.
+
+        Garbage patterns include:
+        - Random capital letters with spaces: "U B D N TR S A"
+        - Very low confidence with mostly non-words
+        - High ratio of uppercase single characters
+
+        Args:
+            text: Text to check
+            confidence: OCR confidence for this text
+
+        Returns:
+            True if text appears to be garbage
+        """
+        if not text or len(text.strip()) < 3:
+            return False
+
+        text = text.strip()
+
+        # Very low confidence is a strong signal
+        if confidence < self.config.garbage_confidence_threshold:
+            # Check if it looks like garbage
+            words = text.split()
+            if len(words) >= 3:
+                # Count short "words" (1-2 chars)
+                short_words = sum(1 for w in words if len(w) <= 2)
+                if short_words / len(words) > 0.6:
+                    return True
+
+        # Check for sequences of short uppercase "words"
+        if self.short_word_sequence.search(text):
+            # Verify it's not a valid acronym or initialism
+            # by checking if there are normal words around it
+            words = text.split()
+            uppercase_short = sum(1 for w in words if len(w) <= 2 and w.isupper())
+            if uppercase_short >= 3 and uppercase_short / len(words) > 0.5:
+                return True
+
+        # Check character composition
+        letters = [c for c in text if c.isalpha()]
+        if letters:
+            uppercase_ratio = sum(1 for c in letters if c.isupper()) / len(letters)
+            # If mostly uppercase and has many spaces, likely garbage
+            if uppercase_ratio > 0.8:
+                space_ratio = text.count(' ') / len(text)
+                if space_ratio > 0.3:  # More than 30% spaces
+                    return True
+
+        return False
+
+    def _clean_garbage_from_text(
+        self,
+        text: str,
+        result: ProcessResult,
+        line_confidences: Optional[List[float]] = None
+    ) -> str:
+        """
+        Remove garbage segments from multi-line text.
+
+        For subtitles with format "garbage\\Ngood text", removes the garbage
+        while keeping the good text.
+
+        Args:
+            text: Full subtitle text (may contain \\N line breaks)
+            result: ProcessResult to track fixes
+            line_confidences: Optional confidence per line
+
+        Returns:
+            Cleaned text with garbage removed
+        """
+        if not self.config.enable_garbage_detection:
+            return text
+
+        # Split on subtitle line breaks
+        lines = text.split('\\N')
+
+        if len(lines) == 1:
+            # Single line - check if entire thing is garbage
+            if self._is_garbage_line(text, line_confidences[0] if line_confidences else 100.0):
+                result.fixes_applied['garbage line removed'] += 1
+                return ""
+            return text
+
+        # Multi-line - check each line
+        clean_lines = []
+        for i, line in enumerate(lines):
+            conf = line_confidences[i] if line_confidences and i < len(line_confidences) else 100.0
+
+            if self._is_garbage_line(line, conf):
+                result.fixes_applied['garbage line removed'] += 1
+                continue
+
+            # Also remove short garbage-like fragments
+            line = self._remove_garbage_fragments(line, result)
+            if line.strip():
+                clean_lines.append(line)
+
+        return '\\N'.join(clean_lines)
+
+    def _remove_garbage_fragments(self, text: str, result: ProcessResult) -> str:
+        """
+        Remove garbage fragments from within a line.
+
+        Handles cases like "U B D N TR S A All units, report" where
+        garbage precedes valid text.
+        """
+        # Look for garbage at the start of the line
+        # Pattern: sequence of short uppercase "words" followed by valid text
+        match = self.short_word_sequence.match(text)
+        if match:
+            garbage = match.group(0)
+            rest = text[len(garbage):].strip()
+            # Check if the rest looks like valid text
+            if rest and not self._is_garbage_line(rest):
+                result.fixes_applied['garbage prefix removed'] += 1
+                return rest
+
+        return text
 
 
 def create_postprocessor(settings_dict: dict) -> OCRPostProcessor:
