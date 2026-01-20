@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional, Dict, List, Any, Callable
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QSplitter, QGroupBox,
     QTreeWidget, QTreeWidgetItem, QPushButton, QLabel, QComboBox,
@@ -252,6 +253,16 @@ class FontManagerDialog(QDialog):
             self.user_fonts_tree.addTopLevelItem(item)
             return
 
+        # Load fonts into Qt and cache the family names
+        self._loaded_fonts = {}  # file_path -> qt_family_name
+        for font in fonts:
+            if str(font.file_path) not in self._loaded_fonts:
+                font_id = QFontDatabase.addApplicationFont(str(font.file_path))
+                if font_id >= 0:
+                    families = QFontDatabase.applicationFontFamilies(font_id)
+                    if families:
+                        self._loaded_fonts[str(font.file_path)] = families[0]
+
         # Group by family
         families = self.scanner.get_font_families()
 
@@ -266,11 +277,27 @@ class FontManagerDialog(QDialog):
                     font.filename
                 ])
                 item.setData(0, Qt.UserRole, font)
+
+                # Apply the font to display in its own typeface
+                qt_family = self._loaded_fonts.get(str(font.file_path))
+                if qt_family:
+                    display_font = QFont(qt_family)
+                    display_font.setPointSize(11)
+                    item.setFont(0, display_font)
+
                 self.user_fonts_tree.addTopLevelItem(item)
             else:
                 # Multiple fonts in family, create expandable group
                 family_item = QTreeWidgetItem([family_name, f"{len(family_fonts)} variants", ""])
                 family_item.setData(0, Qt.UserRole, None)
+
+                # Apply font to family header using first variant
+                first_font = family_fonts[0]
+                qt_family = self._loaded_fonts.get(str(first_font.file_path))
+                if qt_family:
+                    display_font = QFont(qt_family)
+                    display_font.setPointSize(11)
+                    family_item.setFont(0, display_font)
 
                 for font in family_fonts:
                     child = QTreeWidgetItem([
@@ -279,6 +306,14 @@ class FontManagerDialog(QDialog):
                         font.filename
                     ])
                     child.setData(0, Qt.UserRole, font)
+
+                    # Apply font to child item
+                    qt_family = self._loaded_fonts.get(str(font.file_path))
+                    if qt_family:
+                        display_font = QFont(qt_family)
+                        display_font.setPointSize(10)
+                        child.setFont(1, display_font)  # Show style name in that font
+
                     family_item.addChild(child)
 
                 self.user_fonts_tree.addTopLevelItem(family_item)
