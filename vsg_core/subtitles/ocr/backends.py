@@ -96,11 +96,16 @@ class OCRBackend(ABC):
             line_images = self._split_into_lines(image)
 
         if not line_images:
+            logger.debug(f"[{self.name}] No line split, using full image OCR")
             return self.ocr_image(image)
 
+        logger.debug(f"[{self.name}] Split image into {len(line_images)} lines")
+
         all_lines = []
-        for line_img in line_images:
+        for i, line_img in enumerate(line_images):
             line_result = self.ocr_line(line_img)
+            logger.debug(f"[{self.name}] Line {i+1}: text='{line_result.text[:50] if line_result.text else ''}...', "
+                        f"conf={line_result.average_confidence:.1f}%, lines={len(line_result.lines)}")
             all_lines.extend(line_result.lines)
 
         # Build combined result
@@ -118,6 +123,8 @@ class OCRBackend(ABC):
                 result.average_confidence = sum(confidences) / len(confidences)
                 result.min_confidence = min(confidences)
                 result.low_confidence = result.average_confidence < 60.0
+                logger.debug(f"[{self.name}] Combined: {len(all_lines)} lines, "
+                            f"avg_conf={result.average_confidence:.1f}%, min={result.min_confidence:.1f}%")
 
         return result
 
@@ -340,40 +347,126 @@ class EasyOCRBackend(OCRBackend):
         return self._reader
 
     def ocr_image(self, image: np.ndarray) -> OCRResult:
-        """OCR full image."""
-        return self._do_ocr(image, paragraph=True)
+        """OCR full image with proper multi-line handling."""
+        return self._do_ocr(image, single_line=False)
 
     def ocr_line(self, image: np.ndarray) -> OCRResult:
         """OCR single line."""
-        return self._do_ocr(image, paragraph=False)
+        return self._do_ocr(image, single_line=True)
 
-    def _do_ocr(self, image: np.ndarray, paragraph: bool = True) -> OCRResult:
-        """Perform OCR using EasyOCR."""
+    def _do_ocr(self, image: np.ndarray, single_line: bool = False) -> OCRResult:
+        """
+        Perform OCR using EasyOCR.
+
+        For multi-line subtitles, we need to:
+        1. Get detections with bounding boxes (paragraph=False)
+        2. Sort by Y position to get proper line order
+        3. Group detections on the same line
+        4. Join with newlines
+
+        For single-line mode (when image is pre-split):
+        - Just sort by X position and join all text as one line
+        """
         result = OCRResult(text='', backend=self.name)
 
         try:
-            # EasyOCR returns list of (bbox, text, confidence)
-            detections = self.reader.readtext(image, paragraph=paragraph)
+            # Always use paragraph=False to get bounding boxes for proper ordering
+            # paragraph=True loses position info needed for multi-line subtitles
+            detections = self.reader.readtext(image, paragraph=False)
 
             if not detections:
                 return result
 
-            lines = []
+            # Each detection is (bbox, text, confidence)
+            # bbox is 4 points: [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+
+            # Extract detections with position info
+            detection_data = []
             for detection in detections:
                 if len(detection) >= 3:
                     bbox, text, conf = detection[0], detection[1], detection[2]
-                elif len(detection) == 2:
-                    text, conf = detection[0], detection[1]
-                else:
-                    continue
+                    # Calculate centers from bounding box
+                    y_coords = [point[1] for point in bbox]
+                    y_center = sum(y_coords) / len(y_coords)
+                    x_coords = [point[0] for point in bbox]
+                    x_center = sum(x_coords) / len(x_coords)
+                    height = max(y_coords) - min(y_coords)
 
-                # EasyOCR confidence is 0-1, convert to 0-100
-                confidence = conf * 100.0
+                    detection_data.append({
+                        'text': text,
+                        'conf': conf,
+                        'y_center': y_center,
+                        'x_center': x_center,
+                        'height': height
+                    })
+
+            if not detection_data:
+                return result
+
+            # Single-line mode: Image is pre-split, treat all detections as one line
+            if single_line:
+                # Sort by X position only (left to right)
+                detection_data.sort(key=lambda d: d['x_center'])
+
+                # Join all text as one line
+                line_text = ' '.join(d['text'] for d in detection_data)
+                line_conf = sum(d['conf'] for d in detection_data) / len(detection_data) * 100.0
 
                 line = OCRLineResult(
-                    text=text,
-                    confidence=confidence,
-                    word_confidences=[(text, confidence)],
+                    text=line_text,
+                    confidence=line_conf,
+                    word_confidences=[(d['text'], d['conf'] * 100.0) for d in detection_data],
+                    backend=self.name
+                )
+
+                result.lines = [line]
+                result.text = line_text
+                result.average_confidence = line_conf
+                result.min_confidence = min(d['conf'] * 100.0 for d in detection_data)
+                result.low_confidence = result.average_confidence < 60.0
+
+                return result
+
+            # Multi-line mode: Group by Y position
+            # Sort by Y position first (top to bottom)
+            detection_data.sort(key=lambda d: d['y_center'])
+
+            # Group detections into lines based on Y proximity
+            line_groups = []
+            current_group = [detection_data[0]]
+
+            for det in detection_data[1:]:
+                # Use the average height as threshold for same-line detection
+                avg_height = sum(d['height'] for d in current_group) / len(current_group)
+                y_threshold = max(avg_height * 0.5, 10)  # At least 10 pixels or half line height
+
+                if abs(det['y_center'] - current_group[0]['y_center']) < y_threshold:
+                    # Same line - add to current group
+                    current_group.append(det)
+                else:
+                    # New line - save current group and start new one
+                    line_groups.append(current_group)
+                    current_group = [det]
+
+            # Don't forget the last group
+            line_groups.append(current_group)
+
+            # For each line group, sort by X position (left to right) and join
+            lines = []
+            for group in line_groups:
+                # Sort by X position within the line
+                group.sort(key=lambda d: d['x_center'])
+
+                # Join text with spaces
+                line_text = ' '.join(d['text'] for d in group)
+
+                # Calculate average confidence for the line
+                line_conf = sum(d['conf'] for d in group) / len(group) * 100.0
+
+                line = OCRLineResult(
+                    text=line_text,
+                    confidence=line_conf,
+                    word_confidences=[(d['text'], d['conf'] * 100.0) for d in group],
                     backend=self.name
                 )
                 lines.append(line)
