@@ -399,7 +399,8 @@ class OCREngine:
         projection = np.sum(gray, axis=1)
 
         # Find line boundaries (rows with low projection values)
-        threshold = np.max(projection) * 0.1
+        # Use higher threshold (20%) to filter out noise
+        threshold = np.max(projection) * 0.2
         in_text = False
         line_starts = []
         line_ends = []
@@ -416,15 +417,17 @@ class OCREngine:
         if in_text:
             line_ends.append(len(projection) - 1)
 
-        # Extract line images
+        # Extract line images with minimum height filter
         lines = []
         padding = 5  # Add some padding around each line
+        min_line_height = 15  # Minimum height for valid text line (filters noise)
 
         for start, end in zip(line_starts, line_ends):
-            y1 = max(0, start - padding)
-            y2 = min(image.shape[0], end + padding)
-            line_img = image[y1:y2, :]
-            if line_img.shape[0] > 5:  # Skip very thin slices
+            line_height = end - start
+            if line_height >= min_line_height:
+                y1 = max(0, start - padding)
+                y2 = min(image.shape[0], end + padding)
+                line_img = image[y1:y2, :]
                 lines.append(line_img)
 
         return lines

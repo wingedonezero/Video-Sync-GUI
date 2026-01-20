@@ -519,17 +519,18 @@ class VobSubParser(SubtitleImageParser):
 
         VobSub 4-color palette positions:
             Index 0: Background (usually transparent)
-            Index 1: Pattern/text fill (main text body)
-            Index 2: Emphasis 1 (outline)
+            Index 1: Pattern/text fill (one text color, e.g., English)
+            Index 2: Emphasis 1 (second text color, e.g., romaji)
             Index 3: Emphasis 2 (anti-alias/shadow/effects)
 
-        For OCR, we render ONLY position 1 (text fill) as BLACK:
-        - Position 1: Text fill - this is the actual readable text
-        - Position 2: SKIPPED - outline may contain karaoke markers
-        - Position 3: SKIPPED - anti-alias/effects create OCR garbage
+        For OCR, we render positions 1 AND 2 as BLACK:
+        - Position 1: Primary text color (e.g., English translation)
+        - Position 2: Secondary text color (e.g., romaji/Japanese)
+        - Position 3: SKIPPED - often contains effects/noise
 
-        Testing showed that positions 2 and 3 often contain visual elements
-        (karaoke timing, effects) that appear as garbage characters.
+        Multi-language anime subtitles typically use positions 1 and 2
+        for different text lines. Position 3 often has anti-aliasing
+        or visual effects that create OCR garbage.
 
         Returns:
             RGBA numpy array with black text on transparent background
@@ -537,23 +538,23 @@ class VobSubParser(SubtitleImageParser):
         # Create RGBA image
         image = np.zeros((height, width, 4), dtype=np.uint8)
 
-        # Build color lookup - render ONLY position 1 (text fill) as BLACK
+        # Build color lookup - render positions 1 AND 2 as BLACK
         # VobSub 4-color positions:
         #   0: Background (transparent)
-        #   1: Pattern/text fill (main text) - RENDER (this is the actual text)
-        #   2: Emphasis/outline - SKIP (may contain karaoke markers)
-        #   3: Anti-alias/effects - SKIP (often contains noise)
+        #   1: Pattern/text fill (one text color, e.g., English)
+        #   2: Emphasis/outline (second text color, e.g., romaji)
+        #   3: Anti-alias/effects - SKIP (often noise/karaoke markers)
         #
-        # Only rendering position 1 gives cleanest OCR results.
-        # Positions 2 and 3 often contain visual effects, outlines, or
-        # karaoke timing markers that confuse Tesseract.
+        # Multi-language subtitles (romaji + English) typically use
+        # positions 1 and 2 for different text lines.
+        # Position 3 often contains effects or anti-aliasing noise.
         colors = []
         for i, (idx, alpha) in enumerate(zip(color_indices, alpha_values)):
-            if i == 1 and alpha > 0:
-                # Position 1: Text fill -> render as BLACK
+            if i in (1, 2) and alpha > 0:
+                # Positions 1 and 2: Text -> render as BLACK
                 colors.append((0, 0, 0, 255))
             else:
-                # All other positions (0, 2, 3) -> transparent
+                # Position 0 (background) and 3 (effects) -> transparent
                 colors.append((0, 0, 0, 0))
 
         # Decode top field (even lines: 0, 2, 4, ...)
