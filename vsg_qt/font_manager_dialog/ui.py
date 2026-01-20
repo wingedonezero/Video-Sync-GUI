@@ -14,94 +14,13 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QSplitter, QGroupBox,
     QTreeWidget, QTreeWidgetItem, QPushButton, QLabel, QComboBox,
-    QMessageBox, QHeaderView, QFrame, QCheckBox, QDialogButtonBox,
-    QScrollArea, QWidget
+    QMessageBox, QHeaderView, QFrame
 )
 
 from vsg_core.font_manager import (
     FontScanner, SubtitleFontAnalyzer, FontReplacementManager, FontInfo
 )
 from vsg_core.config import AppConfig
-
-
-class StyleSelectionDialog(QDialog):
-    """Dialog to select which styles to apply a font replacement to."""
-
-    def __init__(self, font_name: str, styles: List[str], parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Select Styles")
-        self.setMinimumWidth(300)
-        self.selected_styles: List[str] = []
-        self.checkboxes: Dict[str, QCheckBox] = {}
-
-        layout = QVBoxLayout(self)
-
-        # Header
-        header = QLabel(f"Select which styles using '{font_name}' to replace:")
-        header.setWordWrap(True)
-        layout.addWidget(header)
-
-        # Scrollable area for checkboxes (in case many styles)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setMaximumHeight(200)
-
-        checkbox_widget = QWidget()
-        checkbox_layout = QVBoxLayout(checkbox_widget)
-        checkbox_layout.setContentsMargins(5, 5, 5, 5)
-
-        for style in styles:
-            cb = QCheckBox(style)
-            cb.setChecked(True)  # Default to all selected
-            self.checkboxes[style] = cb
-            checkbox_layout.addWidget(cb)
-
-        checkbox_layout.addStretch()
-        scroll.setWidget(checkbox_widget)
-        layout.addWidget(scroll)
-
-        # Select all / none buttons
-        select_row = QHBoxLayout()
-        select_all_btn = QPushButton("Select All")
-        select_none_btn = QPushButton("Select None")
-        select_all_btn.clicked.connect(self._select_all)
-        select_none_btn.clicked.connect(self._select_none)
-        select_row.addWidget(select_all_btn)
-        select_row.addWidget(select_none_btn)
-        select_row.addStretch()
-        layout.addLayout(select_row)
-
-        # Dialog buttons
-        button_box = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
-        )
-        button_box.accepted.connect(self._on_accept)
-        button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
-
-    def _select_all(self):
-        for cb in self.checkboxes.values():
-            cb.setChecked(True)
-
-    def _select_none(self):
-        for cb in self.checkboxes.values():
-            cb.setChecked(False)
-
-    def _on_accept(self):
-        self.selected_styles = [
-            style for style, cb in self.checkboxes.items() if cb.isChecked()
-        ]
-        if not self.selected_styles:
-            QMessageBox.warning(
-                self,
-                "No Styles Selected",
-                "Please select at least one style to apply the replacement to."
-            )
-            return
-        self.accept()
-
-    def get_selected_styles(self) -> List[str]:
-        return self.selected_styles
 
 
 class FontManagerDialog(QDialog):
@@ -132,14 +51,14 @@ class FontManagerDialog(QDialog):
         self.analyzer = SubtitleFontAnalyzer(subtitle_path)
         self.replacement_manager = FontReplacementManager(self.fonts_dir)
 
-        # Load existing replacements if provided
+        # Load existing replacements if provided (now keyed by style name)
         if current_replacements:
-            for orig_font, repl_data in current_replacements.items():
+            for style_name, repl_data in current_replacements.items():
                 self.replacement_manager.add_replacement(
-                    orig_font,
+                    style_name,
+                    repl_data['original_font'],
                     repl_data['new_font_name'],
-                    Path(repl_data['font_file_path']),
-                    repl_data.get('affected_styles', [])
+                    Path(repl_data['font_file_path']) if repl_data.get('font_file_path') else None
                 )
 
         self._build_ui()
@@ -152,12 +71,12 @@ class FontManagerDialog(QDialog):
         # Main splitter for left/right panes
         splitter = QSplitter(Qt.Horizontal)
 
-        # Left pane: Fonts in file
-        left_group = QGroupBox("Fonts in Subtitle File")
+        # Left pane: Styles in file
+        left_group = QGroupBox("Styles in Subtitle File")
         left_layout = QVBoxLayout(left_group)
 
         self.file_fonts_tree = QTreeWidget()
-        self.file_fonts_tree.setHeaderLabels(["Font Name", "Used By", "Variants Needed"])
+        self.file_fonts_tree.setHeaderLabels(["Style Name", "Current Font"])
         self.file_fonts_tree.setAlternatingRowColors(True)
         self.file_fonts_tree.header().setSectionResizeMode(0, QHeaderView.Stretch)
         left_layout.addWidget(self.file_fonts_tree)
@@ -207,17 +126,17 @@ class FontManagerDialog(QDialog):
         # Replacement selection row
         selection_row = QHBoxLayout()
 
-        selection_row.addWidget(QLabel("Replace:"))
-        self.original_font_combo = QComboBox()
-        self.original_font_combo.setMinimumWidth(200)
-        selection_row.addWidget(self.original_font_combo)
+        selection_row.addWidget(QLabel("Style:"))
+        self.style_combo = QComboBox()
+        self.style_combo.setMinimumWidth(150)
+        selection_row.addWidget(self.style_combo)
 
-        selection_row.addWidget(QLabel("with:"))
+        selection_row.addWidget(QLabel("replace font with:"))
         self.replacement_font_combo = QComboBox()
         self.replacement_font_combo.setMinimumWidth(200)
         selection_row.addWidget(self.replacement_font_combo)
 
-        self.add_replacement_btn = QPushButton("Add Replacement")
+        self.add_replacement_btn = QPushButton("Set Replacement")
         selection_row.addWidget(self.add_replacement_btn)
 
         selection_row.addStretch()
@@ -225,7 +144,7 @@ class FontManagerDialog(QDialog):
 
         # Current replacements list
         self.replacements_tree = QTreeWidget()
-        self.replacements_tree.setHeaderLabels(["Original Font", "Replacement Font", "Affected Styles"])
+        self.replacements_tree.setHeaderLabels(["Style", "Original Font", "Replacement Font"])
         self.replacements_tree.setAlternatingRowColors(True)
         self.replacements_tree.setMaximumHeight(150)
         replacement_layout.addWidget(self.replacements_tree)
@@ -273,38 +192,27 @@ class FontManagerDialog(QDialog):
         self._update_combos()
 
     def _refresh_file_fonts(self):
-        """Refresh the fonts-in-file tree."""
+        """Refresh the styles-in-file tree."""
         self.file_fonts_tree.clear()
 
-        analysis = self.analyzer.analyze()
+        # Get styles directly from subtitle file
+        self.styles_info = self._get_styles_from_subtitle()
 
-        if 'error' in analysis and analysis['error']:
-            item = QTreeWidgetItem(["Error analyzing file", "", ""])
+        if not self.styles_info:
+            item = QTreeWidgetItem(["No styles found", ""])
             self.file_fonts_tree.addTopLevelItem(item)
             return
 
-        fonts_info = analysis.get('fonts', {})
-        inline_fonts = analysis.get('inline_fonts', [])
-
-        for font_name, info in fonts_info.items():
-            styles = info.get('styles', [])
-            styles_text = ', '.join(styles[:3])
-            if len(styles) > 3:
-                styles_text += f" (+{len(styles) - 3} more)"
-
-            # Determine variants needed
-            variants = []
-            if info.get('has_bold_styles'):
-                variants.append("Bold")
-            if info.get('has_italic_styles'):
-                variants.append("Italic")
-            variants_text = ', '.join(variants) if variants else "Regular only"
-
-            item = QTreeWidgetItem([font_name, styles_text, variants_text])
-            item.setData(0, Qt.UserRole, font_name)
+        for style_name, font_name in sorted(self.styles_info.items()):
+            item = QTreeWidgetItem([style_name, font_name])
+            item.setData(0, Qt.UserRole, style_name)  # Store style name
+            item.setData(1, Qt.UserRole, font_name)   # Store original font
             self.file_fonts_tree.addTopLevelItem(item)
 
-        # Show inline fonts warning if any
+        # Check for inline fonts
+        analysis = self.analyzer.analyze()
+        inline_fonts = analysis.get('inline_fonts', [])
+
         if inline_fonts:
             self.inline_fonts_label.setText(
                 f"Note: {len(inline_fonts)} font(s) used in inline tags: {', '.join(inline_fonts[:3])}"
@@ -313,6 +221,24 @@ class FontManagerDialog(QDialog):
             self.inline_fonts_label.setVisible(True)
         else:
             self.inline_fonts_label.setVisible(False)
+
+    def _get_styles_from_subtitle(self) -> Dict[str, str]:
+        """Get style names and their fonts from the subtitle file."""
+        import pysubs2
+
+        try:
+            subs = pysubs2.load(self.subtitle_path, encoding='utf-8')
+        except Exception:
+            try:
+                subs = pysubs2.load(self.subtitle_path)
+            except Exception:
+                return {}
+
+        styles_info = {}
+        for style_name, style in subs.styles.items():
+            styles_info[style_name] = style.fontname
+
+        return styles_info
 
     def _refresh_user_fonts(self):
         """Refresh the user fonts tree."""
@@ -363,33 +289,29 @@ class FontManagerDialog(QDialog):
 
         replacements = self.replacement_manager.get_replacements()
 
-        for original_font, repl_data in replacements.items():
-            styles = repl_data.get('affected_styles', [])
-            styles_text = ', '.join(styles[:3])
-            if len(styles) > 3:
-                styles_text += f" (+{len(styles) - 3} more)"
-
+        for style_name, repl_data in replacements.items():
             item = QTreeWidgetItem([
-                original_font,
-                repl_data['new_font_name'],
-                styles_text
+                style_name,
+                repl_data['original_font'],
+                repl_data['new_font_name']
             ])
-            item.setData(0, Qt.UserRole, original_font)
+            item.setData(0, Qt.UserRole, style_name)
             self.replacements_tree.addTopLevelItem(item)
 
         self.remove_replacement_btn.setEnabled(False)
 
     def _update_combos(self):
         """Update the combo boxes."""
-        # Original font combo
-        self.original_font_combo.clear()
-        analysis = self.analyzer.analyze()
-        fonts_info = analysis.get('fonts', {})
+        # Style combo - show all styles, mark ones with replacements
+        self.style_combo.clear()
         existing_replacements = set(self.replacement_manager.get_replacements().keys())
 
-        for font_name in sorted(fonts_info.keys()):
-            if font_name not in existing_replacements:
-                self.original_font_combo.addItem(font_name, font_name)
+        if hasattr(self, 'styles_info'):
+            for style_name in sorted(self.styles_info.keys()):
+                display = style_name
+                if style_name in existing_replacements:
+                    display = f"{style_name} *"  # Mark as having replacement
+                self.style_combo.addItem(display, style_name)
 
         # Replacement font combo
         self.replacement_font_combo.clear()
@@ -401,14 +323,14 @@ class FontManagerDialog(QDialog):
             self.replacement_font_combo.addItem(display_name, font)
 
     def _on_file_font_selected(self, current, previous):
-        """Handle selection in file fonts tree."""
+        """Handle selection in styles tree."""
         if current:
-            font_name = current.data(0, Qt.UserRole)
-            if font_name:
-                # Select in combo
-                idx = self.original_font_combo.findData(font_name)
+            style_name = current.data(0, Qt.UserRole)
+            if style_name:
+                # Select in style combo
+                idx = self.style_combo.findData(style_name)
                 if idx >= 0:
-                    self.original_font_combo.setCurrentIndex(idx)
+                    self.style_combo.setCurrentIndex(idx)
 
     def _on_user_font_selected(self, current, previous):
         """Handle selection in user fonts tree."""
@@ -441,42 +363,29 @@ class FontManagerDialog(QDialog):
             subprocess.run(['xdg-open', str(self.fonts_dir)])
 
     def _add_replacement(self):
-        """Add a new font replacement."""
-        original_font = self.original_font_combo.currentData()
+        """Add a font replacement for the selected style."""
+        style_name = self.style_combo.currentData()
         replacement_font = self.replacement_font_combo.currentData()
 
-        if not original_font:
-            QMessageBox.warning(self, "Error", "Please select a font to replace.")
+        if not style_name:
+            QMessageBox.warning(self, "Error", "Please select a style.")
             return
 
         if not replacement_font:
             QMessageBox.warning(self, "Error", "Please select a replacement font.")
             return
 
-        # Get all styles using this font
-        analysis = self.analyzer.analyze()
-        fonts_info = analysis.get('fonts', {})
-        all_styles = fonts_info.get(original_font, {}).get('styles', [])
-
-        if not all_styles:
-            QMessageBox.warning(self, "Error", "No styles found using this font.")
+        # Get the original font for this style
+        original_font = self.styles_info.get(style_name)
+        if not original_font:
+            QMessageBox.warning(self, "Error", "Could not determine original font for this style.")
             return
 
-        # If multiple styles use this font, let user select which to affect
-        if len(all_styles) > 1:
-            dialog = StyleSelectionDialog(original_font, all_styles, self)
-            if not dialog.exec():
-                return  # User cancelled
-            selected_styles = dialog.get_selected_styles()
-        else:
-            # Only one style, use it directly
-            selected_styles = all_styles
-
         self.replacement_manager.add_replacement(
+            style_name,
             original_font,
             replacement_font.family_name,
-            replacement_font.file_path,
-            selected_styles
+            replacement_font.file_path
         )
 
         self._refresh_replacements()
@@ -486,9 +395,9 @@ class FontManagerDialog(QDialog):
         """Remove the selected replacement."""
         current = self.replacements_tree.currentItem()
         if current:
-            original_font = current.data(0, Qt.UserRole)
-            if original_font:
-                self.replacement_manager.remove_replacement(original_font)
+            style_name = current.data(0, Qt.UserRole)
+            if style_name:
+                self.replacement_manager.remove_replacement(style_name)
                 self._refresh_replacements()
                 self._update_combos()
 
