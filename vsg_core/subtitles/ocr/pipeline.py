@@ -278,8 +278,9 @@ class OCRPipeline:
             self.ocr_work_dir if self.config.save_debug_images else None
         )
 
-        # Run OCR
-        ocr_result = self.engine.ocr_image(preprocessed.image)
+        # Run OCR - use line splitting with PSM 7 for better accuracy
+        # This splits multi-line subtitles and OCRs each line separately
+        ocr_result = self.engine.ocr_lines_separately(preprocessed.image)
 
         if not ocr_result.success:
             return None, SubtitleOCRResult(

@@ -296,6 +296,10 @@ class OCREngine:
         """
         OCR each line separately for better accuracy.
 
+        Uses PSM 7 (single line mode) for each line, which greatly improves
+        accuracy especially for non-English text. This is the approach used
+        by subtile-ocr/vobsubocr.
+
         If line_images are provided, OCR each one individually.
         Otherwise, attempt to split the image into lines and OCR each.
 
@@ -316,7 +320,8 @@ class OCREngine:
 
         all_lines = []
         for i, line_img in enumerate(line_images):
-            line_result = self.ocr_image(line_img)
+            # Use PSM 7 (single line) for individual lines - much better accuracy
+            line_result = self._ocr_single_line(line_img)
             all_lines.extend(line_result.lines)
 
         result = OCRResult(
@@ -332,6 +337,40 @@ class OCREngine:
                 result.low_confidence = (
                     result.average_confidence < self.config.low_confidence_threshold
                 )
+
+        return result
+
+    def _ocr_single_line(self, image: np.ndarray) -> OCRResult:
+        """
+        OCR a single line image using PSM 7 (single text line).
+
+        PSM 7 is optimized for single lines and gives much better results
+        than block modes for subtitle lines.
+        """
+        result = OCRResult(text='')
+
+        try:
+            # Use PSM 7 specifically for single lines
+            config = self._build_config(psm=7)
+            data = pytesseract.image_to_data(
+                image,
+                lang=self.config.language,
+                config=config,
+                output_type=Output.DICT
+            )
+
+            lines = self._process_ocr_data(data, 7)
+            result.lines = lines
+            result.text = self._build_text_from_lines(lines)
+
+            if lines:
+                confidences = [line.confidence for line in lines if line.confidence >= 0]
+                if confidences:
+                    result.average_confidence = sum(confidences) / len(confidences)
+                    result.min_confidence = min(confidences)
+
+        except Exception as e:
+            result.error = str(e)
 
         return result
 
