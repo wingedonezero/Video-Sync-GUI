@@ -92,8 +92,8 @@ class OCRPipeline:
         self.logs_dir = Path(logs_dir)
         self.progress_callback = progress_callback
 
-        # Create OCR subdirectory in work_dir
-        self.ocr_work_dir = self.work_dir / 'ocr'
+        # Use work_dir directly (caller already provides ocr-specific dir)
+        self.ocr_work_dir = self.work_dir
         self.ocr_work_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize configuration
