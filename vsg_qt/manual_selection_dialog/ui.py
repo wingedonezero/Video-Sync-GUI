@@ -591,8 +591,25 @@ class ManualSelectionDialog(QDialog):
             font_temp_dir.mkdir(parents=True, exist_ok=True)
             extracted_fonts = extract_attachments(source_file, font_temp_dir, runner, tool_paths, 'font')
             if extracted_fonts:
-                fonts_dir = str(font_temp_dir)
                 self.log_callback(f"[INFO] Extracted {len(extracted_fonts)} font(s) for preview.")
+
+            # Also copy user fonts from .fonts folder for font replacement preview
+            user_fonts_dir = self.config.get_fonts_dir()
+            if user_fonts_dir.exists():
+                user_font_count = 0
+                for ext in ['.ttf', '.otf', '.ttc', '.woff', '.woff2']:
+                    for font_file in user_fonts_dir.glob(f'*{ext}'):
+                        try:
+                            dst = font_temp_dir / font_file.name
+                            if not dst.exists():
+                                shutil.copy2(font_file, dst)
+                                user_font_count += 1
+                        except Exception:
+                            pass
+                if user_font_count:
+                    self.log_callback(f"[INFO] Copied {user_font_count} user font(s) for preview.")
+
+            fonts_dir = str(font_temp_dir)
         except Exception as e:
             self.log_callback(f"[WARN] Could not extract fonts: {e}")
 

@@ -307,13 +307,41 @@ class StyleEditorLogic:
     def open_font_manager(self):
         """Open the Font Manager dialog."""
         from vsg_qt.font_manager_dialog import FontManagerDialog
+        from vsg_core.font_manager import apply_font_replacements_to_subtitle
+
+        # Store original font names before any changes
+        original_replacements = self.font_replacements.copy()
+
         dialog = FontManagerDialog(
             str(self.engine.path),
             current_replacements=self.font_replacements,
             parent=self.v
         )
         if dialog.exec():
-            self.font_replacements = dialog.get_replacements()
+            new_replacements = dialog.get_replacements()
+
+            # Check if replacements changed
+            if new_replacements != original_replacements:
+                self.font_replacements = new_replacements
+
+                # Apply font name changes to the subtitle file for preview
+                if new_replacements:
+                    try:
+                        modified = apply_font_replacements_to_subtitle(
+                            str(self.engine.path),
+                            new_replacements
+                        )
+                        # Reload the subtitle in the player to show changes
+                        self.v.player_thread.reload_subtitle_track()
+                        # Also reload the engine so UI reflects changes
+                        self.engine = StyleEngine(str(self.engine.path))
+                        self.populate_initial_state()
+                    except Exception as e:
+                        QMessageBox.warning(
+                            self.v,
+                            "Font Preview",
+                            f"Could not apply font changes to preview: {e}"
+                        )
 
     def get_font_replacements(self) -> Dict[str, Any]:
         """Get the configured font replacements."""
