@@ -612,10 +612,23 @@ class SubtitlesStep:
                     runner._log_message(f"[Font] Applying font replacements to track {item.track.id}...")
                     try:
                         from vsg_core.font_manager import apply_font_replacements_to_subtitle
+                        from vsg_core.subtitles.metadata_preserver import SubtitleMetadata
+
+                        # Capture original state before processing
+                        metadata = SubtitleMetadata(str(item.extracted_path))
+                        metadata.capture()
+
                         modified_count = apply_font_replacements_to_subtitle(
                             str(item.extracted_path),
                             item.font_replacements
                         )
+
+                        # Validate and restore any lost metadata
+                        # Note: Text content changes are expected when \fn tags are replaced
+                        stats = metadata.validate_and_restore(runner)
+                        if stats.get('extradata_restored') or stats.get('comment_lines_restored') or stats.get('project_garbage_restored'):
+                            runner._log_message(f"[Font] Metadata restoration: extradata={stats.get('extradata_restored', 0)}, comments={stats.get('comment_lines_restored', 0)}, garbage={stats.get('project_garbage_restored', 0)}")
+
                         runner._log_message(f"[Font] Applied {len(item.font_replacements)} replacement(s) to {modified_count} style(s).")
                     except Exception as e:
                         runner._log_message(f"[Font] WARNING: Failed to apply font replacements: {e}")
