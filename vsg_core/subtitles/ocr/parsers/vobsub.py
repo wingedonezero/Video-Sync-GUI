@@ -517,7 +517,17 @@ class VobSubParser(SubtitleImageParser):
         VobSub uses interlaced RLE with separate top and bottom fields.
         Each field contains run-length encoded 2-bit color values.
 
-        Based on SubtitleEdit's DecodeRle algorithm.
+        VobSub 4-color palette:
+            Index 0: Background (transparent)
+            Index 1: Text fill (main text - this is what we want!)
+            Index 2: Outline
+            Index 3: Anti-alias/shadow
+
+        For clean OCR, we only render color index 1 (text fill) as opaque.
+        This gives solid black text instead of outlined text, which
+        Tesseract can read much more accurately.
+
+        Based on SubtitleEdit's approach of marking outline colors as transparent.
 
         Returns:
             RGBA numpy array
@@ -525,15 +535,23 @@ class VobSubParser(SubtitleImageParser):
         # Create RGBA image
         image = np.zeros((height, width, 4), dtype=np.uint8)
 
-        # Build color lookup with alpha (4 colors from the 16-color palette)
+        # Build color lookup - ONLY color index 1 (text fill) is opaque
+        # This matches SubtitleEdit's default where outline colors are transparent
         colors = []
         for i, (idx, alpha) in enumerate(zip(color_indices, alpha_values)):
             if idx < len(palette):
                 r, g, b = palette[idx]
             else:
                 r, g, b = 128, 128, 128
-            # Convert 4-bit alpha (0-15) to 8-bit (0-255)
-            a = int(alpha * 255 / 15)
+
+            # Only render color index 1 (text fill) as opaque
+            # Color 0 = background, 2 = outline, 3 = anti-alias -> all transparent
+            if i == 1 and alpha > 0:
+                # Text fill - render as opaque
+                a = 255
+            else:
+                # Background, outline, anti-alias - make transparent
+                a = 0
             colors.append((r, g, b, a))
 
         # Decode top field (even lines: 0, 2, 4, ...)
