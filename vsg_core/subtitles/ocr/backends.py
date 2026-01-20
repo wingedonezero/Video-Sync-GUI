@@ -85,6 +85,9 @@ class OCRBackend(ABC):
         """
         OCR each line separately for better accuracy.
 
+        Note: Subclasses (like EasyOCR) may override this to use their own
+        text detection instead of manual line splitting.
+
         Args:
             image: Full subtitle image
             line_images: Optional pre-split line images
@@ -370,6 +373,24 @@ class EasyOCRBackend(OCRBackend):
     def ocr_line(self, image: np.ndarray) -> OCRResult:
         """OCR single line."""
         return self._do_ocr(image, single_line=True)
+
+    def ocr_lines_separately(
+        self,
+        image: np.ndarray,
+        line_images: Optional[List[np.ndarray]] = None
+    ) -> OCRResult:
+        """
+        Override base class to skip manual line splitting for EasyOCR.
+
+        EasyOCR has its own CRAFT text detection that handles multi-line text
+        better than manual horizontal projection splitting. Manual splitting
+        can cut too close to text edges and cause first/last character loss.
+
+        This approach matches VobSub-ML-OCR which passes full images to EasyOCR.
+        """
+        logger.debug(f"[{self.name}] Using native text detection (skipping line split)")
+        # Use ocr_image which handles multi-line via bounding box grouping
+        return self.ocr_image(image)
 
     def _do_ocr(self, image: np.ndarray, single_line: bool = False) -> OCRResult:
         """
