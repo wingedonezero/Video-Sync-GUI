@@ -629,12 +629,14 @@ class PaddleOCRBackend(OCRBackend):
 
     def _do_ocr(self, image: np.ndarray, single_line: bool = False) -> OCRResult:
         """
-        Perform OCR using PaddleOCR 3.0.
+        Perform OCR using PaddleOCR 3.x.
 
-        PaddleOCR 3.0 uses predict() method and returns result objects with:
+        PaddleOCR 3.x uses predict() method and returns result objects.
+        Access the data via the .json property which returns a dict with:
         - rec_texts: list of recognized text strings
         - rec_scores: confidence scores for each text segment
-        - dt_polys: detection polygon coordinates
+        - rec_boxes: bounding boxes [x_min, y_min, x_max, y_max]
+        - rec_polys: polygon coordinates (optional)
 
         For multi-line subtitles:
         1. Get all detections with bounding boxes
@@ -645,8 +647,7 @@ class PaddleOCRBackend(OCRBackend):
         result = OCRResult(text='', backend=self.name)
 
         try:
-            # PaddleOCR 3.0 uses predict() instead of ocr()
-            # predict() returns a generator, so we need to iterate over it
+            # PaddleOCR 3.x uses predict() which returns a generator
             predictions = self.ocr.predict(image)
 
             # Handle generator - get first result
@@ -662,22 +663,27 @@ class PaddleOCRBackend(OCRBackend):
                 logger.debug(f"[{self.name}] predict() returned no results")
                 return result
 
-            # PaddleOCR 3.0 result attributes accessed directly
-            # Handle various possible return formats defensively
-            rec_texts = getattr(pred, 'rec_texts', None)
-            rec_scores = getattr(pred, 'rec_scores', None)
-            dt_polys = getattr(pred, 'dt_polys', None)
+            # PaddleOCR 3.x: access results via .json property
+            try:
+                json_result = pred.json
+            except AttributeError:
+                # Fallback: maybe it's already a dict or has different structure
+                if isinstance(pred, dict):
+                    json_result = pred
+                else:
+                    logger.error(f"[{self.name}] Unexpected result type: {type(pred)}")
+                    return result
 
-            logger.debug(f"[{self.name}] Result type: {type(pred).__name__}, "
-                        f"rec_texts type: {type(rec_texts).__name__ if rec_texts is not None else 'None'}, "
-                        f"texts count: {len(rec_texts) if rec_texts and hasattr(rec_texts, '__len__') else 0}")
-
-            # Convert to lists if needed, handle None/empty cases
-            if rec_texts is None or (hasattr(rec_texts, '__len__') and len(rec_texts) == 0):
+            if not json_result:
                 return result
-            rec_texts = list(rec_texts) if not isinstance(rec_texts, list) else rec_texts
-            rec_scores = list(rec_scores) if rec_scores is not None and not isinstance(rec_scores, list) else (rec_scores or [])
-            dt_polys = list(dt_polys) if dt_polys is not None and not isinstance(dt_polys, list) else (dt_polys or [])
+
+            # Extract data from JSON result
+            rec_texts = json_result.get('rec_texts', []) or []
+            rec_scores = json_result.get('rec_scores', []) or []
+            # rec_boxes is [x_min, y_min, x_max, y_max] format
+            rec_boxes = json_result.get('rec_boxes', []) or []
+
+            logger.debug(f"[{self.name}] Found {len(rec_texts)} text regions")
 
             if not rec_texts:
                 return result
@@ -688,30 +694,21 @@ class PaddleOCRBackend(OCRBackend):
                 conf = rec_scores[i] if i < len(rec_scores) else 0.0
 
                 # Get bounding box if available
-                # Verify polygon has at least 4 points and each point has x,y coords
-                has_valid_poly = False
-                if i < len(dt_polys):
+                # rec_boxes format: [x_min, y_min, x_max, y_max]
+                if i < len(rec_boxes):
                     try:
-                        poly = dt_polys[i]
-                        # Ensure poly is iterable and has enough points
-                        if hasattr(poly, '__len__') and len(poly) >= 4:
-                            # Check that each point has at least 2 coordinates
-                            if all(hasattr(p, '__len__') and len(p) >= 2 for p in poly[:4]):
-                                has_valid_poly = True
-                    except (TypeError, IndexError):
-                        has_valid_poly = False
-
-                if has_valid_poly:
-                    poly = dt_polys[i]
-                    # poly is [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
-                    try:
-                        y_coords = [float(p[1]) for p in poly]
-                        x_coords = [float(p[0]) for p in poly]
-                        y_center = sum(y_coords) / len(y_coords)
-                        x_center = sum(x_coords) / len(x_coords)
-                        height = max(y_coords) - min(y_coords)
+                        box = rec_boxes[i]
+                        if hasattr(box, '__len__') and len(box) >= 4:
+                            x_min, y_min, x_max, y_max = float(box[0]), float(box[1]), float(box[2]), float(box[3])
+                            x_center = (x_min + x_max) / 2
+                            y_center = (y_min + y_max) / 2
+                            height = y_max - y_min
+                        else:
+                            # Fallback
+                            y_center = i * 50
+                            x_center = 0
+                            height = 30
                     except (TypeError, IndexError, ValueError):
-                        # Fallback if coordinate extraction fails
                         y_center = i * 50
                         x_center = 0
                         height = 30
