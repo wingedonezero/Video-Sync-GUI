@@ -42,11 +42,32 @@ class AppConfig:
             'temp_root': str(self.script_dir / 'temp_work'),
             'logs_folder': str(self.script_dir / 'logs'),
             'videodiff_path': '',
-            'subtile_ocr_path': '',
-            'subtile_ocr_char_blacklist': '',
-            'ocr_cleanup_enabled': True,
-            'ocr_cleanup_normalize_ellipsis': False,
-            'ocr_cleanup_custom_wordlist_path': '',
+
+            # --- OCR Settings ---
+            'ocr_enabled': True,  # Enable OCR for image-based subtitles
+            'ocr_language': 'eng',  # Tesseract language code
+            'ocr_char_blacklist': '',  # Characters to exclude from OCR
+            'ocr_output_format': 'ass',  # 'ass' or 'srt'
+
+            # OCR Preprocessing
+            'ocr_preprocess_auto': True,  # Auto-detect optimal preprocessing
+            'ocr_force_binarization': False,  # Force binary thresholding
+            'ocr_upscale_threshold': 40,  # Upscale if height < this (pixels)
+            'ocr_denoise': False,  # Apply denoising
+
+            # OCR Post-Processing
+            'ocr_cleanup_enabled': True,  # Enable pattern-based text cleanup
+            'ocr_cleanup_normalize_ellipsis': False,  # Convert … to ...
+            'ocr_custom_wordlist_path': '',  # Custom wordlist for anime names, etc.
+            'ocr_low_confidence_threshold': 60.0,  # Flag lines below this confidence
+
+            # OCR Position Handling
+            'ocr_preserve_positions': True,  # Keep non-bottom subtitle positions
+            'ocr_bottom_threshold': 75.0,  # Y% threshold for "bottom" (configurable)
+
+            # OCR Reporting
+            'ocr_generate_report': True,  # Generate detailed OCR report
+            'ocr_save_debug_images': False,  # Save preprocessed images for debugging
 
             # --- Subtitle Sync Settings ---
             'subtitle_sync_mode': 'time-based',
@@ -619,6 +640,7 @@ class AppConfig:
         # Create .config and .fonts directories for new features
         self.get_config_dir().mkdir(parents=True, exist_ok=True)
         self.get_fonts_dir().mkdir(parents=True, exist_ok=True)
+        self.get_ocr_config_dir().mkdir(parents=True, exist_ok=True)
 
     def get_config_dir(self) -> Path:
         """Returns the path to the .config directory for storing app configuration files."""
@@ -627,3 +649,11 @@ class AppConfig:
     def get_fonts_dir(self) -> Path:
         """Returns the path to the .fonts directory for user font files."""
         return self.script_dir / '.fonts'
+
+    def get_ocr_config_dir(self) -> Path:
+        """Returns the path to the .config/ocr directory for OCR configuration files."""
+        return self.get_config_dir() / 'ocr'
+
+    def get_default_wordlist_path(self) -> Path:
+        """Returns the default path for the OCR custom wordlist."""
+        return self.get_ocr_config_dir() / 'custom_wordlist.txt'

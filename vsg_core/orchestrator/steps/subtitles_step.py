@@ -48,12 +48,19 @@ class SubtitlesStep:
                 runner._log_message(f"[Subtitles] Ignoring temp preview file for track {item.track.id} (will apply style patch after conversion).")
 
             if item.perform_ocr and item.extracted_path:
+                # Determine OCR work and logs directories
+                ocr_work_dir = ctx.temp_dir / 'ocr'
+                logs_dir = Path(ctx.settings_dict.get('logs_folder', ctx.temp_dir))
+
                 ocr_output_path = run_ocr(
                     str(item.extracted_path.with_suffix('.idx')),
                     item.track.props.lang,
                     runner,
                     ctx.tool_paths,
-                    ctx.settings_dict
+                    ctx.settings_dict,
+                    work_dir=ocr_work_dir,
+                    logs_dir=logs_dir,
+                    track_id=item.track.id
                 )
                 if ocr_output_path:
                     ocr_file = Path(ocr_output_path)
@@ -112,10 +119,13 @@ class SubtitlesStep:
                     items_to_add.append(preserved_item)
 
                     item.extracted_path = Path(ocr_output_path)
+                    # Determine codec based on output file extension
+                    ocr_output_ext = Path(ocr_output_path).suffix.lower()
+                    ocr_codec_id = "S_TEXT/ASS" if ocr_output_ext == '.ass' else "S_TEXT/UTF8"
                     item.track = Track(
                         source=item.track.source, id=item.track.id, type=item.track.type,
                         props=StreamProps(
-                            codec_id="S_TEXT/UTF8",
+                            codec_id=ocr_codec_id,
                             lang=original_props.lang,
                             name=original_props.name
                         )

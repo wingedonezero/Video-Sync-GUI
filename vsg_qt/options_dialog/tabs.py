@@ -53,80 +53,158 @@ class StorageTab(QWidget):
         self.widgets['logs_folder'].setToolTip("Directory for batch report files. Reports are saved after each job completes for persistent tracking.")
         self.widgets['videodiff_path'] = _file_input()
         self.widgets['videodiff_path'].setToolTip("Optional. The full path to the 'videodiff' executable if it's not in your system's PATH.")
-        self.widgets['subtile_ocr_path'] = _file_input()
-        self.widgets['subtile_ocr_path'].setToolTip("Optional. The full path to the 'subtile-ocr' executable if it's not in your system's PATH.")
-        self.widgets['subtile_ocr_char_blacklist'] = QLineEdit()
-        self.widgets['subtile_ocr_char_blacklist'].setToolTip("Optional. A string of characters to blacklist during the OCR process (e.g., '|/_~').")
+        self.widgets['ocr_custom_wordlist_path'] = _file_input()
+        self.widgets['ocr_custom_wordlist_path'].setToolTip("Path to custom wordlist file for OCR. Contains words to not flag as unknown (anime names, romaji, etc.). One word per line.")
         f.addRow('Output Directory:', self.widgets['output_folder'])
         f.addRow('Temporary Directory:', self.widgets['temp_root'])
         f.addRow('Reports Directory:', self.widgets['logs_folder'])
         f.addRow('VideoDiff Path (optional):', self.widgets['videodiff_path'])
-        f.addRow('Subtitle OCR Path (optional):', self.widgets['subtile_ocr_path'])
-        f.addRow('OCR Character Blacklist (optional):', self.widgets['subtile_ocr_char_blacklist'])
+        f.addRow('OCR Custom Wordlist:', self.widgets['ocr_custom_wordlist_path'])
 
-class SubtitleCleanupTab(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.widgets: Dict[str, QWidget] = {}
-        f = QFormLayout(self)
-        self.widgets['ocr_cleanup_enabled'] = QCheckBox("Enable post-OCR cleanup")
-        self.widgets['ocr_cleanup_enabled'].setToolTip("Automatically fix common OCR errors in subtitles after processing.")
+class OCRTab(QWidget):
+    """
+    Combined OCR settings tab - replaces old Timing and Subtitle Cleanup tabs.
 
-        self.widgets['ocr_cleanup_custom_wordlist_path'] = _file_input()
-        self.widgets['ocr_cleanup_custom_wordlist_path'].setToolTip("Optional. A path to a custom wordlist (.txt file, one word per line) to prevent OCR corrections on specific names or terms.")
-
-        self.widgets['ocr_cleanup_normalize_ellipsis'] = QCheckBox("Normalize ellipsis (...)")
-        self.widgets['ocr_cleanup_normalize_ellipsis'].setToolTip("Replace the Unicode ellipsis character '…' with three periods '...'.")
-
-        f.addRow(self.widgets['ocr_cleanup_enabled'])
-        f.addRow("Custom Wordlist:", self.widgets['ocr_cleanup_custom_wordlist_path'])
-        f.addRow(self.widgets['ocr_cleanup_normalize_ellipsis'])
-
-class TimingTab(QWidget):
+    Contains:
+        - OCR engine settings (language, preprocessing)
+        - Post-processing settings (cleanup, normalization)
+        - Timing corrections (overlaps, duration, CPS)
+        - Output settings (format, position handling)
+    """
     def __init__(self):
         super().__init__()
         self.widgets: Dict[str, QWidget] = {}
         main_layout = QVBoxLayout(self)
 
-        self.widgets['timing_fix_enabled'] = QCheckBox("Enable subtitle timing corrections")
-        self.widgets['timing_fix_enabled'].setToolTip("Apply automated timing fixes after OCR and text cleanup.")
-        main_layout.addWidget(self.widgets['timing_fix_enabled'])
+        # --- OCR Settings Group ---
+        ocr_group = QGroupBox("OCR Settings")
+        ocr_layout = QFormLayout(ocr_group)
 
-        # --- Overlaps Group ---
-        overlap_group = QGroupBox("Fix Overlapping Display Times")
-        overlap_layout = QFormLayout(overlap_group)
-        self.widgets['timing_fix_overlaps'] = QCheckBox("Enable")
+        self.widgets['ocr_enabled'] = QCheckBox("Enable OCR for image-based subtitles")
+        self.widgets['ocr_enabled'].setToolTip("Automatically OCR VobSub and PGS subtitle tracks.")
+
+        self.widgets['ocr_language'] = QComboBox()
+        self.widgets['ocr_language'].addItem('English', 'eng')
+        self.widgets['ocr_language'].addItem('Japanese', 'jpn')
+        self.widgets['ocr_language'].addItem('Spanish', 'spa')
+        self.widgets['ocr_language'].addItem('French', 'fra')
+        self.widgets['ocr_language'].addItem('German', 'deu')
+        self.widgets['ocr_language'].addItem('Chinese (Simplified)', 'chi_sim')
+        self.widgets['ocr_language'].addItem('Chinese (Traditional)', 'chi_tra')
+        self.widgets['ocr_language'].addItem('Korean', 'kor')
+        self.widgets['ocr_language'].setToolTip("Tesseract language pack to use. Requires the corresponding language data to be installed.")
+
+        self.widgets['ocr_char_blacklist'] = QLineEdit()
+        self.widgets['ocr_char_blacklist'].setToolTip("Characters to exclude from OCR results (e.g., '|/_~').")
+
+        ocr_layout.addRow(self.widgets['ocr_enabled'])
+        ocr_layout.addRow("Language:", self.widgets['ocr_language'])
+        ocr_layout.addRow("Character Blacklist:", self.widgets['ocr_char_blacklist'])
+        main_layout.addWidget(ocr_group)
+
+        # --- Preprocessing Group ---
+        preprocess_group = QGroupBox("Preprocessing")
+        preprocess_layout = QFormLayout(preprocess_group)
+
+        self.widgets['ocr_preprocess_auto'] = QCheckBox("Auto-detect optimal settings")
+        self.widgets['ocr_preprocess_auto'].setToolTip("Automatically determine best preprocessing for each subtitle image.")
+
+        self.widgets['ocr_force_binarization'] = QCheckBox("Force binarization")
+        self.widgets['ocr_force_binarization'].setToolTip("Always apply binary thresholding. May help with low-contrast subtitles.")
+
+        self.widgets['ocr_upscale_threshold'] = QSpinBox()
+        self.widgets['ocr_upscale_threshold'].setRange(20, 100)
+        self.widgets['ocr_upscale_threshold'].setSuffix(" px")
+        self.widgets['ocr_upscale_threshold'].setToolTip("Upscale subtitle images if height is below this threshold.")
+
+        preprocess_layout.addRow(self.widgets['ocr_preprocess_auto'])
+        preprocess_layout.addRow(self.widgets['ocr_force_binarization'])
+        preprocess_layout.addRow("Upscale Threshold:", self.widgets['ocr_upscale_threshold'])
+        main_layout.addWidget(preprocess_group)
+
+        # --- Post-Processing Group ---
+        postprocess_group = QGroupBox("Post-Processing")
+        postprocess_layout = QFormLayout(postprocess_group)
+
+        self.widgets['ocr_cleanup_enabled'] = QCheckBox("Enable OCR text cleanup")
+        self.widgets['ocr_cleanup_enabled'].setToolTip("Apply pattern-based fixes for common OCR errors (I/l confusion, rn→m, etc.).")
+
+        self.widgets['ocr_cleanup_normalize_ellipsis'] = QCheckBox("Normalize ellipsis (… → ...)")
+        self.widgets['ocr_cleanup_normalize_ellipsis'].setToolTip("Replace Unicode ellipsis character with three periods.")
+
+        self.widgets['ocr_low_confidence_threshold'] = QDoubleSpinBox()
+        self.widgets['ocr_low_confidence_threshold'].setRange(0.0, 100.0)
+        self.widgets['ocr_low_confidence_threshold'].setSuffix(" %")
+        self.widgets['ocr_low_confidence_threshold'].setToolTip("Lines with confidence below this will be flagged in the report.")
+
+        postprocess_layout.addRow(self.widgets['ocr_cleanup_enabled'])
+        postprocess_layout.addRow(self.widgets['ocr_cleanup_normalize_ellipsis'])
+        postprocess_layout.addRow("Low Confidence Threshold:", self.widgets['ocr_low_confidence_threshold'])
+        main_layout.addWidget(postprocess_group)
+
+        # --- Timing Corrections Group ---
+        timing_group = QGroupBox("Timing Corrections")
+        timing_layout = QFormLayout(timing_group)
+
+        self.widgets['timing_fix_enabled'] = QCheckBox("Enable subtitle timing corrections")
+        self.widgets['timing_fix_enabled'].setToolTip("Apply automated timing fixes after OCR.")
+
+        self.widgets['timing_fix_overlaps'] = QCheckBox("Fix overlapping subtitles")
         self.widgets['timing_overlap_min_gap_ms'] = QSpinBox()
         self.widgets['timing_overlap_min_gap_ms'].setRange(0, 1000)
         self.widgets['timing_overlap_min_gap_ms'].setSuffix(" ms")
-        self.widgets['timing_overlap_min_gap_ms'].setToolTip("The minimum gap to enforce between two subtitles.")
-        overlap_layout.addRow(self.widgets['timing_fix_overlaps'])
-        overlap_layout.addRow("Minimum Gap:", self.widgets['timing_overlap_min_gap_ms'])
-        main_layout.addWidget(overlap_group)
+        self.widgets['timing_overlap_min_gap_ms'].setToolTip("Minimum gap to enforce between subtitles.")
 
-        # --- Short Durations Group ---
-        short_group = QGroupBox("Fix Short Display Times")
-        short_layout = QFormLayout(short_group)
-        self.widgets['timing_fix_short_durations'] = QCheckBox("Enable")
+        self.widgets['timing_fix_short_durations'] = QCheckBox("Fix short durations")
         self.widgets['timing_min_duration_ms'] = QSpinBox()
         self.widgets['timing_min_duration_ms'].setRange(100, 5000)
         self.widgets['timing_min_duration_ms'].setSuffix(" ms")
-        self.widgets['timing_min_duration_ms'].setToolTip("Subtitles shorter than this duration will be extended.")
-        short_layout.addRow(self.widgets['timing_fix_short_durations'])
-        short_layout.addRow("Minimum Duration:", self.widgets['timing_min_duration_ms'])
-        main_layout.addWidget(short_group)
+        self.widgets['timing_min_duration_ms'].setToolTip("Minimum subtitle display duration.")
 
-        # --- Long Durations Group ---
-        long_group = QGroupBox("Fix Long Display Times (based on Reading Speed)")
-        long_layout = QFormLayout(long_group)
-        self.widgets['timing_fix_long_durations'] = QCheckBox("Enable")
+        self.widgets['timing_fix_long_durations'] = QCheckBox("Enforce reading speed (CPS)")
         self.widgets['timing_max_cps'] = QDoubleSpinBox()
         self.widgets['timing_max_cps'].setRange(5.0, 100.0)
         self.widgets['timing_max_cps'].setSuffix(" CPS")
-        self.widgets['timing_max_cps'].setToolTip("Maximum characters per second. Subtitles that stay on screen too long for their text length will be shortened.")
-        long_layout.addRow(self.widgets['timing_fix_long_durations'])
-        long_layout.addRow("Max Characters Per Second:", self.widgets['timing_max_cps'])
-        main_layout.addWidget(long_group)
+        self.widgets['timing_max_cps'].setToolTip("Maximum characters per second. Longer subtitles will be trimmed.")
+
+        timing_layout.addRow(self.widgets['timing_fix_enabled'])
+        timing_layout.addRow(self.widgets['timing_fix_overlaps'])
+        timing_layout.addRow("Minimum Gap:", self.widgets['timing_overlap_min_gap_ms'])
+        timing_layout.addRow(self.widgets['timing_fix_short_durations'])
+        timing_layout.addRow("Minimum Duration:", self.widgets['timing_min_duration_ms'])
+        timing_layout.addRow(self.widgets['timing_fix_long_durations'])
+        timing_layout.addRow("Max CPS:", self.widgets['timing_max_cps'])
+        main_layout.addWidget(timing_group)
+
+        # --- Output Group ---
+        output_group = QGroupBox("Output")
+        output_layout = QFormLayout(output_group)
+
+        self.widgets['ocr_output_format'] = QComboBox()
+        self.widgets['ocr_output_format'].addItem('ASS (recommended)', 'ass')
+        self.widgets['ocr_output_format'].addItem('SRT', 'srt')
+        self.widgets['ocr_output_format'].setToolTip("Output format. ASS supports position tags, SRT does not.")
+
+        self.widgets['ocr_preserve_positions'] = QCheckBox("Preserve subtitle positions (non-bottom only)")
+        self.widgets['ocr_preserve_positions'].setToolTip("Keep original position for subtitles not at the bottom of the screen.")
+
+        self.widgets['ocr_bottom_threshold'] = QDoubleSpinBox()
+        self.widgets['ocr_bottom_threshold'].setRange(50.0, 95.0)
+        self.widgets['ocr_bottom_threshold'].setSuffix(" %")
+        self.widgets['ocr_bottom_threshold'].setToolTip("Y position threshold. Subtitles above this are considered 'not bottom' and will have position preserved.")
+
+        self.widgets['ocr_generate_report'] = QCheckBox("Generate detailed OCR report")
+        self.widgets['ocr_generate_report'].setToolTip("Save a JSON report with unknown words, confidence scores, and applied fixes.")
+
+        self.widgets['ocr_save_debug_images'] = QCheckBox("Save debug images (for troubleshooting)")
+        self.widgets['ocr_save_debug_images'].setToolTip("Save preprocessed images to temp folder for debugging OCR issues.")
+
+        output_layout.addRow("Output Format:", self.widgets['ocr_output_format'])
+        output_layout.addRow(self.widgets['ocr_preserve_positions'])
+        output_layout.addRow("Bottom Threshold:", self.widgets['ocr_bottom_threshold'])
+        output_layout.addRow(self.widgets['ocr_generate_report'])
+        output_layout.addRow(self.widgets['ocr_save_debug_images'])
+        main_layout.addWidget(output_group)
 
         main_layout.addStretch(1)
 
