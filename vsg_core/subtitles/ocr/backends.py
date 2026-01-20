@@ -96,11 +96,16 @@ class OCRBackend(ABC):
             line_images = self._split_into_lines(image)
 
         if not line_images:
+            logger.debug(f"[{self.name}] No line split, using full image OCR")
             return self.ocr_image(image)
 
+        logger.debug(f"[{self.name}] Split image into {len(line_images)} lines")
+
         all_lines = []
-        for line_img in line_images:
+        for i, line_img in enumerate(line_images):
             line_result = self.ocr_line(line_img)
+            logger.debug(f"[{self.name}] Line {i+1}: text='{line_result.text[:50] if line_result.text else ''}...', "
+                        f"conf={line_result.average_confidence:.1f}%, lines={len(line_result.lines)}")
             all_lines.extend(line_result.lines)
 
         # Build combined result
@@ -118,6 +123,8 @@ class OCRBackend(ABC):
                 result.average_confidence = sum(confidences) / len(confidences)
                 result.min_confidence = min(confidences)
                 result.low_confidence = result.average_confidence < 60.0
+                logger.debug(f"[{self.name}] Combined: {len(all_lines)} lines, "
+                            f"avg_conf={result.average_confidence:.1f}%, min={result.min_confidence:.1f}%")
 
         return result
 
