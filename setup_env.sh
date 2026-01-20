@@ -38,9 +38,10 @@ show_menu() {
     echo -e "  ${CYAN}6)${NC} Download curated audio-separator models"
     echo -e "  ${CYAN}7)${NC} Download EasyOCR models (for OCR)"
     echo -e "  ${CYAN}8)${NC} Download PaddleOCR models (for OCR)"
-    echo -e "  ${CYAN}9)${NC} Exit"
+    echo -e "  ${CYAN}9)${NC} Fix PaddleOCR versions (compatibility fix)"
+    echo -e "  ${CYAN}10)${NC} Exit"
     echo ""
-    echo -n "Enter your choice [1-9]: "
+    echo -n "Enter your choice [1-10]: "
 }
 
 # Function to check Python version and verify it works
@@ -302,25 +303,40 @@ download_paddleocr_models() {
         return 1
     fi
 
-    # Check if paddlepaddle is installed (must be installed BEFORE paddleocr)
-    if ! venv_pip show paddlepaddle &> /dev/null; then
-        echo -e "${YELLOW}PaddlePaddle is not installed. Installing now...${NC}"
-        # Install paddlepaddle first (CPU version)
-        venv_pip install paddlepaddle
+    # Install compatible versions of PaddlePaddle and PaddleOCR
+    # These versions are known to work together (avoid PIR attribute conversion errors)
+    local paddle_version="3.2.0"
+    local paddleocr_version="3.3.0"
+
+    echo -e "${BLUE}Installing compatible versions:${NC}"
+    echo -e "  • PaddlePaddle: $paddle_version"
+    echo -e "  • PaddleOCR: $paddleocr_version"
+    echo ""
+
+    # Check current versions
+    local current_paddle=$(venv_pip show paddlepaddle 2>/dev/null | grep "^Version:" | cut -d' ' -f2)
+    local current_paddleocr=$(venv_pip show paddleocr 2>/dev/null | grep "^Version:" | cut -d' ' -f2)
+
+    if [ "$current_paddle" != "$paddle_version" ]; then
+        echo -e "${YELLOW}Installing PaddlePaddle $paddle_version...${NC}"
+        venv_pip install "paddlepaddle==$paddle_version"
         if [ $? -ne 0 ]; then
             echo -e "${RED}Failed to install PaddlePaddle${NC}"
             return 1
         fi
+    else
+        echo -e "${GREEN}✓ PaddlePaddle $paddle_version already installed${NC}"
     fi
 
-    # Check if paddleocr is installed
-    if ! venv_pip show paddleocr &> /dev/null; then
-        echo -e "${YELLOW}PaddleOCR is not installed. Installing now...${NC}"
-        venv_pip install paddleocr
+    if [ "$current_paddleocr" != "$paddleocr_version" ]; then
+        echo -e "${YELLOW}Installing PaddleOCR $paddleocr_version...${NC}"
+        venv_pip install "paddleocr==$paddleocr_version"
         if [ $? -ne 0 ]; then
             echo -e "${RED}Failed to install PaddleOCR${NC}"
             return 1
         fi
+    else
+        echo -e "${GREEN}✓ PaddleOCR $paddleocr_version already installed${NC}"
     fi
 
     local model_dir="$PROJECT_DIR/.config/ocr/paddleocr_models"
@@ -393,6 +409,78 @@ PYEOF
         echo -e "${RED}✗ Failed to download PaddleOCR models${NC}"
         return 1
     fi
+}
+
+# Function to fix PaddleOCR version compatibility
+fix_paddleocr_versions() {
+    echo ""
+    echo "========================================="
+    echo "Fix PaddleOCR Version Compatibility"
+    echo "========================================="
+    echo ""
+
+    if ! ensure_venv; then
+        return 1
+    fi
+
+    # Compatible versions that work together
+    local paddle_version="3.2.0"
+    local paddleocr_version="3.3.0"
+
+    echo "This will install compatible versions of PaddlePaddle and PaddleOCR"
+    echo "to fix the 'ConvertPirAttribute2RuntimeAttribute' error."
+    echo ""
+    echo -e "${BLUE}Target versions:${NC}"
+    echo -e "  • PaddlePaddle: $paddle_version"
+    echo -e "  • PaddleOCR: $paddleocr_version"
+    echo ""
+
+    # Show current versions
+    local current_paddle=$(venv_pip show paddlepaddle 2>/dev/null | grep "^Version:" | cut -d' ' -f2)
+    local current_paddleocr=$(venv_pip show paddleocr 2>/dev/null | grep "^Version:" | cut -d' ' -f2)
+
+    echo -e "${YELLOW}Current versions:${NC}"
+    if [ -n "$current_paddle" ]; then
+        echo -e "  • PaddlePaddle: $current_paddle"
+    else
+        echo -e "  • PaddlePaddle: (not installed)"
+    fi
+    if [ -n "$current_paddleocr" ]; then
+        echo -e "  • PaddleOCR: $current_paddleocr"
+    else
+        echo -e "  • PaddleOCR: (not installed)"
+    fi
+    echo ""
+
+    echo -n "Proceed with installation? [Y/n]: "
+    read -r response
+    if [[ "$response" =~ ^[Nn]$ ]]; then
+        echo -e "${YELLOW}Installation cancelled${NC}"
+        return 0
+    fi
+
+    echo ""
+    echo -e "${BLUE}Installing PaddlePaddle $paddle_version...${NC}"
+    venv_pip install "paddlepaddle==$paddle_version"
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Failed to install PaddlePaddle${NC}"
+        return 1
+    fi
+
+    echo ""
+    echo -e "${BLUE}Installing PaddleOCR $paddleocr_version...${NC}"
+    venv_pip install "paddleocr==$paddleocr_version"
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Failed to install PaddleOCR${NC}"
+        return 1
+    fi
+
+    echo ""
+    echo -e "${GREEN}✓ PaddleOCR versions fixed!${NC}"
+    echo ""
+    echo "Installed versions:"
+    echo "  • PaddlePaddle: $paddle_version"
+    echo "  • PaddleOCR: $paddleocr_version"
 }
 
 download_audio_separator_models() {
@@ -932,6 +1020,10 @@ main() {
             download_paddleocr_models
             exit 0
             ;;
+        --fix-paddleocr)
+            fix_paddleocr_versions
+            exit 0
+            ;;
     esac
 
     # Interactive menu mode
@@ -965,6 +1057,9 @@ main() {
                 download_paddleocr_models
                 ;;
             9)
+                fix_paddleocr_versions
+                ;;
+            10)
                 echo ""
                 echo -e "${GREEN}Goodbye!${NC}"
                 echo ""
@@ -972,7 +1067,7 @@ main() {
                 ;;
             *)
                 echo ""
-                echo -e "${RED}Invalid choice. Please enter 1-9.${NC}"
+                echo -e "${RED}Invalid choice. Please enter 1-10.${NC}"
                 ;;
         esac
 
