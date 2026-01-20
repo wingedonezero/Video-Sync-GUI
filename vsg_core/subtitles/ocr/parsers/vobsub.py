@@ -529,7 +529,13 @@ class VobSubParser(SubtitleImageParser):
         - Apply dual thresholding: alpha >= threshold AND luminance >= threshold
         - Output grayscale image directly (black text on white background)
 
-        This approach produces clean binary output optimized for OCR.
+        DVD subtitles typically have:
+        - Position 1: Light colored text (white/yellow) - THE ACTUAL TEXT
+        - Position 2: Dark outline (black) - around text edges
+        - Position 3: Gray anti-aliasing - edge smoothing
+
+        By using luminance thresholding, we keep only the bright text and
+        filter out the dark outlines, producing cleaner characters for OCR.
 
         Returns:
             Grayscale numpy array (black text on white background)
@@ -544,26 +550,55 @@ class VobSubParser(SubtitleImageParser):
         # Create grayscale image (white background)
         image = np.full((height, width), 255, dtype=np.uint8)
 
-        # Thresholds for determining text pixels
-        # Alpha threshold: pixel must be at least somewhat visible
+        # Calculate luminance for each color position
+        # Luminance formula: Y = 0.299*R + 0.587*G + 0.114*B
+        luminances = []
+        for idx in color_indices:
+            if idx < len(palette):
+                r, g, b = palette[idx]
+                luma = 0.299 * r + 0.587 * g + 0.114 * b
+            else:
+                luma = 128  # Default gray
+            luminances.append(luma)
+
+        logger.debug(f"VobSub decode: luminances={luminances}")
+
+        # Thresholds for determining text pixels (subtile-ocr approach)
+        # Alpha threshold: pixel must be visible
         alpha_threshold = 1  # Minimum alpha (0-15 scale) to be considered visible
-        # Luminance threshold: not used for binarization, any visible non-bg pixel is text
-        # This matches subtile-ocr which treats any visible pixel as text
+        # Luminance threshold: pixel must be BRIGHT (actual text, not dark outline)
+        # DVD text is typically white (255) or yellow (~226), outlines are black (0)
+        # Using threshold of 100 to separate text from outlines
+        luma_threshold = 100
 
         # Build color lookup - determine if each position is TEXT or BACKGROUND
         # Position 0 = always background (transparent)
-        # Positions 1, 2, 3 = text if alpha >= threshold, else background
+        # Positions 1, 2, 3 = text if alpha >= threshold AND luminance > luma_threshold
+        # This filters out dark outlines while keeping bright text
         is_text = []
-        for i, alpha in enumerate(alpha_values):
+        for i, (alpha, luma) in enumerate(zip(alpha_values, luminances)):
             if i == 0:
                 # Position 0: Background - always transparent
                 is_text.append(False)
-            elif alpha >= alpha_threshold:
-                # Visible pixel - treat as text
+            elif alpha >= alpha_threshold and luma > luma_threshold:
+                # Visible AND bright = actual text
                 is_text.append(True)
             else:
-                # Invisible (alpha=0) - treat as background
+                # Either invisible OR dark (outline/shadow) = background
                 is_text.append(False)
+
+        # FALLBACK: If no positions passed luminance threshold, fall back to alpha-only
+        # This handles DVDs with dark text on light background (inverted scheme)
+        if not any(is_text):
+            logger.debug("VobSub decode: No bright colors found, falling back to alpha-only")
+            is_text = []
+            for i, alpha in enumerate(alpha_values):
+                if i == 0:
+                    is_text.append(False)
+                elif alpha >= alpha_threshold:
+                    is_text.append(True)
+                else:
+                    is_text.append(False)
 
         logger.debug(f"VobSub decode: is_text={is_text}")
 
