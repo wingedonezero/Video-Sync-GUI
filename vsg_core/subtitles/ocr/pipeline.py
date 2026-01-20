@@ -139,16 +139,19 @@ class OCRPipeline:
         Returns either traditional OCREngine or new OCRBackend based on settings.
         """
         if self._engine is None:
+            import logging
+            logger = logging.getLogger(__name__)
             backend = self.settings.get('ocr_engine', 'tesseract')
+            logger.info(f"OCR engine setting: '{backend}'")
             if backend in ('easyocr', 'paddleocr'):
                 # Use new backend system
                 from .engine import create_ocr_engine_v2
                 self._engine = create_ocr_engine_v2(self.settings)
-                self._log_progress(f"Using OCR backend: {self._engine.name}", 0.0)
+                logger.info(f"Using OCR backend: {self._engine.name}")
             else:
                 # Use traditional Tesseract engine
                 self._engine = create_ocr_engine(self.settings)
-                self._log_progress("Using OCR backend: tesseract", 0.0)
+                logger.info("Using OCR backend: tesseract (traditional)")
         return self._engine
 
     @property
