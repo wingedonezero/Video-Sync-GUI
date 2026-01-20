@@ -302,10 +302,21 @@ download_paddleocr_models() {
         return 1
     fi
 
+    # Check if paddlepaddle is installed (must be installed BEFORE paddleocr)
+    if ! venv_pip show paddlepaddle &> /dev/null; then
+        echo -e "${YELLOW}PaddlePaddle is not installed. Installing now...${NC}"
+        # Install paddlepaddle first (CPU version)
+        venv_pip install paddlepaddle
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}Failed to install PaddlePaddle${NC}"
+            return 1
+        fi
+    fi
+
     # Check if paddleocr is installed
     if ! venv_pip show paddleocr &> /dev/null; then
         echo -e "${YELLOW}PaddleOCR is not installed. Installing now...${NC}"
-        venv_pip install paddleocr paddlepaddle
+        venv_pip install paddleocr
         if [ $? -ne 0 ]; then
             echo -e "${RED}Failed to install PaddleOCR${NC}"
             return 1
@@ -337,12 +348,14 @@ download_paddleocr_models() {
 import sys
 import os
 
-# Set model directory
+# Set model directory - MUST be set BEFORE importing paddleocr
 model_dir = os.path.join(os.environ.get('PROJECT_DIR', '.'), '.config', 'ocr', 'paddleocr_models')
 os.makedirs(model_dir, exist_ok=True)
 
-# Set environment variable for PaddleOCR model cache
-os.environ['PADDLEOCR_HOME'] = model_dir
+# PaddleOCR 3.0 uses PaddleX under the hood, so we need PADDLEX_HOME
+# Must be set BEFORE any paddleocr/paddlex imports
+os.environ['PADDLEX_HOME'] = model_dir
+os.environ['PADDLEOCR_HOME'] = model_dir  # Also set legacy variable
 
 print(f"Downloading models to: {model_dir}")
 print()

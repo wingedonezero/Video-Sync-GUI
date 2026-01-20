@@ -557,16 +557,20 @@ class PaddleOCRBackend(OCRBackend):
         """Lazy initialization of PaddleOCR."""
         if self._ocr is None:
             try:
-                from paddleocr import PaddleOCR
                 from pathlib import Path
                 import os
 
                 # Ensure model directory exists
                 Path(self.model_dir).mkdir(parents=True, exist_ok=True)
 
-                # Set environment variable for PaddleOCR model cache
-                # PaddleOCR uses ~/.paddleocr by default, we override with our directory
-                os.environ['PADDLEOCR_HOME'] = self.model_dir
+                # PaddleOCR 3.0 uses PaddleX under the hood
+                # Set PADDLEX_HOME to control model download location
+                # MUST be set BEFORE importing paddleocr
+                os.environ['PADDLEX_HOME'] = self.model_dir
+                os.environ['PADDLEOCR_HOME'] = self.model_dir  # Legacy variable
+
+                # Import AFTER setting environment variables
+                from paddleocr import PaddleOCR
 
                 # Detect GPU (PaddleOCR only supports CUDA, not ROCm)
                 # PaddleOCR 3.0+ uses 'device' parameter instead of 'use_gpu'
