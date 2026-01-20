@@ -517,17 +517,16 @@ class VobSubParser(SubtitleImageParser):
         VobSub uses interlaced RLE with separate top and bottom fields.
         Each field contains run-length encoded 2-bit color values.
 
-        VobSub 4-color palette:
-            Index 0: Background (transparent)
-            Index 1: Text fill (main text - this is what we want!)
-            Index 2: Outline
-            Index 3: Anti-alias/shadow
+        VobSub 4-color palette positions:
+            Index 0: Background (usually transparent)
+            Index 1: Pattern/text fill
+            Index 2: Emphasis 1 (outline)
+            Index 3: Emphasis 2 (anti-alias/shadow)
 
-        For clean OCR, we only render color index 1 (text fill) as opaque.
-        This gives solid black text instead of outlined text, which
-        Tesseract can read much more accurately.
-
-        Based on SubtitleEdit's approach of marking outline colors as transparent.
+        We render ALL colors with alpha > 0, not just the text fill.
+        This matches SubtitleEdit's approach. The preprocessing step
+        will convert to grayscale where both fill and outline become
+        dark, giving solid black text.
 
         Returns:
             RGBA numpy array
@@ -535,8 +534,8 @@ class VobSubParser(SubtitleImageParser):
         # Create RGBA image
         image = np.zeros((height, width, 4), dtype=np.uint8)
 
-        # Build color lookup - ONLY color index 1 (text fill) is opaque
-        # This matches SubtitleEdit's default where outline colors are transparent
+        # Build color lookup - render ALL colors that have alpha
+        # Only color index 0 (background) should be transparent
         colors = []
         for i, (idx, alpha) in enumerate(zip(color_indices, alpha_values)):
             if idx < len(palette):
@@ -544,13 +543,14 @@ class VobSubParser(SubtitleImageParser):
             else:
                 r, g, b = 128, 128, 128
 
-            # Only render color index 1 (text fill) as opaque
-            # Color 0 = background, 2 = outline, 3 = anti-alias -> all transparent
-            if i == 1 and alpha > 0:
-                # Text fill - render as opaque
-                a = 255
+            # Render all non-background colors (positions 1, 2, 3)
+            # Position 0 is always background -> transparent
+            if i == 0:
+                a = 0  # Background always transparent
+            elif alpha > 0:
+                # Convert 4-bit alpha (0-15) to 8-bit (0-255)
+                a = int(alpha * 255 / 15)
             else:
-                # Background, outline, anti-alias - make transparent
                 a = 0
             colors.append((r, g, b, a))
 
