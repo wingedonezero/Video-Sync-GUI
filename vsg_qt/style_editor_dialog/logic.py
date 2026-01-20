@@ -333,11 +333,14 @@ class StyleEditorLogic:
                     revert_replacements = {}
                     for orig_font in removed_fonts:
                         # The file currently has new_font_name, we need to change it back to orig_font
-                        new_font = original_replacements[orig_font].get('new_font_name')
+                        repl_data = original_replacements[orig_font]
+                        new_font = repl_data.get('new_font_name')
                         if new_font:
                             revert_replacements[new_font] = {
                                 'new_font_name': orig_font,
-                                'font_file_path': None  # No font file needed for revert
+                                'font_file_path': None,  # No font file needed for revert
+                                # Preserve affected_styles so we only revert specific styles
+                                'affected_styles': repl_data.get('affected_styles', [])
                             }
 
                     if revert_replacements:
