@@ -39,14 +39,17 @@ class DebugSubtitle:
     index: int
     start_time: str  # "HH:MM:SS.mmm"
     end_time: str
-    raw_text: str
+    raw_text: str  # Text after post-processing
     confidence: float
     image: Optional[np.ndarray] = None
+
+    # Raw OCR output (before any fixes)
+    raw_ocr_text: Optional[str] = None
 
     # Issue tracking
     unknown_words: List[str] = field(default_factory=list)
     fixes_applied: Dict[str, str] = field(default_factory=dict)  # fix_name -> description
-    original_text: Optional[str] = None  # Before fixes
+    original_text: Optional[str] = None  # Before fixes (same as raw_ocr_text when set)
 
 
 class OCRDebugger:
@@ -109,9 +112,20 @@ class OCRDebugger:
         end_time: str,
         text: str,
         confidence: float,
-        image: Optional[np.ndarray] = None
+        image: Optional[np.ndarray] = None,
+        raw_ocr_text: Optional[str] = None
     ):
-        """Add a subtitle for potential debug output."""
+        """Add a subtitle for potential debug output.
+
+        Args:
+            index: Subtitle index
+            start_time: Start timestamp
+            end_time: End timestamp
+            text: Text after post-processing
+            confidence: OCR confidence score
+            image: Preprocessed image (optional)
+            raw_ocr_text: Raw OCR output before any fixes (optional)
+        """
         if not self.enabled:
             return
 
@@ -121,7 +135,8 @@ class OCRDebugger:
             end_time=end_time,
             raw_text=text,
             confidence=confidence,
-            image=image.copy() if image is not None else None
+            image=image.copy() if image is not None else None,
+            raw_ocr_text=raw_ocr_text
         )
 
         # Track low confidence
@@ -168,6 +183,9 @@ class OCRDebugger:
         # Save summary
         self._save_summary()
 
+        # Always save raw OCR output (this is the main debugging data)
+        self._save_raw_ocr()
+
         # Save each issue category
         if self.unknown_word_indices:
             self._save_unknown_words()
@@ -189,6 +207,9 @@ class OCRDebugger:
             f"Timestamp: {self.timestamp}",
             f"Total subtitles: {len(self.subtitles)}",
             f"",
+            f"Files:",
+            f"  raw_ocr.txt - Complete raw OCR output (before any fixes)",
+            f"",
             f"Issues found:",
             f"  Unknown words: {len(self.unknown_word_indices)} subtitles",
             f"  Fixes applied: {len(self.fix_indices)} subtitles",
@@ -205,6 +226,79 @@ class OCRDebugger:
             lines.append(f"  low_confidence/ - {len(self.low_confidence_indices)} images")
 
         summary_path.write_text("\n".join(lines), encoding='utf-8')
+
+    def _save_raw_ocr(self):
+        """Save complete raw OCR output for all subtitles.
+
+        This file contains the unedited OCR text for every subtitle,
+        useful for tuning dictionary rules and understanding OCR behavior.
+        """
+        raw_ocr_path = self.debug_dir / "raw_ocr.txt"
+
+        lines = [
+            "Raw OCR Output (Unedited)",
+            "=" * 50,
+            "",
+            "This file contains the raw OCR output before any post-processing fixes.",
+            "Use this to see exactly what the OCR engine produced and tune your",
+            "dictionary rules accordingly.",
+            "",
+            "Format: [index] timecode | confidence% | raw text",
+            "=" * 50,
+            "",
+        ]
+
+        # Sort by index
+        for idx in sorted(self.subtitles.keys()):
+            sub = self.subtitles[idx]
+
+            # Use raw_ocr_text if available, otherwise use original_text, otherwise raw_text
+            raw_text = sub.raw_ocr_text or sub.original_text or sub.raw_text
+
+            # Format: [0001] 00:01:23.456 | 85.2% | The raw OCR text here
+            # Handle multiline by replacing newlines
+            text_display = raw_text.replace('\n', '\\n').replace('\\N', '\\N')
+
+            lines.append(
+                f"[{sub.index:04d}] {sub.start_time} -> {sub.end_time} | "
+                f"{sub.confidence:5.1f}% | {text_display}"
+            )
+
+        # Add a separator and detailed view
+        lines.extend([
+            "",
+            "",
+            "=" * 50,
+            "Detailed View (with line breaks preserved)",
+            "=" * 50,
+            "",
+        ])
+
+        for idx in sorted(self.subtitles.keys()):
+            sub = self.subtitles[idx]
+            raw_text = sub.raw_ocr_text or sub.original_text or sub.raw_text
+            final_text = sub.raw_text
+
+            lines.extend([
+                "-" * 50,
+                f"[{sub.index:04d}] {sub.start_time} -> {sub.end_time}",
+                f"Confidence: {sub.confidence:.1f}%",
+                "",
+                "Raw OCR:",
+                f"  {raw_text.replace(chr(10), chr(10) + '  ')}",
+            ])
+
+            # Show final text if different
+            if raw_text != final_text:
+                lines.extend([
+                    "",
+                    "After fixes:",
+                    f"  {final_text.replace(chr(10), chr(10) + '  ')}",
+                ])
+
+            lines.append("")
+
+        raw_ocr_path.write_text("\n".join(lines), encoding='utf-8')
 
     def _save_unknown_words(self):
         """Save unknown words debug output."""

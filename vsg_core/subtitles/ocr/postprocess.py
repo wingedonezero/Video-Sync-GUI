@@ -45,12 +45,15 @@ except ImportError:
 @dataclass
 class PostProcessConfig:
     """Configuration for post-processing."""
+    # Master switch - disables all fixes when False
+    cleanup_enabled: bool = True  # Master enable/disable for OCR cleanup
+
     # Confidence thresholds
     low_confidence_threshold: float = 60.0  # Apply aggressive fixes below this
     very_low_confidence_threshold: float = 40.0  # Apply extra aggressive fixes
     garbage_confidence_threshold: float = 35.0  # Lines below this are likely garbage
 
-    # Fix categories
+    # Fix categories (only apply if cleanup_enabled is True)
     enable_unambiguous_fixes: bool = True  # Always-apply fixes
     enable_confidence_fixes: bool = True  # Confidence-gated fixes
     enable_dictionary_validation: bool = True  # Track unknown words
@@ -293,6 +296,14 @@ class OCRPostProcessor:
             return result
 
         current_text = text
+
+        # If cleanup is disabled, skip all fixes but still do dictionary validation
+        if not self.config.cleanup_enabled:
+            # Only do dictionary validation for reporting
+            if self.config.enable_dictionary_validation:
+                result.unknown_words = self._find_unknown_words(current_text)
+            result.text = current_text
+            return result
 
         # Step 0: Detect and clean garbage OCR output
         if self.config.enable_garbage_detection:
@@ -807,6 +818,7 @@ def create_postprocessor(settings_dict: dict) -> OCRPostProcessor:
     custom_path = settings_dict.get('ocr_custom_wordlist_path', '')
 
     config = PostProcessConfig(
+        cleanup_enabled=settings_dict.get('ocr_cleanup_enabled', True),
         low_confidence_threshold=settings_dict.get('ocr_low_confidence_threshold', 60.0),
         normalize_ellipsis=settings_dict.get('ocr_cleanup_normalize_ellipsis', False),
         custom_wordlist_path=Path(custom_path) if custom_path else None,
