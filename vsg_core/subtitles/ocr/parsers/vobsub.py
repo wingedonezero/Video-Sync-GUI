@@ -519,15 +519,15 @@ class VobSubParser(SubtitleImageParser):
 
         VobSub 4-color palette positions:
             Index 0: Background (usually transparent)
-            Index 1: Pattern/text fill
+            Index 1: Pattern/text fill (main text body)
             Index 2: Emphasis 1 (outline)
-            Index 3: Emphasis 2 (anti-alias/shadow)
+            Index 3: Emphasis 2 (anti-alias/shadow/effects)
 
-        For OCR, we render ALL non-background pixels as pure BLACK,
-        regardless of their actual palette color. This is critical because:
-        - Some DVDs use light colors for secondary text (translations)
-        - Tesseract needs high contrast black-on-white
-        - The actual color doesn't matter, only the text shape
+        For OCR, we render only positions 1 and 2 as BLACK:
+        - Position 1: Text fill - the main text content
+        - Position 2: Outline - reinforces text shape
+        - Position 3: SKIPPED - often contains karaoke timing markers,
+          visual effects, or anti-aliasing that creates OCR garbage
 
         Returns:
             RGBA numpy array with black text on transparent background
@@ -535,22 +535,23 @@ class VobSubParser(SubtitleImageParser):
         # Create RGBA image
         image = np.zeros((height, width, 4), dtype=np.uint8)
 
-        # Build color lookup - render ALL non-background pixels as BLACK
-        # This is critical for OCR - we need pure black text on white background
-        # The actual palette colors don't matter for OCR, only shape matters
+        # Build color lookup - render only TEXT colors as BLACK
+        # VobSub 4-color positions:
+        #   0: Background (transparent)
+        #   1: Pattern/text fill (main text) - RENDER
+        #   2: Emphasis/outline - RENDER
+        #   3: Anti-alias/effects - SKIP (often contains karaoke markers/noise)
         colors = []
         for i, (idx, alpha) in enumerate(zip(color_indices, alpha_values)):
-            # Position 0 is always background -> transparent
-            # All other positions (1, 2, 3) render as solid BLACK if they have alpha
             if i == 0:
-                # Background - fully transparent
+                # Background - always transparent
                 colors.append((0, 0, 0, 0))
-            elif alpha > 0:
-                # Any text/outline/shadow color -> render as BLACK
-                # This ensures all subtitle elements contribute to OCR
+            elif i in (1, 2) and alpha > 0:
+                # Text fill and outline -> render as BLACK
                 colors.append((0, 0, 0, 255))
             else:
-                # No alpha = invisible
+                # Position 3 (anti-alias/effects) or no alpha = invisible
+                # Skipping position 3 helps avoid karaoke timing markers
                 colors.append((0, 0, 0, 0))
 
         # Decode top field (even lines: 0, 2, 4, ...)
