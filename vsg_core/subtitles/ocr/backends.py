@@ -526,17 +526,23 @@ class EasyOCRBackend(OCRBackend):
 
 
 # =============================================================================
-# PaddleOCR Backend (placeholder for future)
+# PaddleOCR Backend (Full Implementation)
 # =============================================================================
 
 class PaddleOCRBackend(OCRBackend):
-    """PaddleOCR backend - placeholder for future implementation."""
+    """
+    PaddleOCR backend for OCR processing.
+
+    PaddleOCR is a state-of-the-art OCR system from Baidu using PP-OCR models.
+    Note: PaddleOCR only supports CUDA (NVIDIA) for GPU, not ROCm (AMD).
+    """
 
     name = "paddleocr"
 
     def __init__(self, language: str = 'en'):
         self.language = language
         self._ocr = None
+        logger.info(f"PaddleOCRBackend created with language: {self.language}")
 
     @property
     def ocr(self):
@@ -544,47 +550,181 @@ class PaddleOCRBackend(OCRBackend):
         if self._ocr is None:
             try:
                 from paddleocr import PaddleOCR
+
+                # Detect GPU (PaddleOCR only supports CUDA, not ROCm)
+                use_gpu = False
+                gpu_info = "CPU"
+                try:
+                    import paddle
+                    if paddle.device.is_compiled_with_cuda():
+                        # Check if CUDA device is available
+                        gpu_count = paddle.device.cuda.device_count()
+                        if gpu_count > 0:
+                            use_gpu = True
+                            gpu_info = f"CUDA (PaddlePaddle, {gpu_count} device(s))"
+                except Exception:
+                    pass
+
                 logger.info(f"Initializing PaddleOCR with language: {self.language}")
-                self._ocr = PaddleOCR(use_angle_cls=False, lang=self.language, show_log=False)
+                logger.info(f"GPU: {gpu_info} (enabled: {use_gpu})")
+                logger.info("This may take a moment if models need to be downloaded...")
+
+                self._ocr = PaddleOCR(
+                    use_angle_cls=False,  # Don't rotate text
+                    lang=self.language,
+                    use_gpu=use_gpu,
+                    show_log=False,  # Reduce console noise
+                    det_db_score_mode='slow',  # Better accuracy
+                )
+                logger.info("PaddleOCR initialized successfully")
+
             except ImportError:
                 raise ImportError(
-                    "paddleocr is not installed. Install with: pip install paddleocr"
+                    "paddleocr is not installed. Install with: pip install paddleocr paddlepaddle"
                 )
+            except Exception as e:
+                logger.error(f"Failed to initialize PaddleOCR: {e}")
+                raise
         return self._ocr
 
     def ocr_image(self, image: np.ndarray) -> OCRResult:
-        """OCR full image."""
-        return self._do_ocr(image)
+        """OCR full image with proper multi-line handling."""
+        return self._do_ocr(image, single_line=False)
 
     def ocr_line(self, image: np.ndarray) -> OCRResult:
         """OCR single line."""
-        return self._do_ocr(image)
+        return self._do_ocr(image, single_line=True)
 
-    def _do_ocr(self, image: np.ndarray) -> OCRResult:
-        """Perform OCR using PaddleOCR."""
+    def ocr_lines_separately(
+        self,
+        image: np.ndarray,
+        line_images: Optional[List[np.ndarray]] = None
+    ) -> OCRResult:
+        """
+        Override base class to skip manual line splitting for PaddleOCR.
+
+        PaddleOCR has its own DB text detection that handles multi-line text
+        better than manual horizontal projection splitting.
+        """
+        logger.debug(f"[{self.name}] Using native text detection (skipping line split)")
+        return self.ocr_image(image)
+
+    def _do_ocr(self, image: np.ndarray, single_line: bool = False) -> OCRResult:
+        """
+        Perform OCR using PaddleOCR.
+
+        PaddleOCR returns: [[bbox, (text, confidence)], ...]
+        bbox is 4 points: [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+
+        For multi-line subtitles:
+        1. Get all detections with bounding boxes
+        2. Sort by Y position (top to bottom)
+        3. Group detections on the same line
+        4. Join with newlines
+        """
         result = OCRResult(text='', backend=self.name)
 
         try:
+            # PaddleOCR returns list of lists: [[bbox, (text, conf)], ...]
             detections = self.ocr.ocr(image, cls=False)
 
             if not detections or not detections[0]:
                 return result
 
-            lines = []
+            # Extract detections with position info
+            detection_data = []
             for detection in detections[0]:
-                # PaddleOCR returns [bbox, (text, confidence)]
                 if detection and len(detection) >= 2:
-                    text_conf = detection[1]
+                    bbox = detection[0]  # [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+                    text_conf = detection[1]  # (text, confidence)
                     text = text_conf[0]
-                    conf = text_conf[1] * 100.0  # Convert to 0-100
+                    conf = text_conf[1]
 
-                    line = OCRLineResult(
-                        text=text,
-                        confidence=conf,
-                        word_confidences=[(text, conf)],
-                        backend=self.name
-                    )
-                    lines.append(line)
+                    # Calculate centers from bounding box
+                    y_coords = [point[1] for point in bbox]
+                    y_center = sum(y_coords) / len(y_coords)
+                    x_coords = [point[0] for point in bbox]
+                    x_center = sum(x_coords) / len(x_coords)
+                    height = max(y_coords) - min(y_coords)
+
+                    detection_data.append({
+                        'text': text,
+                        'conf': conf,
+                        'y_center': y_center,
+                        'x_center': x_center,
+                        'height': height
+                    })
+
+            if not detection_data:
+                return result
+
+            # Single-line mode: treat all detections as one line
+            if single_line:
+                # Sort by X position only (left to right)
+                detection_data.sort(key=lambda d: d['x_center'])
+
+                # Join all text as one line
+                line_text = ' '.join(d['text'] for d in detection_data)
+                line_conf = sum(d['conf'] for d in detection_data) / len(detection_data) * 100.0
+
+                line = OCRLineResult(
+                    text=line_text,
+                    confidence=line_conf,
+                    word_confidences=[(d['text'], d['conf'] * 100.0) for d in detection_data],
+                    backend=self.name
+                )
+
+                result.lines = [line]
+                result.text = line_text
+                result.average_confidence = line_conf
+                result.min_confidence = min(d['conf'] * 100.0 for d in detection_data)
+                result.low_confidence = result.average_confidence < 60.0
+
+                return result
+
+            # Multi-line mode: Group by Y position
+            # Sort by Y position first (top to bottom)
+            detection_data.sort(key=lambda d: d['y_center'])
+
+            # Group detections into lines based on Y proximity
+            line_groups = []
+            current_group = [detection_data[0]]
+
+            for det in detection_data[1:]:
+                # Use the average height as threshold for same-line detection
+                avg_height = sum(d['height'] for d in current_group) / len(current_group)
+                y_threshold = max(avg_height * 0.5, 10)  # At least 10 pixels or half line height
+
+                if abs(det['y_center'] - current_group[0]['y_center']) < y_threshold:
+                    # Same line - add to current group
+                    current_group.append(det)
+                else:
+                    # New line - save current group and start new one
+                    line_groups.append(current_group)
+                    current_group = [det]
+
+            # Don't forget the last group
+            line_groups.append(current_group)
+
+            # For each line group, sort by X position (left to right) and join
+            lines = []
+            for group in line_groups:
+                # Sort by X position within the line
+                group.sort(key=lambda d: d['x_center'])
+
+                # Join text with spaces
+                line_text = ' '.join(d['text'] for d in group)
+
+                # Calculate average confidence for the line
+                line_conf = sum(d['conf'] for d in group) / len(group) * 100.0
+
+                line = OCRLineResult(
+                    text=line_text,
+                    confidence=line_conf,
+                    word_confidences=[(d['text'], d['conf'] * 100.0) for d in group],
+                    backend=self.name
+                )
+                lines.append(line)
 
             result.lines = lines
             result.text = '\n'.join(line.text for line in lines if line.text.strip())
