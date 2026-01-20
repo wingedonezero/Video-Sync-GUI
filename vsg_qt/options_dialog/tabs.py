@@ -83,6 +83,17 @@ class OCRTab(QWidget):
         self.widgets['ocr_enabled'] = QCheckBox("Enable OCR for image-based subtitles")
         self.widgets['ocr_enabled'].setToolTip("Automatically OCR VobSub and PGS subtitle tracks.")
 
+        self.widgets['ocr_engine'] = QComboBox()
+        self.widgets['ocr_engine'].addItem('Tesseract (Traditional)', 'tesseract')
+        self.widgets['ocr_engine'].addItem('EasyOCR (Deep Learning)', 'easyocr')
+        self.widgets['ocr_engine'].addItem('PaddleOCR (State-of-Art)', 'paddleocr')
+        self.widgets['ocr_engine'].setToolTip(
+            "OCR engine to use.\n"
+            "• Tesseract: Fast, traditional OCR. Good for clean text.\n"
+            "• EasyOCR: Deep learning based. Better for varied fonts. Requires: pip install easyocr\n"
+            "• PaddleOCR: State-of-art accuracy. Requires: pip install paddleocr"
+        )
+
         self.widgets['ocr_language'] = QComboBox()
         self.widgets['ocr_language'].addItem('English', 'eng')
         self.widgets['ocr_language'].addItem('Japanese', 'jpn')
@@ -98,6 +109,7 @@ class OCRTab(QWidget):
         self.widgets['ocr_char_blacklist'].setToolTip("Characters to exclude from OCR results (e.g., '|/_~').")
 
         ocr_layout.addRow(self.widgets['ocr_enabled'])
+        ocr_layout.addRow("OCR Engine:", self.widgets['ocr_engine'])
         ocr_layout.addRow("Language:", self.widgets['ocr_language'])
         ocr_layout.addRow("Character Blacklist:", self.widgets['ocr_char_blacklist'])
         main_layout.addWidget(ocr_group)

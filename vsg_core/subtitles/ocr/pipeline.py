@@ -133,10 +133,20 @@ class OCRPipeline:
         return self._preprocessor
 
     @property
-    def engine(self) -> OCREngine:
-        """Lazy initialization of OCR engine."""
+    def engine(self):
+        """Lazy initialization of OCR engine.
+
+        Returns either traditional OCREngine or new OCRBackend based on settings.
+        """
         if self._engine is None:
-            self._engine = create_ocr_engine(self.settings)
+            backend = self.settings.get('ocr_engine', 'tesseract')
+            if backend in ('easyocr', 'paddleocr'):
+                # Use new backend system
+                from .engine import create_ocr_engine_v2
+                self._engine = create_ocr_engine_v2(self.settings)
+            else:
+                # Use traditional Tesseract engine
+                self._engine = create_ocr_engine(self.settings)
         return self._engine
 
     @property

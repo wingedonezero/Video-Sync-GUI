@@ -45,6 +45,7 @@ class AppConfig:
 
             # --- OCR Settings ---
             'ocr_enabled': True,  # Enable OCR for image-based subtitles
+            'ocr_engine': 'tesseract',  # OCR engine: 'tesseract', 'easyocr', 'paddleocr'
             'ocr_language': 'eng',  # Tesseract language code
             'ocr_char_blacklist': '',  # Characters to exclude from OCR
             'ocr_output_format': 'ass',  # 'ass' or 'srt'
