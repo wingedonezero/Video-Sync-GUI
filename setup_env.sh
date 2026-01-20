@@ -340,22 +340,21 @@ download_paddleocr_models() {
     echo -e "${YELLOW}This may take a few minutes on first run.${NC}"
     echo ""
 
-    # Export PROJECT_DIR for Python script
+    # Export environment variables for Python script
+    # PaddleOCR 3.0 uses PaddleX which needs PADDLEX_HOME set at shell level
     export PROJECT_DIR
+    export PADDLEX_HOME="$model_dir"
+    export PADDLEOCR_HOME="$model_dir"
+    export HF_HOME="$model_dir/huggingface"
 
     # Use Python to download models
     "$VENV_PYTHON" << 'PYEOF'
 import sys
 import os
 
-# Set model directory - MUST be set BEFORE importing paddleocr
-model_dir = os.path.join(os.environ.get('PROJECT_DIR', '.'), '.config', 'ocr', 'paddleocr_models')
+# Model directory is already set via PADDLEX_HOME environment variable
+model_dir = os.environ.get('PADDLEX_HOME', os.path.join(os.environ.get('PROJECT_DIR', '.'), '.config', 'ocr', 'paddleocr_models'))
 os.makedirs(model_dir, exist_ok=True)
-
-# PaddleOCR 3.0 uses PaddleX under the hood, so we need PADDLEX_HOME
-# Must be set BEFORE any paddleocr/paddlex imports
-os.environ['PADDLEX_HOME'] = model_dir
-os.environ['PADDLEOCR_HOME'] = model_dir  # Also set legacy variable
 
 print(f"Downloading models to: {model_dir}")
 print()
