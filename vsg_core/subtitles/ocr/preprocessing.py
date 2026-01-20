@@ -156,21 +156,29 @@ class ImagePreprocessor:
         """
         Convert RGBA image to grayscale, handling transparency.
 
-        Transparent pixels become white (background).
+        For DVD/VobSub subtitles, we use the alpha channel directly as the
+        grayscale mask since it gives the cleanest text edges. The alpha
+        channel defines where text is regardless of the actual colors used.
         """
         if len(image.shape) == 2:
             # Already grayscale
             return image
 
         if image.shape[2] == 4:
-            # RGBA - composite onto white background
-            alpha = image[:, :, 3:4] / 255.0
-            rgb = image[:, :, :3]
-            # Composite: result = fg * alpha + bg * (1 - alpha)
-            white_bg = np.ones_like(rgb) * 255
-            composited = (rgb * alpha + white_bg * (1 - alpha)).astype(np.uint8)
-            # Convert to grayscale
-            gray = cv2.cvtColor(composited, cv2.COLOR_RGB2GRAY)
+            # RGBA - use alpha channel directly for cleanest result
+            # Alpha channel gives us the text mask directly without color noise
+            alpha = image[:, :, 3]
+
+            # Check if alpha channel has meaningful content
+            if np.max(alpha) > 10:  # Has visible content
+                # Use alpha as the grayscale (invert so text is dark on white)
+                # Alpha: 255 = opaque text, 0 = transparent background
+                # We want: 0 = black text, 255 = white background
+                gray = 255 - alpha
+            else:
+                # Fallback to RGB grayscale if alpha is empty
+                rgb = image[:, :, :3]
+                gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
         elif image.shape[2] == 3:
             # RGB
             gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
@@ -185,17 +193,20 @@ class ImagePreprocessor:
         Determine if image should be inverted (white text on black background).
 
         Tesseract works best with black text on white background.
+
+        Since we now use alpha channel directly (inverted to black text on white),
+        we usually don't need additional inversion. Only invert if we detect
+        that text is light on dark (which shouldn't happen with alpha approach).
         """
         if not self.config.auto_detect:
-            # Assume subtitles are typically light on dark and need inversion
-            return True
+            return False  # Trust the alpha-based conversion
 
         # Calculate average brightness
         mean_brightness = np.mean(gray)
 
-        # If image is mostly dark, we have light text on dark background
-        # This needs inversion to black text on white background
-        return mean_brightness < 128
+        # If image is mostly dark (< 100), we probably have wrong polarity
+        # With proper alpha conversion, background should be white (~255)
+        return mean_brightness < 100
 
     def _should_binarize(self, gray: np.ndarray) -> bool:
         """

@@ -210,10 +210,15 @@ class OCRPipeline:
 
             # Step 4: Process each subtitle
             output_entries: List[SubtitleEntry] = []
+            last_logged_percent = -1
 
             for i, sub_image in enumerate(subtitle_images):
                 progress = 0.10 + (0.80 * i / len(subtitle_images))
-                self._log_progress(f"Processing subtitle {i+1}/{len(subtitle_images)}", progress)
+                # Only log at 10% intervals to reduce log spam
+                current_percent = int((i / len(subtitle_images)) * 100)
+                if current_percent >= last_logged_percent + 10:
+                    self._log_progress(f"Processing subtitles ({current_percent}%)", progress)
+                    last_logged_percent = current_percent
 
                 try:
                     entry, sub_result = self._process_single_subtitle(sub_image, report)

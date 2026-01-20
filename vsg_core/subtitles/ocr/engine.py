@@ -30,18 +30,18 @@ except ImportError:
 class OCRConfig:
     """Configuration for OCR engine."""
     language: str = 'eng'
-    psm: int = 7  # Single line mode (best for subtitles)
+    psm: int = 6  # Block mode - works better for DVD subtitles than line mode
     oem: int = 3  # Default - use LSTM if available
     char_whitelist: str = ''  # Characters to allow (empty = all)
-    char_blacklist: str = ''  # Characters to exclude
+    char_blacklist: str = '|'  # Exclude pipe which is often misread
 
     # Confidence thresholds
     min_confidence: float = 0.0  # Minimum confidence to accept (0-100)
     low_confidence_threshold: float = 60.0  # Flag if below this
 
     # Multi-pass settings
-    enable_multi_pass: bool = False  # Retry with different settings if low confidence
-    fallback_psm: int = 6  # PSM to use on retry (block mode)
+    enable_multi_pass: bool = True  # Retry with different settings if low confidence
+    fallback_psm: int = 4  # PSM to use on retry (single column)
 
 
 @dataclass
@@ -126,6 +126,10 @@ class OCREngine:
             config_parts.append(
                 f'-c tessedit_char_blacklist={self.config.char_blacklist}'
             )
+
+        # Additional Tesseract settings for subtitle OCR
+        # These help with the outlined/anti-aliased fonts common in DVD subtitles
+        config_parts.append('-c preserve_interword_spaces=1')
 
         return ' '.join(config_parts)
 

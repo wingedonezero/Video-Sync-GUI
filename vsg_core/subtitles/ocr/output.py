@@ -147,30 +147,16 @@ class SubtitleWriter:
         ])
 
         # Add dialogue lines
+        # Note: Position preservation is disabled - always use default bottom alignment
+        # This matches behavior of SubtitleEdit and other tools which don't preserve
+        # positions from VobSub/PGS sources because it's error-prone
         for sub in subtitles:
             start = self._ms_to_ass_time(sub.start_ms)
             end = self._ms_to_ass_time(sub.end_ms)
             text = self._escape_ass_text(sub.text)
 
-            # Determine positioning
-            position_info = self._determine_position(sub)
-            style = self.config.style_name
-            pos_tag = ''
-
-            if position_info['type'] == 'top':
-                style = 'Top'
-            elif position_info['type'] == 'middle' and self.config.preserve_positions:
-                # Scale position to output resolution
-                scaled_x, scaled_y = self._scale_position(
-                    sub.x + sub.frame_width // 2,  # Use center X
-                    sub.y + 10,  # Offset slightly from top of subtitle
-                    sub.frame_width,
-                    sub.frame_height
-                )
-                pos_tag = f'{{\\pos({scaled_x},{scaled_y})}}'
-
-            # Build dialogue line
-            dialogue = f'Dialogue: 0,{start},{end},{style},,0,0,0,,{pos_tag}{text}'
+            # Build dialogue line with default style (bottom center)
+            dialogue = f'Dialogue: 0,{start},{end},{self.config.style_name},,0,0,0,,{text}'
             lines.append(dialogue)
 
         # Write file
