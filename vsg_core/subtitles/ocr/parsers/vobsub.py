@@ -542,12 +542,8 @@ class VobSubParser(SubtitleImageParser):
 
         # Build color lookup - render with ACTUAL palette colors
         # Position 0 = transparent background
-        # Positions 1, 2, 3 = render as OPAQUE regardless of alpha value
-        #
-        # IMPORTANT: Some VobSubs have alpha=0 for certain text colors,
-        # but we still need to render them for OCR. SubtitleEdit and
-        # other tools render all colors regardless of alpha. The alpha
-        # in VobSub is for display purposes, not to indicate missing text.
+        # Positions 1, 2, 3 = actual colors with alpha
+        # The preprocessing will convert to black-on-white via binarization
         colors = []
         for i, (idx, alpha) in enumerate(zip(color_indices, alpha_values)):
             if idx < len(palette):
@@ -558,10 +554,13 @@ class VobSubParser(SubtitleImageParser):
             if i == 0:
                 # Position 0: Background - always transparent
                 colors.append((0, 0, 0, 0))
+            elif alpha > 0:
+                # Positions 1, 2, 3: Use actual palette color with alpha
+                a = int(alpha * 255 / 15)  # Convert 4-bit alpha to 8-bit
+                colors.append((r, g, b, a))
             else:
-                # Positions 1, 2, 3: Render with actual color, FULL OPACITY
-                # Ignore alpha value - we need all text visible for OCR
-                colors.append((r, g, b, 255))
+                # No alpha = invisible
+                colors.append((0, 0, 0, 0))
 
         # Decode top field (even lines: 0, 2, 4, ...)
         self._decode_rle_field(data, top_offset, image, 0, 2, width, height, colors)
