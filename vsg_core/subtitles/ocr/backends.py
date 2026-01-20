@@ -646,18 +646,38 @@ class PaddleOCRBackend(OCRBackend):
 
         try:
             # PaddleOCR 3.0 uses predict() instead of ocr()
+            # predict() returns a generator, so we need to iterate over it
             predictions = self.ocr.predict(image)
 
-            if not predictions:
+            # Handle generator - get first result
+            pred = None
+            try:
+                for p in predictions:
+                    pred = p
+                    break  # Only need first result
+            except (StopIteration, TypeError):
                 return result
 
-            # Get the first (and usually only) result
-            pred = predictions[0]
+            if pred is None:
+                logger.debug(f"[{self.name}] predict() returned no results")
+                return result
 
             # PaddleOCR 3.0 result attributes accessed directly
-            rec_texts = getattr(pred, 'rec_texts', []) or []
-            rec_scores = getattr(pred, 'rec_scores', []) or []
-            dt_polys = getattr(pred, 'dt_polys', []) or []
+            # Handle various possible return formats defensively
+            rec_texts = getattr(pred, 'rec_texts', None)
+            rec_scores = getattr(pred, 'rec_scores', None)
+            dt_polys = getattr(pred, 'dt_polys', None)
+
+            logger.debug(f"[{self.name}] Result type: {type(pred).__name__}, "
+                        f"rec_texts type: {type(rec_texts).__name__ if rec_texts is not None else 'None'}, "
+                        f"texts count: {len(rec_texts) if rec_texts and hasattr(rec_texts, '__len__') else 0}")
+
+            # Convert to lists if needed, handle None/empty cases
+            if rec_texts is None or (hasattr(rec_texts, '__len__') and len(rec_texts) == 0):
+                return result
+            rec_texts = list(rec_texts) if not isinstance(rec_texts, list) else rec_texts
+            rec_scores = list(rec_scores) if rec_scores is not None and not isinstance(rec_scores, list) else (rec_scores or [])
+            dt_polys = list(dt_polys) if dt_polys is not None and not isinstance(dt_polys, list) else (dt_polys or [])
 
             if not rec_texts:
                 return result
@@ -668,14 +688,33 @@ class PaddleOCRBackend(OCRBackend):
                 conf = rec_scores[i] if i < len(rec_scores) else 0.0
 
                 # Get bounding box if available
-                if i < len(dt_polys) and len(dt_polys[i]) >= 4:
+                # Verify polygon has at least 4 points and each point has x,y coords
+                has_valid_poly = False
+                if i < len(dt_polys):
+                    try:
+                        poly = dt_polys[i]
+                        # Ensure poly is iterable and has enough points
+                        if hasattr(poly, '__len__') and len(poly) >= 4:
+                            # Check that each point has at least 2 coordinates
+                            if all(hasattr(p, '__len__') and len(p) >= 2 for p in poly[:4]):
+                                has_valid_poly = True
+                    except (TypeError, IndexError):
+                        has_valid_poly = False
+
+                if has_valid_poly:
                     poly = dt_polys[i]
                     # poly is [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
-                    y_coords = [p[1] for p in poly]
-                    x_coords = [p[0] for p in poly]
-                    y_center = sum(y_coords) / len(y_coords)
-                    x_center = sum(x_coords) / len(x_coords)
-                    height = max(y_coords) - min(y_coords)
+                    try:
+                        y_coords = [float(p[1]) for p in poly]
+                        x_coords = [float(p[0]) for p in poly]
+                        y_center = sum(y_coords) / len(y_coords)
+                        x_center = sum(x_coords) / len(x_coords)
+                        height = max(y_coords) - min(y_coords)
+                    except (TypeError, IndexError, ValueError):
+                        # Fallback if coordinate extraction fails
+                        y_center = i * 50
+                        x_center = 0
+                        height = 30
                 else:
                     # No position info, use index as proxy
                     y_center = i * 50
