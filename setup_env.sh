@@ -37,9 +37,10 @@ show_menu() {
     echo -e "  ${CYAN}5)${NC} Rebuild PyAV (FFmpeg subtitles support)"
     echo -e "  ${CYAN}6)${NC} Download curated audio-separator models"
     echo -e "  ${CYAN}7)${NC} Download EasyOCR models (for OCR)"
-    echo -e "  ${CYAN}8)${NC} Exit"
+    echo -e "  ${CYAN}8)${NC} Download PaddleOCR models (for OCR)"
+    echo -e "  ${CYAN}9)${NC} Exit"
     echo ""
-    echo -n "Enter your choice [1-8]: "
+    echo -n "Enter your choice [1-9]: "
 }
 
 # Function to check Python version and verify it works
@@ -285,6 +286,98 @@ PYEOF
     else
         echo ""
         echo -e "${RED}✗ Failed to download EasyOCR models${NC}"
+        return 1
+    fi
+}
+
+# Function to download PaddleOCR models for subtitle OCR
+download_paddleocr_models() {
+    echo ""
+    echo "========================================="
+    echo "Download PaddleOCR Models"
+    echo "========================================="
+    echo ""
+
+    if ! ensure_venv; then
+        return 1
+    fi
+
+    # Check if paddleocr is installed
+    if ! venv_pip show paddleocr &> /dev/null; then
+        echo -e "${YELLOW}PaddleOCR is not installed. Installing now...${NC}"
+        venv_pip install paddleocr paddlepaddle
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}Failed to install PaddleOCR${NC}"
+            return 1
+        fi
+    fi
+
+    local model_dir="$PROJECT_DIR/.config/ocr/paddleocr_models"
+    mkdir -p "$model_dir"
+
+    echo -e "${BLUE}Model directory:${NC} $model_dir"
+    echo ""
+    echo "This will download PaddleOCR models for English text recognition."
+    echo "Models include:"
+    echo "  • DB text detection model (~5MB)"
+    echo "  • PP-OCRv4 recognition model (~10MB)"
+    echo ""
+    echo -e "${YELLOW}Note: PaddleOCR only supports CUDA (NVIDIA GPU), not ROCm (AMD GPU).${NC}"
+    echo ""
+
+    echo -e "${BLUE}Downloading and initializing PaddleOCR models...${NC}"
+    echo -e "${YELLOW}This may take a few minutes on first run.${NC}"
+    echo ""
+
+    # Export PROJECT_DIR for Python script
+    export PROJECT_DIR
+
+    # Use Python to download models
+    "$VENV_PYTHON" << 'PYEOF'
+import sys
+import os
+
+# Set model directory
+model_dir = os.path.join(os.environ.get('PROJECT_DIR', '.'), '.config', 'ocr', 'paddleocr_models')
+os.makedirs(model_dir, exist_ok=True)
+
+# Set environment variable for PaddleOCR model cache
+os.environ['PADDLEOCR_HOME'] = model_dir
+
+print(f"Downloading models to: {model_dir}")
+print()
+
+try:
+    from paddleocr import PaddleOCR
+    print("Initializing PaddleOCR (this downloads models)...")
+    ocr = PaddleOCR(
+        use_angle_cls=False,
+        lang='en',
+        use_gpu=False,  # Use CPU for download
+        det_db_score_mode='slow',
+    )
+    print()
+    print("✓ PaddleOCR models downloaded successfully!")
+
+    # Test it works
+    print("Testing OCR initialization...")
+    print("✓ PaddleOCR is working correctly!")
+except Exception as e:
+    print(f"✗ Error: {e}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+
+    if [ $? -eq 0 ]; then
+        echo ""
+        echo -e "${GREEN}✓ PaddleOCR models ready!${NC}"
+        echo ""
+        echo "To use PaddleOCR:"
+        echo "  1. Open the app"
+        echo "  2. Go to Options > OCR"
+        echo "  3. Set 'OCR Engine' to 'PaddleOCR (State-of-art)'"
+    else
+        echo ""
+        echo -e "${RED}✗ Failed to download PaddleOCR models${NC}"
         return 1
     fi
 }
@@ -822,6 +915,10 @@ main() {
             download_easyocr_models
             exit 0
             ;;
+        --download-paddleocr)
+            download_paddleocr_models
+            exit 0
+            ;;
     esac
 
     # Interactive menu mode
@@ -852,6 +949,9 @@ main() {
                 download_easyocr_models
                 ;;
             8)
+                download_paddleocr_models
+                ;;
+            9)
                 echo ""
                 echo -e "${GREEN}Goodbye!${NC}"
                 echo ""
@@ -859,7 +959,7 @@ main() {
                 ;;
             *)
                 echo ""
-                echo -e "${RED}Invalid choice. Please enter 1-8.${NC}"
+                echo -e "${RED}Invalid choice. Please enter 1-9.${NC}"
                 ;;
         esac
 

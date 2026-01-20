@@ -539,10 +539,18 @@ class PaddleOCRBackend(OCRBackend):
 
     name = "paddleocr"
 
-    def __init__(self, language: str = 'en'):
+    def __init__(self, language: str = 'en', model_storage_directory: str = None):
         self.language = language
         self._ocr = None
+        # Use custom model directory if specified, otherwise use app's .config/ocr/paddleocr_models
+        if model_storage_directory:
+            self.model_dir = model_storage_directory
+        else:
+            from pathlib import Path
+            app_dir = Path(__file__).parent.parent.parent.parent  # vsg_core -> project root
+            self.model_dir = str(app_dir / '.config' / 'ocr' / 'paddleocr_models')
         logger.info(f"PaddleOCRBackend created with language: {self.language}")
+        logger.info(f"PaddleOCR model directory: {self.model_dir}")
 
     @property
     def ocr(self):
@@ -550,6 +558,15 @@ class PaddleOCRBackend(OCRBackend):
         if self._ocr is None:
             try:
                 from paddleocr import PaddleOCR
+                from pathlib import Path
+                import os
+
+                # Ensure model directory exists
+                Path(self.model_dir).mkdir(parents=True, exist_ok=True)
+
+                # Set environment variable for PaddleOCR model cache
+                # PaddleOCR uses ~/.paddleocr by default, we override with our directory
+                os.environ['PADDLEOCR_HOME'] = self.model_dir
 
                 # Detect GPU (PaddleOCR only supports CUDA, not ROCm)
                 use_gpu = False
@@ -566,6 +583,7 @@ class PaddleOCRBackend(OCRBackend):
                     pass
 
                 logger.info(f"Initializing PaddleOCR with language: {self.language}")
+                logger.info(f"Model storage: {self.model_dir}")
                 logger.info(f"GPU: {gpu_info} (enabled: {use_gpu})")
                 logger.info("This may take a moment if models need to be downloaded...")
 
@@ -573,7 +591,6 @@ class PaddleOCRBackend(OCRBackend):
                     use_angle_cls=False,  # Don't rotate text
                     lang=self.language,
                     use_gpu=use_gpu,
-                    show_log=False,  # Reduce console noise
                     det_db_score_mode='slow',  # Better accuracy
                 )
                 logger.info("PaddleOCR initialized successfully")
