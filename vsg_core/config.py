@@ -616,7 +616,7 @@ class AppConfig:
         Path(self.get('output_folder')).mkdir(parents=True, exist_ok=True)
         Path(self.get('temp_root')).mkdir(parents=True, exist_ok=True)
         Path(self.get('logs_folder')).mkdir(parents=True, exist_ok=True)
-        # Create .config and fonts directories for new features
+        # Create .config and .fonts directories for new features
         self.get_config_dir().mkdir(parents=True, exist_ok=True)
         self.get_fonts_dir().mkdir(parents=True, exist_ok=True)
 
@@ -625,5 +625,5 @@ class AppConfig:
         return self.script_dir / '.config'
 
     def get_fonts_dir(self) -> Path:
-        """Returns the path to the fonts directory for user font files."""
-        return self.script_dir / 'fonts'
+        """Returns the path to the .fonts directory for user font files."""
+        return self.script_dir / '.fonts'
