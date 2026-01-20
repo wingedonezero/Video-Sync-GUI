@@ -148,10 +148,12 @@ def run_ocr(
             if result.report_summary:
                 summary = result.report_summary
                 runner._log_message(f"[OCR] Average confidence: {summary.get('average_confidence', 0):.1f}%")
-                runner._log_message(f"[OCR] Fixes applied: {summary.get('total_fixes', 0)}")
+                total_fixes = summary.get('total_fixes', 0)
+                if total_fixes > 0:
+                    runner._log_message(f"[OCR] Fixes applied: {total_fixes} total")
                 unknown_count = summary.get('unknown_word_count', 0)
                 if unknown_count > 0:
-                    runner._log_message(f"[OCR] Unknown words: {unknown_count}")
+                    runner._log_message(f"[OCR] Unknown words: {unknown_count} unique")
                     top_unknown = summary.get('top_unknown_words', [])[:5]
                     if top_unknown:
                         runner._log_message(f"[OCR] Top unknown: {', '.join(top_unknown)}")
