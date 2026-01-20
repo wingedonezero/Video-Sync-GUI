@@ -356,11 +356,14 @@ class EasyOCRBackend(OCRBackend):
         2. Sort by Y position to get proper line order
         3. Group detections on the same line
         4. Join with newlines
+
+        For single-line mode (when image is pre-split):
+        - Just sort by X position and join all text as one line
         """
         result = OCRResult(text='', backend=self.name)
 
         try:
-            # Always use paragraph=False to get bounding boxes for proper line ordering
+            # Always use paragraph=False to get bounding boxes for proper ordering
             # paragraph=True loses position info needed for multi-line subtitles
             detections = self.reader.readtext(image, paragraph=False)
 
@@ -369,15 +372,13 @@ class EasyOCRBackend(OCRBackend):
 
             # Each detection is (bbox, text, confidence)
             # bbox is 4 points: [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
-            # We need to sort by Y position and group into lines
 
-            # Extract detections with their Y center position
+            # Extract detections with position info
             detection_data = []
             for detection in detections:
                 if len(detection) >= 3:
                     bbox, text, conf = detection[0], detection[1], detection[2]
-                    # Calculate Y center from bounding box
-                    # bbox is [[x1,y1], [x2,y2], [x3,y3], [x4,y4]] (4 corners)
+                    # Calculate centers from bounding box
                     y_coords = [point[1] for point in bbox]
                     y_center = sum(y_coords) / len(y_coords)
                     x_coords = [point[0] for point in bbox]
@@ -395,11 +396,35 @@ class EasyOCRBackend(OCRBackend):
             if not detection_data:
                 return result
 
+            # Single-line mode: Image is pre-split, treat all detections as one line
+            if single_line:
+                # Sort by X position only (left to right)
+                detection_data.sort(key=lambda d: d['x_center'])
+
+                # Join all text as one line
+                line_text = ' '.join(d['text'] for d in detection_data)
+                line_conf = sum(d['conf'] for d in detection_data) / len(detection_data) * 100.0
+
+                line = OCRLineResult(
+                    text=line_text,
+                    confidence=line_conf,
+                    word_confidences=[(d['text'], d['conf'] * 100.0) for d in detection_data],
+                    backend=self.name
+                )
+
+                result.lines = [line]
+                result.text = line_text
+                result.average_confidence = line_conf
+                result.min_confidence = min(d['conf'] * 100.0 for d in detection_data)
+                result.low_confidence = result.average_confidence < 60.0
+
+                return result
+
+            # Multi-line mode: Group by Y position
             # Sort by Y position first (top to bottom)
             detection_data.sort(key=lambda d: d['y_center'])
 
             # Group detections into lines based on Y proximity
-            # Detections on the same line should have similar Y centers
             line_groups = []
             current_group = [detection_data[0]]
 
