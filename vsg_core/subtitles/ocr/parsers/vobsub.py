@@ -444,26 +444,27 @@ class VobSubParser(SubtitleImageParser):
                     pass
 
                 elif cmd == 0x03:
-                    # Palette
+                    # Palette - 4 nibbles map to color slots 3,2,1,0 (SubtitleEdit order)
+                    # RLE color index 0 uses slot 0, index 1 uses slot 1, etc.
                     if pos + 2 <= len(data):
                         b1, b2 = data[pos], data[pos + 1]
                         color_indices = [
-                            (b1 >> 4) & 0x0F,
-                            b1 & 0x0F,
-                            (b2 >> 4) & 0x0F,
-                            b2 & 0x0F
+                            b2 & 0x0F,          # slot 0 (background)
+                            (b2 >> 4) & 0x0F,   # slot 1 (text/pattern)
+                            b1 & 0x0F,          # slot 2 (emphasis1/outline)
+                            (b1 >> 4) & 0x0F    # slot 3 (emphasis2/anti-alias)
                         ]
                         pos += 2
 
                 elif cmd == 0x04:
-                    # Alpha channel
+                    # Alpha channel - same nibble order as palette
                     if pos + 2 <= len(data):
                         b1, b2 = data[pos], data[pos + 1]
                         alpha_values = [
-                            (b1 >> 4) & 0x0F,
-                            b1 & 0x0F,
-                            (b2 >> 4) & 0x0F,
-                            b2 & 0x0F
+                            b2 & 0x0F,          # slot 0 alpha
+                            (b2 >> 4) & 0x0F,   # slot 1 alpha
+                            b1 & 0x0F,          # slot 2 alpha
+                            (b1 >> 4) & 0x0F    # slot 3 alpha
                         ]
                         pos += 2
 
