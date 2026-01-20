@@ -662,34 +662,58 @@ class PaddleOCRBackend(OCRBackend):
                 image = cv2.cvtColor(image, cv2.COLOR_RGBA2RGB)
 
             # PaddleOCR 3.x uses predict() which returns a generator
+            logger.info(f"[{self.name}] Calling predict() on image shape: {image.shape}, dtype: {image.dtype}")
             predictions = self.ocr.predict(image)
+            logger.info(f"[{self.name}] predict() returned: {type(predictions)}")
 
             # Handle generator - get first result
             pred = None
             try:
                 for p in predictions:
+                    logger.info(f"[{self.name}] Got prediction object: {type(p)}")
                     pred = p
                     break  # Only need first result
-            except (StopIteration, TypeError):
+            except (StopIteration, TypeError) as e:
+                logger.warning(f"[{self.name}] Error iterating predictions: {e}")
                 return result
 
             if pred is None:
-                logger.debug(f"[{self.name}] predict() returned no results")
+                logger.warning(f"[{self.name}] predict() returned no results (pred is None)")
                 return result
 
             # PaddleOCR 3.x: access results via .json property
+            # Log what attributes the prediction object has
+            logger.info(f"[{self.name}] pred type: {type(pred)}, attributes: {[a for a in dir(pred) if not a.startswith('_')][:20]}")
+
             try:
                 json_result = pred.json
-            except AttributeError:
+                logger.info(f"[{self.name}] pred.json type: {type(json_result)}")
+            except AttributeError as e:
+                logger.warning(f"[{self.name}] pred.json not available: {e}")
                 # Fallback: maybe it's already a dict or has different structure
                 if isinstance(pred, dict):
                     json_result = pred
+                elif hasattr(pred, '__dict__'):
+                    # Try to get dict representation
+                    json_result = pred.__dict__
+                    logger.info(f"[{self.name}] Using pred.__dict__: {list(json_result.keys())[:10]}")
                 else:
                     logger.error(f"[{self.name}] Unexpected result type: {type(pred)}")
+                    logger.error(f"[{self.name}] pred attributes: {dir(pred)}")
+                    # Try to see what the object contains
+                    try:
+                        logger.error(f"[{self.name}] pred value: {str(pred)[:500]}")
+                    except Exception:
+                        pass
                     return result
 
             if not json_result:
+                logger.debug(f"[{self.name}] json_result is empty or None")
                 return result
+
+            # Debug: log the actual structure we received
+            logger.debug(f"[{self.name}] json_result type: {type(json_result)}")
+            logger.debug(f"[{self.name}] json_result keys: {json_result.keys() if isinstance(json_result, dict) else 'N/A'}")
 
             # Extract data from JSON result
             rec_texts = json_result.get('rec_texts', []) or []
@@ -698,6 +722,9 @@ class PaddleOCRBackend(OCRBackend):
             rec_boxes = json_result.get('rec_boxes', []) or []
 
             logger.debug(f"[{self.name}] Found {len(rec_texts)} text regions")
+            if len(rec_texts) == 0:
+                # Log more details to help debug
+                logger.warning(f"[{self.name}] No text detected. json_result sample: {str(json_result)[:500]}")
 
             if not rec_texts:
                 return result
