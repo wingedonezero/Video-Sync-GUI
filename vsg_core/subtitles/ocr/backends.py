@@ -807,8 +807,10 @@ class PaddleOCRBackend(OCRBackend):
                 result.low_confidence = result.average_confidence < 60.0
 
         except Exception as e:
+            import traceback
             result.error = str(e)
             logger.error(f"PaddleOCR error: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
 
         return result
 
