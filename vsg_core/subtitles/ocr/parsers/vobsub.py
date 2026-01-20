@@ -12,6 +12,13 @@ VobSub format consists of two files:
 
 The subtitle data is encoded as run-length encoded (RLE) bitmaps with a
 4-color palette per subtitle.
+
+RLE Encoding formats (from SubtitleEdit):
+    Value      Bits   Format
+    1-3        4      nncc               (half a byte)
+    4-15       8      00nnnncc           (one byte)
+    16-63     12      0000nnnnnncc       (one and a half byte)
+    64-255    16      000000nnnnnnnncc   (two bytes)
 """
 
 import re
@@ -510,13 +517,15 @@ class VobSubParser(SubtitleImageParser):
         VobSub uses interlaced RLE with separate top and bottom fields.
         Each field contains run-length encoded 2-bit color values.
 
+        Based on SubtitleEdit's DecodeRle algorithm.
+
         Returns:
             RGBA numpy array
         """
         # Create RGBA image
         image = np.zeros((height, width, 4), dtype=np.uint8)
 
-        # Build color lookup with alpha
+        # Build color lookup with alpha (4 colors from the 16-color palette)
         colors = []
         for i, (idx, alpha) in enumerate(zip(color_indices, alpha_values)):
             if idx < len(palette):
@@ -535,6 +544,82 @@ class VobSubParser(SubtitleImageParser):
 
         return image
 
+    def _decode_rle(
+        self,
+        data: bytes,
+        index: int,
+        only_half: bool
+    ) -> Tuple[int, int, int, bool, bool]:
+        """
+        Decode a single RLE run from the data.
+
+        Based on SubtitleEdit's DecodeRle algorithm.
+
+        RLE encoding formats:
+            Value      Bits   Format
+            1-3        4      nncc               (half a byte)
+            4-15       8      00nnnncc           (one byte)
+            16-63     12      0000nnnnnncc       (one and a half byte)
+            64-255    16      000000nnnnnnnncc   (two bytes)
+
+        Args:
+            data: The raw subtitle data
+            index: Current byte index in data
+            only_half: Whether we're starting at a half-byte position
+
+        Returns:
+            Tuple of (index_increment, run_length, color, new_only_half, rest_of_line)
+        """
+        rest_of_line = False
+
+        # Safety check
+        if index + 2 >= len(data):
+            return 0, 0, 0, only_half, True
+
+        b1 = data[index]
+        b2 = data[index + 1]
+
+        # If we're at a half-byte position, reconstruct the bytes
+        if only_half:
+            if index + 2 >= len(data):
+                return 0, 0, 0, only_half, True
+            b3 = data[index + 2]
+            b1 = ((b1 & 0x0F) << 4) | ((b2 & 0xF0) >> 4)
+            b2 = ((b2 & 0x0F) << 4) | ((b3 & 0xF0) >> 4)
+
+        # 16-bit code: 000000nnnnnnnncc (two bytes, 64-255 pixels)
+        if b1 >> 2 == 0:
+            run_length = (b1 << 6) | (b2 >> 2)
+            color = b2 & 0x03
+            if run_length == 0:
+                # End of line marker
+                rest_of_line = True
+                if only_half:
+                    return 3, run_length, color, False, rest_of_line
+            return 2, run_length, color, only_half, rest_of_line
+
+        # 12-bit code: 0000nnnnnncc (one and a half bytes, 16-63 pixels)
+        if b1 >> 4 == 0:
+            run_length = (b1 << 2) | (b2 >> 6)
+            color = (b2 & 0x30) >> 4
+            if only_half:
+                return 2, run_length, color, False, rest_of_line
+            return 1, run_length, color, True, rest_of_line
+
+        # 8-bit code: 00nnnncc (one byte, 4-15 pixels)
+        if b1 >> 6 == 0:
+            run_length = b1 >> 2
+            color = b1 & 0x03
+            return 1, run_length, color, only_half, rest_of_line
+
+        # 4-bit code: nncc (half a byte, 1-3 pixels)
+        run_length = b1 >> 6
+        color = (b1 & 0x30) >> 4
+
+        if only_half:
+            return 1, run_length, color, False, rest_of_line
+        return 0, run_length, color, True, rest_of_line
+
     def _decode_rle_field(
         self,
         data: bytes,
@@ -549,99 +634,65 @@ class VobSubParser(SubtitleImageParser):
         """
         Decode one RLE field (top or bottom) into the image.
 
-        RLE encoding:
-            - 4 bits at a time, forming run-length + color codes
-            - Special codes for line endings
+        Uses SubtitleEdit's RLE decoding algorithm with proper half-byte tracking.
+
+        Args:
+            data: Raw subtitle data
+            offset: Starting byte offset for this field
+            image: Output image array to fill
+            start_line: First line to decode (0 for top, 1 for bottom)
+            line_step: Line increment (2 for interlaced)
+            width: Image width
+            height: Image height
+            colors: 4-color RGBA palette
         """
         if offset >= len(data):
             return
 
-        bit_pos = 0
-        byte_pos = offset
+        index = offset
+        only_half = False
         x = 0
         y = start_line
 
-        while y < height and byte_pos < len(data):
-            # Read nibble
-            if bit_pos == 0:
-                nibble = (data[byte_pos] >> 4) & 0x0F
-                bit_pos = 4
-            else:
-                nibble = data[byte_pos] & 0x0F
-                bit_pos = 0
-                byte_pos += 1
+        while y < height and index + 2 < len(data):
+            # Decode next run
+            idx_inc, run_length, color, only_half, rest_of_line = self._decode_rle(
+                data, index, only_half
+            )
+            index += idx_inc
 
-            # Decode run-length code
-            if nibble < 4:
-                # 2-bit color, need more nibbles for length
-                color = nibble
-                # Read next nibble for length
-                if byte_pos >= len(data):
-                    break
-                if bit_pos == 0:
-                    next_nibble = (data[byte_pos] >> 4) & 0x0F
-                    bit_pos = 4
-                else:
-                    next_nibble = data[byte_pos] & 0x0F
-                    bit_pos = 0
-                    byte_pos += 1
+            # If end of line, fill rest with this color
+            if rest_of_line:
+                run_length = width - x
 
-                if next_nibble < 4:
-                    # Still short, read more
-                    if byte_pos >= len(data):
-                        break
-                    if bit_pos == 0:
-                        third = (data[byte_pos] >> 4) & 0x0F
-                        bit_pos = 4
-                    else:
-                        third = data[byte_pos] & 0x0F
-                        bit_pos = 0
-                        byte_pos += 1
-
-                    if third < 4:
-                        # Read fourth nibble
-                        if byte_pos >= len(data):
-                            break
-                        if bit_pos == 0:
-                            fourth = (data[byte_pos] >> 4) & 0x0F
-                            bit_pos = 4
-                        else:
-                            fourth = data[byte_pos] & 0x0F
-                            bit_pos = 0
-                            byte_pos += 1
-                        length = (nibble << 6) | (next_nibble << 4) | (third << 2) | (fourth >> 2)
-                        color = fourth & 0x03
-                    else:
-                        length = (nibble << 4) | (next_nibble << 2) | (third >> 2)
-                        color = third & 0x03
-                else:
-                    length = (nibble << 2) | (next_nibble >> 2)
-                    color = next_nibble & 0x03
-
-                if length == 0:
-                    # End of line - fill rest with color
-                    length = width - x
-            else:
-                # Simple run: 2 bits length, 2 bits color
-                length = nibble >> 2
-                color = nibble & 0x03
-
-            # Apply run to image
+            # Get color values
             if color < len(colors):
                 r, g, b, a = colors[color]
-                end_x = min(x + length, width)
-                if y < height:
-                    image[y, x:end_x, 0] = r
-                    image[y, x:end_x, 1] = g
-                    image[y, x:end_x, 2] = b
-                    image[y, x:end_x, 3] = a
-                x = end_x
+            else:
+                r, g, b, a = 0, 0, 0, 0
 
-            # Check for line end
+            # Draw pixels for this run
+            for i in range(run_length):
+                if x >= width:
+                    # Line wrap - align to byte boundary
+                    if only_half:
+                        only_half = False
+                        index += 1
+                    x = 0
+                    y += line_step
+                    break
+
+                if y < height and a > 0:  # Only draw non-transparent pixels
+                    image[y, x, 0] = r
+                    image[y, x, 1] = g
+                    image[y, x, 2] = b
+                    image[y, x, 3] = a
+                x += 1
+
+            # Check if we naturally hit end of line
             if x >= width:
+                if only_half:
+                    only_half = False
+                    index += 1
                 x = 0
                 y += line_step
-                # Align to byte boundary at end of each line
-                if bit_pos != 0:
-                    bit_pos = 0
-                    byte_pos += 1
