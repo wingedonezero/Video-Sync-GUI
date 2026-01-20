@@ -519,41 +519,47 @@ class VobSubParser(SubtitleImageParser):
 
         VobSub 4-color palette positions:
             Index 0: Background (usually transparent)
-            Index 1: Pattern/text fill (main text body)
-            Index 2: Emphasis 1 (outline)
-            Index 3: Emphasis 2 (anti-alias/shadow/effects)
+            Index 1: Pattern/text fill (main text)
+            Index 2: Emphasis 1 (outline or secondary text)
+            Index 3: Emphasis 2 (anti-alias/shadow)
 
-        For OCR, we render ONLY position 1 (text fill) as BLACK:
-        - Position 1: Text fill - this is the actual readable text
-        - Position 2: SKIPPED - outline may contain karaoke markers
-        - Position 3: SKIPPED - anti-alias/effects create OCR garbage
+        Following subtile-ocr/vobsubocr approach:
+        - Render ALL non-background colors with their ACTUAL palette values
+        - Position 0 is always transparent (background)
+        - Positions 1, 2, 3 are rendered with real colors + alpha
+        - The preprocessing step converts to grayscale and binarizes,
+          which naturally filters out light anti-aliasing colors while
+          keeping the darker text colors as black.
 
-        Testing showed that positions 2 and 3 often contain visual elements
-        (karaoke timing, effects) that appear as garbage characters.
+        This approach works better than forcing specific positions to black
+        because it lets the binarization threshold handle edge cases.
 
         Returns:
-            RGBA numpy array with black text on transparent background
+            RGBA numpy array with actual palette colors
         """
         # Create RGBA image
         image = np.zeros((height, width, 4), dtype=np.uint8)
 
-        # Build color lookup - render ONLY position 1 (text fill) as BLACK
-        # VobSub 4-color positions:
-        #   0: Background (transparent)
-        #   1: Pattern/text fill (main text) - RENDER (this is the actual text)
-        #   2: Emphasis/outline - SKIP (may contain karaoke markers)
-        #   3: Anti-alias/effects - SKIP (often contains noise)
-        #
-        # Only rendering position 1 gives cleanest OCR results.
-        # Positions 2 and 3 often contain visual effects, outlines, or
-        # karaoke timing markers that confuse Tesseract.
+        # Build color lookup - render with ACTUAL palette colors
+        # Position 0 = transparent background
+        # Positions 1, 2, 3 = actual colors with alpha
+        # The preprocessing will convert to black-on-white via binarization
         colors = []
         for i, (idx, alpha) in enumerate(zip(color_indices, alpha_values)):
-            if i == 1 and alpha > 0:
-                # Position 1: Text fill -> render as BLACK
-                colors.append((0, 0, 0, 255))
+            if idx < len(palette):
+                r, g, b = palette[idx]
             else:
-                # All other positions (0, 2, 3) -> transparent
+                r, g, b = 128, 128, 128  # Fallback gray
+
+            if i == 0:
+                # Position 0: Background - always transparent
+                colors.append((0, 0, 0, 0))
+            elif alpha > 0:
+                # Positions 1, 2, 3: Use actual palette color with alpha
+                a = int(alpha * 255 / 15)  # Convert 4-bit alpha to 8-bit
+                colors.append((r, g, b, a))
+            else:
+                # No alpha = invisible
                 colors.append((0, 0, 0, 0))
 
         # Decode top field (even lines: 0, 2, 4, ...)
