@@ -523,11 +523,13 @@ class VobSubParser(SubtitleImageParser):
             Index 2: Emphasis 1 (outline)
             Index 3: Emphasis 2 (anti-alias/shadow/effects)
 
-        For OCR, we render only positions 1 and 2 as BLACK:
-        - Position 1: Text fill - the main text content
-        - Position 2: Outline - reinforces text shape
-        - Position 3: SKIPPED - often contains karaoke timing markers,
-          visual effects, or anti-aliasing that creates OCR garbage
+        For OCR, we render ONLY position 1 (text fill) as BLACK:
+        - Position 1: Text fill - this is the actual readable text
+        - Position 2: SKIPPED - outline may contain karaoke markers
+        - Position 3: SKIPPED - anti-alias/effects create OCR garbage
+
+        Testing showed that positions 2 and 3 often contain visual elements
+        (karaoke timing, effects) that appear as garbage characters.
 
         Returns:
             RGBA numpy array with black text on transparent background
@@ -535,23 +537,23 @@ class VobSubParser(SubtitleImageParser):
         # Create RGBA image
         image = np.zeros((height, width, 4), dtype=np.uint8)
 
-        # Build color lookup - render only TEXT colors as BLACK
+        # Build color lookup - render ONLY position 1 (text fill) as BLACK
         # VobSub 4-color positions:
         #   0: Background (transparent)
-        #   1: Pattern/text fill (main text) - RENDER
-        #   2: Emphasis/outline - RENDER
-        #   3: Anti-alias/effects - SKIP (often contains karaoke markers/noise)
+        #   1: Pattern/text fill (main text) - RENDER (this is the actual text)
+        #   2: Emphasis/outline - SKIP (may contain karaoke markers)
+        #   3: Anti-alias/effects - SKIP (often contains noise)
+        #
+        # Only rendering position 1 gives cleanest OCR results.
+        # Positions 2 and 3 often contain visual effects, outlines, or
+        # karaoke timing markers that confuse Tesseract.
         colors = []
         for i, (idx, alpha) in enumerate(zip(color_indices, alpha_values)):
-            if i == 0:
-                # Background - always transparent
-                colors.append((0, 0, 0, 0))
-            elif i in (1, 2) and alpha > 0:
-                # Text fill and outline -> render as BLACK
+            if i == 1 and alpha > 0:
+                # Position 1: Text fill -> render as BLACK
                 colors.append((0, 0, 0, 255))
             else:
-                # Position 3 (anti-alias/effects) or no alpha = invisible
-                # Skipping position 3 helps avoid karaoke timing markers
+                # All other positions (0, 2, 3) -> transparent
                 colors.append((0, 0, 0, 0))
 
         # Decode top field (even lines: 0, 2, 4, ...)
