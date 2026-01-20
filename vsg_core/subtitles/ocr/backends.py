@@ -629,10 +629,12 @@ class PaddleOCRBackend(OCRBackend):
 
     def _do_ocr(self, image: np.ndarray, single_line: bool = False) -> OCRResult:
         """
-        Perform OCR using PaddleOCR.
+        Perform OCR using PaddleOCR 3.0.
 
-        PaddleOCR returns: [[bbox, (text, confidence)], ...]
-        bbox is 4 points: [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+        PaddleOCR 3.0 uses predict() method and returns result objects with:
+        - rec_texts: list of recognized text strings
+        - rec_scores: confidence scores for each text segment
+        - dt_polys: detection polygon coordinates
 
         For multi-line subtitles:
         1. Get all detections with bounding boxes
@@ -643,35 +645,52 @@ class PaddleOCRBackend(OCRBackend):
         result = OCRResult(text='', backend=self.name)
 
         try:
-            # PaddleOCR returns list of lists: [[bbox, (text, conf)], ...]
-            detections = self.ocr.ocr(image, cls=False)
+            # PaddleOCR 3.0 uses predict() instead of ocr()
+            predictions = self.ocr.predict(image)
 
-            if not detections or not detections[0]:
+            if not predictions:
+                return result
+
+            # Get the first (and usually only) result
+            pred = predictions[0]
+
+            # Access results via json attribute
+            pred_data = pred.json if hasattr(pred, 'json') else {}
+
+            rec_texts = pred_data.get('rec_texts', [])
+            rec_scores = pred_data.get('rec_scores', [])
+            dt_polys = pred_data.get('dt_polys', [])
+
+            if not rec_texts:
                 return result
 
             # Extract detections with position info
             detection_data = []
-            for detection in detections[0]:
-                if detection and len(detection) >= 2:
-                    bbox = detection[0]  # [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
-                    text_conf = detection[1]  # (text, confidence)
-                    text = text_conf[0]
-                    conf = text_conf[1]
+            for i, text in enumerate(rec_texts):
+                conf = rec_scores[i] if i < len(rec_scores) else 0.0
 
-                    # Calculate centers from bounding box
-                    y_coords = [point[1] for point in bbox]
+                # Get bounding box if available
+                if i < len(dt_polys) and len(dt_polys[i]) >= 4:
+                    poly = dt_polys[i]
+                    # poly is [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+                    y_coords = [p[1] for p in poly]
+                    x_coords = [p[0] for p in poly]
                     y_center = sum(y_coords) / len(y_coords)
-                    x_coords = [point[0] for point in bbox]
                     x_center = sum(x_coords) / len(x_coords)
                     height = max(y_coords) - min(y_coords)
+                else:
+                    # No position info, use index as proxy
+                    y_center = i * 50
+                    x_center = 0
+                    height = 30
 
-                    detection_data.append({
-                        'text': text,
-                        'conf': conf,
-                        'y_center': y_center,
-                        'x_center': x_center,
-                        'height': height
-                    })
+                detection_data.append({
+                    'text': text,
+                    'conf': conf,
+                    'y_center': y_center,
+                    'x_center': x_center,
+                    'height': height
+                })
 
             if not detection_data:
                 return result
