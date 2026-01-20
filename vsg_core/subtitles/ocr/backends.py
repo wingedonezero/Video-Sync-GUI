@@ -659,9 +659,10 @@ class PaddleOCRBackend(OCRBackend):
 
             logger.debug(f"[{self.name}] Running OCR on image shape: {image.shape}")
 
-            # Use ocr.ocr() method - works in both PaddleOCR 2.x and 3.x
+            # Use ocr.ocr() method
+            # PaddleOCR 3.x doesn't accept cls parameter (use_textline_orientation in init instead)
             # Returns: [[[box], (text, confidence)], ...] or [[result1, result2, ...]]
-            ocr_result = self.ocr.ocr(image, cls=False)
+            ocr_result = self.ocr.ocr(image)
 
             if not ocr_result:
                 logger.debug(f"[{self.name}] ocr() returned empty result")
