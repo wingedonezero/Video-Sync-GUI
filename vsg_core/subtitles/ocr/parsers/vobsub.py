@@ -533,6 +533,13 @@ class VobSubParser(SubtitleImageParser):
         Returns:
             Grayscale numpy array (black text on white background)
         """
+        # DEBUG: Log color and alpha info for first few subtitles
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"VobSub decode: color_indices={color_indices}, alpha_values={alpha_values}")
+        palette_colors = [palette[idx] if idx < len(palette) else (0,0,0) for idx in color_indices]
+        logger.debug(f"VobSub decode: palette_colors={palette_colors}")
+
         # Create grayscale image (white background)
         image = np.full((height, width), 255, dtype=np.uint8)
 
@@ -556,6 +563,8 @@ class VobSubParser(SubtitleImageParser):
             else:
                 # Invisible (alpha=0) - treat as background
                 is_text.append(False)
+
+        logger.debug(f"VobSub decode: is_text={is_text}")
 
         # Convert is_text to grayscale values: True=0 (black), False=255 (white)
         colors = [(0 if t else 255) for t in is_text]
