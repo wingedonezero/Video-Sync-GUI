@@ -367,7 +367,7 @@ def create_preprocessor(
         upscale_threshold_height=settings_dict.get('ocr_upscale_threshold', 40),
         target_height=settings_dict.get('ocr_target_height', 80),
         border_size=settings_dict.get('ocr_border_size', 10),
-        force_binarization=settings_dict.get('ocr_force_binarization', False),
+        force_binarization=settings_dict.get('ocr_force_binarization', True),  # Always binarize for OCR
         binarization_method=settings_dict.get('ocr_binarization_method', 'otsu'),
         denoise=settings_dict.get('ocr_denoise', False),
         save_debug_images=settings_dict.get('ocr_save_debug_images', False),
