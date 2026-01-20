@@ -297,10 +297,19 @@ class EasyOCRBackend(OCRBackend):
 
     name = "easyocr"
 
-    def __init__(self, languages: List[str] = None):
+    def __init__(self, languages: List[str] = None, model_storage_directory: str = None):
         self.languages = languages or ['en']
         self._reader = None
+        # Use custom model directory if specified, otherwise use app's .config/ocr/easyocr_models
+        if model_storage_directory:
+            self.model_dir = model_storage_directory
+        else:
+            # Try to use the app's config directory
+            from pathlib import Path
+            app_dir = Path(__file__).parent.parent.parent.parent  # vsg_core -> project root
+            self.model_dir = str(app_dir / '.config' / 'ocr' / 'easyocr_models')
         logger.info(f"EasyOCRBackend created with languages: {self.languages}")
+        logger.info(f"EasyOCR model directory: {self.model_dir}")
 
     @property
     def reader(self):
@@ -308,9 +317,18 @@ class EasyOCRBackend(OCRBackend):
         if self._reader is None:
             try:
                 import easyocr
+                from pathlib import Path
+                # Ensure model directory exists
+                Path(self.model_dir).mkdir(parents=True, exist_ok=True)
                 logger.info(f"Initializing EasyOCR Reader with languages: {self.languages}")
+                logger.info(f"Model storage: {self.model_dir}")
                 logger.info("This may take a moment if models need to be downloaded...")
-                self._reader = easyocr.Reader(self.languages, gpu=False, verbose=True)
+                self._reader = easyocr.Reader(
+                    self.languages,
+                    gpu=False,
+                    model_storage_directory=self.model_dir,
+                    verbose=True
+                )
                 logger.info("EasyOCR Reader initialized successfully")
             except ImportError:
                 raise ImportError(
