@@ -23,6 +23,9 @@ fonttools
 # Spell Checking
 pyenchant
 
+# OCR (Tesseract wrapper)
+pytesseract
+
 # XML Processing
 lxml
 
