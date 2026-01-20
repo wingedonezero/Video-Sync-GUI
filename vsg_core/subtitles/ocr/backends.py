@@ -340,40 +340,101 @@ class EasyOCRBackend(OCRBackend):
         return self._reader
 
     def ocr_image(self, image: np.ndarray) -> OCRResult:
-        """OCR full image."""
-        return self._do_ocr(image, paragraph=True)
+        """OCR full image with proper multi-line handling."""
+        return self._do_ocr(image, single_line=False)
 
     def ocr_line(self, image: np.ndarray) -> OCRResult:
         """OCR single line."""
-        return self._do_ocr(image, paragraph=False)
+        return self._do_ocr(image, single_line=True)
 
-    def _do_ocr(self, image: np.ndarray, paragraph: bool = True) -> OCRResult:
-        """Perform OCR using EasyOCR."""
+    def _do_ocr(self, image: np.ndarray, single_line: bool = False) -> OCRResult:
+        """
+        Perform OCR using EasyOCR.
+
+        For multi-line subtitles, we need to:
+        1. Get detections with bounding boxes (paragraph=False)
+        2. Sort by Y position to get proper line order
+        3. Group detections on the same line
+        4. Join with newlines
+        """
         result = OCRResult(text='', backend=self.name)
 
         try:
-            # EasyOCR returns list of (bbox, text, confidence)
-            detections = self.reader.readtext(image, paragraph=paragraph)
+            # Always use paragraph=False to get bounding boxes for proper line ordering
+            # paragraph=True loses position info needed for multi-line subtitles
+            detections = self.reader.readtext(image, paragraph=False)
 
             if not detections:
                 return result
 
-            lines = []
+            # Each detection is (bbox, text, confidence)
+            # bbox is 4 points: [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
+            # We need to sort by Y position and group into lines
+
+            # Extract detections with their Y center position
+            detection_data = []
             for detection in detections:
                 if len(detection) >= 3:
                     bbox, text, conf = detection[0], detection[1], detection[2]
-                elif len(detection) == 2:
-                    text, conf = detection[0], detection[1]
-                else:
-                    continue
+                    # Calculate Y center from bounding box
+                    # bbox is [[x1,y1], [x2,y2], [x3,y3], [x4,y4]] (4 corners)
+                    y_coords = [point[1] for point in bbox]
+                    y_center = sum(y_coords) / len(y_coords)
+                    x_coords = [point[0] for point in bbox]
+                    x_center = sum(x_coords) / len(x_coords)
+                    height = max(y_coords) - min(y_coords)
 
-                # EasyOCR confidence is 0-1, convert to 0-100
-                confidence = conf * 100.0
+                    detection_data.append({
+                        'text': text,
+                        'conf': conf,
+                        'y_center': y_center,
+                        'x_center': x_center,
+                        'height': height
+                    })
+
+            if not detection_data:
+                return result
+
+            # Sort by Y position first (top to bottom)
+            detection_data.sort(key=lambda d: d['y_center'])
+
+            # Group detections into lines based on Y proximity
+            # Detections on the same line should have similar Y centers
+            line_groups = []
+            current_group = [detection_data[0]]
+
+            for det in detection_data[1:]:
+                # Use the average height as threshold for same-line detection
+                avg_height = sum(d['height'] for d in current_group) / len(current_group)
+                y_threshold = max(avg_height * 0.5, 10)  # At least 10 pixels or half line height
+
+                if abs(det['y_center'] - current_group[0]['y_center']) < y_threshold:
+                    # Same line - add to current group
+                    current_group.append(det)
+                else:
+                    # New line - save current group and start new one
+                    line_groups.append(current_group)
+                    current_group = [det]
+
+            # Don't forget the last group
+            line_groups.append(current_group)
+
+            # For each line group, sort by X position (left to right) and join
+            lines = []
+            for group in line_groups:
+                # Sort by X position within the line
+                group.sort(key=lambda d: d['x_center'])
+
+                # Join text with spaces
+                line_text = ' '.join(d['text'] for d in group)
+
+                # Calculate average confidence for the line
+                line_conf = sum(d['conf'] for d in group) / len(group) * 100.0
 
                 line = OCRLineResult(
-                    text=text,
-                    confidence=confidence,
-                    word_confidences=[(text, confidence)],
+                    text=line_text,
+                    confidence=line_conf,
+                    word_confidences=[(d['text'], d['conf'] * 100.0) for d in group],
                     backend=self.name
                 )
                 lines.append(line)
