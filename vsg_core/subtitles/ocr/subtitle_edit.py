@@ -306,6 +306,15 @@ class SubtitleEditParser:
                         ))
 
             logger.info(f"Loaded OCR fix list: {result.get_replacement_count()} rules from {path.name}")
+            logger.debug(f"  Breakdown: whole_lines={len(result.whole_lines)}, "
+                        f"partial_lines_always={len(result.partial_lines_always)}, "
+                        f"partial_lines={len(result.partial_lines)}, "
+                        f"begin_lines={len(result.begin_lines)}, "
+                        f"end_lines={len(result.end_lines)}, "
+                        f"whole_words={len(result.whole_words)}, "
+                        f"partial_words_always={len(result.partial_words_always)}, "
+                        f"partial_words={len(result.partial_words)}, "
+                        f"regex={len(result.regex_rules)}")
 
         except ET.ParseError as e:
             logger.error(f"XML parse error in {path}: {e}")
