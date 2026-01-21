@@ -42,6 +42,11 @@ class PlanItem:
     aspect_ratio: Optional[str] = None  # NEW: Store original aspect ratio (e.g., "109:60")
     stepping_adjusted: bool = False  # True if subtitle timestamps were adjusted for stepping corrections
 
+    # OCR data fields
+    ocr_data: Optional[Any] = None  # OCRSubtitleData - preserves full precision timing through pipeline
+    frame_adjusted: bool = False  # True if timestamps were adjusted by frame sync mode
+    framelocked_stats: Optional[Dict[str, Any]] = None  # Stats from frame-locked sync mode
+
     # Generated track fields (for tracks created by filtering styles from another track)
     is_generated: bool = False  # Marks this as a generated track
     generated_source_track_id: Optional[int] = None  # ID of the source track this was generated from

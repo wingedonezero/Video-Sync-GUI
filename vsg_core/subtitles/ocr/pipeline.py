@@ -19,7 +19,7 @@ Usage:
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Dict, Any
 
 from .parsers import SubtitleImageParser, SubtitleImage
 from .preprocessing import ImagePreprocessor, PreprocessingConfig, create_preprocessor
@@ -28,6 +28,7 @@ from .postprocess import OCRPostProcessor, PostProcessConfig, create_postprocess
 from .output import SubtitleWriter, OutputConfig, SubtitleEntry, create_writer
 from .report import OCRReport, SubtitleOCRResult, create_report
 from .debug import OCRDebugger, create_debugger
+from .data import OCRSubtitleData, OCRSubtitleEntry
 
 
 @dataclass
@@ -65,6 +66,8 @@ class PipelineResult:
     subtitle_count: int = 0
     duration_seconds: float = 0.0
     error: Optional[str] = None
+    # The complete OCR data - preserves all info for downstream processing
+    ocr_data: Optional[OCRSubtitleData] = None
 
 
 class OCRPipeline:
@@ -246,7 +249,7 @@ class OCRPipeline:
             )
 
             # Step 4: Process each subtitle
-            output_entries: List[SubtitleEntry] = []
+            ocr_entries: List[OCRSubtitleEntry] = []
             last_logged_percent = -1
 
             for i, sub_image in enumerate(subtitle_images):
@@ -262,7 +265,7 @@ class OCRPipeline:
                         sub_image, report, debugger
                     )
                     if entry is not None:
-                        output_entries.append(entry)
+                        ocr_entries.append(entry)
                         report.add_subtitle_result(sub_result)
                 except Exception as e:
                     report.add_subtitle_result(SubtitleOCRResult(
@@ -275,28 +278,82 @@ class OCRPipeline:
 
             # Step 5: Finalize report
             report.finalize()
-            report.duration_seconds = time.time() - start_time
+            processing_time = time.time() - start_time
+            report.duration_seconds = processing_time
 
-            # Step 6: Write output file
+            # Step 6: Build OCRSubtitleData container
+            self._log_progress("Building OCR data", 0.90)
+            frame_size = parse_result.format_info.get('frame_size', (720, 480))
+            master_palette = parse_result.format_info.get('master_palette')
+
+            # Aggregate fix counts and unknown words
+            total_fixes: Dict[str, int] = {}
+            total_unknown: List[str] = []
+            for entry in ocr_entries:
+                for fix_name, count in entry.fixes_applied.items():
+                    total_fixes[fix_name] = total_fixes.get(fix_name, 0) + count
+                total_unknown.extend(entry.unknown_words)
+            # Deduplicate unknown words
+            total_unknown = list(set(total_unknown))
+
+            ocr_data = OCRSubtitleData(
+                entries=ocr_entries,
+                source_file=str(input_path),
+                source_format=parse_result.format_info.get('format', 'vobsub').lower(),
+                source_resolution=frame_size,
+                ocr_engine=getattr(self.engine, 'name', 'tesseract'),
+                language=self.config.language,
+                master_palette=master_palette,
+                total_fixes_applied=total_fixes,
+                total_unknown_words=total_unknown,
+                processing_duration_seconds=processing_time,
+                preserve_positions=self.config.preserve_positions,
+                bottom_threshold_percent=self.config.bottom_threshold_percent,
+            )
+
+            result.ocr_data = ocr_data
+
+            # Step 7: Write raw output file (for debugging and backwards compatibility)
+            # This file is written with current precision - the ocr_data contains full precision
             self._log_progress("Writing output file", 0.92)
-            self.writer.write(output_entries, output_path)
+            # Convert OCRSubtitleEntry to SubtitleEntry for legacy writer
+            legacy_entries = [
+                SubtitleEntry(
+                    index=e.index,
+                    start_ms=int(e.start_ms),  # Legacy uses int
+                    end_ms=int(e.end_ms),
+                    text=e.text,
+                    x=e.x,
+                    y=e.y,
+                    frame_width=e.frame_width,
+                    frame_height=e.frame_height,
+                    is_forced=e.is_forced,
+                )
+                for e in ocr_entries
+            ]
+            self.writer.write(legacy_entries, output_path)
             result.output_path = output_path
 
-            # Step 7: Save report
+            # Step 8: Save report
             if self.config.generate_report:
-                self._log_progress("Saving report", 0.96)
+                self._log_progress("Saving report", 0.95)
                 report_path = self._get_report_path(input_path, timestamp)
                 report.save(report_path)
                 result.report_path = report_path
                 result.report_summary = report.to_summary()
 
-            # Step 8: Save debug output (if enabled)
+            # Step 9: Save debug output (if enabled)
             if self.config.debug_output:
-                self._log_progress("Saving debug output", 0.98)
+                self._log_progress("Saving debug output", 0.97)
                 debugger.save()
 
+                # Also save the JSON data file to logs folder for easy access
+                json_path = self.logs_dir / f"{input_path.stem}_ocr_data_{timestamp}.json"
+                ocr_data.save_json(json_path)
+                self._log_progress(f"Saved OCR data JSON: {json_path.name}", 0.99)
+
             result.success = True
-            result.duration_seconds = time.time() - start_time
+            result.duration_seconds = processing_time
             self._log_progress("OCR complete", 1.0)
 
         except Exception as e:
@@ -310,12 +367,12 @@ class OCRPipeline:
         sub_image: SubtitleImage,
         report: OCRReport,
         debugger: OCRDebugger
-    ) -> tuple[Optional[SubtitleEntry], SubtitleOCRResult]:
+    ) -> tuple[Optional[OCRSubtitleEntry], SubtitleOCRResult]:
         """
         Process a single subtitle through the pipeline.
 
         Returns:
-            Tuple of (SubtitleEntry for output, SubtitleOCRResult for report)
+            Tuple of (OCRSubtitleEntry for output, SubtitleOCRResult for report)
         """
         # Preprocess image
         preprocessed = self.preprocessor.preprocess(
@@ -393,17 +450,33 @@ class OCRPipeline:
             self.config.bottom_threshold_percent
         )
 
-        # Create output entry
-        entry = SubtitleEntry(
+        # Determine dominant color from subtitle colors (position 1 is typically text)
+        dominant_color = None
+        if sub_image.subtitle_colors and len(sub_image.subtitle_colors) > 1:
+            # Position 1 is text color, get RGB (ignore alpha)
+            r, g, b, a = sub_image.subtitle_colors[1]
+            if a > 0:  # Only if text is visible
+                dominant_color = (r, g, b)
+
+        # Create output entry with full precision and metadata
+        entry = OCRSubtitleEntry(
             index=sub_image.index,
-            start_ms=sub_image.start_ms,
-            end_ms=sub_image.end_ms,
+            start_ms=float(sub_image.start_ms),  # Float for precision
+            end_ms=float(sub_image.end_ms),
             text=post_result.text,
             x=sub_image.x,
             y=sub_image.y,
+            width=sub_image.width,
+            height=sub_image.height,
             frame_width=sub_image.frame_width,
             frame_height=sub_image.frame_height,
             is_forced=sub_image.is_forced,
+            confidence=ocr_result.average_confidence,
+            raw_ocr_text=raw_ocr_text,
+            unknown_words=list(post_result.unknown_words),
+            fixes_applied=dict(post_result.fixes_applied),
+            subtitle_colors=sub_image.subtitle_colors,
+            dominant_color=dominant_color,
         )
 
         # Create report entry

@@ -31,8 +31,9 @@ if TYPE_CHECKING:
     from vsg_core.io.runner import CommandRunner
 
 from .engine import OCREngine
-from .pipeline import OCRPipeline
+from .pipeline import OCRPipeline, PipelineResult
 from .report import OCRReport, UnknownWord, LowConfidenceLine
+from .data import OCRSubtitleData, OCRSubtitleEntry
 from .romaji_dictionary import (
     RomajiDictionary,
     KanaToRomaji,
@@ -43,19 +44,23 @@ from .romaji_dictionary import (
 __all__ = [
     'OCREngine',
     'OCRPipeline',
+    'PipelineResult',
     'OCRReport',
     'UnknownWord',
     'LowConfidenceLine',
+    'OCRSubtitleData',
+    'OCRSubtitleEntry',
     'RomajiDictionary',
     'KanaToRomaji',
     'get_romaji_dictionary',
     'is_romaji_word',
     'run_ocr',
+    'run_ocr_pipeline',
     'check_ocr_available',
 ]
 
 
-def run_ocr(
+def run_ocr_pipeline(
     subtitle_path: str,
     lang: str,
     runner: 'CommandRunner',
@@ -64,16 +69,13 @@ def run_ocr(
     work_dir: Optional[Path] = None,
     logs_dir: Optional[Path] = None,
     track_id: int = 0,
-) -> Optional[str]:
+) -> Optional['PipelineResult']:
     """
-    Runs OCR on an image-based subtitle file (VobSub IDX/SUB or PGS SUP).
+    Runs OCR on an image-based subtitle file and returns full result with data.
 
-    Uses the integrated OCR pipeline with:
-        - Native VobSub parsing
-        - Adaptive preprocessing
-        - Tesseract OCR with confidence tracking
-        - Post-processing and pattern fixes
-        - ASS output with position support
+    This is the preferred function for new code as it returns the complete
+    OCRSubtitleData object which preserves timing precision for downstream
+    processing (sync modes, style application, etc.).
 
     Args:
         subtitle_path: Path to the subtitle file (.idx for VobSub)
@@ -86,40 +88,34 @@ def run_ocr(
         track_id: Track ID for organizing work files
 
     Returns:
-        The path to the generated subtitle file (ASS or SRT), or None on failure.
+        PipelineResult with output_path, ocr_data, and metadata, or None on failure.
     """
     sub_path = Path(subtitle_path)
 
     # Determine input type
     suffix = sub_path.suffix.lower()
     if suffix == '.idx':
-        # VobSub - use .idx path
         input_path = sub_path
     elif suffix == '.sub':
-        # VobSub - convert to .idx path
         input_path = sub_path.with_suffix('.idx')
         if not input_path.exists():
             runner._log_message(f"[OCR] ERROR: IDX file not found: {input_path}")
             return None
     elif suffix == '.sup':
-        # PGS - not yet supported
         runner._log_message(f"[OCR] WARNING: PGS (.sup) support not yet implemented. Skipping {sub_path.name}")
         return None
     else:
         runner._log_message(f"[OCR] Skipping {sub_path.name}: Unsupported format.")
         return None
 
-    # Check if OCR is enabled
     if not config.get('ocr_enabled', True):
         runner._log_message(f"[OCR] Skipping {sub_path.name}: OCR is disabled.")
         return None
 
-    # Determine output format and path
     output_format = config.get('ocr_output_format', 'ass')
     output_suffix = '.ass' if output_format == 'ass' else '.srt'
     output_path = sub_path.with_suffix(output_suffix)
 
-    # Set up directories
     if work_dir is None:
         work_dir = sub_path.parent / 'ocr_work'
     if logs_dir is None:
@@ -129,14 +125,11 @@ def run_ocr(
     runner._log_message(f"[OCR] Language: {lang}, Output: {output_format.upper()}")
 
     try:
-        # Create progress callback that uses runner logging
         def progress_callback(message: str, progress: float):
             runner._log_message(f"[OCR] {message} ({int(progress * 100)}%)")
 
-        # Build settings dict for pipeline
         ocr_settings = _build_ocr_settings(config, lang)
 
-        # Create and run pipeline
         pipeline = OCRPipeline(
             settings_dict=ocr_settings,
             work_dir=work_dir,
@@ -154,7 +147,6 @@ def run_ocr(
             runner._log_message(f"[OCR] Successfully created {output_path.name}")
             runner._log_message(f"[OCR] Processed {result.subtitle_count} subtitles in {result.duration_seconds:.1f}s")
 
-            # Log summary from report
             if result.report_summary:
                 summary = result.report_summary
                 runner._log_message(f"[OCR] Average confidence: {summary.get('average_confidence', 0):.1f}%")
@@ -174,7 +166,10 @@ def run_ocr(
             if result.report_path:
                 runner._log_message(f"[OCR] Report saved: {result.report_path.name}")
 
-            return str(output_path)
+            if result.ocr_data:
+                runner._log_message(f"[OCR] OCR data: {len(result.ocr_data.entries)} entries with full precision timing")
+
+            return result
         else:
             runner._log_message(f"[OCR] ERROR: {result.error or 'Unknown error'}")
             return None
@@ -185,7 +180,49 @@ def run_ocr(
         return None
     except Exception as e:
         runner._log_message(f"[OCR] ERROR: Failed to perform OCR: {e}")
+        import traceback
+        runner._log_message(f"[OCR] Traceback: {traceback.format_exc()}")
         return None
+
+
+def run_ocr(
+    subtitle_path: str,
+    lang: str,
+    runner: 'CommandRunner',
+    tool_paths: dict,
+    config: dict,
+    work_dir: Optional[Path] = None,
+    logs_dir: Optional[Path] = None,
+    track_id: int = 0,
+) -> Optional[str]:
+    """
+    Runs OCR on an image-based subtitle file (VobSub IDX/SUB or PGS SUP).
+
+    This is the legacy interface that returns just the output path.
+    For new code, prefer run_ocr_pipeline() which also returns OCRSubtitleData
+    for precision timing preservation.
+
+    Args:
+        subtitle_path: Path to the subtitle file (.idx for VobSub)
+        lang: The 3-letter language code for OCR (e.g., 'eng')
+        runner: The CommandRunner instance for logging
+        tool_paths: A dictionary of tool paths (unused by new OCR)
+        config: The application's configuration dictionary
+        work_dir: Working directory for temp files
+        logs_dir: Directory for OCR reports
+        track_id: Track ID for organizing work files
+
+    Returns:
+        The path to the generated subtitle file (ASS or SRT), or None on failure.
+    """
+    result = run_ocr_pipeline(
+        subtitle_path, lang, runner, tool_paths, config,
+        work_dir, logs_dir, track_id
+    )
+
+    if result and result.success and result.output_path:
+        return str(result.output_path)
+    return None
 
 
 def _build_ocr_settings(config: dict, lang: str) -> dict:

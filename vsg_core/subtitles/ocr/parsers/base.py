@@ -32,6 +32,9 @@ class SubtitleImage:
         frame_height: Height of the video frame (for calculating relative position)
         is_forced: Whether this is a forced subtitle
         palette: Color palette if applicable (for indexed color images)
+        color_indices: VobSub 4-color selection from master palette (indices into palette)
+        alpha_values: VobSub per-color alpha values (0-15 scale, 0=transparent, 15=opaque)
+        subtitle_colors: Resolved RGBA colors for this subtitle (4 colors)
     """
     index: int
     start_ms: int
@@ -45,6 +48,10 @@ class SubtitleImage:
     frame_height: int = 480
     is_forced: bool = False
     palette: Optional[List[Tuple[int, int, int, int]]] = None
+    # VobSub color data - preserved for potential future use
+    color_indices: Optional[List[int]] = None  # 4 indices into master palette
+    alpha_values: Optional[List[int]] = None   # 4 alpha values (0-15 scale)
+    subtitle_colors: Optional[List[Tuple[int, int, int, int]]] = None  # Resolved RGBA
 
     def __post_init__(self):
         """Set width/height from image if not provided."""

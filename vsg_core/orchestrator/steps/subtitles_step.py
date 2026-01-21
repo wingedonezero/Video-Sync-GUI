@@ -13,7 +13,7 @@ from vsg_core.subtitles.convert import convert_srt_to_ass
 from vsg_core.subtitles.rescale import rescale_subtitle
 from vsg_core.subtitles.style import multiply_font_size
 from vsg_core.subtitles.style_engine import StyleEngine
-from vsg_core.subtitles.ocr import run_ocr
+from vsg_core.subtitles.ocr import run_ocr_pipeline
 from vsg_core.subtitles.timing import fix_subtitle_timing
 from vsg_core.subtitles.stepping_adjust import apply_stepping_to_subtitles
 from vsg_core.subtitles.frame_sync import apply_raw_delay_sync, apply_duration_align_sync, apply_correlation_frame_snap_sync, apply_subtitle_anchored_frame_snap_sync, apply_correlation_guided_frame_anchor_sync, apply_timebase_frame_locked_sync
@@ -51,7 +51,7 @@ class SubtitlesStep:
                 ocr_work_dir = ctx.temp_dir / 'ocr'
                 logs_dir = Path(ctx.settings_dict.get('logs_folder', ctx.temp_dir))
 
-                ocr_output_path = run_ocr(
+                ocr_result = run_ocr_pipeline(
                     str(item.extracted_path.with_suffix('.idx')),
                     item.track.props.lang,
                     runner,
@@ -61,7 +61,10 @@ class SubtitlesStep:
                     logs_dir=logs_dir,
                     track_id=item.track.id
                 )
-                if ocr_output_path:
+                if ocr_result and ocr_result.success:
+                    ocr_output_path = str(ocr_result.output_path)
+                    # Store OCR data for precision timing through sync pipeline
+                    item.ocr_data = ocr_result.ocr_data
                     ocr_file = Path(ocr_output_path)
                     if not ocr_file.exists():
                         # OCR tool didn't create output file - this is a critical failure
@@ -157,11 +160,11 @@ class SubtitlesStep:
                             runner._log_message("--------------------------")
 
                 else:
-                    # run_ocr returned None - complete failure
+                    # run_ocr_pipeline returned None or failed - complete failure
+                    error_msg = ocr_result.error if ocr_result else "Pipeline returned None"
                     runner._log_message(
-                        f"[OCR] ERROR: OCR tool failed for track {item.track.id} "
-                        f"({item.track.props.name or 'Unnamed'}). "
-                        f"Check that subtile-ocr is installed and the IDX/SUB files are valid."
+                        f"[OCR] ERROR: OCR failed for track {item.track.id} "
+                        f"({item.track.props.name or 'Unnamed'}): {error_msg}"
                     )
                     runner._log_message(
                         f"[OCR] WARNING: Keeping original image-based subtitle for track {item.track.id}."
@@ -562,6 +565,11 @@ class SubtitlesStep:
                                 runner._log_message(f"[CorrGuidedAnchor] Source video: {Path(source_video).name}")
                                 runner._log_message(f"[CorrGuidedAnchor] Target video: {Path(target_video).name}")
 
+                                # Pass OCR data if available for precision timing
+                                ocr_data_param = getattr(item, 'ocr_data', None)
+                                if ocr_data_param:
+                                    runner._log_message(f"[CorrGuidedAnchor] Using OCR data for precision timing ({len(ocr_data_param.entries)} entries)")
+
                                 frame_sync_report = apply_correlation_guided_frame_anchor_sync(
                                     str(item.extracted_path),
                                     str(source_video),
@@ -572,7 +580,8 @@ class SubtitlesStep:
                                     ctx.settings_dict,
                                     temp_dir=ctx.temp_dir,
                                     sync_exclusion_styles=item.sync_exclusion_styles,
-                                    sync_exclusion_mode=item.sync_exclusion_mode
+                                    sync_exclusion_mode=item.sync_exclusion_mode,
+                                    ocr_data=ocr_data_param,
                                 )
 
                                 if frame_sync_report and frame_sync_report.get('success'):
@@ -664,6 +673,30 @@ class SubtitlesStep:
         # Set context flag if any track used raw delay fallback due to no scene matches
         if _any_no_scene_fallback:
             ctx.correlation_snap_no_scenes_fallback = True
+
+        # Final step: Write ASS files from OCR data (single conversion point)
+        # This preserves timing precision through the entire pipeline
+        for item in ctx.extracted_items:
+            ocr_data = getattr(item, 'ocr_data', None)
+            if ocr_data and item.frame_adjusted:
+                # This is an OCR track that went through sync - write final ASS
+                runner._log_message(f"[OCR Final] Writing final ASS for track {item.track.id} (precision timing preserved)")
+
+                # Determine output path (should already be .ass from OCR)
+                final_path = item.extracted_path
+                if final_path.suffix.lower() != '.ass':
+                    final_path = final_path.with_suffix('.ass')
+
+                # Write the final ASS with single-point rounding
+                try:
+                    ocr_data.save_ass(final_path)
+                    item.extracted_path = final_path
+                    runner._log_message(f"[OCR Final] Saved: {final_path.name}")
+                    runner._log_message(f"[OCR Final] Sync offset: {ocr_data.sync_offset_applied_ms:+.3f}ms")
+                except Exception as e:
+                    runner._log_message(f"[OCR Final] ERROR: Failed to write final ASS: {e}")
+                    # Fall back to the already-written file (with double rounding)
+                    runner._log_message(f"[OCR Final] WARNING: Using pre-sync file (may have timing precision loss)")
 
         if items_to_add:
             ctx.extracted_items.extend(items_to_add)

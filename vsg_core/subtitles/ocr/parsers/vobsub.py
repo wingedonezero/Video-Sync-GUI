@@ -111,6 +111,7 @@ class VobSubParser(SubtitleImageParser):
                 'frame_size': (header.size_x, header.size_y),
                 'language': header.language,
                 'subtitle_count': len(entries),
+                'master_palette': header.palette,  # 16-color RGB palette from IDX
             }
 
             if not entries:
@@ -239,9 +240,9 @@ class VobSubParser(SubtitleImageParser):
         if not subtitle_data or len(subtitle_data) < 4:
             return None
 
-        # Parse the subtitle packet (now includes duration from control sequence)
+        # Parse the subtitle packet (now includes duration and color data)
         try:
-            image, x, y, forced, duration_ms = self._decode_subtitle_packet(
+            image, x, y, forced, duration_ms, color_indices, alpha_values = self._decode_subtitle_packet(
                 subtitle_data, header
             )
         except Exception:
@@ -265,6 +266,22 @@ class VobSubParser(SubtitleImageParser):
             end_ms = entry.timestamp_ms + 4000
             logger.debug(f"Subtitle {index}: no SPU duration, using 4s default")
 
+        # Build the full palette with RGBA
+        full_palette = [(r, g, b, 255) for r, g, b in header.palette]
+
+        # Resolve the 4 subtitle colors with their alpha values
+        # Convert alpha from 0-15 scale to 0-255 scale
+        subtitle_colors = None
+        if color_indices and alpha_values:
+            subtitle_colors = []
+            for ci, av in zip(color_indices, alpha_values):
+                if ci < len(header.palette):
+                    r, g, b = header.palette[ci]
+                    a = int((av / 15.0) * 255)  # Convert 0-15 to 0-255
+                    subtitle_colors.append((r, g, b, a))
+                else:
+                    subtitle_colors.append((128, 128, 128, 0))
+
         return SubtitleImage(
             index=index,
             start_ms=entry.timestamp_ms,
@@ -277,7 +294,10 @@ class VobSubParser(SubtitleImageParser):
             frame_width=header.size_x,
             frame_height=header.size_y,
             is_forced=forced,
-            palette=[(r, g, b, 255) for r, g, b in header.palette],
+            palette=full_palette,
+            color_indices=color_indices,
+            alpha_values=alpha_values,
+            subtitle_colors=subtitle_colors,
         )
 
     def _read_pes_packets(self, f: BinaryIO) -> bytes:
@@ -359,7 +379,7 @@ class VobSubParser(SubtitleImageParser):
         self,
         data: bytes,
         header: VobSubHeader
-    ) -> Tuple[Optional[np.ndarray], int, int, bool, int]:
+    ) -> Tuple[Optional[np.ndarray], int, int, bool, int, List[int], List[int]]:
         """
         Decode subtitle packet into bitmap image.
 
@@ -371,10 +391,11 @@ class VobSubParser(SubtitleImageParser):
             header: VobSub header with palette
 
         Returns:
-            Tuple of (image array, x position, y position, is_forced, duration_ms)
+            Tuple of (image array, x position, y position, is_forced, duration_ms,
+                     color_indices, alpha_values)
         """
         if len(data) < 4:
-            return None, 0, 0, False, 0
+            return None, 0, 0, False, 0, [], []
 
         # First two bytes are total size (we already have the data)
         # Next two bytes are offset to control sequence
@@ -382,12 +403,12 @@ class VobSubParser(SubtitleImageParser):
         ctrl_offset = struct.unpack('>H', data[2:4])[0]
 
         if ctrl_offset >= len(data):
-            return None, 0, 0, False, 0
+            return None, 0, 0, False, 0, [], []
 
         # Parse control sequence to get display parameters and duration
         ctrl_result = self._parse_control_sequence(data, ctrl_offset, header)
         if ctrl_result is None:
-            return None, 0, 0, False, 0
+            return None, 0, 0, False, 0, [], []
 
         (x1, y1, x2, y2, color_indices, alpha_values,
          top_field_offset, bottom_field_offset, forced, duration_ms) = ctrl_result
@@ -396,7 +417,7 @@ class VobSubParser(SubtitleImageParser):
         height = y2 - y1 + 1
 
         if width <= 0 or height <= 0 or width > 2000 or height > 2000:
-            return None, 0, 0, False, 0
+            return None, 0, 0, False, 0, [], []
 
         # Decode RLE data into bitmap
         image = self._decode_rle_image(
@@ -404,7 +425,7 @@ class VobSubParser(SubtitleImageParser):
             width, height, color_indices, alpha_values, header.palette
         )
 
-        return image, x1, y1, forced, duration_ms
+        return image, x1, y1, forced, duration_ms, color_indices, alpha_values
 
     def _parse_control_sequence(
         self,

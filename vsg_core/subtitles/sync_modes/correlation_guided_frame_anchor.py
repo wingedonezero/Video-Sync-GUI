@@ -8,7 +8,7 @@ Combines the strengths of correlation (guidance) and subtitle-anchor (robust mat
 """
 from __future__ import annotations
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 import pysubs2
 import math
 import gc
@@ -19,6 +19,9 @@ from ..frame_utils import (
     detect_video_fps,
     get_vapoursynth_frame_info
 )
+
+if TYPE_CHECKING:
+    from ..ocr.data import OCRSubtitleData
 
 
 # Global variables for worker processes (ProcessPoolExecutor)
@@ -236,7 +239,8 @@ def apply_correlation_guided_frame_anchor_sync(
     config: dict = None,
     temp_dir: Path = None,
     sync_exclusion_styles: List[str] = None,
-    sync_exclusion_mode: str = 'exclude'
+    sync_exclusion_mode: str = 'exclude',
+    ocr_data: 'OCRSubtitleData' = None,  # Optional OCR data for precision timing
 ) -> Dict[str, Any]:
     """
     Correlation-Guided Frame Anchor: Use correlation to guide robust frame matching.
@@ -320,15 +324,35 @@ def apply_correlation_guided_frame_anchor_sync(
     runner._log_message(f"[CorrGuided Anchor]   Fallback mode: {fallback_mode}")
     runner._log_message(f"[CorrGuided Anchor]   Anchor positions: {anchor_positions_pct}%")
 
-    # Load subtitle file (needed for final save)
-    try:
-        subs = pysubs2.load(subtitle_path, encoding='utf-8')
-    except Exception as e:
-        runner._log_message(f"[CorrGuided Anchor] ERROR: Failed to load subtitle file: {e}")
-        return {
-            'success': False,
-            'error': f'Failed to load subtitle file: {e}'
-        }
+    # Check if we're using OCR data (precision timing mode)
+    using_ocr_data = ocr_data is not None and len(ocr_data.entries) > 0
+
+    if using_ocr_data:
+        runner._log_message(f"[CorrGuided Anchor] Using OCR data: {len(ocr_data.entries)} entries (precision timing mode)")
+        # Create a mock subs structure for compatibility with existing code
+        # We'll need to convert back at the end
+        class MockEvent:
+            def __init__(self, entry):
+                self.start = int(entry.start_ms)
+                self.end = int(entry.end_ms)
+                self.style = 'Default'  # OCR doesn't have styles yet
+                self._ocr_entry = entry  # Keep reference for updating
+
+        class MockSubs:
+            def __init__(self, entries):
+                self.events = [MockEvent(e) for e in entries]
+
+        subs = MockSubs(ocr_data.entries)
+    else:
+        # Load subtitle file (needed for final save)
+        try:
+            subs = pysubs2.load(subtitle_path, encoding='utf-8')
+        except Exception as e:
+            runner._log_message(f"[CorrGuided Anchor] ERROR: Failed to load subtitle file: {e}")
+            return {
+                'success': False,
+                'error': f'Failed to load subtitle file: {e}'
+            }
 
     if not subs.events:
         runner._log_message(f"[CorrGuided Anchor] WARNING: No subtitle events found")
@@ -829,33 +853,51 @@ def apply_correlation_guided_frame_anchor_sync(
             event.start += final_offset_int
             event.end += final_offset_int
 
-    # Capture original metadata (if not already done during non-refinement path)
-    if refine_per_line and len(measurements) > 0:
-        metadata = SubtitleMetadata(subtitle_path)
-        metadata.capture()
-    elif 'metadata' not in locals():
-        # Metadata wasn't captured yet (edge case)
-        metadata = SubtitleMetadata(subtitle_path)
-        metadata.capture()
+    # Handle saving based on whether we're using OCR data or file-based flow
+    if using_ocr_data:
+        # Update OCR data entries with the final timing (preserving float precision)
+        for event in subs.events:
+            # Update the original OCRSubtitleEntry through the mock event reference
+            ocr_entry = event._ocr_entry
+            offset_to_apply = event.start - int(ocr_entry.start_ms)  # Calculate what was applied
+            ocr_entry.start_ms = ocr_entry.start_ms + offset_to_apply
+            ocr_entry.end_ms = ocr_entry.end_ms + offset_to_apply
 
-    # Save modified subtitle
-    runner._log_message(f"[CorrGuided Anchor] Saving modified subtitle file...")
-    try:
-        subs.save(subtitle_path, encoding='utf-8')
-    except Exception as e:
-        runner._log_message(f"[CorrGuided Anchor] ERROR: Failed to save subtitle file: {e}")
-        return {
-            'success': False,
-            'error': f'Failed to save subtitle file: {e}',
-            'checkpoints': checkpoint_details
-        }
+        # Update OCR data metadata
+        ocr_data.sync_mode_used = 'correlation-guided-frame-anchor'
+        ocr_data.sync_offset_applied_ms = final_offset_ms
 
-    # Validate and restore metadata
-    # For refinement mode, we can't specify expected_delay since each line is different
-    if refine_per_line and len(measurements) > 0:
-        metadata.validate_and_restore(runner, expected_delay_ms=None)
+        runner._log_message(f"[CorrGuided Anchor] Updated {len(ocr_data.entries)} OCR entries (precision timing preserved)")
+        runner._log_message(f"[CorrGuided Anchor] NOTE: Final ASS will be written at end of pipeline")
     else:
-        metadata.validate_and_restore(runner, expected_delay_ms=final_offset_int)
+        # File-based flow - capture metadata and save
+        # Capture original metadata (if not already done during non-refinement path)
+        if refine_per_line and len(measurements) > 0:
+            metadata = SubtitleMetadata(subtitle_path)
+            metadata.capture()
+        elif 'metadata' not in locals():
+            # Metadata wasn't captured yet (edge case)
+            metadata = SubtitleMetadata(subtitle_path)
+            metadata.capture()
+
+        # Save modified subtitle
+        runner._log_message(f"[CorrGuided Anchor] Saving modified subtitle file...")
+        try:
+            subs.save(subtitle_path, encoding='utf-8')
+        except Exception as e:
+            runner._log_message(f"[CorrGuided Anchor] ERROR: Failed to save subtitle file: {e}")
+            return {
+                'success': False,
+                'error': f'Failed to save subtitle file: {e}',
+                'checkpoints': checkpoint_details
+            }
+
+        # Validate and restore metadata
+        # For refinement mode, we can't specify expected_delay since each line is different
+        if refine_per_line and len(measurements) > 0:
+            metadata.validate_and_restore(runner, expected_delay_ms=None)
+        else:
+            metadata.validate_and_restore(runner, expected_delay_ms=final_offset_int)
 
     runner._log_message(f"[CorrGuided Anchor] Successfully synchronized {len(subs.events)} events")
     runner._log_message(f"[CorrGuided Anchor] ═══════════════════════════════════════")
