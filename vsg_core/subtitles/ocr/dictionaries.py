@@ -80,25 +80,9 @@ class ReplacementRule:
         )
 
 
-# Default replacement rules - complement SubtitleEdit's OCR fix list
-# Many common I/l rules are in SE, these add unique or capitalized variants
-DEFAULT_REPLACEMENT_RULES = [
-    # Rules unique to us (not in SE)
-    ReplacementRule("IIl", "Ill", "literal", description="II→Il in Ill"),
-    ReplacementRule("IIi", "Ili", "literal", description="II→Il"),
-    ReplacementRule("||", "ll", "literal", description="double pipe→ll"),
-
-    # Capitalized versions (SE has lowercase variants like lf→if, but we need If)
-    ReplacementRule("lf", "If", "word", description="l→I at word start (capitalized)"),
-    ReplacementRule("ls", "Is", "word", description="l→I at word start"),
-    ReplacementRule("lt", "It", "word", description="l→I at word start"),
-    ReplacementRule("lts", "Its", "word", description="l→I at word start"),
-    ReplacementRule("lsn't", "Isn't", "literal", description="l→I in Isn't (capitalized)"),
-    ReplacementRule("l", "I", "word", description="Standalone l→I (capitalized)"),
-
-    # Confidence-gated fixes - only apply when OCR confidence is low
-    ReplacementRule("rn", "m", "word_middle", confidence_gated=True, description="rn→m confusion"),
-]
+# Default replacement rules - empty by default, SE OCR fix list provides comprehensive coverage
+# Users can add custom rules as needed via the UI
+DEFAULT_REPLACEMENT_RULES = []
 
 
 class OCRDictionaries:
