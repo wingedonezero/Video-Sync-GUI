@@ -590,6 +590,8 @@ class PaddleOCRBackend(OCRBackend):
                 logger.info("This may take a moment if models need to be downloaded...")
 
                 self._ocr = PaddleOCR(
+                    use_doc_orientation_classify=False,  # Don't try to fix document rotation
+                    use_doc_unwarping=False,  # Don't try to unwarp document
                     use_textline_orientation=False,  # Don't rotate text (replaces use_angle_cls)
                     lang=self.language,
                     device=device,  # PaddleOCR 3.0+ API
