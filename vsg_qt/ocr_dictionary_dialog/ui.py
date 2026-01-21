@@ -28,6 +28,10 @@ from vsg_core.subtitles.ocr.dictionaries import (
 from vsg_core.subtitles.ocr.subtitle_edit import (
     SubtitleEditParser, SEDictionaryConfig, load_se_config, save_se_config
 )
+from vsg_core.subtitles.ocr.word_lists import (
+    WordListConfig, ValidationManager, get_validation_manager,
+    initialize_validation_manager, DEFAULT_WORD_LISTS
+)
 
 
 class ReplacementEditWidget(QWidget):
@@ -694,6 +698,253 @@ class SubtitleEditTab(QWidget):
             subprocess.run(['xdg-open', str(self.se_dir)])
 
 
+class WordListsConfigTab(QWidget):
+    """
+    Tab for configuring word list behavior and priority.
+
+    Shows all word lists with checkboxes for:
+    - Enabled: Whether the list is active
+    - Validates: Words in this list won't show as "unknown"
+    - Protects: Words in this list won't be auto-corrected
+    - Accept Fix: Words in this list are valid correction targets
+
+    Lists can be reordered by dragging or using up/down buttons.
+    """
+
+    def __init__(self, dictionaries: OCRDictionaries, parent=None):
+        super().__init__(parent)
+        self.dictionaries = dictionaries
+        self.config_dir = dictionaries.config_dir
+        self._setup_ui()
+        self._load_data()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+
+        # Info section
+        info_group = QGroupBox("Word List Configuration")
+        info_layout = QVBoxLayout(info_group)
+
+        info_text = QLabel(
+            "Configure how each word list is used during OCR processing. "
+            "Lists are checked in order from top to bottom.\n\n"
+            "Flags:\n"
+            "  - Enabled: List is active\n"
+            "  - Validates: Words won't be flagged as 'unknown'\n"
+            "  - Protects: Words won't be auto-corrected by fix rules\n"
+            "  - Accept Fix: Words are valid targets for OCR corrections"
+        )
+        info_text.setWordWrap(True)
+        info_layout.addWidget(info_text)
+        layout.addWidget(info_group)
+
+        # Word lists table
+        table_group = QGroupBox("Word Lists (Priority Order)")
+        table_layout = QVBoxLayout(table_group)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(7)
+        self.table.setHorizontalHeaderLabels([
+            "Order", "Name", "Source", "Words", "Validates", "Protects", "Accept Fix"
+        ])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        table_layout.addWidget(self.table)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+
+        self.move_up_btn = QPushButton("Move Up")
+        self.move_up_btn.clicked.connect(self._move_up)
+        btn_layout.addWidget(self.move_up_btn)
+
+        self.move_down_btn = QPushButton("Move Down")
+        self.move_down_btn.clicked.connect(self._move_down)
+        btn_layout.addWidget(self.move_down_btn)
+
+        btn_layout.addStretch()
+
+        self.reset_btn = QPushButton("Reset to Defaults")
+        self.reset_btn.clicked.connect(self._reset_defaults)
+        btn_layout.addWidget(self.reset_btn)
+
+        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn.clicked.connect(self._load_data)
+        btn_layout.addWidget(self.refresh_btn)
+
+        table_layout.addLayout(btn_layout)
+        layout.addWidget(table_group)
+
+        # Status
+        self.status_label = QLabel()
+        layout.addWidget(self.status_label)
+
+    def _load_data(self):
+        """Load word list configurations."""
+        # Initialize or get the validation manager
+        try:
+            manager = self.dictionaries.get_validation_manager()
+        except Exception as e:
+            self.status_label.setText(f"Error loading word lists: {e}")
+            return
+
+        word_lists = manager.get_word_lists()
+
+        self.table.setRowCount(len(word_lists))
+        for row, wl in enumerate(word_lists):
+            # Order
+            order_item = QTableWidgetItem(str(wl.config.order))
+            order_item.setFlags(order_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 0, order_item)
+
+            # Name
+            name_item = QTableWidgetItem(wl.config.name)
+            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 1, name_item)
+
+            # Source
+            source_item = QTableWidgetItem(wl.config.source)
+            source_item.setFlags(source_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 2, source_item)
+
+            # Word count
+            count_item = QTableWidgetItem(f"{wl.word_count:,}")
+            count_item.setFlags(count_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(row, 3, count_item)
+
+            # Validates checkbox
+            validates_widget = QWidget()
+            validates_layout = QHBoxLayout(validates_widget)
+            validates_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            validates_layout.setContentsMargins(0, 0, 0, 0)
+            validates_check = QCheckBox()
+            validates_check.setChecked(wl.config.validates_known)
+            validates_check.stateChanged.connect(
+                lambda state, name=wl.config.name: self._on_validates_changed(name, state)
+            )
+            validates_layout.addWidget(validates_check)
+            self.table.setCellWidget(row, 4, validates_widget)
+
+            # Protects checkbox
+            protects_widget = QWidget()
+            protects_layout = QHBoxLayout(protects_widget)
+            protects_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            protects_layout.setContentsMargins(0, 0, 0, 0)
+            protects_check = QCheckBox()
+            protects_check.setChecked(wl.config.protects_from_fix)
+            protects_check.stateChanged.connect(
+                lambda state, name=wl.config.name: self._on_protects_changed(name, state)
+            )
+            protects_layout.addWidget(protects_check)
+            self.table.setCellWidget(row, 5, protects_widget)
+
+            # Accept Fix checkbox
+            accept_widget = QWidget()
+            accept_layout = QHBoxLayout(accept_widget)
+            accept_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            accept_layout.setContentsMargins(0, 0, 0, 0)
+            accept_check = QCheckBox()
+            accept_check.setChecked(wl.config.accepts_as_fix_result)
+            accept_check.stateChanged.connect(
+                lambda state, name=wl.config.name: self._on_accept_changed(name, state)
+            )
+            accept_layout.addWidget(accept_check)
+            self.table.setCellWidget(row, 6, accept_widget)
+
+        # Update status
+        total_words = sum(wl.word_count for wl in word_lists)
+        enabled_lists = sum(1 for wl in word_lists if wl.enabled)
+        self.status_label.setText(
+            f"{len(word_lists)} word lists configured, {total_words:,} total words"
+        )
+
+    def _on_validates_changed(self, name: str, state: int):
+        """Handle validates checkbox change."""
+        manager = self.dictionaries.get_validation_manager()
+        manager.update_word_list_config(name, validates_known=(state == Qt.CheckState.Checked.value))
+
+    def _on_protects_changed(self, name: str, state: int):
+        """Handle protects checkbox change."""
+        manager = self.dictionaries.get_validation_manager()
+        manager.update_word_list_config(name, protects_from_fix=(state == Qt.CheckState.Checked.value))
+
+    def _on_accept_changed(self, name: str, state: int):
+        """Handle accept fix checkbox change."""
+        manager = self.dictionaries.get_validation_manager()
+        manager.update_word_list_config(name, accepts_as_fix_result=(state == Qt.CheckState.Checked.value))
+
+    def _move_up(self):
+        """Move selected list up in priority."""
+        current_row = self.table.currentRow()
+        if current_row <= 0:
+            return
+
+        manager = self.dictionaries.get_validation_manager()
+        word_lists = manager.get_word_lists()
+
+        if current_row < len(word_lists):
+            # Swap orders
+            current_list = word_lists[current_row]
+            above_list = word_lists[current_row - 1]
+
+            current_order = current_list.config.order
+            above_order = above_list.config.order
+
+            manager.reorder_word_list(current_list.config.name, above_order)
+            manager.reorder_word_list(above_list.config.name, current_order)
+
+            self._load_data()
+            self.table.selectRow(current_row - 1)
+
+    def _move_down(self):
+        """Move selected list down in priority."""
+        current_row = self.table.currentRow()
+        manager = self.dictionaries.get_validation_manager()
+        word_lists = manager.get_word_lists()
+
+        if current_row < 0 or current_row >= len(word_lists) - 1:
+            return
+
+        # Swap orders
+        current_list = word_lists[current_row]
+        below_list = word_lists[current_row + 1]
+
+        current_order = current_list.config.order
+        below_order = below_list.config.order
+
+        manager.reorder_word_list(current_list.config.name, below_order)
+        manager.reorder_word_list(below_list.config.name, current_order)
+
+        self._load_data()
+        self.table.selectRow(current_row + 1)
+
+    def _reset_defaults(self):
+        """Reset to default word list configuration."""
+        reply = QMessageBox.question(
+            self, "Reset Defaults",
+            "Reset all word list configurations to defaults?\n"
+            "This will reset order and all flag settings.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            # Delete config file to reset to defaults
+            config_path = self.config_dir / "ocr_config.json"
+            if config_path.exists():
+                config_path.unlink()
+
+            # Reinitialize
+            self.dictionaries._validation_manager = None
+            self.dictionaries.get_validation_manager()
+            self._load_data()
+
+
 class RomajiBuildWorker(QThread):
     """Worker thread for building the romaji dictionary."""
 
@@ -965,6 +1216,10 @@ class OCRDictionaryDialog(QDialog):
         self.romaji_tab = RomajiTab(self.dictionaries)
         self.tabs.addTab(self.romaji_tab, "Romaji")
 
+        # Word Lists Config tab
+        self.word_lists_tab = WordListsConfigTab(self.dictionaries)
+        self.tabs.addTab(self.word_lists_tab, "Word Lists")
+
         layout.addWidget(self.tabs)
 
         # Help text based on selected tab
@@ -1000,6 +1255,10 @@ class OCRDictionaryDialog(QDialog):
             "Romaji: Japanese words in romanized form from JMdict. "
             "Click 'Build Dictionary' to download and generate ~100k words. "
             "Prevents words like 'arigatou', 'sugoi' from being flagged.",
+
+            "Word Lists: Configure behavior for all word lists. "
+            "Set which lists validate words, protect from fixes, or accept as fix results. "
+            "Drag or use buttons to reorder priority.",
         ]
         if index < len(help_texts):
             self.help_label.setText(help_texts[index])
