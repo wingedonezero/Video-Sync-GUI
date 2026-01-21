@@ -21,6 +21,7 @@ RLE Encoding formats (from SubtitleEdit):
     64-255    16      000000nnnnnnnncc   (two bytes)
 """
 
+import logging
 import re
 import struct
 from dataclasses import dataclass
@@ -29,6 +30,8 @@ from typing import List, Optional, Tuple, BinaryIO
 import numpy as np
 
 from .base import SubtitleImage, SubtitleImageParser, ParseResult
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -224,7 +227,7 @@ class VobSubParser(SubtitleImageParser):
             entry: IDX entry for this subtitle
             index: Index of this subtitle
             header: VobSub header info
-            all_entries: All entries (to calculate end time)
+            all_entries: All entries (for fallback end time calculation)
 
         Returns:
             SubtitleImage or None if parsing fails
@@ -236,9 +239,9 @@ class VobSubParser(SubtitleImageParser):
         if not subtitle_data or len(subtitle_data) < 4:
             return None
 
-        # Parse the subtitle packet
+        # Parse the subtitle packet (now includes duration from control sequence)
         try:
-            image, x, y, forced = self._decode_subtitle_packet(
+            image, x, y, forced, duration_ms = self._decode_subtitle_packet(
                 subtitle_data, header
             )
         except Exception:
@@ -247,12 +250,20 @@ class VobSubParser(SubtitleImageParser):
         if image is None:
             return None
 
-        # Calculate end time from next entry or add default duration
-        if index + 1 < len(all_entries):
+        # Calculate end time using duration from control sequence
+        # The duration comes from the SP_DCSQ_STM delay field when stop display (0x02) is seen
+        if duration_ms > 0:
+            # Use the actual duration from the subtitle packet
+            end_ms = entry.timestamp_ms + duration_ms
+            logger.debug(f"Subtitle {index}: using SPU duration {duration_ms}ms")
+        elif index + 1 < len(all_entries):
+            # Fallback: use next subtitle's start time (old behavior)
             end_ms = all_entries[index + 1].timestamp_ms
+            logger.debug(f"Subtitle {index}: no SPU duration, using next start time")
         else:
-            # Default 4 second duration for last subtitle
+            # Default 4 second duration for last subtitle with no duration info
             end_ms = entry.timestamp_ms + 4000
+            logger.debug(f"Subtitle {index}: no SPU duration, using 4s default")
 
         return SubtitleImage(
             index=index,
@@ -348,7 +359,7 @@ class VobSubParser(SubtitleImageParser):
         self,
         data: bytes,
         header: VobSubHeader
-    ) -> Tuple[Optional[np.ndarray], int, int, bool]:
+    ) -> Tuple[Optional[np.ndarray], int, int, bool, int]:
         """
         Decode subtitle packet into bitmap image.
 
@@ -360,10 +371,10 @@ class VobSubParser(SubtitleImageParser):
             header: VobSub header with palette
 
         Returns:
-            Tuple of (image array, x position, y position, is_forced)
+            Tuple of (image array, x position, y position, is_forced, duration_ms)
         """
         if len(data) < 4:
-            return None, 0, 0, False
+            return None, 0, 0, False, 0
 
         # First two bytes are total size (we already have the data)
         # Next two bytes are offset to control sequence
@@ -371,21 +382,21 @@ class VobSubParser(SubtitleImageParser):
         ctrl_offset = struct.unpack('>H', data[2:4])[0]
 
         if ctrl_offset >= len(data):
-            return None, 0, 0, False
+            return None, 0, 0, False, 0
 
-        # Parse control sequence to get display parameters
+        # Parse control sequence to get display parameters and duration
         ctrl_result = self._parse_control_sequence(data, ctrl_offset, header)
         if ctrl_result is None:
-            return None, 0, 0, False
+            return None, 0, 0, False, 0
 
         (x1, y1, x2, y2, color_indices, alpha_values,
-         top_field_offset, bottom_field_offset, forced) = ctrl_result
+         top_field_offset, bottom_field_offset, forced, duration_ms) = ctrl_result
 
         width = x2 - x1 + 1
         height = y2 - y1 + 1
 
         if width <= 0 or height <= 0 or width > 2000 or height > 2000:
-            return None, 0, 0, False
+            return None, 0, 0, False, 0
 
         # Decode RLE data into bitmap
         image = self._decode_rle_image(
@@ -393,7 +404,7 @@ class VobSubParser(SubtitleImageParser):
             width, height, color_indices, alpha_values, header.palette
         )
 
-        return image, x1, y1, forced
+        return image, x1, y1, forced, duration_ms
 
     def _parse_control_sequence(
         self,
@@ -404,8 +415,19 @@ class VobSubParser(SubtitleImageParser):
         """
         Parse subtitle control sequence.
 
+        The control sequence contains timing info in SP_DCSQ_STM field.
+        When we see command 0x02 (stop display), the delay value tells us
+        the subtitle duration.
+
+        SP_DCSQ format (from DVD spec):
+            - 2 bytes: SP_DCSQ_STM (delay in 90KHz/1024 ticks)
+            - 2 bytes: pointer to next SP_DCSQ
+            - commands until 0xFF
+
+        Delay to milliseconds: delay_ms = (delay_ticks * 1024) / 90
+
         Returns:
-            Tuple of (x1, y1, x2, y2, colors, alphas, top_offset, bottom_offset, forced)
+            Tuple of (x1, y1, x2, y2, colors, alphas, top_offset, bottom_offset, forced, duration_ms)
         """
         x1, y1, x2, y2 = 0, 0, header.size_x - 1, header.size_y - 1
         color_indices = [0, 1, 2, 3]  # Default palette indices
@@ -413,13 +435,16 @@ class VobSubParser(SubtitleImageParser):
         top_field_offset = 4  # Default data start
         bottom_field_offset = 4
         forced = False
-        end_time_pts = 0
+        duration_ms = 0  # Will be set when we find stop display command
 
         pos = offset
-        while pos < len(data) - 1:
-            # Skip date field (2 bytes)
+        while pos < len(data) - 3:
+            # Read SP_DCSQ_STM delay field (2 bytes, big-endian)
+            # This is the delay in 90KHz/1024 ticks before executing commands
+            delay_ticks = struct.unpack('>H', data[pos:pos+2])[0]
             pos += 2
-            if pos >= len(data):
+
+            if pos + 2 > len(data):
                 break
 
             # Read next control sequence offset
@@ -440,8 +465,9 @@ class VobSubParser(SubtitleImageParser):
                     pass
 
                 elif cmd == 0x02:
-                    # Stop display
-                    pass
+                    # Stop display - the delay_ticks tells us when to stop
+                    # Convert to milliseconds: (ticks * 1024) / 90
+                    duration_ms = int((delay_ticks * 1024) / 90)
 
                 elif cmd == 0x03:
                     # Palette - 4 nibbles map to color slots 3,2,1,0 (SubtitleEdit order)
@@ -499,7 +525,7 @@ class VobSubParser(SubtitleImageParser):
             pos = offset
 
         return (x1, y1, x2, y2, color_indices, alpha_values,
-                top_field_offset, bottom_field_offset, forced)
+                top_field_offset, bottom_field_offset, forced, duration_ms)
 
     def _decode_rle_image(
         self,
