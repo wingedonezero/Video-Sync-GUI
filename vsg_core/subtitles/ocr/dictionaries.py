@@ -3,16 +3,21 @@
 """
 OCR Dictionary Management
 
-Manages three databases for OCR text correction:
+Manages databases for OCR text correction:
     1. replacements.json - Pattern-based character/word replacements
     2. user_dictionary.txt - User's custom valid words
     3. names.txt - Proper names (characters, places, etc.)
+    4. romaji_dictionary.txt - Japanese romanization words
+
+Now integrates with ValidationManager for unified word validation
+across all OCR components.
 
 Features:
     - Atomic writes (write to temp, then rename)
     - Automatic backups before changes
     - Duplicate prevention
     - Import/export functions
+    - ValidationManager integration for unified validation
 """
 
 import json
@@ -179,6 +184,9 @@ class OCRDictionaries:
         self._user_words: Set[str] = set()
         self._names: Set[str] = set()
         self._romaji_dict = None  # Lazy-loaded romaji dictionary
+
+        # ValidationManager integration (lazy loaded)
+        self._validation_manager = None
 
         # Load or create defaults
         self._ensure_defaults()
@@ -613,17 +621,27 @@ class OCRDictionaries:
         self.load_names()
         logger.info(f"Reloaded all dictionaries from {self.config_dir}")
 
-    def is_known_word(self, word: str, check_romaji: bool = True) -> bool:
+    def is_known_word(self, word: str, check_romaji: bool = True, track_stats: bool = False) -> bool:
         """
-        Check if a word is in user dictionary, names, or romaji dictionary.
+        Check if a word is known (in any dictionary).
+
+        Uses ValidationManager if initialized, otherwise falls back to
+        direct checking of user dictionary, names, and romaji.
 
         Args:
             word: Word to check
             check_romaji: Whether to also check romaji dictionary
+            track_stats: Whether to track validation statistics
 
         Returns:
             True if word is known
         """
+        # Use ValidationManager if available
+        if self._validation_manager is not None:
+            result = self._validation_manager.is_known_word(word, track_stats=track_stats)
+            return result.is_known
+
+        # Fallback to direct checking (backward compatibility)
         word_lower = word.lower()
         user_words = self.load_user_dictionary()
         names = self.load_names()
@@ -643,6 +661,85 @@ class OCRDictionaries:
                 return True
 
         return False
+
+    def is_protected_word(self, word: str) -> bool:
+        """
+        Check if a word is protected from auto-fixing.
+
+        Uses ValidationManager if initialized.
+
+        Args:
+            word: Word to check
+
+        Returns:
+            True if word should not be auto-fixed
+        """
+        if self._validation_manager is not None:
+            return self._validation_manager.is_protected_word(word)
+
+        # Fallback: any known word is protected
+        return self.is_known_word(word, check_romaji=True)
+
+    def is_valid_fix_result(self, word: str) -> bool:
+        """
+        Check if a word is a valid result for an OCR fix.
+
+        Uses ValidationManager if initialized.
+
+        Args:
+            word: Word to check
+
+        Returns:
+            True if word is acceptable as a fix result
+        """
+        if self._validation_manager is not None:
+            return self._validation_manager.is_valid_fix_result(word)
+
+        # Fallback: any known word except romaji-only words
+        word_lower = word.lower()
+
+        # Check user dictionary and names first (these are valid fix results)
+        user_words = self.load_user_dictionary()
+        names = self.load_names()
+        if word_lower in {w.lower() for w in user_words}:
+            return True
+        if word_lower in {n.lower() for n in names}:
+            return True
+
+        # Romaji words are NOT valid fix results (OCR wouldn't produce Japanese)
+        # So we don't check romaji here
+        return False
+
+    # =========================================================================
+    # ValidationManager Integration
+    # =========================================================================
+
+    def get_validation_manager(self):
+        """Get the ValidationManager instance, initializing if needed."""
+        if self._validation_manager is None:
+            from .word_lists import initialize_validation_manager
+            self._validation_manager = initialize_validation_manager(self.config_dir)
+        return self._validation_manager
+
+    def set_validation_manager(self, manager):
+        """Set the ValidationManager instance (for external initialization)."""
+        self._validation_manager = manager
+
+    def init_validation_manager(self, spell_checker=None):
+        """
+        Initialize the ValidationManager with all word lists.
+
+        Args:
+            spell_checker: Optional Enchant spell checker instance
+
+        Returns:
+            Initialized ValidationManager
+        """
+        from .word_lists import initialize_validation_manager
+        self._validation_manager = initialize_validation_manager(
+            self.config_dir, spell_checker=spell_checker
+        )
+        return self._validation_manager
 
     # =========================================================================
     # Romaji Dictionary

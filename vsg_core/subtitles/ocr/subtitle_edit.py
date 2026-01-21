@@ -593,18 +593,23 @@ class SubtitleEditCorrector:
     Uses the rules loaded from SE dictionary files to fix OCR errors.
     Follows Subtitle Edit's logic: only fix words that are NOT in the dictionary,
     and only accept fixes that produce valid dictionary words.
+
+    Can use ValidationManager for unified validation across all dictionaries,
+    or fall back to spell_checker + SE dictionaries only.
     """
 
-    def __init__(self, se_dicts: SEDictionaries, spell_checker=None):
+    def __init__(self, se_dicts: SEDictionaries, spell_checker=None, validation_manager=None):
         """
         Initialize corrector with loaded dictionaries.
 
         Args:
             se_dicts: Loaded Subtitle Edit dictionaries
             spell_checker: Spell checker for validating fixes (required for proper operation)
+            validation_manager: Optional ValidationManager for unified validation
         """
         self.dicts = se_dicts
         self.spell_checker = spell_checker
+        self.validation_manager = validation_manager
         self.word_splitter = None
 
         if se_dicts.word_split_list:
@@ -622,6 +627,40 @@ class SubtitleEditCorrector:
         # Build lookup dicts for faster word-level processing
         self._whole_word_map = {rule.from_text: rule.to_text for rule in se_dicts.whole_words}
 
+    def _is_word_protected(self, word: str) -> bool:
+        """Check if a word is protected from being fixed."""
+        if not word or len(word) <= 1:
+            return True  # Skip very short words
+
+        # Strip punctuation for checking
+        clean_word = word.strip(".,!?;:\"'()-")
+        if not clean_word:
+            return True
+
+        # Use ValidationManager if available
+        if self.validation_manager is not None:
+            return self.validation_manager.is_protected_word(clean_word)
+
+        # Fallback to spell checker + SE dictionaries
+        return self._is_word_valid_fallback(clean_word)
+
+    def _is_valid_fix_result(self, word: str) -> bool:
+        """Check if a word is a valid result for a fix."""
+        if not word:
+            return False
+
+        # Strip punctuation for checking
+        clean_word = word.strip(".,!?;:\"'()-")
+        if not clean_word:
+            return False
+
+        # Use ValidationManager if available
+        if self.validation_manager is not None:
+            return self.validation_manager.is_valid_fix_result(clean_word)
+
+        # Fallback to spell checker + SE dictionaries
+        return self._is_word_valid_fallback(clean_word)
+
     def _is_word_valid(self, word: str) -> bool:
         """Check if a word is valid (in spell checker or SE dictionaries)."""
         if not word or len(word) <= 1:
@@ -632,6 +671,16 @@ class SubtitleEditCorrector:
         if not clean_word:
             return True
 
+        # Use ValidationManager if available (for unknown word detection)
+        if self.validation_manager is not None:
+            result = self.validation_manager.is_known_word(clean_word)
+            return result.is_known
+
+        # Fallback to spell checker + SE dictionaries
+        return self._is_word_valid_fallback(clean_word)
+
+    def _is_word_valid_fallback(self, clean_word: str) -> bool:
+        """Fallback validation using spell checker + SE dictionaries only."""
         # Check spell checker
         if self.spell_checker:
             if self.spell_checker.check(clean_word):
@@ -651,6 +700,9 @@ class SubtitleEditCorrector:
     def _try_fix_word(self, word: str) -> Tuple[str, Optional[str]]:
         """
         Try to fix a single word using SE rules.
+
+        Only fixes words that are NOT protected (not in any dictionary).
+        Only accepts fixes that produce valid fix results.
 
         Args:
             word: Word to fix
@@ -676,21 +728,23 @@ class SubtitleEditCorrector:
         if not clean_word:
             return word, None
 
-        # If word is already valid, don't fix it
-        if self._is_word_valid(clean_word):
+        # If word is protected (in dictionary), don't fix it
+        if self._is_word_protected(clean_word):
             return word, None
 
         # Try whole word replacement
         if clean_word in self._whole_word_map:
             replacement = self._whole_word_map[clean_word]
-            if self._is_word_valid(replacement):
+            # Only accept fix if result is a valid fix target
+            if self._is_valid_fix_result(replacement):
                 return prefix + replacement + suffix, f"whole_word: {clean_word} -> {replacement}"
 
         # Try partial word fixes (only PartialWords, not PartialWordsAlways - those are line-level)
         for rule in self.dicts.partial_words:
             if rule.from_text in clean_word:
                 new_word = clean_word.replace(rule.from_text, rule.to_text)
-                if self._is_word_valid(new_word):
+                # Only accept fix if result is a valid fix target
+                if self._is_valid_fix_result(new_word):
                     return prefix + new_word + suffix, f"partial_word: {rule.from_text} -> {rule.to_text}"
 
         # Word couldn't be fixed

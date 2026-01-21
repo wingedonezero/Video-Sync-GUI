@@ -185,8 +185,11 @@ class OCRPostProcessor:
         logger.debug(f"Loaded {len(self.custom_names)} names")
         logger.debug(f"Romaji dictionary: {romaji_stats.get('word_count', 0)} words from {romaji_stats.get('dict_path', 'N/A')}")
 
+        # ValidationManager will be initialized after spell checker is ready
+        self.validation_manager = None
+
     def _init_spell_checker(self):
-        """Initialize spell-check dictionary."""
+        """Initialize spell-check dictionary and ValidationManager."""
         self.dictionary = None
         if ENCHANT_AVAILABLE and self.config.enable_dictionary_validation:
             try:
@@ -198,7 +201,10 @@ class OCRPostProcessor:
                 for word in self.all_custom_words:
                     self.dictionary.add_to_session(word)
             except enchant.errors.DictNotFoundError:
-                pass
+                logger.warning("[OCR] Enchant dictionary not found, spell checking disabled")
+
+        # Initialize ValidationManager with spell checker
+        self.validation_manager = self.ocr_dicts.init_validation_manager(self.dictionary)
 
     def _init_patterns(self):
         """Compile regex patterns from database rules."""
@@ -316,13 +322,17 @@ class OCRPostProcessor:
             # Load dictionaries
             self.se_dicts = parser.load_all(se_config)
 
-            # Create corrector
-            self.se_corrector = SubtitleEditCorrector(self.se_dicts, self.dictionary)
-
-            # Add SE valid words to spell checker
+            # Add SE valid words to spell checker first (before creating corrector)
             if self.dictionary:
                 for word in self.se_dicts.get_all_valid_words():
                     self.dictionary.add_to_session(word)
+
+            # Create corrector with ValidationManager for unified validation
+            self.se_corrector = SubtitleEditCorrector(
+                self.se_dicts,
+                self.dictionary,
+                validation_manager=self.validation_manager
+            )
 
             logger.info(
                 f"Loaded Subtitle Edit dictionaries: "
@@ -409,7 +419,38 @@ class OCRPostProcessor:
         result.text = current_text
         result.was_modified = current_text != text
 
+        # Log summary if we made changes or found issues
+        if result.was_modified or result.unknown_words:
+            self._log_process_summary(result, timestamp)
+
         return result
+
+    def _log_process_summary(self, result: ProcessResult, timestamp: str = ""):
+        """Log a summary of processing results."""
+        parts = []
+
+        # Fixes applied
+        if result.fixes_applied:
+            total_fixes = sum(result.fixes_applied.values())
+            parts.append(f"{total_fixes} fixes")
+
+        # Unknown words
+        if result.unknown_words:
+            unknown_preview = result.unknown_words[:3]
+            if len(result.unknown_words) > 3:
+                unknown_preview.append(f"+{len(result.unknown_words) - 3}")
+            parts.append(f"{len(result.unknown_words)} unknown: {', '.join(unknown_preview)}")
+
+        # ValidationManager stats (if tracked)
+        if self.validation_manager and self.validation_manager._stats.total_validated > 0:
+            stats = self.validation_manager._stats
+            source_parts = [f"{count} {src}" for src, count in stats.by_source.items()]
+            if source_parts:
+                parts.append(f"validated: {', '.join(source_parts)}")
+
+        if parts:
+            ts_prefix = f"[{timestamp}] " if timestamp else ""
+            logger.info(f"[OCR] {ts_prefix}{'; '.join(parts)}")
 
     def _apply_unambiguous_fixes(
         self,
@@ -711,7 +752,7 @@ class OCRPostProcessor:
 
         return text
 
-    def _find_unknown_words(self, text: str) -> List[str]:
+    def _find_unknown_words(self, text: str, track_stats: bool = True) -> List[str]:
         """
         Find words not in dictionary.
 
@@ -720,8 +761,10 @@ class OCRPostProcessor:
         - Foreign words (romaji, etc.)
         - OCR errors that weren't caught by patterns
         - Technical terms
+
+        Uses ValidationManager for unified checking across all word lists.
         """
-        if not self.dictionary:
+        if not self.dictionary and not self.validation_manager:
             return []
 
         unknown = []
@@ -731,14 +774,6 @@ class OCRPostProcessor:
         for match in word_pattern.finditer(text):
             word = match.group()
 
-            # Skip if in user dictionary, names, or romaji dictionary
-            if self.ocr_dicts.is_known_word(word, check_romaji=True):
-                continue
-
-            # Skip if in Subtitle Edit dictionaries
-            if self.se_corrector and self.se_corrector.is_valid_word(word):
-                continue
-
             # Skip common contractions that might not be in dict
             if "'" in word:
                 continue
@@ -747,32 +782,51 @@ class OCRPostProcessor:
             if len(word) <= 2:
                 continue
 
-            # Check dictionary
+            # Use ValidationManager for unified checking
+            if self.validation_manager:
+                result = self.validation_manager.is_known_word(word, track_stats=track_stats)
+                if result.is_known:
+                    continue
+            else:
+                # Fallback to legacy checking
+                if self.ocr_dicts.is_known_word(word, check_romaji=True):
+                    continue
+                if self.se_corrector and self.se_corrector.is_valid_word(word):
+                    continue
+
+            # Check dictionary as final fallback
             if not self._is_valid_word(word):
                 unknown.append(word)
+                if track_stats and self.validation_manager:
+                    self.validation_manager._stats.add_unknown(word)
 
         return list(set(unknown))  # Remove duplicates
 
     def _is_valid_word(self, word: str) -> bool:
         """Check if word is valid according to dictionary."""
-        if not self.dictionary:
+        if not self.dictionary and not self.validation_manager:
             return True
 
-        # Check user dictionary, names, and romaji dictionary first
-        if self.ocr_dicts.is_known_word(word, check_romaji=True):
-            return True
-
-        # Check Subtitle Edit dictionaries
-        if self.se_corrector and self.se_corrector.is_valid_word(word):
-            return True
+        # Use ValidationManager if available
+        if self.validation_manager:
+            result = self.validation_manager.is_known_word(word)
+            if result.is_known:
+                return True
+        else:
+            # Fallback to legacy checking
+            if self.ocr_dicts.is_known_word(word, check_romaji=True):
+                return True
+            if self.se_corrector and self.se_corrector.is_valid_word(word):
+                return True
 
         # Check dictionary
-        if self.dictionary.check(word):
-            return True
-        if self.dictionary.check(word.lower()):
-            return True
-        if self.dictionary.check(word.capitalize()):
-            return True
+        if self.dictionary:
+            if self.dictionary.check(word):
+                return True
+            if self.dictionary.check(word.lower()):
+                return True
+            if self.dictionary.check(word.capitalize()):
+                return True
 
         return False
 
@@ -785,9 +839,15 @@ class OCRPostProcessor:
         if not word:
             return False
 
-        # Check user dictionary, names, and romaji first
-        if self.ocr_dicts.is_known_word(word, check_romaji=True):
-            return True
+        # Use ValidationManager if available
+        if self.validation_manager:
+            result = self.validation_manager.is_known_word(word)
+            if result.is_known:
+                return True
+        else:
+            # Fallback to legacy checking
+            if self.ocr_dicts.is_known_word(word, check_romaji=True):
+                return True
 
         # Dictionary check
         if self.dictionary and self._is_valid_word(word):
