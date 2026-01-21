@@ -722,8 +722,8 @@ class OCRPostProcessor:
         for match in word_pattern.finditer(text):
             word = match.group()
 
-            # Skip if in user dictionary or names
-            if self.ocr_dicts.is_known_word(word):
+            # Skip if in user dictionary, names, or romaji dictionary
+            if self.ocr_dicts.is_known_word(word, check_romaji=True):
                 continue
 
             # Skip if in Subtitle Edit dictionaries
@@ -749,8 +749,8 @@ class OCRPostProcessor:
         if not self.dictionary:
             return True
 
-        # Check user dictionary and names first
-        if self.ocr_dicts.is_known_word(word):
+        # Check user dictionary, names, and romaji dictionary first
+        if self.ocr_dicts.is_known_word(word, check_romaji=True):
             return True
 
         # Check Subtitle Edit dictionaries
@@ -776,8 +776,8 @@ class OCRPostProcessor:
         if not word:
             return False
 
-        # Check user dictionary and names first
-        if self.ocr_dicts.is_known_word(word):
+        # Check user dictionary, names, and romaji first
+        if self.ocr_dicts.is_known_word(word, check_romaji=True):
             return True
 
         # Dictionary check
