@@ -389,23 +389,37 @@ class RomajiDictionary:
         self.jmdict_path = self.config_dir / self.JMDICT_CACHE
 
         self._words: Optional[Set[str]] = None
+        self._words_mtime: float = 0  # Track file modification time
         self._converter = KanaToRomaji()
 
     def load(self) -> Set[str]:
         """
         Load romaji dictionary from file.
 
+        Automatically reloads if the file was modified since last load.
+
         Returns:
             Set of romaji words
         """
-        if self._words is not None:
-            return self._words
-
+        # Check if file exists
         if not self.dict_path.exists():
-            logger.warning(f"Romaji dictionary not found at: {self.dict_path}")
+            if self._words is None or len(self._words) > 0:
+                logger.warning(f"Romaji dictionary not found at: {self.dict_path}")
             self._words = set()
+            self._words_mtime = 0
             return self._words
 
+        # Check if we need to reload (file modified since last load)
+        try:
+            current_mtime = self.dict_path.stat().st_mtime
+        except OSError:
+            current_mtime = 0
+
+        if self._words is not None and current_mtime == self._words_mtime:
+            # File hasn't changed, use cached data
+            return self._words
+
+        # Load the file (first time or file changed)
         try:
             words = set()
             with open(self.dict_path, 'r', encoding='utf-8') as f:
@@ -415,12 +429,14 @@ class RomajiDictionary:
                         words.add(word.lower())
 
             self._words = words
+            self._words_mtime = current_mtime
             logger.info(f"Loaded {len(words)} romaji words from {self.dict_path}")
             return words
 
         except Exception as e:
             logger.error(f"Error loading romaji dictionary: {e}")
             self._words = set()
+            self._words_mtime = 0
             return self._words
 
     def save(self, words: Set[str]) -> bool:
