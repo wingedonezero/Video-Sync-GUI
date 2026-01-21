@@ -539,11 +539,14 @@ class PaddleOCRBackend(OCRBackend):
 
     name = "paddleocr"
 
-    def __init__(self, language: str = 'en', model_storage_directory: str = None):
+    def __init__(self, language: str = 'en', model_storage_directory: str = None,
+                 drop_score: float = 0.5, force_cpu: bool = False):
         import os
         from pathlib import Path
 
         self.language = language
+        self.drop_score = drop_score  # Min confidence threshold (0.0-1.0)
+        self.force_cpu = force_cpu
         self._ocr = None
         # Use custom model directory if specified, otherwise use app's .config/ocr/paddleocr_models
         if model_storage_directory:
@@ -573,16 +576,19 @@ class PaddleOCRBackend(OCRBackend):
                 # PaddleOCR 3.0+ uses 'device' parameter instead of 'use_gpu'
                 device = "cpu"
                 gpu_info = "CPU"
-                try:
-                    import paddle
-                    if paddle.device.is_compiled_with_cuda():
-                        # Check if CUDA device is available
-                        gpu_count = paddle.device.cuda.device_count()
-                        if gpu_count > 0:
-                            device = "gpu"
-                            gpu_info = f"CUDA (PaddlePaddle, {gpu_count} device(s))"
-                except Exception:
-                    pass
+                if self.force_cpu:
+                    gpu_info = "CPU (forced)"
+                else:
+                    try:
+                        import paddle
+                        if paddle.device.is_compiled_with_cuda():
+                            # Check if CUDA device is available
+                            gpu_count = paddle.device.cuda.device_count()
+                            if gpu_count > 0:
+                                device = "gpu"
+                                gpu_info = f"CUDA (PaddlePaddle, {gpu_count} device(s))"
+                    except Exception:
+                        pass
 
                 logger.info(f"Initializing PaddleOCR with language: {self.language}")
                 logger.info(f"Model storage: {self.model_dir}")
@@ -595,6 +601,7 @@ class PaddleOCRBackend(OCRBackend):
                     use_textline_orientation=False,  # Don't rotate text (replaces use_angle_cls)
                     lang=self.language,
                     device=device,  # PaddleOCR 3.0+ API
+                    drop_score=self.drop_score,  # Min confidence to keep detection
                 )
                 logger.info("PaddleOCR initialized successfully")
 
@@ -976,6 +983,11 @@ def create_backend(
         langs = mapped_lang if isinstance(mapped_lang, list) else [mapped_lang]
         return backend_class(languages=langs)
     elif backend_name == 'paddleocr':
-        return backend_class(language=mapped_lang)
+        # Pass through drop_score and force_cpu if provided
+        return backend_class(
+            language=mapped_lang,
+            drop_score=kwargs.get('drop_score', 0.5),
+            force_cpu=kwargs.get('force_cpu', False)
+        )
 
     return backend_class()
