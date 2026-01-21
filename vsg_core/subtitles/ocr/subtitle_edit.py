@@ -584,6 +584,8 @@ class SubtitleEditCorrector:
     Applies Subtitle Edit OCR corrections to text.
 
     Uses the rules loaded from SE dictionary files to fix OCR errors.
+    Follows Subtitle Edit's logic: only fix words that are NOT in the dictionary,
+    and only accept fixes that produce valid dictionary words.
     """
 
     def __init__(self, se_dicts: SEDictionaries, spell_checker=None):
@@ -592,7 +594,7 @@ class SubtitleEditCorrector:
 
         Args:
             se_dicts: Loaded Subtitle Edit dictionaries
-            spell_checker: Optional spell checker for validating fixes
+            spell_checker: Spell checker for validating fixes (required for proper operation)
         """
         self.dicts = se_dicts
         self.spell_checker = spell_checker
@@ -610,18 +612,102 @@ class SubtitleEditCorrector:
             except re.error as e:
                 logger.warning(f"Invalid SE regex pattern '{rule.from_text}': {e}")
 
-    def apply_corrections(self, text: str) -> Tuple[str, List[str]]:
+        # Build lookup dicts for faster word-level processing
+        self._whole_word_map = {rule.from_text: rule.to_text for rule in se_dicts.whole_words}
+
+    def _is_word_valid(self, word: str) -> bool:
+        """Check if a word is valid (in spell checker or SE dictionaries)."""
+        if not word or len(word) <= 1:
+            return True  # Skip very short words
+
+        # Strip punctuation for checking
+        clean_word = word.strip(".,!?;:\"'()-")
+        if not clean_word:
+            return True
+
+        # Check spell checker
+        if self.spell_checker:
+            if self.spell_checker.check(clean_word):
+                return True
+            if self.spell_checker.check(clean_word.lower()):
+                return True
+            if self.spell_checker.check(clean_word.capitalize()):
+                return True
+
+        # Check SE valid words (names, spell_words, etc.)
+        all_valid = self.dicts.get_all_valid_words()
+        if clean_word in all_valid or clean_word.lower() in {w.lower() for w in all_valid}:
+            return True
+
+        return False
+
+    def _try_fix_word(self, word: str) -> Tuple[str, Optional[str]]:
+        """
+        Try to fix a single word using SE rules.
+
+        Args:
+            word: Word to fix
+
+        Returns:
+            (fixed_word, fix_description) or (original_word, None) if no fix applied
+        """
+        # Strip punctuation but remember it
+        prefix = ""
+        suffix = ""
+        clean_word = word
+
+        # Extract leading punctuation
+        while clean_word and not clean_word[0].isalnum():
+            prefix += clean_word[0]
+            clean_word = clean_word[1:]
+
+        # Extract trailing punctuation
+        while clean_word and not clean_word[-1].isalnum():
+            suffix = clean_word[-1] + suffix
+            clean_word = clean_word[:-1]
+
+        if not clean_word:
+            return word, None
+
+        # If word is already valid, don't fix it
+        if self._is_word_valid(clean_word):
+            return word, None
+
+        # Try whole word replacement
+        if clean_word in self._whole_word_map:
+            replacement = self._whole_word_map[clean_word]
+            if self._is_word_valid(replacement):
+                return prefix + replacement + suffix, f"whole_word: {clean_word} -> {replacement}"
+
+        # Try partial word fixes (only PartialWords, not PartialWordsAlways - those are line-level)
+        for rule in self.dicts.partial_words:
+            if rule.from_text in clean_word:
+                new_word = clean_word.replace(rule.from_text, rule.to_text)
+                if self._is_word_valid(new_word):
+                    return prefix + new_word + suffix, f"partial_word: {rule.from_text} -> {rule.to_text}"
+
+        # Word couldn't be fixed
+        return word, None
+
+    def apply_corrections(self, text: str) -> Tuple[str, List[str], List[str]]:
         """
         Apply all SE corrections to text.
+
+        Follows Subtitle Edit's logic:
+        1. Line-level fixes (always apply - these are safe patterns)
+        2. Word-level fixes (only fix unknown words, only accept valid results)
+        3. Word splitting (only for unknown words)
 
         Args:
             text: Input text
 
         Returns:
-            (corrected_text, list_of_applied_fixes)
+            (corrected_text, list_of_applied_fixes, list_of_unknown_words)
         """
         fixes_applied = []
-        original = text
+        unknown_words = []
+
+        # === LINE-LEVEL FIXES (safe patterns, always apply) ===
 
         # 1. Whole line replacements (exact match of entire line)
         for rule in self.dicts.whole_lines:
@@ -642,56 +728,62 @@ class SubtitleEditCorrector:
                 text = text[:-len(rule.from_text)] + rule.to_text
                 fixes_applied.append(f"end_line: {rule.from_text} -> {rule.to_text}")
 
-        # 4. Partial lines always (substring replacements, always apply)
+        # 4. Partial lines always (safe substring fixes like '' -> " or ,., -> ...)
         for rule in self.dicts.partial_lines_always:
             if rule.from_text in text:
                 text = text.replace(rule.from_text, rule.to_text)
                 fixes_applied.append(f"partial_always: {rule.from_text} -> {rule.to_text}")
 
-        # 5. Partial lines (substring replacements, apply if result word is valid)
-        for rule in self.dicts.partial_lines:
-            if rule.from_text in text:
-                new_text = text.replace(rule.from_text, rule.to_text)
-                # Only apply if we can verify result is valid (or no spell checker)
-                if self.spell_checker is None or self._seems_valid(new_text):
-                    text = new_text
-                    fixes_applied.append(f"partial_line: {rule.from_text} -> {rule.to_text}")
-
-        # 6. Whole word replacements
-        for rule in self.dicts.whole_words:
-            pattern = re.compile(r'\b' + re.escape(rule.from_text) + r'\b')
-            if pattern.search(text):
-                text = pattern.sub(rule.to_text, text)
-                fixes_applied.append(f"whole_word: {rule.from_text} -> {rule.to_text}")
-
-        # 7. Partial words always
+        # 5. Partial words always (safe substring fixes applied to whole text)
         for rule in self.dicts.partial_words_always:
             if rule.from_text in text:
                 text = text.replace(rule.from_text, rule.to_text)
                 fixes_applied.append(f"partial_word_always: {rule.from_text} -> {rule.to_text}")
 
-        # 8. Partial words (apply if result is valid word)
-        for rule in self.dicts.partial_words:
-            if rule.from_text in text:
-                new_text = text.replace(rule.from_text, rule.to_text)
-                if self.spell_checker is None or self._seems_valid(new_text):
-                    text = new_text
-                    fixes_applied.append(f"partial_word: {rule.from_text} -> {rule.to_text}")
-
-        # 9. Regex replacements
+        # 6. Regex replacements (usually safe patterns)
         for pattern, replacement in self._compiled_regex:
             if pattern.search(text):
                 text = pattern.sub(replacement, text)
                 fixes_applied.append(f"regex: {pattern.pattern}")
 
-        # 10. Word splitting
-        if self.word_splitter:
-            new_text = self.word_splitter.split_merged_words(text, self.spell_checker)
-            if new_text != text:
-                fixes_applied.append("word_split")
-                text = new_text
+        # === WORD-LEVEL FIXES (require spell check validation) ===
 
-        return text, fixes_applied
+        # Only do word-level processing if we have a spell checker
+        if self.spell_checker:
+            # Split into words, preserving spacing
+            words = re.findall(r'\S+|\s+', text)
+            result_words = []
+
+            for word in words:
+                # Skip whitespace
+                if word.isspace():
+                    result_words.append(word)
+                    continue
+
+                # Try to fix the word
+                fixed_word, fix_desc = self._try_fix_word(word)
+
+                if fix_desc:
+                    fixes_applied.append(fix_desc)
+                    result_words.append(fixed_word)
+                else:
+                    result_words.append(word)
+                    # Track unknown words (that we couldn't fix)
+                    clean = word.strip(".,!?;:\"'()-")
+                    if clean and len(clean) > 1 and not self._is_word_valid(clean):
+                        if clean not in unknown_words:
+                            unknown_words.append(clean)
+
+            text = ''.join(result_words)
+
+            # Word splitting (only for unknown words - already handled in WordSplitter)
+            if self.word_splitter:
+                new_text = self.word_splitter.split_merged_words(text, self.spell_checker)
+                if new_text != text:
+                    fixes_applied.append("word_split")
+                    text = new_text
+
+        return text, fixes_applied, unknown_words
 
     def _seems_valid(self, text: str) -> bool:
         """Check if text seems to contain valid words."""
