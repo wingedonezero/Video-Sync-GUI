@@ -33,6 +33,12 @@ if TYPE_CHECKING:
 from .engine import OCREngine
 from .pipeline import OCRPipeline
 from .report import OCRReport, UnknownWord, LowConfidenceLine
+from .romaji_dictionary import (
+    RomajiDictionary,
+    KanaToRomaji,
+    get_romaji_dictionary,
+    is_romaji_word,
+)
 
 __all__ = [
     'OCREngine',
@@ -40,6 +46,10 @@ __all__ = [
     'OCRReport',
     'UnknownWord',
     'LowConfidenceLine',
+    'RomajiDictionary',
+    'KanaToRomaji',
+    'get_romaji_dictionary',
+    'is_romaji_word',
     'run_ocr',
     'check_ocr_available',
 ]

@@ -27,6 +27,9 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
+# Lazy import to avoid circular dependency
+_romaji_dict = None
+
 
 class RuleType(Enum):
     """Types of replacement rules."""
@@ -138,6 +141,7 @@ class OCRDictionaries:
         self._replacements: List[ReplacementRule] = []
         self._user_words: Set[str] = set()
         self._names: Set[str] = set()
+        self._romaji_dict = None  # Lazy-loaded romaji dictionary
 
         # Load or create defaults
         self._ensure_defaults()
@@ -563,20 +567,82 @@ class OCRDictionaries:
         self._replacements = []
         self._user_words = set()
         self._names = set()
+        self._romaji_dict = None  # Reset romaji dictionary
         self.load_replacements()
         self.load_user_dictionary()
         self.load_names()
 
-    def is_known_word(self, word: str) -> bool:
-        """Check if a word is in user dictionary or names."""
+    def is_known_word(self, word: str, check_romaji: bool = True) -> bool:
+        """
+        Check if a word is in user dictionary, names, or romaji dictionary.
+
+        Args:
+            word: Word to check
+            check_romaji: Whether to also check romaji dictionary
+
+        Returns:
+            True if word is known
+        """
         word_lower = word.lower()
         user_words = self.load_user_dictionary()
         names = self.load_names()
 
-        return (
-            word_lower in {w.lower() for w in user_words} or
-            word_lower in {n.lower() for n in names}
-        )
+        # Check user dictionary and names
+        if word_lower in {w.lower() for w in user_words}:
+            return True
+        if word_lower in {n.lower() for n in names}:
+            return True
+
+        # Check romaji dictionary
+        if check_romaji and self.is_romaji_word(word):
+            return True
+
+        return False
+
+    # =========================================================================
+    # Romaji Dictionary
+    # =========================================================================
+
+    def _get_romaji_dictionary(self):
+        """Get romaji dictionary instance (lazy loading)."""
+        if self._romaji_dict is None:
+            from .romaji_dictionary import RomajiDictionary
+            self._romaji_dict = RomajiDictionary(self.config_dir)
+        return self._romaji_dict
+
+    def load_romaji_dictionary(self) -> Set[str]:
+        """Load romaji dictionary words."""
+        return self._get_romaji_dictionary().load()
+
+    def is_romaji_word(self, word: str) -> bool:
+        """
+        Check if a word is a valid romaji (Japanese romanization) word.
+
+        Args:
+            word: Word to check
+
+        Returns:
+            True if word is in romaji dictionary
+        """
+        return self._get_romaji_dictionary().is_valid_word(word)
+
+    def build_romaji_dictionary(self, progress_callback=None) -> Tuple[bool, str]:
+        """
+        Build romaji dictionary from JMdict.
+
+        Downloads JMdict if not cached, parses it, and saves the romaji wordlist.
+
+        Args:
+            progress_callback: Optional callback(status, current, total)
+
+        Returns:
+            (success, message) tuple
+        """
+        return self._get_romaji_dictionary().build_dictionary(progress_callback)
+
+    def get_romaji_stats(self) -> Dict:
+        """Get romaji dictionary statistics."""
+        return self._get_romaji_dictionary().get_stats()
 
 
 # Global instance for convenience
