@@ -601,7 +601,6 @@ class PaddleOCRBackend(OCRBackend):
                     use_textline_orientation=False,  # Don't rotate text (replaces use_angle_cls)
                     lang=self.language,
                     device=device,  # PaddleOCR 3.0+ API
-                    drop_score=self.drop_score,  # Min confidence to keep detection
                 )
                 logger.info("PaddleOCR initialized successfully")
 
