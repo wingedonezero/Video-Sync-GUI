@@ -117,6 +117,43 @@ class OCRDictionaries:
     Provides atomic file operations, backups, and duplicate prevention.
     """
 
+    @staticmethod
+    def _find_config_dir() -> Path:
+        """
+        Find the OCR config directory.
+
+        Searches in order:
+        1. Current working directory .config/ocr/
+        2. __file__ based project root .config/ocr/
+        3. Creates in cwd if none found
+        """
+        candidates = []
+
+        # 1. Current working directory (most reliable for running apps)
+        cwd_config = Path.cwd() / ".config" / "ocr"
+        candidates.append(cwd_config)
+
+        # 2. __file__ based (4 levels up from this file)
+        try:
+            file_based = Path(__file__).parent.parent.parent.parent / ".config" / "ocr"
+            candidates.append(file_based)
+        except Exception:
+            pass
+
+        # 3. Check if any candidate has existing dictionary files
+        for candidate in candidates:
+            if candidate.exists():
+                # Check if it has any of our files
+                if (candidate / "replacements.json").exists() or \
+                   (candidate / "user_dictionary.txt").exists() or \
+                   (candidate / "romaji_dictionary.txt").exists():
+                    logger.info(f"[OCR] Found existing config at: {candidate}")
+                    return candidate
+
+        # 4. If no existing config found, use cwd-based path
+        logger.info(f"[OCR] Creating new config dir at: {cwd_config}")
+        return cwd_config
+
     def __init__(self, config_dir: Optional[Path] = None):
         """
         Initialize dictionary manager.
@@ -125,14 +162,12 @@ class OCRDictionaries:
             config_dir: Directory for database files. Defaults to .config/ocr/
         """
         if config_dir is None:
-            # Default to project .config/ocr/
-            project_root = Path(__file__).parent.parent.parent.parent
-            config_dir = project_root / ".config" / "ocr"
+            config_dir = self._find_config_dir()
 
         self.config_dir = Path(config_dir)
         self.config_dir.mkdir(parents=True, exist_ok=True)
 
-        logger.debug(f"OCR dictionaries config dir: {self.config_dir}")
+        logger.info(f"[OCR] Using config dir: {self.config_dir}")
 
         # File paths
         self.replacements_path = self.config_dir / "replacements.json"
