@@ -207,7 +207,15 @@ class SubtitleEditParser:
             # Parse PartialLines
             partial_lines = root.find('PartialLines')
             if partial_lines is not None:
+                # Handle both <LinePart> and <WordPart> elements
                 for elem in partial_lines.findall('LinePart'):
+                    from_text = elem.get('from', '')
+                    to_text = elem.get('to', '')
+                    if from_text:
+                        result.partial_lines.append(SEReplacementRule(
+                            from_text, to_text, 'partial_line'
+                        ))
+                for elem in partial_lines.findall('WordPart'):
                     from_text = elem.get('from', '')
                     to_text = elem.get('to', '')
                     if from_text:
