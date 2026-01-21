@@ -659,65 +659,91 @@ class PaddleOCRBackend(OCRBackend):
 
             logger.debug(f"[{self.name}] Running OCR on image shape: {image.shape}")
 
-            # PaddleOCR 3.x: ocr.ocr() returns a generator yielding result objects
-            # Each result object has .json property with structure:
-            # {'res': {'dt_polys': [...], 'rec_texts': [...], 'rec_scores': [...]}}
+            # PaddleOCR 3.x ocr.ocr() can return various formats depending on version
             ocr_result = self.ocr.ocr(image)
 
             if ocr_result is None:
                 logger.debug(f"[{self.name}] ocr() returned None")
                 return result
 
-            # Handle generator - iterate to get results
+            # Log what we got for debugging
+            logger.info(f"[{self.name}] ocr_result type: {type(ocr_result)}")
+
+            # Collect all texts, scores, and polygons
             rec_texts = []
             rec_scores = []
             dt_polys = []
 
             try:
-                for res_obj in ocr_result:
-                    # Get the data from result object
+                # Convert to list if generator
+                if hasattr(ocr_result, '__next__'):
+                    ocr_result = list(ocr_result)
+
+                logger.info(f"[{self.name}] ocr_result length: {len(ocr_result) if ocr_result else 0}")
+
+                # Handle different result formats
+                for idx, res_obj in enumerate(ocr_result):
                     if res_obj is None:
                         continue
 
-                    # Try to access .json property (PaddleOCR 3.x result object)
+                    logger.info(f"[{self.name}] Result {idx} type: {type(res_obj)}")
+
+                    # Try to get data as dict
+                    data = None
+
                     if hasattr(res_obj, 'json'):
+                        # PaddleOCR 3.x result object with .json property
                         data = res_obj.json
+                        logger.info(f"[{self.name}] Got .json, type: {type(data)}")
                     elif isinstance(res_obj, dict):
                         data = res_obj
-                    else:
-                        # Might be old format: [[box, (text, conf)], ...]
-                        # Try to parse as list
-                        if isinstance(res_obj, (list, tuple)):
-                            # Old format - parse directly
-                            for item in res_obj:
-                                if item and len(item) >= 2:
-                                    box, text_conf = item[0], item[1]
-                                    if isinstance(text_conf, (list, tuple)) and len(text_conf) >= 2:
-                                        dt_polys.append(box)
-                                        rec_texts.append(str(text_conf[0]))
-                                        rec_scores.append(float(text_conf[1]))
+                    elif isinstance(res_obj, (list, tuple)):
+                        # Could be old format: [[box, (text, conf)], ...]
+                        # Or new format where each item is [box, (text, conf)]
+                        if len(res_obj) > 0:
+                            first = res_obj[0]
+                            if isinstance(first, (list, tuple)) and len(first) >= 2:
+                                # Check if it looks like [box, (text, conf)]
+                                if isinstance(first[1], (list, tuple)) and len(first[1]) >= 2:
+                                    # Old format items
+                                    for item in res_obj:
+                                        if item and len(item) >= 2:
+                                            box, text_conf = item[0], item[1]
+                                            if isinstance(text_conf, (list, tuple)) and len(text_conf) >= 2:
+                                                dt_polys.append(box)
+                                                rec_texts.append(str(text_conf[0]))
+                                                rec_scores.append(float(text_conf[1]))
+                                    continue
+
+                    if data is None:
+                        logger.info(f"[{self.name}] Could not extract data from result {idx}")
                         continue
 
-                    # Navigate nested structure: {'res': {...}} or direct
-                    if 'res' in data and isinstance(data['res'], dict):
-                        actual = data['res']
-                    else:
-                        actual = data
+                    # Navigate nested structure if present
+                    if isinstance(data, dict):
+                        if 'res' in data and isinstance(data['res'], dict):
+                            actual = data['res']
+                        else:
+                            actual = data
 
-                    # Extract texts, scores, polygons
-                    texts = actual.get('rec_texts') or actual.get('rec_text') or []
-                    scores = actual.get('rec_scores') or actual.get('rec_score') or []
-                    polys = actual.get('dt_polys') or []
+                        logger.info(f"[{self.name}] Data keys: {list(actual.keys()) if isinstance(actual, dict) else 'not a dict'}")
 
-                    # Handle single values vs lists
-                    if isinstance(texts, str):
-                        texts = [texts]
-                    if isinstance(scores, (int, float)):
-                        scores = [scores]
+                        # Extract texts, scores, polygons - try various key names
+                        texts = actual.get('rec_texts') or actual.get('rec_text') or []
+                        scores = actual.get('rec_scores') or actual.get('rec_score') or []
+                        polys = actual.get('dt_polys') or actual.get('rec_polys') or []
 
-                    rec_texts.extend(texts)
-                    rec_scores.extend(scores if isinstance(scores, list) else [scores])
-                    dt_polys.extend(polys)
+                        # Handle single values vs lists
+                        if isinstance(texts, str):
+                            texts = [texts]
+                        if isinstance(scores, (int, float)):
+                            scores = [scores]
+                        if texts:
+                            logger.info(f"[{self.name}] Found {len(texts)} texts: {texts[:3]}...")
+
+                        rec_texts.extend(texts if isinstance(texts, list) else [texts])
+                        rec_scores.extend(scores if isinstance(scores, list) else [scores])
+                        dt_polys.extend(polys if isinstance(polys, list) else [polys])
 
             except Exception as e:
                 logger.error(f"[{self.name}] Error iterating OCR results: {e}")
@@ -725,7 +751,7 @@ class PaddleOCRBackend(OCRBackend):
                 logger.error(f"[{self.name}] Traceback: {traceback.format_exc()}")
                 return result
 
-            logger.debug(f"[{self.name}] Extracted {len(rec_texts)} texts, {len(dt_polys)} polys")
+            logger.info(f"[{self.name}] Total extracted: {len(rec_texts)} texts, {len(dt_polys)} polys")
 
             if not rec_texts:
                 logger.debug(f"[{self.name}] No text extracted")
