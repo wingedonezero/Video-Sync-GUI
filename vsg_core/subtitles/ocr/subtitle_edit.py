@@ -792,7 +792,14 @@ class SubtitleEditCorrector:
         Returns:
             (fixed_word, fix_description) or (original_word, None) if no fix applied
         """
-        # Strip punctuation but remember it
+        # First, try whole word replacement on the ORIGINAL word (including punctuation)
+        # This handles rules like /'m -> I'm where the punctuation is part of the pattern
+        if word in self._whole_word_map:
+            replacement = self._whole_word_map[word]
+            if self._is_valid_fix_result(replacement):
+                return replacement, f"whole_word: {word} -> {replacement}"
+
+        # Strip punctuation but remember it for partial fixes
         prefix = ""
         suffix = ""
         clean_word = word
@@ -814,7 +821,7 @@ class SubtitleEditCorrector:
         if self._is_word_protected(clean_word):
             return word, None
 
-        # Try whole word replacement
+        # Try whole word replacement on cleaned word
         if clean_word in self._whole_word_map:
             replacement = self._whole_word_map[clean_word]
             # Only accept fix if result is a valid fix target
