@@ -218,7 +218,15 @@ class SubtitleEditParser:
             # Parse BeginLines
             begin_lines = root.find('BeginLines')
             if begin_lines is not None:
+                # Handle both <Line> and <Beginning> elements
                 for elem in begin_lines.findall('Line'):
+                    from_text = elem.get('from', '')
+                    to_text = elem.get('to', '')
+                    if from_text:
+                        result.begin_lines.append(SEReplacementRule(
+                            from_text, to_text, 'begin_line'
+                        ))
+                for elem in begin_lines.findall('Beginning'):
                     from_text = elem.get('from', '')
                     to_text = elem.get('to', '')
                     if from_text:
@@ -229,7 +237,15 @@ class SubtitleEditParser:
             # Parse EndLines
             end_lines = root.find('EndLines')
             if end_lines is not None:
+                # Handle both <Line> and <Ending> elements
                 for elem in end_lines.findall('Line'):
+                    from_text = elem.get('from', '')
+                    to_text = elem.get('to', '')
+                    if from_text:
+                        result.end_lines.append(SEReplacementRule(
+                            from_text, to_text, 'end_line'
+                        ))
+                for elem in end_lines.findall('Ending'):
                     from_text = elem.get('from', '')
                     to_text = elem.get('to', '')
                     if from_text:
