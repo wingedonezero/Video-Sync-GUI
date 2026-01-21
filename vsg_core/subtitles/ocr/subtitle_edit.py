@@ -585,13 +585,14 @@ class WordSplitter:
 
         return None
 
-    def split_merged_words(self, text: str, dictionary=None) -> str:
+    def split_merged_words(self, text: str, dictionary=None, validator=None) -> str:
         """
         Split merged words in text.
 
         Args:
             text: Input text
             dictionary: Optional spell checker to verify words aren't already valid
+            validator: Optional validator with is_known_word() method (ValidationManager or OCRDictionaries)
 
         Returns:
             Text with merged words split (preserves line breaks)
@@ -605,12 +606,17 @@ class WordSplitter:
             result_words = []
 
             for word in words:
-                # Skip if word is already valid
+                # Skip if word is already valid in spell checker
                 if dictionary and dictionary.check(word):
                     result_words.append(word)
                     continue
 
-                # Skip if word is in our valid words
+                # Skip if word is known in validator (romaji, user dict, etc.)
+                if validator and hasattr(validator, 'is_known_word') and validator.is_known_word(word):
+                    result_words.append(word)
+                    continue
+
+                # Skip if word is in our valid words (split list)
                 if self.is_valid_word(word):
                     result_words.append(word)
                     continue
@@ -618,7 +624,25 @@ class WordSplitter:
                 # Try to split
                 split = self.try_split(word)
                 if split:
-                    result_words.append(split)
+                    # Validate that split parts are actually valid words
+                    # (not just in split list, but in actual dictionary)
+                    parts = split.split()
+                    all_valid = True
+                    for part in parts:
+                        # Check spell checker
+                        if dictionary and dictionary.check(part):
+                            continue
+                        # Check validator (romaji, user dict, etc.)
+                        if validator and hasattr(validator, 'is_known_word') and validator.is_known_word(part):
+                            continue
+                        # Part is not valid - reject the split
+                        all_valid = False
+                        break
+
+                    if all_valid:
+                        result_words.append(split)
+                    else:
+                        result_words.append(word)
                 else:
                     result_words.append(word)
 
@@ -880,7 +904,9 @@ class SubtitleEditCorrector:
 
             # Word splitting (only for unknown words - already handled in WordSplitter)
             if self.word_splitter:
-                new_text = self.word_splitter.split_merged_words(text, self.spell_checker)
+                new_text = self.word_splitter.split_merged_words(
+                    text, self.spell_checker, self.validation_manager
+                )
                 if new_text != text:
                     fixes_applied.append("word_split")
                     text = new_text
