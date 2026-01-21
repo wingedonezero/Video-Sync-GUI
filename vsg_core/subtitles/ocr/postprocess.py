@@ -502,9 +502,13 @@ class OCRPostProcessor:
 
             # Log unknown words that couldn't be fixed
             if se_unknown_words:
-                logger.debug(f"SE unknown words: {', '.join(se_unknown_words)}")
-                # Add to result's unknown words (will be merged later)
-                result.unknown_words.extend(se_unknown_words)
+                logger.debug(f"SE unknown words (before romaji filter): {', '.join(se_unknown_words)}")
+                # Filter through romaji dictionary before adding
+                filtered_unknown = [w for w in se_unknown_words
+                                    if not self.ocr_dicts.is_known_word(w, check_romaji=True)]
+                if filtered_unknown:
+                    logger.debug(f"SE unknown words (after romaji filter): {', '.join(filtered_unknown)}")
+                    result.unknown_words.extend(filtered_unknown)
 
             return corrected_text
 
