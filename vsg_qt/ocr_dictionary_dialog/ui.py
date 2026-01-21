@@ -12,14 +12,14 @@ Provides a GUI for editing the three OCR correction databases:
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
     QListWidget, QListWidgetItem,
     QPushButton, QLineEdit, QComboBox, QCheckBox, QLabel,
     QGroupBox, QFormLayout, QMessageBox, QFileDialog,
-    QDialogButtonBox, QSplitter, QFrame
+    QDialogButtonBox, QSplitter, QFrame, QProgressBar
 )
 
 from vsg_core.subtitles.ocr.dictionaries import (
@@ -694,6 +694,223 @@ class SubtitleEditTab(QWidget):
             subprocess.run(['xdg-open', str(self.se_dir)])
 
 
+class RomajiBuildWorker(QThread):
+    """Worker thread for building the romaji dictionary."""
+
+    progress = Signal(str, int, int)  # status, current, total
+    finished = Signal(bool, str)  # success, message
+
+    def __init__(self, dictionaries: OCRDictionaries, parent=None):
+        super().__init__(parent)
+        self.dictionaries = dictionaries
+
+    def run(self):
+        """Build the romaji dictionary in a background thread."""
+        try:
+            def progress_callback(status, current, total):
+                self.progress.emit(status, current, total)
+
+            success, message = self.dictionaries.build_romaji_dictionary(progress_callback)
+            self.finished.emit(success, message)
+        except Exception as e:
+            self.finished.emit(False, f"Error: {str(e)}")
+
+
+class RomajiTab(QWidget):
+    """Tab for managing the Romaji (Japanese romanization) dictionary."""
+
+    def __init__(self, dictionaries: OCRDictionaries, parent=None):
+        super().__init__(parent)
+        self.dictionaries = dictionaries
+        self.build_worker = None
+        self._setup_ui()
+        self._load_data()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+
+        # Info section
+        info_group = QGroupBox("Romaji Dictionary")
+        info_layout = QVBoxLayout(info_group)
+
+        info_text = QLabel(
+            "The romaji dictionary contains Japanese words in romanized form (e.g., 'arigatou', "
+            "'sugoi', 'kawaii'). This prevents valid Japanese words from being flagged as "
+            "unknown by the OCR spell checker.\n\n"
+            "Click 'Build Dictionary' to download JMdict (Japanese-English dictionary) and "
+            "extract all word readings converted to romaji. This is a one-time setup that "
+            "downloads ~20MB and generates ~100,000+ words."
+        )
+        info_text.setWordWrap(True)
+        info_layout.addWidget(info_text)
+
+        layout.addWidget(info_group)
+
+        # Status section
+        status_group = QGroupBox("Dictionary Status")
+        status_layout = QFormLayout(status_group)
+
+        self.status_label = QLabel("Not loaded")
+        status_layout.addRow("Status:", self.status_label)
+
+        self.word_count_label = QLabel("0")
+        status_layout.addRow("Word Count:", self.word_count_label)
+
+        self.dict_path_label = QLabel("-")
+        self.dict_path_label.setWordWrap(True)
+        status_layout.addRow("Dictionary File:", self.dict_path_label)
+
+        self.jmdict_status_label = QLabel("-")
+        status_layout.addRow("JMdict Cache:", self.jmdict_status_label)
+
+        layout.addWidget(status_group)
+
+        # Progress section (hidden initially)
+        self.progress_group = QGroupBox("Build Progress")
+        progress_layout = QVBoxLayout(self.progress_group)
+
+        self.progress_label = QLabel("Ready")
+        progress_layout.addWidget(self.progress_label)
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0)  # Indeterminate
+        progress_layout.addWidget(self.progress_bar)
+
+        self.progress_group.setVisible(False)
+        layout.addWidget(self.progress_group)
+
+        # Action buttons
+        btn_layout = QHBoxLayout()
+
+        self.build_btn = QPushButton("Build Dictionary (Download JMdict)")
+        self.build_btn.clicked.connect(self._build_dictionary)
+        btn_layout.addWidget(self.build_btn)
+
+        self.rebuild_btn = QPushButton("Rebuild")
+        self.rebuild_btn.setToolTip("Delete cached files and rebuild from scratch")
+        self.rebuild_btn.clicked.connect(self._rebuild_dictionary)
+        btn_layout.addWidget(self.rebuild_btn)
+
+        btn_layout.addStretch()
+
+        self.refresh_btn = QPushButton("Refresh Status")
+        self.refresh_btn.clicked.connect(self._load_data)
+        btn_layout.addWidget(self.refresh_btn)
+
+        layout.addLayout(btn_layout)
+
+        # Spacer
+        layout.addStretch()
+
+        # Source info
+        source_label = QLabel(
+            "Data source: JMdict/EDICT (Electronic Dictionary Research and Development Group)\n"
+            "https://www.edrdg.org/jmdict/j_jmdict.html"
+        )
+        source_label.setStyleSheet("color: gray; font-size: 10px;")
+        layout.addWidget(source_label)
+
+    def _load_data(self):
+        """Load and display dictionary status."""
+        try:
+            stats = self.dictionaries.get_romaji_stats()
+
+            word_count = stats.get('word_count', 0)
+            dict_exists = stats.get('dict_exists', False)
+            jmdict_cached = stats.get('jmdict_cached', False)
+            dict_path = stats.get('dict_path', '-')
+
+            if dict_exists and word_count > 0:
+                self.status_label.setText("Ready")
+                self.status_label.setStyleSheet("color: green; font-weight: bold;")
+                self.build_btn.setText("Update Dictionary")
+            elif dict_exists:
+                self.status_label.setText("Empty (needs rebuild)")
+                self.status_label.setStyleSheet("color: orange;")
+                self.build_btn.setText("Build Dictionary")
+            else:
+                self.status_label.setText("Not built yet")
+                self.status_label.setStyleSheet("color: gray;")
+                self.build_btn.setText("Build Dictionary (Download JMdict)")
+
+            self.word_count_label.setText(f"{word_count:,}")
+            self.dict_path_label.setText(dict_path)
+            self.jmdict_status_label.setText("Cached" if jmdict_cached else "Not downloaded")
+
+        except Exception as e:
+            self.status_label.setText(f"Error: {e}")
+            self.status_label.setStyleSheet("color: red;")
+
+    def _build_dictionary(self):
+        """Start building the romaji dictionary."""
+        if self.build_worker and self.build_worker.isRunning():
+            return
+
+        # Show progress UI
+        self.progress_group.setVisible(True)
+        self.progress_label.setText("Starting...")
+        self.progress_bar.setRange(0, 0)  # Indeterminate
+        self.build_btn.setEnabled(False)
+        self.rebuild_btn.setEnabled(False)
+
+        # Start worker thread
+        self.build_worker = RomajiBuildWorker(self.dictionaries, self)
+        self.build_worker.progress.connect(self._on_progress)
+        self.build_worker.finished.connect(self._on_finished)
+        self.build_worker.start()
+
+    def _rebuild_dictionary(self):
+        """Delete cached files and rebuild."""
+        reply = QMessageBox.question(
+            self, "Rebuild Dictionary",
+            "This will delete the cached JMdict file and rebuild the dictionary from scratch. "
+            "This requires re-downloading ~20MB.\n\nContinue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            # Delete cached files
+            romaji_dict = self.dictionaries._get_romaji_dictionary()
+            if romaji_dict.dict_path.exists():
+                romaji_dict.dict_path.unlink()
+            if romaji_dict.jmdict_path.exists():
+                romaji_dict.jmdict_path.unlink()
+
+            # Clear cached data
+            romaji_dict._words = None
+
+            self._load_data()
+            self._build_dictionary()
+
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to clear cache: {e}")
+
+    def _on_progress(self, status: str, current: int, total: int):
+        """Handle progress updates from worker."""
+        self.progress_label.setText(status)
+        if total > 0:
+            self.progress_bar.setRange(0, total)
+            self.progress_bar.setValue(current)
+        else:
+            self.progress_bar.setRange(0, 0)  # Indeterminate
+
+    def _on_finished(self, success: bool, message: str):
+        """Handle worker completion."""
+        self.progress_group.setVisible(False)
+        self.build_btn.setEnabled(True)
+        self.rebuild_btn.setEnabled(True)
+
+        if success:
+            QMessageBox.information(self, "Build Complete", message)
+        else:
+            QMessageBox.warning(self, "Build Failed", message)
+
+        self._load_data()
+
+
 class OCRDictionaryDialog(QDialog):
     """
     Dialog for editing OCR correction dictionaries.
@@ -744,6 +961,10 @@ class OCRDictionaryDialog(QDialog):
         self.subtitle_edit_tab = SubtitleEditTab(self.dictionaries)
         self.tabs.addTab(self.subtitle_edit_tab, "Subtitle Edit")
 
+        # Romaji tab
+        self.romaji_tab = RomajiTab(self.dictionaries)
+        self.tabs.addTab(self.romaji_tab, "Romaji")
+
         layout.addWidget(self.tabs)
 
         # Help text based on selected tab
@@ -775,6 +996,10 @@ class OCRDictionaryDialog(QDialog):
             "Subtitle Edit: Use dictionary files from Subtitle Edit. "
             "Download from GitHub and place in the subtitleedit folder. "
             "Includes OCR fixes, names, word splitting, and more.",
+
+            "Romaji: Japanese words in romanized form from JMdict. "
+            "Click 'Build Dictionary' to download and generate ~100k words. "
+            "Prevents words like 'arigatou', 'sugoi' from being flagged.",
         ]
         if index < len(help_texts):
             self.help_label.setText(help_texts[index])
