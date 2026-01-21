@@ -202,7 +202,6 @@ class ExtractStep:
             plan_item.is_forced_display = bool(sel.get('is_forced_display', False))
             plan_item.apply_track_name = bool(sel.get('apply_track_name', False))
             plan_item.perform_ocr = bool(sel.get('perform_ocr', False))
-            plan_item.perform_ocr_cleanup = bool(sel.get('perform_ocr_cleanup', False))
             plan_item.convert_to_ass = bool(sel.get('convert_to_ass', False))
             plan_item.rescale = bool(sel.get('rescale', False))
 

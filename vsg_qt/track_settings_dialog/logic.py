@@ -62,7 +62,6 @@ class TrackSettingsLogic:
             # Enable OCR only for image-based subtitles
             is_ocr_compatible = 'VOBSUB' in codec_upper or 'PGS' in codec_upper
             self.v.cb_ocr.setEnabled(is_ocr_compatible)
-            self.v.cb_cleanup.setEnabled(is_ocr_compatible)
 
             # Enable convert-to-ASS only for SRT tracks
             self.v.cb_convert.setEnabled("S_TEXT/UTF8" in codec_upper)
@@ -80,7 +79,6 @@ class TrackSettingsLogic:
         custom_lang: str = "",
         custom_name: str = "",
         perform_ocr: bool = False,
-        perform_ocr_cleanup: bool = False,
         convert_to_ass: bool = False,
         rescale: bool = False,
         size_multiplier: float = 1.0,
@@ -98,7 +96,6 @@ class TrackSettingsLogic:
 
         # Set subtitle options
         self.v.cb_ocr.setChecked(bool(perform_ocr))
-        self.v.cb_cleanup.setChecked(bool(perform_ocr_cleanup))
         self.v.cb_convert.setChecked(bool(convert_to_ass))
         self.v.cb_rescale.setChecked(bool(rescale))
         self.v.size_multiplier.setValue(float(size_multiplier))
@@ -112,7 +109,6 @@ class TrackSettingsLogic:
             "custom_lang": selected_lang if selected_lang else "",
             "custom_name": self.v.custom_name_input.text().strip(),
             "perform_ocr": self.v.cb_ocr.isChecked(),
-            "perform_ocr_cleanup": self.v.cb_cleanup.isChecked(),
             "convert_to_ass": self.v.cb_convert.isChecked(),
             "rescale": self.v.cb_rescale.isChecked(),
             "size_multiplier": self.v.size_multiplier.value(),
