@@ -80,35 +80,21 @@ class ReplacementRule:
         )
 
 
-# Default replacement rules - migrated from hardcoded postprocess.py
+# Default replacement rules - complement SubtitleEdit's OCR fix list
+# Many common I/l rules are in SE, these add unique or capitalized variants
 DEFAULT_REPLACEMENT_RULES = [
-    # I/l confusion in contractions - always safe
-    ReplacementRule("l'm", "I'm", "literal", description="l→I in I'm"),
-    ReplacementRule("l've", "I've", "literal", description="l→I in I've"),
-    ReplacementRule("l'll", "I'll", "literal", description="l→I in I'll"),
-    ReplacementRule("l'd", "I'd", "literal", description="l→I in I'd"),
-    ReplacementRule("lt's", "It's", "literal", description="l→I in It's"),
-    ReplacementRule("lt'II", "It'll", "literal", description="II→ll in It'll"),
-    ReplacementRule("lt'Il", "It'll", "literal", description="Il→ll in It'll"),
-    ReplacementRule("l'II", "I'll", "literal", description="II→ll in I'll"),
-    ReplacementRule("l'Il", "I'll", "literal", description="Il→ll in I'll"),
-    ReplacementRule("lsn't", "Isn't", "literal", description="l→I in Isn't"),
-
-    # Double-I confusion
+    # Rules unique to us (not in SE)
     ReplacementRule("IIl", "Ill", "literal", description="II→Il in Ill"),
     ReplacementRule("IIi", "Ili", "literal", description="II→Il"),
-
-    # Pipe confusion
-    ReplacementRule("|", "I", "literal", description="pipe→I"),
     ReplacementRule("||", "ll", "literal", description="double pipe→ll"),
 
-    # Word boundary fixes - match whole word only
-    ReplacementRule("lf", "If", "word", description="l→I at word start"),
-    ReplacementRule("ln", "In", "word", description="l→I at word start"),
+    # Capitalized versions (SE has lowercase variants like lf→if, but we need If)
+    ReplacementRule("lf", "If", "word", description="l→I at word start (capitalized)"),
     ReplacementRule("ls", "Is", "word", description="l→I at word start"),
     ReplacementRule("lt", "It", "word", description="l→I at word start"),
     ReplacementRule("lts", "Its", "word", description="l→I at word start"),
-    ReplacementRule("l", "I", "word", description="Standalone l→I"),
+    ReplacementRule("lsn't", "Isn't", "literal", description="l→I in Isn't (capitalized)"),
+    ReplacementRule("l", "I", "word", description="Standalone l→I (capitalized)"),
 
     # Confidence-gated fixes - only apply when OCR confidence is low
     ReplacementRule("rn", "m", "word_middle", confidence_gated=True, description="rn→m confusion"),

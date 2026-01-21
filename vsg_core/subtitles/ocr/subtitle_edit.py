@@ -297,7 +297,15 @@ class SubtitleEditParser:
             # Parse RegularExpressions
             regex_section = root.find('RegularExpressions')
             if regex_section is not None:
+                # Handle both <Regex> and <RegEx> elements
                 for elem in regex_section.findall('Regex'):
+                    find_pattern = elem.get('find', '')
+                    replace_with = elem.get('replaceWith', '')
+                    if find_pattern:
+                        result.regex_rules.append(SEReplacementRule(
+                            find_pattern, replace_with, 'regex'
+                        ))
+                for elem in regex_section.findall('RegEx'):
                     find_pattern = elem.get('find', '')
                     replace_with = elem.get('replaceWith', '')
                     if find_pattern:
