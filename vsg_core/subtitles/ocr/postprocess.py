@@ -535,21 +535,15 @@ class OCRPostProcessor:
             return text
 
         try:
-            corrected_text, fixes, se_unknown_words = self.se_corrector.apply_corrections(text)
+            corrected_text, fixes, _ = self.se_corrector.apply_corrections(text)
 
             # Track fixes applied
             for fix in fixes:
                 result.fixes_applied[f'SE:{fix}'] += 1
 
-            # Log unknown words that couldn't be fixed
-            if se_unknown_words:
-                logger.debug(f"SE unknown words (before romaji filter): {', '.join(se_unknown_words)}")
-                # Filter through romaji dictionary before adding
-                filtered_unknown = [w for w in se_unknown_words
-                                    if not self.ocr_dicts.is_known_word(w, check_romaji=True)]
-                if filtered_unknown:
-                    logger.debug(f"SE unknown words (after romaji filter): {', '.join(filtered_unknown)}")
-                    result.unknown_words.extend(filtered_unknown)
+            # Note: We don't collect SE unknown words here because later fixes
+            # (underscore removal, etc.) may fix them. Unknown word detection
+            # happens at the end via _find_unknown_words() on the final text.
 
             return corrected_text
 
