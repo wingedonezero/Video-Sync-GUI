@@ -32,6 +32,10 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 from .dictionaries import OCRDictionaries, ReplacementRule, get_dictionaries
+from .subtitle_edit import (
+    SubtitleEditParser, SubtitleEditCorrector, SEDictionaries, SEDictionaryConfig,
+    load_se_config, save_se_config
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +62,9 @@ class PostProcessConfig:
     enable_confidence_fixes: bool = True  # Confidence-gated fixes
     enable_dictionary_validation: bool = True  # Track unknown words
     enable_garbage_detection: bool = True  # Detect and clean garbage OCR
+
+    # Subtitle Edit integration
+    enable_subtitle_edit: bool = True  # Use Subtitle Edit dictionaries
 
     # Normalization
     normalize_ellipsis: bool = False  # Convert … to ...
@@ -157,6 +164,7 @@ class OCRPostProcessor:
         self._init_dictionaries()
         self._init_spell_checker()
         self._init_patterns()
+        self._init_subtitle_edit()
 
     def _init_dictionaries(self):
         """Initialize OCR dictionaries from database."""
@@ -269,6 +277,60 @@ class OCRPostProcessor:
             r'(?:\b[A-Z]{1,2}\b\s*){3,}'  # 3+ consecutive 1-2 char uppercase "words"
         )
 
+    def _init_subtitle_edit(self):
+        """Initialize Subtitle Edit dictionary integration."""
+        self.se_corrector = None
+        self.se_dicts = None
+
+        if not self.config.enable_subtitle_edit:
+            return
+
+        try:
+            # Get SE dictionaries directory
+            se_dir = self.ocr_dicts.config_dir / "subtitleedit"
+
+            if not se_dir.exists():
+                # Create the directory for users to add SE files
+                se_dir.mkdir(parents=True, exist_ok=True)
+                logger.info(f"Created Subtitle Edit dictionaries directory: {se_dir}")
+                return
+
+            # Load SE configuration
+            se_config = load_se_config(self.ocr_dicts.config_dir)
+
+            # Parse all available SE files
+            parser = SubtitleEditParser(se_dir)
+            available_files = parser.get_available_files()
+
+            # Check if any files are available
+            has_files = any(files for files in available_files.values())
+            if not has_files:
+                logger.debug("No Subtitle Edit dictionary files found")
+                return
+
+            # Load dictionaries
+            self.se_dicts = parser.load_all(se_config)
+
+            # Create corrector
+            self.se_corrector = SubtitleEditCorrector(self.se_dicts, self.dictionary)
+
+            # Add SE valid words to spell checker
+            if self.dictionary:
+                for word in self.se_dicts.get_all_valid_words():
+                    self.dictionary.add_to_session(word)
+
+            logger.info(
+                f"Loaded Subtitle Edit dictionaries: "
+                f"{self.se_dicts.get_replacement_count()} rules, "
+                f"{len(self.se_dicts.names)} names, "
+                f"{len(self.se_dicts.word_split_list)} split words"
+            )
+
+        except Exception as e:
+            logger.error(f"Error initializing Subtitle Edit integration: {e}")
+            self.se_corrector = None
+            self.se_dicts = None
+
     def process(
         self,
         text: str,
@@ -314,20 +376,24 @@ class OCRPostProcessor:
                 result.was_modified = True
                 return result
 
-        # Step 1: Always apply unambiguous fixes
+        # Step 1: Always apply unambiguous fixes (user's rules first)
         if self.config.enable_unambiguous_fixes:
             current_text = self._apply_unambiguous_fixes(current_text, result)
 
-        # Step 2: Apply confidence-gated fixes
+        # Step 2: Apply Subtitle Edit corrections (after user rules)
+        if self.config.enable_subtitle_edit and self.se_corrector:
+            current_text = self._apply_subtitle_edit_fixes(current_text, result)
+
+        # Step 3: Apply confidence-gated fixes
         if self.config.enable_confidence_fixes:
             current_text = self._apply_confidence_fixes(
                 current_text, confidence, result
             )
 
-        # Step 3: Normalization
+        # Step 4: Normalization
         current_text = self._apply_normalization(current_text, result)
 
-        # Step 4: Dictionary validation (report, don't fix)
+        # Step 5: Dictionary validation (report, don't fix)
         if self.config.enable_dictionary_validation:
             result.unknown_words = self._find_unknown_words(current_text)
 
@@ -404,6 +470,32 @@ class OCRPostProcessor:
             text = new_text
 
         return text
+
+    def _apply_subtitle_edit_fixes(
+        self,
+        text: str,
+        result: ProcessResult
+    ) -> str:
+        """
+        Apply Subtitle Edit OCR corrections.
+
+        These are applied after user's custom rules, so user rules take precedence.
+        """
+        if not self.se_corrector:
+            return text
+
+        try:
+            corrected_text, fixes = self.se_corrector.apply_corrections(text)
+
+            # Track fixes applied
+            for fix in fixes:
+                result.fixes_applied[f'SE:{fix}'] += 1
+
+            return corrected_text
+
+        except Exception as e:
+            logger.warning(f"Error applying Subtitle Edit fixes: {e}")
+            return text
 
     def _apply_confidence_fixes(
         self,
@@ -624,6 +716,10 @@ class OCRPostProcessor:
             if self.ocr_dicts.is_known_word(word):
                 continue
 
+            # Skip if in Subtitle Edit dictionaries
+            if self.se_corrector and self.se_corrector.is_valid_word(word):
+                continue
+
             # Skip common contractions that might not be in dict
             if "'" in word:
                 continue
@@ -645,6 +741,10 @@ class OCRPostProcessor:
 
         # Check user dictionary and names first
         if self.ocr_dicts.is_known_word(word):
+            return True
+
+        # Check Subtitle Edit dictionaries
+        if self.se_corrector and self.se_corrector.is_valid_word(word):
             return True
 
         # Check dictionary

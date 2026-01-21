@@ -25,6 +25,9 @@ from PySide6.QtWidgets import (
 from vsg_core.subtitles.ocr.dictionaries import (
     OCRDictionaries, ReplacementRule, RuleType, get_dictionaries
 )
+from vsg_core.subtitles.ocr.subtitle_edit import (
+    SubtitleEditParser, SEDictionaryConfig, load_se_config, save_se_config
+)
 
 
 class ReplacementEditWidget(QWidget):
@@ -489,6 +492,208 @@ class WordListTab(QWidget):
             self._load_data()
 
 
+class SubtitleEditTab(QWidget):
+    """Tab for managing Subtitle Edit dictionary integration."""
+
+    def __init__(self, dictionaries: OCRDictionaries, parent=None):
+        super().__init__(parent)
+        self.dictionaries = dictionaries
+        self.se_dir = dictionaries.config_dir / "subtitleedit"
+        self._setup_ui()
+        self._load_data()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+
+        # Info section
+        info_group = QGroupBox("Subtitle Edit Dictionaries")
+        info_layout = QVBoxLayout(info_group)
+
+        info_text = QLabel(
+            "Place Subtitle Edit dictionary files in the folder below. "
+            "Files are loaded automatically when OCR processing starts.\n\n"
+            "Download files from: github.com/SubtitleEdit/subtitleedit/tree/main/Dictionaries"
+        )
+        info_text.setWordWrap(True)
+        info_layout.addWidget(info_text)
+
+        # Folder path display
+        folder_layout = QHBoxLayout()
+        folder_layout.addWidget(QLabel("Folder:"))
+        self.folder_label = QLineEdit()
+        self.folder_label.setReadOnly(True)
+        self.folder_label.setText(str(self.se_dir))
+        folder_layout.addWidget(self.folder_label)
+
+        open_folder_btn = QPushButton("Open Folder")
+        open_folder_btn.clicked.connect(self._open_folder)
+        folder_layout.addWidget(open_folder_btn)
+        info_layout.addLayout(folder_layout)
+
+        layout.addWidget(info_group)
+
+        # Enable/Disable switches
+        toggles_group = QGroupBox("Dictionary Types")
+        toggles_layout = QFormLayout(toggles_group)
+
+        self.ocr_fix_check = QCheckBox()
+        self.ocr_fix_check.stateChanged.connect(self._save_config)
+        toggles_layout.addRow("OCR Fix Replace List (*_OCRFixReplaceList.xml):", self.ocr_fix_check)
+
+        self.names_check = QCheckBox()
+        self.names_check.stateChanged.connect(self._save_config)
+        toggles_layout.addRow("Names (*_names.xml):", self.names_check)
+
+        self.no_break_check = QCheckBox()
+        self.no_break_check.stateChanged.connect(self._save_config)
+        toggles_layout.addRow("No Break After List (*_NoBreakAfterList.xml):", self.no_break_check)
+
+        self.spell_words_check = QCheckBox()
+        self.spell_words_check.stateChanged.connect(self._save_config)
+        toggles_layout.addRow("Spell Check Words (*_se.xml):", self.spell_words_check)
+
+        self.interjections_check = QCheckBox()
+        self.interjections_check.stateChanged.connect(self._save_config)
+        toggles_layout.addRow("Interjections (*_interjections_se.xml):", self.interjections_check)
+
+        self.word_split_check = QCheckBox()
+        self.word_split_check.stateChanged.connect(self._save_config)
+        toggles_layout.addRow("Word Split List (*_WordSplitList.txt):", self.word_split_check)
+
+        layout.addWidget(toggles_group)
+
+        # Available files list
+        files_group = QGroupBox("Available Files")
+        files_layout = QVBoxLayout(files_group)
+
+        self.files_table = QTableWidget()
+        self.files_table.setColumnCount(3)
+        self.files_table.setHorizontalHeaderLabels(["File", "Type", "Status"])
+        self.files_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.files_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.files_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.files_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        files_layout.addWidget(self.files_table)
+
+        # Refresh button
+        btn_layout = QHBoxLayout()
+        refresh_btn = QPushButton("Refresh Available Files")
+        refresh_btn.clicked.connect(self._load_data)
+        btn_layout.addWidget(refresh_btn)
+        btn_layout.addStretch()
+        files_layout.addLayout(btn_layout)
+
+        layout.addWidget(files_group)
+
+        # Stats label
+        self.stats_label = QLabel()
+        layout.addWidget(self.stats_label)
+
+    def _load_data(self):
+        """Load available SE files and configuration."""
+        # Ensure folder exists
+        self.se_dir.mkdir(parents=True, exist_ok=True)
+
+        # Load config
+        config = load_se_config(self.dictionaries.config_dir)
+
+        # Set checkboxes (block signals to avoid saving during load)
+        self.ocr_fix_check.blockSignals(True)
+        self.names_check.blockSignals(True)
+        self.no_break_check.blockSignals(True)
+        self.spell_words_check.blockSignals(True)
+        self.interjections_check.blockSignals(True)
+        self.word_split_check.blockSignals(True)
+
+        self.ocr_fix_check.setChecked(config.ocr_fix_enabled)
+        self.names_check.setChecked(config.names_enabled)
+        self.no_break_check.setChecked(config.no_break_enabled)
+        self.spell_words_check.setChecked(config.spell_words_enabled)
+        self.interjections_check.setChecked(config.interjections_enabled)
+        self.word_split_check.setChecked(config.word_split_enabled)
+
+        self.ocr_fix_check.blockSignals(False)
+        self.names_check.blockSignals(False)
+        self.no_break_check.blockSignals(False)
+        self.spell_words_check.blockSignals(False)
+        self.interjections_check.blockSignals(False)
+        self.word_split_check.blockSignals(False)
+
+        # Scan for available files
+        parser = SubtitleEditParser(self.se_dir)
+        available = parser.get_available_files()
+
+        # Populate table
+        all_files = []
+        type_names = {
+            'ocr_fix': 'OCR Fix List',
+            'names': 'Names',
+            'no_break': 'No Break After',
+            'spell_words': 'Spell Words',
+            'interjections': 'Interjections',
+            'word_split': 'Word Split',
+        }
+        type_enabled = {
+            'ocr_fix': config.ocr_fix_enabled,
+            'names': config.names_enabled,
+            'no_break': config.no_break_enabled,
+            'spell_words': config.spell_words_enabled,
+            'interjections': config.interjections_enabled,
+            'word_split': config.word_split_enabled,
+        }
+
+        for file_type, files in available.items():
+            for path in files:
+                enabled = type_enabled.get(file_type, True)
+                all_files.append((path.name, type_names.get(file_type, file_type), enabled))
+
+        self.files_table.setRowCount(len(all_files))
+        for row, (name, file_type, enabled) in enumerate(all_files):
+            self.files_table.setItem(row, 0, QTableWidgetItem(name))
+            self.files_table.setItem(row, 1, QTableWidgetItem(file_type))
+            status = "Enabled" if enabled else "Disabled"
+            status_item = QTableWidgetItem(status)
+            if not enabled:
+                status_item.setForeground(Qt.GlobalColor.gray)
+            self.files_table.setItem(row, 2, status_item)
+
+        # Update stats
+        total_files = len(all_files)
+        enabled_files = sum(1 for _, _, enabled in all_files if enabled)
+        if total_files == 0:
+            self.stats_label.setText("No Subtitle Edit dictionary files found. Add files to the folder above.")
+        else:
+            self.stats_label.setText(f"{enabled_files} of {total_files} files enabled")
+
+    def _save_config(self):
+        """Save current configuration."""
+        config = SEDictionaryConfig(
+            ocr_fix_enabled=self.ocr_fix_check.isChecked(),
+            names_enabled=self.names_check.isChecked(),
+            no_break_enabled=self.no_break_check.isChecked(),
+            spell_words_enabled=self.spell_words_check.isChecked(),
+            interjections_enabled=self.interjections_check.isChecked(),
+            word_split_enabled=self.word_split_check.isChecked(),
+        )
+        save_se_config(self.dictionaries.config_dir, config)
+        # Refresh to update status column
+        self._load_data()
+
+    def _open_folder(self):
+        """Open the SE dictionaries folder in file manager."""
+        import subprocess
+        import sys
+
+        self.se_dir.mkdir(parents=True, exist_ok=True)
+
+        if sys.platform == 'darwin':
+            subprocess.run(['open', str(self.se_dir)])
+        elif sys.platform == 'win32':
+            subprocess.run(['explorer', str(self.se_dir)])
+        else:
+            subprocess.run(['xdg-open', str(self.se_dir)])
+
+
 class OCRDictionaryDialog(QDialog):
     """
     Dialog for editing OCR correction dictionaries.
@@ -497,6 +702,7 @@ class OCRDictionaryDialog(QDialog):
         - Replacement rules (pattern-based corrections)
         - User dictionary (custom valid words)
         - Names dictionary (proper names)
+        - Subtitle Edit dictionaries (external OCR fix lists)
     """
 
     def __init__(self, parent=None, config_dir: Optional[Path] = None):
@@ -534,6 +740,10 @@ class OCRDictionaryDialog(QDialog):
         self.names_tab = WordListTab(self.dictionaries, "names")
         self.tabs.addTab(self.names_tab, "Names")
 
+        # Subtitle Edit tab
+        self.subtitle_edit_tab = SubtitleEditTab(self.dictionaries)
+        self.tabs.addTab(self.subtitle_edit_tab, "Subtitle Edit")
+
         layout.addWidget(self.tabs)
 
         # Help text based on selected tab
@@ -561,5 +771,12 @@ class OCRDictionaryDialog(QDialog):
 
             "Names: Proper names (characters, places) that won't be flagged. "
             "Useful for anime/movie character names, romaji, etc.",
+
+            "Subtitle Edit: Use dictionary files from Subtitle Edit. "
+            "Download from GitHub and place in the subtitleedit folder. "
+            "Includes OCR fixes, names, word splitting, and more.",
         ]
-        self.help_label.setText(help_texts[index])
+        if index < len(help_texts):
+            self.help_label.setText(help_texts[index])
+        else:
+            self.help_label.setText("")
