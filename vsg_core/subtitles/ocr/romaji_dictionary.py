@@ -404,7 +404,7 @@ class RomajiDictionary:
         # Check if file exists
         if not self.dict_path.exists():
             if self._words is None or len(self._words) > 0:
-                logger.warning(f"Romaji dictionary not found at: {self.dict_path}")
+                logger.info(f"[Romaji] Dictionary not found at: {self.dict_path}")
             self._words = set()
             self._words_mtime = 0
             return self._words
@@ -430,7 +430,7 @@ class RomajiDictionary:
 
             self._words = words
             self._words_mtime = current_mtime
-            logger.info(f"Loaded {len(words)} romaji words from {self.dict_path}")
+            logger.info(f"[Romaji] Loaded {len(words):,} words from {self.dict_path}")
             return words
 
         except Exception as e:
