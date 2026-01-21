@@ -132,6 +132,8 @@ class OCRDictionaries:
         self.config_dir = Path(config_dir)
         self.config_dir.mkdir(parents=True, exist_ok=True)
 
+        logger.debug(f"OCR dictionaries config dir: {self.config_dir}")
+
         # File paths
         self.replacements_path = self.config_dir / "replacements.json"
         self.user_dict_path = self.config_dir / "user_dictionary.txt"
@@ -567,10 +569,14 @@ class OCRDictionaries:
         self._replacements = []
         self._user_words = set()
         self._names = set()
-        self._romaji_dict = None  # Reset romaji dictionary
+        # Reset romaji dictionary so it reloads on next access
+        if self._romaji_dict is not None:
+            self._romaji_dict._words = None
+        self._romaji_dict = None
         self.load_replacements()
         self.load_user_dictionary()
         self.load_names()
+        logger.info(f"Reloaded all dictionaries from {self.config_dir}")
 
     def is_known_word(self, word: str, check_romaji: bool = True) -> bool:
         """
@@ -593,9 +599,13 @@ class OCRDictionaries:
         if word_lower in {n.lower() for n in names}:
             return True
 
-        # Check romaji dictionary
-        if check_romaji and self.is_romaji_word(word):
-            return True
+        # Check romaji dictionary (last, after other dictionaries)
+        if check_romaji:
+            romaji_dict = self._get_romaji_dictionary()
+            romaji_words = romaji_dict.load()
+            if word_lower in romaji_words:
+                logger.debug(f"Word '{word}' found in romaji dictionary")
+                return True
 
         return False
 

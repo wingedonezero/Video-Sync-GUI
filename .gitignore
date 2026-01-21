@@ -11,6 +11,7 @@ docs/ARCHITECTURE.odt
 
 # User settings
 settings.json
+.config/
 
 # Python cache
 __pycache__/

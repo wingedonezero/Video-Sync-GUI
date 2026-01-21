@@ -300,7 +300,9 @@ class JMdictParser:
                             if reb is not None and reb.text:
                                 kana = reb.text.strip()
                                 romaji = self.converter.convert(kana)
-                                if romaji and romaji.isalpha():
+                                # Filter: must be alphabetic and at least 3 chars
+                                # (filters out "a", "aa", "i", "e", "o", etc.)
+                                if romaji and romaji.isalpha() and len(romaji) >= 3:
                                     romaji_words.add(romaji.lower())
 
                         # Clear element to free memory
@@ -400,6 +402,7 @@ class RomajiDictionary:
             return self._words
 
         if not self.dict_path.exists():
+            logger.warning(f"Romaji dictionary not found at: {self.dict_path}")
             self._words = set()
             return self._words
 
@@ -467,7 +470,14 @@ class RomajiDictionary:
             True if word is in romaji dictionary
         """
         words = self.load()
-        return word.lower() in words
+        word_lower = word.lower()
+        is_valid = word_lower in words
+
+        # Debug logging for troubleshooting
+        if not is_valid and len(words) > 0:
+            logger.debug(f"Romaji check: '{word_lower}' not in dictionary ({len(words)} words loaded from {self.dict_path})")
+
+        return is_valid
 
     def download_jmdict(self, progress_callback=None) -> bool:
         """

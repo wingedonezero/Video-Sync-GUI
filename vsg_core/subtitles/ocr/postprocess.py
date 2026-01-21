@@ -176,9 +176,14 @@ class OCRPostProcessor:
         # Combine user dictionary and names for validation
         self.all_custom_words = self.custom_words | self.custom_names
 
+        # Pre-load romaji dictionary and log stats
+        romaji_stats = self.ocr_dicts.get_romaji_stats()
+
+        logger.debug(f"OCR dictionaries loaded from: {self.ocr_dicts.config_dir}")
         logger.debug(f"Loaded {len(self.replacement_rules)} replacement rules")
         logger.debug(f"Loaded {len(self.custom_words)} user dictionary words")
         logger.debug(f"Loaded {len(self.custom_names)} names")
+        logger.debug(f"Romaji dictionary: {romaji_stats.get('word_count', 0)} words from {romaji_stats.get('dict_path', 'N/A')}")
 
     def _init_spell_checker(self):
         """Initialize spell-check dictionary."""
