@@ -395,7 +395,11 @@ class OCRPostProcessor:
 
         # Step 5: Dictionary validation (report, don't fix)
         if self.config.enable_dictionary_validation:
-            result.unknown_words = self._find_unknown_words(current_text)
+            dict_unknown = self._find_unknown_words(current_text)
+            # Merge with SE unknown words (dedupe)
+            all_unknown = set(result.unknown_words)
+            all_unknown.update(dict_unknown)
+            result.unknown_words = list(all_unknown)
 
         result.text = current_text
         result.was_modified = current_text != text
@@ -485,11 +489,17 @@ class OCRPostProcessor:
             return text
 
         try:
-            corrected_text, fixes = self.se_corrector.apply_corrections(text)
+            corrected_text, fixes, se_unknown_words = self.se_corrector.apply_corrections(text)
 
             # Track fixes applied
             for fix in fixes:
                 result.fixes_applied[f'SE:{fix}'] += 1
+
+            # Log unknown words that couldn't be fixed
+            if se_unknown_words:
+                logger.debug(f"SE unknown words: {', '.join(se_unknown_words)}")
+                # Add to result's unknown words (will be merged later)
+                result.unknown_words.extend(se_unknown_words)
 
             return corrected_text
 

@@ -14,7 +14,6 @@ from vsg_core.subtitles.rescale import rescale_subtitle
 from vsg_core.subtitles.style import multiply_font_size
 from vsg_core.subtitles.style_engine import StyleEngine
 from vsg_core.subtitles.ocr import run_ocr
-from vsg_core.subtitles.cleanup import run_cleanup
 from vsg_core.subtitles.timing import fix_subtitle_timing
 from vsg_core.subtitles.stepping_adjust import apply_stepping_to_subtitles
 from vsg_core.subtitles.frame_sync import apply_raw_delay_sync, apply_duration_align_sync, apply_correlation_frame_snap_sync, apply_subtitle_anchored_frame_snap_sync, apply_correlation_guided_frame_anchor_sync, apply_timebase_frame_locked_sync
@@ -148,14 +147,6 @@ class SubtitlesStep:
                                 runner._log_message("--------------------------------")
                                 # Mark that timestamps have been adjusted (so mux doesn't double-apply delay)
                                 item.stepping_adjusted = True
-
-                    if item.perform_ocr_cleanup:
-                        report = run_cleanup(ocr_output_path, ctx.settings_dict, runner)
-                        if report:
-                            runner._log_message("--- OCR Cleanup Report ---")
-                            for key, value in report.items():
-                                runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
-                            runner._log_message("------------------------")
 
                     if ctx.settings_dict.get('timing_fix_enabled', False):
                         timing_report = fix_subtitle_timing(ocr_output_path, ctx.settings_dict, runner)

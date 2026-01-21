@@ -22,7 +22,6 @@ class TrackSettingsDialog(QDialog):
 
         # Subtitle-specific controls
         self.cb_ocr = QCheckBox("Perform OCR")
-        self.cb_cleanup = QCheckBox("Perform Post-OCR Cleanup")
         self.cb_convert = QCheckBox("Convert to ASS (SRT only)")
         self.cb_rescale = QCheckBox("Rescale to video resolution")
         self.size_multiplier = QDoubleSpinBox()
@@ -58,7 +57,6 @@ class TrackSettingsDialog(QDialog):
         self.subtitle_group = QGroupBox("Subtitle Options")
         subtitle_layout = QVBoxLayout(self.subtitle_group)
         subtitle_layout.addWidget(self.cb_ocr)
-        subtitle_layout.addWidget(self.cb_cleanup)
         subtitle_layout.addWidget(self.cb_convert)
         subtitle_layout.addWidget(self.cb_rescale)
         subtitle_layout.addWidget(self.size_multiplier)

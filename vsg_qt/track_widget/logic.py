@@ -24,7 +24,6 @@ class TrackWidgetLogic:
             current_value = self.track_data.get('size_multiplier')
             self.v.size_multiplier.setValue(1.0 if current_value is None else float(current_value))
             self.v.cb_ocr.setChecked(self.track_data.get('perform_ocr', False))
-            self.v.cb_cleanup.setChecked(self.track_data.get('perform_ocr_cleanup', False))
             self.v.cb_convert.setChecked(self.track_data.get('convert_to_ass', False))
             self.v.cb_rescale.setChecked(self.track_data.get('rescale', False))
 
@@ -113,7 +112,6 @@ class TrackWidgetLogic:
         # Only check subtitle-specific options for subtitles
         if self.track_data.get('type') == 'subtitles':
             if self.v.cb_ocr.isChecked(): parts.append("OCR")
-            if self.v.cb_cleanup.isChecked(): parts.append("Cleanup")
             if self.v.cb_convert.isChecked(): parts.append("→ASS")
             if self.v.cb_rescale.isChecked(): parts.append("Rescale")
 
@@ -216,7 +214,6 @@ class TrackWidgetLogic:
             "apply_track_name": self.v.cb_name.isChecked(),
             "is_forced_display": self.v.cb_forced.isChecked() if is_subs else False,
             "perform_ocr": self.v.cb_ocr.isChecked() if is_subs else False,
-            "perform_ocr_cleanup": self.v.cb_cleanup.isChecked() if is_subs else False,
             "convert_to_ass": self.v.cb_convert.isChecked() if is_subs else False,
             "rescale": self.v.cb_rescale.isChecked() if is_subs else False,
             "size_multiplier": size_mult_value,

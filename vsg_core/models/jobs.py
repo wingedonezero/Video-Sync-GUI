@@ -36,7 +36,6 @@ class PlanItem:
     is_corrected: bool = False
     correction_source: Optional[str] = None
     perform_ocr: bool = False
-    perform_ocr_cleanup: bool = False
     container_delay_ms: int = 0
     custom_lang: str = ''
     custom_name: str = ''  # NEW: Custom track name set by user

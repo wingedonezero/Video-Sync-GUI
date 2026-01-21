@@ -35,7 +35,6 @@ class TrackWidget(QWidget):
 
         # Hidden controls whose state is managed by the settings dialog
         self.cb_ocr = QCheckBox("Perform OCR")
-        self.cb_cleanup = QCheckBox("Perform Cleanup")
         self.cb_convert = QCheckBox("To ASS")
         self.cb_rescale = QCheckBox("Rescale")
         self.size_multiplier = QDoubleSpinBox()
@@ -102,7 +101,6 @@ class TrackWidget(QWidget):
             new_config = dialog.read_values()
             # Update the hidden controls on this widget
             self.cb_ocr.setChecked(new_config.get('perform_ocr', False))
-            self.cb_cleanup.setChecked(new_config.get('perform_ocr_cleanup', False))
             self.cb_convert.setChecked(new_config.get('convert_to_ass', False))
             self.cb_rescale.setChecked(new_config.get('rescale', False))
             self.size_multiplier.setValue(new_config.get('size_multiplier', 1.0))
