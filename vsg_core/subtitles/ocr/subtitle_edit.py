@@ -16,11 +16,19 @@ https://github.com/SubtitleEdit/subtitleedit/tree/main/Dictionaries
 
 import json
 import logging
-import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
+
+# Try to use 'regex' module for Unicode property support (\p{L}, \p{Ll}, etc.)
+# Fall back to standard 're' module if not available
+try:
+    import regex as re
+    REGEX_UNICODE_SUPPORT = True
+except ImportError:
+    import re
+    REGEX_UNICODE_SUPPORT = False
 
 logger = logging.getLogger(__name__)
 
@@ -682,12 +690,21 @@ class SubtitleEditCorrector:
 
         # Compile regex patterns
         self._compiled_regex = []
+        unicode_pattern_count = 0
         for rule in se_dicts.regex_rules:
             try:
                 pattern = re.compile(rule.from_text)
                 self._compiled_regex.append((pattern, rule.to_text))
             except re.error as e:
-                logger.warning(f"Invalid SE regex pattern '{rule.from_text}': {e}")
+                # Check if this is a Unicode property pattern (\p{...})
+                if '\\p{' in rule.from_text or r'\p{' in rule.from_text:
+                    unicode_pattern_count += 1
+                else:
+                    logger.warning(f"Invalid SE regex pattern '{rule.from_text}': {e}")
+
+        if unicode_pattern_count > 0 and not REGEX_UNICODE_SUPPORT:
+            logger.info(f"Skipped {unicode_pattern_count} SE regex patterns with Unicode properties. "
+                       f"Install 'regex' module for full support: pip install regex")
 
         # Build lookup dicts for faster word-level processing
         self._whole_word_map = {rule.from_text: rule.to_text for rule in se_dicts.whole_words}
