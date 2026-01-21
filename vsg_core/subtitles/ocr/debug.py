@@ -11,10 +11,15 @@ Creates organized debug output for analyzing OCR issues:
 Folder structure:
     {report_name}_debug/
         summary.txt                 # Quick overview
+        raw_ocr.txt                 # Complete raw OCR output for all subtitles
+        all_subtitles/
+            all_subtitles.txt       # All subtitles with OCR text
+            sub_0001.png            # All preprocessed images for verification
+            sub_0002.png
+            ...
         unknown_words/
             unknown_words.txt       # Timecodes, text, unknown words
-            sub_0001.png            # Preprocessed images
-            sub_0002.png
+            sub_0001.png            # Images for subtitles with unknown words
             ...
         fixes_applied/
             fixes_applied.txt       # Timecodes, original, fixed text
@@ -186,6 +191,9 @@ class OCRDebugger:
         # Always save raw OCR output (this is the main debugging data)
         self._save_raw_ocr()
 
+        # Always save all subtitles with images for verification
+        self._save_all_subtitles()
+
         # Save each issue category
         if self.unknown_word_indices:
             self._save_unknown_words()
@@ -216,6 +224,7 @@ class OCRDebugger:
             f"  Low confidence: {len(self.low_confidence_indices)} subtitles",
             f"",
             f"Folders:",
+            f"  all_subtitles/ - {len(self.subtitles)} images (all subtitles for verification)",
         ]
 
         if self.unknown_word_indices:
@@ -299,6 +308,58 @@ class OCRDebugger:
             lines.append("")
 
         raw_ocr_path.write_text("\n".join(lines), encoding='utf-8')
+
+    def _save_all_subtitles(self):
+        """Save all subtitle images for verification.
+
+        This folder contains every subtitle image so you can manually verify
+        the raw OCR output against the actual images.
+        """
+        folder = self.debug_dir / "all_subtitles"
+        folder.mkdir(parents=True, exist_ok=True)
+
+        lines = [
+            "All Subtitles - Raw Verification",
+            "=" * 50,
+            "",
+            "All subtitle images and their OCR output for manual verification.",
+            "Compare the images against the raw_ocr.txt output to check accuracy.",
+            "",
+        ]
+
+        for idx in sorted(self.subtitles.keys()):
+            sub = self.subtitles[idx]
+
+            # Use raw_ocr_text if available, otherwise original_text, otherwise raw_text
+            raw_text = sub.raw_ocr_text or sub.original_text or sub.raw_text
+            final_text = sub.raw_text
+
+            lines.extend([
+                "-" * 50,
+                f"Index: {sub.index}",
+                f"Time: {sub.start_time} -> {sub.end_time}",
+                f"Confidence: {sub.confidence:.1f}%",
+                f"Image: sub_{sub.index:04d}.png",
+                f"",
+                f"Raw OCR:",
+                f"  {raw_text.replace(chr(10), chr(10) + '  ')}",
+            ])
+
+            # Show final text if different
+            if raw_text != final_text:
+                lines.extend([
+                    f"",
+                    f"After fixes:",
+                    f"  {final_text.replace(chr(10), chr(10) + '  ')}",
+                ])
+
+            lines.append("")
+
+            # Save image
+            if sub.image is not None:
+                self._save_image(sub.image, folder / f"sub_{sub.index:04d}.png")
+
+        (folder / "all_subtitles.txt").write_text("\n".join(lines), encoding='utf-8')
 
     def _save_unknown_words(self):
         """Save unknown words debug output."""
