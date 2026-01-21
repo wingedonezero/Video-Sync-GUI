@@ -553,30 +553,37 @@ class WordSplitter:
             dictionary: Optional spell checker to verify words aren't already valid
 
         Returns:
-            Text with merged words split
+            Text with merged words split (preserves line breaks)
         """
-        words = text.split()
-        result_words = []
+        # Process line by line to preserve newlines
+        lines = text.split('\n')
+        result_lines = []
 
-        for word in words:
-            # Skip if word is already valid
-            if dictionary and dictionary.check(word):
-                result_words.append(word)
-                continue
+        for line in lines:
+            words = line.split()  # Split on spaces within the line
+            result_words = []
 
-            # Skip if word is in our valid words
-            if self.is_valid_word(word):
-                result_words.append(word)
-                continue
+            for word in words:
+                # Skip if word is already valid
+                if dictionary and dictionary.check(word):
+                    result_words.append(word)
+                    continue
 
-            # Try to split
-            split = self.try_split(word)
-            if split:
-                result_words.append(split)
-            else:
-                result_words.append(word)
+                # Skip if word is in our valid words
+                if self.is_valid_word(word):
+                    result_words.append(word)
+                    continue
 
-        return ' '.join(result_words)
+                # Try to split
+                split = self.try_split(word)
+                if split:
+                    result_words.append(split)
+                else:
+                    result_words.append(word)
+
+            result_lines.append(' '.join(result_words))
+
+        return '\n'.join(result_lines)
 
 
 class SubtitleEditCorrector:
