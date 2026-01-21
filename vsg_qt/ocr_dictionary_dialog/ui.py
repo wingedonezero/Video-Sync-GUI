@@ -114,21 +114,38 @@ class ReplacementsTab(QWidget):
     def __init__(self, dictionaries: OCRDictionaries, parent=None):
         super().__init__(parent)
         self.dictionaries = dictionaries
+        self._se_rules = []  # Cache for SE rules
         self._setup_ui()
         self._load_data()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
 
+        # Filter controls
+        filter_layout = QHBoxLayout()
+        filter_layout.addWidget(QLabel("Show:"))
+        self.source_filter = QComboBox()
+        self.source_filter.addItem("User Rules", "user")
+        self.source_filter.addItem("SE Rules (read-only)", "se")
+        self.source_filter.addItem("All Rules", "all")
+        self.source_filter.currentIndexChanged.connect(self._load_data)
+        filter_layout.addWidget(self.source_filter)
+        filter_layout.addStretch()
+
+        self.rules_count_label = QLabel()
+        filter_layout.addWidget(self.rules_count_label)
+        layout.addLayout(filter_layout)
+
         # Table
         self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels(["Pattern", "Replacement", "Type", "Conf. Gated", "Description"])
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels(["Source", "Pattern", "Replacement", "Type", "Conf. Gated", "Description"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
@@ -177,34 +194,160 @@ class ReplacementsTab(QWidget):
         io_layout.addWidget(reset_btn)
         layout.addLayout(io_layout)
 
+    def _load_se_rules(self):
+        """Load SE replacement rules from all available OCR fix files."""
+        if self._se_rules:
+            return self._se_rules
+
+        se_dir = self.dictionaries.config_dir / "subtitleedit"
+        if not se_dir.exists():
+            return []
+
+        parser = SubtitleEditParser(se_dir)
+        available = parser.get_available_files()
+        ocr_fix_files = available.get('ocr_fix', [])
+
+        rules = []
+        for path in ocr_fix_files:
+            se_dicts = parser.parse_ocr_fix_list(path)
+            # Combine all rule types
+            for rule in se_dicts.whole_lines:
+                rules.append(('SE', rule.from_text, rule.to_text, rule.rule_type, False, rule))
+            for rule in se_dicts.partial_lines_always:
+                rules.append(('SE', rule.from_text, rule.to_text, rule.rule_type, False, rule))
+            for rule in se_dicts.partial_lines:
+                rules.append(('SE', rule.from_text, rule.to_text, rule.rule_type, False, rule))
+            for rule in se_dicts.begin_lines:
+                rules.append(('SE', rule.from_text, rule.to_text, rule.rule_type, False, rule))
+            for rule in se_dicts.end_lines:
+                rules.append(('SE', rule.from_text, rule.to_text, rule.rule_type, False, rule))
+            for rule in se_dicts.whole_words:
+                rules.append(('SE', rule.from_text, rule.to_text, rule.rule_type, False, rule))
+            for rule in se_dicts.partial_words_always:
+                rules.append(('SE', rule.from_text, rule.to_text, rule.rule_type, False, rule))
+            for rule in se_dicts.partial_words:
+                rules.append(('SE', rule.from_text, rule.to_text, rule.rule_type, False, rule))
+            for rule in se_dicts.regex_rules:
+                rules.append(('SE', rule.from_text, rule.to_text, rule.rule_type, False, rule))
+
+        self._se_rules = rules
+        return rules
+
     def _load_data(self):
-        """Load rules into table."""
-        rules = self.dictionaries.load_replacements()
-        self.table.setRowCount(len(rules))
+        """Load rules into table based on source filter."""
+        source_filter = self.source_filter.currentData()
 
-        for row, rule in enumerate(rules):
-            self.table.setItem(row, 0, QTableWidgetItem(rule.pattern))
-            self.table.setItem(row, 1, QTableWidgetItem(rule.replacement))
-            self.table.setItem(row, 2, QTableWidgetItem(rule.rule_type))
-            self.table.setItem(row, 3, QTableWidgetItem("Yes" if rule.confidence_gated else "No"))
-            self.table.setItem(row, 4, QTableWidgetItem(rule.description or ""))
+        all_rows = []
 
-            # Store rule object in first column
-            self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, rule)
+        # Load user rules
+        if source_filter in ('user', 'all'):
+            user_rules = self.dictionaries.load_replacements()
+            for rule in user_rules:
+                all_rows.append(('User', rule.pattern, rule.replacement, rule.rule_type,
+                                 rule.confidence_gated, rule.description or '', rule, True))
+
+        # Load SE rules
+        if source_filter in ('se', 'all'):
+            se_rules = self._load_se_rules()
+            for source, pattern, replacement, rule_type, conf_gated, rule_obj in se_rules:
+                all_rows.append((source, pattern, replacement, rule_type,
+                                 conf_gated, '', rule_obj, False))
+
+        self.table.setRowCount(len(all_rows))
+
+        for row, (source, pattern, replacement, rule_type, conf_gated, desc, rule_obj, is_user) in enumerate(all_rows):
+            # Source column
+            source_item = QTableWidgetItem(source)
+            source_item.setFlags(source_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            if not is_user:
+                source_item.setForeground(Qt.GlobalColor.gray)
+            self.table.setItem(row, 0, source_item)
+
+            # Pattern column
+            pattern_item = QTableWidgetItem(pattern)
+            if not is_user:
+                pattern_item.setForeground(Qt.GlobalColor.gray)
+            self.table.setItem(row, 1, pattern_item)
+
+            # Replacement column
+            replacement_item = QTableWidgetItem(replacement)
+            if not is_user:
+                replacement_item.setForeground(Qt.GlobalColor.gray)
+            self.table.setItem(row, 2, replacement_item)
+
+            # Type column
+            type_item = QTableWidgetItem(rule_type)
+            if not is_user:
+                type_item.setForeground(Qt.GlobalColor.gray)
+            self.table.setItem(row, 3, type_item)
+
+            # Confidence gated column
+            conf_item = QTableWidgetItem("Yes" if conf_gated else "No")
+            if not is_user:
+                conf_item.setForeground(Qt.GlobalColor.gray)
+            self.table.setItem(row, 4, conf_item)
+
+            # Description column
+            desc_item = QTableWidgetItem(desc)
+            if not is_user:
+                desc_item.setForeground(Qt.GlobalColor.gray)
+            self.table.setItem(row, 5, desc_item)
+
+            # Store rule object and user flag in first column
+            self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, rule_obj)
+            self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole + 1, is_user)
+
+        # Update count label
+        user_count = sum(1 for r in all_rows if r[7])
+        se_count = sum(1 for r in all_rows if not r[7])
+        if source_filter == 'user':
+            self.rules_count_label.setText(f"{user_count} user rules")
+        elif source_filter == 'se':
+            self.rules_count_label.setText(f"{se_count} SE rules (read-only)")
+        else:
+            self.rules_count_label.setText(f"{user_count} user + {se_count} SE rules")
 
     def _on_selection_changed(self):
         """Handle table selection change."""
         rows = self.table.selectionModel().selectedRows()
         has_selection = len(rows) > 0
 
-        self.update_btn.setEnabled(has_selection)
-        self.delete_btn.setEnabled(has_selection)
-
         if has_selection:
             row = rows[0].row()
-            rule = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+            source_item = self.table.item(row, 0)
+            rule = source_item.data(Qt.ItemDataRole.UserRole)
+            is_user = source_item.data(Qt.ItemDataRole.UserRole + 1)
+
+            # Only enable edit/delete for user rules
+            self.update_btn.setEnabled(is_user if is_user else False)
+            self.delete_btn.setEnabled(is_user if is_user else False)
+            self.add_btn.setEnabled(True)
+
             if rule:
-                self.edit_widget.set_rule(rule)
+                # For user rules, populate the edit widget
+                if is_user and hasattr(rule, 'pattern'):
+                    self.edit_widget.set_rule(rule)
+                elif not is_user:
+                    # For SE rules, show in edit widget but user can't save changes
+                    self.edit_widget.pattern_edit.setText(rule.from_text if hasattr(rule, 'from_text') else '')
+                    self.edit_widget.replacement_edit.setText(rule.to_text if hasattr(rule, 'to_text') else '')
+                    # Find closest match for type
+                    se_type = rule.rule_type if hasattr(rule, 'rule_type') else 'literal'
+                    type_map = {
+                        'whole_line': 'literal', 'partial_line': 'literal', 'partial_line_always': 'literal',
+                        'begin_line': 'word_start', 'end_line': 'word_end',
+                        'whole_word': 'word', 'partial_word': 'word_middle', 'partial_word_always': 'word_middle',
+                        'regex': 'regex'
+                    }
+                    mapped_type = type_map.get(se_type, 'literal')
+                    idx = self.edit_widget.type_combo.findData(mapped_type)
+                    if idx >= 0:
+                        self.edit_widget.type_combo.setCurrentIndex(idx)
+                    self.edit_widget.confidence_gated.setChecked(False)
+                    self.edit_widget.description_edit.setText(f"(SE: {se_type})")
+        else:
+            self.update_btn.setEnabled(False)
+            self.delete_btn.setEnabled(False)
 
     def _add_rule(self):
         """Add a new rule."""
@@ -227,7 +370,14 @@ class ReplacementsTab(QWidget):
             return
 
         row = rows[0].row()
-        old_rule = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        source_item = self.table.item(row, 0)
+        old_rule = source_item.data(Qt.ItemDataRole.UserRole)
+        is_user = source_item.data(Qt.ItemDataRole.UserRole + 1)
+
+        if not is_user:
+            QMessageBox.warning(self, "Cannot Edit", "SE rules are read-only.")
+            return
+
         new_rule = self.edit_widget.get_rule()
 
         if not new_rule:
@@ -247,7 +397,13 @@ class ReplacementsTab(QWidget):
             return
 
         row = rows[0].row()
-        rule = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        source_item = self.table.item(row, 0)
+        rule = source_item.data(Qt.ItemDataRole.UserRole)
+        is_user = source_item.data(Qt.ItemDataRole.UserRole + 1)
+
+        if not is_user:
+            QMessageBox.warning(self, "Cannot Delete", "SE rules are read-only.")
+            return
 
         reply = QMessageBox.question(
             self, "Confirm Delete",
@@ -990,7 +1146,10 @@ class RomajiTab(QWidget):
             "unknown by the OCR spell checker.\n\n"
             "Click 'Build Dictionary' to download JMdict (Japanese-English dictionary) and "
             "extract all word readings converted to romaji. This is a one-time setup that "
-            "downloads ~20MB and generates ~100,000+ words."
+            "downloads ~20MB and generates ~100,000+ words.\n\n"
+            "Note: By default, romaji words validate as 'known' but are NOT accepted as OCR "
+            "fix results. This prevents the spell checker from incorrectly 'fixing' words to romaji. "
+            "Configure this in the Word Lists tab."
         )
         info_text.setWordWrap(True)
         info_layout.addWidget(info_text)
@@ -1013,6 +1172,11 @@ class RomajiTab(QWidget):
 
         self.jmdict_status_label = QLabel("-")
         status_layout.addRow("JMdict Cache:", self.jmdict_status_label)
+
+        # Config status (from word lists)
+        self.config_status_label = QLabel("-")
+        self.config_status_label.setWordWrap(True)
+        status_layout.addRow("Validation Config:", self.config_status_label)
 
         layout.addWidget(status_group)
 
@@ -1087,6 +1251,33 @@ class RomajiTab(QWidget):
             self.word_count_label.setText(f"{word_count:,}")
             self.dict_path_label.setText(dict_path)
             self.jmdict_status_label.setText("Cached" if jmdict_cached else "Not downloaded")
+
+            # Get romaji config from validation manager
+            try:
+                manager = self.dictionaries.get_validation_manager()
+                romaji_list = None
+                for wl in manager.get_word_lists():
+                    if wl.config.name == "Romaji":
+                        romaji_list = wl
+                        break
+
+                if romaji_list:
+                    cfg = romaji_list.config
+                    flags = []
+                    if cfg.validates_known:
+                        flags.append("Validates")
+                    if cfg.protects_from_fix:
+                        flags.append("Protects")
+                    if cfg.accepts_as_fix_result:
+                        flags.append("Accept Fix")
+                    else:
+                        flags.append("No Fix Accept")
+
+                    self.config_status_label.setText(", ".join(flags))
+                else:
+                    self.config_status_label.setText("Not configured")
+            except Exception:
+                self.config_status_label.setText("-")
 
         except Exception as e:
             self.status_label.setText(f"Error: {e}")
