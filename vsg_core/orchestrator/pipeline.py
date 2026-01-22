@@ -49,6 +49,13 @@ class Orchestrator:
         job_temp = base_temp / f"orch_{Path(source1_file).stem}_{int(time.time())}"
         job_temp.mkdir(parents=True, exist_ok=True)
 
+        # Cleanup old style editor temp files from previous sessions
+        from vsg_core.config import AppConfig
+        config = AppConfig()
+        cleaned = config.cleanup_style_editor_temp()
+        if cleaned > 0:
+            log(f'[Cleanup] Removed {cleaned} old style editor temp files')
+
         runner = CommandRunner(settings_dict, log)
 
         ctx = Context(

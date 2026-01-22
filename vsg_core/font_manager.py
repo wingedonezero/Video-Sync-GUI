@@ -157,21 +157,18 @@ class SubtitleFontAnalyzer:
         Returns:
             Dictionary with font usage information
         """
-        import pysubs2
+        from vsg_core.subtitles.data import SubtitleData
 
         try:
-            subs = pysubs2.load(str(self.subtitle_path), encoding='utf-8')
-        except Exception:
-            try:
-                subs = pysubs2.load(str(self.subtitle_path))
-            except Exception as e:
-                return {'error': str(e), 'fonts': {}, 'inline_fonts': []}
+            data = SubtitleData.from_file(self.subtitle_path)
+        except Exception as e:
+            return {'error': str(e), 'fonts': {}, 'inline_fonts': []}
 
         # Analyze style fonts
         self._fonts_by_style.clear()
         fonts_to_styles: Dict[str, List[str]] = {}
 
-        for style_name, style in subs.styles.items():
+        for style_name, style in data.styles.items():
             font_name = style.fontname
             if font_name not in fonts_to_styles:
                 fonts_to_styles[font_name] = []
@@ -186,7 +183,7 @@ class SubtitleFontAnalyzer:
         self._inline_fonts.clear()
         fn_pattern = re.compile(r'\\fn([^\\}]+)')
 
-        for event in subs.events:
+        for event in data.events:
             matches = fn_pattern.findall(event.text)
             for font_name in matches:
                 self._inline_fonts.add(font_name.strip())
@@ -198,18 +195,18 @@ class SubtitleFontAnalyzer:
                 'styles': styles,
                 'style_count': len(styles),
                 'has_bold_styles': any(
-                    subs.styles[s].bold for s in styles if s in subs.styles
+                    data.styles[s].bold != 0 for s in styles if s in data.styles
                 ),
                 'has_italic_styles': any(
-                    subs.styles[s].italic for s in styles if s in subs.styles
+                    data.styles[s].italic != 0 for s in styles if s in data.styles
                 ),
             }
 
         return {
             'fonts': fonts_info,
             'inline_fonts': list(self._inline_fonts),
-            'total_styles': len(subs.styles),
-            'total_events': len(subs.events),
+            'total_styles': len(data.styles),
+            'total_events': len(data.events),
         }
 
     def get_styles_using_font(self, font_name: str) -> List[str]:
@@ -368,13 +365,9 @@ def validate_font_replacements(
     # Check if styles exist in subtitle file (non-blocking warning)
     if subtitle_path and Path(subtitle_path).exists():
         try:
-            import pysubs2
-            try:
-                subs = pysubs2.load(subtitle_path, encoding='utf-8')
-            except Exception:
-                subs = pysubs2.load(subtitle_path)
-
-            existing_styles = set(subs.styles.keys())
+            from vsg_core.subtitles.data import SubtitleData
+            data = SubtitleData.from_file(subtitle_path)
+            existing_styles = set(data.styles.keys())
 
             for style_name in replacements.keys():
                 if style_name not in existing_styles:
@@ -409,17 +402,13 @@ def apply_font_replacements_to_subtitle(
     Returns:
         Number of styles modified
     """
-    import pysubs2
+    from vsg_core.subtitles.data import SubtitleData
 
-    try:
-        subs = pysubs2.load(subtitle_path, encoding='utf-8')
-    except Exception:
-        subs = pysubs2.load(subtitle_path)
-
+    data = SubtitleData.from_file(subtitle_path)
     modified_count = 0
 
     # Apply replacements by style name
-    for style_name, style in subs.styles.items():
+    for style_name, style in data.styles.items():
         if style_name in replacements:
             repl_data = replacements[style_name]
             new_font = repl_data['new_font_name']
@@ -439,7 +428,7 @@ def apply_font_replacements_to_subtitle(
     if font_mapping:
         fn_pattern = re.compile(r'\\fn([^\\}]+)')
 
-        for event in subs.events:
+        for event in data.events:
             def replace_fn(match):
                 font_name = match.group(1).strip()
                 if font_name in font_mapping:
@@ -450,5 +439,5 @@ def apply_font_replacements_to_subtitle(
             if new_text != event.text:
                 event.text = new_text
 
-    subs.save(subtitle_path, encoding='utf-8')
+    data.save(subtitle_path)
     return modified_count
