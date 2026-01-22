@@ -390,11 +390,11 @@ class StyleEditorLogic:
                             f"Could not apply font changes to preview: {e}"
                         )
 
-                # Reload the subtitle in the player to show changes
-                self.v.player_thread.reload_subtitle_track(self.engine.get_preview_path())
-                # Also reload the engine so UI reflects changes
+                # Reload the engine FIRST so it picks up the font replacement changes
                 self.engine = StyleEngine(str(self.engine.path))
                 self.populate_initial_state()
+                # Now reload the player - get_preview_path() will save the updated data to temp
+                self.v.player_thread.reload_subtitle_track(self.engine.get_preview_path())
 
     def get_font_replacements(self) -> Dict[str, Any]:
         """Get the configured font replacements."""

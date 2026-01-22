@@ -193,8 +193,7 @@ class StyleEditorDialog(QDialog):
             if isinstance(widget, QLineEdit):
                 widget.editingFinished.connect(self._logic.update_current_style)
             elif isinstance(widget, (QDoubleSpinBox, QSpinBox)):
-                # Use valueChanged so arrow clicks trigger updates immediately
-                widget.valueChanged.connect(self._logic.update_current_style)
+                widget.editingFinished.connect(self._logic.update_current_style)
             elif isinstance(widget, QCheckBox):
                 widget.stateChanged.connect(self._logic.update_current_style)
         self.style_widgets['primarycolor'].clicked.connect(lambda: self._logic.pick_color(self.style_widgets['primarycolor'], "primarycolor"))
