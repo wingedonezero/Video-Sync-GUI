@@ -21,7 +21,7 @@ from typing import Dict, Any, Optional, TYPE_CHECKING
 from .. import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
-    from ...data import SubtitleData, OperationResult, OperationRecord
+    from ...data import SubtitleData, OperationResult, OperationRecord, SyncEventData
 
 
 @register_sync_plugin
@@ -62,7 +62,7 @@ class TimebaseFrameLockedSync(SyncPlugin):
         Returns:
             OperationResult with statistics
         """
-        from ...data import OperationResult, OperationRecord
+        from ...data import OperationResult, OperationRecord, SyncEventData
 
         config = config or {}
 
@@ -117,6 +117,10 @@ class TimebaseFrameLockedSync(SyncPlugin):
         # Step 2: Apply delay and frame-snap each event
         log(f"[FrameLocked] Applying frame-aligned delay: {frame_aligned_delay:+.3f}ms")
 
+        # Track per-event adjustments for stats
+        start_adjustments = []
+        end_adjustments = []
+
         for event in subtitle_data.events:
             # Skip comments if configured
             if event.is_comment:
@@ -130,6 +134,11 @@ class TimebaseFrameLockedSync(SyncPlugin):
             delayed_start = original_start + frame_aligned_delay
             delayed_end = original_end + frame_aligned_delay
 
+            # Initialize sync tracking data
+            start_frame = None
+            end_frame = None
+            snapped = False
+
             # Frame-snap start time
             if vts:
                 snapped_start, start_frame = self._snap_to_frame_start(delayed_start, vts, target_fps)
@@ -137,6 +146,7 @@ class TimebaseFrameLockedSync(SyncPlugin):
 
                 if abs(start_delta) > 0.5:
                     stats['start_snapped'] += 1
+                    snapped = True
                 else:
                     stats['start_already_aligned'] += 1
 
@@ -157,8 +167,45 @@ class TimebaseFrameLockedSync(SyncPlugin):
                 # No VideoTimestamps - just apply delay
                 event.start_ms = delayed_start
                 event.end_ms = delayed_end
+                snapped_start = delayed_start
+                snapped_end = delayed_end
+
+            # Calculate actual adjustments
+            start_adj = event.start_ms - original_start
+            end_adj = event.end_ms - original_end
+            start_adjustments.append(start_adj)
+            end_adjustments.append(end_adj)
+
+            # Populate per-event sync metadata
+            event.sync = SyncEventData(
+                original_start_ms=original_start,
+                original_end_ms=original_end,
+                start_adjustment_ms=start_adj,
+                end_adjustment_ms=end_adj,
+                snapped_to_frame=snapped,
+                target_frame_start=start_frame,
+                target_frame_end=end_frame,
+            )
 
             stats['events_synced'] += 1
+
+        # Calculate adjustment statistics
+        if start_adjustments:
+            stats['min_adjustment_ms'] = min(start_adjustments)
+            stats['max_adjustment_ms'] = max(start_adjustments)
+            stats['avg_adjustment_ms'] = sum(start_adjustments) / len(start_adjustments)
+        else:
+            stats['min_adjustment_ms'] = 0.0
+            stats['max_adjustment_ms'] = 0.0
+            stats['avg_adjustment_ms'] = 0.0
+
+        # Build summary with adjustment range if varied
+        if stats['min_adjustment_ms'] != stats['max_adjustment_ms']:
+            summary = (f"Frame-locked sync: {stats['events_synced']} events, "
+                      f"avg {stats['avg_adjustment_ms']:+.1f}ms "
+                      f"(range: {stats['min_adjustment_ms']:+.1f} to {stats['max_adjustment_ms']:+.1f})")
+        else:
+            summary = f"Frame-locked sync: {stats['events_synced']} events, delay {frame_aligned_delay:+.1f}ms"
 
         # Record operation
         record = OperationRecord(
@@ -166,12 +213,13 @@ class TimebaseFrameLockedSync(SyncPlugin):
             timestamp=datetime.now(),
             parameters={
                 'mode': self.name,
-                'raw_delay_ms': total_delay_ms,
+                'input_delay_ms': total_delay_ms,
                 'frame_aligned_delay_ms': frame_aligned_delay,
                 'target_fps': target_fps,
+                'global_shift_ms': global_shift_ms,
             },
             events_affected=stats['events_synced'],
-            summary=f"Frame-locked sync: {stats['events_synced']} events, delay {frame_aligned_delay:+.1f}ms"
+            summary=summary
         )
         subtitle_data.operations.append(record)
 

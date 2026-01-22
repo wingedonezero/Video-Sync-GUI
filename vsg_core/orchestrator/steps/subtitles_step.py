@@ -219,7 +219,30 @@ class SubtitlesStep:
                 runner._log_message(f"[SubtitleData] WARNING: Ignoring unreasonable size multiplier {size_mult:.2f}x")
 
         # ================================================================
-        # STEP 6: Save (SINGLE ROUNDING POINT)
+        # STEP 6: Save JSON (ALWAYS - before ASS/SRT to preserve all data)
+        # ================================================================
+        # JSON contains all metadata that would be lost in ASS/SRT
+        # Always write to temp folder so it can be grabbed for debugging
+        json_path = ctx.temp_dir / f"subtitle_data_track_{item.track.id}.json"
+        try:
+            subtitle_data.save_json(json_path)
+            runner._log_message(f"[SubtitleData] JSON saved: {json_path.name}")
+        except Exception as e:
+            runner._log_message(f"[SubtitleData] WARNING: Could not save JSON: {e}")
+
+        # For OCR with debug enabled, also copy to OCR debug folder
+        if item.perform_ocr and ctx.settings_dict.get('ocr_debug_output', False):
+            ocr_debug_dir = self._get_ocr_debug_dir(item, ctx)
+            if ocr_debug_dir:
+                ocr_json_path = ocr_debug_dir / "subtitle_data.json"
+                try:
+                    subtitle_data.save_json(ocr_json_path)
+                    runner._log_message(f"[SubtitleData] OCR debug JSON saved: {ocr_json_path}")
+                except Exception as e:
+                    runner._log_message(f"[SubtitleData] WARNING: Could not save OCR debug JSON: {e}")
+
+        # ================================================================
+        # STEP 7: Save ASS/SRT (SINGLE ROUNDING POINT)
         # ================================================================
         output_path = item.extracted_path.with_suffix(output_format)
 
@@ -244,17 +267,6 @@ class SubtitlesStep:
                     name=item.track.props.name
                 )
             )
-
-        # ================================================================
-        # STEP 7: Debug Output (optional)
-        # ================================================================
-        if ctx.settings_dict.get('subtitle_debug_output', False):
-            debug_path = logs_dir / f"subtitle_data_track_{item.track.id}.json"
-            try:
-                subtitle_data.save_json(debug_path)
-                runner._log_message(f"[SubtitleData] Debug JSON saved: {debug_path.name}")
-            except Exception as e:
-                runner._log_message(f"[SubtitleData] WARNING: Could not save debug JSON: {e}")
 
         # Log summary
         runner._log_message(f"[SubtitleData] Track {item.track.id} complete: {len(subtitle_data.operations)} operations applied")
@@ -529,4 +541,37 @@ class SubtitlesStep:
                 return (props.get('width', 1920), props.get('height', 1080))
         except Exception as e:
             runner._log_message(f"[Rescale] WARNING: Could not get video resolution: {e}")
+        return None
+
+    def _get_ocr_debug_dir(self, item, ctx) -> Optional[Path]:
+        """
+        Get OCR debug directory for a track if it exists.
+
+        Looks for the debug folder created by OCR pipeline:
+        {logs_dir}/{base_name}_ocr_debug_{timestamp}/
+        """
+        logs_dir = Path(ctx.settings_dict.get('logs_folder', ctx.temp_dir))
+
+        # Find existing OCR debug directory for this track
+        # Format: track_{id}_ocr_debug_* or similar
+        try:
+            base_name = item.extracted_path.stem if item.extracted_path else f"track_{item.track.id}"
+
+            # Look for directories matching OCR debug pattern
+            for path in logs_dir.iterdir():
+                if path.is_dir() and '_ocr_debug_' in path.name:
+                    # Check if this is the right track's debug dir
+                    if base_name in path.name or f"track_{item.track.id}" in str(path):
+                        return path
+
+            # Also check temp_dir/ocr for debug output
+            ocr_dir = ctx.temp_dir / 'ocr'
+            if ocr_dir.exists():
+                for path in ocr_dir.iterdir():
+                    if path.is_dir() and 'debug' in path.name.lower():
+                        return path
+
+        except Exception:
+            pass
+
         return None
