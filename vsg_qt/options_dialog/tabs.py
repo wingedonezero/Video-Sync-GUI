@@ -44,7 +44,11 @@ class StorageTab(QWidget):
     def __init__(self):
         super().__init__()
         self.widgets: Dict[str, QWidget] = {}
-        f = QFormLayout(self)
+        main_layout = QVBoxLayout(self)
+
+        # Paths section
+        paths_group = QGroupBox("Paths")
+        f = QFormLayout(paths_group)
         self.widgets['output_folder'] = _dir_input()
         self.widgets['output_folder'].setToolTip("The default directory where final merged files will be saved.")
         self.widgets['temp_root'] = _dir_input()
@@ -60,6 +64,21 @@ class StorageTab(QWidget):
         f.addRow('Reports Directory:', self.widgets['logs_folder'])
         f.addRow('VideoDiff Path (optional):', self.widgets['videodiff_path'])
         f.addRow('OCR Custom Wordlist:', self.widgets['ocr_custom_wordlist_path'])
+        main_layout.addWidget(paths_group)
+
+        # Config Maintenance section
+        maint_group = QGroupBox("Config Maintenance")
+        maint_layout = QVBoxLayout(maint_group)
+        self.remove_invalid_btn = QPushButton("Remove Invalid Config Entries")
+        self.remove_invalid_btn.setToolTip(
+            "Removes orphaned/invalid keys from settings.json that are no longer used.\n"
+            "This cleans up entries from old versions or deprecated features.\n"
+            "Your valid settings will not be affected."
+        )
+        maint_layout.addWidget(self.remove_invalid_btn)
+        main_layout.addWidget(maint_group)
+
+        main_layout.addStretch()
 
 class OCRTab(QWidget):
     """

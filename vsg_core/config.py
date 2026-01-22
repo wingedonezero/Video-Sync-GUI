@@ -598,6 +598,27 @@ class AppConfig:
         """
         return self._accessed_keys - set(self.defaults.keys())
 
+    def get_orphaned_keys(self) -> Set[str]:
+        """
+        Returns set of keys in settings that are not in defaults.
+
+        These are invalid/orphaned entries that will be removed on next save.
+        """
+        return set(self.settings.keys()) - set(self.defaults.keys())
+
+    def remove_orphaned_keys(self) -> Set[str]:
+        """
+        Removes orphaned keys from settings and saves.
+
+        Returns the set of keys that were removed.
+        """
+        orphaned = self.get_orphaned_keys()
+        if orphaned:
+            for key in orphaned:
+                del self.settings[key]
+            self.save()
+        return orphaned
+
     def ensure_dirs_exist(self):
         Path(self.get('output_folder')).mkdir(parents=True, exist_ok=True)
         Path(self.get('temp_root')).mkdir(parents=True, exist_ok=True)
