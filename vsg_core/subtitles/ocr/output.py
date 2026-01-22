@@ -17,10 +17,13 @@ Position handling:
     - Middle subtitles: Use \\pos(x,y) explicit positioning
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, TYPE_CHECKING
 import re
+
+if TYPE_CHECKING:
+    from ..data import SubtitleData
 
 
 @dataclass
@@ -287,3 +290,215 @@ def create_writer(settings_dict: dict) -> SubtitleWriter:
     )
 
     return SubtitleWriter(config)
+
+
+# =============================================================================
+# SubtitleData Conversion for Unified Pipeline
+# =============================================================================
+
+@dataclass
+class OCRSubtitleResult:
+    """
+    Extended subtitle result with all OCR metadata for SubtitleData conversion.
+
+    This carries all the data needed to populate SubtitleEvent.ocr and OCRMetadata.
+    """
+    index: int
+    start_ms: float  # Float for precision
+    end_ms: float
+    text: str
+
+    # OCR metadata
+    confidence: float = 0.0
+    raw_ocr_text: str = ''
+    fixes_applied: dict = field(default_factory=dict)
+    unknown_words: List[str] = field(default_factory=list)
+
+    # Position data
+    x: int = 0
+    y: int = 0
+    width: int = 0
+    height: int = 0
+    frame_width: int = 0
+    frame_height: int = 0
+
+    # VobSub specific
+    is_forced: bool = False
+    subtitle_colors: List[List[int]] = field(default_factory=list)
+    dominant_color: List[int] = field(default_factory=list)
+
+    # Debug image reference
+    debug_image: str = ''  # e.g., "sub_0000.png"
+
+
+def create_subtitle_data_from_ocr(
+    ocr_results: List[OCRSubtitleResult],
+    source_file: str,
+    engine: str = 'tesseract',
+    language: str = 'eng',
+    source_format: str = 'vobsub',
+    source_resolution: Tuple[int, int] = (720, 480),
+    output_resolution: Tuple[int, int] = (1920, 1080),
+    master_palette: Optional[List[List[int]]] = None,
+    config: Optional[OutputConfig] = None
+) -> 'SubtitleData':
+    """
+    Create SubtitleData from OCR results.
+
+    This is the unified entry point for OCR -> SubtitleData conversion.
+    All OCR metadata is preserved on each event.
+
+    Args:
+        ocr_results: List of OCRSubtitleResult with full metadata
+        source_file: Original source file path
+        engine: OCR engine used
+        language: OCR language
+        source_format: Source subtitle format (vobsub, pgs)
+        source_resolution: Source video resolution
+        output_resolution: Target video resolution
+        master_palette: VobSub master palette (16 colors)
+        config: Output configuration
+
+    Returns:
+        SubtitleData with all OCR metadata populated
+    """
+    from ..data import (
+        SubtitleData, SubtitleEvent, SubtitleStyle,
+        OCREventData, OCRMetadata
+    )
+    from collections import OrderedDict
+
+    config = config or OutputConfig()
+
+    # Create SubtitleData
+    data = SubtitleData()
+    data.source_path = Path(source_file)
+    data.source_format = 'ocr'
+    data.encoding = 'utf-8'
+
+    # Set up script info
+    data.script_info = OrderedDict([
+        ('Title', 'OCR Output'),
+        ('ScriptType', 'v4.00+'),
+        ('WrapStyle', '0'),
+        ('ScaledBorderAndShadow', 'yes'),
+        ('PlayResX', str(output_resolution[0])),
+        ('PlayResY', str(output_resolution[1])),
+    ])
+
+    # Create default style
+    default_style = SubtitleStyle(
+        name='Default',
+        fontname=config.font_name,
+        fontsize=float(config.font_size),
+        primary_color=config.primary_color,
+        outline_color=config.outline_color,
+        outline=config.outline_width,
+        shadow=config.shadow_depth,
+        alignment=2,  # Bottom center
+        margin_v=config.margin_v,
+    )
+
+    # Create top style for positioned subtitles
+    top_style = SubtitleStyle(
+        name='Top',
+        fontname=config.font_name,
+        fontsize=float(config.font_size),
+        primary_color=config.primary_color,
+        outline_color=config.outline_color,
+        outline=config.outline_width,
+        shadow=config.shadow_depth,
+        alignment=8,  # Top center
+        margin_v=config.margin_v,
+    )
+
+    data.styles = OrderedDict([
+        ('Default', default_style),
+        ('Top', top_style),
+    ])
+
+    # Track statistics for OCRMetadata
+    confidences = []
+    total_fixes = 0
+    fixes_by_type: dict = {}
+    unknown_words_map: dict = {}  # word -> first occurrence info
+    positioned_count = 0
+
+    # Convert each OCR result to SubtitleEvent
+    for result in ocr_results:
+        # Escape text for ASS
+        text = result.text.replace('\n', '\\N')
+
+        # Create event
+        event = SubtitleEvent(
+            start_ms=float(result.start_ms),
+            end_ms=float(result.end_ms),
+            text=text,
+            style='Default',
+            original_index=result.index,
+        )
+
+        # Create OCR metadata for this event
+        event.ocr = OCREventData(
+            index=result.index,
+            image=result.debug_image or f"sub_{result.index:04d}.png",
+            confidence=result.confidence,
+            raw_text=result.raw_ocr_text,
+            fixes_applied=dict(result.fixes_applied),
+            unknown_words=list(result.unknown_words),
+            x=result.x,
+            y=result.y,
+            width=result.width,
+            height=result.height,
+            frame_width=result.frame_width,
+            frame_height=result.frame_height,
+            is_forced=result.is_forced,
+            subtitle_colors=result.subtitle_colors,
+            dominant_color=result.dominant_color,
+        )
+
+        # Track statistics
+        confidences.append(result.confidence)
+
+        for fix_name, count in result.fixes_applied.items():
+            total_fixes += count
+            fixes_by_type[fix_name] = fixes_by_type.get(fix_name, 0) + count
+
+        for word in result.unknown_words:
+            if word not in unknown_words_map:
+                unknown_words_map[word] = {
+                    'word': word,
+                    'first_seen_index': result.index,
+                    'occurrences': 0,
+                }
+            unknown_words_map[word]['occurrences'] += 1
+
+        # Check if positioned
+        if result.frame_height > 0:
+            y_percent = (result.y / result.frame_height) * 100
+            if y_percent < config.bottom_threshold_percent:
+                positioned_count += 1
+
+        data.events.append(event)
+
+    # Create document-level OCR metadata
+    data.ocr_metadata = OCRMetadata(
+        engine=engine,
+        language=language,
+        source_format=source_format,
+        source_file=source_file,
+        source_resolution=list(source_resolution),
+        master_palette=master_palette or [],
+        total_subtitles=len(ocr_results),
+        successful=len([r for r in ocr_results if r.text.strip()]),
+        failed=len([r for r in ocr_results if not r.text.strip()]),
+        average_confidence=sum(confidences) / len(confidences) if confidences else 0.0,
+        min_confidence=min(confidences) if confidences else 0.0,
+        max_confidence=max(confidences) if confidences else 0.0,
+        total_fixes_applied=total_fixes,
+        positioned_subtitles=positioned_count,
+        fixes_by_type=fixes_by_type,
+        unknown_words=[info for info in unknown_words_map.values()],
+    )
+
+    return data

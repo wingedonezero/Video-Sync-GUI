@@ -18,7 +18,10 @@ from __future__ import annotations
 import copy
 import shutil
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from vsg_core.subtitles.data import SubtitleData
 
 from vsg_core.io.runner import CommandRunner
 from vsg_core.orchestrator.steps.context import Context
@@ -61,15 +64,33 @@ class SubtitlesStep:
             # ================================================================
             # OCR Processing (if needed)
             # ================================================================
+            ocr_subtitle_data = None
             if item.perform_ocr and item.extracted_path:
                 ocr_result = self._process_ocr(item, ctx, runner, items_to_add)
-                if not ocr_result:
+                if ocr_result is None:
                     continue  # OCR failed, skip this track
+                elif ocr_result is True:
+                    # Legacy mode - file was written, proceed with file loading
+                    pass
+                else:
+                    # Unified mode - SubtitleData returned directly
+                    ocr_subtitle_data = ocr_result
 
             # ================================================================
             # Unified SubtitleData Processing
             # ================================================================
-            if item.extracted_path:
+            if ocr_subtitle_data is not None:
+                # OCR already gave us SubtitleData - use it directly
+                try:
+                    self._process_track_unified(
+                        item, ctx, runner, source1_file,
+                        _scene_detection_cache, items_to_add,
+                        subtitle_data=ocr_subtitle_data
+                    )
+                except Exception as e:
+                    runner._log_message(f"[Subtitles] ERROR processing track {item.track.id}: {e}")
+                    raise
+            elif item.extracted_path:
                 ext = item.extracted_path.suffix.lower()
                 supported_formats = ['.ass', '.ssa', '.srt', '.vtt']
 
@@ -102,33 +123,44 @@ class SubtitlesStep:
         runner: CommandRunner,
         source1_file: Optional[Path],
         scene_cache: Dict[str, Any],
-        items_to_add: list
+        items_to_add: list,
+        subtitle_data: Optional['SubtitleData'] = None
     ) -> None:
         """
         Process a subtitle track using the unified SubtitleData flow.
 
-        1. Load into SubtitleData
+        1. Load into SubtitleData (or use provided SubtitleData from OCR)
         2. Apply stepping (if applicable)
         3. Apply sync mode
         4. Apply style operations
         5. Save (single rounding point)
+
+        Args:
+            subtitle_data: Optional pre-loaded SubtitleData (from OCR).
+                          If provided, skips file loading step.
         """
-        from vsg_core.subtitles.data import SubtitleData
+        from vsg_core.subtitles.data import SubtitleData as SubtitleDataClass
 
         subtitle_sync_mode = ctx.settings_dict.get('subtitle_sync_mode', 'time-based')
         logs_dir = Path(ctx.settings_dict.get('logs_folder', ctx.temp_dir))
 
         # ================================================================
-        # STEP 1: Load into SubtitleData
+        # STEP 1: Load into SubtitleData (or use provided)
         # ================================================================
-        runner._log_message(f"[SubtitleData] Loading track {item.track.id}: {item.extracted_path.name}")
+        if subtitle_data is not None:
+            # SubtitleData provided (from OCR)
+            runner._log_message(f"[SubtitleData] Using OCR SubtitleData for track {item.track.id}")
+            runner._log_message(f"[SubtitleData] {len(subtitle_data.events)} events, OCR metadata preserved")
+        else:
+            # Load from file
+            runner._log_message(f"[SubtitleData] Loading track {item.track.id}: {item.extracted_path.name}")
 
-        try:
-            subtitle_data = SubtitleData.from_file(item.extracted_path)
-            runner._log_message(f"[SubtitleData] Loaded {len(subtitle_data.events)} events, {len(subtitle_data.styles)} styles")
-        except Exception as e:
-            runner._log_message(f"[SubtitleData] ERROR: Failed to load: {e}")
-            raise
+            try:
+                subtitle_data = SubtitleDataClass.from_file(item.extracted_path)
+                runner._log_message(f"[SubtitleData] Loaded {len(subtitle_data.events)} events, {len(subtitle_data.styles)} styles")
+            except Exception as e:
+                runner._log_message(f"[SubtitleData] ERROR: Failed to load: {e}")
+                raise
 
         # ================================================================
         # STEP 2: Apply Stepping (if applicable)
@@ -219,7 +251,30 @@ class SubtitlesStep:
                 runner._log_message(f"[SubtitleData] WARNING: Ignoring unreasonable size multiplier {size_mult:.2f}x")
 
         # ================================================================
-        # STEP 6: Save (SINGLE ROUNDING POINT)
+        # STEP 6: Save JSON (ALWAYS - before ASS/SRT to preserve all data)
+        # ================================================================
+        # JSON contains all metadata that would be lost in ASS/SRT
+        # Always write to temp folder so it can be grabbed for debugging
+        json_path = ctx.temp_dir / f"subtitle_data_track_{item.track.id}.json"
+        try:
+            subtitle_data.save_json(json_path)
+            runner._log_message(f"[SubtitleData] JSON saved: {json_path.name}")
+        except Exception as e:
+            runner._log_message(f"[SubtitleData] WARNING: Could not save JSON: {e}")
+
+        # For OCR with debug enabled, also copy to OCR debug folder
+        if item.perform_ocr and ctx.settings_dict.get('ocr_debug_output', False):
+            ocr_debug_dir = self._get_ocr_debug_dir(item, ctx)
+            if ocr_debug_dir:
+                ocr_json_path = ocr_debug_dir / "subtitle_data.json"
+                try:
+                    subtitle_data.save_json(ocr_json_path)
+                    runner._log_message(f"[SubtitleData] OCR debug JSON saved: {ocr_json_path}")
+                except Exception as e:
+                    runner._log_message(f"[SubtitleData] WARNING: Could not save OCR debug JSON: {e}")
+
+        # ================================================================
+        # STEP 7: Save ASS/SRT (SINGLE ROUNDING POINT)
         # ================================================================
         output_path = item.extracted_path.with_suffix(output_format)
 
@@ -244,17 +299,6 @@ class SubtitlesStep:
                     name=item.track.props.name
                 )
             )
-
-        # ================================================================
-        # STEP 7: Debug Output (optional)
-        # ================================================================
-        if ctx.settings_dict.get('subtitle_debug_output', False):
-            debug_path = logs_dir / f"subtitle_data_track_{item.track.id}.json"
-            try:
-                subtitle_data.save_json(debug_path)
-                runner._log_message(f"[SubtitleData] Debug JSON saved: {debug_path.name}")
-            except Exception as e:
-                runner._log_message(f"[SubtitleData] WARNING: Could not save debug JSON: {e}")
 
         # Log summary
         runner._log_message(f"[SubtitleData] Track {item.track.id} complete: {len(subtitle_data.operations)} operations applied")
@@ -443,18 +487,22 @@ class SubtitlesStep:
 
         return OperationResult(success=False, operation='sync', error=f'Unknown or unhandled sync mode: {sync_mode}')
 
-    def _process_ocr(self, item, ctx, runner, items_to_add) -> bool:
+    def _process_ocr(self, item, ctx, runner, items_to_add):
         """
         Process OCR for a track.
 
-        Returns True if OCR succeeded, False if failed/skipped.
+        Returns:
+            - SubtitleData if unified OCR succeeded
+            - True if legacy OCR succeeded (file written)
+            - None if OCR failed/skipped
         """
-        from vsg_core.subtitles.ocr import run_ocr
+        from vsg_core.subtitles.ocr import run_ocr_unified
 
         ocr_work_dir = ctx.temp_dir / 'ocr'
         logs_dir = Path(ctx.settings_dict.get('logs_folder', ctx.temp_dir))
 
-        ocr_output_path = run_ocr(
+        # Use unified OCR that returns SubtitleData
+        subtitle_data = run_ocr_unified(
             str(item.extracted_path.with_suffix('.idx')),
             item.track.props.lang,
             runner,
@@ -465,27 +513,17 @@ class SubtitlesStep:
             track_id=item.track.id
         )
 
-        if not ocr_output_path:
+        if subtitle_data is None:
             runner._log_message(f"[OCR] ERROR: OCR failed for track {item.track.id}")
             runner._log_message(f"[OCR] Keeping original image-based subtitle")
             item.perform_ocr = False
-            return False
+            return None
 
-        ocr_file = Path(ocr_output_path)
-        if not ocr_file.exists():
-            runner._log_message(f"[OCR] ERROR: Output file not created for track {item.track.id}")
+        # Check if we got valid events
+        if not subtitle_data.events:
+            runner._log_message(f"[OCR] WARNING: OCR produced no events for track {item.track.id}")
             item.perform_ocr = False
-            return False
-
-        # Check file size
-        if ocr_file.stat().st_size < 50:
-            runner._log_message(f"[OCR] WARNING: OCR output nearly empty for track {item.track.id}")
-            item.perform_ocr = False
-            try:
-                ocr_file.unlink()
-            except Exception:
-                pass
-            return False
+            return None
 
         # OCR succeeded - create preserved copy of original
         preserved_item = copy.deepcopy(item)
@@ -503,22 +541,21 @@ class SubtitlesStep:
         )
         items_to_add.append(preserved_item)
 
-        # Update item with OCR output
-        item.extracted_path = Path(ocr_output_path)
-        ocr_ext = Path(ocr_output_path).suffix.lower()
-        ocr_codec = "S_TEXT/ASS" if ocr_ext == '.ass' else "S_TEXT/UTF8"
+        # Update item to reflect OCR output
+        # Set expected output path for later save
+        item.extracted_path = item.extracted_path.with_suffix('.ass')
         item.track = Track(
             source=item.track.source,
             id=item.track.id,
             type=item.track.type,
             props=StreamProps(
-                codec_id=ocr_codec,
+                codec_id="S_TEXT/ASS",
                 lang=original_props.lang,
                 name=original_props.name
             )
         )
 
-        return True
+        return subtitle_data
 
     def _get_video_resolution(self, video_path: Path, runner, ctx) -> Optional[tuple]:
         """Get video resolution for rescaling."""
@@ -529,4 +566,37 @@ class SubtitlesStep:
                 return (props.get('width', 1920), props.get('height', 1080))
         except Exception as e:
             runner._log_message(f"[Rescale] WARNING: Could not get video resolution: {e}")
+        return None
+
+    def _get_ocr_debug_dir(self, item, ctx) -> Optional[Path]:
+        """
+        Get OCR debug directory for a track if it exists.
+
+        Looks for the debug folder created by OCR pipeline:
+        {logs_dir}/{base_name}_ocr_debug_{timestamp}/
+        """
+        logs_dir = Path(ctx.settings_dict.get('logs_folder', ctx.temp_dir))
+
+        # Find existing OCR debug directory for this track
+        # Format: track_{id}_ocr_debug_* or similar
+        try:
+            base_name = item.extracted_path.stem if item.extracted_path else f"track_{item.track.id}"
+
+            # Look for directories matching OCR debug pattern
+            for path in logs_dir.iterdir():
+                if path.is_dir() and '_ocr_debug_' in path.name:
+                    # Check if this is the right track's debug dir
+                    if base_name in path.name or f"track_{item.track.id}" in str(path):
+                        return path
+
+            # Also check temp_dir/ocr for debug output
+            ocr_dir = ctx.temp_dir / 'ocr'
+            if ocr_dir.exists():
+                for path in ocr_dir.iterdir():
+                    if path.is_dir() and 'debug' in path.name.lower():
+                        return path
+
+        except Exception:
+            pass
+
         return None

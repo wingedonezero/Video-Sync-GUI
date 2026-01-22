@@ -19,13 +19,19 @@ Usage:
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..data import SubtitleData
 
 from .parsers import SubtitleImageParser, SubtitleImage
 from .preprocessing import ImagePreprocessor, PreprocessingConfig, create_preprocessor
 from .engine import OCREngine, OCRConfig, create_ocr_engine
 from .postprocess import OCRPostProcessor, PostProcessConfig, create_postprocessor
-from .output import SubtitleWriter, OutputConfig, SubtitleEntry, create_writer
+from .output import (
+    SubtitleWriter, OutputConfig, SubtitleEntry, create_writer,
+    OCRSubtitleResult, create_subtitle_data_from_ocr
+)
 from .report import OCRReport, SubtitleOCRResult, create_report
 from .debug import OCRDebugger, create_debugger
 
@@ -65,6 +71,9 @@ class PipelineResult:
     subtitle_count: int = 0
     duration_seconds: float = 0.0
     error: Optional[str] = None
+
+    # Unified SubtitleData (when return_subtitle_data=True)
+    subtitle_data: Optional['SubtitleData'] = None
 
 
 class OCRPipeline:
@@ -172,7 +181,8 @@ class OCRPipeline:
         self,
         input_path: Path,
         output_path: Optional[Path] = None,
-        track_id: int = 0
+        track_id: int = 0,
+        return_subtitle_data: bool = False
     ) -> PipelineResult:
         """
         Process a subtitle file through the OCR pipeline.
@@ -181,9 +191,13 @@ class OCRPipeline:
             input_path: Path to input file (.idx for VobSub, .sup for PGS)
             output_path: Optional output path (auto-generated if None)
             track_id: Track ID for organizing work files
+            return_subtitle_data: If True, returns SubtitleData instead of writing ASS.
+                                  The SubtitleData contains all OCR metadata and can be
+                                  processed by the unified subtitle pipeline.
 
         Returns:
-            PipelineResult with output paths and statistics
+            PipelineResult with output paths and statistics.
+            If return_subtitle_data=True, result.subtitle_data contains the SubtitleData.
         """
         result = PipelineResult()
         start_time = time.time()
@@ -246,6 +260,8 @@ class OCRPipeline:
             )
 
             # Step 4: Process each subtitle
+            # Use OCRSubtitleResult for unified pipeline, SubtitleEntry for legacy
+            ocr_results: List[OCRSubtitleResult] = []
             output_entries: List[SubtitleEntry] = []
             last_logged_percent = -1
 
@@ -258,11 +274,14 @@ class OCRPipeline:
                     last_logged_percent = current_percent
 
                 try:
-                    entry, sub_result = self._process_single_subtitle(
+                    ocr_result, entry, sub_result = self._process_single_subtitle_unified(
                         sub_image, report, debugger
                     )
+                    if ocr_result is not None:
+                        ocr_results.append(ocr_result)
                     if entry is not None:
                         output_entries.append(entry)
+                    if sub_result is not None:
                         report.add_subtitle_result(sub_result)
                 except Exception as e:
                     report.add_subtitle_result(SubtitleOCRResult(
@@ -277,10 +296,36 @@ class OCRPipeline:
             report.finalize()
             report.duration_seconds = time.time() - start_time
 
-            # Step 6: Write output file
-            self._log_progress("Writing output file", 0.92)
-            self.writer.write(output_entries, output_path)
-            result.output_path = output_path
+            # Step 6: Create output
+            self._log_progress("Creating output", 0.92)
+
+            if return_subtitle_data:
+                # Create SubtitleData with all OCR metadata
+                engine_name = getattr(self.engine, 'name', 'tesseract')
+                source_res = (
+                    subtitle_images[0].frame_width if subtitle_images else 720,
+                    subtitle_images[0].frame_height if subtitle_images else 480
+                )
+                output_res = (
+                    self.settings.get('ocr_video_width', 1920),
+                    self.settings.get('ocr_video_height', 1080)
+                )
+
+                subtitle_data = create_subtitle_data_from_ocr(
+                    ocr_results=ocr_results,
+                    source_file=str(input_path),
+                    engine=engine_name,
+                    language=self.config.language,
+                    source_format=parse_result.format_info.get('format', 'vobsub').lower(),
+                    source_resolution=source_res,
+                    output_resolution=output_res,
+                )
+                result.subtitle_data = subtitle_data
+                result.output_path = output_path  # Caller will save later
+            else:
+                # Legacy mode: write ASS/SRT directly
+                self.writer.write(output_entries, output_path)
+                result.output_path = output_path
 
             # Step 7: Save report
             if self.config.generate_report:
@@ -422,6 +467,161 @@ class OCRPipeline:
         )
 
         return entry, sub_result
+
+    def _process_single_subtitle_unified(
+        self,
+        sub_image: SubtitleImage,
+        report: OCRReport,
+        debugger: OCRDebugger
+    ) -> tuple[Optional[OCRSubtitleResult], Optional[SubtitleEntry], Optional[SubtitleOCRResult]]:
+        """
+        Process a single subtitle through the pipeline.
+
+        Returns unified OCRSubtitleResult for SubtitleData conversion,
+        plus legacy SubtitleEntry and SubtitleOCRResult for backwards compatibility.
+
+        Returns:
+            Tuple of (OCRSubtitleResult, SubtitleEntry, SubtitleOCRResult)
+        """
+        # Preprocess image
+        preprocessed = self.preprocessor.preprocess(
+            sub_image,
+            self.ocr_work_dir if self.config.save_debug_images else None
+        )
+
+        # Run OCR - use line splitting with PSM 7 for better accuracy
+        ocr_result = self.engine.ocr_lines_separately(preprocessed.image)
+
+        if not ocr_result.success:
+            return None, None, SubtitleOCRResult(
+                index=sub_image.index,
+                timestamp_start=sub_image.start_time,
+                timestamp_end=sub_image.end_time,
+                text="",
+                confidence=0.0,
+            )
+
+        # Store raw OCR text before post-processing
+        raw_ocr_text = ocr_result.text
+
+        # Post-process text
+        post_result = self.postprocessor.process(
+            ocr_result.text,
+            confidence=ocr_result.average_confidence,
+            timestamp=sub_image.start_time
+        )
+
+        # Add to debugger (it checks if enabled internally)
+        debugger.add_subtitle(
+            index=sub_image.index,
+            start_time=sub_image.start_time,
+            end_time=sub_image.end_time,
+            text=post_result.text,
+            confidence=ocr_result.average_confidence,
+            image=preprocessed.image,
+            raw_ocr_text=raw_ocr_text
+        )
+
+        # Track unknown words
+        for word in post_result.unknown_words:
+            report.add_unknown_word(
+                word=word,
+                context=post_result.text[:50],
+                timestamp=sub_image.start_time,
+                confidence=ocr_result.average_confidence
+            )
+            debugger.add_unknown_word(sub_image.index, word)
+
+        # Track fixes applied
+        if post_result.was_modified:
+            for fix_name, fix_count in post_result.fixes_applied.items():
+                debugger.add_fix(
+                    sub_image.index,
+                    fix_name,
+                    f"Applied {fix_count} time(s)",
+                    original_text=raw_ocr_text
+                )
+
+        # Track low confidence
+        if ocr_result.low_confidence:
+            report.add_low_confidence_line(
+                text=post_result.text,
+                timestamp=sub_image.start_time,
+                confidence=ocr_result.average_confidence,
+                subtitle_index=sub_image.index,
+                potential_issues=list(post_result.fixes_applied.keys())
+            )
+
+        # Determine if positioned
+        is_positioned = not sub_image.is_bottom_positioned(
+            self.config.bottom_threshold_percent
+        )
+
+        # Extract palette colors if available
+        subtitle_colors: List[List[int]] = []
+        dominant_color: List[int] = []
+        if sub_image.palette:
+            # Convert palette tuples to lists for JSON serialization
+            for color in sub_image.palette:
+                if color and len(color) >= 3:
+                    subtitle_colors.append(list(color[:4]) if len(color) >= 4 else list(color) + [255])
+            # First non-transparent color is often the dominant text color
+            for color in sub_image.palette:
+                if color and len(color) >= 4 and color[3] > 128:  # Alpha > 128
+                    dominant_color = list(color[:4])
+                    break
+
+        # Create unified OCRSubtitleResult with all metadata
+        ocr_subtitle_result = OCRSubtitleResult(
+            index=sub_image.index,
+            start_ms=float(sub_image.start_ms),
+            end_ms=float(sub_image.end_ms),
+            text=post_result.text,
+            confidence=ocr_result.average_confidence,
+            raw_ocr_text=raw_ocr_text,
+            fixes_applied=dict(post_result.fixes_applied),
+            unknown_words=list(post_result.unknown_words),
+            x=sub_image.x,
+            y=sub_image.y,
+            width=sub_image.width,
+            height=sub_image.height,
+            frame_width=sub_image.frame_width,
+            frame_height=sub_image.frame_height,
+            is_forced=sub_image.is_forced,
+            subtitle_colors=subtitle_colors,
+            dominant_color=dominant_color,
+            debug_image=f"sub_{sub_image.index:04d}.png",
+        )
+
+        # Create legacy output entry
+        entry = SubtitleEntry(
+            index=sub_image.index,
+            start_ms=sub_image.start_ms,
+            end_ms=sub_image.end_ms,
+            text=post_result.text,
+            x=sub_image.x,
+            y=sub_image.y,
+            frame_width=sub_image.frame_width,
+            frame_height=sub_image.frame_height,
+            is_forced=sub_image.is_forced,
+        )
+
+        # Create report entry
+        sub_result = SubtitleOCRResult(
+            index=sub_image.index,
+            timestamp_start=sub_image.start_time,
+            timestamp_end=sub_image.end_time,
+            text=post_result.text,
+            confidence=ocr_result.average_confidence,
+            was_modified=post_result.was_modified,
+            fixes_applied=dict(post_result.fixes_applied),
+            unknown_words=post_result.unknown_words,
+            position_x=sub_image.x,
+            position_y=sub_image.y,
+            is_positioned=is_positioned,
+        )
+
+        return ocr_subtitle_result, entry, sub_result
 
     def _get_report_path(self, input_path: Path, timestamp: str) -> Path:
         """Generate report file path."""

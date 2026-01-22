@@ -29,6 +29,7 @@ from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from vsg_core.io.runner import CommandRunner
+    from vsg_core.subtitles.data import SubtitleData
 
 from .engine import OCREngine
 from .pipeline import OCRPipeline
@@ -51,6 +52,7 @@ __all__ = [
     'get_romaji_dictionary',
     'is_romaji_word',
     'run_ocr',
+    'run_ocr_unified',
     'check_ocr_available',
 ]
 
@@ -259,3 +261,119 @@ def check_ocr_available() -> tuple[bool, str]:
         return False, "pytesseract not installed (pip install pytesseract)"
     except Exception as e:
         return False, f"Tesseract not found: {e}"
+
+
+def run_ocr_unified(
+    subtitle_path: str,
+    lang: str,
+    runner: 'CommandRunner',
+    tool_paths: dict,
+    config: dict,
+    work_dir: Optional[Path] = None,
+    logs_dir: Optional[Path] = None,
+    track_id: int = 0,
+) -> Optional['SubtitleData']:
+    """
+    Run OCR and return SubtitleData with all OCR metadata preserved.
+
+    This is the unified entry point for OCR -> SubtitleData conversion.
+    All OCR metadata (confidence, raw text, fixes, position, colors) is
+    preserved on each event for the unified subtitle pipeline.
+
+    Args:
+        subtitle_path: Path to the subtitle file (.idx for VobSub)
+        lang: The 3-letter language code for OCR (e.g., 'eng')
+        runner: The CommandRunner instance for logging
+        tool_paths: A dictionary of tool paths (unused by new OCR)
+        config: The application's configuration dictionary
+        work_dir: Working directory for temp files
+        logs_dir: Directory for OCR reports
+        track_id: Track ID for organizing work files
+
+    Returns:
+        SubtitleData with OCR metadata, or None on failure.
+    """
+    sub_path = Path(subtitle_path)
+
+    # Determine input type
+    suffix = sub_path.suffix.lower()
+    if suffix == '.idx':
+        input_path = sub_path
+    elif suffix == '.sub':
+        input_path = sub_path.with_suffix('.idx')
+        if not input_path.exists():
+            runner._log_message(f"[OCR] ERROR: IDX file not found: {input_path}")
+            return None
+    elif suffix == '.sup':
+        runner._log_message(f"[OCR] WARNING: PGS (.sup) support not yet implemented. Skipping {sub_path.name}")
+        return None
+    else:
+        runner._log_message(f"[OCR] Skipping {sub_path.name}: Unsupported format.")
+        return None
+
+    # Check if OCR is enabled
+    if not config.get('ocr_enabled', True):
+        runner._log_message(f"[OCR] Skipping {sub_path.name}: OCR is disabled.")
+        return None
+
+    # Set up directories
+    if work_dir is None:
+        work_dir = sub_path.parent / 'ocr_work'
+    if logs_dir is None:
+        logs_dir = sub_path.parent
+
+    runner._log_message(f"[OCR] Starting OCR on {sub_path.name}...")
+    runner._log_message(f"[OCR] Language: {lang}, Mode: Unified (SubtitleData)")
+
+    try:
+        # Create progress callback that uses runner logging
+        def progress_callback(message: str, progress: float):
+            runner._log_message(f"[OCR] {message} ({int(progress * 100)}%)")
+
+        # Build settings dict for pipeline
+        ocr_settings = _build_ocr_settings(config, lang)
+
+        # Create and run pipeline with return_subtitle_data=True
+        pipeline = OCRPipeline(
+            settings_dict=ocr_settings,
+            work_dir=work_dir,
+            logs_dir=logs_dir,
+            progress_callback=progress_callback
+        )
+
+        result = pipeline.process(
+            input_path=input_path,
+            output_path=sub_path.with_suffix('.ass'),  # Provide path for reference
+            track_id=track_id,
+            return_subtitle_data=True  # Return SubtitleData instead of writing file
+        )
+
+        if result.success and result.subtitle_data:
+            runner._log_message(f"[OCR] Successfully processed {result.subtitle_count} subtitles in {result.duration_seconds:.1f}s")
+
+            # Log summary from report
+            if result.report_summary:
+                summary = result.report_summary
+                runner._log_message(f"[OCR] Average confidence: {summary.get('average_confidence', 0):.1f}%")
+                total_fixes = summary.get('total_fixes', 0)
+                if total_fixes > 0:
+                    runner._log_message(f"[OCR] Fixes applied: {total_fixes} total")
+                unknown_count = summary.get('unknown_word_count', 0)
+                if unknown_count > 0:
+                    runner._log_message(f"[OCR] Unknown words: {unknown_count} unique")
+
+            if result.report_path:
+                runner._log_message(f"[OCR] Report saved: {result.report_path.name}")
+
+            return result.subtitle_data
+        else:
+            runner._log_message(f"[OCR] ERROR: {result.error or 'Unknown error'}")
+            return None
+
+    except ImportError as e:
+        runner._log_message(f"[OCR] ERROR: Missing dependency: {e}")
+        runner._log_message("[OCR] Please install: pip install pytesseract")
+        return None
+    except Exception as e:
+        runner._log_message(f"[OCR] ERROR: Failed to perform OCR: {e}")
+        return None

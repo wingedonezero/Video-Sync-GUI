@@ -26,6 +26,148 @@ if TYPE_CHECKING:
 
 
 # =============================================================================
+# Per-Event Metadata (OCR, Sync, Stepping)
+# =============================================================================
+
+@dataclass
+class OCREventData:
+    """OCR-specific metadata for a single subtitle event."""
+    index: int                                  # OCR index (sub_0000.png -> 0)
+    image: str = ''                             # Debug image filename (sub_0000.png)
+    confidence: float = 0.0                     # OCR confidence 0-100
+    raw_text: str = ''                          # Raw OCR output before corrections
+    fixes_applied: Dict[str, int] = field(default_factory=dict)  # fix_name -> count
+    unknown_words: List[str] = field(default_factory=list)
+
+    # Position data from source image
+    x: int = 0
+    y: int = 0
+    width: int = 0
+    height: int = 0
+    frame_width: int = 0
+    frame_height: int = 0
+
+    # VobSub specific
+    is_forced: bool = False
+    subtitle_colors: List[List[int]] = field(default_factory=list)  # 4 RGBA colors
+    dominant_color: List[int] = field(default_factory=list)         # RGB
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'index': self.index,
+            'image': self.image,
+            'confidence': self.confidence,
+            'raw_text': self.raw_text,
+            'fixes_applied': self.fixes_applied,
+            'unknown_words': self.unknown_words,
+            'position': {
+                'x': self.x,
+                'y': self.y,
+                'width': self.width,
+                'height': self.height,
+            },
+            'frame_size': [self.frame_width, self.frame_height],
+            'is_forced': self.is_forced,
+            'subtitle_colors': self.subtitle_colors,
+            'dominant_color': self.dominant_color,
+        }
+
+
+@dataclass
+class SyncEventData:
+    """Sync-specific metadata for a single subtitle event."""
+    original_start_ms: float = 0.0              # Start before sync
+    original_end_ms: float = 0.0                # End before sync
+    start_adjustment_ms: float = 0.0            # Delta applied to start
+    end_adjustment_ms: float = 0.0              # Delta applied to end
+    snapped_to_frame: bool = False              # Whether frame alignment was used
+    target_frame_start: Optional[int] = None    # Frame number if snapped
+    target_frame_end: Optional[int] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        result = {
+            'original_start_ms': self.original_start_ms,
+            'original_end_ms': self.original_end_ms,
+            'start_adjustment_ms': self.start_adjustment_ms,
+            'end_adjustment_ms': self.end_adjustment_ms,
+            'snapped_to_frame': self.snapped_to_frame,
+        }
+        if self.target_frame_start is not None:
+            result['target_frame_start'] = self.target_frame_start
+        if self.target_frame_end is not None:
+            result['target_frame_end'] = self.target_frame_end
+        return result
+
+
+@dataclass
+class SteppingEventData:
+    """Stepping-specific metadata for a single subtitle event."""
+    original_start_ms: float = 0.0
+    original_end_ms: float = 0.0
+    segment_index: Optional[int] = None         # Which EDL segment it fell into
+    adjustment_ms: float = 0.0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'original_start_ms': self.original_start_ms,
+            'original_end_ms': self.original_end_ms,
+            'segment_index': self.segment_index,
+            'adjustment_ms': self.adjustment_ms,
+        }
+
+
+# =============================================================================
+# Document-Level OCR Metadata
+# =============================================================================
+
+@dataclass
+class OCRMetadata:
+    """Document-level OCR metadata and statistics."""
+    engine: str = 'tesseract'
+    language: str = 'eng'
+    source_format: str = 'vobsub'               # vobsub, pgs, etc.
+    source_file: str = ''
+    source_resolution: List[int] = field(default_factory=lambda: [0, 0])
+    master_palette: List[List[int]] = field(default_factory=list)  # 16 colors from IDX
+
+    # Statistics
+    total_subtitles: int = 0
+    successful: int = 0
+    failed: int = 0
+    average_confidence: float = 0.0
+    min_confidence: float = 0.0
+    max_confidence: float = 0.0
+    total_fixes_applied: int = 0
+    positioned_subtitles: int = 0
+
+    # Aggregated data
+    fixes_by_type: Dict[str, int] = field(default_factory=dict)
+    unknown_words: List[Dict[str, Any]] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            'engine': self.engine,
+            'language': self.language,
+            'source_format': self.source_format,
+            'source_file': self.source_file,
+            'source_resolution': self.source_resolution,
+            'master_palette': self.master_palette,
+            'statistics': {
+                'total_subtitles': self.total_subtitles,
+                'successful': self.successful,
+                'failed': self.failed,
+                'average_confidence': self.average_confidence,
+                'min_confidence': self.min_confidence,
+                'max_confidence': self.max_confidence,
+                'total_fixes_applied': self.total_fixes_applied,
+                'positioned_subtitles': self.positioned_subtitles,
+            },
+            'fixes_by_type': self.fixes_by_type,
+            'unknown_words': self.unknown_words,
+        }
+
+
+# =============================================================================
 # Style Definition
 # =============================================================================
 
@@ -226,6 +368,11 @@ class SubtitleEvent:
     # Original line for debugging
     _original_line: Optional[str] = field(default=None, repr=False)
 
+    # Optional per-event metadata (populated by operations)
+    ocr: Optional[OCREventData] = None      # OCR data if from OCR
+    sync: Optional[SyncEventData] = None    # Sync data after sync applied
+    stepping: Optional[SteppingEventData] = None  # Stepping data after stepping
+
     @property
     def duration_ms(self) -> float:
         """Get duration in milliseconds."""
@@ -328,7 +475,8 @@ class SubtitleEvent:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
-        return {
+        result = {
+            'index': self.original_index,
             'start_ms': self.start_ms,
             'end_ms': self.end_ms,
             'duration_ms': self.duration_ms,
@@ -341,10 +489,23 @@ class SubtitleEvent:
             'margin_v': self.margin_v,
             'effect': self.effect,
             'is_comment': self.is_comment,
-            'extradata_ids': self.extradata_ids,
-            'original_index': self.original_index,
-            'srt_index': self.srt_index,
         }
+
+        # Include optional metadata if present
+        if self.ocr is not None:
+            result['ocr'] = self.ocr.to_dict()
+        if self.sync is not None:
+            result['sync'] = self.sync.to_dict()
+        if self.stepping is not None:
+            result['stepping'] = self.stepping.to_dict()
+
+        # Include extra tracking if present
+        if self.extradata_ids:
+            result['extradata_ids'] = self.extradata_ids
+        if self.srt_index is not None:
+            result['srt_index'] = self.srt_index
+
+        return result
 
 
 # =============================================================================
@@ -459,6 +620,9 @@ class SubtitleData:
     # Operation tracking
     operations: List[OperationRecord] = field(default_factory=list)
 
+    # OCR document-level metadata (populated if source is OCR)
+    ocr_metadata: Optional[OCRMetadata] = None
+
     # Comments before sections (for preservation)
     section_comments: Dict[str, List[str]] = field(default_factory=dict)
 
@@ -547,19 +711,40 @@ class SubtitleData:
             raise ValueError(f"Unsupported output format: {ext}")
 
     def save_json(self, path: Path | str) -> None:
-        """Save debug JSON representation."""
+        """
+        Save complete JSON representation for debugging and data preservation.
+
+        This JSON contains ALL data including OCR metadata, sync adjustments,
+        and per-event tracking that would be lost in ASS/SRT output.
+        """
         path = Path(path)
         data = {
+            'version': '1.0',
             'source_path': str(self.source_path) if self.source_path else None,
             'source_format': self.source_format,
             'encoding': self.encoding,
-            'script_info': dict(self.script_info),
-            'styles': {name: style.to_dict() for name, style in self.styles.items()},
-            'events': [e.to_dict() for e in self.events],
-            'operations': [op.to_dict() for op in self.operations],
-            'event_count': len(self.events),
-            'style_count': len(self.styles),
         }
+
+        # Include OCR metadata if present
+        if self.ocr_metadata is not None:
+            data['ocr_metadata'] = self.ocr_metadata.to_dict()
+
+        # Script info
+        data['script_info'] = dict(self.script_info)
+
+        # Styles
+        data['styles'] = {name: style.to_dict() for name, style in self.styles.items()}
+
+        # Events with all metadata
+        data['events'] = [e.to_dict() for e in self.events]
+
+        # Operations history
+        data['operations'] = [op.to_dict() for op in self.operations]
+
+        # Summary counts
+        data['event_count'] = len(self.events)
+        data['style_count'] = len(self.styles)
+
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
