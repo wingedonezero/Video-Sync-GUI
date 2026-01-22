@@ -13,15 +13,28 @@ or metadata preservation.
 Phase 1: Add methods to SubtitleData
 ------------------------------------
 - SubtitleData.get_style_counts() -> Dict[str, int]
-- SubtitleData.filter_by_styles(styles: List[str], mode: str = 'exclude') -> OperationResult
+- SubtitleData.get_style_counts_from_file(path) -> Dict[str, int]  (static, for validation)
+- SubtitleData.filter_by_styles(styles, mode) -> OperationResult
 
 Phase 2: Migrate callers
 ------------------------
 Current usages (search for StyleFilterEngine):
-- vsg_core/orchestrator/steps/extract_step.py (lines 246-374) - generated track filtering
-- vsg_qt/sync_exclusion_dialog/ui.py - style enumeration for sync exclusion
-- vsg_qt/generated_track_dialog/ui.py - style enumeration for track generation
-- vsg_qt/job_queue_dialog/logic.py (lines 167, 307, 441) - validation
+
+A) UI Dialogs (need style enumeration):
+   - vsg_qt/generated_track_dialog/ui.py - populate style checkboxes
+   - vsg_qt/sync_exclusion_dialog/ui.py - populate style checkboxes
+   Replace: StyleFilterEngine.get_styles_from_file() → SubtitleData.get_style_counts_from_file()
+
+B) Validation (MUST KEEP - user needs to know issues BEFORE running batch jobs):
+   - vsg_qt/job_queue_dialog/logic.py (lines 167, 307, 441)
+   Replace: StyleFilterEngine.get_styles_from_file() → SubtitleData.get_style_counts_from_file()
+   NOTE: Keep all validation logic, warnings, auto-fix behavior exactly as-is!
+   Batch processing (50+ files) requires knowing which have style mismatches upfront.
+
+C) Pipeline filtering:
+   - vsg_core/orchestrator/steps/extract_step.py (lines 246-374)
+   Move to: subtitles_step.py - apply filter_by_styles() as operation after load
+   Generated tracks use same pipeline as regular tracks, filtering is just an operation.
 
 Phase 3: Deprecate StyleFilterEngine
 ------------------------------------
