@@ -31,6 +31,7 @@ class PlayerThread(QThread):
         self._lock = Lock()
         self._seek_request_ms = -1
         self._reload_subs_requested = False
+        self._force_render_frame = False  # Force one frame render after reload while paused
 
     def _setup_graph(self):
         self._graph = av.filter.Graph()
@@ -70,7 +71,9 @@ class PlayerThread(QThread):
 
                 if should_reload:
                     self._setup_graph()
-                    with self._lock: self._reload_subs_requested = False
+                    with self._lock:
+                        self._reload_subs_requested = False
+                        self._force_render_frame = True  # Force frame render after reload
 
                 if should_seek:
                     try:
@@ -83,7 +86,13 @@ class PlayerThread(QThread):
                     finally:
                         with self._lock: self._seek_request_ms = -1
 
-                if is_paused and not should_seek:
+                # Check if we should force render (after reload while paused)
+                with self._lock:
+                    force_render = self._force_render_frame
+                    if force_render:
+                        self._force_render_frame = False
+
+                if is_paused and not should_seek and not force_render:
                     time.sleep(0.05)
                     continue
 
