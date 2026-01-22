@@ -232,7 +232,8 @@ class StyleEditorDialog(QDialog):
         try: self.player_thread.seek(int(start_time_ms_str))
         except (ValueError, TypeError): pass
     def closeEvent(self, event):
-        self.player_thread.stop()
+        if hasattr(self, 'player_thread') and self.player_thread:
+            self.player_thread.stop()
         # Note: We don't cleanup temp files here - they're cleaned at job start/end
         # This allows debugging and keeps all temp files in one place
         super().closeEvent(event)
