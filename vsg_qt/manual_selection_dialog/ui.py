@@ -445,11 +445,22 @@ class ManualSelectionDialog(QDialog):
                 temp_path = temp_dir / Path(source_file).name
                 shutil.copy2(source_file, temp_path)
 
-                # For VobSub, also copy the .sub file if .idx was provided
+                # For VobSub, handle .idx/.sub pair
                 if temp_path.suffix.lower() == '.idx':
+                    # .idx provided - also copy the .sub file
                     sub_file = Path(source_file).with_suffix('.sub')
                     if sub_file.exists():
                         shutil.copy2(sub_file, temp_dir / sub_file.name)
+                    return str(temp_path)
+                elif temp_path.suffix.lower() == '.sub':
+                    # .sub provided - check for .idx and use that instead
+                    idx_file = Path(source_file).with_suffix('.idx')
+                    if idx_file.exists():
+                        idx_temp = temp_dir / idx_file.name
+                        shutil.copy2(idx_file, idx_temp)
+                        return str(idx_temp)
+                    # No .idx found, return .sub (OCR will fail gracefully)
+                    return str(temp_path)
 
                 return str(temp_path)
             else:
@@ -462,7 +473,17 @@ class ManualSelectionDialog(QDialog):
                     self.log_callback(f"[ERROR] Failed to extract track {track_id} for OCR preview")
                     return None
 
-                return extracted[0]['path']
+                extracted_path = Path(extracted[0]['path'])
+
+                # For VobSub, mkvextract creates both .idx and .sub files
+                # extract_tracks returns .sub path, but OCR needs .idx
+                if extracted_path.suffix.lower() == '.sub':
+                    idx_path = extracted_path.with_suffix('.idx')
+                    if idx_path.exists():
+                        self.log_callback(f"[INFO] Using .idx file for VobSub OCR: {idx_path.name}")
+                        return str(idx_path)
+
+                return str(extracted_path)
 
         except Exception as e:
             self.log_callback(f"[ERROR] Exception during image subtitle extraction: {e}")
