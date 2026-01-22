@@ -955,6 +955,75 @@ class SubtitleData:
 
         return warnings
 
+    def sort_events_by_time(self) -> None:
+        """Sort events by start time, preserving layer order for simultaneous events."""
+        self.events.sort(key=lambda e: (e.start_ms, e.layer))
+
+    def remove_events(self, indices: List[int]) -> int:
+        """
+        Remove events at specified indices.
+
+        Args:
+            indices: List of event indices to remove
+
+        Returns:
+            Number of events removed
+        """
+        # Sort in reverse to remove from end first (preserves indices)
+        for idx in sorted(indices, reverse=True):
+            if 0 <= idx < len(self.events):
+                del self.events[idx]
+        return len(indices)
+
+    def remove_events_by_style(self, style_name: str) -> int:
+        """
+        Remove all events with specified style.
+
+        Args:
+            style_name: Style name to match
+
+        Returns:
+            Number of events removed
+        """
+        original_count = len(self.events)
+        self.events = [e for e in self.events if e.style != style_name]
+        return original_count - len(self.events)
+
+    def shift_timing(self, offset_ms: float) -> None:
+        """
+        Shift all event timing by offset.
+
+        Args:
+            offset_ms: Milliseconds to add (positive) or subtract (negative)
+        """
+        for event in self.events:
+            event.start_ms = max(0.0, event.start_ms + offset_ms)
+            event.end_ms = max(0.0, event.end_ms + offset_ms)
+
+    def remove_overlapping_events(self) -> int:
+        """
+        Remove events that completely overlap with others (same timing).
+
+        Keeps the first occurrence.
+
+        Returns:
+            Number of events removed
+        """
+        seen = set()
+        unique_events = []
+        removed = 0
+
+        for event in self.events:
+            key = (event.start_ms, event.end_ms, event.text)
+            if key not in seen:
+                seen.add(key)
+                unique_events.append(event)
+            else:
+                removed += 1
+
+        self.events = unique_events
+        return removed
+
 
 # =============================================================================
 # Helper Functions
