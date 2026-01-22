@@ -5,6 +5,11 @@ Stepping operation for SubtitleData.
 
 Adjusts subtitle timestamps based on EDL (Edit Decision List) from audio stepping.
 When audio undergoes stepping correction, subtitles need matching adjustments.
+
+NOTE: This operation needs refactoring/testing. The feature doesn't work correctly
+in all cases. The boundary mode handling (start/midpoint/majority) and cumulative
+offset calculation may need review. See original stepping_adjust.py (now removed)
+for reference implementation details.
 """
 from __future__ import annotations
 

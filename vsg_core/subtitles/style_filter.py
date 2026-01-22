@@ -3,6 +3,30 @@
 """
 Filters subtitle events by style name for creating generated tracks
 (e.g., signs-only tracks from full subtitle tracks).
+
+REFACTOR PLAN: Integrate with SubtitleData
+==========================================
+This module uses pysubs2 directly, bypassing the unified SubtitleData system.
+This creates a parallel data path that doesn't integrate with operation tracking
+or metadata preservation.
+
+Phase 1: Add methods to SubtitleData
+------------------------------------
+- SubtitleData.get_style_counts() -> Dict[str, int]
+- SubtitleData.filter_by_styles(styles: List[str], mode: str = 'exclude') -> OperationResult
+
+Phase 2: Migrate callers
+------------------------
+Current usages (search for StyleFilterEngine):
+- vsg_core/orchestrator/steps/extract_step.py (lines 246-374) - generated track filtering
+- vsg_qt/sync_exclusion_dialog/ui.py - style enumeration for sync exclusion
+- vsg_qt/generated_track_dialog/ui.py - style enumeration for track generation
+- vsg_qt/job_queue_dialog/logic.py (lines 167, 307, 441) - validation
+
+Phase 3: Deprecate StyleFilterEngine
+------------------------------------
+Once all callers use SubtitleData, this class can be removed.
+The metadata_preserver.py workaround also becomes unnecessary.
 """
 from pathlib import Path
 from typing import Dict, List, Any
