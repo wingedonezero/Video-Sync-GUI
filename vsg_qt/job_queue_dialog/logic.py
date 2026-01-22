@@ -62,7 +62,7 @@ class JobQueueLogic:
         job_id = self.layout_manager.generate_job_id(job['sources'])
         status_text = "Configured" if self.layout_manager.layout_exists(job_id) else "Needs Configuration"
 
-        # NEW: Additional check for generated tracks and sync exclusions (doesn't affect existing validation)
+        # NEW: Additional check for generated tracks, sync exclusions, and style edits (doesn't affect existing validation)
         validation_warning = ""
         all_issues = []
         if status_text == "Configured":
@@ -71,11 +71,14 @@ class JobQueueLogic:
             if layout_data:
                 gen_issues = self._validate_generated_tracks(layout_data, job)
                 sync_exclusion_issues = self._validate_sync_exclusions(layout_data, job)
+                style_edit_issues = self._validate_style_edits(layout_data, job)
 
                 if gen_issues:
                     all_issues.extend([f"Generated: {issue}" for issue in gen_issues])
                 if sync_exclusion_issues:
                     all_issues.extend([f"Sync Exclusion: {issue}" for issue in sync_exclusion_issues])
+                if style_edit_issues:
+                    all_issues.extend([f"Style Edit: {issue}" for issue in style_edit_issues])
 
                 if all_issues:
                     validation_warning = " ⚠️"
@@ -213,6 +216,92 @@ class JobQueueLogic:
         if layout_modified:
             job_id = self.layout_manager.generate_job_id(job['sources'])
             self.layout_manager.persistence.save_layout(job_id, layout_data)
+
+        return issues
+
+    def _validate_style_edits(self, layout_data: Dict, job: Dict) -> List[str]:
+        """
+        Validates that style_patch and font_replacements reference styles that exist in the target file.
+        This is an ADDITIONAL check that doesn't affect existing layout matching.
+
+        Returns list of warning messages if there are issues, empty list if OK.
+        """
+        from vsg_core.subtitles.style_filter import StyleFilterEngine
+
+        issues = []
+        enhanced_layout = layout_data.get('enhanced_layout', [])
+
+        for track in enhanced_layout:
+            # Skip non-subtitle tracks
+            if track.get('type') != 'subtitles':
+                continue
+
+            # Check if track has style_patch or font_replacements
+            style_patch = track.get('style_patch')
+            font_replacements = track.get('font_replacements')
+
+            if not style_patch and not font_replacements:
+                continue
+
+            track_name = track.get('custom_name') or track.get('description', 'Unknown')
+            track_id = track.get('id')
+            source_key = track.get('source')
+            source_file = job['sources'].get(source_key)
+
+            if not source_file:
+                issues.append(f"'{track_name}': Source '{source_key}' not found")
+                continue
+
+            try:
+                # Extract the subtitle track temporarily to check styles
+                import tempfile
+                import time
+                from pathlib import Path
+                from vsg_core.extraction.tracks import extract_tracks
+
+                job_id = self.layout_manager.generate_job_id(job['sources'])
+                timestamp = int(time.time() * 1000)
+                temp_dir = Path(tempfile.gettempdir()) / f"vsg_style_validate_{job_id}_{source_key}_{track_id}_{timestamp}"
+                temp_dir.mkdir(parents=True, exist_ok=True)
+
+                try:
+                    extracted = extract_tracks(source_file, temp_dir, self.runner, self.tool_paths, 'validate', specific_tracks=[track_id])
+                    if not extracted:
+                        issues.append(f"'{track_name}': Could not extract track for style validation")
+                        continue
+
+                    # Get available styles from the extracted file
+                    available_styles = StyleFilterEngine.get_styles_from_file(extracted[0]['path'])
+                    available_style_set = set(available_styles.keys())
+
+                    # Validate style_patch styles exist
+                    if style_patch:
+                        patch_styles = set(style_patch.keys())
+                        missing_patch_styles = patch_styles - available_style_set
+                        if missing_patch_styles:
+                            issues.append(
+                                f"'{track_name}': Style patch references missing styles: "
+                                f"{', '.join(sorted(missing_patch_styles))}"
+                            )
+
+                    # Validate font_replacements styles exist
+                    if font_replacements:
+                        replacement_styles = set(font_replacements.keys())
+                        missing_replacement_styles = replacement_styles - available_style_set
+                        if missing_replacement_styles:
+                            issues.append(
+                                f"'{track_name}': Font replacements reference missing styles: "
+                                f"{', '.join(sorted(missing_replacement_styles))}"
+                            )
+
+                finally:
+                    # Clean up temp extraction
+                    import shutil
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+
+            except Exception as e:
+                # If validation fails, warn but don't block
+                issues.append(f"'{track_name}': Could not validate style edits ({str(e)})")
 
         return issues
 
@@ -464,9 +553,11 @@ class JobQueueLogic:
 
     def _replace_paths_in_layout(self, layout_template: List[Dict], target_sources: Dict[str, str]) -> List[Dict]:
         """Creates a new layout with file paths updated for the target job."""
+        import copy
         new_layout = []
         for track_template in layout_template:
-            new_track = track_template.copy()
+            # Use deepcopy to properly copy nested dicts like style_patch and font_replacements
+            new_track = copy.deepcopy(track_template)
             source_key = new_track.get('source')
             if source_key in target_sources:
                 new_track['original_path'] = target_sources[source_key]
@@ -474,6 +565,13 @@ class JobQueueLogic:
                 # This ensures the Edit dialog extracts from the correct source file
                 if new_track.get('is_generated'):
                     new_track['generated_source_path'] = target_sources[source_key]
+
+            # CRITICAL: Clear user_modified_path - it points to source episode's temp file
+            # which contains episode-specific line edits (stripped tags, etc.)
+            # The style_patch and font_replacements are safe to copy (style-level changes)
+            # but user_modified_path is episode-specific and must not be copied
+            new_track.pop('user_modified_path', None)
+
             new_layout.append(new_track)
         return new_layout
 

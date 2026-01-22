@@ -150,20 +150,10 @@ class FinalList(QListWidget):
             act_edit_generated = menu.addAction("Edit Generated Track...")
             menu.addSeparator()
 
-        act_copy = menu.addAction("✂️ Copy Styles (Raw)")
-        act_paste = menu.addAction("📋 Paste Styles (Raw)")
-        act_copy.setEnabled(is_subs)
-        act_paste.setEnabled(is_subs and self.dialog._style_clipboard is not None)
-        menu.addSeparator()
-
-        # Copy/Paste Style Edits (style_patch + font_replacements)
-        has_edits = False
-        if is_subs and hasattr(widget, 'track_data'):
-            has_edits = bool(widget.track_data.get('style_patch')) or bool(widget.track_data.get('font_replacements'))
-        act_copy_edits = menu.addAction("📝 Copy Style Edits")
-        act_paste_edits = menu.addAction("📝 Paste Style Edits")
-        act_copy_edits.setEnabled(is_subs and has_edits)
-        act_paste_edits.setEnabled(is_subs and self.dialog._edit_clipboard is not None)
+        act_copy = menu.addAction("✂️ Copy Style Edits")
+        act_paste = menu.addAction("📋 Paste Style Edits")
+        act_copy.setEnabled(is_subs and bool(widget.track_data.get('style_patch') or widget.track_data.get('font_replacements')))
+        act_paste.setEnabled(is_subs and self.dialog._style_edit_clipboard is not None)
         menu.addSeparator()
 
         act_default = menu.addAction("Make Default")
@@ -178,10 +168,8 @@ class FinalList(QListWidget):
         elif act == act_down: self._move_by(+1)
         elif act_edit_generated and act == act_edit_generated:
             self.dialog._edit_generated_track(widget, item)
-        elif act == act_copy: self.dialog._copy_styles(widget)
-        elif act == act_paste: self.dialog._paste_styles(widget)
-        elif act == act_copy_edits: self.dialog._copy_style_edits(widget)
-        elif act == act_paste_edits: self.dialog._paste_style_edits(widget)
+        elif act == act_copy: self.dialog._copy_style_edits(widget)
+        elif act == act_paste: self.dialog._paste_style_edits(widget)
         elif act == act_default and hasattr(widget, 'cb_default'):
             self._enforce_single_default(widget, prefer=True)
         elif act_forced and act == act_forced and hasattr(widget, 'cb_forced'):

@@ -41,8 +41,7 @@ class ManualSelectionDialog(QDialog):
         self.manual_layout: Optional[List[dict]] = None
         self.attachment_sources: List[str] = []
         self.source_settings: Dict[str, Dict[str, Any]] = previous_source_settings or {}
-        self._style_clipboard: Optional[List[str]] = None
-        self._edit_clipboard: Optional[Dict[str, Any]] = None  # For copy/paste style edits
+        self._style_edit_clipboard: Optional[Dict[str, Any]] = None  # Stores style_patch and font_replacements
         self.edited_widget = None
         self._source_group_boxes: Dict[str, QGroupBox] = {}  # Track group boxes for context menu
 
@@ -351,28 +350,126 @@ class ManualSelectionDialog(QDialog):
             self.log_callback(f"[ERROR] Exception during subtitle preparation: {e}")
             return None
 
-    def _copy_styles(self, widget: TrackWidget):
-        temp_path = self._ensure_editable_subtitle_path(widget)
-        if not temp_path:
-            QMessageBox.warning(self, "Error", "Could not prepare subtitle file for copying.")
-            return
-        engine = StyleEngine(temp_path)
-        self._style_clipboard = engine.get_raw_style_block()
-        if self._style_clipboard:
-            self.info_label.setText("✅ Styles copied to clipboard.")
-            self.info_label.setVisible(True)
-        else:
-            QMessageBox.warning(self, "Copy Styles", "No styles found in the selected track.")
+    def _copy_style_edits(self, widget: TrackWidget):
+        """Copy style_patch and font_replacements from track_data (not raw style block)."""
+        style_patch = widget.track_data.get('style_patch')
+        font_replacements = widget.track_data.get('font_replacements')
 
-    def _paste_styles(self, widget: TrackWidget):
-        if not self._style_clipboard: return
+        if not style_patch and not font_replacements:
+            QMessageBox.warning(self, "Copy Style Edits", "No style edits found on this track.\n\nUse the Style Editor to make changes first.")
+            return
+
+        self._style_edit_clipboard = {
+            'style_patch': style_patch.copy() if style_patch else {},
+            'font_replacements': font_replacements.copy() if font_replacements else {},
+            'source_name': widget.track_data.get('custom_name') or widget.track_data.get('description', 'Unknown')
+        }
+
+        # Build description of what was copied
+        parts = []
+        if style_patch:
+            parts.append(f"{len(style_patch)} style patch(es)")
+        if font_replacements:
+            parts.append(f"{len(font_replacements)} font replacement(s)")
+
+        self.info_label.setText(f"✅ Copied {', '.join(parts)} to clipboard.")
+        self.info_label.setVisible(True)
+
+    def _paste_style_edits(self, widget: TrackWidget):
+        """Paste style_patch and font_replacements to target track with validation."""
+        if not self._style_edit_clipboard:
+            QMessageBox.warning(self, "Paste Style Edits", "Clipboard is empty.\n\nCopy style edits from another track first.")
+            return
+
+        style_patch = self._style_edit_clipboard.get('style_patch', {})
+        font_replacements = self._style_edit_clipboard.get('font_replacements', {})
+
+        if not style_patch and not font_replacements:
+            QMessageBox.warning(self, "Paste Style Edits", "Clipboard contains no style edits.")
+            return
+
+        # Get target track's editable file path
         temp_path = self._ensure_editable_subtitle_path(widget)
         if not temp_path:
             QMessageBox.warning(self, "Error", "Could not prepare subtitle file for pasting.")
             return
+
+        # Get available styles from target file for validation
         engine = StyleEngine(temp_path)
-        engine.set_raw_style_block(self._style_clipboard)
-        self.info_label.setText("✅ Styles pasted.")
+        available_styles = set(engine.get_style_names())
+
+        # Validate and collect warnings
+        warnings = []
+        valid_style_patch = {}
+        valid_font_replacements = {}
+
+        # Validate style_patch
+        for style_name, attrs in style_patch.items():
+            if style_name in available_styles:
+                valid_style_patch[style_name] = attrs
+            else:
+                warnings.append(f"Style patch: '{style_name}' not found")
+
+        # Validate font_replacements
+        for style_name, repl_data in font_replacements.items():
+            if style_name in available_styles:
+                valid_font_replacements[style_name] = repl_data
+            else:
+                warnings.append(f"Font replacement: '{style_name}' not found")
+
+        if not valid_style_patch and not valid_font_replacements:
+            QMessageBox.warning(
+                self, "Paste Failed",
+                "None of the styles in the clipboard exist in the target track.\n\n" +
+                "Missing styles:\n" + "\n".join(warnings)
+            )
+            return
+
+        # Apply valid patches to the file using SubtitleData
+        from vsg_core.subtitles.data import SubtitleData
+        from vsg_core.subtitles.operations.style_ops import apply_style_patch
+
+        data = SubtitleData.from_file(temp_path)
+
+        # Apply style patch
+        if valid_style_patch:
+            apply_style_patch(data, valid_style_patch)
+
+        # Apply font replacements (update fontname attribute in styles)
+        if valid_font_replacements:
+            for style_name, repl_data in valid_font_replacements.items():
+                new_font = repl_data.get('new_font_name')
+                if new_font and style_name in data.styles:
+                    data.styles[style_name].fontname = new_font
+
+        # Save the modified file
+        data.save_ass(temp_path)
+
+        # Merge into target track's track_data
+        existing_patch = widget.track_data.get('style_patch', {})
+        existing_patch.update(valid_style_patch)
+        if existing_patch:
+            widget.track_data['style_patch'] = existing_patch
+
+        existing_font_repl = widget.track_data.get('font_replacements', {})
+        existing_font_repl.update(valid_font_replacements)
+        if existing_font_repl:
+            widget.track_data['font_replacements'] = existing_font_repl
+
+        # Show result
+        applied_parts = []
+        if valid_style_patch:
+            applied_parts.append(f"{len(valid_style_patch)} style patch(es)")
+        if valid_font_replacements:
+            applied_parts.append(f"{len(valid_font_replacements)} font replacement(s)")
+
+        result_msg = f"✅ Applied {', '.join(applied_parts)}."
+        if warnings:
+            result_msg += f" ({len(warnings)} skipped)"
+            # Store warnings for badge display
+            widget.track_data['pasted_warnings'] = warnings
+
+        self.info_label.setText(result_msg)
         self.info_label.setVisible(True)
         widget.refresh_badges()
         widget.refresh_summary()
@@ -614,155 +711,6 @@ class ManualSelectionDialog(QDialog):
             elif 'font_replacements' in widget.track_data:
                 # Clear if no replacements (user removed them)
                 del widget.track_data['font_replacements']
-            # Clear paste warnings - user has now reviewed the track
-            widget.track_data.pop('pasted_missing_styles', None)
-            widget.track_data.pop('pasted_source_name', None)
             self.edited_widget = widget
             widget.logic.refresh_badges()
             widget.logic.refresh_summary()
-
-    def _copy_style_edits(self, widget: TrackWidget):
-        """
-        Copy style edits (style_patch and font_replacements) to clipboard.
-
-        This copies only the style-level edits that are safe to apply across tracks,
-        NOT line-level edits or deleted events (which are track-specific).
-        """
-        track_data = widget.track_data
-        style_patch = track_data.get('style_patch')
-        font_replacements = track_data.get('font_replacements')
-
-        if not style_patch and not font_replacements:
-            QMessageBox.information(self, "Copy Style Edits", "No style edits to copy.")
-            return
-
-        # Get the source styles list from the subtitle (for validation on paste)
-        source_styles = []
-        temp_path = track_data.get('user_modified_path')
-        if temp_path and Path(temp_path).exists():
-            try:
-                engine = StyleEngine(temp_path)
-                source_styles = engine.get_style_names()
-            except Exception as e:
-                self.log_callback(f"[WARN] Could not read source styles: {e}")
-
-        # If we have style_patch, extract style names from it
-        if style_patch and not source_styles:
-            source_styles = list(style_patch.keys())
-
-        # If we have font_replacements, add those style names too
-        if font_replacements:
-            for style_name in font_replacements.keys():
-                if style_name not in source_styles:
-                    source_styles.append(style_name)
-
-        self._edit_clipboard = {
-            'style_patch': style_patch.copy() if style_patch else None,
-            'font_replacements': font_replacements.copy() if font_replacements else None,
-            'source_styles': source_styles,
-            'source_track_name': track_data.get('name', track_data.get('description', 'Unknown'))
-        }
-
-        count_items = []
-        if style_patch:
-            count_items.append(f"{len(style_patch)} style edit(s)")
-        if font_replacements:
-            count_items.append(f"{len(font_replacements)} font replacement(s)")
-
-        self.info_label.setText(f"✅ Copied {', '.join(count_items)} to clipboard.")
-        self.info_label.setVisible(True)
-
-    def _paste_style_edits(self, widget: TrackWidget):
-        """
-        Paste style edits from clipboard to target track.
-
-        Non-blocking: applies what can be applied, stores warnings on track_data
-        for display as badges (like generated tracks).
-        """
-        if not self._edit_clipboard:
-            return
-
-        track_data = widget.track_data
-        clipboard_patch = self._edit_clipboard.get('style_patch')
-        clipboard_fonts = self._edit_clipboard.get('font_replacements')
-        source_name = self._edit_clipboard.get('source_track_name', 'Unknown')
-
-        if not clipboard_patch and not clipboard_fonts:
-            return
-
-        # Get target styles from the subtitle
-        target_styles = []
-        temp_path = self._ensure_editable_subtitle_path(widget)
-        if temp_path:
-            try:
-                engine = StyleEngine(temp_path)
-                target_styles = engine.get_style_names()
-            except Exception as e:
-                self.log_callback(f"[WARN] Could not read target styles: {e}")
-
-        # Validate and prepare what can be applied
-        applied_patch = {}
-        applied_fonts = {}
-        missing_styles = []
-
-        if clipboard_patch:
-            for style_name, edits in clipboard_patch.items():
-                if style_name in target_styles:
-                    applied_patch[style_name] = edits.copy()
-                else:
-                    missing_styles.append(style_name)
-
-        if clipboard_fonts:
-            for style_name, repl_data in clipboard_fonts.items():
-                if style_name in target_styles:
-                    applied_fonts[style_name] = repl_data.copy()
-                else:
-                    if style_name not in missing_styles:
-                        missing_styles.append(style_name)
-
-        # If nothing can be applied, just show in info label (no blocking dialog)
-        if not applied_patch and not applied_fonts:
-            self.info_label.setText(f"⚠️ No matching styles found from '{source_name}'")
-            self.info_label.setVisible(True)
-            return
-
-        # Apply the edits (non-blocking - always apply what we can)
-        if applied_patch:
-            existing_patch = track_data.get('style_patch', {})
-            existing_patch.update(applied_patch)
-            track_data['style_patch'] = existing_patch
-
-        if applied_fonts:
-            existing_fonts = track_data.get('font_replacements', {})
-            existing_fonts.update(applied_fonts)
-            track_data['font_replacements'] = existing_fonts
-
-        # Store warnings on track_data for badge display (like generated tracks)
-        if missing_styles:
-            track_data['pasted_missing_styles'] = missing_styles
-            track_data['pasted_source_name'] = source_name
-        else:
-            # Clear any previous warnings if paste was complete
-            track_data.pop('pasted_missing_styles', None)
-            track_data.pop('pasted_source_name', None)
-
-        # Refresh widget to show badges
-        if hasattr(widget, 'logic'):
-            widget.logic.refresh_badges()
-            widget.logic.refresh_summary()
-
-        self.edited_widget = widget
-
-        # Show confirmation in info label
-        count_items = []
-        if applied_patch:
-            count_items.append(f"{len(applied_patch)} style edit(s)")
-        if applied_fonts:
-            count_items.append(f"{len(applied_fonts)} font replacement(s)")
-
-        status = f"✅ Pasted {', '.join(count_items)}."
-        if missing_styles:
-            status += f" ⚠️ {len(missing_styles)} style(s) not found"
-
-        self.info_label.setText(status)
-        self.info_label.setVisible(True)
