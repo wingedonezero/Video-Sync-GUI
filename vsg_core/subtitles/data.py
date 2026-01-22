@@ -717,6 +717,19 @@ class SubtitleData:
         This JSON contains ALL data including OCR metadata, sync adjustments,
         and per-event tracking that would be lost in ASS/SRT output.
         """
+        import numpy as np
+
+        class NumpyEncoder(json.JSONEncoder):
+            """JSON encoder that handles numpy types."""
+            def default(self, obj):
+                if isinstance(obj, (np.integer, np.int32, np.int64)):
+                    return int(obj)
+                elif isinstance(obj, (np.floating, np.float32, np.float64)):
+                    return float(obj)
+                elif isinstance(obj, np.ndarray):
+                    return obj.tolist()
+                return super().default(obj)
+
         path = Path(path)
         data = {
             'version': '1.0',
@@ -746,7 +759,7 @@ class SubtitleData:
         data['style_count'] = len(self.styles)
 
         with open(path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+            json.dump(data, f, indent=2, ensure_ascii=False, cls=NumpyEncoder)
 
     # =========================================================================
     # Operation Methods
