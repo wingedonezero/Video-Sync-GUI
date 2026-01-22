@@ -8,6 +8,7 @@ from .style_ops import (
     apply_font_replacement,
     apply_size_multiplier,
     apply_rescale,
+    apply_style_filter,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     'apply_font_replacement',
     'apply_size_multiplier',
     'apply_rescale',
+    'apply_style_filter',
 ]

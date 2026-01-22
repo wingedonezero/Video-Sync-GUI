@@ -916,6 +916,28 @@ class SubtitleData:
         from .operations.style_ops import apply_rescale
         return apply_rescale(self, target_resolution, runner)
 
+    def filter_by_styles(
+        self,
+        styles: List[str],
+        mode: str = 'exclude',
+        runner=None
+    ) -> 'OperationResult':
+        """
+        Filter events by style name.
+
+        Args:
+            styles: List of style names to filter
+            mode: 'exclude' (remove these styles) or 'include' (keep only these)
+            runner: CommandRunner for logging
+
+        Returns:
+            OperationResult with filtering statistics including:
+            - original_count, filtered_count, removed_count
+            - styles_found, styles_missing
+        """
+        from .operations.style_ops import apply_style_filter
+        return apply_style_filter(self, styles, mode, runner)
+
     # =========================================================================
     # Utility Methods
     # =========================================================================
@@ -927,6 +949,41 @@ class SubtitleData:
     def get_events_by_style(self, style_name: str) -> List[SubtitleEvent]:
         """Get events with specific style."""
         return [e for e in self.events if e.style == style_name]
+
+    def get_style_counts(self) -> Dict[str, int]:
+        """
+        Get event count per style name.
+
+        Returns:
+            Dictionary mapping style name to event count.
+            Example: {'Default': 1243, 'Sign': 47, 'OP': 24}
+        """
+        counts: Dict[str, int] = {}
+        for event in self.events:
+            if not event.is_comment:
+                counts[event.style] = counts.get(event.style, 0) + 1
+        return counts
+
+    @staticmethod
+    def get_style_counts_from_file(path: str) -> Dict[str, int]:
+        """
+        Get style counts from a file without loading full SubtitleData.
+
+        This is a quick method for validation and UI dialogs that only
+        need style enumeration, not full subtitle data.
+
+        Args:
+            path: Path to subtitle file
+
+        Returns:
+            Dictionary mapping style name to event count.
+            Empty dict if file can't be loaded.
+        """
+        try:
+            data = SubtitleData.from_file(path)
+            return data.get_style_counts()
+        except Exception:
+            return {}
 
     def get_timing_range(self) -> Tuple[float, float]:
         """Get (min_start_ms, max_end_ms) of all events."""
