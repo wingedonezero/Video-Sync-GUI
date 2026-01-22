@@ -43,9 +43,11 @@ class StyleEditorLogic:
         dialog = ResampleDialog(current_x, current_y, video_path, self.v)
         if dialog.exec():
             new_x, new_y = dialog.get_resolution()
-            self.engine.set_info('PlayResX', str(new_x))
-            self.engine.set_info('PlayResY', str(new_y))
+            # Use apply_rescale for full Aegisub-style rescaling (not just metadata)
+            self.engine.data.apply_rescale((new_x, new_y))
             self.engine.save()
+            # Reload UI to reflect scaled style values
+            self.populate_initial_state()
             self.v.player_thread.reload_subtitle_track(self.engine.get_preview_path())
 
     def populate_initial_state(self):
