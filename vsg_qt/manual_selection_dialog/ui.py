@@ -818,10 +818,19 @@ class ManualSelectionDialog(QDialog):
         codec_id = track_data.get('codec_id', '').upper()
         # Read perform_ocr from checkbox widget (track_data may not be synced after Track Settings dialog)
         perform_ocr = widget.cb_ocr.isChecked() if hasattr(widget, 'cb_ocr') else track_data.get('perform_ocr', False)
-        is_ocr_track = perform_ocr and ('VOBSUB' in codec_id or 'PGS' in codec_id or 'HDMV' in codec_id)
+        is_image_based = 'VOBSUB' in codec_id or 'PGS' in codec_id or 'HDMV' in codec_id
+        is_ocr_track = perform_ocr and is_image_based
 
-        # Debug logging
-        self.log_callback(f"[Style Editor] codec_id={codec_id}, perform_ocr={perform_ocr}, is_ocr_track={is_ocr_track}")
+        # Check: Image-based subtitle without OCR enabled
+        if is_image_based and not perform_ocr:
+            QMessageBox.information(
+                self, "OCR Required",
+                "This is an image-based subtitle (VobSub/PGS) which cannot be "
+                "edited directly.\n\n"
+                "To use the Style Editor, enable 'Perform OCR' in Track Settings first. "
+                "This will convert the images to editable text."
+            )
+            return
 
         if is_ocr_track:
             # OCR path: Run preview OCR with progress dialog
