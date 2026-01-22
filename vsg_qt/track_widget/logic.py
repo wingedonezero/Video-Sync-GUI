@@ -180,6 +180,10 @@ class TrackWidgetLogic:
             font_count = len(self.track_data['font_replacements'])
             badges.append(f"Fonts: {font_count}")
 
+        # Add warning badge for pasted style edits that had missing styles
+        if self.track_data.get('pasted_warnings'):
+            badges.append("⚠️ Paste Warnings")
+
         # NEW: Add badge if language was customized
         original_lang = self.track_data.get('lang', 'und')
         custom_lang = self.track_data.get('custom_lang', '')
