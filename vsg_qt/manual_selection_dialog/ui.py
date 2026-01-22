@@ -673,8 +673,8 @@ class ManualSelectionDialog(QDialog):
         """
         Paste style edits from clipboard to target track.
 
-        Validates that target styles exist and warns about any mismatches.
-        Only applies edits to styles that exist in the target.
+        Non-blocking: applies what can be applied, stores warnings on track_data
+        for display as badges (like generated tracks).
         """
         if not self._edit_clipboard:
             return
@@ -682,11 +682,9 @@ class ManualSelectionDialog(QDialog):
         track_data = widget.track_data
         clipboard_patch = self._edit_clipboard.get('style_patch')
         clipboard_fonts = self._edit_clipboard.get('font_replacements')
-        source_styles = self._edit_clipboard.get('source_styles', [])
         source_name = self._edit_clipboard.get('source_track_name', 'Unknown')
 
         if not clipboard_patch and not clipboard_fonts:
-            QMessageBox.information(self, "Paste Style Edits", "Clipboard is empty.")
             return
 
         # Get target styles from the subtitle
@@ -703,7 +701,6 @@ class ManualSelectionDialog(QDialog):
         applied_patch = {}
         applied_fonts = {}
         missing_styles = []
-        warnings = []
 
         if clipboard_patch:
             for style_name, edits in clipboard_patch.items():
@@ -720,39 +717,13 @@ class ManualSelectionDialog(QDialog):
                     if style_name not in missing_styles:
                         missing_styles.append(style_name)
 
-        # Build warning message if there are missing styles
-        if missing_styles:
-            warnings.append(f"The following styles from '{source_name}' don't exist in this track:")
-            for style in missing_styles[:5]:  # Show first 5
-                warnings.append(f"  • {style}")
-            if len(missing_styles) > 5:
-                warnings.append(f"  ... and {len(missing_styles) - 5} more")
-
-        # If nothing can be applied, show error
+        # If nothing can be applied, just show in info label (no blocking dialog)
         if not applied_patch and not applied_fonts:
-            QMessageBox.warning(
-                self, "Paste Style Edits",
-                "No style edits could be applied.\n\n" +
-                "\n".join(warnings) if warnings else "No matching styles found."
-            )
+            self.info_label.setText(f"⚠️ No matching styles found from '{source_name}'")
+            self.info_label.setVisible(True)
             return
 
-        # If there are warnings, ask user to confirm
-        if warnings:
-            applied_count = len(applied_patch) + len(applied_fonts)
-            msg = "\n".join(warnings)
-            msg += f"\n\n{applied_count} edit(s) can be applied to matching styles.\nContinue?"
-
-            reply = QMessageBox.question(
-                self, "Paste Style Edits - Partial Match",
-                msg,
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes
-            )
-            if reply != QMessageBox.Yes:
-                return
-
-        # Apply the edits
+        # Apply the edits (non-blocking - always apply what we can)
         if applied_patch:
             existing_patch = track_data.get('style_patch', {})
             existing_patch.update(applied_patch)
@@ -763,14 +734,23 @@ class ManualSelectionDialog(QDialog):
             existing_fonts.update(applied_fonts)
             track_data['font_replacements'] = existing_fonts
 
-        # Refresh widget
+        # Store warnings on track_data for badge display (like generated tracks)
+        if missing_styles:
+            track_data['pasted_missing_styles'] = missing_styles
+            track_data['pasted_source_name'] = source_name
+        else:
+            # Clear any previous warnings if paste was complete
+            track_data.pop('pasted_missing_styles', None)
+            track_data.pop('pasted_source_name', None)
+
+        # Refresh widget to show badges
         if hasattr(widget, 'logic'):
             widget.logic.refresh_badges()
             widget.logic.refresh_summary()
 
         self.edited_widget = widget
 
-        # Show confirmation
+        # Show confirmation in info label
         count_items = []
         if applied_patch:
             count_items.append(f"{len(applied_patch)} style edit(s)")
@@ -779,7 +759,7 @@ class ManualSelectionDialog(QDialog):
 
         status = f"✅ Pasted {', '.join(count_items)}."
         if missing_styles:
-            status += f" ({len(missing_styles)} skipped due to missing styles)"
+            status += f" ⚠️ {len(missing_styles)} style(s) not found"
 
         self.info_label.setText(status)
         self.info_label.setVisible(True)
