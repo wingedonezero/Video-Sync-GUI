@@ -110,15 +110,15 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
         frame_duration_ms = 1000.0 / fps
         log(f"[CorrGuided] FPS: {fps:.3f} (frame: {frame_duration_ms:.3f}ms)")
 
-        # Get config parameters (unified settings with fallback to mode-specific)
-        search_range_ms = config.get('frame_search_range_ms', config.get('corr_anchor_search_range_ms', 2000))
-        hash_algorithm = config.get('frame_hash_algorithm', config.get('corr_anchor_hash_algorithm', 'dhash'))
-        hash_size = int(config.get('frame_hash_size', config.get('corr_anchor_hash_size', 8)))
-        hash_threshold = int(config.get('frame_hash_threshold', config.get('corr_anchor_hash_threshold', 5)))
-        window_radius = int(config.get('frame_window_radius', config.get('corr_anchor_window_radius', 5)))
-        tolerance_ms = config.get('frame_agreement_tolerance_ms', config.get('corr_anchor_agreement_tolerance_ms', 100))
-        fallback_mode = config.get('corr_anchor_fallback_mode', 'use-correlation')  # Mode-specific (different options per mode)
-        anchor_positions = config.get('corr_anchor_anchor_positions', [10, 50, 90])  # Mode-specific
+        # Get unified config parameters
+        search_range_ms = config.get('frame_search_range_ms', 2000)
+        hash_algorithm = config.get('frame_hash_algorithm', 'dhash')
+        hash_size = int(config.get('frame_hash_size', 8))
+        hash_threshold = int(config.get('frame_hash_threshold', 5))
+        window_radius = int(config.get('frame_window_radius', 5))
+        tolerance_ms = config.get('frame_agreement_tolerance_ms', 100)
+        fallback_mode = config.get('corr_anchor_fallback_mode', 'use-correlation')
+        anchor_positions = config.get('corr_anchor_anchor_positions', [10, 50, 90])
 
         log(f"[CorrGuided] Search range: ±{search_range_ms}ms")
         log(f"[CorrGuided] Hash: {hash_algorithm}, size={hash_size}, threshold={hash_threshold}")
@@ -149,7 +149,7 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
 
         # Open video readers
         try:
-            use_vs = config.get('frame_use_vapoursynth', config.get('corr_anchor_use_vapoursynth', True))
+            use_vs = config.get('frame_use_vapoursynth', True)
             source_reader = VideoReader(source_video, runner, use_vapoursynth=use_vs, temp_dir=temp_dir)
             target_reader = VideoReader(target_video, runner, use_vapoursynth=use_vs, temp_dir=temp_dir)
         except Exception as e:

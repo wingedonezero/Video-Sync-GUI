@@ -88,9 +88,6 @@ class AppConfig:
             # --- Unified Rounding Settings ---
             'subtitle_rounding': 'floor',  # Final rounding for all sync modes: floor, round, ceil
 
-            # --- Time-Based Frame-Locked Timestamps Settings ---
-            'videotimestamps_rounding': 'floor',  # VideoTimestamps rounding method: 'floor' or 'round' (deprecated, use subtitle_rounding)
-
             # --- Duration-Align Sync Settings ---
             'duration_align_validate': True,  # Enable validation of duration-based sync
             'duration_align_validate_points': 3,  # Number of validation checkpoints (1 or 3)
@@ -111,47 +108,6 @@ class AppConfig:
             'corr_anchor_anchor_positions': [10, 50, 90],  # % of video duration for anchor points
             'corr_anchor_refine_per_line': False,  # Refine each subtitle line to exact frames after checkpoint validation
             'corr_anchor_refine_workers': 4,  # Number of parallel workers for refinement
-
-            # ===== DEPRECATED: Mode-specific settings (use unified frame_* settings instead) =====
-            # Kept for backwards compatibility - unified settings take precedence
-            'raw_delay_rounding': 'floor',  # DEPRECATED: Use subtitle_rounding
-            'duration_align_hash_algorithm': 'dhash',
-            'duration_align_hash_size': 8,
-            'duration_align_hash_threshold': 5,
-            'duration_align_use_vapoursynth': True,
-            'duration_align_verify_search_window_ms': 2000,
-            'duration_align_verify_agreement_tolerance_ms': 100,
-            'duration_align_verify_checkpoints': 3,
-            'duration_align_fallback_target': 'source1',
-            'correlation_snap_hash_algorithm': 'dhash',
-            'correlation_snap_hash_size': 8,
-            'correlation_snap_hash_threshold': 5,
-            'correlation_snap_window_radius': 3,
-            'correlation_snap_search_range': 5,
-            'sub_anchor_search_range_ms': 2000,
-            'sub_anchor_hash_algorithm': 'dhash',
-            'sub_anchor_hash_size': 8,
-            'sub_anchor_hash_threshold': 5,
-            'sub_anchor_window_radius': 5,
-            'sub_anchor_agreement_tolerance_ms': 100,
-            'sub_anchor_use_vapoursynth': True,
-            'corr_anchor_search_range_ms': 2000,
-            'corr_anchor_hash_algorithm': 'dhash',
-            'corr_anchor_hash_size': 8,
-            'corr_anchor_hash_threshold': 5,
-            'corr_anchor_window_radius': 5,
-            'corr_anchor_agreement_tolerance_ms': 100,
-            'corr_anchor_use_vapoursynth': True,
-            # Old frame_match_* settings - deprecated
-            'frame_match_method': 'dhash',
-            'frame_match_hash_size': 8,
-            'frame_match_threshold': 5,
-            'frame_match_search_window_frames': 10,
-            'frame_match_search_window_sec': 2.0,
-            'frame_match_max_search_frames': 100,
-            'frame_match_skip_unmatched': False,
-            'frame_match_use_timestamp_prefilter': True,
-            'frame_match_workers': 4,
 
             # --- Timing Fix Settings ---
             'timing_fix_enabled': False,
@@ -417,9 +373,8 @@ class AppConfig:
             if value not in valid:
                 return False, f"{key} must be one of {valid}, got '{value}'"
 
-        elif key in ('frame_match_method', 'duration_align_hash_algorithm', 'correlation_snap_hash_algorithm',
-                     'sub_anchor_hash_algorithm', 'corr_anchor_hash_algorithm'):
-            valid = ['dhash', 'phash', 'average_hash']
+        elif key == 'frame_hash_algorithm':
+            valid = ['dhash', 'phash', 'average_hash', 'whash']
             if value not in valid:
                 return False, f"{key} must be one of {valid}, got '{value}'"
 
