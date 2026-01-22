@@ -8,6 +8,7 @@ Operations:
 - apply_font_replacement: Replace font names
 - apply_size_multiplier: Scale font sizes
 - apply_rescale: Rescale to target resolution (Aegisub "Add Borders" style)
+- apply_style_filter: Filter events by style name (include/exclude)
 """
 from __future__ import annotations
 
@@ -552,3 +553,94 @@ def _map_style_attribute(attr: str) -> str:
         'scaley': 'scale_y',
     }
     return mapping.get(attr.lower(), attr.lower().replace('-', '_'))
+
+
+def apply_style_filter(
+    data: 'SubtitleData',
+    styles: list,
+    mode: str = 'exclude',
+    runner=None
+) -> 'OperationResult':
+    """
+    Filter events by style name.
+
+    Args:
+        data: SubtitleData to modify
+        styles: List of style names to filter
+        mode: 'exclude' (remove these styles) or 'include' (keep only these styles)
+        runner: CommandRunner for logging
+
+    Returns:
+        OperationResult with filtering statistics
+    """
+    from ..data import OperationResult, OperationRecord
+
+    def log(msg: str):
+        if runner:
+            runner._log_message(msg)
+
+    if not styles:
+        return OperationResult(
+            success=True,
+            operation='style_filter',
+            summary='No styles specified for filtering'
+        )
+
+    original_count = len(data.events)
+    styles_set = set(styles)
+
+    # Track which styles were found
+    found_styles = set()
+    for event in data.events:
+        if event.style in styles_set:
+            found_styles.add(event.style)
+
+    # Filter events
+    if mode == 'include':
+        # Keep only events with styles in the list
+        data.events = [e for e in data.events if e.style in styles_set]
+        mode_desc = 'included'
+    else:  # mode == 'exclude'
+        # Remove events with styles in the list
+        data.events = [e for e in data.events if e.style not in styles_set]
+        mode_desc = 'excluded'
+
+    filtered_count = len(data.events)
+    removed_count = original_count - filtered_count
+
+    # Check for missing styles
+    missing_styles = styles_set - found_styles
+
+    log(f"[StyleFilter] {mode_desc.capitalize()} {len(found_styles)} style(s), "
+        f"removed {removed_count}/{original_count} events")
+
+    if missing_styles:
+        log(f"[StyleFilter] WARNING: Styles not found in file: {', '.join(sorted(missing_styles))}")
+
+    # Record operation
+    record = OperationRecord(
+        operation='style_filter',
+        timestamp=datetime.now(),
+        parameters={
+            'styles': list(styles),
+            'mode': mode,
+        },
+        events_affected=removed_count,
+        summary=f"{mode_desc.capitalize()} styles: {', '.join(sorted(found_styles)) or 'none'}, "
+                f"removed {removed_count} events"
+    )
+    data.operations.append(record)
+
+    return OperationResult(
+        success=True,
+        operation='style_filter',
+        events_affected=removed_count,
+        summary=record.summary,
+        details={
+            'original_count': original_count,
+            'filtered_count': filtered_count,
+            'removed_count': removed_count,
+            'styles_found': list(found_styles),
+            'styles_missing': list(missing_styles),
+        }
+    )

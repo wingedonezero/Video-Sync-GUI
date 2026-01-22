@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QGroupBox, QRadioButton, QButtonGroup
 )
 
-from vsg_core.subtitles.style_filter import StyleFilterEngine
+from vsg_core.subtitles.data import SubtitleData
 
 
 class GeneratedTrackDialog(QDialog):
@@ -124,8 +124,8 @@ class GeneratedTrackDialog(QDialog):
             return
 
         try:
-            # Get style counts from the filter engine
-            self.style_counts = StyleFilterEngine.get_styles_from_file(subtitle_path)
+            # Get style counts from SubtitleData
+            self.style_counts = SubtitleData.get_style_counts_from_file(subtitle_path)
 
             if not self.style_counts:
                 self.preview_label.setText("⚠️ No styles found in subtitle file")

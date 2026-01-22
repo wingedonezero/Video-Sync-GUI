@@ -163,6 +163,27 @@ class SubtitlesStep:
                 raise
 
         # ================================================================
+        # STEP 1b: Apply Style Filtering (for generated tracks)
+        # ================================================================
+        if item.is_generated and item.generated_filter_styles:
+            runner._log_message(f"[SubtitleData] Applying style filter for generated track...")
+            result = subtitle_data.filter_by_styles(
+                styles=item.generated_filter_styles,
+                mode=item.generated_filter_mode or 'exclude',
+                runner=runner
+            )
+            if result.success:
+                runner._log_message(f"[SubtitleData] Style filter: {result.summary}")
+                # Check for missing styles (validation already happened, just warn)
+                if result.details and result.details.get('styles_missing'):
+                    runner._log_message(
+                        f"[SubtitleData] WARNING: Filter styles not found: "
+                        f"{', '.join(result.details['styles_missing'])}"
+                    )
+            else:
+                runner._log_message(f"[SubtitleData] Style filter failed: {result.error}")
+
+        # ================================================================
         # STEP 2: Apply Stepping (if applicable)
         # ================================================================
         if ctx.settings_dict.get('stepping_adjust_subtitles', True):

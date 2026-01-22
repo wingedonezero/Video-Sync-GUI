@@ -245,28 +245,26 @@ class ExtractStep:
 
     def _process_generated_tracks(self, items: List[PlanItem], runner: CommandRunner, temp_dir: Path) -> List[PlanItem]:
         """
-        Process generated tracks by creating filtered subtitle files.
+        Prepare generated tracks by copying source files.
+
+        The actual style filtering is done in subtitles_step using SubtitleData.filter_by_styles().
+        This method just sets up the extracted_path and inherits source properties.
 
         Args:
             items: Existing PlanItems (to find source tracks)
             runner: Command runner for logging
-            temp_dir: Temporary directory for filtered files
+            temp_dir: Temporary directory for copied files
 
         Returns:
             List of PlanItems that failed processing (to be removed from pipeline)
         """
-        from vsg_core.subtitles.style_filter import StyleFilterEngine
-
         failed_tracks = []
 
         for item in items:
             if not item.is_generated:
                 continue
 
-            runner._log_message(f"[Generated Track] Creating filtered track from {item.track.source} Track {item.generated_source_track_id}...")
-            runner._log_message(f"  [DEBUG] Generated track original_path: {item.track.source} (ID {item.track.id})")
-            runner._log_message(f"  [DEBUG] Generated source path: {item.generated_source_path}")
-            runner._log_message(f"  [DEBUG] Looking for source track: {item.track.source} ID {item.generated_source_track_id}")
+            runner._log_message(f"[Generated Track] Preparing track from {item.track.source} Track {item.generated_source_track_id}...")
 
             # Find the SOURCE track's ORIGINAL extracted path
             # We want the original extraction, NOT any user edits
@@ -277,29 +275,20 @@ class ExtractStep:
                     potential_source.track.id == item.generated_source_track_id and
                     not potential_source.is_generated):
                     source_item = potential_source
-                    runner._log_message(f"  [DEBUG] Found potential source: {potential_source.track.source} ID {potential_source.track.id}, extracted from: {potential_source.extracted_path}")
                     break
 
-            # CRITICAL FIX: Support standalone generated tracks (source track not in pipeline)
-            # If the source track is not in the pipeline, the generated track can use its own
-            # extracted file as the source (since it has the same track ID, it points to the same extraction)
+            # Support standalone generated tracks (source track not in pipeline)
             if not source_item:
-                runner._log_message(f"  [DEBUG] Source track not in pipeline - using generated track's own extraction as source")
-                # Use the generated track's own extracted_path and properties
+                runner._log_message(f"  Source track not in pipeline - using generated track's own extraction")
                 source_path = item.extracted_path
-                # Container delay and sync settings are already set from extraction step
-                # No need to inherit from source_item
             else:
                 # INHERIT source file properties (container delay, sync settings, etc.)
-                # These come from the source FILE/container, not user UI settings
                 item.container_delay_ms = source_item.container_delay_ms
-                item.sync_to = source_item.sync_to  # For external subs synced to specific source
+                item.sync_to = source_item.sync_to
 
                 if item.container_delay_ms != 0 or item.sync_to:
-                    runner._log_message(f"  Inherited properties - Container delay: {item.container_delay_ms}ms, Sync to: {item.sync_to}")
+                    runner._log_message(f"  Inherited - Container delay: {item.container_delay_ms}ms, Sync to: {item.sync_to}")
 
-                # ALWAYS use the extracted_path (original extraction), NEVER user_modified_path
-                # This ensures source edits don't affect the generated track
                 source_path = source_item.extracted_path
 
             # Validate source path exists
@@ -309,66 +298,24 @@ class ExtractStep:
                 failed_tracks.append(item)
                 continue
 
-            runner._log_message(f"  Filtering from original extraction: {source_path.name}")
-
-            # Create filtered subtitle file
+            # Copy source file to generated track's path (filtering happens in subtitles_step)
             try:
-                # Create unique filename for filtered file
                 original_stem = source_path.stem
-                filtered_filename = f"{original_stem}_generated_{id(item)}.{source_path.suffix.lstrip('.')}"
-                filtered_path = temp_dir / filtered_filename
+                generated_filename = f"{original_stem}_generated_{id(item)}.{source_path.suffix.lstrip('.')}"
+                generated_path = temp_dir / generated_filename
 
-                # Copy the ORIGINAL source file to the filtered path
-                shutil.copy(source_path, filtered_path)
+                shutil.copy(source_path, generated_path)
+                item.extracted_path = generated_path
 
-                # Apply the style filter
-                filter_engine = StyleFilterEngine(str(filtered_path))
-                result = filter_engine.filter_by_styles(
-                    styles=item.generated_filter_styles,
-                    mode=item.generated_filter_mode,
-                    output_path=None  # Overwrites the copied file
-                )
-
-                # Log the results
-                mode_text = "excluded" if item.generated_filter_mode == 'exclude' else "included"
-                runner._log_message(
-                    f"  Filtered {result['removed_count']} events "
-                    f"({mode_text} styles: {', '.join(result['styles_found'])})"
-                )
-
-                # Check verification
-                if not result['verification_passed']:
-                    if item.generated_verify_only_lines_removed:
-                        # User wants verification - fail on verification issues
-                        runner._log_message(f"[ERROR] Verification failed for generated track:")
-                        for issue in result['verification_issues']:
-                            runner._log_message(f"  - {issue}")
-                        runner._log_message(f"[ERROR] Removing generated track '{item.custom_name or item.track.props.name}' from pipeline")
-                        failed_tracks.append(item)
-                        continue
-                    else:
-                        # Just warn
-                        runner._log_message(f"[WARNING] Verification issues detected:")
-                        for issue in result['verification_issues']:
-                            runner._log_message(f"  - {issue}")
-
-                # Check if any styles were missing
-                if result['styles_missing']:
-                    runner._log_message(
-                        f"  [WARNING] Some styles not found in source: {', '.join(result['styles_missing'])}"
-                    )
-
-                # Update the PlanItem's extracted_path to point to the filtered file
-                item.extracted_path = filtered_path
-
-                runner._log_message(f"  ✓ Generated track created: {filtered_path.name}")
+                runner._log_message(f"  ✓ Copied source to: {generated_path.name}")
+                runner._log_message(f"  Style filtering will be applied in subtitles step")
 
             except Exception as e:
-                runner._log_message(f"[ERROR] Failed to create generated track: {e}")
+                runner._log_message(f"[ERROR] Failed to prepare generated track: {e}")
                 import traceback
                 runner._log_message(traceback.format_exc())
                 runner._log_message(f"[ERROR] Removing generated track '{item.custom_name or item.track.props.name}' from pipeline")
                 failed_tracks.append(item)
                 continue
 
-        return failed_tracks  # Return list of failed tracks to be removed
+        return failed_tracks
