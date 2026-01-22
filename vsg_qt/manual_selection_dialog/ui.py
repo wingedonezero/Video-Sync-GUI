@@ -614,6 +614,9 @@ class ManualSelectionDialog(QDialog):
             elif 'font_replacements' in widget.track_data:
                 # Clear if no replacements (user removed them)
                 del widget.track_data['font_replacements']
+            # Clear paste warnings - user has now reviewed the track
+            widget.track_data.pop('pasted_missing_styles', None)
+            widget.track_data.pop('pasted_source_name', None)
             self.edited_widget = widget
             widget.logic.refresh_badges()
             widget.logic.refresh_summary()
