@@ -11,7 +11,7 @@ with a target video. All modes work the same way:
 
 Registry pattern allows easy addition of new sync modes.
 
-Legacy functions are preserved for backwards compatibility during migration.
+Plugins are located in: vsg_core/subtitles/sync_mode_plugins/
 """
 from __future__ import annotations
 
@@ -99,7 +99,6 @@ def _ensure_plugins_loaded():
     """Lazy-load plugins to avoid circular imports."""
     global _plugins_loaded
     if not _plugins_loaded:
-        # Use importlib to avoid circular imports
         import importlib
         plugins_to_load = [
             'vsg_core.subtitles.sync_mode_plugins.time_based',
@@ -142,37 +141,9 @@ def list_sync_plugins() -> Dict[str, str]:
     return {name: cls.description for name, cls in _sync_plugins.items()}
 
 
-# =============================================================================
-# Legacy Exports (for backwards compatibility during migration)
-# =============================================================================
-
-from .time_based import apply_raw_delay_sync
-from .timebase_frame_locked_timestamps import apply_timebase_frame_locked_sync
-from .duration_align import apply_duration_align_sync, verify_alignment_with_sliding_window
-from .correlation_frame_snap import apply_correlation_frame_snap_sync, verify_correlation_with_frame_snap
-from .subtitle_anchored_frame_snap import apply_subtitle_anchored_frame_snap_sync
-from .correlation_guided_frame_anchor import apply_correlation_guided_frame_anchor_sync
-
-
-# =============================================================================
-# Plugin Registration
-# =============================================================================
-# Plugins are loaded lazily via _ensure_plugins_loaded() to avoid circular imports.
-# The plugins are located in vsg_core/subtitles/sync_mode_plugins/
-
 __all__ = [
-    # Plugin system
     'SyncPlugin',
     'register_sync_plugin',
     'get_sync_plugin',
     'list_sync_plugins',
-    # Legacy exports
-    'apply_raw_delay_sync',
-    'apply_timebase_frame_locked_sync',
-    'apply_duration_align_sync',
-    'verify_alignment_with_sliding_window',
-    'apply_correlation_frame_snap_sync',
-    'verify_correlation_with_frame_snap',
-    'apply_subtitle_anchored_frame_snap_sync',
-    'apply_correlation_guided_frame_anchor_sync',
 ]
