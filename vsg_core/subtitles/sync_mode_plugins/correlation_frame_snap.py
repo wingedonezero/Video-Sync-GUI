@@ -1,4 +1,4 @@
-# vsg_core/subtitles/sync_modes/plugins/correlation_frame_snap.py
+# vsg_core/subtitles/sync_mode_plugins/correlation_frame_snap.py
 # -*- coding: utf-8 -*-
 """
 Correlation + Frame Snap sync plugin for SubtitleData.
@@ -15,10 +15,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, TYPE_CHECKING
 
-from .. import SyncPlugin, register_sync_plugin
+from ..sync_modes import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
-    from ...data import SubtitleData, OperationResult, OperationRecord, SyncEventData
+    from ..data import SubtitleData, OperationResult, OperationRecord, SyncEventData
 
 
 @register_sync_plugin
@@ -69,9 +69,9 @@ class CorrelationFrameSnapSync(SyncPlugin):
         Returns:
             OperationResult with statistics
         """
-        from ...data import OperationResult, OperationRecord, SyncEventData
-        from ...frame_utils import detect_video_fps, detect_scene_changes
-        from ..correlation_frame_snap import verify_correlation_with_frame_snap
+        from ..data import OperationResult, OperationRecord, SyncEventData
+        from ..frame_utils import detect_video_fps, detect_scene_changes
+        from ..sync_modes.correlation_frame_snap import verify_correlation_with_frame_snap
 
         config = config or {}
 

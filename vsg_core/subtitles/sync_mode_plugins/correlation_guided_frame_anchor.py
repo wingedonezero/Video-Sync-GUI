@@ -1,4 +1,4 @@
-# vsg_core/subtitles/sync_modes/plugins/correlation_guided_frame_anchor.py
+# vsg_core/subtitles/sync_mode_plugins/correlation_guided_frame_anchor.py
 # -*- coding: utf-8 -*-
 """
 Correlation-Guided Frame Anchor sync plugin for SubtitleData.
@@ -15,10 +15,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List, TYPE_CHECKING
 
-from .. import SyncPlugin, register_sync_plugin
+from ..sync_modes import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
-    from ...data import SubtitleData, OperationResult, OperationRecord, SyncEventData
+    from ..data import SubtitleData, OperationResult, OperationRecord, SyncEventData
 
 
 @register_sync_plugin
@@ -73,8 +73,8 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
         Returns:
             OperationResult with statistics
         """
-        from ...data import OperationResult, OperationRecord, SyncEventData
-        from ...frame_utils import detect_video_fps, get_video_duration_ms
+        from ..data import OperationResult, OperationRecord, SyncEventData
+        from ..frame_utils import detect_video_fps, get_video_duration_ms
 
         config = config or {}
 
@@ -138,7 +138,7 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
 
         # Try to import frame matching
         try:
-            from ..frame_matching import VideoReader, compute_frame_hash, compute_hamming_distance
+            from ..sync_modes.frame_matching import VideoReader, compute_frame_hash, compute_hamming_distance
         except ImportError as e:
             # Fall back to just correlation
             log(f"[CorrGuided] Frame matching unavailable: {e}")
@@ -323,7 +323,7 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
         runner
     ) -> 'OperationResult':
         """Apply the calculated offset to all events."""
-        from ...data import OperationResult, OperationRecord, SyncEventData
+        from ..data import OperationResult, OperationRecord, SyncEventData
 
         def log(msg: str):
             if runner:

@@ -1,4 +1,4 @@
-# vsg_core/subtitles/sync_modes/plugins/subtitle_anchored_frame_snap.py
+# vsg_core/subtitles/sync_mode_plugins/subtitle_anchored_frame_snap.py
 # -*- coding: utf-8 -*-
 """
 Subtitle-Anchored Frame Snap sync plugin for SubtitleData.
@@ -15,10 +15,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List, TYPE_CHECKING
 
-from .. import SyncPlugin, register_sync_plugin
+from ..sync_modes import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
-    from ...data import SubtitleData, OperationResult, OperationRecord, SyncEventData
+    from ..data import SubtitleData, OperationResult, OperationRecord, SyncEventData
 
 
 @register_sync_plugin
@@ -68,9 +68,9 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
         Returns:
             OperationResult with statistics
         """
-        from ...data import OperationResult, OperationRecord, SyncEventData
-        from ...frame_utils import detect_video_fps
-        from ...checkpoint_selection import select_smart_checkpoints
+        from ..data import OperationResult, OperationRecord, SyncEventData
+        from ..frame_utils import detect_video_fps
+        from ..checkpoint_selection import select_smart_checkpoints
 
         config = config or {}
 
@@ -145,7 +145,7 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
 
         # Try to import frame matching
         try:
-            from ..frame_matching import VideoReader, compute_frame_hash, compute_hamming_distance
+            from ..sync_modes.frame_matching import VideoReader, compute_frame_hash, compute_hamming_distance
         except ImportError as e:
             return OperationResult(
                 success=False,
