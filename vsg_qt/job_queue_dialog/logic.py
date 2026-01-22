@@ -224,9 +224,14 @@ class JobQueueLogic:
         Validates that style_patch and font_replacements reference styles that exist in the target file.
         This is an ADDITIONAL check that doesn't affect existing layout matching.
 
+        For OCR tracks, validates against known OCR output styles (Default, Top).
+
         Returns list of warning messages if there are issues, empty list if OK.
         """
         from vsg_core.subtitles.style_filter import StyleFilterEngine
+
+        # OCR output always has these styles
+        OCR_OUTPUT_STYLES = {'Default', 'Top'}
 
         issues = []
         enhanced_layout = layout_data.get('enhanced_layout', [])
@@ -244,6 +249,34 @@ class JobQueueLogic:
                 continue
 
             track_name = track.get('custom_name') or track.get('description', 'Unknown')
+
+            # For OCR tracks, validate against known OCR output styles
+            if track.get('perform_ocr'):
+                available_style_set = OCR_OUTPUT_STYLES
+
+                # Validate style_patch styles exist in OCR output
+                if style_patch:
+                    patch_styles = set(style_patch.keys())
+                    missing_patch_styles = patch_styles - available_style_set
+                    if missing_patch_styles:
+                        issues.append(
+                            f"'{track_name}' (OCR): Style patch references styles not in OCR output: "
+                            f"{', '.join(sorted(missing_patch_styles))} (OCR only has: Default, Top)"
+                        )
+
+                # Validate font_replacements styles exist in OCR output
+                if font_replacements:
+                    replacement_styles = set(font_replacements.keys())
+                    missing_replacement_styles = replacement_styles - available_style_set
+                    if missing_replacement_styles:
+                        issues.append(
+                            f"'{track_name}' (OCR): Font replacements reference styles not in OCR output: "
+                            f"{', '.join(sorted(missing_replacement_styles))} (OCR only has: Default, Top)"
+                        )
+
+                continue  # Skip file extraction for OCR tracks
+
+            # For non-OCR tracks, extract and validate against actual file
             track_id = track.get('id')
             source_key = track.get('source')
             source_file = job['sources'].get(source_key)
