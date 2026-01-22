@@ -116,6 +116,10 @@ class PlayerThread(QThread):
     def seek(self, time_ms: int):
         with self._lock: self._seek_request_ms = time_ms
 
-    def reload_subtitle_track(self):
+    def reload_subtitle_track(self, subtitle_path: str | None = None):
+        """Reload the subtitle track, optionally with a new path."""
         with self._lock:
-            if self._graph: self._reload_subs_requested = True
+            if subtitle_path:
+                self.subtitle_path = subtitle_path
+            if self._graph:
+                self._reload_subs_requested = True

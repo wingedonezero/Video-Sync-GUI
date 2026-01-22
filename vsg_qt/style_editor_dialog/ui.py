@@ -28,7 +28,9 @@ class StyleEditorDialog(QDialog):
         self._build_ui()
         self._logic = StyleEditorLogic(self, subtitle_path, existing_font_replacements, fonts_dir)
         self._logic.populate_initial_state()
-        self.player_thread = PlayerThread(video_path, subtitle_path, self.video_frame.winId(), fonts_dir=fonts_dir, parent=self)
+        # Use the preview path (temp file) for the player to avoid modifying original during preview
+        preview_path = self._logic.engine.get_preview_path()
+        self.player_thread = PlayerThread(video_path, preview_path, self.video_frame.winId(), fonts_dir=fonts_dir, parent=self)
         self._connect_signals()
         self.player_thread.start()
 
@@ -160,9 +162,12 @@ class StyleEditorDialog(QDialog):
         return self._logic.get_font_replacements()
 
     def accept(self):
-        """Generate the patch before closing."""
-        # FIX: Save any pending UI changes to the engine before generating the patch
+        """Save changes to original file and generate the patch before closing."""
+        # Save any pending UI changes to the engine
         self._logic.update_current_style()
+        # Save to the original file (not just temp)
+        self._logic.engine.save_to_original()
+        # Generate the patch for external use
         self._logic.generate_patch()
         super().accept()
 
@@ -224,4 +229,8 @@ class StyleEditorDialog(QDialog):
         start_time_ms_str = self.events_table.item(row, 1).text()
         try: self.player_thread.seek(int(start_time_ms_str))
         except (ValueError, TypeError): pass
-    def closeEvent(self, event): self.player_thread.stop(); super().closeEvent(event)
+    def closeEvent(self, event):
+        self.player_thread.stop()
+        # Cleanup temp file
+        self._logic.engine.cleanup()
+        super().closeEvent(event)

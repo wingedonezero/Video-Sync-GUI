@@ -21,11 +21,10 @@ class StyleEditorLogic:
         self.engine = StyleEngine(subtitle_path)
         self.fonts_dir = fonts_dir  # Directory for preview fonts
         self.current_style_name = None
-        self.original_styles = deepcopy(self.engine.subs.styles) if self.engine.subs else {}
         self.tag_pattern = re.compile(r'{[^}]+}')
-        # NEW: Store snapshots of styles as they are selected for editing
+        # Store snapshots of styles as they are selected for editing
         self.edit_snapshots = {}
-        # NEW: Store the final generated patch of changes
+        # Store the final generated patch of changes
         self.generated_patch = {}
         # Initialize favorite colors manager
         config = AppConfig()
@@ -34,20 +33,20 @@ class StyleEditorLogic:
         self.font_replacements: Dict = existing_font_replacements.copy() if existing_font_replacements else {}
 
     def open_resample_dialog(self):
-        if not self.engine.subs:
+        if not self.engine.data:
             return
 
-        current_x = int(self.engine.subs.info.get('PlayResX', 0))
-        current_y = int(self.engine.subs.info.get('PlayResY', 0))
+        current_x = int(self.engine.info.get('PlayResX', 0))
+        current_y = int(self.engine.info.get('PlayResY', 0))
         video_path = self.v.player_thread.video_path
 
         dialog = ResampleDialog(current_x, current_y, video_path, self.v)
         if dialog.exec():
             new_x, new_y = dialog.get_resolution()
-            self.engine.subs.info['PlayResX'] = str(new_x)
-            self.engine.subs.info['PlayResY'] = str(new_y)
+            self.engine.set_info('PlayResX', str(new_x))
+            self.engine.set_info('PlayResY', str(new_y))
             self.engine.save()
-            self.v.player_thread.reload_subtitle_track()
+            self.v.player_thread.reload_subtitle_track(self.engine.get_preview_path())
 
     def populate_initial_state(self):
         self.populate_styles_dropdown()
@@ -102,10 +101,14 @@ class StyleEditorLogic:
         try:
             line_num_str = self.v.events_table.item(row, 0).text()
             line_num = int(line_num_str)
-            event_obj = self.engine.subs.events[line_num - 1]
-            if self.tag_pattern.search(event_obj.text):
-                self.v.tag_warning_label.setText("⚠️ Note: This line contains override tags. Edits to the global style may not be visible.")
-                self.v.tag_warning_label.setVisible(True)
+            # Access events through SubtitleData
+            if self.engine.data and line_num - 1 < len(self.engine.data.events):
+                event_obj = self.engine.data.events[line_num - 1]
+                if self.tag_pattern.search(event_obj.text):
+                    self.v.tag_warning_label.setText("⚠️ Note: This line contains override tags. Edits to the global style may not be visible.")
+                    self.v.tag_warning_label.setVisible(True)
+                else:
+                    self.v.tag_warning_label.setVisible(False)
             else:
                 self.v.tag_warning_label.setVisible(False)
         except (ValueError, IndexError):
@@ -190,24 +193,27 @@ class StyleEditorLogic:
 
     def strip_tags_from_selected(self):
         selected_rows = {it.row() for it in self.v.events_table.selectedItems()}
-        if not selected_rows: return
+        if not selected_rows or not self.engine.data:
+            return
         style_tags_pattern = re.compile(r'\\(c|1c|2c|3c|4c|fn|fs|bord|shad|b|i|u|s)[^\\}]+')
         modified = False
         for row in selected_rows:
             try:
                 line_num = int(self.v.events_table.item(row, 0).text())
-                event_obj = self.engine.subs.events[line_num - 1]
-                if self.tag_pattern.search(event_obj.text):
-                    cleaned_text = style_tags_pattern.sub('', event_obj.text)
-                    cleaned_text = cleaned_text.replace('{}', '')
-                    if cleaned_text != event_obj.text:
-                        event_obj.text = cleaned_text
-                        modified = True
-            except (ValueError, IndexError): continue
+                if line_num - 1 < len(self.engine.data.events):
+                    event_obj = self.engine.data.events[line_num - 1]
+                    if self.tag_pattern.search(event_obj.text):
+                        cleaned_text = style_tags_pattern.sub('', event_obj.text)
+                        cleaned_text = cleaned_text.replace('{}', '')
+                        if cleaned_text != event_obj.text:
+                            event_obj.text = cleaned_text
+                            modified = True
+            except (ValueError, IndexError):
+                continue
         if modified:
             self.engine.save()
             self.populate_events_table()
-            self.v.player_thread.reload_subtitle_track()
+            self.v.player_thread.reload_subtitle_track(self.engine.get_preview_path())
             self.on_event_selected()
 
     def pick_color(self, button, attribute_name):
@@ -221,20 +227,21 @@ class StyleEditorLogic:
         button.setStyleSheet(f"background-color: {QColor(hex_color_str).name()};")
 
     def update_current_style(self):
-        if not self.current_style_name: return
+        if not self.current_style_name:
+            return
         current_attrs = self._get_current_ui_attrs()
         self.engine.update_style_attributes(self.current_style_name, current_attrs)
         self.engine.save()
-        self.v.player_thread.reload_subtitle_track()
+        self.v.player_thread.reload_subtitle_track(self.engine.get_preview_path())
 
     def reset_current_style(self):
-        if not self.current_style_name: return
-        original_style = self.original_styles.get(self.current_style_name)
-        if not original_style: return
-        self.engine.subs.styles[self.current_style_name] = deepcopy(original_style)
+        if not self.current_style_name:
+            return
+        # Use the engine's built-in reset functionality
+        self.engine.reset_style(self.current_style_name)
         self.load_style_attributes(self.current_style_name)
         self.engine.save()
-        self.v.player_thread.reload_subtitle_track()
+        self.v.player_thread.reload_subtitle_track(self.engine.get_preview_path())
 
     # --- Favorite Colors Methods ---
 
@@ -382,7 +389,7 @@ class StyleEditorLogic:
                         )
 
                 # Reload the subtitle in the player to show changes
-                self.v.player_thread.reload_subtitle_track()
+                self.v.player_thread.reload_subtitle_track(self.engine.get_preview_path())
                 # Also reload the engine so UI reflects changes
                 self.engine = StyleEngine(str(self.engine.path))
                 self.populate_initial_state()

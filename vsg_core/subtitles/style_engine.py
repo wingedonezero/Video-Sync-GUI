@@ -1,108 +1,216 @@
 # vsg_core/subtitles/style_engine.py
 # -*- coding: utf-8 -*-
+"""
+Style engine using SubtitleData for subtitle manipulation.
+
+Provides the same API as before but uses the unified SubtitleData
+system instead of pysubs2 directly.
+"""
 import hashlib
 import re
+import tempfile
+from copy import deepcopy
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-import pysubs2
-from .metadata_preserver import SubtitleMetadata
+from .data import SubtitleData, SubtitleStyle
+
+
+# =============================================================================
+# Color Conversion Helpers
+# =============================================================================
+
+def ass_color_to_qt(ass_color: str) -> str:
+    """
+    Convert ASS color format to Qt hex format.
+
+    ASS format: &HAABBGGRR (alpha, blue, green, red)
+    Qt format:  #AARRGGBB (alpha, red, green, blue)
+
+    Note: ASS alpha is inverted (00 = opaque, FF = transparent)
+          Qt alpha is normal (FF = opaque, 00 = transparent)
+    """
+    # Remove &H prefix and ensure 8 characters
+    color = ass_color.lstrip('&Hh').upper()
+    color = color.zfill(8)
+
+    # Parse AABBGGRR
+    ass_alpha = int(color[0:2], 16)
+    blue = color[2:4]
+    green = color[4:6]
+    red = color[6:8]
+
+    # Convert ASS alpha (inverted) to Qt alpha (normal)
+    qt_alpha = 255 - ass_alpha
+
+    return f"#{qt_alpha:02X}{red}{green}{blue}"
+
+
+def qt_color_to_ass(qt_color: str) -> str:
+    """
+    Convert Qt hex format to ASS color format.
+
+    Qt format:  #AARRGGBB (alpha, red, green, blue)
+    ASS format: &HAABBGGRR (alpha, blue, green, red)
+
+    Note: Qt alpha is normal (FF = opaque, 00 = transparent)
+          ASS alpha is inverted (00 = opaque, FF = transparent)
+    """
+    # Remove # prefix
+    color = qt_color.lstrip('#').upper()
+    color = color.zfill(8)
+
+    # Parse AARRGGBB
+    qt_alpha = int(color[0:2], 16)
+    red = color[2:4]
+    green = color[4:6]
+    blue = color[6:8]
+
+    # Convert Qt alpha to ASS alpha (inverted)
+    ass_alpha = 255 - qt_alpha
+
+    return f"&H{ass_alpha:02X}{blue}{green}{red}"
+
+
+# =============================================================================
+# Style Engine
+# =============================================================================
 
 class StyleEngine:
     """
     Handles loading, parsing, manipulating, and saving subtitle styles
-    using the pysubs2 library.
+    using the SubtitleData system.
     """
+
     def __init__(self, subtitle_path: str):
         self.path = Path(subtitle_path)
-        self.subs: Optional[pysubs2.SSAFile] = None
-        self.metadata: Optional[SubtitleMetadata] = None
+        self.data: Optional[SubtitleData] = None
+        self._original_data: Optional[SubtitleData] = None
+        self._temp_file: Optional[Path] = None
         self.load()
 
     def load(self):
-        """Loads the subtitle file, converting SRT to ASS if necessary."""
-        # Capture original metadata before pysubs2 processing
-        self.metadata = SubtitleMetadata(str(self.path))
-        self.metadata.capture()
-
-        try:
-            self.subs = pysubs2.load(str(self.path), encoding='utf-8')
-        except Exception:
-            self.subs = pysubs2.load(str(self.path))
+        """Loads the subtitle file into SubtitleData."""
+        self.data = SubtitleData.from_file(self.path)
+        # Keep a deep copy of original for reset functionality
+        self._original_data = deepcopy(self.data)
 
     def save(self):
-        """Saves any changes back to the original file path."""
-        if self.subs:
-            self.subs.save(str(self.path), encoding='utf-8', format_=self.path.suffix[1:])
+        """Saves changes to a temp file for preview, not the original."""
+        if self.data:
+            # Write to temp file for FFmpeg preview
+            if self._temp_file is None:
+                self._temp_file = Path(tempfile.gettempdir()) / f"vsg_preview_{id(self)}.ass"
+            self.data.save_ass(self._temp_file)
 
-            # Validate and restore lost metadata (without runner for GUI context)
-            if self.metadata:
-                self.metadata.validate_and_restore()
+    def save_to_original(self):
+        """Saves changes back to the original file."""
+        if self.data:
+            self.data.save(self.path)
+
+    def get_preview_path(self) -> str:
+        """Get path to temp file for preview. Creates/updates it if needed."""
+        self.save()
+        return str(self._temp_file) if self._temp_file else str(self.path)
+
+    def cleanup(self):
+        """Remove temp file on cleanup."""
+        if self._temp_file and self._temp_file.exists():
+            try:
+                self._temp_file.unlink()
+            except OSError:
+                pass
 
     def get_style_names(self) -> List[str]:
         """Returns a list of all style names defined in the file."""
-        return list(self.subs.styles.keys()) if self.subs else []
+        return list(self.data.styles.keys()) if self.data else []
 
     def get_style_attributes(self, style_name: str) -> Dict[str, Any]:
         """Returns a dictionary of attributes for a given style."""
-        if not self.subs or style_name not in self.subs.styles:
+        if not self.data or style_name not in self.data.styles:
             return {}
 
-        style = self.subs.styles[style_name]
+        style = self.data.styles[style_name]
 
-        def to_qt_hex(c: pysubs2.Color) -> str:
-            qt_alpha = 255 - c.a
-            return f"#{qt_alpha:02X}{c.r:02X}{c.g:02X}{c.b:02X}"
-
-        # FIX: Removed 'alignment' as it is not editable in the UI
         return {
-            "fontname": style.fontname, "fontsize": style.fontsize,
-            "primarycolor": to_qt_hex(style.primarycolor),
-            "secondarycolor": to_qt_hex(style.secondarycolor),
-            "outlinecolor": to_qt_hex(style.outlinecolor),
-            "backcolor": to_qt_hex(style.backcolor),
-            "bold": style.bold, "italic": style.italic,
-            "underline": style.underline, "strikeout": style.strikeout,
-            "outline": style.outline, "shadow": style.shadow,
-            "marginl": style.marginl, "marginr": style.marginr,
-            "marginv": style.marginv,
+            "fontname": style.fontname,
+            "fontsize": style.fontsize,
+            "primarycolor": ass_color_to_qt(style.primary_color),
+            "secondarycolor": ass_color_to_qt(style.secondary_color),
+            "outlinecolor": ass_color_to_qt(style.outline_color),
+            "backcolor": ass_color_to_qt(style.back_color),
+            "bold": style.bold != 0,  # Convert -1/0 to bool
+            "italic": style.italic != 0,
+            "underline": style.underline != 0,
+            "strikeout": style.strike_out != 0,
+            "outline": style.outline,
+            "shadow": style.shadow,
+            "marginl": style.margin_l,
+            "marginr": style.margin_r,
+            "marginv": style.margin_v,
         }
 
     def update_style_attributes(self, style_name: str, attributes: Dict[str, Any]):
         """Updates attributes for a given style."""
-        if not self.subs or style_name not in self.subs.styles:
+        if not self.data or style_name not in self.data.styles:
             return
 
-        def from_qt_hex(hex_str: str) -> pysubs2.Color:
-            hex_str = hex_str.lstrip('#')
-            a = int(hex_str[0:2], 16)
-            r = int(hex_str[2:4], 16)
-            g = int(hex_str[4:6], 16)
-            b = int(hex_str[6:8], 16)
-            pysubs2_a = 255 - a
-            return pysubs2.Color(r, g, b, pysubs2_a)
+        style = self.data.styles[style_name]
 
-        style = self.subs.styles[style_name]
         for key, value in attributes.items():
-            if key == "alignment": # Explicitly ignore alignment if it ever slips through
+            if key == "alignment":
+                # Explicitly ignore alignment if it ever slips through
                 continue
-            if "color" in key and isinstance(value, str):
-                setattr(style, key, from_qt_hex(value))
-            else:
-                setattr(style, key, value)
+            elif key == "fontname":
+                style.fontname = value
+            elif key == "fontsize":
+                style.fontsize = float(value)
+            elif key == "primarycolor":
+                style.primary_color = qt_color_to_ass(value)
+            elif key == "secondarycolor":
+                style.secondary_color = qt_color_to_ass(value)
+            elif key == "outlinecolor":
+                style.outline_color = qt_color_to_ass(value)
+            elif key == "backcolor":
+                style.back_color = qt_color_to_ass(value)
+            elif key == "bold":
+                style.bold = -1 if value else 0
+            elif key == "italic":
+                style.italic = -1 if value else 0
+            elif key == "underline":
+                style.underline = -1 if value else 0
+            elif key == "strikeout":
+                style.strike_out = -1 if value else 0
+            elif key == "outline":
+                style.outline = float(value)
+            elif key == "shadow":
+                style.shadow = float(value)
+            elif key == "marginl":
+                style.margin_l = int(value)
+            elif key == "marginr":
+                style.margin_r = int(value)
+            elif key == "marginv":
+                style.margin_v = int(value)
 
     def get_events(self) -> List[Dict[str, Any]]:
-        """Returns all subtitle events, ensuring plaintext is included."""
-        if not self.subs: return []
+        """Returns all subtitle events."""
+        if not self.data:
+            return []
 
         tag_pattern = re.compile(r'{[^}]+}')
 
-        return [{
-                    "line_num": i + 1, "start": event.start, "end": event.end,
-                    "style": event.style, "text": event.text,
-                    "plaintext": tag_pattern.sub('', event.text)
-                }
-                for i, event in enumerate(self.subs.events)]
+        return [
+            {
+                "line_num": i + 1,
+                "start": int(event.start_ms),
+                "end": int(event.end_ms),
+                "style": event.style,
+                "text": event.text,
+                "plaintext": tag_pattern.sub('', event.text),
+            }
+            for i, event in enumerate(self.data.events)
+            if not event.is_comment
+        ]
 
     def get_raw_style_block(self) -> Optional[List[str]]:
         """Extracts the raw [V4+ Styles] block as a list of strings."""
@@ -112,11 +220,11 @@ class StyleEngine:
             style_lines = []
             for line in content.splitlines():
                 line_strip = line.strip()
-                if line_strip == '[V4+ Styles]':
+                if line_strip.lower() in ('[v4+ styles]', '[v4 styles]'):
                     in_styles_block = True
                 elif in_styles_block and line_strip.startswith(('Format:', 'Style:')):
                     style_lines.append(line)
-                elif in_styles_block and line_strip == '[Events]':
+                elif in_styles_block and line_strip.startswith('['):
                     break
             return style_lines if style_lines else None
         except Exception:
@@ -124,12 +232,67 @@ class StyleEngine:
 
     def set_raw_style_block(self, style_lines: List[str]):
         """Overwrites the [V4+ Styles] block with the provided lines."""
-        if not self.subs or not style_lines:
+        if not self.data or not style_lines:
             return
-        self.subs.styles.clear()
-        temp_subs = pysubs2.SSAFile.from_string("\n".join(['[V4+ Styles]'] + style_lines))
-        self.subs.styles = temp_subs.styles.copy()
+
+        # Parse the style lines
+        format_line = None
+        styles = []
+
+        for line in style_lines:
+            line = line.strip()
+            if line.startswith('Format:'):
+                format_line = [f.strip() for f in line[7:].split(',')]
+            elif line.startswith('Style:'):
+                values = line[6:].split(',')
+                if format_line:
+                    style = SubtitleStyle.from_format_line(format_line, values)
+                    styles.append(style)
+
+        # Update data
+        if format_line:
+            self.data.styles_format = format_line
+        self.data.styles.clear()
+        for style in styles:
+            self.data.styles[style.name] = style
+
         self.save()
+
+    def reset_style(self, style_name: str):
+        """Reset a single style to its original state."""
+        if not self._original_data or style_name not in self._original_data.styles:
+            return
+        if not self.data:
+            return
+
+        self.data.styles[style_name] = deepcopy(self._original_data.styles[style_name])
+
+    def reset_all_styles(self):
+        """Reset all styles to original state."""
+        if not self._original_data or not self.data:
+            return
+
+        self.data.styles = deepcopy(self._original_data.styles)
+
+    # =========================================================================
+    # Script Info Access (for resample dialog)
+    # =========================================================================
+
+    @property
+    def info(self) -> Dict[str, Any]:
+        """Access to script info for compatibility."""
+        if self.data:
+            return self.data.script_info
+        return {}
+
+    def set_info(self, key: str, value: Any):
+        """Set script info value."""
+        if self.data:
+            self.data.script_info[key] = value
+
+    # =========================================================================
+    # Static Methods
+    # =========================================================================
 
     @staticmethod
     def merge_styles_from_template(target_path: str, template_path: str) -> bool:
@@ -138,27 +301,17 @@ class StyleEngine:
         Only styles with matching names are updated; unique styles in the target are preserved.
         """
         try:
-            # Capture original metadata before pysubs2 processing
-            metadata = SubtitleMetadata(target_path)
-            metadata.capture()
+            target_data = SubtitleData.from_file(target_path)
+            template_data = SubtitleData.from_file(template_path)
 
-            target_subs = pysubs2.load(target_path, encoding='utf-8')
-            template_subs = pysubs2.load(template_path, encoding='utf-8')
-
-            template_styles = {s.name: s for s in template_subs.styles.values()}
             updated_count = 0
-
-            for style_name, style_object in target_subs.styles.items():
-                if style_name in template_styles:
-                    target_subs.styles[style_name] = template_styles[style_name].copy()
+            for style_name in target_data.styles:
+                if style_name in template_data.styles:
+                    target_data.styles[style_name] = deepcopy(template_data.styles[style_name])
                     updated_count += 1
 
             if updated_count > 0:
-                target_subs.save(target_path, encoding='utf-8')
-
-                # Validate and restore lost metadata
-                metadata.validate_and_restore()
-
+                target_data.save(target_path)
                 return True
             return False
         except Exception as e:
@@ -174,13 +327,14 @@ class StyleEngine:
             style_lines = []
             for line in content.splitlines():
                 line_strip = line.strip()
-                if line_strip == '[V4+ Styles]':
+                if line_strip.lower() in ('[v4+ styles]', '[v4 styles]'):
                     in_styles_block = True
                 elif in_styles_block and line_strip.startswith('Style:'):
                     style_lines.append(line_strip)
                 elif in_styles_block and not line_strip:
                     break
-            if not style_lines: return None
+            if not style_lines:
+                return None
             return hashlib.sha256('\n'.join(sorted(style_lines)).encode('utf-8')).hexdigest()
         except Exception:
             return None
@@ -188,8 +342,10 @@ class StyleEngine:
     @staticmethod
     def get_name_signature(track_name: str) -> Optional[str]:
         """Generates a fallback signature from the track name (e.g., 'Signs [LostYears]')."""
-        if not track_name: return None
+        if not track_name:
+            return None
         sanitized_name = re.sub(r'[\\/*?:"<>|]', "", track_name)
         sanitized_name = sanitized_name.strip()
-        if not sanitized_name: return None
+        if not sanitized_name:
+            return None
         return sanitized_name
