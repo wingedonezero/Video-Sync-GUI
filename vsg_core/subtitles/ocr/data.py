@@ -433,3 +433,130 @@ class OCRSubtitleData:
             'sync_mode': self.sync_mode_used,
             'processing_time_seconds': self.processing_duration_seconds,
         }
+
+    def to_subtitle_data(self) -> 'SubtitleData':
+        """
+        Convert OCR output to SubtitleData for unified editing pipeline.
+
+        This creates a SubtitleData object that can be processed by all
+        standard subtitle operations (sync, style patches, etc.).
+
+        OCR-specific metadata is preserved in custom_sections for potential
+        future use (positioning, colors, etc.).
+
+        Returns:
+            SubtitleData object ready for editing operations
+        """
+        from collections import OrderedDict
+        from ..data import SubtitleData, SubtitleStyle, SubtitleEvent
+
+        data = SubtitleData()
+        data.source_path = Path(self.source_file) if self.source_file else None
+        data.source_format = 'ocr'
+        data.encoding = 'utf-8'
+
+        # Set up script info
+        data.script_info = OrderedDict([
+            ('Title', 'OCR Subtitles'),
+            ('ScriptType', 'v4.00+'),
+            ('PlayResX', str(self.output_resolution[0])),
+            ('PlayResY', str(self.output_resolution[1])),
+            ('WrapStyle', '0'),
+            ('ScaledBorderAndShadow', 'yes'),
+        ])
+
+        # Create styles from OCR style config
+        style = self.style_config
+        default_style = SubtitleStyle(
+            name='Default',
+            fontname=style.get('font_name', 'Arial'),
+            fontsize=float(style.get('font_size', 48)),
+            primary_color=style.get('primary_color', '&H00FFFFFF'),
+            secondary_color='&H000000FF',
+            outline_color=style.get('outline_color', '&H00000000'),
+            back_color='&H00000000',
+            bold=0,
+            italic=0,
+            underline=0,
+            strike_out=0,
+            scale_x=100.0,
+            scale_y=100.0,
+            spacing=0.0,
+            angle=0.0,
+            border_style=1,
+            outline=float(style.get('outline_width', 2.0)),
+            shadow=float(style.get('shadow_depth', 1.0)),
+            alignment=2,  # Bottom center
+            margin_l=10,
+            margin_r=10,
+            margin_v=int(style.get('margin_v', 30)),
+            encoding=1,
+        )
+        data.styles['Default'] = default_style
+
+        # Top style for top-positioned subtitles
+        top_style = SubtitleStyle(
+            name='Top',
+            fontname=style.get('font_name', 'Arial'),
+            fontsize=float(style.get('font_size', 48)),
+            primary_color=style.get('primary_color', '&H00FFFFFF'),
+            secondary_color='&H000000FF',
+            outline_color=style.get('outline_color', '&H00000000'),
+            back_color='&H00000000',
+            bold=0,
+            italic=0,
+            underline=0,
+            strike_out=0,
+            scale_x=100.0,
+            scale_y=100.0,
+            spacing=0.0,
+            angle=0.0,
+            border_style=1,
+            outline=float(style.get('outline_width', 2.0)),
+            shadow=float(style.get('shadow_depth', 1.0)),
+            alignment=8,  # Top center
+            margin_l=10,
+            margin_r=10,
+            margin_v=int(style.get('margin_v', 30)),
+            encoding=1,
+        )
+        data.styles['Top'] = top_style
+
+        # Convert entries to events
+        for entry in self.entries:
+            # Determine style based on position
+            style_name = 'Default'
+            if self.preserve_positions:
+                if entry.is_top_positioned(self.top_threshold_percent):
+                    style_name = 'Top'
+
+            event = SubtitleEvent(
+                start_ms=entry.start_ms,  # Float precision preserved
+                end_ms=entry.end_ms,
+                text=self._escape_ass_text(entry.text),
+                style=style_name,
+                layer=0,
+                name='',
+                margin_l=0,
+                margin_r=0,
+                margin_v=0,
+                effect='',
+                is_comment=False,
+                srt_index=entry.index,
+            )
+            data.events.append(event)
+
+        # Preserve OCR metadata in custom section (for future use)
+        ocr_metadata = [
+            f'; OCR Engine: {self.ocr_engine}',
+            f'; Language: {self.language}',
+            f'; Source: {self.source_file}',
+            f'; Source Resolution: {self.source_resolution[0]}x{self.source_resolution[1]}',
+            f'; Total Fixes: {sum(self.total_fixes_applied.values())}',
+            f'; Unknown Words: {len(self.total_unknown_words)}',
+        ]
+        if self.master_palette:
+            ocr_metadata.append(f'; Master Palette Colors: {len(self.master_palette)}')
+        data.custom_sections['[OCR Metadata]'] = ocr_metadata
+
+        return data

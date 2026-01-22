@@ -1,10 +1,36 @@
 # vsg_core/subtitles/timing.py
 # -*- coding: utf-8 -*-
+"""
+Subtitle timing correction module.
+
+!!! DEPRECATED - NEEDS REWORK !!!
+
+This module is currently disabled and needs a complete rework:
+- CPS (characters per second) calculation needs fixing
+- Should integrate with SubtitleData system instead of using pysubs2 directly
+- Need better handling of multi-line subtitles
+- Need better handling of subtitles with formatting tags
+- Should preserve float precision (currently uses int milliseconds)
+
+TODO:
+1. Port to SubtitleData.apply_timing_fix() method
+2. Fix CPS calculation to properly handle:
+   - Multi-line text
+   - ASS formatting tags
+   - Unicode characters (CJK, etc.)
+3. Add proper duration extension that accounts for reading patterns
+4. Add option to exclude certain styles from timing fixes
+
+For now, this module should remain disabled in settings.
+Enable 'timing_fix_enabled' at your own risk.
+"""
 from __future__ import annotations
 from collections import defaultdict
 import pysubs2
 from .metadata_preserver import SubtitleMetadata
 
+
+# DEPRECATED: This function needs rework. See module docstring.
 def fix_subtitle_timing(subtitle_path: str, config: dict, runner) -> dict:
     """
     Applies various timing corrections to a subtitle file based on config.
