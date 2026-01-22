@@ -1,4 +1,4 @@
-# vsg_core/subtitles/sync_modes/plugins/time_based.py
+# vsg_core/subtitles/sync_mode_plugins/time_based.py
 # -*- coding: utf-8 -*-
 """
 Time-based sync plugin for SubtitleData.
@@ -11,10 +11,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 
-from .. import SyncPlugin, register_sync_plugin
+from ..sync_modes import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
-    from ...data import SubtitleData, OperationResult, OperationRecord, SyncEventData
+    from ..data import SubtitleData, OperationResult, OperationRecord, SyncEventData
 
 
 @register_sync_plugin
@@ -49,7 +49,7 @@ class TimeBasedSync(SyncPlugin):
 
         If True, applies raw delay to subtitle events.
         """
-        from ...data import OperationResult, OperationRecord
+        from ..data import OperationResult, OperationRecord
 
         config = config or {}
 
@@ -84,7 +84,7 @@ class TimeBasedSync(SyncPlugin):
             )
 
         # Raw values mode: apply delay directly
-        from ...data import SyncEventData
+        from ..data import SyncEventData
 
         log(f"[TimeBased] === Time-Based Sync (Raw Values) ===")
         log(f"[TimeBased] Events: {len(subtitle_data.events)}")

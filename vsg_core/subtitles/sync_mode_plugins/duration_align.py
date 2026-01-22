@@ -1,4 +1,4 @@
-# vsg_core/subtitles/sync_modes/plugins/duration_align.py
+# vsg_core/subtitles/sync_mode_plugins/duration_align.py
 # -*- coding: utf-8 -*-
 """
 Duration-align sync plugin for SubtitleData.
@@ -14,10 +14,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, TYPE_CHECKING
 
-from .. import SyncPlugin, register_sync_plugin
+from ..sync_modes import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
-    from ...data import SubtitleData, OperationResult, OperationRecord, SyncEventData
+    from ..data import SubtitleData, OperationResult, OperationRecord, SyncEventData
 
 
 @register_sync_plugin
@@ -68,14 +68,14 @@ class DurationAlignSync(SyncPlugin):
         Returns:
             OperationResult with statistics
         """
-        from ...data import OperationResult, OperationRecord, SyncEventData
-        from ...frame_utils import (
+        from ..data import OperationResult, OperationRecord, SyncEventData
+        from ..frame_utils import (
             get_vapoursynth_frame_info,
             detect_video_fps,
             frame_to_time_vfr,
             validate_frame_alignment
         )
-        from ..duration_align import verify_alignment_with_sliding_window
+        from ..sync_modes.duration_align import verify_alignment_with_sliding_window
 
         config = config or {}
 

@@ -1,4 +1,4 @@
-# vsg_core/subtitles/sync_modes/plugins/timebase_frame_locked.py
+# vsg_core/subtitles/sync_mode_plugins/timebase_frame_locked.py
 # -*- coding: utf-8 -*-
 """
 TimeBase Frame-Locked Timestamps sync plugin for SubtitleData.
@@ -18,10 +18,10 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Dict, Any, Optional, TYPE_CHECKING
 
-from .. import SyncPlugin, register_sync_plugin
+from ..sync_modes import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
-    from ...data import SubtitleData, OperationResult, OperationRecord, SyncEventData
+    from ..data import SubtitleData, OperationResult, OperationRecord, SyncEventData
 
 
 @register_sync_plugin
@@ -62,7 +62,7 @@ class TimebaseFrameLockedSync(SyncPlugin):
         Returns:
             OperationResult with statistics
         """
-        from ...data import OperationResult, OperationRecord, SyncEventData
+        from ..data import OperationResult, OperationRecord, SyncEventData
 
         config = config or {}
 
@@ -244,7 +244,7 @@ class TimebaseFrameLockedSync(SyncPlugin):
     def _get_video_timestamps(self, video_path: str, fps: float, runner, config: dict):
         """Get VideoTimestamps handler for the video."""
         try:
-            from ...frame_utils import get_vfr_timestamps
+            from ..frame_utils import get_vfr_timestamps
             return get_vfr_timestamps(video_path, fps, runner, config)
         except Exception as e:
             if runner:

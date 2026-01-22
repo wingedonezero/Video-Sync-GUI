@@ -76,6 +76,7 @@ class SyncPlugin(ABC):
 
 # Plugin registry
 _sync_plugins: Dict[str, Type[SyncPlugin]] = {}
+_plugins_loaded = False
 
 
 def register_sync_plugin(plugin_class: Type[SyncPlugin]) -> Type[SyncPlugin]:
@@ -94,6 +95,25 @@ def register_sync_plugin(plugin_class: Type[SyncPlugin]) -> Type[SyncPlugin]:
     return plugin_class
 
 
+def _ensure_plugins_loaded():
+    """Lazy-load plugins to avoid circular imports."""
+    global _plugins_loaded
+    if not _plugins_loaded:
+        # Use importlib to avoid circular imports
+        import importlib
+        plugins_to_load = [
+            'vsg_core.subtitles.sync_mode_plugins.time_based',
+            'vsg_core.subtitles.sync_mode_plugins.timebase_frame_locked',
+            'vsg_core.subtitles.sync_mode_plugins.duration_align',
+            'vsg_core.subtitles.sync_mode_plugins.correlation_frame_snap',
+            'vsg_core.subtitles.sync_mode_plugins.subtitle_anchored_frame_snap',
+            'vsg_core.subtitles.sync_mode_plugins.correlation_guided_frame_anchor',
+        ]
+        for module_name in plugins_to_load:
+            importlib.import_module(module_name)
+        _plugins_loaded = True
+
+
 def get_sync_plugin(name: str) -> Optional[SyncPlugin]:
     """
     Get a sync plugin instance by name.
@@ -104,6 +124,7 @@ def get_sync_plugin(name: str) -> Optional[SyncPlugin]:
     Returns:
         Plugin instance, or None if not found
     """
+    _ensure_plugins_loaded()
     plugin_class = _sync_plugins.get(name)
     if plugin_class:
         return plugin_class()
@@ -117,6 +138,7 @@ def list_sync_plugins() -> Dict[str, str]:
     Returns:
         Dict of name -> description
     """
+    _ensure_plugins_loaded()
     return {name: cls.description for name, cls in _sync_plugins.items()}
 
 
@@ -133,17 +155,10 @@ from .correlation_guided_frame_anchor import apply_correlation_guided_frame_anch
 
 
 # =============================================================================
-# Register Plugins
+# Plugin Registration
 # =============================================================================
-
-# Import plugins to register them (decorators trigger registration)
-from .plugins.timebase_frame_locked import TimebaseFrameLockedSync
-from .plugins.time_based import TimeBasedSync
-from .plugins.duration_align import DurationAlignSync
-from .plugins.correlation_frame_snap import CorrelationFrameSnapSync
-from .plugins.subtitle_anchored_frame_snap import SubtitleAnchoredFrameSnapSync
-from .plugins.correlation_guided_frame_anchor import CorrelationGuidedFrameAnchorSync
-
+# Plugins are loaded lazily via _ensure_plugins_loaded() to avoid circular imports.
+# The plugins are located in vsg_core/subtitles/sync_mode_plugins/
 
 __all__ = [
     # Plugin system

@@ -370,122 +370,14 @@ class SubtitlesStep:
             return result
 
         else:
-            # Fall back to legacy sync modes
-            runner._log_message(f"[Sync] Using legacy sync mode: {sync_mode}")
-            return self._apply_sync_legacy(
-                item, ctx, runner, source1_file, sync_mode, scene_cache,
-                source_key, source_video, target_video,
-                total_delay_ms, global_shift_ms, target_fps
+            # All sync modes should have plugins - unknown mode
+            from vsg_core.subtitles.data import OperationResult
+            runner._log_message(f"[Sync] ERROR: Unknown sync mode: {sync_mode}")
+            return OperationResult(
+                success=False,
+                operation='sync',
+                error=f'Unknown sync mode: {sync_mode}'
             )
-
-    def _apply_sync_legacy(
-        self,
-        item, ctx, runner, source1_file, sync_mode, scene_cache,
-        source_key, source_video, target_video,
-        total_delay_ms, global_shift_ms, target_fps
-    ):
-        """
-        Fall back to legacy sync mode implementation.
-
-        This handles modes that haven't been migrated to plugins yet.
-        """
-        from vsg_core.subtitles.data import OperationResult
-
-        # Import legacy sync functions
-        from vsg_core.subtitles.sync_modes import (
-            apply_duration_align_sync,
-            apply_correlation_frame_snap_sync,
-            apply_subtitle_anchored_frame_snap_sync,
-            apply_correlation_guided_frame_anchor_sync,
-        )
-
-        if sync_mode == 'duration-align':
-            if source_video and target_video:
-                sync_config = ctx.settings_dict.copy()
-                if item.skip_frame_validation:
-                    sync_config['duration_align_validate'] = False
-
-                report = apply_duration_align_sync(
-                    str(item.extracted_path),
-                    str(source_video),
-                    str(target_video),
-                    global_shift_ms,
-                    runner,
-                    sync_config,
-                    ctx.temp_dir
-                )
-
-                if report and 'error' not in report:
-                    return OperationResult(success=True, operation='sync', summary='Duration-align applied')
-                elif report and 'error' in report:
-                    raise RuntimeError(f"Duration-align failed: {report['error']}")
-
-        elif sync_mode == 'correlation-frame-snap':
-            if source_video and target_video:
-                cached = scene_cache.get(source_key)
-
-                report = apply_correlation_frame_snap_sync(
-                    str(item.extracted_path),
-                    str(source_video),
-                    str(target_video),
-                    total_delay_ms,
-                    global_shift_ms,
-                    runner,
-                    ctx.settings_dict,
-                    cached_frame_correction=cached
-                )
-
-                if report and report.get('success'):
-                    # Cache result if good
-                    verification = report.get('verification', {})
-                    num_matches = verification.get('num_scene_matches', 0)
-                    if source_key not in scene_cache and num_matches >= 2:
-                        scene_cache[source_key] = {
-                            'frame_correction_ms': report.get('frame_correction_ms', 0.0),
-                            'num_scene_matches': num_matches,
-                        }
-                    return OperationResult(success=True, operation='sync', summary='Correlation-frame-snap applied')
-                elif report and 'error' in report:
-                    raise RuntimeError(f"Correlation-frame-snap failed: {report['error']}")
-
-        elif sync_mode == 'subtitle-anchored-frame-snap':
-            if source_video and target_video:
-                report = apply_subtitle_anchored_frame_snap_sync(
-                    str(item.extracted_path),
-                    str(source_video),
-                    str(target_video),
-                    global_shift_ms,
-                    runner,
-                    ctx.settings_dict,
-                    temp_dir=ctx.temp_dir
-                )
-
-                if report and report.get('success'):
-                    return OperationResult(success=True, operation='sync', summary='Subtitle-anchored-frame-snap applied')
-                elif report and 'error' in report:
-                    raise RuntimeError(f"Subtitle-anchored-frame-snap failed: {report['error']}")
-
-        elif sync_mode == 'correlation-guided-frame-anchor':
-            if source_video and target_video:
-                report = apply_correlation_guided_frame_anchor_sync(
-                    str(item.extracted_path),
-                    str(source_video),
-                    str(target_video),
-                    total_delay_ms,
-                    global_shift_ms,
-                    runner,
-                    ctx.settings_dict,
-                    temp_dir=ctx.temp_dir,
-                    sync_exclusion_styles=getattr(item, 'sync_exclusion_styles', []),
-                    sync_exclusion_mode=getattr(item, 'sync_exclusion_mode', 'exclude')
-                )
-
-                if report and report.get('success'):
-                    return OperationResult(success=True, operation='sync', summary='Correlation-guided-frame-anchor applied')
-                elif report and 'error' in report:
-                    raise RuntimeError(f"Correlation-guided-frame-anchor failed: {report['error']}")
-
-        return OperationResult(success=False, operation='sync', error=f'Unknown or unhandled sync mode: {sync_mode}')
 
     def _process_ocr(self, item, ctx, runner, items_to_add):
         """
