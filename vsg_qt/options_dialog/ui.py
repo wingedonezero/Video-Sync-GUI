@@ -2,7 +2,7 @@
 from __future__ import annotations
 from typing import Dict
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QTabWidget, QDialogButtonBox, QScrollArea, QWidget
+    QDialog, QVBoxLayout, QTabWidget, QDialogButtonBox, QScrollArea, QWidget, QMessageBox
 )
 from .logic import OptionsLogic
 from .tabs import StorageTab, AnalysisTab, SteppingTab, SubtitleSyncTab, ChaptersTab, MergeBehaviorTab, LoggingTab, OCRTab
@@ -75,6 +75,44 @@ class OptionsDialog(QDialog):
         # Logic
         self._logic = OptionsLogic(self)
         self.load_settings()
+
+        # Connect storage tab maintenance button
+        self._storage_tab.remove_invalid_btn.clicked.connect(self._on_remove_invalid_config)
+
+    def _on_remove_invalid_config(self):
+        """Handle remove invalid config entries button click."""
+        if not hasattr(self.config, 'get_orphaned_keys'):
+            QMessageBox.warning(self, "Not Supported", "Config object doesn't support orphan detection.")
+            return
+
+        orphaned = self.config.get_orphaned_keys()
+        if not orphaned:
+            QMessageBox.information(
+                self,
+                "Config Clean",
+                "No invalid config entries found.\nYour settings.json is clean!"
+            )
+            return
+
+        # Show confirmation with list of keys to be removed
+        keys_list = "\n".join(f"  - {k}" for k in sorted(orphaned))
+        reply = QMessageBox.question(
+            self,
+            "Remove Invalid Entries?",
+            f"Found {len(orphaned)} invalid/orphaned config entries:\n\n{keys_list}\n\n"
+            "These are old settings no longer used by the application.\n"
+            "Remove them from settings.json?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            removed = self.config.remove_orphaned_keys()
+            QMessageBox.information(
+                self,
+                "Cleanup Complete",
+                f"Removed {len(removed)} invalid entries from settings.json."
+            )
 
     # --- public (kept for compatibility) ---
     def load_settings(self):
