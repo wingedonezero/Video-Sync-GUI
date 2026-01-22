@@ -816,7 +816,8 @@ class ManualSelectionDialog(QDialog):
 
         # Check if this is an OCR track (image-based subtitle with OCR enabled)
         codec_id = track_data.get('codec_id', '').upper()
-        perform_ocr = track_data.get('perform_ocr', False)
+        # Read perform_ocr from checkbox widget (track_data may not be synced after Track Settings dialog)
+        perform_ocr = widget.cb_ocr.isChecked() if hasattr(widget, 'cb_ocr') else track_data.get('perform_ocr', False)
         is_ocr_track = perform_ocr and ('VOBSUB' in codec_id or 'PGS' in codec_id or 'HDMV' in codec_id)
 
         # Debug logging
