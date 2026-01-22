@@ -1233,232 +1233,161 @@ class SubtitleSyncTab(QWidget):
         self.widgets: Dict[str, QWidget] = {}
         main_layout = QVBoxLayout(self)
 
-        sync_group = QGroupBox("Subtitle Synchronization Mode")
-        sync_layout = QFormLayout(sync_group)
+        # ===== SYNC MODE SELECTION =====
+        mode_group = QGroupBox("Sync Mode")
+        mode_layout = QFormLayout(mode_group)
 
         self.widgets['subtitle_sync_mode'] = QComboBox()
-        self.widgets['subtitle_sync_mode'].addItems(['time-based', 'timebase-frame-locked-timestamps', 'duration-align', 'correlation-frame-snap', 'subtitle-anchored-frame-snap', 'correlation-guided-frame-anchor'])
+        self.widgets['subtitle_sync_mode'].addItems([
+            'time-based',
+            'timebase-frame-locked-timestamps',
+            'duration-align',
+            'correlation-frame-snap',
+            'subtitle-anchored-frame-snap',
+            'correlation-guided-frame-anchor'
+        ])
         self.widgets['subtitle_sync_mode'].setToolTip(
             "Subtitle synchronization method:\n\n"
-            "• time-based (Default): Apply delays using millisecond timestamps\n"
-            "  - Simple and fast, uses mkvmerge --sync\n"
-            "  - Optional: Enable 'Use raw correlation values' to embed\n"
-            "    delay directly in subtitle file using pysubs2\n"
-            "  - Works with all subtitle formats\n\n"
-            "• timebase-frame-locked-timestamps (NEW): Time-based + VideoTimestamps\n"
-            "  - Starts from time-based mode (audio correlation → delay)\n"
-            "  - Frame-aligns global shift using TARGET video (no drift)\n"
-            "  - Deterministic frame-snapping using VideoTimestamps library\n"
-            "  - Eliminates fractional-frame errors over long content\n"
-            "  - Post-ASS-quantization validation with safety checks\n"
-            "  - More accurate than time-based for frame precision\n"
-            "  - Requires VideoTimestamps library: pip install VideoTimestamps\n"
-            "  - Requires target video file\n\n"
-            "• duration-align: Frame alignment via total duration difference\n"
-            "  - Calculates: target_duration - source_duration\n"
-            "  - Applies this offset to all subtitle times\n"
-            "  - Then adds global shift (if any)\n"
-            "  - Example: Source 23:40.003, Target 23:41.002 → +999ms offset\n"
-            "  - Ignores audio correlation completely\n"
-            "  - Best for frame-aligned videos with different total durations\n"
-            "  - Optional hybrid frame verification for accuracy\n"
-            "  - Requires both source and target video files\n\n"
-            "• correlation-frame-snap: Correlation + frame boundary refinement\n"
-            "  - Uses audio correlation as authoritative offset\n"
-            "  - Verifies frame alignment using scene change anchors\n"
-            "  - Applies precise refinement based on frame matching\n"
-            "  - Handles global shift correctly (no double-application)\n"
-            "  - Uses floor rounding for final timestamps\n"
-            "  - Detects drift/stepping via checkpoint disagreement\n"
-            "  - Requires both source and target video files\n\n"
-            "• subtitle-anchored-frame-snap: Visual-only sync\n"
-            "  - Uses subtitle positions as frame anchors (not scene detection)\n"
-            "  - No dependency on audio correlation - purely visual matching\n"
-            "  - Sliding window frame comparison with temporal consistency\n"
-            "  - Sub-frame timing precision preserved until final floor\n"
-            "  - Best when correlation fails or scene detection picks bad frames\n"
-            "  - Uses dialogue events which are stable, content-rich frames\n"
-            "  - Requires both source and target video files\n\n"
-            "• correlation-guided-frame-anchor: Hybrid correlation + robust matching\n"
-            "  - Uses correlation to guide frame search (reduces false matches)\n"
-            "  - Time-based anchors (10%, 50%, 90% of video) - not subtitle-dependent\n"
-            "  - Sliding window matching like subtitle-anchor mode\n"
-            "  - Searches ±2000ms around correlation prediction (not blind search)\n"
-            "  - 3-checkpoint agreement verification\n"
-            "  - Best when subtitle-anchor has too many false matches\n"
-            "  - Combines correlation guidance with robust frame matching\n"
-            "  - Requires both source and target video files\n\n"
-            "Note: Stepping correction (if enabled) takes precedence over this setting."
+            "• time-based: Simple delay via mkvmerge --sync (fastest)\n"
+            "• timebase-frame-locked: Time-based + VideoTimestamps frame-alignment\n"
+            "• duration-align: Align by video duration difference\n"
+            "• correlation-frame-snap: Correlation + scene-based frame verification\n"
+            "• subtitle-anchored-frame-snap: Visual-only using subtitle positions\n"
+            "• correlation-guided-frame-anchor: Correlation-guided robust matching"
+        )
+        mode_layout.addRow("Mode:", self.widgets['subtitle_sync_mode'])
+        main_layout.addWidget(mode_group)
+
+        # ===== SHARED FRAME MATCHING SETTINGS =====
+        frame_group = QGroupBox("Frame Matching Settings (All Frame-Based Modes)")
+        frame_layout = QFormLayout(frame_group)
+
+        self.widgets['frame_hash_algorithm'] = QComboBox()
+        self.widgets['frame_hash_algorithm'].addItems(['dhash', 'phash', 'average_hash', 'whash'])
+        self.widgets['frame_hash_algorithm'].setToolTip(
+            "Hash algorithm for frame comparison:\n\n"
+            "• dhash (Default): Difference hash - fast, good for scene cuts\n"
+            "• phash: Perceptual hash - better for heavy re-encoding\n"
+            "• average_hash: Simple averaging - fastest but less accurate\n"
+            "• whash: Wavelet hash - most robust for processed videos"
         )
 
-        # Time-based mode options
-        self.widgets['time_based_use_raw_values'] = QCheckBox("Use raw correlation values (pysubs)")
-        self.widgets['time_based_use_raw_values'].setToolTip(
-            "Apply delay directly to subtitle timestamps using pysubs2:\n\n"
-            "• Unchecked (Default): Use mkvmerge --sync for delay\n"
-            "  - Delay stored in container, subtitle file unchanged\n"
-            "  - Most compatible with all players\n\n"
-            "• Checked: Embed delay in subtitle timestamps\n"
-            "  - Uses raw correlation values with rounding\n"
-            "  - Subtitle file modified directly\n"
-            "  - Useful when mkvmerge delay causes issues\n\n"
-            "When enabled, the 'Rounding' setting below controls\n"
-            "how timestamps are rounded to centisecond precision."
+        self.widgets['frame_hash_size'] = QComboBox()
+        self.widgets['frame_hash_size'].addItems(['4', '8', '16'])
+        self.widgets['frame_hash_size'].setCurrentIndex(1)  # Default 8
+        self.widgets['frame_hash_size'].setToolTip(
+            "Hash size (resolution):\n\n"
+            "• 4: Very tolerant (16-bit hash)\n"
+            "• 8 (Default): Balanced precision (64-bit hash)\n"
+            "• 16: Very precise (256-bit hash)"
         )
 
-        self.widgets['raw_delay_rounding'] = QComboBox()
-        self.widgets['raw_delay_rounding'].addItems(['floor', 'round', 'ceil'])
-        self.widgets['raw_delay_rounding'].setToolTip(
-            "Rounding mode for subtitle timestamps:\n\n"
+        self.widgets['frame_hash_threshold'] = QSpinBox()
+        self.widgets['frame_hash_threshold'].setRange(0, 30)
+        self.widgets['frame_hash_threshold'].setValue(5)
+        self.widgets['frame_hash_threshold'].setToolTip(
+            "Max hamming distance for frame match:\n\n"
+            "• 0-3: Strict (near-perfect match required)\n"
+            "• 5 (Default): Balanced (minor compression differences OK)\n"
+            "• 10-15: Tolerant (heavy re-encoding OK)\n"
+            "• 20+: Very loose (may match wrong frames)"
+        )
+
+        self.widgets['frame_window_radius'] = QSpinBox()
+        self.widgets['frame_window_radius'].setRange(1, 10)
+        self.widgets['frame_window_radius'].setValue(5)
+        self.widgets['frame_window_radius'].setToolTip(
+            "Sliding window radius (frames before/after):\n\n"
+            "Window size = 2*N+1 frames for temporal consistency.\n\n"
+            "• 3: 7-frame window (faster)\n"
+            "• 5 (Default): 11-frame window (recommended)\n"
+            "• 7+: 15+ frame window (more robust, slower)"
+        )
+
+        self.widgets['frame_search_range_ms'] = QSpinBox()
+        self.widgets['frame_search_range_ms'].setRange(500, 10000)
+        self.widgets['frame_search_range_ms'].setValue(2000)
+        self.widgets['frame_search_range_ms'].setSingleStep(500)
+        self.widgets['frame_search_range_ms'].setSuffix(" ms")
+        self.widgets['frame_search_range_ms'].setToolTip(
+            "Search range around expected position (±N ms):\n\n"
+            "• 1000ms: Tight search (~24 frames at 24fps)\n"
+            "• 2000ms (Default): Standard search (~48 frames)\n"
+            "• 5000ms: Wide search for large timing differences"
+        )
+
+        self.widgets['frame_agreement_tolerance_ms'] = QSpinBox()
+        self.widgets['frame_agreement_tolerance_ms'].setRange(10, 500)
+        self.widgets['frame_agreement_tolerance_ms'].setValue(100)
+        self.widgets['frame_agreement_tolerance_ms'].setSingleStep(10)
+        self.widgets['frame_agreement_tolerance_ms'].setSuffix(" ms")
+        self.widgets['frame_agreement_tolerance_ms'].setToolTip(
+            "Agreement tolerance for checkpoint measurements:\n\n"
+            "All checkpoints must agree within this tolerance.\n\n"
+            "• 50ms: Strict (~1-2 frames)\n"
+            "• 100ms (Default): Standard (~2-3 frames)\n"
+            "• 200ms: Loose (~5 frames)"
+        )
+
+        self.widgets['frame_use_vapoursynth'] = QCheckBox("Use VapourSynth indexing")
+        self.widgets['frame_use_vapoursynth'].setChecked(True)
+        self.widgets['frame_use_vapoursynth'].setToolTip(
+            "Use VapourSynth for frame extraction:\n\n"
+            "• Checked (Default): Much faster after first run (cached .lwi index)\n"
+            "• Unchecked: Use ffprobe/ffmpeg fallback (slower but no dependencies)"
+        )
+
+        frame_layout.addRow("Hash Algorithm:", self.widgets['frame_hash_algorithm'])
+        frame_layout.addRow("Hash Size:", self.widgets['frame_hash_size'])
+        frame_layout.addRow("Hash Threshold:", self.widgets['frame_hash_threshold'])
+        frame_layout.addRow("Window Radius:", self.widgets['frame_window_radius'])
+        frame_layout.addRow("Search Range:", self.widgets['frame_search_range_ms'])
+        frame_layout.addRow("Tolerance:", self.widgets['frame_agreement_tolerance_ms'])
+        frame_layout.addRow("", self.widgets['frame_use_vapoursynth'])
+        main_layout.addWidget(frame_group)
+
+        # ===== SHARED OUTPUT SETTINGS =====
+        output_group = QGroupBox("Output Settings")
+        output_layout = QFormLayout(output_group)
+
+        self.widgets['subtitle_rounding'] = QComboBox()
+        self.widgets['subtitle_rounding'].addItems(['floor', 'round', 'ceil'])
+        self.widgets['subtitle_rounding'].setToolTip(
+            "Final rounding mode for subtitle timestamps:\n\n"
             "Controls how timestamps are rounded to ASS centisecond precision (10ms).\n\n"
-            "• floor (Default): Round down to nearest 10ms\n"
-            "  - Example: 1065.458ms → 1060ms\n"
-            "  - Conservative (subtitles appear slightly earlier)\n"
-            "  - Recommended for most cases\n\n"
-            "• round: Round to nearest 10ms\n"
-            "  - Example: 1065.458ms → 1070ms\n"
-            "  - Statistically balanced\n\n"
-            "• ceil: Round up to nearest 10ms\n"
-            "  - Example: 1065.458ms → 1070ms\n"
-            "  - Aggressive (subtitles appear slightly later)\n\n"
-            "Used when 'Use raw correlation values' is enabled."
+            "• floor (Default): Round down - subtitles appear slightly earlier\n"
+            "• round: Nearest - statistically balanced\n"
+            "• ceil: Round up - subtitles appear slightly later"
         )
+        output_layout.addRow("Rounding:", self.widgets['subtitle_rounding'])
+        main_layout.addWidget(output_group)
 
-        # VideoTimestamps Frame-Locked mode settings
-        self.widgets['videotimestamps_rounding'] = QComboBox()
-        self.widgets['videotimestamps_rounding'].addItems(['floor', 'round'])
-        self.widgets['videotimestamps_rounding'].setCurrentIndex(0)  # Default to floor
-        self.widgets['videotimestamps_rounding'].setToolTip(
-            "VideoTimestamps rounding method (timebase-frame-locked-timestamps mode):\n\n"
-            "Controls how VideoTimestamps converts between frames and time.\n\n"
-            "• floor (Default): Round timestamps down\n"
-            "  - Conservative (subtitles never appear too late)\n"
-            "  - Preferred for most use cases\n"
-            "  - Ensures subtitles don't bleed into next frame\n"
-            "  - Example: frame 100 at 23.976fps → 4170.8ms → 4170ms\n\n"
-            "• round: Standard mathematical rounding\n"
-            "  - Rounds to nearest millisecond\n"
-            "  - Statistically balanced\n"
-            "  - Example: 4170.8ms → 4171ms\n\n"
-            "This setting is separate from 'raw_delay_rounding' which controls\n"
-            "ASS centisecond quantization. VideoTimestamps rounding happens\n"
-            "during frame-to-time conversions before ASS export.\n\n"
-            "Only used when 'timebase-frame-locked-timestamps' mode is selected."
+        # ===== MODE-SPECIFIC SETTINGS =====
+        specific_group = QGroupBox("Mode-Specific Settings")
+        specific_layout = QFormLayout(specific_group)
+
+        # --- Time-based options ---
+        self.widgets['time_based_use_raw_values'] = QCheckBox("Apply delay directly to subtitle file (pysubs2)")
+        self.widgets['time_based_use_raw_values'].setToolTip(
+            "How to apply the delay:\n\n"
+            "• Unchecked (Default): Use mkvmerge --sync (delay in container)\n"
+            "• Checked: Modify subtitle timestamps directly with pysubs2"
         )
+        specific_layout.addRow("", self.widgets['time_based_use_raw_values'])
 
-        # Duration-Align settings
-        self.widgets['duration_align_use_vapoursynth'] = QCheckBox("Use VapourSynth indexing")
-        self.widgets['duration_align_use_vapoursynth'].setChecked(True)
-        self.widgets['duration_align_use_vapoursynth'].setToolTip(
-            "Use VapourSynth for frame indexing (duration-align mode):\n\n"
-            "• Checked (Default): Use VapourSynth to get frame count/timestamps\n"
-            "  - MUCH faster after first run (~1s vs 60s)\n"
-            "  - Generates .lwi index files (cached)\n"
-            "  - More accurate for VFR videos\n"
-            "  - Requires VapourSynth installed\n"
-            "  - Falls back to ffprobe if unavailable\n\n"
-            "• Unchecked: Always use ffprobe -count_frames\n"
-            "  - Slower (30-60 seconds per video)\n"
-            "  - No dependencies\n"
-            "  - Reliable fallback\n\n"
-            "VapourSynth indexing speeds up duration-align significantly!"
-        )
-
+        # --- Duration-align options ---
         self.widgets['duration_align_validate'] = QCheckBox("Validate frame alignment")
         self.widgets['duration_align_validate'].setChecked(True)
         self.widgets['duration_align_validate'].setToolTip(
-            "Validate frame alignment using perceptual hashing:\n\n"
-            "• Checked (Default): Verify videos are actually frame-aligned\n"
-            "  - Compares frames at key subtitle positions\n"
-            "  - Warns if videos don't match (wrong mode selected)\n"
-            "  - Adds ~2-5 seconds to processing\n"
-            "  - HIGH CONFIDENCE validation\n\n"
-            "• Unchecked: Skip validation\n"
-            "  - Faster, but no confirmation sync is correct\n"
-            "  - Risk of applying wrong sync offset\n\n"
-            "Highly recommended to leave enabled!"
+            "Verify videos are actually frame-aligned using perceptual hashing."
         )
 
         self.widgets['duration_align_validate_points'] = QComboBox()
-        self.widgets['duration_align_validate_points'].addItem('1 point (fast)', 1)  # Store integer value
-        self.widgets['duration_align_validate_points'].addItem('3 points (thorough)', 3)  # Store integer value
-        self.widgets['duration_align_validate_points'].setCurrentIndex(1)  # Default to 3 points
+        self.widgets['duration_align_validate_points'].addItem('1 point (fast)', 1)
+        self.widgets['duration_align_validate_points'].addItem('3 points (thorough)', 3)
+        self.widgets['duration_align_validate_points'].setCurrentIndex(1)
         self.widgets['duration_align_validate_points'].setToolTip(
-            "Number of checkpoints to validate:\n\n"
-            "• 1 point (fast): Only check first subtitle\n"
-            "  - Fastest (~1-2 seconds)\n"
-            "  - Good if videos are known to be same cut\n"
-            "  - May miss issues later in video\n\n"
-            "• 3 points (thorough) [DEFAULT]: Check first, middle, last subtitles\n"
-            "  - Takes ~3-5 seconds\n"
-            "  - Catches scene cut differences\n"
-            "  - Detects credits length differences\n"
-            "  - RECOMMENDED for unknown videos\n\n"
-            "For each checkpoint, validates 11 frames (center ± 5)."
-        )
-
-        self.widgets['duration_align_hash_threshold'] = QSpinBox()
-        self.widgets['duration_align_hash_threshold'].setRange(0, 30)
-        self.widgets['duration_align_hash_threshold'].setValue(5)
-        self.widgets['duration_align_hash_threshold'].setToolTip(
-            "Perceptual hash similarity threshold:\n\n"
-            "Maximum hamming distance for frames to be considered matching.\n\n"
-            "• 0: Perfect match only (too strict for compression differences)\n"
-            "• 3-5 (Default): Very similar frames\n"
-            "  - Tolerates minor compression differences\n"
-            "  - Good for Remux ↔ WebDL\n"
-            "• 8-15: More tolerant\n"
-            "  - Heavy re-encoding (Remux ↔ Encode)\n"
-            "  - Color grading differences\n"
-            "• 20-30: Very loose\n"
-            "  - Different filters/processing\n"
-            "  - May match wrong scenes if too high\n\n"
-            "Increase if validation fails on visually identical scenes."
-        )
-
-        self.widgets['duration_align_hash_algorithm'] = QComboBox()
-        self.widgets['duration_align_hash_algorithm'].addItems(['dhash', 'phash', 'average_hash', 'whash'])
-        self.widgets['duration_align_hash_algorithm'].setToolTip(
-            "Perceptual hash algorithm:\n\n"
-            "Different algorithms have different tolerance to visual changes:\n\n"
-            "• dhash (Default): Difference hash\n"
-            "  - Fast and accurate\n"
-            "  - Good for compression artifacts\n"
-            "  - Best for: Remux ↔ WebDL, light transcodes\n"
-            "  - Use with threshold 3-8\n\n"
-            "• phash: Perceptual hash (DCT-based)\n"
-            "  - More robust to re-encoding\n"
-            "  - Handles color grading, filtering\n"
-            "  - Best for: Remux ↔ Heavy Encode\n"
-            "  - Use with threshold 10-20\n\n"
-            "• average_hash: Simple averaging\n"
-            "  - Fastest but least accurate\n"
-            "  - Use for testing only\n\n"
-            "• whash: Wavelet hash\n"
-            "  - Most robust, but slowest\n"
-            "  - Best for heavily processed videos\n"
-            "  - Use with threshold 15-30\n\n"
-            "Start with dhash, try phash if validation fails on same-source videos."
-        )
-
-        self.widgets['duration_align_hash_size'] = QComboBox()
-        self.widgets['duration_align_hash_size'].addItems(['4', '8', '16'])
-        self.widgets['duration_align_hash_size'].setCurrentIndex(1)  # Default to 8
-        self.widgets['duration_align_hash_size'].setToolTip(
-            "Hash size (resolution):\n\n"
-            "Larger hash = more precise but less tolerant to differences.\n\n"
-            "• 4x4 (16 bits):\n"
-            "  - Very tolerant to changes\n"
-            "  - Less precise\n"
-            "  - Good for heavily re-encoded content\n\n"
-            "• 8x8 (64 bits) [DEFAULT]:\n"
-            "  - Balanced precision and tolerance\n"
-            "  - Recommended for most cases\n\n"
-            "• 16x16 (256 bits):\n"
-            "  - Very precise\n"
-            "  - Less tolerant to compression\n"
-            "  - Good for near-identical encodes\n\n"
-            "Keep at 8 unless you need more tolerance (use 4) or precision (use 16)."
+            "Number of checkpoints to validate (first, middle, last)."
         )
 
         self.widgets['duration_align_strictness'] = QSpinBox()
@@ -1466,477 +1395,191 @@ class SubtitleSyncTab(QWidget):
         self.widgets['duration_align_strictness'].setValue(80)
         self.widgets['duration_align_strictness'].setSuffix("%")
         self.widgets['duration_align_strictness'].setToolTip(
-            "Validation strictness (match percentage required):\n\n"
-            "Percentage of frames that must match at each checkpoint for validation to pass.\n\n"
-            "• 90-100%: Very strict\n"
-            "  - Requires near-perfect matches\n"
-            "  - Good for identical encodes\n\n"
-            "• 80% (Default): Balanced\n"
-            "  - Allows some mismatches\n"
-            "  - Good for light transcodes\n\n"
-            "• 60-70%: Tolerant\n"
-            "  - Accepts more differences\n"
-            "  - Good for heavy re-encodes\n\n"
-            "Lower this if validation fails on same-source videos with different encoding."
+            "Percentage of frames that must match at each checkpoint."
         )
 
-        # Hybrid verification settings
-        self.widgets['duration_align_verify_with_frames'] = QCheckBox("Verify alignment with frame matching (hybrid mode)")
-        self.widgets['duration_align_verify_with_frames'].setChecked(False)
+        self.widgets['duration_align_verify_with_frames'] = QCheckBox("Hybrid mode: verify with sliding window")
         self.widgets['duration_align_verify_with_frames'].setToolTip(
-            "Enable hybrid verification mode:\n\n"
-            "Combines duration-align (fast rough estimate) with sliding window\n"
-            "frame matching (precise verification) for maximum accuracy.\n\n"
-            "How it works:\n"
-            "1. Calculate duration offset (fast, approximate)\n"
-            "2. Extract frames at 3 checkpoints (first/mid/last subtitles)\n"
-            "3. Use sliding window to find actual frame alignment\n"
-            "4. Verify all measurements agree (within tolerance)\n"
-            "5. Use precise measurement if agreement, fallback if not\n\n"
-            "Benefits:\n"
-            "• More accurate than pure duration-align\n"
-            "• Faster than full frame-matched mode\n"
-            "• Self-validates - knows if sync is correct\n"
-            "• Works even with small encode differences\n\n"
-            "Adds ~10-20 seconds but gives high-confidence sync.\n\n"
-            "Recommended for important syncs where accuracy matters."
+            "Combine duration-align with sliding window frame matching for higher accuracy."
         )
 
-        self.widgets['duration_align_verify_search_window'] = QSpinBox()
-        self.widgets['duration_align_verify_search_window'].setRange(500, 10000)
-        self.widgets['duration_align_verify_search_window'].setValue(2000)
-        self.widgets['duration_align_verify_search_window'].setSingleStep(500)
-        self.widgets['duration_align_verify_search_window'].setSuffix(" ms")
-        self.widgets['duration_align_verify_search_window'].setToolTip(
-            "Search window for frame matching verification:\n\n"
-            "How far to search around the duration-based estimate.\n\n"
-            "• 2000ms (Default): Search ±2 seconds\n"
-            "  - Good for most encode differences\n"
-            "  - Catches frame shift of ~48-60 frames at 24fps\n\n"
-            "• 5000ms: Search ±5 seconds\n"
-            "  - For heavily different encodes\n"
-            "  - If duration estimate might be very wrong\n\n"
-            "Larger = more thorough but slower.\n"
-            "Only used when hybrid mode enabled."
-        )
-
-        self.widgets['duration_align_verify_tolerance'] = QSpinBox()
-        self.widgets['duration_align_verify_tolerance'].setRange(10, 500)
-        self.widgets['duration_align_verify_tolerance'].setValue(100)
-        self.widgets['duration_align_verify_tolerance'].setSingleStep(10)
-        self.widgets['duration_align_verify_tolerance'].setSuffix(" ms")
-        self.widgets['duration_align_verify_tolerance'].setToolTip(
-            "Agreement tolerance for measurements:\n\n"
-            "All 3 checkpoints must agree within this tolerance.\n\n"
-            "• 100ms (Default): Tight agreement\n"
-            "  - Ensures all measurements are consistent\n"
-            "  - ~2-3 frames at 24fps\n\n"
-            "• 200ms: Looser tolerance\n"
-            "  - For VFR or borderline cases\n"
-            "  - ~5 frames at 24fps\n\n"
-            "If measurements disagree, uses fallback mode setting.\n"
-            "Only used when hybrid mode enabled."
+        self.widgets['duration_align_skip_validation_generated_tracks'] = QCheckBox("Skip validation for generated tracks")
+        self.widgets['duration_align_skip_validation_generated_tracks'].setChecked(True)
+        self.widgets['duration_align_skip_validation_generated_tracks'].setToolTip(
+            "Generated tracks inherit timing from source - no need to re-validate."
         )
 
         self.widgets['duration_align_fallback_mode'] = QComboBox()
-        self.widgets['duration_align_fallback_mode'].addItems(['none', 'abort', 'auto-fallback', 'duration-offset'])
+        self.widgets['duration_align_fallback_mode'].addItems(['none', 'abort', 'duration-offset'])
         self.widgets['duration_align_fallback_mode'].setToolTip(
-            "What to do if frame validation fails:\n\n"
-            "• none (Default): Warn but continue\n"
-            "  - Shows warning in logs\n"
-            "  - Applies duration-align sync anyway\n"
-            "  - User can review and re-run if needed\n\n"
+            "What to do if validation fails:\n"
+            "• none: Warn but continue\n"
             "• abort: Fail the job\n"
-            "  - Returns error, job shows as failed\n"
-            "  - Good for batch processing to identify problems\n"
-            "  - Forces manual review and correction\n\n"
-            "• duration-offset: Use duration offset\n"
-            "  - Falls back to simple duration calculation\n"
-            "  - Skips frame verification entirely\n"
-            "  - For hybrid mode: use if measurements disagree\n\n"
-            "• auto-fallback: Try different sync mode\n"
-            "  - Automatically uses fallback mode (configured below)\n"
-            "  - Seamless recovery from validation failures\n"
-            "  - Good for automated workflows\n\n"
-            "Recommended: 'abort' for batch, 'duration-offset' for hybrid mode."
+            "• duration-offset: Use duration calculation only"
         )
 
-        self.widgets['duration_align_fallback_target'] = QComboBox()
-        self.widgets['duration_align_fallback_target'].addItems([
-            'not-implemented'
-        ])
-        self.widgets['duration_align_fallback_target'].setToolTip(
-            "Fallback sync mode if validation fails:\n\n"
-            "NOTE: Auto-fallback is not yet implemented.\n"
-            "If 'auto-fallback' is selected above, the system will\n"
-            "fall back to using duration-offset instead."
-        )
+        specific_layout.addRow("", self.widgets['duration_align_validate'])
+        specific_layout.addRow("Validation Points:", self.widgets['duration_align_validate_points'])
+        specific_layout.addRow("Strictness:", self.widgets['duration_align_strictness'])
+        specific_layout.addRow("", self.widgets['duration_align_verify_with_frames'])
+        specific_layout.addRow("", self.widgets['duration_align_skip_validation_generated_tracks'])
+        specific_layout.addRow("DA Fallback:", self.widgets['duration_align_fallback_mode'])
 
-        # Skip validation for generated tracks
-        self.widgets['duration_align_skip_validation_generated_tracks'] = QCheckBox("Skip validation for generated tracks (recommended)")
-        self.widgets['duration_align_skip_validation_generated_tracks'].setChecked(True)
-        self.widgets['duration_align_skip_validation_generated_tracks'].setToolTip(
-            "Automatically skip frame validation for generated tracks:\n\n"
-            "Generated tracks are created by filtering styles from an already-synced\n"
-            "source track. They inherit the same timing, so re-validating is redundant.\n\n"
-            "• Checked (Default): Skip validation for all generated tracks\n"
-            "  - Faster processing\n"
-            "  - Safe since source was already validated\n\n"
-            "• Unchecked: Validate generated tracks like normal tracks\n"
-            "  - May fail validation on sparse events (signs tracks)\n"
-            "  - Slower but more thorough\n\n"
-            "Recommendation: Keep enabled for faster, safer processing."
-        )
-
-        # Correlation + Frame Snap settings
+        # --- Correlation-frame-snap options ---
         self.widgets['correlation_snap_fallback_mode'] = QComboBox()
         self.widgets['correlation_snap_fallback_mode'].addItems(['snap-to-frame', 'use-raw', 'abort'])
         self.widgets['correlation_snap_fallback_mode'].setToolTip(
-            "What to do if frame verification fails (correlation-frame-snap mode):\n\n"
-            "• snap-to-frame (Default): Snap correlation to nearest frame\n"
-            "  - Rounds pure correlation to nearest frame boundary\n"
-            "  - Safe fallback when checkpoints disagree\n"
-            "  - Ensures frame-aligned timing\n\n"
+            "What to do if frame verification fails:\n"
+            "• snap-to-frame: Snap correlation to nearest frame\n"
             "• use-raw: Use raw correlation delay\n"
-            "  - No frame correction applied\n"
-            "  - May be off by partial frame\n"
-            "  - Good if frame matching is unreliable\n\n"
-            "• abort: Fail the job\n"
-            "  - Returns error, job shows as failed\n"
-            "  - Use when accurate sync is critical\n\n"
-            "Recommendation: 'snap-to-frame' for most cases."
+            "• abort: Fail the job"
         )
+        specific_layout.addRow("CorrSnap Fallback:", self.widgets['correlation_snap_fallback_mode'])
 
-        self.widgets['correlation_snap_hash_algorithm'] = QComboBox()
-        self.widgets['correlation_snap_hash_algorithm'].addItems(['dhash', 'phash', 'average_hash'])
-        self.widgets['correlation_snap_hash_algorithm'].setToolTip(
-            "Hash algorithm for frame comparison (correlation-frame-snap):\n\n"
-            "• dhash (Default): Difference hash - fast and robust\n"
-            "  - Compares adjacent pixels\n"
-            "  - Good for detecting scene cuts\n"
-            "  - Recommended for most cases\n\n"
-            "• phash: Perceptual hash - more accurate\n"
-            "  - DCT-based frequency analysis\n"
-            "  - Better with compression artifacts\n"
-            "  - Slightly slower\n\n"
-            "• average_hash: Simple average-based hash\n"
-            "  - Very fast but less accurate\n"
-            "  - May have false positives"
-        )
-
-        self.widgets['correlation_snap_hash_threshold'] = QSpinBox()
-        self.widgets['correlation_snap_hash_threshold'].setRange(0, 64)
-        self.widgets['correlation_snap_hash_threshold'].setValue(5)
-        self.widgets['correlation_snap_hash_threshold'].setToolTip(
-            "Hash threshold (hamming distance) for frame matching:\n\n"
-            "Maximum allowed difference between frame hashes.\n"
-            "For 8x8 hash, range is 0-64 bits.\n\n"
-            "• 0: Perfect match only (too strict)\n"
-            "• 5 (Default): Similar frames (recommended)\n"
-            "• 10-15: More tolerant (for heavy compression)\n"
-            "• 20+: Too loose (may match wrong frames)\n\n"
-            "Lower = stricter matching."
-        )
-
-        self.widgets['correlation_snap_window_radius'] = QSpinBox()
-        self.widgets['correlation_snap_window_radius'].setRange(1, 10)
-        self.widgets['correlation_snap_window_radius'].setValue(3)
-        self.widgets['correlation_snap_window_radius'].setToolTip(
-            "Sliding window radius (frames before/after center):\n\n"
-            "Creates a window of (2*N+1) frames centered on scene change.\n"
-            "Used to match a sequence of frames, not just one.\n\n"
-            "• 1: 3 frame window (minimal)\n"
-            "• 3 (Default): 7 frame window (recommended)\n"
-            "• 5: 11 frame window (more robust)\n\n"
-            "Larger = more robust matching but slower."
-        )
-
-        self.widgets['correlation_snap_search_range'] = QSpinBox()
-        self.widgets['correlation_snap_search_range'].setRange(1, 30)
-        self.widgets['correlation_snap_search_range'].setValue(5)
-        self.widgets['correlation_snap_search_range'].setToolTip(
-            "Search range around correlation prediction (±N frames):\n\n"
-            "After correlation predicts target position, we search\n"
-            "±N frames to find the best frame alignment.\n\n"
-            "• 5 (Default): Good for remux vs remux (~200ms)\n"
-            "• 10-15: For encodes or larger timing differences\n"
-            "• 20-30: For very different sources\n\n"
-            "Increase if best match is at edge of search window."
-        )
-
-        # Subtitle-Anchored Frame Snap settings
-        self.widgets['sub_anchor_search_range_ms'] = QSpinBox()
-        self.widgets['sub_anchor_search_range_ms'].setRange(500, 10000)
-        self.widgets['sub_anchor_search_range_ms'].setValue(2000)
-        self.widgets['sub_anchor_search_range_ms'].setSingleStep(500)
-        self.widgets['sub_anchor_search_range_ms'].setSuffix(" ms")
-        self.widgets['sub_anchor_search_range_ms'].setToolTip(
-            "Search range around expected position (±N ms):\n\n"
-            "How far to search from the subtitle's source time.\n"
-            "This is converted to frames based on video FPS.\n\n"
-            "• 2000ms (Default): Search ±2 seconds (~48 frames at 24fps)\n"
-            "  - Good for most frame-aligned videos\n"
-            "  - Covers typical sync offsets up to ±1500ms\n\n"
-            "• 5000ms: Search ±5 seconds (~120 frames at 24fps)\n"
-            "  - For videos with larger timing differences\n"
-            "  - Slower but more thorough\n\n"
-            "Larger = more thorough but slower."
-        )
-
-        self.widgets['sub_anchor_hash_algorithm'] = QComboBox()
-        self.widgets['sub_anchor_hash_algorithm'].addItems(['dhash', 'phash', 'average_hash'])
-        self.widgets['sub_anchor_hash_algorithm'].setToolTip(
-            "Hash algorithm for frame comparison:\n\n"
-            "• dhash (Default): Difference hash - fast and robust\n"
-            "  - Compares adjacent pixels for edge detection\n"
-            "  - Best for detecting content changes\n"
-            "  - Recommended for most cases\n\n"
-            "• phash: Perceptual hash - more accurate\n"
-            "  - DCT-based frequency analysis\n"
-            "  - Better with heavy compression\n"
-            "  - Slightly slower\n\n"
-            "• average_hash: Simple average-based hash\n"
-            "  - Very fast but less accurate\n"
-            "  - May have more false positives"
-        )
-
-        self.widgets['sub_anchor_hash_threshold'] = QSpinBox()
-        self.widgets['sub_anchor_hash_threshold'].setRange(0, 30)
-        self.widgets['sub_anchor_hash_threshold'].setValue(5)
-        self.widgets['sub_anchor_hash_threshold'].setToolTip(
-            "Hash threshold (max hamming distance):\n\n"
-            "Maximum allowed difference between frame hashes.\n"
-            "For 8x8 hash, range is 0-64 bits.\n\n"
-            "• 0: Perfect match only (too strict)\n"
-            "• 3-5 (Default): Very similar frames\n"
-            "  - Tolerates minor compression differences\n"
-            "  - Good for Remux ↔ WebDL\n"
-            "• 8-15: More tolerant\n"
-            "  - Heavy re-encoding (Remux ↔ Encode)\n"
-            "  - Color grading differences\n\n"
-            "Lower = stricter matching."
-        )
-
-        self.widgets['sub_anchor_window_radius'] = QSpinBox()
-        self.widgets['sub_anchor_window_radius'].setRange(3, 10)
-        self.widgets['sub_anchor_window_radius'].setValue(5)
-        self.widgets['sub_anchor_window_radius'].setToolTip(
-            "Frame window radius (frames before/after center):\n\n"
-            "Creates a window of (2*N+1) frames for temporal consistency.\n"
-            "Ensures we match a SEQUENCE of frames, not just one.\n\n"
-            "• 3: 7 frame window (faster)\n"
-            "• 5 (Default): 11 frame window (recommended)\n"
-            "  - Good balance of accuracy and speed\n"
-            "• 7-10: 15-21 frame window (more robust)\n"
-            "  - Better for static scenes\n\n"
-            "Larger = more robust but slower."
-        )
-
-        self.widgets['sub_anchor_agreement_tolerance_ms'] = QSpinBox()
-        self.widgets['sub_anchor_agreement_tolerance_ms'].setRange(10, 500)
-        self.widgets['sub_anchor_agreement_tolerance_ms'].setValue(100)
-        self.widgets['sub_anchor_agreement_tolerance_ms'].setSingleStep(10)
-        self.widgets['sub_anchor_agreement_tolerance_ms'].setSuffix(" ms")
-        self.widgets['sub_anchor_agreement_tolerance_ms'].setToolTip(
-            "Agreement tolerance for checkpoint measurements:\n\n"
-            "All checkpoints must agree within this tolerance.\n"
-            "If measurements disagree, uses fallback mode.\n\n"
-            "• 100ms (Default): Tight agreement\n"
-            "  - Ensures measurements are consistent\n"
-            "  - ~2-3 frames at 24fps\n\n"
-            "• 200ms: Looser tolerance\n"
-            "  - For VFR or borderline cases\n"
-            "  - ~5 frames at 24fps\n\n"
-            "Lower = stricter verification."
-        )
-
+        # --- Subtitle-anchored options ---
         self.widgets['sub_anchor_fallback_mode'] = QComboBox()
         self.widgets['sub_anchor_fallback_mode'].addItems(['abort', 'use-median'])
         self.widgets['sub_anchor_fallback_mode'].setToolTip(
-            "What to do if frame matching fails or checkpoints disagree:\n\n"
-            "• abort (Default): Fail the job\n"
-            "  - Returns error, job shows as failed\n"
-            "  - Recommended for batch processing\n"
-            "  - Forces manual review when sync uncertain\n\n"
-            "• use-median: Use median offset anyway\n"
-            "  - Applies median of measurements even if they disagree\n"
-            "  - Use when you want to proceed despite uncertainty\n"
-            "  - May result in incorrect sync\n\n"
-            "Recommendation: 'abort' for important syncs."
+            "What to do if checkpoints disagree:\n"
+            "• abort: Fail the job\n"
+            "• use-median: Use median offset anyway"
         )
+        specific_layout.addRow("SubAnchor Fallback:", self.widgets['sub_anchor_fallback_mode'])
 
-        # Correlation-Guided Frame Anchor settings
-        self.widgets['corr_anchor_search_range_ms'] = QSpinBox()
-        self.widgets['corr_anchor_search_range_ms'].setRange(500, 10000)
-        self.widgets['corr_anchor_search_range_ms'].setValue(2000)
-        self.widgets['corr_anchor_search_range_ms'].setSingleStep(500)
-        self.widgets['corr_anchor_search_range_ms'].setSuffix(" ms")
-        self.widgets['corr_anchor_search_range_ms'].setToolTip(
-            "Search range around correlation prediction (±N ms):\n\n"
-            "How far to search from correlation-predicted position.\n"
-            "Narrows the search compared to subtitle-anchor mode.\n\n"
-            "• 1000ms: Tight search (~24 frames at 24fps)\n"
-            "  - For very accurate correlation\n\n"
-            "• 2000ms (Default): Standard (~48 frames)\n"
-            "  - Good balance for most videos\n\n"
-            "• 5000ms: Wide search (~120 frames)\n"
-            "  - When correlation may be off significantly"
-        )
-
-        self.widgets['corr_anchor_hash_algorithm'] = QComboBox()
-        self.widgets['corr_anchor_hash_algorithm'].addItems(['dhash', 'phash', 'average_hash'])
-        self.widgets['corr_anchor_hash_algorithm'].setToolTip(
-            "Hash algorithm for frame comparison:\n\n"
-            "• dhash (Default): Difference hash - fast and robust\n"
-            "• phash: Perceptual hash - best for heavy re-encoding\n"
-            "• average_hash: Simple averaging - fastest but less accurate"
-        )
-
-        self.widgets['corr_anchor_hash_threshold'] = QSpinBox()
-        self.widgets['corr_anchor_hash_threshold'].setRange(0, 30)
-        self.widgets['corr_anchor_hash_threshold'].setValue(5)
-        self.widgets['corr_anchor_hash_threshold'].setToolTip(
-            "Hash threshold (max hamming distance):\n\n"
-            "Maximum allowed difference between frame hashes.\n\n"
-            "• 0-3: Very strict - requires near-perfect match\n"
-            "• 5 (Default): Balanced - allows minor differences\n"
-            "• 10+: Lenient - for heavily compressed videos"
-        )
-
-        self.widgets['corr_anchor_window_radius'] = QSpinBox()
-        self.widgets['corr_anchor_window_radius'].setRange(3, 10)
-        self.widgets['corr_anchor_window_radius'].setValue(5)
-        self.widgets['corr_anchor_window_radius'].setToolTip(
-            "Frame window radius (frames before/after center):\n\n"
-            "Creates a window of (2*N+1) frames for temporal consistency.\n\n"
-            "• 3: 7-frame window - faster, less robust\n"
-            "• 5 (Default): 11-frame window - good balance\n"
-            "• 7+: 15+ frame window - more robust, slower"
-        )
-
-        self.widgets['corr_anchor_agreement_tolerance_ms'] = QSpinBox()
-        self.widgets['corr_anchor_agreement_tolerance_ms'].setRange(10, 500)
-        self.widgets['corr_anchor_agreement_tolerance_ms'].setValue(100)
-        self.widgets['corr_anchor_agreement_tolerance_ms'].setSingleStep(10)
-        self.widgets['corr_anchor_agreement_tolerance_ms'].setSuffix(" ms")
-        self.widgets['corr_anchor_agreement_tolerance_ms'].setToolTip(
-            "Agreement tolerance for checkpoint measurements:\n\n"
-            "All checkpoints must agree within this tolerance.\n\n"
-            "• 50ms: Strict\n"
-            "  - ~1-2 frames at 24fps\n\n"
-            "• 100ms (Default): Standard\n"
-            "  - ~2-3 frames at 24fps\n\n"
-            "• 200ms: Looser\n"
-            "  - ~5 frames at 24fps"
-        )
-
+        # --- Correlation-guided options ---
         self.widgets['corr_anchor_fallback_mode'] = QComboBox()
-        self.widgets['corr_anchor_fallback_mode'].addItems(['abort', 'use-median', 'use-correlation'])
+        self.widgets['corr_anchor_fallback_mode'].addItems(['use-correlation', 'use-median', 'abort'])
         self.widgets['corr_anchor_fallback_mode'].setToolTip(
-            "What to do if frame matching fails or checkpoints disagree:\n\n"
-            "• abort (Default): Fail the job\n"
-            "  - Forces manual review when sync uncertain\n\n"
+            "What to do if checkpoints disagree:\n"
+            "• use-correlation: Fall back to correlation baseline\n"
             "• use-median: Use median offset anyway\n"
-            "  - May result in incorrect sync\n\n"
-            "• use-correlation: Fall back to raw correlation\n"
-            "  - Uses correlation baseline without frame refinement"
+            "• abort: Fail the job"
         )
 
         self.widgets['corr_anchor_refine_per_line'] = QCheckBox("Refine each subtitle to exact frames")
         self.widgets['corr_anchor_refine_per_line'].setToolTip(
-            "Per-line frame refinement:\n\n"
-            "After checkpoint validation, refine each subtitle line to exact frames.\n\n"
-            "How it works:\n"
-            "• Uses checkpoint offset as starting point\n"
-            "• Finds exact matching frames for each subtitle START\n"
-            "• Preserves original subtitle duration (authoring intent)\n"
-            "• Falls back to global offset if frames don't match\n\n"
-            "Benefits:\n"
-            "• Frame-perfect alignment\n"
-            "• Handles NTSC conversions (23.976 fps)\n"
-            "• Prevents invalid timings (end < start)\n"
-            "• 2x faster than refining both start and end\n\n"
-            "Ideal for: Videos with 1001/1000 global shift or minor encoding differences.\n"
-            "Performance: ~5-15 seconds for typical files (with 4 workers)."
+            "After checkpoint validation, refine each subtitle line to exact frames."
         )
 
         self.widgets['corr_anchor_refine_workers'] = QSpinBox()
         self.widgets['corr_anchor_refine_workers'].setRange(1, 16)
         self.widgets['corr_anchor_refine_workers'].setValue(4)
         self.widgets['corr_anchor_refine_workers'].setToolTip(
-            "Number of parallel workers for refinement:\n\n"
-            "• 1: Sequential processing (slower, easier to debug)\n"
-            "• 4-8: Recommended for most systems\n"
-            "• 8-16: For high-end CPUs (12+ cores)\n\n"
-            "Performance scaling:\n"
-            "• 4 workers ≈ 3-4x speedup\n"
-            "• 8 workers ≈ 6-7x speedup\n\n"
-            "Note: Each worker needs its own video reader instance.\n"
-            "Memory usage increases slightly with more workers."
+            "Number of parallel workers for per-line refinement."
         )
 
-        # Layout - Sync Mode
-        sync_layout.addRow("Sync Mode:", self.widgets['subtitle_sync_mode'])
+        specific_layout.addRow("CorrGuided Fallback:", self.widgets['corr_anchor_fallback_mode'])
+        specific_layout.addRow("", self.widgets['corr_anchor_refine_per_line'])
+        specific_layout.addRow("Refine Workers:", self.widgets['corr_anchor_refine_workers'])
 
-        # Time-based mode options
-        sync_layout.addRow("", self.widgets['time_based_use_raw_values'])
-        sync_layout.addRow("Rounding:", self.widgets['raw_delay_rounding'])
-
-        # VideoTimestamps Frame-Locked mode options
-        sync_layout.addRow("VTS Rounding:", self.widgets['videotimestamps_rounding'])
-
-        # Duration-Align mode options
-        sync_layout.addRow("", self.widgets['duration_align_use_vapoursynth'])
-        sync_layout.addRow("", self.widgets['duration_align_validate'])
-        sync_layout.addRow("Validation Points:", self.widgets['duration_align_validate_points'])
-        sync_layout.addRow("Hash Algorithm:", self.widgets['duration_align_hash_algorithm'])
-        sync_layout.addRow("Hash Size:", self.widgets['duration_align_hash_size'])
-        sync_layout.addRow("Hash Threshold:", self.widgets['duration_align_hash_threshold'])
-        sync_layout.addRow("Strictness:", self.widgets['duration_align_strictness'])
-        sync_layout.addRow("", self.widgets['duration_align_verify_with_frames'])
-        sync_layout.addRow("Verify Search Window:", self.widgets['duration_align_verify_search_window'])
-        sync_layout.addRow("Verify Tolerance:", self.widgets['duration_align_verify_tolerance'])
-        sync_layout.addRow("Fallback Mode:", self.widgets['duration_align_fallback_mode'])
-        sync_layout.addRow("Fallback Target:", self.widgets['duration_align_fallback_target'])
-        sync_layout.addRow("", self.widgets['duration_align_skip_validation_generated_tracks'])
-
-        # Correlation+FrameSnap mode options
-        sync_layout.addRow("Corr+Snap Fallback:", self.widgets['correlation_snap_fallback_mode'])
-        sync_layout.addRow("Corr+Snap Hash:", self.widgets['correlation_snap_hash_algorithm'])
-        sync_layout.addRow("Corr+Snap Threshold:", self.widgets['correlation_snap_hash_threshold'])
-        sync_layout.addRow("Corr+Snap Window:", self.widgets['correlation_snap_window_radius'])
-        sync_layout.addRow("Corr+Snap Search:", self.widgets['correlation_snap_search_range'])
-
-        # Subtitle-Anchored Frame Snap mode options
-        sync_layout.addRow("SubAnchor Search Range:", self.widgets['sub_anchor_search_range_ms'])
-        sync_layout.addRow("SubAnchor Hash:", self.widgets['sub_anchor_hash_algorithm'])
-        sync_layout.addRow("SubAnchor Threshold:", self.widgets['sub_anchor_hash_threshold'])
-        sync_layout.addRow("SubAnchor Window:", self.widgets['sub_anchor_window_radius'])
-        sync_layout.addRow("SubAnchor Tolerance:", self.widgets['sub_anchor_agreement_tolerance_ms'])
-        sync_layout.addRow("SubAnchor Fallback:", self.widgets['sub_anchor_fallback_mode'])
-
-        # Correlation-Guided Frame Anchor mode options
-        sync_layout.addRow("CorrGuided Search Range:", self.widgets['corr_anchor_search_range_ms'])
-        sync_layout.addRow("CorrGuided Hash:", self.widgets['corr_anchor_hash_algorithm'])
-        sync_layout.addRow("CorrGuided Threshold:", self.widgets['corr_anchor_hash_threshold'])
-        sync_layout.addRow("CorrGuided Window:", self.widgets['corr_anchor_window_radius'])
-        sync_layout.addRow("CorrGuided Tolerance:", self.widgets['corr_anchor_agreement_tolerance_ms'])
-        sync_layout.addRow("CorrGuided Fallback:", self.widgets['corr_anchor_fallback_mode'])
-        sync_layout.addRow("", self.widgets['corr_anchor_refine_per_line'])
-        sync_layout.addRow("CorrGuided Workers:", self.widgets['corr_anchor_refine_workers'])
-
-        main_layout.addWidget(sync_group)
+        main_layout.addWidget(specific_group)
         main_layout.addStretch(1)
 
-        # Connect signals for visibility updates
+        # ===== DEPRECATED WIDGETS (hidden, for backwards compat loading) =====
+        # These are loaded from old configs but not shown in UI
+        self._create_deprecated_widgets()
+
+        # Connect signals
         self.widgets['subtitle_sync_mode'].currentTextChanged.connect(self._update_mode_visibility)
-        self.widgets['time_based_use_raw_values'].toggled.connect(
-            lambda: self._update_mode_visibility(self.widgets['subtitle_sync_mode'].currentText())
-        )
-        self.widgets['duration_align_verify_with_frames'].toggled.connect(
-            lambda: self._update_mode_visibility(self.widgets['subtitle_sync_mode'].currentText())
-        )
         self._update_mode_visibility(self.widgets['subtitle_sync_mode'].currentText())
+
+
+    def _create_deprecated_widgets(self):
+        """Create hidden widgets for backwards compatibility with old configs."""
+        # These widgets are not shown but exist for loading old config values
+        # The logic module will map these to unified settings
+
+        # Old mode-specific hash settings (now unified)
+        self.widgets['raw_delay_rounding'] = QComboBox()
+        self.widgets['raw_delay_rounding'].addItems(['floor', 'round', 'ceil'])
+        self.widgets['raw_delay_rounding'].hide()
+
+        self.widgets['videotimestamps_rounding'] = QComboBox()
+        self.widgets['videotimestamps_rounding'].addItems(['floor', 'round'])
+        self.widgets['videotimestamps_rounding'].hide()
+
+        self.widgets['duration_align_hash_algorithm'] = QComboBox()
+        self.widgets['duration_align_hash_algorithm'].addItems(['dhash', 'phash', 'average_hash', 'whash'])
+        self.widgets['duration_align_hash_algorithm'].hide()
+
+        self.widgets['duration_align_hash_size'] = QComboBox()
+        self.widgets['duration_align_hash_size'].addItems(['4', '8', '16'])
+        self.widgets['duration_align_hash_size'].hide()
+
+        self.widgets['duration_align_hash_threshold'] = QSpinBox()
+        self.widgets['duration_align_hash_threshold'].setRange(0, 30)
+        self.widgets['duration_align_hash_threshold'].hide()
+
+        self.widgets['duration_align_use_vapoursynth'] = QCheckBox()
+        self.widgets['duration_align_use_vapoursynth'].hide()
+
+        self.widgets['duration_align_verify_search_window'] = QSpinBox()
+        self.widgets['duration_align_verify_search_window'].setRange(500, 10000)
+        self.widgets['duration_align_verify_search_window'].hide()
+
+        self.widgets['duration_align_verify_tolerance'] = QSpinBox()
+        self.widgets['duration_align_verify_tolerance'].setRange(10, 500)
+        self.widgets['duration_align_verify_tolerance'].hide()
+
+        self.widgets['duration_align_fallback_target'] = QComboBox()
+        self.widgets['duration_align_fallback_target'].addItems(['not-implemented'])
+        self.widgets['duration_align_fallback_target'].hide()
+
+        self.widgets['correlation_snap_hash_algorithm'] = QComboBox()
+        self.widgets['correlation_snap_hash_algorithm'].addItems(['dhash', 'phash', 'average_hash'])
+        self.widgets['correlation_snap_hash_algorithm'].hide()
+
+        self.widgets['correlation_snap_hash_threshold'] = QSpinBox()
+        self.widgets['correlation_snap_hash_threshold'].setRange(0, 64)
+        self.widgets['correlation_snap_hash_threshold'].hide()
+
+        self.widgets['correlation_snap_window_radius'] = QSpinBox()
+        self.widgets['correlation_snap_window_radius'].setRange(1, 10)
+        self.widgets['correlation_snap_window_radius'].hide()
+
+        self.widgets['correlation_snap_search_range'] = QSpinBox()
+        self.widgets['correlation_snap_search_range'].setRange(1, 30)
+        self.widgets['correlation_snap_search_range'].hide()
+
+        self.widgets['sub_anchor_search_range_ms'] = QSpinBox()
+        self.widgets['sub_anchor_search_range_ms'].setRange(500, 10000)
+        self.widgets['sub_anchor_search_range_ms'].hide()
+
+        self.widgets['sub_anchor_hash_algorithm'] = QComboBox()
+        self.widgets['sub_anchor_hash_algorithm'].addItems(['dhash', 'phash', 'average_hash'])
+        self.widgets['sub_anchor_hash_algorithm'].hide()
+
+        self.widgets['sub_anchor_hash_threshold'] = QSpinBox()
+        self.widgets['sub_anchor_hash_threshold'].setRange(0, 30)
+        self.widgets['sub_anchor_hash_threshold'].hide()
+
+        self.widgets['sub_anchor_window_radius'] = QSpinBox()
+        self.widgets['sub_anchor_window_radius'].setRange(3, 10)
+        self.widgets['sub_anchor_window_radius'].hide()
+
+        self.widgets['sub_anchor_agreement_tolerance_ms'] = QSpinBox()
+        self.widgets['sub_anchor_agreement_tolerance_ms'].setRange(10, 500)
+        self.widgets['sub_anchor_agreement_tolerance_ms'].hide()
+
+        self.widgets['corr_anchor_search_range_ms'] = QSpinBox()
+        self.widgets['corr_anchor_search_range_ms'].setRange(500, 10000)
+        self.widgets['corr_anchor_search_range_ms'].hide()
+
+        self.widgets['corr_anchor_hash_algorithm'] = QComboBox()
+        self.widgets['corr_anchor_hash_algorithm'].addItems(['dhash', 'phash', 'average_hash'])
+        self.widgets['corr_anchor_hash_algorithm'].hide()
+
+        self.widgets['corr_anchor_hash_threshold'] = QSpinBox()
+        self.widgets['corr_anchor_hash_threshold'].setRange(0, 30)
+        self.widgets['corr_anchor_hash_threshold'].hide()
+
+        self.widgets['corr_anchor_window_radius'] = QSpinBox()
+        self.widgets['corr_anchor_window_radius'].setRange(3, 10)
+        self.widgets['corr_anchor_window_radius'].hide()
+
+        self.widgets['corr_anchor_agreement_tolerance_ms'] = QSpinBox()
+        self.widgets['corr_anchor_agreement_tolerance_ms'].setRange(10, 500)
+        self.widgets['corr_anchor_agreement_tolerance_ms'].hide()
 
     def _update_mode_visibility(self, text: str):
         """Show/hide settings based on selected sync mode."""
@@ -1947,53 +1590,34 @@ class SubtitleSyncTab(QWidget):
         is_sub_anchor_snap = (text == 'subtitle-anchored-frame-snap')
         is_corr_guided_anchor = (text == 'correlation-guided-frame-anchor')
 
-        # Time-based mode options
+        # Frame-based modes need frame matching settings
+        is_frame_based = is_frame_locked or is_duration_align or is_correlation_snap or is_sub_anchor_snap or is_corr_guided_anchor
+
+        # Shared frame matching settings (enabled for all frame-based modes)
+        for key in ['frame_hash_algorithm', 'frame_hash_size', 'frame_hash_threshold',
+                    'frame_window_radius', 'frame_search_range_ms', 'frame_agreement_tolerance_ms',
+                    'frame_use_vapoursynth']:
+            if key in self.widgets:
+                self.widgets[key].setEnabled(is_frame_based)
+
+        # Time-based specific
         self.widgets['time_based_use_raw_values'].setEnabled(is_time_based)
-        use_raw = is_time_based and self.widgets['time_based_use_raw_values'].isChecked()
-        self.widgets['raw_delay_rounding'].setEnabled(use_raw)
 
-        # VideoTimestamps Frame-Locked mode options
-        self.widgets['videotimestamps_rounding'].setEnabled(is_frame_locked)
-
-        # Duration-align mode options
-        self.widgets['duration_align_use_vapoursynth'].setEnabled(is_duration_align)
+        # Duration-align specific
         self.widgets['duration_align_validate'].setEnabled(is_duration_align)
         self.widgets['duration_align_validate_points'].setEnabled(is_duration_align)
-        self.widgets['duration_align_hash_algorithm'].setEnabled(is_duration_align)
-        self.widgets['duration_align_hash_size'].setEnabled(is_duration_align)
-        self.widgets['duration_align_hash_threshold'].setEnabled(is_duration_align)
         self.widgets['duration_align_strictness'].setEnabled(is_duration_align)
         self.widgets['duration_align_verify_with_frames'].setEnabled(is_duration_align)
         self.widgets['duration_align_skip_validation_generated_tracks'].setEnabled(is_duration_align)
         self.widgets['duration_align_fallback_mode'].setEnabled(is_duration_align)
 
-        # Hybrid mode sub-settings (only when duration-align AND hybrid enabled)
-        hybrid_enabled = is_duration_align and self.widgets['duration_align_verify_with_frames'].isChecked()
-        self.widgets['duration_align_verify_search_window'].setEnabled(hybrid_enabled)
-        self.widgets['duration_align_verify_tolerance'].setEnabled(hybrid_enabled)
-        self.widgets['duration_align_fallback_target'].setEnabled(hybrid_enabled)
-
-        # Correlation-frame-snap mode options
+        # Correlation-frame-snap specific
         self.widgets['correlation_snap_fallback_mode'].setEnabled(is_correlation_snap)
-        self.widgets['correlation_snap_hash_algorithm'].setEnabled(is_correlation_snap)
-        self.widgets['correlation_snap_hash_threshold'].setEnabled(is_correlation_snap)
-        self.widgets['correlation_snap_window_radius'].setEnabled(is_correlation_snap)
-        self.widgets['correlation_snap_search_range'].setEnabled(is_correlation_snap)
 
-        # Subtitle-anchored frame snap mode options
-        self.widgets['sub_anchor_search_range_ms'].setEnabled(is_sub_anchor_snap)
-        self.widgets['sub_anchor_hash_algorithm'].setEnabled(is_sub_anchor_snap)
-        self.widgets['sub_anchor_hash_threshold'].setEnabled(is_sub_anchor_snap)
-        self.widgets['sub_anchor_window_radius'].setEnabled(is_sub_anchor_snap)
-        self.widgets['sub_anchor_agreement_tolerance_ms'].setEnabled(is_sub_anchor_snap)
+        # Subtitle-anchored specific
         self.widgets['sub_anchor_fallback_mode'].setEnabled(is_sub_anchor_snap)
 
-        # Correlation-guided frame anchor mode options
-        self.widgets['corr_anchor_search_range_ms'].setEnabled(is_corr_guided_anchor)
-        self.widgets['corr_anchor_hash_algorithm'].setEnabled(is_corr_guided_anchor)
-        self.widgets['corr_anchor_hash_threshold'].setEnabled(is_corr_guided_anchor)
-        self.widgets['corr_anchor_window_radius'].setEnabled(is_corr_guided_anchor)
-        self.widgets['corr_anchor_agreement_tolerance_ms'].setEnabled(is_corr_guided_anchor)
+        # Correlation-guided specific
         self.widgets['corr_anchor_fallback_mode'].setEnabled(is_corr_guided_anchor)
         self.widgets['corr_anchor_refine_per_line'].setEnabled(is_corr_guided_anchor)
         self.widgets['corr_anchor_refine_workers'].setEnabled(is_corr_guided_anchor)
