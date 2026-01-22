@@ -71,7 +71,7 @@ class CorrelationFrameSnapSync(SyncPlugin):
         """
         from ..data import OperationResult, OperationRecord, SyncEventData
         from ..frame_utils import detect_video_fps, detect_scene_changes
-        from ..sync_modes.correlation_frame_snap import verify_correlation_with_frame_snap
+        from ..frame_verification import verify_correlation_with_frame_snap
 
         config = config or {}
 

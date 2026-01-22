@@ -75,7 +75,7 @@ class DurationAlignSync(SyncPlugin):
             frame_to_time_vfr,
             validate_frame_alignment
         )
-        from ..sync_modes.duration_align import verify_alignment_with_sliding_window
+        from ..frame_verification import verify_alignment_with_sliding_window
 
         config = config or {}
 

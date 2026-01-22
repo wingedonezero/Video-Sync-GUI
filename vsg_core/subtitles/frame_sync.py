@@ -1,14 +1,12 @@
 # vsg_core/subtitles/frame_sync.py
 # -*- coding: utf-8 -*-
 """
-Subtitle synchronization module (refactored).
+Subtitle synchronization utilities.
 
-This module now acts as an orchestrator, importing functionality from specialized modules:
-- frame_utils: Frame timing and video utilities
-- checkpoint_selection: Smart checkpoint selection for verification
-- sync_modes: Different synchronization strategies
+This module provides frame timing and video utilities. Sync modes are now
+handled via the plugin system in sync_modes/__init__.py.
 
-For backward compatibility, all functions are re-exported here.
+Use get_sync_plugin() from sync_modes to access sync functionality.
 """
 from __future__ import annotations
 
@@ -39,19 +37,7 @@ from .frame_utils import (
 )
 
 # Re-export checkpoint selection
-from .checkpoint_selection import select_smart_checkpoints as _select_smart_checkpoints
-
-# Re-export sync modes
-from .sync_modes import (
-    apply_raw_delay_sync,
-    apply_timebase_frame_locked_sync,
-    apply_duration_align_sync,
-    verify_alignment_with_sliding_window,
-    apply_correlation_frame_snap_sync,
-    verify_correlation_with_frame_snap,
-    apply_subtitle_anchored_frame_snap_sync,
-    apply_correlation_guided_frame_anchor_sync,
-)
+from .checkpoint_selection import select_smart_checkpoints
 
 __all__ = [
     # Frame timing
@@ -78,15 +64,5 @@ __all__ = [
     'compare_video_properties',
 
     # Checkpoint selection
-    '_select_smart_checkpoints',
-
-    # Sync modes
-    'apply_raw_delay_sync',
-    'apply_timebase_frame_locked_sync',
-    'apply_duration_align_sync',
-    'verify_alignment_with_sliding_window',
-    'apply_correlation_frame_snap_sync',
-    'verify_correlation_with_frame_snap',
-    'apply_subtitle_anchored_frame_snap_sync',
-    'apply_correlation_guided_frame_anchor_sync',
+    'select_smart_checkpoints',
 ]

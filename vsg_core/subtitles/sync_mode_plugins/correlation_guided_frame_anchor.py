@@ -138,7 +138,7 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
 
         # Try to import frame matching
         try:
-            from ..sync_modes.frame_matching import VideoReader, compute_frame_hash, compute_hamming_distance
+            from ..frame_matching import VideoReader, compute_frame_hash, compute_hamming_distance
         except ImportError as e:
             # Fall back to just correlation
             log(f"[CorrGuided] Frame matching unavailable: {e}")
