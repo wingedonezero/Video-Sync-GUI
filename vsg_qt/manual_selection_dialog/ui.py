@@ -798,58 +798,42 @@ class ManualSelectionDialog(QDialog):
         perform_ocr = track_data.get('perform_ocr', False)
         is_ocr_track = perform_ocr and ('VOBSUB' in codec_id or 'PGS' in codec_id or 'HDMV' in codec_id)
 
-        # Extract fonts (usually fast, do it before opening dialog)
-        fonts_dir = self._extract_fonts_for_preview(track_data)
+        if is_ocr_track:
+            # OCR path: Run preview OCR with progress dialog
+            result = self._prepare_ocr_preview_with_progress(widget)
+            if result is None:
+                return
+            json_path, editable_sub_path = result
+            widget.track_data['ocr_preview_json'] = json_path
+        else:
+            editable_sub_path = self._ensure_editable_subtitle_path(widget)
+
+        if not editable_sub_path:
+            QMessageBox.critical(self, "Error", "Failed to prepare the subtitle file.")
+            return
+
+        runner = CommandRunner(self.config.settings, self.log_callback)
+        tool_paths = {t: shutil.which(t) for t in ['mkvmerge', 'mkvextract']}
+        fonts_dir = None
+        try:
+            source_file = track_data.get('original_path')
+            font_temp_dir = Path(tempfile.gettempdir()) / f"vsg_fonts_{Path(source_file).stem}"
+            font_temp_dir.mkdir(parents=True, exist_ok=True)
+            extracted_fonts = extract_attachments(source_file, font_temp_dir, runner, tool_paths, 'font')
+            if extracted_fonts:
+                self.log_callback(f"[INFO] Extracted {len(extracted_fonts)} font(s) for preview.")
+            fonts_dir = str(font_temp_dir)
+        except Exception as e:
+            self.log_callback(f"[WARN] Could not extract fonts: {e}")
 
         # Pass existing font replacements if any
         existing_font_replacements = track_data.get('font_replacements')
-
-        # Open dialog with deferred loading - shows immediately with loading overlay
         editor = StyleEditorDialog(
-            ref_video_path,
-            subtitle_path=None,  # Will be loaded async
+            ref_video_path, editable_sub_path,
             fonts_dir=fonts_dir,
             existing_font_replacements=existing_font_replacements,
-            parent=self,
-            deferred_loading=True
+            parent=self
         )
-
-        # Store reference to widget for callback
-        editor._source_widget = widget
-
-        if is_ocr_track:
-            # OCR path: Extract image subtitle, then run OCR async
-            extracted_path = self._extract_image_subtitle(widget)
-            if not extracted_path:
-                QMessageBox.critical(self, "Error", "Failed to extract image-based subtitle.")
-                return
-
-            lang = track_data.get('custom_lang') or 'eng'
-            output_dir = self.config.get_style_editor_temp_dir()
-
-            # Connect finished signal to store OCR JSON path
-            def on_ocr_done():
-                if editor.ocr_json_path:
-                    widget.track_data['ocr_preview_json'] = editor.ocr_json_path
-                    widget.track_data['user_modified_path'] = editor._logic.engine.path if editor._logic else None
-
-            editor.finished.connect(on_ocr_done)
-
-            # Schedule async OCR loading after dialog is shown
-            # This is needed because PlayerThread requires video_frame.winId() which
-            # needs the widget to be realized (shown) first
-            from PySide6.QtCore import QTimer
-            QTimer.singleShot(0, lambda: editor.load_ocr_async(extracted_path, lang, output_dir))
-        else:
-            # Regular subtitle path: Load async via extraction
-            def prepare_subtitle():
-                return self._ensure_editable_subtitle_path(widget)
-
-            # Schedule async loading after dialog is shown
-            from PySide6.QtCore import QTimer
-            QTimer.singleShot(0, lambda: editor.load_subtitle_async(prepare_subtitle, is_ocr=False))
-
-        # Show the dialog (blocks until closed)
         if editor.exec():
             widget.track_data['style_patch'] = editor.get_style_patch()
             # Store font replacements if any were configured
@@ -863,24 +847,108 @@ class ManualSelectionDialog(QDialog):
             widget.logic.refresh_badges()
             widget.logic.refresh_summary()
 
-    def _extract_fonts_for_preview(self, track_data: dict) -> Optional[str]:
-        """Extract fonts from source file for style editor preview."""
-        try:
-            source_file = track_data.get('original_path')
-            if not source_file:
-                return None
+    def _prepare_ocr_preview_with_progress(self, widget: TrackWidget) -> Optional[Tuple[str, str]]:
+        """
+        Run preview OCR with a progress dialog.
 
-            runner = CommandRunner(self.config.settings, self.log_callback)
-            tool_paths = {t: shutil.which(t) for t in ['mkvmerge', 'mkvextract']}
+        Shows a modal progress dialog while OCR runs, blocking the UI
+        but showing progress updates.
 
-            font_temp_dir = Path(tempfile.gettempdir()) / f"vsg_fonts_{Path(source_file).stem}"
-            font_temp_dir.mkdir(parents=True, exist_ok=True)
+        Returns:
+            Tuple of (json_path, ass_path) on success, or None on failure.
+        """
+        from PySide6.QtWidgets import QProgressDialog
+        from PySide6.QtCore import Qt
 
-            extracted_fonts = extract_attachments(source_file, font_temp_dir, runner, tool_paths, 'font')
-            if extracted_fonts:
-                self.log_callback(f"[INFO] Extracted {len(extracted_fonts)} font(s) for preview.")
+        track_data = widget.track_data
 
-            return str(font_temp_dir)
-        except Exception as e:
-            self.log_callback(f"[WARN] Could not extract fonts: {e}")
+        # Check if we already have a preview
+        if track_data.get('ocr_preview_json') and track_data.get('user_modified_path'):
+            existing_json = track_data['ocr_preview_json']
+            existing_ass = track_data['user_modified_path']
+            if Path(existing_json).exists() and Path(existing_ass).exists():
+                self.log_callback("[Style Editor] Using existing OCR preview")
+                return existing_json, existing_ass
+
+        # Extract the image-based subtitle first
+        extracted_path = self._extract_image_subtitle(widget)
+        if not extracted_path:
+            QMessageBox.warning(
+                self, "OCR Preview",
+                "Failed to extract image-based subtitle.\n\n"
+                "Make sure the source file is accessible."
+            )
             return None
+
+        # Get language and output directory
+        lang = track_data.get('custom_lang') or 'eng'
+        output_dir = self.config.get_style_editor_temp_dir()
+
+        # Create progress dialog
+        progress = QProgressDialog("Running OCR preview...", "Cancel", 0, 100, self)
+        progress.setWindowTitle("OCR Preview")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        progress.setValue(0)
+        progress.show()
+
+        # Track progress via log callback
+        result_holder = [None]  # Use list to allow modification in nested function
+        canceled = [False]
+
+        def progress_log(msg: str):
+            if canceled[0]:
+                return
+            self.log_callback(msg)
+            # Extract progress percentage from OCR messages
+            if "%" in msg and "[Preview OCR]" in msg:
+                try:
+                    pct_str = msg.split("(")[-1].rstrip("%)")
+                    pct = int(pct_str)
+                    progress.setValue(pct)
+                    # Extract message for label
+                    msg_part = msg.split("]")[1].split("(")[0].strip()
+                    progress.setLabelText(f"OCR Preview: {msg_part}")
+                except (ValueError, IndexError):
+                    pass
+            # Process events to update UI
+            from PySide6.QtWidgets import QApplication
+            QApplication.processEvents()
+            if progress.wasCanceled():
+                canceled[0] = True
+
+        # Run preview OCR (blocking but with progress updates)
+        from vsg_core.subtitles.ocr import run_preview_ocr
+
+        self.log_callback(f"[Style Editor] Running preview OCR ({lang})...")
+
+        result = run_preview_ocr(
+            subtitle_path=extracted_path,
+            lang=lang,
+            output_dir=output_dir,
+            log_callback=progress_log,
+        )
+
+        progress.close()
+
+        if canceled[0]:
+            self.log_callback("[Style Editor] OCR preview canceled")
+            return None
+
+        if result is None:
+            QMessageBox.warning(
+                self, "OCR Preview Failed",
+                "Preview OCR failed to process the subtitle.\n\n"
+                "Check the log for details."
+            )
+            return None
+
+        json_path, ass_path = result
+
+        # Store paths in track_data
+        widget.track_data['user_modified_path'] = ass_path
+        widget.track_data['ocr_preview_json'] = json_path
+
+        self.log_callback(f"[Style Editor] Preview ready: {Path(ass_path).name}")
+
+        return json_path, ass_path

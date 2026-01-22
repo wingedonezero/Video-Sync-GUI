@@ -9,87 +9,33 @@ from PySide6.QtWidgets import (
     QDialog, QDialogButtonBox, QVBoxLayout, QHBoxLayout, QLabel, QSlider,
     QPushButton, QWidget, QTableWidget, QAbstractItemView, QGroupBox, QFormLayout,
     QComboBox, QLineEdit, QDoubleSpinBox, QCheckBox, QScrollArea, QSpinBox,
-    QMenu, QToolButton, QProgressBar, QFrame, QStackedWidget
+    QMenu, QToolButton
 )
 from .logic import StyleEditorLogic
 from .player_thread import PlayerThread
 from .video_widget import VideoWidget
 
 class StyleEditorDialog(QDialog):
-    def __init__(self, video_path: str, subtitle_path: str | None = None, fonts_dir: str | None = None,
-                 existing_font_replacements: Dict | None = None, parent=None,
-                 deferred_loading: bool = False):
-        """
-        Initialize the style editor dialog.
-
-        Args:
-            video_path: Path to the video file for preview
-            subtitle_path: Path to the subtitle file (can be None if deferred_loading=True)
-            fonts_dir: Directory containing fonts for preview
-            existing_font_replacements: Existing font replacement mappings
-            parent: Parent widget
-            deferred_loading: If True, don't load subtitle immediately - call load_subtitle() later
-        """
+    def __init__(self, video_path: str, subtitle_path: str, fonts_dir: str | None,
+                 existing_font_replacements: Dict | None = None, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Subtitle Style Editor")
         self.setMinimumSize(1400, 800)
         self.duration_seconds = 0.0
         self.is_seeking = False
         self.style_widgets: Dict[str, QWidget] = {}
-        self.fonts_dir = fonts_dir
-        self._video_path = video_path
-        self._existing_font_replacements = existing_font_replacements
-        self._logic = None
-        self.player_thread = None
-        self._loader_thread = None
-        self._is_loading = False
-
+        self.fonts_dir = fonts_dir  # Store for font replacement copying
         self._build_ui()
-
-        if deferred_loading or subtitle_path is None:
-            # Show loading overlay, wait for load_subtitle() call
-            self._show_loading_state("Preparing subtitle...")
-        else:
-            # Immediate loading (legacy behavior)
-            self._load_subtitle_internal(subtitle_path)
+        self._logic = StyleEditorLogic(self, subtitle_path, existing_font_replacements, fonts_dir)
+        self._logic.populate_initial_state()
+        # Use the preview path (temp file) for the player to avoid modifying original during preview
+        preview_path = self._logic.engine.get_preview_path()
+        self.player_thread = PlayerThread(video_path, preview_path, self.video_frame.winId(), fonts_dir=fonts_dir, parent=self)
+        self._connect_signals()
+        self.player_thread.start()
 
     def _build_ui(self):
-        # Use a stacked widget to switch between loading and main content
-        self._stack = QStackedWidget()
-        root_layout = QVBoxLayout(self)
-        root_layout.setContentsMargins(0, 0, 0, 0)
-        root_layout.addWidget(self._stack)
-
-        # Loading overlay page
-        self._loading_page = QFrame()
-        loading_layout = QVBoxLayout(self._loading_page)
-        loading_layout.addStretch()
-        self._loading_label = QLabel("Loading...")
-        self._loading_label.setAlignment(Qt.AlignCenter)
-        self._loading_label.setStyleSheet("font-size: 18px; font-weight: bold;")
-        loading_layout.addWidget(self._loading_label)
-        self._loading_progress = QProgressBar()
-        self._loading_progress.setRange(0, 100)
-        self._loading_progress.setTextVisible(True)
-        self._loading_progress.setFixedWidth(400)
-        self._loading_progress.setAlignment(Qt.AlignCenter)
-        progress_container = QHBoxLayout()
-        progress_container.addStretch()
-        progress_container.addWidget(self._loading_progress)
-        progress_container.addStretch()
-        loading_layout.addLayout(progress_container)
-        self._loading_status = QLabel("")
-        self._loading_status.setAlignment(Qt.AlignCenter)
-        self._loading_status.setStyleSheet("color: #888;")
-        loading_layout.addWidget(self._loading_status)
-        loading_layout.addStretch()
-        self._stack.addWidget(self._loading_page)
-
-        # Main content page
-        self._main_page = QWidget()
-        main_layout = QHBoxLayout(self._main_page)
-        self._stack.addWidget(self._main_page)
-
+        main_layout = QHBoxLayout(self)
         left_pane = QVBoxLayout()
         self.video_frame = VideoWidget()
         left_pane.addWidget(self.video_frame, 1)
@@ -209,143 +155,22 @@ class StyleEditorDialog(QDialog):
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
 
-    # =========================================================================
-    # Loading State Management
-    # =========================================================================
-
-    def _show_loading_state(self, message: str = "Loading...", progress: int = 0):
-        """Show the loading overlay with a message."""
-        self._is_loading = True
-        self._loading_label.setText(message)
-        self._loading_progress.setValue(progress)
-        self._loading_status.setText("")
-        self._stack.setCurrentWidget(self._loading_page)
-
-    def _update_loading_progress(self, message: str, progress: int):
-        """Update loading progress display."""
-        if self._is_loading:
-            self._loading_status.setText(message)
-            self._loading_progress.setValue(progress)
-
-    def _show_main_content(self):
-        """Switch from loading overlay to main content."""
-        self._is_loading = False
-        self._stack.setCurrentWidget(self._main_page)
-
-    def _load_subtitle_internal(self, subtitle_path: str):
-        """Internal method to load subtitle and initialize the editor."""
-        self._logic = StyleEditorLogic(self, subtitle_path, self._existing_font_replacements, self.fonts_dir)
-        self._logic.populate_initial_state()
-        # Use the preview path (temp file) for the player
-        preview_path = self._logic.engine.get_preview_path()
-        self.player_thread = PlayerThread(
-            self._video_path, preview_path, self.video_frame.winId(),
-            fonts_dir=self.fonts_dir, parent=self
-        )
-        self._connect_signals()
-        self.player_thread.start()
-        self._show_main_content()
-
-    def load_subtitle(self, subtitle_path: str):
-        """
-        Load a subtitle file after the dialog has been opened.
-
-        Call this when using deferred_loading=True to provide the subtitle path
-        after preparation (extraction/OCR) is complete.
-        """
-        self._load_subtitle_internal(subtitle_path)
-
-    def load_subtitle_async(self, prepare_func, is_ocr: bool = False):
-        """
-        Load subtitle asynchronously using a preparation function.
-
-        Args:
-            prepare_func: Callable that returns the subtitle path when done.
-                         Will be run in a background thread.
-            is_ocr: If True, show OCR-specific progress messages.
-        """
-        from .loader_thread import SubtitleLoaderThread
-
-        self._show_loading_state("Running OCR..." if is_ocr else "Extracting subtitle...")
-
-        self._loader_thread = SubtitleLoaderThread(prepare_func, is_ocr=is_ocr, parent=self)
-        self._loader_thread.progress.connect(self._update_loading_progress)
-        self._loader_thread.finished.connect(self._on_async_load_finished)
-        self._loader_thread.start()
-
-    def load_ocr_async(self, extracted_path: str, lang: str, output_dir):
-        """
-        Run OCR asynchronously with detailed progress tracking.
-
-        Args:
-            extracted_path: Path to extracted image-based subtitle
-            lang: Language code for OCR
-            output_dir: Directory for output files
-        """
-        from pathlib import Path
-        from .loader_thread import OCRLoaderThread
-
-        self._show_loading_state("Starting OCR preview...", 0)
-
-        self._loader_thread = OCRLoaderThread(
-            extracted_path, lang, Path(output_dir), parent=self
-        )
-        self._loader_thread.progress.connect(self._update_loading_progress)
-        self._loader_thread.finished.connect(self._on_ocr_load_finished)
-        self._loader_thread.start()
-
-    def _on_async_load_finished(self, success: bool, subtitle_path: str, error: str):
-        """Handle completion of async subtitle loading."""
-        self._loader_thread = None
-        if success and subtitle_path:
-            self._load_subtitle_internal(subtitle_path)
-        else:
-            from PySide6.QtWidgets import QMessageBox
-            self._loading_label.setText("Failed to load subtitle")
-            self._loading_status.setText(error or "Unknown error")
-            QMessageBox.critical(self, "Error", f"Failed to load subtitle:\n\n{error}")
-            self.reject()
-
-    def _on_ocr_load_finished(self, success: bool, json_path: str, ass_path: str, error: str):
-        """Handle completion of OCR loading."""
-        self._loader_thread = None
-        if success and ass_path:
-            # Store JSON path for future use (accessible via property)
-            self._ocr_json_path = json_path
-            self._load_subtitle_internal(ass_path)
-        else:
-            from PySide6.QtWidgets import QMessageBox
-            self._loading_label.setText("OCR Failed")
-            self._loading_status.setText(error or "Unknown error")
-            QMessageBox.critical(self, "OCR Error", f"OCR preview failed:\n\n{error}")
-            self.reject()
-
-    @property
-    def ocr_json_path(self) -> str | None:
-        """Path to OCR SubtitleData JSON if this was an OCR preview."""
-        return getattr(self, '_ocr_json_path', None)
-
-    # =========================================================================
-    # Public API
-    # =========================================================================
-
     def get_style_patch(self):
         """Public method to retrieve the generated patch."""
-        return self._logic.generated_patch if self._logic else {}
+        return self._logic.generated_patch
 
     def get_font_replacements(self):
         """Public method to retrieve the font replacements."""
-        return self._logic.get_font_replacements() if self._logic else {}
+        return self._logic.get_font_replacements()
 
     def accept(self):
         """Save changes to original file and generate the patch before closing."""
-        if self._logic:
-            # Save any pending UI changes to the engine
-            self._logic.update_current_style()
-            # Save to the original file (not just temp)
-            self._logic.engine.save_to_original()
-            # Generate the patch for external use
-            self._logic.generate_patch()
+        # Save any pending UI changes to the engine
+        self._logic.update_current_style()
+        # Save to the original file (not just temp)
+        self._logic.engine.save_to_original()
+        # Generate the patch for external use
+        self._logic.generate_patch()
         super().accept()
 
     def _connect_signals(self):
@@ -393,37 +218,21 @@ class StyleEditorDialog(QDialog):
         self.duration_seconds = duration; self.seek_slider.setRange(0, int(self.duration_seconds * 1000))
     def update_slider_position(self, time_ms: int):
         if not self.is_seeking: self.seek_slider.setValue(time_ms)
-    def toggle_playback(self):
-        if self.player_thread:
-            self.player_thread.toggle_pause()
-
+    def toggle_playback(self): self.player_thread.toggle_pause()
     def handle_slider_press(self): self.is_seeking = True
-
     def handle_slider_release(self):
         self.is_seeking = False
-        if self.player_thread:
-            self.player_thread.seek(self.seek_slider.value())
-
+        self.player_thread.seek(self.seek_slider.value())
     def handle_event_selection_changed(self):
         selected_items = self.events_table.selectedItems()
-        if not selected_items or not self._logic:
-            return
+        if not selected_items: return
         self._logic.on_event_selected()
         row = selected_items[0].row()
         start_time_ms_str = self.events_table.item(row, 1).text()
-        try:
-            if self.player_thread:
-                self.player_thread.seek(int(start_time_ms_str))
-        except (ValueError, TypeError):
-            pass
-
+        try: self.player_thread.seek(int(start_time_ms_str))
+        except (ValueError, TypeError): pass
     def closeEvent(self, event):
-        # Stop loader thread if running
-        if self._loader_thread and self._loader_thread.isRunning():
-            self._loader_thread.quit()
-            self._loader_thread.wait(1000)
-        # Stop player thread
-        if self.player_thread:
-            self.player_thread.stop()
+        self.player_thread.stop()
         # Note: We don't cleanup temp files here - they're cleaned at job start/end
+        # This allows debugging and keeps all temp files in one place
         super().closeEvent(event)
