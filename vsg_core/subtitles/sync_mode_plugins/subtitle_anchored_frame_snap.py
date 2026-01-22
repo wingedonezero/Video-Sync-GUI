@@ -101,14 +101,15 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
         frame_duration_ms = 1000.0 / fps
         log(f"[SubAnchor] FPS: {fps:.3f} (frame: {frame_duration_ms:.3f}ms)")
 
-        # Get config parameters
-        search_range_ms = config.get('sub_anchor_search_range_ms', 2000)
-        hash_algorithm = config.get('sub_anchor_hash_algorithm', 'dhash')
-        hash_size = int(config.get('sub_anchor_hash_size', 8))
-        hash_threshold = int(config.get('sub_anchor_hash_threshold', 5))
-        window_radius = int(config.get('sub_anchor_window_radius', 5))
-        tolerance_ms = config.get('sub_anchor_agreement_tolerance_ms', 100)
-        fallback_mode = config.get('sub_anchor_fallback_mode', 'abort')
+        # Get config parameters (unified settings with fallback to mode-specific)
+        search_range_ms = config.get('frame_search_range_ms', config.get('sub_anchor_search_range_ms', 2000))
+        hash_algorithm = config.get('frame_hash_algorithm', config.get('sub_anchor_hash_algorithm', 'dhash'))
+        hash_size = int(config.get('frame_hash_size', config.get('sub_anchor_hash_size', 8)))
+        hash_threshold = int(config.get('frame_hash_threshold', config.get('sub_anchor_hash_threshold', 5)))
+        window_radius = int(config.get('frame_window_radius', config.get('sub_anchor_window_radius', 5)))
+        tolerance_ms = config.get('frame_agreement_tolerance_ms', config.get('sub_anchor_agreement_tolerance_ms', 100))
+        fallback_mode = config.get('sub_anchor_fallback_mode', 'abort')  # Mode-specific
+        use_vapoursynth = config.get('frame_use_vapoursynth', config.get('sub_anchor_use_vapoursynth', True))
 
         log(f"[SubAnchor] Search range: ±{search_range_ms}ms")
         log(f"[SubAnchor] Hash: {hash_algorithm}, size={hash_size}, threshold={hash_threshold}")
@@ -155,8 +156,8 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
 
         # Open video readers
         try:
-            source_reader = VideoReader(source_video, runner, use_vapoursynth=config.get('sub_anchor_use_vapoursynth', True), temp_dir=temp_dir)
-            target_reader = VideoReader(target_video, runner, use_vapoursynth=config.get('sub_anchor_use_vapoursynth', True), temp_dir=temp_dir)
+            source_reader = VideoReader(source_video, runner, use_vapoursynth=use_vapoursynth, temp_dir=temp_dir)
+            target_reader = VideoReader(target_video, runner, use_vapoursynth=use_vapoursynth, temp_dir=temp_dir)
         except Exception as e:
             return OperationResult(
                 success=False,

@@ -107,7 +107,7 @@ class DurationAlignSync(SyncPlugin):
         log(f"[DurationAlign] Target: {Path(target_video).name}")
 
         # Get video durations - try VapourSynth first, fallback to ffprobe
-        use_vapoursynth = config.get('duration_align_use_vapoursynth', True)
+        use_vapoursynth = config.get('frame_use_vapoursynth', config.get('duration_align_use_vapoursynth', True))
 
         source_frame_count = None
         source_duration_ms = None

@@ -75,71 +75,83 @@ class AppConfig:
             'subtitle_sync_mode': 'time-based',
             'subtitle_target_fps': 0.0,
             'time_based_use_raw_values': False,  # Use pysubs instead of mkvmerge --sync
-            'raw_delay_rounding': 'floor',  # Rounding for raw/time-based-raw: floor, round, ceil
+
+            # --- Unified Frame Matching Settings (shared by all frame-based sync modes) ---
+            'frame_hash_algorithm': 'dhash',  # Hash algorithm: 'dhash', 'phash', 'average_hash', 'whash'
+            'frame_hash_size': 8,  # Hash size: 4, 8, or 16 (higher = more precise but stricter)
+            'frame_hash_threshold': 5,  # Max hamming distance for frame match (0-30)
+            'frame_window_radius': 5,  # Frames before/after center (5 = 11 frame window)
+            'frame_search_range_ms': 2000,  # Search ±N ms around expected position
+            'frame_agreement_tolerance_ms': 100,  # Checkpoints must agree within ±N ms
+            'frame_use_vapoursynth': True,  # Use VapourSynth for frame extraction (faster with cache)
+
+            # --- Unified Rounding Settings ---
+            'subtitle_rounding': 'floor',  # Final rounding for all sync modes: floor, round, ceil
 
             # --- Time-Based Frame-Locked Timestamps Settings ---
-            'videotimestamps_rounding': 'floor',  # VideoTimestamps rounding method: 'floor' or 'round'
+            'videotimestamps_rounding': 'floor',  # VideoTimestamps rounding method: 'floor' or 'round' (deprecated, use subtitle_rounding)
 
-            # --- Duration-Align Sync Settings (Hybrid Mode) ---
-            'duration_align_verify_with_frames': False,  # Enable hybrid: duration + sliding window verification
-            'duration_align_verify_search_window_ms': 2000,  # Search window for sliding window (±2 seconds)
-            'duration_align_verify_agreement_tolerance_ms': 100,  # Measurements must agree within ±100ms
-            'duration_align_verify_checkpoints': 3,  # Number of checkpoints to verify (1 or 3)
-            'duration_align_skip_validation_generated_tracks': True,  # Skip validation for generated tracks (default: True)
-            'duration_align_fallback_mode': 'abort',  # Fallback if verification fails: 'abort', 'use-duration', 'snap-to-frame'
-            'duration_align_fallback_target': 'source1',  # Which video to use for fallback frame snapping
-            'duration_align_hash_algorithm': 'dhash',  # Hash algorithm for frame matching: 'dhash', 'phash', 'average_hash'
-            'duration_align_hash_size': 8,  # Hash size for perceptual hashing (8 = 64-bit hash)
-            'duration_align_hash_threshold': 5,  # Max hamming distance for frame match
-            'duration_align_strictness': 'normal',  # Validation strictness: 'strict', 'normal', 'lenient'
-            'duration_align_use_vapoursynth': True,  # Use VapourSynth for frame extraction (faster with cache)
+            # --- Duration-Align Sync Settings ---
             'duration_align_validate': True,  # Enable validation of duration-based sync
             'duration_align_validate_points': 3,  # Number of validation checkpoints (1 or 3)
+            'duration_align_strictness': 80,  # Validation strictness: percentage of frames that must match (0-100)
+            'duration_align_verify_with_frames': False,  # Enable hybrid: duration + sliding window verification
+            'duration_align_skip_validation_generated_tracks': True,  # Skip validation for generated tracks
+            'duration_align_fallback_mode': 'none',  # Fallback: 'none', 'abort', 'auto-fallback', 'duration-offset'
 
             # --- Correlation + Frame Snap Settings ---
-            'correlation_snap_fallback_mode': 'snap-to-frame',  # What to do if verification fails: 'snap-to-frame', 'use-raw', 'abort'
-            'correlation_snap_hash_algorithm': 'dhash',  # Hash algorithm: 'dhash', 'phash', 'average_hash'
-            'correlation_snap_hash_size': 8,  # Hash size for perceptual hashing
-            'correlation_snap_hash_threshold': 5,  # Max hamming distance for frame match (increase for encodes)
-            'correlation_snap_window_radius': 3,  # Frames before/after center for sliding window (3 = 7 frame window)
-            'correlation_snap_search_range': 5,  # Search ±N frames around correlation prediction (increase for encodes)
+            'correlation_snap_fallback_mode': 'snap-to-frame',  # Fallback: 'snap-to-frame', 'use-raw', 'abort'
             'correlation_snap_use_scene_changes': True,  # Use PySceneDetect to find anchor points
 
-            # --- Frame Matching Settings (General) ---
-            'frame_match_method': 'dhash',  # Hash algorithm: 'dhash', 'phash', 'average_hash'
-            'frame_match_hash_size': 8,  # Hash size for perceptual hashing (8 = 64-bit hash)
-            'frame_match_threshold': 5,  # Max hamming distance for acceptable frame match
-            'frame_match_search_window_frames': 10,  # Search ±N frames around expected position
-            'frame_match_search_window_sec': 2.0,  # Search window in seconds (alternative to frames)
-            'frame_match_max_search_frames': 100,  # Maximum frames to search in total
-            'frame_match_skip_unmatched': False,  # Skip unmatched lines instead of failing
-            'frame_match_use_timestamp_prefilter': True,  # Use timestamps to narrow search before hashing
-            'frame_match_workers': 4,  # Number of parallel workers for frame extraction/matching
-
             # --- Subtitle-Anchored Frame Snap Settings ---
-            # Visual-only sync using subtitle positions as anchors (no audio correlation dependency)
-            'sub_anchor_search_range_ms': 2000,  # Search ±N ms around expected position (default 2000 = ~48 frames at 24fps)
-            'sub_anchor_hash_algorithm': 'dhash',  # Hash algorithm: 'dhash', 'phash', 'average_hash'
-            'sub_anchor_hash_size': 8,  # Hash size for perceptual hashing (8 = 64-bit)
-            'sub_anchor_hash_threshold': 5,  # Max hamming distance for frame match
-            'sub_anchor_window_radius': 5,  # Frames before/after center (5 = 11 frame window)
-            'sub_anchor_agreement_tolerance_ms': 100,  # Checkpoints must agree within ±N ms
-            'sub_anchor_fallback_mode': 'abort',  # What to do if verification fails: 'abort', 'use-median'
-            'sub_anchor_use_vapoursynth': True,  # Use VapourSynth for frame extraction (faster with cache)
+            'sub_anchor_fallback_mode': 'abort',  # Fallback: 'abort', 'use-median'
 
             # --- Correlation-Guided Frame Anchor Settings ---
-            # Hybrid mode: Uses correlation to guide robust frame matching at time-based anchors
-            'corr_anchor_search_range_ms': 2000,  # Search ±N ms around correlation prediction (default 2000 = ~48 frames)
-            'corr_anchor_hash_algorithm': 'dhash',  # Hash algorithm: 'dhash', 'phash', 'average_hash'
-            'corr_anchor_hash_size': 8,  # Hash size for perceptual hashing (8 = 64-bit)
-            'corr_anchor_hash_threshold': 5,  # Max hamming distance for frame match
-            'corr_anchor_window_radius': 5,  # Frames before/after center (5 = 11 frame window)
-            'corr_anchor_agreement_tolerance_ms': 100,  # Checkpoints must agree within ±N ms
-            'corr_anchor_fallback_mode': 'abort',  # Fallback: 'abort', 'use-median', 'use-correlation'
-            'corr_anchor_use_vapoursynth': True,  # Use VapourSynth for frame extraction (faster with cache)
+            'corr_anchor_fallback_mode': 'use-correlation',  # Fallback: 'abort', 'use-median', 'use-correlation'
             'corr_anchor_anchor_positions': [10, 50, 90],  # % of video duration for anchor points
             'corr_anchor_refine_per_line': False,  # Refine each subtitle line to exact frames after checkpoint validation
-            'corr_anchor_refine_workers': 4,  # Number of parallel workers for refinement (1=sequential, 4-8 recommended)
+            'corr_anchor_refine_workers': 4,  # Number of parallel workers for refinement
+
+            # ===== DEPRECATED: Mode-specific settings (use unified frame_* settings instead) =====
+            # Kept for backwards compatibility - unified settings take precedence
+            'raw_delay_rounding': 'floor',  # DEPRECATED: Use subtitle_rounding
+            'duration_align_hash_algorithm': 'dhash',
+            'duration_align_hash_size': 8,
+            'duration_align_hash_threshold': 5,
+            'duration_align_use_vapoursynth': True,
+            'duration_align_verify_search_window_ms': 2000,
+            'duration_align_verify_agreement_tolerance_ms': 100,
+            'duration_align_verify_checkpoints': 3,
+            'duration_align_fallback_target': 'source1',
+            'correlation_snap_hash_algorithm': 'dhash',
+            'correlation_snap_hash_size': 8,
+            'correlation_snap_hash_threshold': 5,
+            'correlation_snap_window_radius': 3,
+            'correlation_snap_search_range': 5,
+            'sub_anchor_search_range_ms': 2000,
+            'sub_anchor_hash_algorithm': 'dhash',
+            'sub_anchor_hash_size': 8,
+            'sub_anchor_hash_threshold': 5,
+            'sub_anchor_window_radius': 5,
+            'sub_anchor_agreement_tolerance_ms': 100,
+            'sub_anchor_use_vapoursynth': True,
+            'corr_anchor_search_range_ms': 2000,
+            'corr_anchor_hash_algorithm': 'dhash',
+            'corr_anchor_hash_size': 8,
+            'corr_anchor_hash_threshold': 5,
+            'corr_anchor_window_radius': 5,
+            'corr_anchor_agreement_tolerance_ms': 100,
+            'corr_anchor_use_vapoursynth': True,
+            # Old frame_match_* settings - deprecated
+            'frame_match_method': 'dhash',
+            'frame_match_hash_size': 8,
+            'frame_match_threshold': 5,
+            'frame_match_search_window_frames': 10,
+            'frame_match_search_window_sec': 2.0,
+            'frame_match_max_search_frames': 100,
+            'frame_match_skip_unmatched': False,
+            'frame_match_use_timestamp_prefilter': True,
+            'frame_match_workers': 4,
 
             # --- Timing Fix Settings ---
             'timing_fix_enabled': False,
