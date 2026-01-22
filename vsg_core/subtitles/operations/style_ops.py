@@ -18,6 +18,40 @@ if TYPE_CHECKING:
     from ..data import SubtitleData, OperationResult, OperationRecord
 
 
+# Color attributes that need Qt->ASS conversion
+_COLOR_ATTRIBUTES = {
+    'primary_color', 'secondary_color', 'outline_color', 'back_color'
+}
+
+# Bool attributes that need bool->int conversion (-1 for True, 0 for False)
+_BOOL_ATTRIBUTES = {
+    'bold', 'italic', 'underline', 'strike_out'
+}
+
+
+def _convert_patch_value(attr_name: str, value: Any) -> Any:
+    """
+    Convert patch values to SubtitleStyle-compatible format.
+
+    Handles:
+    - Color: Qt #AARRGGBB -> ASS &HAABBGGRR
+    - Bool: True/False -> -1/0
+    """
+    if attr_name in _COLOR_ATTRIBUTES:
+        # Import here to avoid circular dependency
+        from ..style_engine import qt_color_to_ass
+        if isinstance(value, str) and value.startswith('#'):
+            return qt_color_to_ass(value)
+        return value
+
+    if attr_name in _BOOL_ATTRIBUTES:
+        if isinstance(value, bool):
+            return -1 if value else 0
+        return value
+
+    return value
+
+
 def apply_style_patch(
     data: 'SubtitleData',
     patches: Dict[str, Dict[str, Any]],
@@ -58,13 +92,15 @@ def apply_style_patch(
         style = data.styles[style_name]
 
         for attr, value in attributes.items():
-            # Map common attribute names
+            # Map common attribute names to SubtitleStyle field names
             attr_name = _map_style_attribute(attr)
 
             if hasattr(style, attr_name):
                 old_value = getattr(style, attr_name)
-                setattr(style, attr_name, value)
-                changes.append(f"{style_name}.{attr_name}: {old_value} -> {value}")
+                # Convert value to SubtitleStyle-compatible format
+                converted_value = _convert_patch_value(attr_name, value)
+                setattr(style, attr_name, converted_value)
+                changes.append(f"{style_name}.{attr_name}: {old_value} -> {converted_value}")
             else:
                 log(f"[StylePatch] WARNING: Unknown attribute '{attr}' for style '{style_name}'")
 
@@ -352,17 +388,26 @@ def apply_rescale(
 def _map_style_attribute(attr: str) -> str:
     """Map common attribute names to SubtitleStyle field names."""
     mapping = {
-        # Common variations
+        # Font
         'font': 'fontname',
         'font_name': 'fontname',
         'size': 'fontsize',
         'font_size': 'fontsize',
+
+        # Colors - Style Editor uses no-underscore names
+        'primarycolor': 'primary_color',
+        'secondarycolor': 'secondary_color',
+        'outlinecolor': 'outline_color',
+        'backcolor': 'back_color',
+        # Alternative variations
         'color': 'primary_color',
         'colour': 'primary_color',
         'primary': 'primary_color',
         'secondary': 'secondary_color',
         'outline_colour': 'outline_color',
         'back_colour': 'back_color',
+
+        # Other attributes
         'strikeout': 'strike_out',
         'border': 'border_style',
         'align': 'alignment',
