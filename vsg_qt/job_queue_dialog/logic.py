@@ -464,9 +464,11 @@ class JobQueueLogic:
 
     def _replace_paths_in_layout(self, layout_template: List[Dict], target_sources: Dict[str, str]) -> List[Dict]:
         """Creates a new layout with file paths updated for the target job."""
+        import copy
         new_layout = []
         for track_template in layout_template:
-            new_track = track_template.copy()
+            # Use deepcopy to properly copy nested dicts like style_patch and font_replacements
+            new_track = copy.deepcopy(track_template)
             source_key = new_track.get('source')
             if source_key in target_sources:
                 new_track['original_path'] = target_sources[source_key]

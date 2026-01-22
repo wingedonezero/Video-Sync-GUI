@@ -140,15 +140,6 @@ class TrackWidgetLogic:
                 else:
                     parts.append(f"Fonts: {len(font_replacements)}")
 
-            # Show pasted style edits warning (missing styles from paste)
-            pasted_missing = self.track_data.get('pasted_missing_styles', [])
-            if pasted_missing:
-                source_name = self.track_data.get('pasted_source_name', 'source')
-                styles_str = ', '.join(pasted_missing[:2])
-                if len(pasted_missing) > 2:
-                    styles_str += f" +{len(pasted_missing) - 2} more"
-                parts.append(f"⚠️ Pasted from '{source_name}': {styles_str} not found")
-
         if not parts:
             self.v.source_label.setText("")
         else:
@@ -188,11 +179,6 @@ class TrackWidgetLogic:
         if self.track_data.get('font_replacements'):
             font_count = len(self.track_data['font_replacements'])
             badges.append(f"Fonts: {font_count}")
-
-        # Add warning badge for pasted edits with missing styles
-        if self.track_data.get('pasted_missing_styles'):
-            missing_count = len(self.track_data['pasted_missing_styles'])
-            badges.append(f"⚠️ {missing_count} style(s) not found")
 
         # NEW: Add badge if language was customized
         original_lang = self.track_data.get('lang', 'und')
@@ -252,9 +238,6 @@ class TrackWidgetLogic:
             "sync_exclusion_mode": self.track_data.get('sync_exclusion_mode', 'exclude'),
             "sync_exclusion_original_style_list": self.track_data.get('sync_exclusion_original_style_list', []),
 
-            # Pasted style edits warnings (for badge display)
-            "pasted_missing_styles": self.track_data.get('pasted_missing_styles', []),
-            "pasted_source_name": self.track_data.get('pasted_source_name', ''),
         }
 
         return config
