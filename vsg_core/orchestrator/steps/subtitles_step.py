@@ -1,667 +1,92 @@
 # vsg_core/orchestrator/steps/subtitles_step.py
 # -*- coding: utf-8 -*-
+"""
+Unified subtitle processing step using SubtitleData.
+
+Flow:
+1. Load subtitle into SubtitleData (single load)
+2. Apply operations in order:
+   - Stepping (EDL-based timing adjustment)
+   - Sync mode (timing sync to target video)
+   - Style operations (font replacement, style patch, rescale, size multiplier)
+3. Save once at end (single rounding point)
+
+All timing is float ms internally - rounding only at final save.
+"""
 from __future__ import annotations
-from pathlib import Path
-import shutil
+
 import copy
+import shutil
+from pathlib import Path
+from typing import Optional, Dict, Any
 
 from vsg_core.io.runner import CommandRunner
 from vsg_core.orchestrator.steps.context import Context
 from vsg_core.models.enums import TrackType
 from vsg_core.models.media import StreamProps, Track
-from vsg_core.subtitles.convert import convert_srt_to_ass
-from vsg_core.subtitles.rescale import rescale_subtitle
-from vsg_core.subtitles.style import multiply_font_size
-from vsg_core.subtitles.style_engine import StyleEngine
-from vsg_core.subtitles.ocr import run_ocr
-from vsg_core.subtitles.timing import fix_subtitle_timing
-from vsg_core.subtitles.stepping_adjust import apply_stepping_to_subtitles
-from vsg_core.subtitles.frame_sync import apply_raw_delay_sync, apply_duration_align_sync, apply_correlation_frame_snap_sync, apply_subtitle_anchored_frame_snap_sync, apply_correlation_guided_frame_anchor_sync, apply_timebase_frame_locked_sync
+
 
 class SubtitlesStep:
+    """
+    Unified subtitle processing step.
+
+    Uses SubtitleData as the central container for all operations.
+    """
+
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
         if not ctx.and_merge or not ctx.extracted_items:
             return ctx
 
         source1_file = ctx.sources.get("Source 1")
         if not source1_file:
-            runner._log_message("[WARN] No Source 1 file found for subtitle rescaling reference.")
+            runner._log_message("[WARN] No Source 1 file found for subtitle processing reference.")
 
         items_to_add = []
-        _any_no_scene_fallback = False  # Track if any track used raw delay due to no scene matches
+        _any_no_scene_fallback = False
 
         # Cache for scene detection results per source
-        # All subtitle tracks from the same source get the same frame correction
-        # since they're all synced to the same video. This saves ~1 min per extra track.
-        # Key: source_key, Value: dict with frame_correction_ms, num_scene_matches, valid
         _scene_detection_cache = {}
 
         for item in ctx.extracted_items:
             if item.track.type != TrackType.SUBTITLES:
                 continue
 
+            # Handle manually edited files
             if item.user_modified_path and not item.style_patch:
                 runner._log_message(f"[Subtitles] Using manually edited file for track {item.track.id}.")
                 shutil.copy(item.user_modified_path, item.extracted_path)
             elif item.user_modified_path and item.style_patch:
                 runner._log_message(f"[Subtitles] Ignoring temp preview file for track {item.track.id} (will apply style patch after conversion).")
 
+            # ================================================================
+            # OCR Processing (if needed)
+            # ================================================================
             if item.perform_ocr and item.extracted_path:
-                # Determine OCR work and logs directories
-                ocr_work_dir = ctx.temp_dir / 'ocr'
-                logs_dir = Path(ctx.settings_dict.get('logs_folder', ctx.temp_dir))
+                ocr_result = self._process_ocr(item, ctx, runner, items_to_add)
+                if not ocr_result:
+                    continue  # OCR failed, skip this track
 
-                ocr_output_path = run_ocr(
-                    str(item.extracted_path.with_suffix('.idx')),
-                    item.track.props.lang,
-                    runner,
-                    ctx.tool_paths,
-                    ctx.settings_dict,
-                    work_dir=ocr_work_dir,
-                    logs_dir=logs_dir,
-                    track_id=item.track.id
-                )
-                if ocr_output_path:
-                    ocr_file = Path(ocr_output_path)
-                    if not ocr_file.exists():
-                        # OCR tool didn't create output file - this is a critical failure
-                        runner._log_message(
-                            f"[OCR] ERROR: Output file was not created at {ocr_output_path}. "
-                            f"OCR completely failed for track {item.track.id}."
-                        )
-                        runner._log_message(
-                            f"[OCR] WARNING: Keeping original image-based subtitle for track {item.track.id} "
-                            f"({item.track.props.name or 'Unnamed'})."
-                        )
-                        # Don't raise - just skip OCR for this track and keep original
-                        item.perform_ocr = False
-                        continue
-
-                    # Check if OCR produced meaningful output
-                    file_size = ocr_file.stat().st_size
-                    if file_size < 50:
-                        # OCR produced an empty or nearly-empty file
-                        runner._log_message(
-                            f"[OCR] WARNING: OCR output is nearly empty for track {item.track.id} "
-                            f"({item.track.props.name or 'Unnamed'}). "
-                            f"File size: {file_size} bytes."
-                        )
-                        runner._log_message(
-                            f"[OCR] This likely means the subtitle track is empty or contains no recognizable text."
-                        )
-                        runner._log_message(
-                            f"[OCR] Keeping original image-based subtitle instead."
-                        )
-                        # Don't raise - just skip OCR for this track and keep original
-                        item.perform_ocr = False
-
-                        # Clean up the empty OCR file
-                        try:
-                            ocr_file.unlink()
-                        except Exception as e:
-                            runner._log_message(f"[OCR] Note: Could not delete empty OCR file: {e}")
-
-                        continue
-
-                    # OCR succeeded - proceed with processing
-                    preserved_item = copy.deepcopy(item)
-                    preserved_item.is_preserved = True
-                    original_props = preserved_item.track.props
-                    preserved_item.track = Track(
-                        source=preserved_item.track.source, id=preserved_item.track.id, type=preserved_item.track.type,
-                        props=StreamProps(
-                            codec_id=original_props.codec_id,
-                            lang=original_props.lang,
-                            name=f"{original_props.name} (Original)" if original_props.name else "Original"
-                        )
-                    )
-                    items_to_add.append(preserved_item)
-
-                    item.extracted_path = Path(ocr_output_path)
-                    # Determine codec based on output file extension
-                    ocr_output_ext = Path(ocr_output_path).suffix.lower()
-                    ocr_codec_id = "S_TEXT/ASS" if ocr_output_ext == '.ass' else "S_TEXT/UTF8"
-                    item.track = Track(
-                        source=item.track.source, id=item.track.id, type=item.track.type,
-                        props=StreamProps(
-                            codec_id=ocr_codec_id,
-                            lang=original_props.lang,
-                            name=original_props.name
-                        )
-                    )
-
-                    # Apply stepping correction to subtitle timestamps (if applicable)
-                    if ctx.settings_dict.get('stepping_adjust_subtitles', True):
-                        source_key = item.track.source
-                        if source_key in ctx.stepping_edls:
-                            stepping_report = apply_stepping_to_subtitles(
-                                str(item.extracted_path),
-                                ctx.stepping_edls[source_key],
-                                runner,
-                                ctx.settings_dict
-                            )
-                            if stepping_report and 'error' not in stepping_report:
-                                runner._log_message("--- Stepping Adjustment Report ---")
-                                for key, value in stepping_report.items():
-                                    runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
-                                runner._log_message("--------------------------------")
-                                # Mark that timestamps have been adjusted (so mux doesn't double-apply delay)
-                                item.stepping_adjusted = True
-
-                    if ctx.settings_dict.get('timing_fix_enabled', False):
-                        timing_report = fix_subtitle_timing(ocr_output_path, ctx.settings_dict, runner)
-                        if timing_report:
-                            runner._log_message("--- Subtitle Timing Report ---")
-                            for key, value in timing_report.items():
-                                runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
-                            runner._log_message("--------------------------")
-
-                else:
-                    # run_ocr returned None - complete failure
-                    runner._log_message(
-                        f"[OCR] ERROR: OCR tool failed for track {item.track.id} "
-                        f"({item.track.props.name or 'Unnamed'}). "
-                        f"Check that subtile-ocr is installed and the IDX/SUB files are valid."
-                    )
-                    runner._log_message(
-                        f"[OCR] WARNING: Keeping original image-based subtitle for track {item.track.id}."
-                    )
-                    # Don't raise - just skip OCR for this track
-                    item.perform_ocr = False
-                    continue
-
-            # Apply stepping correction to subtitle timestamps for non-OCR subtitles
-            # (OCR subtitles already handled above)
-            if not item.perform_ocr and item.extracted_path:
-                if ctx.settings_dict.get('stepping_adjust_subtitles', True):
-                    source_key = item.track.source
-                    if source_key in ctx.stepping_edls:
-                        stepping_report = apply_stepping_to_subtitles(
-                            str(item.extracted_path),
-                            ctx.stepping_edls[source_key],
-                            runner,
-                            ctx.settings_dict
-                        )
-                        if stepping_report and 'error' not in stepping_report:
-                            runner._log_message("--- Stepping Adjustment Report ---")
-                            for key, value in stepping_report.items():
-                                runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
-                            runner._log_message("--------------------------------")
-                            # Mark that timestamps have been adjusted (so mux doesn't double-apply delay)
-                            item.stepping_adjusted = True
-
-            # Apply subtitle sync mode
-            # NOTE: timebase-frame-locked-timestamps runs AFTER stepping (complementary)
-            # Other modes are skipped if stepping was applied (they would conflict)
+            # ================================================================
+            # Unified SubtitleData Processing
+            # ================================================================
             if item.extracted_path:
-                subtitle_sync_mode = ctx.settings_dict.get('subtitle_sync_mode', 'time-based')
+                ext = item.extracted_path.suffix.lower()
+                supported_formats = ['.ass', '.ssa', '.srt', '.vtt']
 
-                # For non-frame-locked modes, skip if stepping was already applied
-                if item.stepping_adjusted and subtitle_sync_mode not in ['timebase-frame-locked-timestamps']:
-                    pass  # Skip - stepping already handled timing
-                elif subtitle_sync_mode == 'time-based':
-                    # Check for time-based with raw values option
-                    use_raw_values = ctx.settings_dict.get('time_based_use_raw_values', False)
-                    if use_raw_values and not item.stepping_adjusted:
-                        # Time-based with raw values - apply delay using pysubs
-                        ext = item.extracted_path.suffix.lower()
-                        supported_formats = ['.ass', '.ssa', '.srt', '.vtt']
-
-                        if ext in supported_formats:
-                            source_key = item.sync_to if item.track.source == 'External' else item.track.source
-
-                            # Get total delay (already includes global shift)
-                            total_delay_with_global_ms = 0.0
-                            if ctx.delays and source_key in ctx.delays.raw_source_delays_ms:
-                                total_delay_with_global_ms = ctx.delays.raw_source_delays_ms[source_key]
-                                runner._log_message(f"[Time-Based Raw] Total delay (with global): {total_delay_with_global_ms:+.3f}ms from {source_key}")
-
-                            # Get global shift separately for logging breakdown
-                            raw_global_shift_ms = 0.0
-                            if ctx.delays:
-                                raw_global_shift_ms = ctx.delays.raw_global_shift_ms
-                                runner._log_message(f"[Time-Based Raw] Global shift: {raw_global_shift_ms:+.3f}ms")
-
-                            # Get target video for frame boundary correction
-                            target_video = source1_file
-                            target_fps = None
-                            if target_video:
-                                from vsg_core.subtitles.frame_sync import detect_video_fps
-                                try:
-                                    target_fps = detect_video_fps(str(target_video), runner)
-                                    runner._log_message(f"[Time-Based Raw] Target video: {Path(target_video).name} ({target_fps:.3f} fps)")
-                                except Exception as e:
-                                    runner._log_message(f"[Time-Based Raw] WARNING: Could not detect target FPS: {e}")
-                                    runner._log_message(f"[Time-Based Raw] Frame boundary correction will be skipped")
-
-                            runner._log_message(f"[Time-Based Raw] Applying to track {item.track.id} ({item.track.props.name or 'Unnamed'})")
-
-                            # Get frame boundary correction setting
-                            enable_frame_correction = ctx.settings_dict.get('time_based_frame_boundary_correction', True)
-
-                            frame_sync_report = apply_raw_delay_sync(
-                                str(item.extracted_path),
-                                total_delay_with_global_ms,
-                                raw_global_shift_ms,
-                                runner,
-                                ctx.settings_dict,
-                                target_fps=target_fps,
-                                enable_frame_boundary_correction=enable_frame_correction
-                            )
-
-                            if frame_sync_report and 'error' not in frame_sync_report:
-                                runner._log_message(f"--- Time-Based Raw Sync Report ---")
-                                for key, value in frame_sync_report.items():
-                                    runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
-                                runner._log_message("------------------------------------------")
-                                # Mark that timestamps have been adjusted (so mux uses --sync 0:0)
-                                item.frame_adjusted = True
-                            else:
-                                runner._log_message(f"[Time-Based Raw] WARNING: Sync failed for track {item.track.id}")
-                        else:
-                            runner._log_message(f"[Time-Based Raw] Skipping track {item.track.id} - format {ext} not supported")
-                    # else: default time-based mode uses mkvmerge --sync, no processing needed here
-
-                elif subtitle_sync_mode == 'timebase-frame-locked-timestamps':
-                    # Time-based + VideoTimestamps frame locking
-                    # IMPORTANT: This mode runs EVEN AFTER stepping (complementary)
-                    # Stepping just makes the timeline continuous - final delay still needs to be applied
-                    ext = item.extracted_path.suffix.lower()
-                    supported_formats = ['.ass', '.ssa', '.srt', '.vtt']
-
-                    if ext in supported_formats:
-                        source_key = item.sync_to if item.track.source == 'External' else item.track.source
-
-                        if item.stepping_adjusted:
-                            runner._log_message(f"[FrameLocked] Stepping already applied - now applying final delay + frame-snap")
-
-                        # Get total delay (already includes global shift)
-                        total_delay_with_global_ms = 0.0
-                        if ctx.delays and source_key in ctx.delays.raw_source_delays_ms:
-                            total_delay_with_global_ms = ctx.delays.raw_source_delays_ms[source_key]
-                            runner._log_message(f"[FrameLocked] Total delay (with global): {total_delay_with_global_ms:+.3f}ms from {source_key}")
-
-                        # Get global shift separately for logging breakdown
-                        raw_global_shift_ms = 0.0
-                        if ctx.delays:
-                            raw_global_shift_ms = ctx.delays.raw_global_shift_ms
-                            runner._log_message(f"[FrameLocked] Global shift: {raw_global_shift_ms:+.3f}ms")
-
-                        # Get target video and FPS
-                        target_video = source1_file
-                        target_fps = None
-                        if target_video:
-                            from vsg_core.subtitles.frame_sync import detect_video_fps
-                            try:
-                                target_fps = detect_video_fps(str(target_video), runner)
-                                runner._log_message(f"[FrameLocked] Target video: {Path(target_video).name} ({target_fps:.3f} fps)")
-                            except Exception as e:
-                                runner._log_message(f"[FrameLocked] ERROR: Could not detect target FPS: {e}")
-                                runner._log_message(f"[FrameLocked] Frame-locked mode requires target video FPS")
-                                raise RuntimeError(f"Frame-locked sync failed: Could not detect target FPS: {e}")
-
-                        if target_video and target_fps:
-                            runner._log_message(f"[FrameLocked] Applying to track {item.track.id} ({item.track.props.name or 'Unnamed'})")
-
-                            frame_sync_report = apply_timebase_frame_locked_sync(
-                                str(item.extracted_path),
-                                total_delay_with_global_ms,
-                                raw_global_shift_ms,
-                                str(target_video),
-                                target_fps,
-                                runner,
-                                ctx.settings_dict
-                            )
-
-                            if frame_sync_report and 'error' not in frame_sync_report:
-                                runner._log_message(f"--- Frame-Locked Timestamps Sync Report ---")
-                                for key, value in frame_sync_report.items():
-                                    runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
-                                runner._log_message("------------------------------------------")
-                                # Store FrameLocked stats for final audit
-                                item.framelocked_stats = frame_sync_report
-                                # Mark that timestamps have been adjusted (so mux uses --sync 0:0)
-                                item.frame_adjusted = True
-                            else:
-                                runner._log_message(f"[FrameLocked] WARNING: Sync failed for track {item.track.id}")
-                        else:
-                            runner._log_message(f"[FrameLocked] ERROR: Missing target video")
-                    else:
-                        runner._log_message(f"[FrameLocked] Skipping track {item.track.id} - format {ext} not supported")
-
-                elif subtitle_sync_mode in ['duration-align', 'correlation-frame-snap', 'subtitle-anchored-frame-snap', 'correlation-guided-frame-anchor'] and not item.stepping_adjusted:
-                    # Check if this subtitle format supports advanced sync
-                    ext = item.extracted_path.suffix.lower()
-                    supported_formats = ['.ass', '.ssa', '.srt', '.vtt']
-
-                    if ext in supported_formats:
-                        # Duration-Align mode: Frame alignment via total duration difference
-                        if subtitle_sync_mode == 'duration-align':
-                            # Requires source and target videos
-                            source_key = item.sync_to if item.track.source == 'External' else item.track.source
-                            source_video = ctx.sources.get(source_key)
-                            target_video = source1_file
-
-                            # Get raw global shift (NOT source-specific delay)
-                            global_shift_ms = 0.0
-                            if ctx.delays:
-                                global_shift_ms = ctx.delays.raw_global_shift_ms
-                                runner._log_message(f"[Duration Align] Using raw global shift: {global_shift_ms:+.3f}ms")
-
-                            if source_video and target_video:
-                                runner._log_message(f"[Duration Align] Applying to track {item.track.id} ({item.track.props.name or 'Unnamed'})")
-                                runner._log_message(f"[Duration Align] Source video: {Path(source_video).name}")
-                                runner._log_message(f"[Duration Align] Target video: {Path(target_video).name}")
-
-                                # Check if this track should skip frame validation (for generated tracks)
-                                sync_config = ctx.settings_dict.copy()
-                                if item.skip_frame_validation:
-                                    runner._log_message(f"[Duration Align] Skipping frame validation for this track (generated track)")
-                                    sync_config['duration_align_validate'] = False
-
-                                frame_sync_report = apply_duration_align_sync(
-                                    str(item.extracted_path),
-                                    str(source_video),
-                                    str(target_video),
-                                    global_shift_ms,
-                                    runner,
-                                    sync_config,
-                                    ctx.temp_dir
-                                )
-
-                                if frame_sync_report and 'error' not in frame_sync_report:
-                                    runner._log_message(f"--- Duration Align Sync Report ---")
-                                    for key, value in frame_sync_report.items():
-                                        runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
-                                    runner._log_message("------------------------------------------")
-                                    # Mark that timestamps have been adjusted
-                                    item.frame_adjusted = True
-                                elif frame_sync_report and 'error' in frame_sync_report:
-                                    # Sync function returned error - this is a fatal error (abort mode)
-                                    error_msg = frame_sync_report['error']
-                                    runner._log_message(f"[Duration Align] ERROR: Sync failed for track {item.track.id}: {error_msg}")
-                                    raise RuntimeError(f"Duration-align sync failed for track {item.track.id}: {error_msg}")
-                                else:
-                                    # No report returned at all - unexpected
-                                    runner._log_message(f"[Duration Align] ERROR: No sync report returned for track {item.track.id}")
-                                    raise RuntimeError(f"Duration-align sync failed for track {item.track.id}: No report returned")
-                            else:
-                                runner._log_message(f"[Duration Align] ERROR: Missing source or target video")
-                                runner._log_message(f"[Duration Align] Source: {source_video}, Target: {target_video}")
-
-                            # Skip the delay-based sync logic for duration-align mode
-                            continue
-
-                        # Correlation + Frame Snap mode: Use correlation as authoritative, refined to frame boundaries
-                        if subtitle_sync_mode == 'correlation-frame-snap':
-                            # Requires source and target videos + correlation delay
-                            source_key = item.sync_to if item.track.source == 'External' else item.track.source
-                            source_video = ctx.sources.get(source_key)
-                            target_video = source1_file
-
-                            # CRITICAL: Get the TOTAL delay (which ALREADY includes global_shift)
-                            # raw_source_delays_ms has global_shift baked in from analysis step
-                            total_delay_with_global_ms = 0.0
-                            if ctx.delays and source_key in ctx.delays.raw_source_delays_ms:
-                                total_delay_with_global_ms = ctx.delays.raw_source_delays_ms[source_key]
-                                runner._log_message(f"[Correlation+FrameSnap] Total delay (with global): {total_delay_with_global_ms:+.3f}ms from {source_key}")
-
-                            # Get raw global shift separately (for the function to subtract and get pure correlation)
-                            raw_global_shift_ms = 0.0
-                            if ctx.delays:
-                                raw_global_shift_ms = ctx.delays.raw_global_shift_ms
-                                runner._log_message(f"[Correlation+FrameSnap] Global shift: {raw_global_shift_ms:+.3f}ms")
-
-                            if source_video and target_video:
-                                runner._log_message(f"[Correlation+FrameSnap] Applying to track {item.track.id} ({item.track.props.name or 'Unnamed'})")
-                                runner._log_message(f"[Correlation+FrameSnap] Source video: {Path(source_video).name}")
-                                runner._log_message(f"[Correlation+FrameSnap] Target video: {Path(target_video).name}")
-
-                                # Check if we have a cached scene detection result for this source
-                                # All subs from same source are synced to same video, so they get same correction
-                                cached_correction = _scene_detection_cache.get(source_key)
-
-                                frame_sync_report = apply_correlation_frame_snap_sync(
-                                    str(item.extracted_path),
-                                    str(source_video),
-                                    str(target_video),
-                                    total_delay_with_global_ms,  # ALREADY includes global_shift
-                                    raw_global_shift_ms,          # Passed separately for pure correlation calculation
-                                    runner,
-                                    ctx.settings_dict,
-                                    cached_frame_correction=cached_correction  # Reuse if available
-                                )
-
-                                if frame_sync_report and frame_sync_report.get('success'):
-                                    runner._log_message(f"--- Correlation+FrameSnap Sync Report ---")
-                                    for key, value in frame_sync_report.items():
-                                        if key != 'verification':  # Skip nested verification dict
-                                            runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
-                                    runner._log_message("------------------------------------------")
-                                    # Mark that timestamps have been adjusted
-                                    item.frame_adjusted = True
-
-                                    # Check verification results for caching and fallback tracking
-                                    verification = frame_sync_report.get('verification', {})
-                                    num_scene_matches = verification.get('num_scene_matches', 0)
-                                    valid = verification.get('valid', False)
-
-                                    # Track if this used raw delay fallback (no scene matches)
-                                    if num_scene_matches == 0:
-                                        _any_no_scene_fallback = True
-
-                                    # Cache the result if it meets quality criteria for reuse:
-                                    # - At least 2 scene matches (can verify agreement)
-                                    # - Checkpoints agreed (valid=True) OR only 1 scene matched
-                                    # - Not already cached (don't overwrite with reused data)
-                                    if source_key not in _scene_detection_cache:
-                                        # Criteria for caching: need confident result
-                                        # - 2+ scenes that agree (valid=True), OR
-                                        # - 3+ scenes even if they used median (robust enough)
-                                        should_cache = (
-                                            (num_scene_matches >= 2 and valid) or
-                                            (num_scene_matches >= 3)
-                                        )
-
-                                        if should_cache:
-                                            _scene_detection_cache[source_key] = {
-                                                'frame_correction_ms': frame_sync_report.get('frame_correction_ms', 0.0),
-                                                'num_scene_matches': num_scene_matches,
-                                                'valid': valid
-                                            }
-                                            runner._log_message(f"[Correlation+FrameSnap] Cached scene detection result for {source_key} ({num_scene_matches} scenes, valid={valid})")
-                                        elif num_scene_matches < 2:
-                                            runner._log_message(f"[Correlation+FrameSnap] Not caching: only {num_scene_matches} scene(s) - each track will run its own detection")
-
-                                elif frame_sync_report and 'error' in frame_sync_report:
-                                    # Sync function returned error
-                                    error_msg = frame_sync_report['error']
-                                    runner._log_message(f"[Correlation+FrameSnap] ERROR: Sync failed for track {item.track.id}: {error_msg}")
-                                    raise RuntimeError(f"Correlation+FrameSnap sync failed for track {item.track.id}: {error_msg}")
-                                else:
-                                    # No report or unexpected result
-                                    runner._log_message(f"[Correlation+FrameSnap] ERROR: No sync report returned for track {item.track.id}")
-                                    raise RuntimeError(f"Correlation+FrameSnap sync failed for track {item.track.id}: No report returned")
-                            else:
-                                runner._log_message(f"[Correlation+FrameSnap] ERROR: Missing source or target video")
-                                runner._log_message(f"[Correlation+FrameSnap] Source: {source_video}, Target: {target_video}")
-                                raise RuntimeError(f"Correlation+FrameSnap sync failed: missing source/target video")
-
-                        # Subtitle-Anchored Frame Snap mode: Visual-only sync using subtitle positions
-                        if subtitle_sync_mode == 'subtitle-anchored-frame-snap':
-                            # Requires source and target videos
-                            source_key = item.sync_to if item.track.source == 'External' else item.track.source
-                            source_video = ctx.sources.get(source_key)
-                            target_video = source1_file
-
-                            # Get raw global shift (NOT source-specific delay)
-                            # This mode does NOT depend on audio correlation
-                            global_shift_ms = 0.0
-                            if ctx.delays:
-                                global_shift_ms = ctx.delays.raw_global_shift_ms
-                                runner._log_message(f"[SubAnchor FrameSnap] Using raw global shift: {global_shift_ms:+.3f}ms")
-
-                            if source_video and target_video:
-                                runner._log_message(f"[SubAnchor FrameSnap] Applying to track {item.track.id} ({item.track.props.name or 'Unnamed'})")
-                                runner._log_message(f"[SubAnchor FrameSnap] Source video: {Path(source_video).name}")
-                                runner._log_message(f"[SubAnchor FrameSnap] Target video: {Path(target_video).name}")
-
-                                frame_sync_report = apply_subtitle_anchored_frame_snap_sync(
-                                    str(item.extracted_path),
-                                    str(source_video),
-                                    str(target_video),
-                                    global_shift_ms,
-                                    runner,
-                                    ctx.settings_dict,
-                                    temp_dir=ctx.temp_dir
-                                )
-
-                                if frame_sync_report and frame_sync_report.get('success'):
-                                    runner._log_message(f"--- SubAnchor FrameSnap Sync Report ---")
-                                    for key, value in frame_sync_report.items():
-                                        if key not in ('verification', 'checkpoints'):  # Skip nested dicts
-                                            runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
-                                    runner._log_message("------------------------------------------")
-                                    # Mark that timestamps have been adjusted
-                                    item.frame_adjusted = True
-                                elif frame_sync_report and 'error' in frame_sync_report:
-                                    # Sync function returned error
-                                    error_msg = frame_sync_report['error']
-                                    runner._log_message(f"[SubAnchor FrameSnap] ERROR: Sync failed for track {item.track.id}: {error_msg}")
-                                    raise RuntimeError(f"SubAnchor FrameSnap sync failed for track {item.track.id}: {error_msg}")
-                                else:
-                                    # No report or unexpected result
-                                    runner._log_message(f"[SubAnchor FrameSnap] ERROR: No sync report returned for track {item.track.id}")
-                                    raise RuntimeError(f"SubAnchor FrameSnap sync failed for track {item.track.id}: No report returned")
-                            else:
-                                runner._log_message(f"[SubAnchor FrameSnap] ERROR: Missing source or target video")
-                                runner._log_message(f"[SubAnchor FrameSnap] Source: {source_video}, Target: {target_video}")
-                                raise RuntimeError(f"SubAnchor FrameSnap sync failed: missing source/target video")
-
-                        # Correlation-Guided Frame Anchor mode: Hybrid sync using correlation + frame anchors
-                        if subtitle_sync_mode == 'correlation-guided-frame-anchor':
-                            # Requires source and target videos + correlation delay
-                            source_key = item.sync_to if item.track.source == 'External' else item.track.source
-                            source_video = ctx.sources.get(source_key)
-                            target_video = source1_file
-
-                            # Get total delay (already includes global_shift)
-                            total_delay_with_global_ms = 0.0
-                            if ctx.delays and source_key in ctx.delays.raw_source_delays_ms:
-                                total_delay_with_global_ms = ctx.delays.raw_source_delays_ms[source_key]
-                                runner._log_message(f"[CorrGuidedAnchor] Total delay (with global): {total_delay_with_global_ms:+.3f}ms from {source_key}")
-
-                            # Get raw global shift separately for logging breakdown
-                            raw_global_shift_ms = 0.0
-                            if ctx.delays:
-                                raw_global_shift_ms = ctx.delays.raw_global_shift_ms
-                                runner._log_message(f"[CorrGuidedAnchor] Global shift: {raw_global_shift_ms:+.3f}ms")
-
-                            if source_video and target_video:
-                                runner._log_message(f"[CorrGuidedAnchor] Applying to track {item.track.id} ({item.track.props.name or 'Unnamed'})")
-                                runner._log_message(f"[CorrGuidedAnchor] Source video: {Path(source_video).name}")
-                                runner._log_message(f"[CorrGuidedAnchor] Target video: {Path(target_video).name}")
-
-                                frame_sync_report = apply_correlation_guided_frame_anchor_sync(
-                                    str(item.extracted_path),
-                                    str(source_video),
-                                    str(target_video),
-                                    total_delay_with_global_ms,
-                                    raw_global_shift_ms,
-                                    runner,
-                                    ctx.settings_dict,
-                                    temp_dir=ctx.temp_dir,
-                                    sync_exclusion_styles=item.sync_exclusion_styles,
-                                    sync_exclusion_mode=item.sync_exclusion_mode
-                                )
-
-                                if frame_sync_report and frame_sync_report.get('success'):
-                                    runner._log_message(f"--- Correlation-Guided Frame Anchor Sync Report ---")
-                                    for key, value in frame_sync_report.items():
-                                        if key not in ('verification', 'checkpoints'):  # Skip nested dicts
-                                            runner._log_message(f"  - {key.replace('_', ' ').title()}: {value}")
-                                    runner._log_message("------------------------------------------")
-                                    # Mark that timestamps have been adjusted
-                                    item.frame_adjusted = True
-                                elif frame_sync_report and 'error' in frame_sync_report:
-                                    # Sync function returned error
-                                    error_msg = frame_sync_report['error']
-                                    runner._log_message(f"[CorrGuidedAnchor] ERROR: Sync failed for track {item.track.id}: {error_msg}")
-                                    raise RuntimeError(f"Correlation-Guided Frame Anchor sync failed for track {item.track.id}: {error_msg}")
-                                else:
-                                    # No report or unexpected result
-                                    runner._log_message(f"[CorrGuidedAnchor] ERROR: No sync report returned for track {item.track.id}")
-                                    raise RuntimeError(f"Correlation-Guided Frame Anchor sync failed for track {item.track.id}: No report returned")
-                            else:
-                                runner._log_message(f"[CorrGuidedAnchor] ERROR: Missing source or target video")
-                                runner._log_message(f"[CorrGuidedAnchor] Source: {source_video}, Target: {target_video}")
-                                raise RuntimeError(f"Correlation-Guided Frame Anchor sync failed: missing source/target video")
-
-                    else:
-                        # Unsupported format (PGS/VOB bitmap subtitles)
-                        # These can't be processed with advanced sync, but they still need
-                        # the basic audio delay applied via mkvmerge --sync
-                        runner._log_message(f"[{subtitle_sync_mode}] Skipping track {item.track.id} - format {ext} not supported (bitmap subtitle)")
-
-            if item.convert_to_ass and item.extracted_path and item.extracted_path.suffix.lower() == '.srt':
-                new_path = convert_srt_to_ass(str(item.extracted_path), runner, ctx.tool_paths)
-                item.extracted_path = Path(new_path)
-
-            # Apply font replacements if configured (before style patches)
-            if item.font_replacements and item.extracted_path:
-                if item.extracted_path.suffix.lower() in ['.ass', '.ssa']:
-                    runner._log_message(f"[Font] Applying font replacements to track {item.track.id}...")
+                if ext in supported_formats:
                     try:
-                        from vsg_core.font_manager import apply_font_replacements_to_subtitle
-                        from vsg_core.subtitles.metadata_preserver import SubtitleMetadata
-
-                        # Capture original state before processing
-                        metadata = SubtitleMetadata(str(item.extracted_path))
-                        metadata.capture()
-
-                        modified_count = apply_font_replacements_to_subtitle(
-                            str(item.extracted_path),
-                            item.font_replacements
+                        self._process_track_unified(
+                            item, ctx, runner, source1_file,
+                            _scene_detection_cache, items_to_add
                         )
-
-                        # Validate and restore any lost metadata
-                        # Note: Text content changes are expected when \fn tags are replaced
-                        stats = metadata.validate_and_restore(runner)
-                        if stats.get('extradata_restored') or stats.get('comment_lines_restored') or stats.get('project_garbage_restored'):
-                            runner._log_message(f"[Font] Metadata restoration: extradata={stats.get('extradata_restored', 0)}, comments={stats.get('comment_lines_restored', 0)}, garbage={stats.get('project_garbage_restored', 0)}")
-
-                        runner._log_message(f"[Font] Applied {len(item.font_replacements)} replacement(s) to {modified_count} style(s).")
                     except Exception as e:
-                        runner._log_message(f"[Font] WARNING: Failed to apply font replacements: {e}")
+                        runner._log_message(f"[Subtitles] ERROR processing track {item.track.id}: {e}")
+                        raise
                 else:
-                    runner._log_message(f"[Font] WARNING: Cannot apply font replacements to {item.extracted_path.suffix} file.")
+                    # Bitmap subtitles - can't process with unified flow
+                    runner._log_message(f"[Subtitles] Track {item.track.id}: format {ext} not supported for unified processing")
 
-            if item.style_patch and item.extracted_path:
-                if item.extracted_path.suffix.lower() in ['.ass', '.ssa']:
-                    runner._log_message(f"[Style] Applying style patch to track {item.track.id}...")
-                    engine = StyleEngine(str(item.extracted_path))
-                    if engine.subs:
-                        for style_name, changes in item.style_patch.items():
-                            if style_name in engine.subs.styles:
-                                engine.update_style_attributes(style_name, changes)
-                        engine.save()
-                        runner._log_message("[Style] Patch applied successfully.")
-                    else:
-                        runner._log_message("[Style] WARNING: Could not load subtitle file to apply patch.")
-                else:
-                    runner._log_message(f"[Style] WARNING: Cannot apply style patch to {item.extracted_path.suffix} file. Patch requires ASS/SSA format.")
-
-            if item.rescale and source1_file:
-                rescale_subtitle(str(item.extracted_path), source1_file, runner, ctx.tool_paths)
-
-            size_mult = float(item.size_multiplier)
-            if abs(size_mult - 1.0) > 1e-6:
-                if 0.5 <= size_mult <= 3.0:
-                    multiply_font_size(str(item.extracted_path), size_mult, runner)
-                else:
-                    runner._log_message(f"[Font Size] WARNING: Ignoring unreasonable size multiplier {size_mult:.2f}x for track {item.track.id}. Using 1.0x instead.")
-
-        # Set context flag if any track used raw delay fallback due to no scene matches
+        # Set context flag if any track used raw delay fallback
         if _any_no_scene_fallback:
             ctx.correlation_snap_no_scenes_fallback = True
 
@@ -669,3 +94,439 @@ class SubtitlesStep:
             ctx.extracted_items.extend(items_to_add)
 
         return ctx
+
+    def _process_track_unified(
+        self,
+        item,
+        ctx: Context,
+        runner: CommandRunner,
+        source1_file: Optional[Path],
+        scene_cache: Dict[str, Any],
+        items_to_add: list
+    ) -> None:
+        """
+        Process a subtitle track using the unified SubtitleData flow.
+
+        1. Load into SubtitleData
+        2. Apply stepping (if applicable)
+        3. Apply sync mode
+        4. Apply style operations
+        5. Save (single rounding point)
+        """
+        from vsg_core.subtitles.data import SubtitleData
+
+        subtitle_sync_mode = ctx.settings_dict.get('subtitle_sync_mode', 'time-based')
+        logs_dir = Path(ctx.settings_dict.get('logs_folder', ctx.temp_dir))
+
+        # ================================================================
+        # STEP 1: Load into SubtitleData
+        # ================================================================
+        runner._log_message(f"[SubtitleData] Loading track {item.track.id}: {item.extracted_path.name}")
+
+        try:
+            subtitle_data = SubtitleData.from_file(item.extracted_path)
+            runner._log_message(f"[SubtitleData] Loaded {len(subtitle_data.events)} events, {len(subtitle_data.styles)} styles")
+        except Exception as e:
+            runner._log_message(f"[SubtitleData] ERROR: Failed to load: {e}")
+            raise
+
+        # ================================================================
+        # STEP 2: Apply Stepping (if applicable)
+        # ================================================================
+        if ctx.settings_dict.get('stepping_adjust_subtitles', True):
+            source_key = item.track.source
+            if source_key in ctx.stepping_edls:
+                runner._log_message(f"[SubtitleData] Applying stepping correction...")
+
+                result = subtitle_data.apply_stepping(
+                    edl_segments=ctx.stepping_edls[source_key],
+                    boundary_mode=ctx.settings_dict.get('stepping_boundary_mode', 'start'),
+                    runner=runner
+                )
+
+                if result.success:
+                    runner._log_message(f"[SubtitleData] Stepping: {result.summary}")
+                    item.stepping_adjusted = True
+                else:
+                    runner._log_message(f"[SubtitleData] Stepping failed: {result.error}")
+
+        # ================================================================
+        # STEP 3: Apply Sync Mode
+        # ================================================================
+        # For non-frame-locked modes with stepping already applied, skip sync
+        should_apply_sync = True
+        if item.stepping_adjusted and subtitle_sync_mode not in ['timebase-frame-locked-timestamps']:
+            should_apply_sync = False
+            runner._log_message(f"[SubtitleData] Skipping {subtitle_sync_mode} - stepping already applied")
+
+        if should_apply_sync:
+            sync_result = self._apply_sync_unified(
+                item, subtitle_data, ctx, runner, source1_file, subtitle_sync_mode, scene_cache
+            )
+
+            if sync_result and sync_result.success:
+                item.frame_adjusted = True
+                if hasattr(sync_result, 'details'):
+                    item.framelocked_stats = sync_result.details
+
+        # ================================================================
+        # STEP 4: Apply SRT to ASS Conversion (if needed)
+        # ================================================================
+        output_format = '.ass'
+        if item.convert_to_ass and item.extracted_path.suffix.lower() == '.srt':
+            # Conversion happens at save - SubtitleData can save to any format
+            runner._log_message(f"[SubtitleData] Will convert SRT to ASS at save")
+            output_format = '.ass'
+        else:
+            output_format = item.extracted_path.suffix.lower()
+
+        # ================================================================
+        # STEP 5: Apply Style Operations
+        # ================================================================
+
+        # Font replacements
+        if item.font_replacements:
+            runner._log_message(f"[SubtitleData] Applying font replacements...")
+            result = subtitle_data.apply_font_replacement(item.font_replacements, runner)
+            if result.success:
+                runner._log_message(f"[SubtitleData] Font replacement: {result.summary}")
+
+        # Style patches
+        if item.style_patch:
+            runner._log_message(f"[SubtitleData] Applying style patch...")
+            result = subtitle_data.apply_style_patch(item.style_patch, runner)
+            if result.success:
+                runner._log_message(f"[SubtitleData] Style patch: {result.summary}")
+
+        # Rescale
+        if item.rescale and source1_file:
+            runner._log_message(f"[SubtitleData] Applying rescale...")
+            target_res = self._get_video_resolution(source1_file, runner, ctx)
+            if target_res:
+                result = subtitle_data.apply_rescale(target_res, runner)
+                if result.success:
+                    runner._log_message(f"[SubtitleData] Rescale: {result.summary}")
+
+        # Size multiplier
+        size_mult = float(item.size_multiplier) if hasattr(item, 'size_multiplier') else 1.0
+        if abs(size_mult - 1.0) > 1e-6:
+            if 0.5 <= size_mult <= 3.0:
+                runner._log_message(f"[SubtitleData] Applying size multiplier: {size_mult}x")
+                result = subtitle_data.apply_size_multiplier(size_mult, runner)
+                if result.success:
+                    runner._log_message(f"[SubtitleData] Size multiplier: {result.summary}")
+            else:
+                runner._log_message(f"[SubtitleData] WARNING: Ignoring unreasonable size multiplier {size_mult:.2f}x")
+
+        # ================================================================
+        # STEP 6: Save (SINGLE ROUNDING POINT)
+        # ================================================================
+        output_path = item.extracted_path.with_suffix(output_format)
+
+        runner._log_message(f"[SubtitleData] Saving to {output_path.name}...")
+        try:
+            subtitle_data.save(output_path)
+            item.extracted_path = output_path
+            runner._log_message(f"[SubtitleData] Saved successfully ({len(subtitle_data.events)} events)")
+        except Exception as e:
+            runner._log_message(f"[SubtitleData] ERROR: Failed to save: {e}")
+            raise
+
+        # Update track codec if format changed
+        if output_path.suffix.lower() == '.ass':
+            item.track = Track(
+                source=item.track.source,
+                id=item.track.id,
+                type=item.track.type,
+                props=StreamProps(
+                    codec_id="S_TEXT/ASS",
+                    lang=item.track.props.lang,
+                    name=item.track.props.name
+                )
+            )
+
+        # ================================================================
+        # STEP 7: Debug Output (optional)
+        # ================================================================
+        if ctx.settings_dict.get('subtitle_debug_output', False):
+            debug_path = logs_dir / f"subtitle_data_track_{item.track.id}.json"
+            try:
+                subtitle_data.save_json(debug_path)
+                runner._log_message(f"[SubtitleData] Debug JSON saved: {debug_path.name}")
+            except Exception as e:
+                runner._log_message(f"[SubtitleData] WARNING: Could not save debug JSON: {e}")
+
+        # Log summary
+        runner._log_message(f"[SubtitleData] Track {item.track.id} complete: {len(subtitle_data.operations)} operations applied")
+
+    def _apply_sync_unified(
+        self,
+        item,
+        subtitle_data,
+        ctx: Context,
+        runner: CommandRunner,
+        source1_file: Optional[Path],
+        sync_mode: str,
+        scene_cache: Dict[str, Any]
+    ):
+        """Apply sync mode using unified SubtitleData flow."""
+        from vsg_core.subtitles.sync_modes import get_sync_plugin
+
+        # Get source and delays
+        source_key = item.sync_to if item.track.source == 'External' else item.track.source
+        source_video = ctx.sources.get(source_key)
+        target_video = source1_file
+
+        # Get delays
+        total_delay_ms = 0.0
+        global_shift_ms = 0.0
+        if ctx.delays:
+            if source_key in ctx.delays.raw_source_delays_ms:
+                total_delay_ms = ctx.delays.raw_source_delays_ms[source_key]
+            global_shift_ms = ctx.delays.raw_global_shift_ms
+
+        # Get target FPS
+        target_fps = None
+        if target_video:
+            try:
+                from vsg_core.subtitles.frame_utils import detect_video_fps
+                target_fps = detect_video_fps(str(target_video), runner)
+            except Exception as e:
+                runner._log_message(f"[Sync] WARNING: Could not detect FPS: {e}")
+
+        runner._log_message(f"[Sync] Mode: {sync_mode}")
+        runner._log_message(f"[Sync] Delay: {total_delay_ms:+.3f}ms (global: {global_shift_ms:+.3f}ms)")
+
+        # Try to use new plugin system
+        plugin = get_sync_plugin(sync_mode)
+
+        if plugin:
+            # Use new unified plugin
+            runner._log_message(f"[Sync] Using plugin: {plugin.name}")
+
+            result = plugin.apply(
+                subtitle_data=subtitle_data,
+                total_delay_ms=total_delay_ms,
+                global_shift_ms=global_shift_ms,
+                target_fps=target_fps,
+                source_video=str(source_video) if source_video else None,
+                target_video=str(target_video) if target_video else None,
+                runner=runner,
+                config=ctx.settings_dict,
+                temp_dir=ctx.temp_dir,
+                sync_exclusion_styles=getattr(item, 'sync_exclusion_styles', None),
+                sync_exclusion_mode=getattr(item, 'sync_exclusion_mode', 'exclude'),
+            )
+
+            if result.success:
+                runner._log_message(f"[Sync] {result.summary}")
+            else:
+                runner._log_message(f"[Sync] WARNING: {result.error or 'Sync failed'}")
+
+            return result
+
+        else:
+            # Fall back to legacy sync modes
+            runner._log_message(f"[Sync] Using legacy sync mode: {sync_mode}")
+            return self._apply_sync_legacy(
+                item, ctx, runner, source1_file, sync_mode, scene_cache,
+                source_key, source_video, target_video,
+                total_delay_ms, global_shift_ms, target_fps
+            )
+
+    def _apply_sync_legacy(
+        self,
+        item, ctx, runner, source1_file, sync_mode, scene_cache,
+        source_key, source_video, target_video,
+        total_delay_ms, global_shift_ms, target_fps
+    ):
+        """
+        Fall back to legacy sync mode implementation.
+
+        This handles modes that haven't been migrated to plugins yet.
+        """
+        from vsg_core.subtitles.data import OperationResult
+
+        # Import legacy sync functions
+        from vsg_core.subtitles.sync_modes import (
+            apply_duration_align_sync,
+            apply_correlation_frame_snap_sync,
+            apply_subtitle_anchored_frame_snap_sync,
+            apply_correlation_guided_frame_anchor_sync,
+        )
+
+        if sync_mode == 'duration-align':
+            if source_video and target_video:
+                sync_config = ctx.settings_dict.copy()
+                if item.skip_frame_validation:
+                    sync_config['duration_align_validate'] = False
+
+                report = apply_duration_align_sync(
+                    str(item.extracted_path),
+                    str(source_video),
+                    str(target_video),
+                    global_shift_ms,
+                    runner,
+                    sync_config,
+                    ctx.temp_dir
+                )
+
+                if report and 'error' not in report:
+                    return OperationResult(success=True, operation='sync', summary='Duration-align applied')
+                elif report and 'error' in report:
+                    raise RuntimeError(f"Duration-align failed: {report['error']}")
+
+        elif sync_mode == 'correlation-frame-snap':
+            if source_video and target_video:
+                cached = scene_cache.get(source_key)
+
+                report = apply_correlation_frame_snap_sync(
+                    str(item.extracted_path),
+                    str(source_video),
+                    str(target_video),
+                    total_delay_ms,
+                    global_shift_ms,
+                    runner,
+                    ctx.settings_dict,
+                    cached_frame_correction=cached
+                )
+
+                if report and report.get('success'):
+                    # Cache result if good
+                    verification = report.get('verification', {})
+                    num_matches = verification.get('num_scene_matches', 0)
+                    if source_key not in scene_cache and num_matches >= 2:
+                        scene_cache[source_key] = {
+                            'frame_correction_ms': report.get('frame_correction_ms', 0.0),
+                            'num_scene_matches': num_matches,
+                        }
+                    return OperationResult(success=True, operation='sync', summary='Correlation-frame-snap applied')
+                elif report and 'error' in report:
+                    raise RuntimeError(f"Correlation-frame-snap failed: {report['error']}")
+
+        elif sync_mode == 'subtitle-anchored-frame-snap':
+            if source_video and target_video:
+                report = apply_subtitle_anchored_frame_snap_sync(
+                    str(item.extracted_path),
+                    str(source_video),
+                    str(target_video),
+                    global_shift_ms,
+                    runner,
+                    ctx.settings_dict,
+                    temp_dir=ctx.temp_dir
+                )
+
+                if report and report.get('success'):
+                    return OperationResult(success=True, operation='sync', summary='Subtitle-anchored-frame-snap applied')
+                elif report and 'error' in report:
+                    raise RuntimeError(f"Subtitle-anchored-frame-snap failed: {report['error']}")
+
+        elif sync_mode == 'correlation-guided-frame-anchor':
+            if source_video and target_video:
+                report = apply_correlation_guided_frame_anchor_sync(
+                    str(item.extracted_path),
+                    str(source_video),
+                    str(target_video),
+                    total_delay_ms,
+                    global_shift_ms,
+                    runner,
+                    ctx.settings_dict,
+                    temp_dir=ctx.temp_dir,
+                    sync_exclusion_styles=getattr(item, 'sync_exclusion_styles', []),
+                    sync_exclusion_mode=getattr(item, 'sync_exclusion_mode', 'exclude')
+                )
+
+                if report and report.get('success'):
+                    return OperationResult(success=True, operation='sync', summary='Correlation-guided-frame-anchor applied')
+                elif report and 'error' in report:
+                    raise RuntimeError(f"Correlation-guided-frame-anchor failed: {report['error']}")
+
+        return OperationResult(success=False, operation='sync', error=f'Unknown or unhandled sync mode: {sync_mode}')
+
+    def _process_ocr(self, item, ctx, runner, items_to_add) -> bool:
+        """
+        Process OCR for a track.
+
+        Returns True if OCR succeeded, False if failed/skipped.
+        """
+        from vsg_core.subtitles.ocr import run_ocr
+
+        ocr_work_dir = ctx.temp_dir / 'ocr'
+        logs_dir = Path(ctx.settings_dict.get('logs_folder', ctx.temp_dir))
+
+        ocr_output_path = run_ocr(
+            str(item.extracted_path.with_suffix('.idx')),
+            item.track.props.lang,
+            runner,
+            ctx.tool_paths,
+            ctx.settings_dict,
+            work_dir=ocr_work_dir,
+            logs_dir=logs_dir,
+            track_id=item.track.id
+        )
+
+        if not ocr_output_path:
+            runner._log_message(f"[OCR] ERROR: OCR failed for track {item.track.id}")
+            runner._log_message(f"[OCR] Keeping original image-based subtitle")
+            item.perform_ocr = False
+            return False
+
+        ocr_file = Path(ocr_output_path)
+        if not ocr_file.exists():
+            runner._log_message(f"[OCR] ERROR: Output file not created for track {item.track.id}")
+            item.perform_ocr = False
+            return False
+
+        # Check file size
+        if ocr_file.stat().st_size < 50:
+            runner._log_message(f"[OCR] WARNING: OCR output nearly empty for track {item.track.id}")
+            item.perform_ocr = False
+            try:
+                ocr_file.unlink()
+            except Exception:
+                pass
+            return False
+
+        # OCR succeeded - create preserved copy of original
+        preserved_item = copy.deepcopy(item)
+        preserved_item.is_preserved = True
+        original_props = preserved_item.track.props
+        preserved_item.track = Track(
+            source=preserved_item.track.source,
+            id=preserved_item.track.id,
+            type=preserved_item.track.type,
+            props=StreamProps(
+                codec_id=original_props.codec_id,
+                lang=original_props.lang,
+                name=f"{original_props.name} (Original)" if original_props.name else "Original"
+            )
+        )
+        items_to_add.append(preserved_item)
+
+        # Update item with OCR output
+        item.extracted_path = Path(ocr_output_path)
+        ocr_ext = Path(ocr_output_path).suffix.lower()
+        ocr_codec = "S_TEXT/ASS" if ocr_ext == '.ass' else "S_TEXT/UTF8"
+        item.track = Track(
+            source=item.track.source,
+            id=item.track.id,
+            type=item.track.type,
+            props=StreamProps(
+                codec_id=ocr_codec,
+                lang=original_props.lang,
+                name=original_props.name
+            )
+        )
+
+        return True
+
+    def _get_video_resolution(self, video_path: Path, runner, ctx) -> Optional[tuple]:
+        """Get video resolution for rescaling."""
+        try:
+            from vsg_core.subtitles.frame_utils import get_video_properties
+            props = get_video_properties(str(video_path), runner, ctx.tool_paths)
+            if props:
+                return (props.get('width', 1920), props.get('height', 1080))
+        except Exception as e:
+            runner._log_message(f"[Rescale] WARNING: Could not get video resolution: {e}")
+        return None
