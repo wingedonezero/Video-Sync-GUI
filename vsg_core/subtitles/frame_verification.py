@@ -52,11 +52,11 @@ def verify_correlation_with_frame_snap(
     frame_duration_ms = 1000.0 / fps
     runner._log_message(f"[Correlation+FrameSnap] FPS: {fps:.3f} → frame duration: {frame_duration_ms:.3f}ms")
 
-    # Get config parameters (unified settings with fallback)
-    hash_algorithm = config.get('frame_hash_algorithm', config.get('correlation_snap_hash_algorithm', 'dhash'))
-    hash_size = int(config.get('frame_hash_size', config.get('correlation_snap_hash_size', 8)))
-    hash_threshold = int(config.get('frame_hash_threshold', config.get('correlation_snap_hash_threshold', 5)))
-    window_radius = int(config.get('frame_window_radius', config.get('correlation_snap_window_radius', 3)))
+    # Get unified config parameters
+    hash_algorithm = config.get('frame_hash_algorithm', 'dhash')
+    hash_size = int(config.get('frame_hash_size', 8))
+    hash_threshold = int(config.get('frame_hash_threshold', 5))
+    window_radius = int(config.get('frame_window_radius', 5))
     search_range_frames = int(config.get('correlation_snap_search_range', 5))
 
     runner._log_message(f"[Correlation+FrameSnap] Hash: {hash_algorithm}, size={hash_size}, threshold={hash_threshold}")
@@ -279,12 +279,12 @@ def verify_alignment_with_sliding_window(
     runner._log_message(f"[Hybrid Verification] Running TEMPORAL CONSISTENCY verification...")
     runner._log_message(f"[Hybrid Verification] Duration offset (rough): {duration_offset_ms:+.3f}ms")
 
-    # Get config parameters (unified settings with fallback)
-    search_window_ms = config.get('frame_search_range_ms', config.get('duration_align_verify_search_window_ms', 2000))
-    tolerance_ms = config.get('frame_agreement_tolerance_ms', config.get('duration_align_verify_agreement_tolerance_ms', 100))
-    hash_algorithm = config.get('frame_hash_algorithm', config.get('duration_align_hash_algorithm', 'dhash'))
-    hash_size = int(config.get('frame_hash_size', config.get('duration_align_hash_size', 8)))
-    hash_threshold = int(config.get('frame_hash_threshold', config.get('duration_align_hash_threshold', 5)))
+    # Get unified config parameters
+    search_window_ms = config.get('frame_search_range_ms', 2000)
+    tolerance_ms = config.get('frame_agreement_tolerance_ms', 100)
+    hash_algorithm = config.get('frame_hash_algorithm', 'dhash')
+    hash_size = int(config.get('frame_hash_size', 8))
+    hash_threshold = int(config.get('frame_hash_threshold', 5))
 
     runner._log_message(f"[Hybrid Verification] Search window: ±{search_window_ms}ms")
     runner._log_message(f"[Hybrid Verification] Agreement tolerance: ±{tolerance_ms}ms")
