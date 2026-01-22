@@ -835,14 +835,19 @@ class ManualSelectionDialog(QDialog):
 
             editor.finished.connect(on_ocr_done)
 
-            # Start async OCR loading
-            editor.load_ocr_async(extracted_path, lang, output_dir)
+            # Schedule async OCR loading after dialog is shown
+            # This is needed because PlayerThread requires video_frame.winId() which
+            # needs the widget to be realized (shown) first
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: editor.load_ocr_async(extracted_path, lang, output_dir))
         else:
             # Regular subtitle path: Load async via extraction
             def prepare_subtitle():
                 return self._ensure_editable_subtitle_path(widget)
 
-            editor.load_subtitle_async(prepare_subtitle, is_ocr=False)
+            # Schedule async loading after dialog is shown
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(0, lambda: editor.load_subtitle_async(prepare_subtitle, is_ocr=False))
 
         # Show the dialog (blocks until closed)
         if editor.exec():
