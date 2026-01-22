@@ -17,6 +17,7 @@ from vsg_core.subtitles.ocr import run_ocr_pipeline
 from vsg_core.subtitles.timing import fix_subtitle_timing
 from vsg_core.subtitles.stepping_adjust import apply_stepping_to_subtitles
 from vsg_core.subtitles.frame_sync import apply_raw_delay_sync, apply_duration_align_sync, apply_correlation_frame_snap_sync, apply_subtitle_anchored_frame_snap_sync, apply_correlation_guided_frame_anchor_sync, apply_timebase_frame_locked_sync
+from vsg_core.subtitles.data import SubtitleData, OperationRecord
 
 class SubtitlesStep:
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
@@ -674,29 +675,75 @@ class SubtitlesStep:
         if _any_no_scene_fallback:
             ctx.correlation_snap_no_scenes_fallback = True
 
-        # Final step: Write ASS files from OCR data (single conversion point)
+        # Get logs directory for debug output
+        logs_dir = Path(ctx.settings_dict.get('logs_folder', ctx.temp_dir))
+        debug_enabled = ctx.settings_dict.get('debug_enabled', False) or ctx.settings_dict.get('ocr_debug_output', False)
+
+        # Final step: Convert to SubtitleData and write ASS files (single conversion point)
         # This preserves timing precision through the entire pipeline
         for item in ctx.extracted_items:
+            if item.track.type != TrackType.SUBTITLES:
+                continue
+
             ocr_data = getattr(item, 'ocr_data', None)
             if ocr_data and item.frame_adjusted:
-                # This is an OCR track that went through sync - write final ASS
-                runner._log_message(f"[OCR Final] Writing final ASS for track {item.track.id} (precision timing preserved)")
+                # This is an OCR track that went through sync - convert to SubtitleData and write
+                runner._log_message(f"[SubtitleData] Converting OCR data for track {item.track.id} (precision timing preserved)")
 
-                # Determine output path (should already be .ass from OCR)
-                final_path = item.extracted_path
-                if final_path.suffix.lower() != '.ass':
-                    final_path = final_path.with_suffix('.ass')
-
-                # Write the final ASS with single-point rounding
                 try:
-                    ocr_data.save_ass(final_path)
+                    # Convert OCR data to SubtitleData
+                    subtitle_data = ocr_data.to_subtitle_data()
+
+                    # Record the sync operation that was applied
+                    sync_record = OperationRecord(
+                        operation='sync_offset',
+                        parameters={
+                            'sync_mode': ocr_data.sync_mode_used,
+                            'offset_ms': ocr_data.sync_offset_applied_ms,
+                        },
+                        events_affected=len(subtitle_data.events),
+                        summary=f'Applied {ocr_data.sync_offset_applied_ms:+.3f}ms via {ocr_data.sync_mode_used}'
+                    )
+                    subtitle_data.operations.append(sync_record)
+
+                    # Store on item for potential future use
+                    item.subtitle_data = subtitle_data
+
+                    # Determine output path (should already be .ass from OCR)
+                    final_path = item.extracted_path
+                    if final_path.suffix.lower() != '.ass':
+                        final_path = final_path.with_suffix('.ass')
+
+                    # Save JSON debug output if enabled
+                    if debug_enabled:
+                        json_path = logs_dir / f"subtitle_data_track_{item.track.id}.json"
+                        try:
+                            subtitle_data.save_json(json_path)
+                            runner._log_message(f"[SubtitleData] Saved debug JSON: {json_path.name}")
+                        except Exception as e:
+                            runner._log_message(f"[SubtitleData] WARNING: Could not save debug JSON: {e}")
+
+                    # Write the final ASS with single-point rounding
+                    subtitle_data.save_ass(final_path)
                     item.extracted_path = final_path
-                    runner._log_message(f"[OCR Final] Saved: {final_path.name}")
-                    runner._log_message(f"[OCR Final] Sync offset: {ocr_data.sync_offset_applied_ms:+.3f}ms")
+                    runner._log_message(f"[SubtitleData] Saved final ASS: {final_path.name}")
+                    runner._log_message(f"[SubtitleData] Sync offset: {ocr_data.sync_offset_applied_ms:+.3f}ms")
+                    runner._log_message(f"[SubtitleData] Operations applied: {len(subtitle_data.operations)}")
+
                 except Exception as e:
-                    runner._log_message(f"[OCR Final] ERROR: Failed to write final ASS: {e}")
-                    # Fall back to the already-written file (with double rounding)
-                    runner._log_message(f"[OCR Final] WARNING: Using pre-sync file (may have timing precision loss)")
+                    runner._log_message(f"[SubtitleData] ERROR: Failed to convert/write: {e}")
+                    # Fall back to OCR data direct save
+                    runner._log_message(f"[SubtitleData] Falling back to OCR data save...")
+                    try:
+                        final_path = item.extracted_path
+                        if final_path.suffix.lower() != '.ass':
+                            final_path = final_path.with_suffix('.ass')
+                        ocr_data.save_ass(final_path)
+                        item.extracted_path = final_path
+                        runner._log_message(f"[SubtitleData] Fallback saved: {final_path.name}")
+                    except Exception as e2:
+                        runner._log_message(f"[SubtitleData] ERROR: Fallback also failed: {e2}")
+                        runner._log_message(f"[SubtitleData] WARNING: Using pre-sync file (may have timing precision loss)")
 
         if items_to_add:
             ctx.extracted_items.extend(items_to_add)
