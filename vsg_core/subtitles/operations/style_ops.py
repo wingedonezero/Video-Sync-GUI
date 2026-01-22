@@ -7,15 +7,126 @@ Operations:
 - apply_style_patch: Apply attribute changes to styles
 - apply_font_replacement: Replace font names
 - apply_size_multiplier: Scale font sizes
-- apply_rescale: Rescale to target resolution
+- apply_rescale: Rescale to target resolution (Aegisub "Add Borders" style)
 """
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any, Dict, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..data import SubtitleData, OperationResult, OperationRecord
+
+
+def _scale_override_tags(text: str, scale: float, scale_h: float, offset_x: float, offset_y: float) -> str:
+    """
+    Scales all ASS override tags using uniform scaling and adds border offsets.
+    Maintains aspect ratio like Aegisub's "Add Borders" resampling.
+    Uses vertical scaling (scale_h) for font sizes to match Aegisub behavior.
+
+    Args:
+        text: Event text with ASS override tags
+        scale: Uniform scale factor (min of scale_x, scale_y)
+        scale_h: Vertical scale factor for font/outline/shadow
+        offset_x: Horizontal border offset for position tags
+        offset_y: Vertical border offset for position tags
+
+    Returns:
+        Text with scaled override tags
+    """
+
+    def scale_value(val: str, scale_factor: float, offset: float = 0) -> str:
+        """Scale a numeric value, add offset, and format cleanly."""
+        try:
+            scaled = float(val) * scale_factor + offset
+            return f"{scaled:.3f}".rstrip('0').rstrip('.')
+        except ValueError:
+            return val
+
+    def scale_tag(tag_name: str, args: str) -> str:
+        """Scale tag arguments based on tag type."""
+        if not args:
+            return args
+
+        tag_lower = tag_name.lower()
+        parts = [p.strip() for p in args.split(',')]
+        scaled_parts = []
+
+        for i, part in enumerate(parts):
+            # Width/X measurements (no offset needed for size measurements)
+            if tag_lower in ('fscx', 'bord', 'xbord'):
+                scaled_parts.append(scale_value(part, scale))
+
+            # Height/Y measurements and font size (use vertical scaling, no offset for size measurements)
+            elif tag_lower in ('fscy', 'ybord', 'yshad', 'fs', 'blur', 'pbo', 'shad'):
+                scaled_parts.append(scale_value(part, scale_h))
+
+            # Position tags (x, y) - need offsets
+            elif tag_lower in ('pos', 'org') and i < 2:
+                pos_offset = offset_x if i == 0 else offset_y
+                scaled_parts.append(scale_value(part, scale, pos_offset))
+
+            # Clip rectangles - need offsets
+            elif tag_lower == 'clip' and i < 4:
+                clip_offset = offset_x if i in [0, 2] else offset_y
+                scaled_parts.append(scale_value(part, scale, clip_offset))
+
+            # move tag: (x1, y1, x2, y2, t1, t2) - positions need offsets
+            elif tag_lower == 'move':
+                if i in [0, 2]:  # x coordinates
+                    scaled_parts.append(scale_value(part, scale, offset_x))
+                elif i in [1, 3]:  # y coordinates
+                    scaled_parts.append(scale_value(part, scale, offset_y))
+                else:  # time values
+                    scaled_parts.append(part)
+
+            # Time-based tags, factors, coefficients - don't scale
+            else:
+                scaled_parts.append(part)
+
+        return ','.join(scaled_parts)
+
+    def process_override_block(block_content: str) -> str:
+        """Process all tags within a single {...} block."""
+        tag_pattern = re.compile(r'\\([a-zA-Z]+)(\([^)]*\)|(?:\-?\d+(?:\.\d+)?))?')
+
+        def replace_tag(match):
+            tag_name = match.group(1)
+            tag_lower = tag_name.lower()
+            args_or_value = match.group(2)
+
+            if args_or_value is None:
+                return match.group(0)
+
+            elif args_or_value.startswith('('):
+                # Tag with parentheses
+                args = args_or_value[1:-1]
+                scaled_args = scale_tag(tag_name, args)
+                return f'\\{tag_name}({scaled_args})'
+
+            else:
+                # Shorthand format
+                value = args_or_value
+
+                # Scale size measurements (use vertical scaling for font/outline/shadow)
+                if tag_lower in ('fs', 'blur', 'fscy', 'ybord', 'yshad', 'pbo', 'shad'):
+                    scaled = scale_value(value, scale_h)
+                    return f'\\{tag_name}{scaled}'
+                elif tag_lower in ('fscx', 'bord', 'xbord'):
+                    scaled = scale_value(value, scale)
+                    return f'\\{tag_name}{scaled}'
+                else:
+                    return match.group(0)
+
+        return tag_pattern.sub(replace_tag, block_content)
+
+    def replace_block(match):
+        block_content = match.group(1)
+        scaled_content = process_override_block(block_content)
+        return '{' + scaled_content + '}'
+
+    return re.sub(r'\{([^}]*)\}', replace_block, text)
 
 
 # Color attributes that need Qt->ASS conversion
@@ -263,9 +374,11 @@ def apply_rescale(
     runner=None
 ) -> 'OperationResult':
     """
-    Rescale subtitle to target resolution.
+    Rescale subtitle to target resolution using Aegisub "Add Borders" style.
 
-    Scales font sizes, margins, outline, shadow proportionally.
+    Uses uniform scaling (min of scale_x, scale_y) to maintain aspect ratio.
+    Position tags get border offsets for centering. Font sizes use vertical
+    scaling (scale_h) to match Aegisub behavior.
 
     Args:
         data: SubtitleData to modify
@@ -316,38 +429,55 @@ def apply_rescale(
             summary='Already at target resolution'
         )
 
-    # Calculate scale factors
+    # Calculate scale factors (Aegisub "Add Borders" style)
     scale_x = target_x / current_x
     scale_y = target_y / current_y
+    scale = min(scale_x, scale_y)  # Uniform scale to maintain aspect ratio
+    scale_h = scale_y  # Vertical scaling for font sizes (Aegisub convention)
 
-    # Scale styles
+    # Calculate effective size and border offsets for position tags
+    new_w = int(current_x * scale + 0.5)
+    new_h = int(current_y * scale + 0.5)
+    offset_x = (target_x - new_w) / 2
+    offset_y = (target_y - new_h) / 2
+
+    log(
+        f"[Rescale] Rescaling from {current_x}x{current_y} to {target_x}x{target_y} "
+        f"(uniform scale: {scale:.4f}, font scale: {scale_h:.4f}, "
+        f"borders: {offset_x:.1f}x, {offset_y:.1f}y)"
+    )
+
+    # Scale styles (margins are edge-relative, so no offsets needed)
     styles_affected = 0
     for style in data.styles.values():
-        # Font size scales with Y
-        style.fontsize *= scale_y
+        # Use vertical scaling for font size (Aegisub convention)
+        style.fontsize = int(style.fontsize * scale_h + 0.5)
 
-        # Outline and shadow scale with Y
-        style.outline *= scale_y
-        style.shadow *= scale_y
+        # Outline and shadow scale with vertical factor
+        style.outline *= scale_h
+        style.shadow *= scale_h
 
-        # Margins scale with respective axis
-        style.margin_l = int(style.margin_l * scale_x)
-        style.margin_r = int(style.margin_r * scale_x)
-        style.margin_v = int(style.margin_v * scale_y)
+        # Margins are edge-relative, scale uniformly without offsets
+        style.margin_l = int(style.margin_l * scale + 0.5)
+        style.margin_r = int(style.margin_r * scale + 0.5)
+        style.margin_v = int(style.margin_v * scale + 0.5)
 
         styles_affected += 1
 
-    # Scale event margins too
+    # Scale event margins and inline override tags
     events_affected = 0
     for event in data.events:
+        # Scale event margins (edge-relative, no offsets)
         if event.margin_l != 0:
-            event.margin_l = int(event.margin_l * scale_x)
-            events_affected += 1
+            event.margin_l = int(event.margin_l * scale + 0.5)
         if event.margin_r != 0:
-            event.margin_r = int(event.margin_r * scale_x)
-            events_affected += 1
+            event.margin_r = int(event.margin_r * scale + 0.5)
         if event.margin_v != 0:
-            event.margin_v = int(event.margin_v * scale_y)
+            event.margin_v = int(event.margin_v * scale + 0.5)
+
+        # Scale inline override tags (position tags get offsets)
+        if '{' in event.text:
+            event.text = _scale_override_tags(event.text, scale, scale_h, offset_x, offset_y)
             events_affected += 1
 
     # Update script info
@@ -361,8 +491,10 @@ def apply_rescale(
         parameters={
             'from': f'{current_x}x{current_y}',
             'to': f'{target_x}x{target_y}',
-            'scale_x': scale_x,
-            'scale_y': scale_y,
+            'scale': scale,
+            'scale_h': scale_h,
+            'offset_x': offset_x,
+            'offset_y': offset_y,
         },
         styles_affected=styles_affected,
         events_affected=events_affected,
@@ -370,7 +502,7 @@ def apply_rescale(
     )
     data.operations.append(record)
 
-    log(f"[Rescale] {record.summary}")
+    log(f"[Rescale] Successfully rescaled to {target_x}x{target_y}")
 
     return OperationResult(
         success=True,
@@ -379,8 +511,10 @@ def apply_rescale(
         events_affected=events_affected,
         summary=record.summary,
         details={
-            'scale_x': scale_x,
-            'scale_y': scale_y,
+            'scale': scale,
+            'scale_h': scale_h,
+            'offset_x': offset_x,
+            'offset_y': offset_y,
         }
     )
 
