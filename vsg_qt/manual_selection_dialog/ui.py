@@ -819,15 +819,23 @@ class ManualSelectionDialog(QDialog):
         perform_ocr = track_data.get('perform_ocr', False)
         is_ocr_track = perform_ocr and ('VOBSUB' in codec_id or 'PGS' in codec_id or 'HDMV' in codec_id)
 
+        # Debug logging
+        self.log_callback(f"[Style Editor] codec_id={codec_id}, perform_ocr={perform_ocr}, is_ocr_track={is_ocr_track}")
+
         if is_ocr_track:
             # OCR path: Run preview OCR with progress dialog
+            self.log_callback("[Style Editor] Taking OCR path...")
             result = self._prepare_ocr_preview_with_progress(widget)
             if result is None:
+                self.log_callback("[Style Editor] OCR preview returned None")
                 return
             json_path, editable_sub_path = result
+            self.log_callback(f"[Style Editor] OCR result: json={json_path}, ass={editable_sub_path}")
             widget.track_data['ocr_preview_json'] = json_path
         else:
+            self.log_callback("[Style Editor] Taking non-OCR path (extracting subtitle)...")
             editable_sub_path = self._ensure_editable_subtitle_path(widget)
+            self.log_callback(f"[Style Editor] Extracted path: {editable_sub_path}")
 
         if not editable_sub_path:
             QMessageBox.critical(self, "Error", "Failed to prepare the subtitle file.")
