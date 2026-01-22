@@ -8,12 +8,13 @@ system instead of pysubs2 directly.
 """
 import hashlib
 import re
-import tempfile
+import time
 from copy import deepcopy
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
 from .data import SubtitleData, SubtitleStyle
+from vsg_core.config import AppConfig
 
 
 # =============================================================================
@@ -82,11 +83,27 @@ class StyleEngine:
     using the SubtitleData system.
     """
 
-    def __init__(self, subtitle_path: str):
+    def __init__(self, subtitle_path: str, temp_dir: Optional[Path] = None):
+        """
+        Initialize the style engine.
+
+        Args:
+            subtitle_path: Path to the subtitle file
+            temp_dir: Optional temp directory for preview files.
+                      If not provided, uses config's style_editor_temp directory.
+        """
         self.path = Path(subtitle_path)
         self.data: Optional[SubtitleData] = None
         self._original_data: Optional[SubtitleData] = None
         self._temp_file: Optional[Path] = None
+
+        # Use provided temp_dir or get from config
+        if temp_dir:
+            self._temp_dir = Path(temp_dir)
+        else:
+            config = AppConfig()
+            self._temp_dir = config.get_style_editor_temp_dir()
+
         self.load()
 
     def load(self):
@@ -99,8 +116,11 @@ class StyleEngine:
         """Saves changes to a temp file for preview, not the original."""
         if self.data:
             # Write to temp file for FFmpeg preview
+            # Use a unique name based on source file and timestamp
             if self._temp_file is None:
-                self._temp_file = Path(tempfile.gettempdir()) / f"vsg_preview_{id(self)}.ass"
+                source_stem = self.path.stem
+                unique_id = int(time.time() * 1000) % 1000000
+                self._temp_file = self._temp_dir / f"preview_{source_stem}_{unique_id}.ass"
             self.data.save_ass(self._temp_file)
 
     def save_to_original(self):

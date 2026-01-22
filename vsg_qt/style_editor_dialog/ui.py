@@ -231,6 +231,6 @@ class StyleEditorDialog(QDialog):
         except (ValueError, TypeError): pass
     def closeEvent(self, event):
         self.player_thread.stop()
-        # Cleanup temp file
-        self._logic.engine.cleanup()
+        # Note: We don't cleanup temp files here - they're cleaned at job start/end
+        # This allows debugging and keeps all temp files in one place
         super().closeEvent(event)

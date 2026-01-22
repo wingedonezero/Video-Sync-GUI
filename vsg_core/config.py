@@ -636,6 +636,45 @@ class AppConfig:
         """Returns the path to the .fonts directory for user font files."""
         return self.script_dir / '.fonts'
 
+    def get_style_editor_temp_dir(self) -> Path:
+        """
+        Returns the path to the style_editor_temp directory for preview files.
+
+        This is a persistent temp directory that gets cleaned up at job start,
+        not when the style editor closes. This allows debugging of temp files
+        and keeps all job-related temp files in one place.
+        """
+        temp_dir = self.script_dir / 'style_editor_temp'
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        return temp_dir
+
+    def cleanup_style_editor_temp(self) -> int:
+        """
+        Clean up the style editor temp directory.
+
+        Called at job start or end to remove old preview files.
+
+        Returns:
+            Number of files removed
+        """
+        import shutil
+        temp_dir = self.script_dir / 'style_editor_temp'
+        if not temp_dir.exists():
+            return 0
+
+        count = 0
+        for item in temp_dir.iterdir():
+            try:
+                if item.is_file():
+                    item.unlink()
+                    count += 1
+                elif item.is_dir():
+                    shutil.rmtree(item)
+                    count += 1
+            except OSError:
+                pass
+        return count
+
     def get_ocr_config_dir(self) -> Path:
         """Returns the path to the .config/ocr directory for OCR configuration files."""
         return self.get_config_dir() / 'ocr'
