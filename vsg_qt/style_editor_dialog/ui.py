@@ -50,6 +50,8 @@ class StyleEditorDialog(QDialog):
         self.events_table.setHorizontalHeaderLabels(["#", "Start", "End", "Style", "Text"])
         self.events_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.events_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        # Prevent auto-scroll horizontally when selecting long text rows
+        self.events_table.setAutoScroll(False)
         left_pane.addWidget(self.events_table)
         right_pane_group = QGroupBox("Style Controls")
         right_pane_layout = QVBoxLayout(right_pane_group)

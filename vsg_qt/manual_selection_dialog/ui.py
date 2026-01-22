@@ -42,6 +42,7 @@ class ManualSelectionDialog(QDialog):
         self.attachment_sources: List[str] = []
         self.source_settings: Dict[str, Dict[str, Any]] = previous_source_settings or {}
         self._style_clipboard: Optional[List[str]] = None
+        self._edit_clipboard: Optional[Dict[str, Any]] = None  # For copy/paste style edits
         self.edited_widget = None
         self._source_group_boxes: Dict[str, QGroupBox] = {}  # Track group boxes for context menu
 
@@ -616,3 +617,169 @@ class ManualSelectionDialog(QDialog):
             self.edited_widget = widget
             widget.logic.refresh_badges()
             widget.logic.refresh_summary()
+
+    def _copy_style_edits(self, widget: TrackWidget):
+        """
+        Copy style edits (style_patch and font_replacements) to clipboard.
+
+        This copies only the style-level edits that are safe to apply across tracks,
+        NOT line-level edits or deleted events (which are track-specific).
+        """
+        track_data = widget.track_data
+        style_patch = track_data.get('style_patch')
+        font_replacements = track_data.get('font_replacements')
+
+        if not style_patch and not font_replacements:
+            QMessageBox.information(self, "Copy Style Edits", "No style edits to copy.")
+            return
+
+        # Get the source styles list from the subtitle (for validation on paste)
+        source_styles = []
+        temp_path = track_data.get('user_modified_path')
+        if temp_path and Path(temp_path).exists():
+            try:
+                engine = StyleEngine(temp_path)
+                source_styles = engine.get_style_names()
+            except Exception as e:
+                self.log_callback(f"[WARN] Could not read source styles: {e}")
+
+        # If we have style_patch, extract style names from it
+        if style_patch and not source_styles:
+            source_styles = list(style_patch.keys())
+
+        # If we have font_replacements, add those style names too
+        if font_replacements:
+            for style_name in font_replacements.keys():
+                if style_name not in source_styles:
+                    source_styles.append(style_name)
+
+        self._edit_clipboard = {
+            'style_patch': style_patch.copy() if style_patch else None,
+            'font_replacements': font_replacements.copy() if font_replacements else None,
+            'source_styles': source_styles,
+            'source_track_name': track_data.get('name', track_data.get('description', 'Unknown'))
+        }
+
+        count_items = []
+        if style_patch:
+            count_items.append(f"{len(style_patch)} style edit(s)")
+        if font_replacements:
+            count_items.append(f"{len(font_replacements)} font replacement(s)")
+
+        self.info_label.setText(f"✅ Copied {', '.join(count_items)} to clipboard.")
+        self.info_label.setVisible(True)
+
+    def _paste_style_edits(self, widget: TrackWidget):
+        """
+        Paste style edits from clipboard to target track.
+
+        Validates that target styles exist and warns about any mismatches.
+        Only applies edits to styles that exist in the target.
+        """
+        if not self._edit_clipboard:
+            return
+
+        track_data = widget.track_data
+        clipboard_patch = self._edit_clipboard.get('style_patch')
+        clipboard_fonts = self._edit_clipboard.get('font_replacements')
+        source_styles = self._edit_clipboard.get('source_styles', [])
+        source_name = self._edit_clipboard.get('source_track_name', 'Unknown')
+
+        if not clipboard_patch and not clipboard_fonts:
+            QMessageBox.information(self, "Paste Style Edits", "Clipboard is empty.")
+            return
+
+        # Get target styles from the subtitle
+        target_styles = []
+        temp_path = self._ensure_editable_subtitle_path(widget)
+        if temp_path:
+            try:
+                engine = StyleEngine(temp_path)
+                target_styles = engine.get_style_names()
+            except Exception as e:
+                self.log_callback(f"[WARN] Could not read target styles: {e}")
+
+        # Validate and prepare what can be applied
+        applied_patch = {}
+        applied_fonts = {}
+        missing_styles = []
+        warnings = []
+
+        if clipboard_patch:
+            for style_name, edits in clipboard_patch.items():
+                if style_name in target_styles:
+                    applied_patch[style_name] = edits.copy()
+                else:
+                    missing_styles.append(style_name)
+
+        if clipboard_fonts:
+            for style_name, repl_data in clipboard_fonts.items():
+                if style_name in target_styles:
+                    applied_fonts[style_name] = repl_data.copy()
+                else:
+                    if style_name not in missing_styles:
+                        missing_styles.append(style_name)
+
+        # Build warning message if there are missing styles
+        if missing_styles:
+            warnings.append(f"The following styles from '{source_name}' don't exist in this track:")
+            for style in missing_styles[:5]:  # Show first 5
+                warnings.append(f"  • {style}")
+            if len(missing_styles) > 5:
+                warnings.append(f"  ... and {len(missing_styles) - 5} more")
+
+        # If nothing can be applied, show error
+        if not applied_patch and not applied_fonts:
+            QMessageBox.warning(
+                self, "Paste Style Edits",
+                "No style edits could be applied.\n\n" +
+                "\n".join(warnings) if warnings else "No matching styles found."
+            )
+            return
+
+        # If there are warnings, ask user to confirm
+        if warnings:
+            applied_count = len(applied_patch) + len(applied_fonts)
+            msg = "\n".join(warnings)
+            msg += f"\n\n{applied_count} edit(s) can be applied to matching styles.\nContinue?"
+
+            reply = QMessageBox.question(
+                self, "Paste Style Edits - Partial Match",
+                msg,
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        # Apply the edits
+        if applied_patch:
+            existing_patch = track_data.get('style_patch', {})
+            existing_patch.update(applied_patch)
+            track_data['style_patch'] = existing_patch
+
+        if applied_fonts:
+            existing_fonts = track_data.get('font_replacements', {})
+            existing_fonts.update(applied_fonts)
+            track_data['font_replacements'] = existing_fonts
+
+        # Refresh widget
+        if hasattr(widget, 'logic'):
+            widget.logic.refresh_badges()
+            widget.logic.refresh_summary()
+
+        self.edited_widget = widget
+
+        # Show confirmation
+        count_items = []
+        if applied_patch:
+            count_items.append(f"{len(applied_patch)} style edit(s)")
+        if applied_fonts:
+            count_items.append(f"{len(applied_fonts)} font replacement(s)")
+
+        status = f"✅ Pasted {', '.join(count_items)}."
+        if missing_styles:
+            status += f" ({len(missing_styles)} skipped due to missing styles)"
+
+        self.info_label.setText(status)
+        self.info_label.setVisible(True)
