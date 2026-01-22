@@ -1,45 +1,15 @@
 # vsg_core/subtitles/style_filter.py
 # -*- coding: utf-8 -*-
 """
-Filters subtitle events by style name for creating generated tracks
-(e.g., signs-only tracks from full subtitle tracks).
+DEPRECATED: This module is no longer used.
 
-REFACTOR PLAN: Integrate with SubtitleData
-==========================================
-This module uses pysubs2 directly, bypassing the unified SubtitleData system.
-This creates a parallel data path that doesn't integrate with operation tracking
-or metadata preservation.
+All callers have been migrated to use SubtitleData:
+- UI Dialogs: Use SubtitleData.get_style_counts_from_file()
+- Validation: Use SubtitleData.get_style_counts_from_file()
+- Pipeline filtering: Use SubtitleData.filter_by_styles() in subtitles_step
 
-Phase 1: Add methods to SubtitleData
-------------------------------------
-- SubtitleData.get_style_counts() -> Dict[str, int]
-- SubtitleData.get_style_counts_from_file(path) -> Dict[str, int]  (static, for validation)
-- SubtitleData.filter_by_styles(styles, mode) -> OperationResult
-
-Phase 2: Migrate callers
-------------------------
-Current usages (search for StyleFilterEngine):
-
-A) UI Dialogs (need style enumeration):
-   - vsg_qt/generated_track_dialog/ui.py - populate style checkboxes
-   - vsg_qt/sync_exclusion_dialog/ui.py - populate style checkboxes
-   Replace: StyleFilterEngine.get_styles_from_file() → SubtitleData.get_style_counts_from_file()
-
-B) Validation (MUST KEEP - user needs to know issues BEFORE running batch jobs):
-   - vsg_qt/job_queue_dialog/logic.py (lines 167, 307, 441)
-   Replace: StyleFilterEngine.get_styles_from_file() → SubtitleData.get_style_counts_from_file()
-   NOTE: Keep all validation logic, warnings, auto-fix behavior exactly as-is!
-   Batch processing (50+ files) requires knowing which have style mismatches upfront.
-
-C) Pipeline filtering:
-   - vsg_core/orchestrator/steps/extract_step.py (lines 246-374)
-   Move to: subtitles_step.py - apply filter_by_styles() as operation after load
-   Generated tracks use same pipeline as regular tracks, filtering is just an operation.
-
-Phase 3: Deprecate StyleFilterEngine
-------------------------------------
-Once all callers use SubtitleData, this class can be removed.
-The metadata_preserver.py workaround also becomes unnecessary.
+This file and metadata_preserver.py can be safely deleted.
+Keeping temporarily for reference during transition.
 """
 from pathlib import Path
 from typing import Dict, List, Any
