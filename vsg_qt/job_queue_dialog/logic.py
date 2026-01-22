@@ -114,7 +114,7 @@ class JobQueueLogic:
 
         Returns list of warning messages if there are issues, empty list if OK.
         """
-        from vsg_core.subtitles.style_filter import StyleFilterEngine
+        from vsg_core.subtitles.data import SubtitleData
 
         issues = []
         enhanced_layout = layout_data.get('enhanced_layout', [])
@@ -164,7 +164,7 @@ class JobQueueLogic:
                         continue
 
                     # Get available styles from the extracted file
-                    available_styles = StyleFilterEngine.get_styles_from_file(extracted[0]['path'])
+                    available_styles = SubtitleData.get_style_counts_from_file(extracted[0]['path'])
                     available_style_set = set(available_styles.keys())
 
                     # ADDITIONAL CHECK: Validate that the filter styles actually exist
@@ -228,7 +228,7 @@ class JobQueueLogic:
 
         Returns list of warning messages if there are issues, empty list if OK.
         """
-        from vsg_core.subtitles.style_filter import StyleFilterEngine
+        from vsg_core.subtitles.data import SubtitleData
 
         # OCR output always has these styles
         OCR_OUTPUT_STYLES = {'Default', 'Top'}
@@ -304,7 +304,7 @@ class JobQueueLogic:
                         continue
 
                     # Get available styles from the extracted file
-                    available_styles = StyleFilterEngine.get_styles_from_file(extracted[0]['path'])
+                    available_styles = SubtitleData.get_style_counts_from_file(extracted[0]['path'])
                     available_style_set = set(available_styles.keys())
 
                     # Validate style_patch styles exist
@@ -349,7 +349,7 @@ class JobQueueLogic:
 
         Returns list of warning messages if there are issues, empty list if OK.
         """
-        from vsg_core.subtitles.style_filter import StyleFilterEngine
+        from vsg_core.subtitles.data import SubtitleData
 
         issues = []
         enhanced_layout = layout_data.get('enhanced_layout', [])
@@ -438,7 +438,7 @@ class JobQueueLogic:
 
                 try:
                     # Get available styles from the file
-                    available_styles = StyleFilterEngine.get_styles_from_file(subtitle_path)
+                    available_styles = SubtitleData.get_style_counts_from_file(subtitle_path)
                     available_style_set = set(available_styles.keys())
 
                     # Validate that the exclusion styles actually exist
