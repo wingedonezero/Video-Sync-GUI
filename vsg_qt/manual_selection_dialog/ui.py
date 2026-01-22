@@ -350,6 +350,124 @@ class ManualSelectionDialog(QDialog):
             self.log_callback(f"[ERROR] Exception during subtitle preparation: {e}")
             return None
 
+    def _prepare_ocr_preview(self, widget: TrackWidget) -> Optional[Tuple[str, str]]:
+        """
+        Run preview OCR on image-based subtitle for style editing.
+
+        Uses fast EasyOCR to generate a temporary ASS file that can be edited
+        in the style editor. Also generates SubtitleData JSON with full OCR
+        metadata for future advanced features.
+
+        Returns:
+            Tuple of (json_path, ass_path) on success, or None on failure.
+        """
+        track_data = widget.track_data
+
+        # Check if we already have a preview
+        if track_data.get('ocr_preview_json') and track_data.get('user_modified_path'):
+            existing_json = track_data['ocr_preview_json']
+            existing_ass = track_data['user_modified_path']
+            if Path(existing_json).exists() and Path(existing_ass).exists():
+                self.log_callback("[Style Editor] Using existing OCR preview")
+                return existing_json, existing_ass
+
+        # Extract the image-based subtitle first
+        extracted_path = self._extract_image_subtitle(widget)
+        if not extracted_path:
+            QMessageBox.warning(
+                self, "OCR Preview",
+                "Failed to extract image-based subtitle.\n\n"
+                "Make sure the source file is accessible."
+            )
+            return None
+
+        # Get language from track settings or default to English
+        lang = track_data.get('custom_lang') or 'eng'
+
+        # Get style_editor_temp directory
+        output_dir = self.config.get_style_editor_temp_dir()
+
+        self.log_callback(f"[Style Editor] Running preview OCR ({lang})...")
+
+        # Import and run preview OCR
+        from vsg_core.subtitles.ocr import run_preview_ocr
+
+        result = run_preview_ocr(
+            subtitle_path=extracted_path,
+            lang=lang,
+            output_dir=output_dir,
+            log_callback=self.log_callback,
+        )
+
+        if result is None:
+            QMessageBox.warning(
+                self, "OCR Preview Failed",
+                "Preview OCR failed to process the subtitle.\n\n"
+                "Check the log for details. The subtitle may be empty or corrupted."
+            )
+            return None
+
+        json_path, ass_path = result
+
+        # Store paths in track_data
+        widget.track_data['user_modified_path'] = ass_path
+        widget.track_data['ocr_preview_json'] = json_path
+
+        self.log_callback(f"[Style Editor] Preview ready: {Path(ass_path).name}")
+
+        return json_path, ass_path
+
+    def _extract_image_subtitle(self, widget: TrackWidget) -> Optional[str]:
+        """
+        Extract image-based subtitle (VobSub/PGS) from source file.
+
+        Returns:
+            Path to extracted .idx (VobSub) or .sup (PGS), or None on failure.
+        """
+        track_data = widget.track_data
+        source_file = track_data.get('original_path')
+        track_id = track_data.get('id')
+
+        if not all([source_file, track_id is not None]):
+            self.log_callback("[ERROR] Missing source file or track ID for OCR extraction.")
+            return None
+
+        runner = CommandRunner(self.config.settings, self.log_callback)
+        tool_paths = {t: shutil.which(t) for t in ['mkvmerge', 'mkvextract', 'ffmpeg']}
+
+        try:
+            # Create temp directory for extraction
+            temp_dir = Path(tempfile.gettempdir()) / f"vsg_ocr_preview_{Path(source_file).stem}_{track_id}_{int(time.time())}"
+            temp_dir.mkdir(parents=True, exist_ok=True)
+
+            if track_data.get('source') == 'External':
+                # External file - just copy it
+                temp_path = temp_dir / Path(source_file).name
+                shutil.copy2(source_file, temp_path)
+
+                # For VobSub, also copy the .sub file if .idx was provided
+                if temp_path.suffix.lower() == '.idx':
+                    sub_file = Path(source_file).with_suffix('.sub')
+                    if sub_file.exists():
+                        shutil.copy2(sub_file, temp_dir / sub_file.name)
+
+                return str(temp_path)
+            else:
+                # Extract from container
+                extracted = extract_tracks(
+                    source_file, temp_dir, runner, tool_paths,
+                    'ocr_preview', specific_tracks=[track_id]
+                )
+                if not extracted:
+                    self.log_callback(f"[ERROR] Failed to extract track {track_id} for OCR preview")
+                    return None
+
+                return extracted[0]['path']
+
+        except Exception as e:
+            self.log_callback(f"[ERROR] Exception during image subtitle extraction: {e}")
+            return None
+
     def _copy_style_edits(self, widget: TrackWidget):
         """Copy style_patch and font_replacements from track_data (not raw style block)."""
         style_patch = widget.track_data.get('style_patch')
@@ -675,7 +793,22 @@ class ManualSelectionDialog(QDialog):
             QMessageBox.warning(self, "Error", "Reference video path is missing.")
             return
 
-        editable_sub_path = self._ensure_editable_subtitle_path(widget)
+        # Check if this is an OCR track (image-based subtitle with OCR enabled)
+        codec_id = track_data.get('codec_id', '').upper()
+        perform_ocr = track_data.get('perform_ocr', False)
+        is_ocr_track = perform_ocr and ('VOBSUB' in codec_id or 'PGS' in codec_id or 'HDMV' in codec_id)
+
+        if is_ocr_track:
+            # Run preview OCR to generate editable ASS
+            result = self._prepare_ocr_preview(widget)
+            if result is None:
+                return
+            json_path, editable_sub_path = result
+            # Store JSON path for future SubtitleData features
+            widget.track_data['ocr_preview_json'] = json_path
+        else:
+            editable_sub_path = self._ensure_editable_subtitle_path(widget)
+
         if not editable_sub_path:
             QMessageBox.critical(self, "Error", "Failed to prepare the subtitle file.")
             return

@@ -53,6 +53,7 @@ __all__ = [
     'is_romaji_word',
     'run_ocr',
     'run_ocr_unified',
+    'run_preview_ocr',
     'check_ocr_available',
 ]
 
@@ -376,4 +377,159 @@ def run_ocr_unified(
         return None
     except Exception as e:
         runner._log_message(f"[OCR] ERROR: Failed to perform OCR: {e}")
+        return None
+
+
+def run_preview_ocr(
+    subtitle_path: str,
+    lang: str,
+    output_dir: Path,
+    log_callback=None,
+) -> Optional[tuple[str, str]]:
+    """
+    Run fast preview OCR for style editor.
+
+    Uses EasyOCR (faster than PaddleOCR) with minimal settings for quick preview.
+    Returns SubtitleData JSON and ASS file for style editing.
+
+    Args:
+        subtitle_path: Path to the subtitle file (.idx for VobSub, .sup for PGS)
+        lang: The 3-letter language code for OCR (e.g., 'eng')
+        output_dir: Directory to save output files (style_editor_temp/)
+        log_callback: Optional callback for logging messages
+
+    Returns:
+        Tuple of (json_path, ass_path) on success, or None on failure.
+        - json_path: SubtitleData with full OCR metadata
+        - ass_path: ASS file for visual editing in style editor
+    """
+    import time
+    from .backends import get_available_backends
+
+    sub_path = Path(subtitle_path)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    def log(msg: str):
+        if log_callback:
+            log_callback(msg)
+
+    # Validate input format
+    suffix = sub_path.suffix.lower()
+    if suffix == '.idx':
+        input_path = sub_path
+    elif suffix == '.sub':
+        input_path = sub_path.with_suffix('.idx')
+        if not input_path.exists():
+            log(f"[Preview OCR] ERROR: IDX file not found: {input_path}")
+            return None
+    elif suffix == '.sup':
+        log(f"[Preview OCR] WARNING: PGS (.sup) support not yet implemented.")
+        return None
+    else:
+        log(f"[Preview OCR] ERROR: Unsupported format: {suffix}")
+        return None
+
+    # Determine OCR engine - prefer EasyOCR for speed, fallback to Tesseract
+    available = get_available_backends()
+    if 'easyocr' in available:
+        ocr_engine = 'easyocr'
+    elif 'tesseract' in available:
+        ocr_engine = 'tesseract'
+        log("[Preview OCR] EasyOCR not available, using Tesseract")
+    else:
+        log("[Preview OCR] ERROR: No OCR backend available (need EasyOCR or Tesseract)")
+        return None
+
+    log(f"[Preview OCR] Starting preview OCR with {ocr_engine}...")
+
+    # Map language code
+    lang_map = {
+        'eng': 'eng', 'jpn': 'jpn', 'spa': 'spa', 'fra': 'fra',
+        'deu': 'deu', 'chi': 'chi_sim', 'kor': 'kor', 'por': 'por',
+        'ita': 'ita', 'rus': 'rus',
+    }
+    ocr_lang = lang_map.get(lang, lang)
+
+    # Minimal settings for fast preview
+    preview_settings = {
+        'ocr_language': ocr_lang,
+        'ocr_engine': ocr_engine,
+        'ocr_preprocess_auto': True,
+        'ocr_force_binarization': False,
+        'ocr_upscale_threshold': 40,
+        'ocr_denoise': False,
+        'ocr_char_blacklist': '',
+        'ocr_low_confidence_threshold': 60.0,
+        'ocr_cleanup_enabled': True,
+        'ocr_cleanup_normalize_ellipsis': False,
+        'ocr_custom_wordlist_path': '',
+        'ocr_output_format': 'ass',
+        'ocr_preserve_positions': True,
+        'ocr_bottom_threshold': 75.0,
+        # Disable reports and debug for speed
+        'ocr_generate_report': False,
+        'ocr_save_debug_images': False,
+        'ocr_debug_output': False,
+    }
+
+    try:
+        # Create work directory for OCR processing
+        work_dir = output_dir / 'ocr_work'
+        work_dir.mkdir(parents=True, exist_ok=True)
+
+        # Progress callback
+        def progress_callback(message: str, progress: float):
+            log(f"[Preview OCR] {message} ({int(progress * 100)}%)")
+
+        # Run OCR pipeline
+        pipeline = OCRPipeline(
+            settings_dict=preview_settings,
+            work_dir=work_dir,
+            logs_dir=output_dir,
+            progress_callback=progress_callback
+        )
+
+        result = pipeline.process(
+            input_path=input_path,
+            output_path=output_dir / f"preview_{sub_path.stem}.ass",
+            track_id=0,
+            return_subtitle_data=True
+        )
+
+        if not result.success or not result.subtitle_data:
+            log(f"[Preview OCR] ERROR: {result.error or 'OCR failed'}")
+            return None
+
+        subtitle_data = result.subtitle_data
+
+        if not subtitle_data.events:
+            log("[Preview OCR] WARNING: OCR produced no events")
+            return None
+
+        log(f"[Preview OCR] Processed {len(subtitle_data.events)} subtitles")
+
+        # Generate unique output filenames
+        unique_id = int(time.time() * 1000) % 1000000
+        stem = sub_path.stem
+        json_path = output_dir / f"preview_{stem}_{unique_id}.json"
+        ass_path = output_dir / f"preview_{stem}_{unique_id}.ass"
+
+        # Save SubtitleData to JSON (preserves all OCR metadata)
+        subtitle_data.save_json(json_path)
+        log(f"[Preview OCR] Saved metadata: {json_path.name}")
+
+        # Save ASS for style editing
+        subtitle_data.save_ass(ass_path)
+        log(f"[Preview OCR] Saved ASS: {ass_path.name}")
+
+        return str(json_path), str(ass_path)
+
+    except ImportError as e:
+        log(f"[Preview OCR] ERROR: Missing dependency: {e}")
+        return None
+    except Exception as e:
+        log(f"[Preview OCR] ERROR: {e}")
+        import traceback
+        log(f"[Preview OCR] {traceback.format_exc()}")
         return None
