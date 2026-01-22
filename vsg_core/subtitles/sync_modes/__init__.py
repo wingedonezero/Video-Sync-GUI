@@ -139,6 +139,10 @@ from .correlation_guided_frame_anchor import apply_correlation_guided_frame_anch
 # Import plugins to register them (decorators trigger registration)
 from .plugins.timebase_frame_locked import TimebaseFrameLockedSync
 from .plugins.time_based import TimeBasedSync
+from .plugins.duration_align import DurationAlignSync
+from .plugins.correlation_frame_snap import CorrelationFrameSnapSync
+from .plugins.subtitle_anchored_frame_snap import SubtitleAnchoredFrameSnapSync
+from .plugins.correlation_guided_frame_anchor import CorrelationGuidedFrameAnchorSync
 
 
 __all__ = [

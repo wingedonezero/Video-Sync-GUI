@@ -717,17 +717,23 @@ class SubtitleData:
         This JSON contains ALL data including OCR metadata, sync adjustments,
         and per-event tracking that would be lost in ASS/SRT output.
         """
-        import numpy as np
+        # Try to import numpy for handling numpy types in JSON
+        try:
+            import numpy as np
+            HAS_NUMPY = True
+        except ImportError:
+            HAS_NUMPY = False
 
         class NumpyEncoder(json.JSONEncoder):
             """JSON encoder that handles numpy types."""
             def default(self, obj):
-                if isinstance(obj, (np.integer, np.int32, np.int64)):
-                    return int(obj)
-                elif isinstance(obj, (np.floating, np.float32, np.float64)):
-                    return float(obj)
-                elif isinstance(obj, np.ndarray):
-                    return obj.tolist()
+                if HAS_NUMPY:
+                    if isinstance(obj, (np.integer,)):
+                        return int(obj)
+                    elif isinstance(obj, (np.floating,)):
+                        return float(obj)
+                    elif isinstance(obj, np.ndarray):
+                        return obj.tolist()
                 return super().default(obj)
 
         path = Path(path)
