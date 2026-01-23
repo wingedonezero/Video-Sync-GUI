@@ -16,7 +16,10 @@ All timing is float ms internally - rounding only at final save.
 from __future__ import annotations
 
 import copy
+import json
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 from typing import Optional, Dict, Any, TYPE_CHECKING
 
@@ -414,17 +417,25 @@ class SubtitlesStep:
         ocr_work_dir = ctx.temp_dir / 'ocr'
         logs_dir = Path(ctx.settings_dict.get('logs_folder', ctx.temp_dir))
 
-        # Use unified OCR that returns SubtitleData
-        subtitle_data = run_ocr_unified(
-            str(item.extracted_path.with_suffix('.idx')),
-            item.track.props.lang,
-            runner,
-            ctx.tool_paths,
-            ctx.settings_dict,
-            work_dir=ocr_work_dir,
-            logs_dir=logs_dir,
-            track_id=item.track.id
-        )
+        if ctx.settings_dict.get('ocr_run_in_subprocess', False):
+            subtitle_data = self._run_ocr_subprocess(
+                item=item,
+                ctx=ctx,
+                runner=runner,
+                ocr_work_dir=ocr_work_dir,
+                logs_dir=logs_dir,
+            )
+        else:
+            subtitle_data = run_ocr_unified(
+                str(item.extracted_path.with_suffix('.idx')),
+                item.track.props.lang,
+                runner,
+                ctx.tool_paths,
+                ctx.settings_dict,
+                work_dir=ocr_work_dir,
+                logs_dir=logs_dir,
+                track_id=item.track.id
+            )
 
         if subtitle_data is None:
             runner._log_message(f"[OCR] ERROR: OCR failed for track {item.track.id}")
@@ -469,6 +480,99 @@ class SubtitlesStep:
         )
 
         return subtitle_data
+
+    def _run_ocr_subprocess(self, item, ctx, runner, ocr_work_dir: Path, logs_dir: Path):
+        from vsg_core.subtitles.data import SubtitleData
+
+        config_path = ctx.temp_dir / f"ocr_config_track_{item.track.id}.json"
+        output_json = ctx.temp_dir / f"subtitle_data_track_{item.track.id}.json"
+
+        try:
+            with open(config_path, 'w', encoding='utf-8') as config_file:
+                json.dump(ctx.settings_dict, config_file, indent=2, ensure_ascii=False)
+        except Exception as e:
+            runner._log_message(f"[OCR] ERROR: Failed to write OCR config: {e}")
+            return None
+
+        cmd = [
+            sys.executable,
+            "-m",
+            "vsg_core.subtitles.ocr.unified_subprocess",
+            "--subtitle-path",
+            str(item.extracted_path.with_suffix('.idx')),
+            "--lang",
+            item.track.props.lang,
+            "--config-json",
+            str(config_path),
+            "--output-json",
+            str(output_json),
+            "--work-dir",
+            str(ocr_work_dir),
+            "--logs-dir",
+            str(logs_dir),
+            "--track-id",
+            str(item.track.id),
+        ]
+
+        runner._log_message(f"[OCR] Running OCR in subprocess for track {item.track.id}...")
+
+        try:
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                encoding='utf-8',
+            )
+        except Exception as e:
+            runner._log_message(f"[OCR] ERROR: Failed to start OCR subprocess: {e}")
+            return None
+
+        json_payload = None
+        json_prefix = "__VSG_UNIFIED_OCR_JSON__ "
+
+        if process.stdout:
+            for line in process.stdout:
+                line = line.rstrip('\n')
+                if line.startswith(json_prefix):
+                    try:
+                        json_payload = json.loads(line.split(json_prefix, 1)[1])
+                    except json.JSONDecodeError:
+                        json_payload = None
+                elif line:
+                    runner._log_message(line)
+
+        return_code = process.wait()
+
+        if process.stderr:
+            for line in process.stderr:
+                line = line.rstrip('\n')
+                if line:
+                    runner._log_message(f"[OCR] {line}")
+
+        if return_code != 0:
+            error_detail = None
+            if json_payload and not json_payload.get('success'):
+                error_detail = json_payload.get('error')
+            runner._log_message(f"[OCR] ERROR: OCR subprocess failed (code {return_code})")
+            if error_detail:
+                runner._log_message(f"[OCR] ERROR: {error_detail}")
+            return None
+
+        if not json_payload or not json_payload.get('success'):
+            runner._log_message("[OCR] ERROR: OCR subprocess returned no result")
+            return None
+
+        json_path = json_payload.get('json_path')
+        if not json_path:
+            runner._log_message("[OCR] ERROR: OCR subprocess returned no JSON path")
+            return None
+
+        try:
+            return SubtitleData.from_json(json_path)
+        except Exception as e:
+            runner._log_message(f"[OCR] ERROR: Failed to load SubtitleData JSON: {e}")
+            return None
 
     def _get_video_resolution(self, video_path: Path, runner, ctx) -> Optional[tuple]:
         """Get video resolution for rescaling."""

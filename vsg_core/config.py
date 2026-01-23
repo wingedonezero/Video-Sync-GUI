@@ -71,6 +71,7 @@ class AppConfig:
             'ocr_generate_report': True,  # Generate detailed OCR report
             'ocr_save_debug_images': False,  # Save preprocessed images for debugging
             'ocr_debug_output': False,  # Save debug output by issue type (unknown words, fixes, low confidence)
+            'ocr_run_in_subprocess': True,  # Run OCR in a subprocess to release memory
 
             # --- Subtitle Sync Settings ---
             'subtitle_sync_mode': 'time-based',
