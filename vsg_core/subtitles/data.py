@@ -72,6 +72,28 @@ class OCREventData:
             'dominant_color': self.dominant_color,
         }
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'OCREventData':
+        position = data.get('position', {}) or {}
+        frame_size = data.get('frame_size', [0, 0]) or [0, 0]
+        return cls(
+            index=data.get('index', 0),
+            image=data.get('image', ''),
+            confidence=float(data.get('confidence', 0.0)),
+            raw_text=data.get('raw_text', ''),
+            fixes_applied=data.get('fixes_applied', {}) or {},
+            unknown_words=data.get('unknown_words', []) or [],
+            x=int(position.get('x', 0)),
+            y=int(position.get('y', 0)),
+            width=int(position.get('width', 0)),
+            height=int(position.get('height', 0)),
+            frame_width=int(frame_size[0]) if len(frame_size) > 0 else 0,
+            frame_height=int(frame_size[1]) if len(frame_size) > 1 else 0,
+            is_forced=bool(data.get('is_forced', False)),
+            subtitle_colors=data.get('subtitle_colors', []) or [],
+            dominant_color=data.get('dominant_color', []) or [],
+        )
+
 
 @dataclass
 class SyncEventData:
@@ -98,6 +120,18 @@ class SyncEventData:
             result['target_frame_end'] = self.target_frame_end
         return result
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'SyncEventData':
+        return cls(
+            original_start_ms=float(data.get('original_start_ms', 0.0)),
+            original_end_ms=float(data.get('original_end_ms', 0.0)),
+            start_adjustment_ms=float(data.get('start_adjustment_ms', 0.0)),
+            end_adjustment_ms=float(data.get('end_adjustment_ms', 0.0)),
+            snapped_to_frame=bool(data.get('snapped_to_frame', False)),
+            target_frame_start=data.get('target_frame_start'),
+            target_frame_end=data.get('target_frame_end'),
+        )
+
 
 @dataclass
 class SteppingEventData:
@@ -114,6 +148,15 @@ class SteppingEventData:
             'segment_index': self.segment_index,
             'adjustment_ms': self.adjustment_ms,
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'SteppingEventData':
+        return cls(
+            original_start_ms=float(data.get('original_start_ms', 0.0)),
+            original_end_ms=float(data.get('original_end_ms', 0.0)),
+            segment_index=data.get('segment_index'),
+            adjustment_ms=float(data.get('adjustment_ms', 0.0)),
+        )
 
 
 # =============================================================================
@@ -165,6 +208,28 @@ class OCRMetadata:
             'fixes_by_type': self.fixes_by_type,
             'unknown_words': self.unknown_words,
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'OCRMetadata':
+        stats = data.get('statistics', {}) or {}
+        return cls(
+            engine=data.get('engine', 'tesseract'),
+            language=data.get('language', 'eng'),
+            source_format=data.get('source_format', 'vobsub'),
+            source_file=data.get('source_file', ''),
+            source_resolution=data.get('source_resolution', [0, 0]) or [0, 0],
+            master_palette=data.get('master_palette', []) or [],
+            total_subtitles=int(stats.get('total_subtitles', 0)),
+            successful=int(stats.get('successful', 0)),
+            failed=int(stats.get('failed', 0)),
+            average_confidence=float(stats.get('average_confidence', 0.0)),
+            min_confidence=float(stats.get('min_confidence', 0.0)),
+            max_confidence=float(stats.get('max_confidence', 0.0)),
+            total_fixes_applied=int(stats.get('total_fixes_applied', 0)),
+            positioned_subtitles=int(stats.get('positioned_subtitles', 0)),
+            fixes_by_type=data.get('fixes_by_type', {}) or {},
+            unknown_words=data.get('unknown_words', []) or [],
+        )
 
 
 # =============================================================================
@@ -325,6 +390,34 @@ class SubtitleStyle:
             'margin_v': self.margin_v,
             'encoding': self.encoding,
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'SubtitleStyle':
+        return cls(
+            name=data.get('name', 'Default'),
+            fontname=data.get('fontname', 'Arial'),
+            fontsize=float(data.get('fontsize', 48.0)),
+            primary_color=data.get('primary_color', '&H00FFFFFF'),
+            secondary_color=data.get('secondary_color', '&H000000FF'),
+            outline_color=data.get('outline_color', '&H00000000'),
+            back_color=data.get('back_color', '&H00000000'),
+            bold=int(data.get('bold', 0)),
+            italic=int(data.get('italic', 0)),
+            underline=int(data.get('underline', 0)),
+            strike_out=int(data.get('strike_out', 0)),
+            scale_x=float(data.get('scale_x', 100.0)),
+            scale_y=float(data.get('scale_y', 100.0)),
+            spacing=float(data.get('spacing', 0.0)),
+            angle=float(data.get('angle', 0.0)),
+            border_style=int(data.get('border_style', 1)),
+            outline=float(data.get('outline', 2.0)),
+            shadow=float(data.get('shadow', 2.0)),
+            alignment=int(data.get('alignment', 2)),
+            margin_l=int(data.get('margin_l', 10)),
+            margin_r=int(data.get('margin_r', 10)),
+            margin_v=int(data.get('margin_v', 10)),
+            encoding=int(data.get('encoding', 1)),
+        )
 
 
 # =============================================================================
@@ -507,6 +600,35 @@ class SubtitleEvent:
 
         return result
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'SubtitleEvent':
+        event = cls(
+            start_ms=float(data.get('start_ms', 0.0)),
+            end_ms=float(data.get('end_ms', 0.0)),
+            text=data.get('text', ''),
+            style=data.get('style', 'Default'),
+            layer=int(data.get('layer', 0)),
+            name=data.get('name', ''),
+            margin_l=int(data.get('margin_l', 0)),
+            margin_r=int(data.get('margin_r', 0)),
+            margin_v=int(data.get('margin_v', 0)),
+            effect=data.get('effect', ''),
+            is_comment=bool(data.get('is_comment', False)),
+            extradata_ids=data.get('extradata_ids', []) or [],
+            original_index=data.get('index'),
+            srt_index=data.get('srt_index'),
+        )
+        ocr_data = data.get('ocr')
+        if ocr_data:
+            event.ocr = OCREventData.from_dict(ocr_data)
+        sync_data = data.get('sync')
+        if sync_data:
+            event.sync = SyncEventData.from_dict(sync_data)
+        stepping_data = data.get('stepping')
+        if stepping_data:
+            event.stepping = SteppingEventData.from_dict(stepping_data)
+        return event
+
 
 # =============================================================================
 # Embedded Content
@@ -555,6 +677,24 @@ class OperationRecord:
             'styles_affected': self.styles_affected,
             'summary': self.summary,
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'OperationRecord':
+        timestamp_raw = data.get('timestamp')
+        timestamp = datetime.now()
+        if timestamp_raw:
+            try:
+                timestamp = datetime.fromisoformat(timestamp_raw)
+            except ValueError:
+                timestamp = datetime.now()
+        return cls(
+            operation=data.get('operation', ''),
+            timestamp=timestamp,
+            parameters=data.get('parameters', {}) or {},
+            events_affected=int(data.get('events_affected', 0)),
+            styles_affected=int(data.get('styles_affected', 0)),
+            summary=data.get('summary', ''),
+        )
 
 
 @dataclass
@@ -674,6 +814,46 @@ class SubtitleData:
             return parse_vtt_file(path)
         else:
             raise ValueError(f"Unsupported subtitle format: {ext}")
+
+    @classmethod
+    def from_json(cls, path: Path | str) -> 'SubtitleData':
+        """
+        Load SubtitleData from a JSON file produced by save_json().
+
+        Args:
+            path: Path to SubtitleData JSON file
+
+        Returns:
+            SubtitleData instance
+        """
+        path = Path(path)
+        with open(path, 'r', encoding='utf-8') as f:
+            payload = json.load(f)
+
+        data = cls(
+            source_path=Path(payload['source_path']) if payload.get('source_path') else None,
+            source_format=payload.get('source_format', 'ass'),
+            encoding=payload.get('encoding', 'utf-8'),
+        )
+
+        if payload.get('ocr_metadata'):
+            data.ocr_metadata = OCRMetadata.from_dict(payload['ocr_metadata'])
+
+        data.script_info = OrderedDict(payload.get('script_info', {}))
+
+        styles_payload = payload.get('styles', {}) or {}
+        data.styles = OrderedDict(
+            (name, SubtitleStyle.from_dict(style_data))
+            for name, style_data in styles_payload.items()
+        )
+
+        events_payload = payload.get('events', []) or []
+        data.events = [SubtitleEvent.from_dict(event_data) for event_data in events_payload]
+
+        operations_payload = payload.get('operations', []) or []
+        data.operations = [OperationRecord.from_dict(op_data) for op_data in operations_payload]
+
+        return data
 
     # =========================================================================
     # Save Methods
