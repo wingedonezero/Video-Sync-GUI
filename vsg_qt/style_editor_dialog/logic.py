@@ -391,7 +391,10 @@ class StyleEditorLogic:
                         )
 
                 # Reload the engine FIRST so it picks up the font replacement changes
-                self.engine = StyleEngine(str(self.engine.path))
+                # Clean up old engine before creating new one to prevent memory leak
+                old_path = str(self.engine.path)
+                self.engine.cleanup()
+                self.engine = StyleEngine(old_path)
                 self.populate_initial_state()
                 # Now reload the player - get_preview_path() will save the updated data to temp
                 self.v.player_thread.reload_subtitle_track(self.engine.get_preview_path())
@@ -399,3 +402,22 @@ class StyleEditorLogic:
     def get_font_replacements(self) -> Dict[str, Any]:
         """Get the configured font replacements."""
         return self.font_replacements
+
+    def cleanup(self):
+        """Clean up resources to prevent memory leaks."""
+        # Clean up StyleEngine (releases SubtitleData and temp file)
+        if self.engine:
+            self.engine.cleanup()
+            self.engine = None
+
+        # Clear edit snapshots
+        self.edit_snapshots.clear()
+
+        # Clear generated patch
+        self.generated_patch.clear()
+
+        # Clear font replacements (keep reference but empty it)
+        self.font_replacements.clear()
+
+        # Break circular reference to view
+        self.v = None
