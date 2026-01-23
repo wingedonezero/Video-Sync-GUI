@@ -306,9 +306,10 @@ class OCRPipeline:
                     subtitle_images[0].frame_width if subtitle_images else 720,
                     subtitle_images[0].frame_height if subtitle_images else 480
                 )
+                # Use source resolution as default - only override if explicitly set
                 output_res = (
-                    self.settings.get('ocr_video_width', 1920),
-                    self.settings.get('ocr_video_height', 1080)
+                    self.settings.get('ocr_video_width') or source_res[0],
+                    self.settings.get('ocr_video_height') or source_res[1]
                 )
 
                 subtitle_data = create_subtitle_data_from_ocr(
