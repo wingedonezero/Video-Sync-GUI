@@ -106,8 +106,15 @@ class TimebaseFrameLockedSync(SyncPlugin):
         }
 
         # Step 1: Frame-align the global delay
+        # Config option: frame_lock_submillisecond_precision (default: False)
+        # When True, preserves sub-ms precision in frame calculations
+        use_submillisecond = config.get('frame_lock_submillisecond_precision', False)
+
         if vts:
-            frame_aligned_delay = self._frame_align_delay(total_delay_ms, vts, target_fps, log)
+            frame_aligned_delay = self._frame_align_delay(
+                total_delay_ms, vts, target_fps, log,
+                use_submillisecond=use_submillisecond
+            )
             stats['frame_aligned_delay_ms'] = frame_aligned_delay
             stats['alignment_delta_ms'] = frame_aligned_delay - total_delay_ms
         else:
@@ -251,18 +258,43 @@ class TimebaseFrameLockedSync(SyncPlugin):
                 runner._log_message(f"[FrameLocked] WARNING: Could not get VideoTimestamps: {e}")
             return None
 
-    def _frame_align_delay(self, delay_ms: float, vts, fps: float, log) -> float:
+    def _frame_align_delay(self, delay_ms: float, vts, fps: float, log, use_submillisecond: bool = False) -> float:
         """
         Align delay to nearest frame boundary.
 
         Returns delay that corresponds to an exact frame start time.
+
+        Args:
+            delay_ms: Delay in milliseconds (may have sub-ms precision)
+            vts: VideoTimestamps instance
+            fps: Frame rate
+            log: Logging function
+            use_submillisecond: If True, preserve sub-millisecond precision when
+                               converting to frame. If False (default), truncate
+                               to integer milliseconds before conversion.
+                               Default matches historical behavior.
+
+        Note on precision:
+            VideoTimestamps.time_to_frame() accepts a Fraction for precise timing.
+            - Truncated mode: Fraction(int(delay_ms), 1) e.g., 1234.567 -> 1234
+            - Precise mode: Fraction(int(delay_ms * 1000), 1000) e.g., 1234.567 -> 1234567/1000
+            The difference only matters near frame boundaries (<1ms from edge).
+            Since ASS format saves at 10ms precision anyway, truncation is usually fine.
         """
         try:
             from video_timestamps import TimeType
 
-            # Convert to frame number
-            delay_frac = Fraction(int(delay_ms * 1000), 1000)  # Keep precision
-            frame = vts.time_to_frame(Fraction(int(delay_ms), 1), TimeType.EXACT)
+            # Convert delay to Fraction for VideoTimestamps
+            if use_submillisecond:
+                # Preserve sub-millisecond precision (e.g., 1234.567 -> Fraction(1234567, 1000))
+                delay_frac = Fraction(int(delay_ms * 1000), 1000)
+                log(f"[FrameLocked] Using sub-millisecond precision: {float(delay_frac):.3f}ms")
+            else:
+                # Truncate to integer milliseconds (historical default behavior)
+                # e.g., 1234.567 -> Fraction(1234, 1)
+                delay_frac = Fraction(int(delay_ms), 1)
+
+            frame = vts.time_to_frame(delay_frac, TimeType.EXACT)
 
             # Get exact frame start time
             frame_start = vts.frame_to_time(frame, TimeType.START)
