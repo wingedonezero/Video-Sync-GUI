@@ -9,7 +9,6 @@ system instead of pysubs2 directly.
 import hashlib
 import re
 import time
-from copy import deepcopy
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -94,7 +93,6 @@ class StyleEngine:
         """
         self.path = Path(subtitle_path)
         self.data: Optional[SubtitleData] = None
-        self._original_data: Optional[SubtitleData] = None
         self._temp_file: Optional[Path] = None
 
         # Use provided temp_dir or get from config
@@ -109,8 +107,6 @@ class StyleEngine:
     def load(self):
         """Loads the subtitle file into SubtitleData."""
         self.data = SubtitleData.from_file(self.path)
-        # Keep a deep copy of original for reset functionality
-        self._original_data = deepcopy(self.data)
 
     def save(self):
         """Saves changes to a temp file for preview, not the original."""
@@ -279,20 +275,29 @@ class StyleEngine:
         self.save()
 
     def reset_style(self, style_name: str):
-        """Reset a single style to its original state."""
-        if not self._original_data or style_name not in self._original_data.styles:
-            return
+        """Reset a single style to its original state by reloading from disk."""
         if not self.data:
             return
 
-        self.data.styles[style_name] = deepcopy(self._original_data.styles[style_name])
+        # Reload original file to get the original style
+        try:
+            original_data = SubtitleData.from_file(self.path)
+            if style_name in original_data.styles:
+                self.data.styles[style_name] = original_data.styles[style_name]
+        except Exception:
+            pass  # If reload fails, keep current state
 
     def reset_all_styles(self):
-        """Reset all styles to original state."""
-        if not self._original_data or not self.data:
+        """Reset all styles to original state by reloading from disk."""
+        if not self.data:
             return
 
-        self.data.styles = deepcopy(self._original_data.styles)
+        # Reload original file to get all original styles
+        try:
+            original_data = SubtitleData.from_file(self.path)
+            self.data.styles = original_data.styles
+        except Exception:
+            pass  # If reload fails, keep current state
 
     # =========================================================================
     # Script Info Access (for resample dialog)
@@ -320,6 +325,7 @@ class StyleEngine:
         Merges styles from a template file into a target file.
         Only styles with matching names are updated; unique styles in the target are preserved.
         """
+        from copy import deepcopy  # Local import - only needed here
         try:
             target_data = SubtitleData.from_file(target_path)
             template_data = SubtitleData.from_file(template_path)

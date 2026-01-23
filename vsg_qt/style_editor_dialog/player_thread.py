@@ -1,5 +1,6 @@
 # vsg_qt/style_editor_dialog/player_thread.py
 # -*- coding: utf-8 -*-
+import gc
 import time
 from pathlib import Path
 from threading import Lock
@@ -114,10 +115,39 @@ class PlayerThread(QThread):
             delay = self._frame_delay
             time.sleep(delay if delay > 0.001 else 0.001)
 
-        if self._container: self._container.close()
+        # Cleanup: explicitly free resources to prevent memory leaks
+        self._cleanup_resources()
+
+    def _cleanup_resources(self):
+        """Explicitly free PyAV resources to prevent memory leaks."""
+        # Free filter graph first (holds references to frames)
+        if self._graph is not None:
+            try:
+                del self._graph
+            except Exception:
+                pass
+            self._graph = None
+
+        # Close container (file handle)
+        if self._container is not None:
+            try:
+                self._container.close()
+            except Exception:
+                pass
+            self._container = None
+
+        # Clear stream reference
+        self._video_stream = None
+
+        # Force garbage collection to release native PyAV/FFmpeg memory
+        gc.collect()
 
     @Slot()
-    def stop(self): self._is_running = False; self.wait()
+    def stop(self):
+        self._is_running = False
+        self.wait()
+        # Ensure cleanup happens even if thread exits abnormally
+        self._cleanup_resources()
 
     def toggle_pause(self):
         with self._lock: self._is_paused = not self._is_paused
