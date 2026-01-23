@@ -25,6 +25,9 @@ class StyleEditorDialog(QDialog):
         self.is_seeking = False
         self.style_widgets: Dict[str, QWidget] = {}
         self.fonts_dir = fonts_dir  # Store for font replacement copying
+        # Cached results for retrieval after dialog closes
+        self._cached_style_patch = {}
+        self._cached_font_replacements = {}
         self._build_ui()
         self._logic = StyleEditorLogic(self, subtitle_path, existing_font_replacements, fonts_dir)
         self._logic.populate_initial_state()
@@ -157,11 +160,13 @@ class StyleEditorDialog(QDialog):
 
     def get_style_patch(self):
         """Public method to retrieve the generated patch."""
-        return self._logic.generated_patch
+        # Return cached value (set in accept before cleanup)
+        return self._cached_style_patch
 
     def get_font_replacements(self):
         """Public method to retrieve the font replacements."""
-        return self._logic.get_font_replacements()
+        # Return cached value (set in accept before cleanup)
+        return self._cached_font_replacements
 
     def accept(self):
         """Save changes to original file and generate the patch before closing."""
@@ -171,6 +176,9 @@ class StyleEditorDialog(QDialog):
         self._logic.engine.save_to_original()
         # Generate the patch for external use
         self._logic.generate_patch()
+        # Cache results before cleanup (getters are called after dialog closes)
+        self._cached_style_patch = self._logic.generated_patch.copy()
+        self._cached_font_replacements = self._logic.get_font_replacements().copy()
         super().accept()
 
     def _connect_signals(self):
@@ -234,8 +242,24 @@ class StyleEditorDialog(QDialog):
         try: self.player_thread.seek(int(start_time_ms_str))
         except (ValueError, TypeError): pass
     def closeEvent(self, event):
+        import gc
+
+        # Stop the player thread first (releases PyAV resources)
         if hasattr(self, 'player_thread') and self.player_thread:
             self.player_thread.stop()
-        # Note: We don't cleanup temp files here - they're cleaned at job start/end
-        # This allows debugging and keeps all temp files in one place
+            self.player_thread = None
+
+        # Clean up logic layer (releases StyleEngine, SubtitleData, breaks circular refs)
+        if hasattr(self, '_logic') and self._logic:
+            self._logic.cleanup()
+            self._logic = None
+
+        # Clear events table (can have thousands of items)
+        if hasattr(self, 'events_table') and self.events_table:
+            self.events_table.clearContents()
+            self.events_table.setRowCount(0)
+
+        # Force garbage collection to release memory immediately
+        gc.collect()
+
         super().closeEvent(event)

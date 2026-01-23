@@ -130,12 +130,17 @@ class StyleEngine:
         return str(self._temp_file) if self._temp_file else str(self.path)
 
     def cleanup(self):
-        """Remove temp file on cleanup."""
+        """Clean up resources - remove temp file and release data."""
+        # Remove temp preview file
         if self._temp_file and self._temp_file.exists():
             try:
                 self._temp_file.unlink()
             except OSError:
                 pass
+            self._temp_file = None
+
+        # Release SubtitleData to free memory
+        self.data = None
 
     def get_style_names(self) -> List[str]:
         """Returns a list of all style names defined in the file."""
