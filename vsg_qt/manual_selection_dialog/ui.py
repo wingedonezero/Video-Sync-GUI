@@ -897,7 +897,9 @@ class ManualSelectionDialog(QDialog):
             Tuple of (json_path, ass_path) on success, or None on failure.
         """
         from PySide6.QtWidgets import QProgressDialog
-        from PySide6.QtCore import Qt
+        from PySide6.QtCore import Qt, QProcess
+        import json
+        import sys
 
         track_data = widget.track_data
 
@@ -931,8 +933,6 @@ class ManualSelectionDialog(QDialog):
         progress.setValue(0)
         progress.show()
 
-        # Track progress via log callback
-        result_holder = [None]  # Use list to allow modification in nested function
         canceled = [False]
 
         def progress_log(msg: str):
@@ -956,17 +956,72 @@ class ManualSelectionDialog(QDialog):
             if progress.wasCanceled():
                 canceled[0] = True
 
-        # Run preview OCR (blocking but with progress updates)
-        from vsg_core.subtitles.ocr import run_preview_ocr
-
         self.log_callback(f"[Style Editor] Running preview OCR ({lang})...")
 
-        result = run_preview_ocr(
-            subtitle_path=extracted_path,
-            lang=lang,
-            output_dir=output_dir,
-            log_callback=progress_log,
-        )
+        process = QProcess(self)
+        process.setProgram(sys.executable)
+        process.setArguments([
+            "-m",
+            "vsg_core.subtitles.ocr.preview_subprocess",
+            "--subtitle-path",
+            extracted_path,
+            "--lang",
+            lang,
+            "--output-dir",
+            str(output_dir),
+        ])
+
+        process.setProcessChannelMode(QProcess.SeparateChannels)
+        process.start()
+
+        if not process.waitForStarted(3000):
+            progress.close()
+            QMessageBox.warning(
+                self, "OCR Preview Failed",
+                "Failed to start preview OCR subprocess."
+            )
+            return None
+
+        json_payload = None
+
+        from PySide6.QtWidgets import QApplication
+        while process.state() != QProcess.NotRunning:
+            process.waitForReadyRead(100)
+            output = bytes(process.readAllStandardOutput()).decode("utf-8", errors="replace")
+            if output:
+                for line in output.splitlines():
+                    if line.startswith("__VSG_PREVIEW_JSON__ "):
+                        try:
+                            json_payload = json.loads(line.split("__VSG_PREVIEW_JSON__ ", 1)[1])
+                        except json.JSONDecodeError:
+                            json_payload = None
+                    else:
+                        progress_log(line)
+
+            if progress.wasCanceled():
+                canceled[0] = True
+                process.terminate()
+                process.waitForFinished(3000)
+                break
+
+            QApplication.processEvents()
+
+        # Flush remaining output
+        output = bytes(process.readAllStandardOutput()).decode("utf-8", errors="replace")
+        if output:
+            for line in output.splitlines():
+                if line.startswith("__VSG_PREVIEW_JSON__ "):
+                    try:
+                        json_payload = json.loads(line.split("__VSG_PREVIEW_JSON__ ", 1)[1])
+                    except json.JSONDecodeError:
+                        json_payload = None
+                else:
+                    progress_log(line)
+
+        error_output = bytes(process.readAllStandardError()).decode("utf-8", errors="replace")
+        if error_output:
+            for line in error_output.splitlines():
+                self.log_callback(f"[Preview OCR] {line}")
 
         progress.close()
         progress.deleteLater()  # Ensure proper cleanup
@@ -975,15 +1030,25 @@ class ManualSelectionDialog(QDialog):
             self.log_callback("[Style Editor] OCR preview canceled")
             return None
 
-        if result is None:
+        if not json_payload or not json_payload.get("success"):
+            error_detail = json_payload.get("error") if json_payload else "No output from subprocess"
             QMessageBox.warning(
                 self, "OCR Preview Failed",
                 "Preview OCR failed to process the subtitle.\n\n"
-                "Check the log for details."
+                f"Details: {error_detail}\n\n"
+                "Check the log for more information."
             )
             return None
 
-        json_path, ass_path = result
+        json_path = json_payload.get("json_path")
+        ass_path = json_payload.get("ass_path")
+        if not json_path or not ass_path:
+            QMessageBox.warning(
+                self, "OCR Preview Failed",
+                "Preview OCR did not return output paths.\n\n"
+                "Check the log for details."
+            )
+            return None
 
         # Store paths in track_data
         widget.track_data['user_modified_path'] = ass_path
