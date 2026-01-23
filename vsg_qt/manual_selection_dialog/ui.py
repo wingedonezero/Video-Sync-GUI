@@ -969,6 +969,7 @@ class ManualSelectionDialog(QDialog):
         )
 
         progress.close()
+        progress.deleteLater()  # Ensure proper cleanup
 
         if canceled[0]:
             self.log_callback("[Style Editor] OCR preview canceled")

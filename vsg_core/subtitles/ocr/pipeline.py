@@ -358,7 +358,27 @@ class OCRPipeline:
             result.error = str(e)
             result.duration_seconds = time.time() - start_time
 
+        finally:
+            # Clean up resources to prevent memory leaks
+            self._cleanup()
+
         return result
+
+    def _cleanup(self):
+        """Release resources held by the pipeline."""
+        # Clear progress callback to break reference cycles
+        self.progress_callback = None
+
+        # Clean up OCR backend (releases GPU memory, models)
+        if self._engine is not None:
+            if hasattr(self._engine, 'cleanup'):
+                self._engine.cleanup()
+            self._engine = None
+
+        # Clear other cached objects
+        self._preprocessor = None
+        self._postprocessor = None
+        self._writer = None
 
     def _process_single_subtitle(
         self,

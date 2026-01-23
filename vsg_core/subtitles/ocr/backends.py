@@ -51,6 +51,22 @@ class OCRBackend(ABC):
 
     name: str = "base"
 
+    def cleanup(self):
+        """
+        Release resources held by the backend.
+
+        Override in subclasses that hold expensive resources (models, GPU memory).
+        Called when the backend is no longer needed.
+        """
+        pass
+
+    def __del__(self):
+        """Destructor - ensure cleanup is called."""
+        try:
+            self.cleanup()
+        except Exception:
+            pass  # Don't raise in destructor
+
     @abstractmethod
     def ocr_image(self, image: np.ndarray) -> OCRResult:
         """
@@ -524,6 +540,21 @@ class EasyOCRBackend(OCRBackend):
 
         return result
 
+    def cleanup(self):
+        """Release EasyOCR reader and associated GPU memory."""
+        if self._reader is not None:
+            logger.info("Releasing EasyOCR reader and GPU memory")
+            try:
+                # Clear CUDA cache if using GPU
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except ImportError:
+                pass
+            except Exception as e:
+                logger.debug(f"Error clearing CUDA cache: {e}")
+            self._reader = None
+
 
 # =============================================================================
 # PaddleOCR Backend (Full Implementation)
@@ -892,6 +923,21 @@ class PaddleOCRBackend(OCRBackend):
             logger.error(f"Traceback: {traceback.format_exc()}")
 
         return result
+
+    def cleanup(self):
+        """Release PaddleOCR engine and associated GPU memory."""
+        if self._ocr is not None:
+            logger.info("Releasing PaddleOCR engine and GPU memory")
+            try:
+                # Clear Paddle GPU memory if using GPU
+                import paddle
+                if paddle.device.is_compiled_with_cuda():
+                    paddle.device.cuda.empty_cache()
+            except ImportError:
+                pass
+            except Exception as e:
+                logger.debug(f"Error clearing Paddle CUDA cache: {e}")
+            self._ocr = None
 
 
 # =============================================================================
