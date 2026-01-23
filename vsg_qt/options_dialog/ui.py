@@ -117,6 +117,8 @@ class OptionsDialog(QDialog):
     # --- public (kept for compatibility) ---
     def load_settings(self):
         self._logic.load_from_config(self.config.settings if hasattr(self.config, "settings") else self.config)
+        # Initialize font size preview after settings are loaded
+        self._ocr_tab.initialize_font_preview()
 
     def accept(self):
         cfg = self.config.settings if hasattr(self.config, "settings") else self.config

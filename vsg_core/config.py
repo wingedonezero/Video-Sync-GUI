@@ -49,6 +49,7 @@ class AppConfig:
             'ocr_language': 'eng',  # Tesseract language code
             'ocr_char_blacklist': '',  # Characters to exclude from OCR
             'ocr_output_format': 'ass',  # 'ass' or 'srt'
+            'ocr_font_size_ratio': 5.80,  # Font size as % of PlayResY (5.80% = 28pt at 480p, 63pt at 1080p)
 
             # OCR Preprocessing
             'ocr_preprocess_auto': True,  # Auto-detect optimal preprocessing

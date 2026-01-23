@@ -227,6 +227,24 @@ class OCRTab(QWidget):
         self.widgets['ocr_output_format'].addItem('SRT', 'srt')
         self.widgets['ocr_output_format'].setToolTip("Output format. ASS supports position tags, SRT does not.")
 
+        # Font size ratio with live preview
+        self.widgets['ocr_font_size_ratio'] = QDoubleSpinBox()
+        self.widgets['ocr_font_size_ratio'].setRange(3.00, 10.00)
+        self.widgets['ocr_font_size_ratio'].setDecimals(2)
+        self.widgets['ocr_font_size_ratio'].setSingleStep(0.05)
+        self.widgets['ocr_font_size_ratio'].setSuffix(" %")
+        self.widgets['ocr_font_size_ratio'].setToolTip(
+            "Font size as percentage of video height (PlayResY).\n"
+            "Ensures consistent visual size across resolutions.\n\n"
+            "Examples at 5.80%:\n"
+            "• 480p → 28pt\n"
+            "• 720p → 42pt\n"
+            "• 1080p → 63pt"
+        )
+        self._font_preview_label = QLabel()
+        self._font_preview_label.setStyleSheet("color: gray; font-size: 11px;")
+        self.widgets['ocr_font_size_ratio'].valueChanged.connect(self._update_font_preview)
+
         self.widgets['ocr_preserve_positions'] = QCheckBox("Preserve subtitle positions (non-bottom only)")
         self.widgets['ocr_preserve_positions'].setToolTip("Keep original position for subtitles not at the bottom of the screen.")
 
@@ -251,6 +269,8 @@ class OCRTab(QWidget):
         )
 
         output_layout.addRow("Output Format:", self.widgets['ocr_output_format'])
+        output_layout.addRow("Font Size Ratio:", self.widgets['ocr_font_size_ratio'])
+        output_layout.addRow("", self._font_preview_label)
         output_layout.addRow(self.widgets['ocr_preserve_positions'])
         output_layout.addRow("Bottom Threshold:", self.widgets['ocr_bottom_threshold'])
         output_layout.addRow(self.widgets['ocr_generate_report'])
@@ -265,6 +285,26 @@ class OCRTab(QWidget):
         from vsg_qt.ocr_dictionary_dialog import OCRDictionaryDialog
         dialog = OCRDictionaryDialog(self)
         dialog.exec()
+
+    def _update_font_preview(self, ratio: float = None):
+        """Update the font size preview label with calculated values."""
+        if ratio is None:
+            ratio = self.widgets['ocr_font_size_ratio'].value()
+
+        # Calculate font sizes for common resolutions
+        sizes = {
+            '480p': round(480 * ratio / 100),
+            '576p': round(576 * ratio / 100),
+            '720p': round(720 * ratio / 100),
+            '1080p': round(1080 * ratio / 100),
+        }
+
+        preview_text = f"480p: {sizes['480p']}  |  720p: {sizes['720p']}  |  1080p: {sizes['1080p']}"
+        self._font_preview_label.setText(preview_text)
+
+    def initialize_font_preview(self):
+        """Initialize the font preview after settings are loaded."""
+        self._update_font_preview()
 
 class AnalysisTab(QWidget):
     def __init__(self):

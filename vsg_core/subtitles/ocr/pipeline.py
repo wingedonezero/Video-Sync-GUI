@@ -312,6 +312,14 @@ class OCRPipeline:
                     self.settings.get('ocr_video_height') or source_res[1]
                 )
 
+                # Calculate font size from ratio (% of PlayResY)
+                font_ratio = self.settings.get('ocr_font_size_ratio', 5.80)
+                calculated_font_size = round(output_res[1] * font_ratio / 100)
+                self._log_progress(f"Font size: {calculated_font_size}pt ({font_ratio}% of {output_res[1]}p)", 0.93)
+
+                # Create output config with calculated font size
+                output_config = OutputConfig(font_size=calculated_font_size)
+
                 subtitle_data = create_subtitle_data_from_ocr(
                     ocr_results=ocr_results,
                     source_file=str(input_path),
@@ -320,6 +328,7 @@ class OCRPipeline:
                     source_format=parse_result.format_info.get('format', 'vobsub').lower(),
                     source_resolution=source_res,
                     output_resolution=output_res,
+                    config=output_config,
                 )
                 result.subtitle_data = subtitle_data
                 result.output_path = output_path  # Caller will save later
