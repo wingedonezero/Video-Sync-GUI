@@ -77,14 +77,14 @@ def verify_correlation_with_frame_snap(
 
     runner._log_message(f"[Correlation+FrameSnap] Subtitle range: {min_sub_time}ms - {max_sub_time}ms ({sub_duration}ms)")
 
-    # Import frame matching utilities
+    # Import frame utilities
     try:
-        from .frame_matching import VideoReader, compute_frame_hash
+        from .frame_utils import VideoReader, compute_frame_hash
     except ImportError:
-        runner._log_message(f"[Correlation+FrameSnap] ERROR: frame_matching module not available")
+        runner._log_message(f"[Correlation+FrameSnap] ERROR: frame_utils module not available")
         return {
             'valid': False,
-            'error': 'frame_matching module not available',
+            'error': 'frame_utils module not available',
             'frame_delta': 0,
             'frame_correction_ms': 0.0
         }
@@ -303,13 +303,13 @@ def verify_alignment_with_sliding_window(
         }
 
     try:
-        from .frame_matching import VideoReader, compute_frame_hash
+        from .frame_utils import VideoReader, compute_frame_hash
     except ImportError:
-        runner._log_message(f"[Hybrid Verification] ERROR: frame_matching module not available")
+        runner._log_message(f"[Hybrid Verification] ERROR: frame_utils module not available")
         return {
             'enabled': True,
             'valid': False,
-            'error': 'frame_matching module not available',
+            'error': 'frame_utils module not available',
             'measurements': [],
             'duration_offset_ms': duration_offset_ms
         }

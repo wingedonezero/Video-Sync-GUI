@@ -181,7 +181,7 @@ def frame_to_time_aegisub(frame_num: int, fps: float) -> int:
 import threading
 
 # Cache for VideoTimestamps instances to avoid re-parsing video
-# Thread-safe: accessed from ThreadPoolExecutor workers in frame_matching
+# Thread-safe: accessed from ThreadPoolExecutor workers
 _vfr_cache = {}
 _vfr_cache_lock = threading.Lock()
 
@@ -1307,3 +1307,555 @@ def validate_frame_alignment(
     runner._log_message(f"[Frame Validation] ═══════════════════════════════════════")
 
     return validation_results
+
+
+# ============================================================================
+# VIDEO READER - Efficient frame extraction with multi-backend support
+# ============================================================================
+
+class VideoReader:
+    """
+    Efficient video reader that keeps video file open for fast frame access.
+
+    Priority order:
+    1. VapourSynth + FFMS2 plugin (fastest - persistent index caching, <1ms per frame, thread-safe)
+    2. pyffms2 (fast - indexed seeking, but re-indexes each time)
+    3. OpenCV (medium - keeps file open, but seeks from keyframes)
+    4. FFmpeg (slow - spawns process per frame)
+    """
+    def __init__(self, video_path: str, runner, temp_dir: Path = None, **kwargs):
+        self.video_path = video_path
+        self.runner = runner
+        self.vs_clip = None  # VapourSynth clip
+        self.source = None   # FFMS2 source
+        self.cap = None      # OpenCV capture
+        self.use_vapoursynth = False
+        self.use_ffms2 = False
+        self.use_opencv = False
+        self.fps = None
+        self.temp_dir = temp_dir
+
+        # Try VapourSynth first (fastest - persistent index caching)
+        if self._try_vapoursynth():
+            return
+
+        # Try FFMS2 second (fast but re-indexes each time)
+        try:
+            import ffms2
+
+            # Note: The pyffms2 Python bindings don't reliably support loading cached indexes
+            # We create the index on-demand each time (still faster than OpenCV fallback)
+            runner._log_message(f"[FrameUtils] Creating FFMS2 index...")
+            runner._log_message(f"[FrameUtils] This may take 1-2 minutes on first access...")
+
+            # Create indexer and generate index
+            indexer = ffms2.Indexer(str(video_path))
+            index = indexer.do_indexing2()
+
+            # Get first video track
+            track_number = index.get_first_indexed_track_of_type(ffms2.FFMS_TYPE_VIDEO)
+
+            # Create video source from index
+            self.source = ffms2.VideoSource(str(video_path), track_number, index)
+            self.use_ffms2 = True
+
+            # Get video properties
+            self.fps = self.source.properties.FPSNumerator / self.source.properties.FPSDenominator
+
+            runner._log_message(f"[FrameUtils] FFMS2 ready! Using instant frame seeking (FPS: {self.fps:.3f})")
+            return
+
+        except ImportError:
+            runner._log_message(f"[FrameUtils] FFMS2 not installed, trying opencv...")
+            runner._log_message(f"[FrameUtils] Install FFMS2 for 100x speedup: pip install ffms2")
+        except Exception as e:
+            runner._log_message(f"[FrameUtils] WARNING: FFMS2 failed ({e}), trying opencv...")
+
+
+        # Fallback to opencv if FFMS2 unavailable
+        try:
+            import cv2
+            self.cv2 = cv2
+            self.cap = cv2.VideoCapture(str(video_path))
+            if self.cap.isOpened():
+                self.use_opencv = True
+                self.fps = self.cap.get(cv2.CAP_PROP_FPS)
+                runner._log_message(f"[FrameUtils] Using opencv for frame access (FPS: {self.fps:.3f})")
+            else:
+                runner._log_message(f"[FrameUtils] WARNING: opencv couldn't open video, falling back to ffmpeg")
+                self.cap = None
+        except ImportError:
+            runner._log_message(f"[FrameUtils] WARNING: opencv not installed, using slower ffmpeg fallback")
+            runner._log_message(f"[FrameUtils] Install opencv for better performance: pip install opencv-python")
+
+    def _get_index_cache_path(self, video_path: str, temp_dir: Path) -> Path:
+        """
+        Generate cache path for FFMS2 index in job's temp directory.
+
+        Cache key: parent_dir + filename + size + mtime (unique per file path)
+        Location: {job_temp_dir}/ffindex/{cache_key}.ffindex
+
+        The index is created in the job's temp folder so it can be:
+        1. Easily identified by filename and source
+        2. Reused within the job (multiple tracks using same source)
+        3. Cleaned up automatically when job completes
+        4. Avoid collisions when different sources have same episode numbers
+        """
+        import os
+        import hashlib
+
+        video_path_obj = Path(video_path)
+
+        # Get file metadata for cache invalidation
+        stat = os.stat(video_path)
+        file_size = stat.st_size
+        mtime = int(stat.st_mtime)
+
+        # Include parent directory to distinguish between sources
+        # E.g., "source1/1.mkv" vs "source2/1.mkv" get different indexes
+        parent_dir = video_path_obj.parent.name
+
+        # If parent is empty/root, use path hash instead
+        if not parent_dir or parent_dir == '.':
+            path_hash = hashlib.md5(str(video_path_obj.resolve()).encode()).hexdigest()[:8]
+            cache_key = f"{video_path_obj.stem}_{path_hash}_{file_size}_{mtime}"
+        else:
+            cache_key = f"{parent_dir}_{video_path_obj.stem}_{file_size}_{mtime}"
+
+        # ALWAYS use job's temp_dir for index storage (for cleanup)
+        if temp_dir:
+            cache_dir = temp_dir / "ffindex"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            # Fallback: use system temp (but warn - won't be cleaned up)
+            cache_dir = Path(tempfile.gettempdir()) / "vsg_ffindex"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            self.runner._log_message(f"[FrameUtils] WARNING: No job temp_dir provided, index won't be auto-cleaned")
+
+        index_path = cache_dir / f"{cache_key}.ffindex"
+        return index_path
+
+    def _try_vapoursynth(self) -> bool:
+        """
+        Try to initialize VapourSynth with FFMS2 plugin for persistent index caching.
+
+        Returns:
+            True if successful, False if VapourSynth unavailable or failed
+        """
+        try:
+            import vapoursynth as vs
+
+            self.runner._log_message("[FrameUtils] Attempting VapourSynth with FFMS2 plugin...")
+
+            # Get VapourSynth core instance
+            core = vs.core
+
+            # Check if ffms2 plugin is available
+            if not hasattr(core, 'ffms2'):
+                self.runner._log_message("[FrameUtils] VapourSynth installed but ffms2 plugin missing")
+                self.runner._log_message("[FrameUtils] Install FFMS2 plugin for VapourSynth")
+                return False
+
+            # Generate cache path
+            index_path = self._get_index_cache_path(self.video_path, self.temp_dir)
+
+            # Show where index is stored
+            if self.temp_dir:
+                # Show relative path from job temp dir
+                try:
+                    rel_path = index_path.relative_to(self.temp_dir)
+                    location_msg = f"job_temp/{rel_path}"
+                except ValueError:
+                    location_msg = str(index_path)
+            else:
+                location_msg = str(index_path)
+
+            # Load video with index caching
+            if index_path.exists():
+                self.runner._log_message(f"[FrameUtils] Reusing existing index from: {location_msg}")
+            else:
+                self.runner._log_message(f"[FrameUtils] Creating new index at: {location_msg}")
+                self.runner._log_message(f"[FrameUtils] This may take 1-2 minutes...")
+
+            clip = core.ffms2.Source(
+                source=str(self.video_path),
+                cachefile=str(index_path)
+            )
+
+            # Keep clip in original format (usually YUV)
+            # We'll extract only luma (Y) plane for hashing - more reliable than RGB
+            self.vs_clip = clip
+
+            # Get video properties
+            self.fps = self.vs_clip.fps_num / self.vs_clip.fps_den
+            self.use_vapoursynth = True
+
+            self.runner._log_message(f"[FrameUtils] VapourSynth ready! Using persistent index cache (FPS: {self.fps:.3f})")
+            self.runner._log_message(f"[FrameUtils] Index will be shared across all workers (no re-indexing!)")
+
+            return True
+
+        except ImportError:
+            self.runner._log_message("[FrameUtils] VapourSynth not installed, trying pyffms2...")
+            self.runner._log_message("[FrameUtils] Install VapourSynth for persistent index caching: pip install VapourSynth")
+            return False
+        except AttributeError as e:
+            self.runner._log_message(f"[FrameUtils] VapourSynth ffms2 plugin not found: {e}")
+            self.runner._log_message("[FrameUtils] Install FFMS2 plugin for VapourSynth")
+            return False
+        except Exception as e:
+            self.runner._log_message(f"[FrameUtils] VapourSynth initialization failed: {e}")
+            return False
+
+    def get_frame_at_time(self, time_ms: int) -> Optional['Image.Image']:
+        """
+        Extract frame at specified timestamp.
+
+        Args:
+            time_ms: Timestamp in milliseconds
+
+        Returns:
+            PIL Image object, or None on failure
+        """
+        if self.use_vapoursynth and self.vs_clip:
+            return self._get_frame_vapoursynth(time_ms)
+        elif self.use_ffms2 and self.source:
+            return self._get_frame_ffms2(time_ms)
+        elif self.use_opencv and self.cap:
+            return self._get_frame_opencv(time_ms)
+        else:
+            return self._get_frame_ffmpeg(time_ms)
+
+    def get_frame_at_index(self, frame_num: int) -> Optional['Image.Image']:
+        """
+        Extract frame by frame number directly (avoids time-to-frame conversion precision issues).
+
+        This method bypasses the floating-point time conversion that can cause 1-frame
+        offsets with NTSC framerates (23.976fps, 29.97fps) where int(time * fps) may
+        truncate incorrectly (e.g., 1000.9999 -> 1000 instead of 1001).
+
+        Args:
+            frame_num: Frame index (0-based)
+
+        Returns:
+            PIL Image object, or None on failure
+        """
+        if self.use_vapoursynth and self.vs_clip:
+            return self._get_frame_vapoursynth_by_index(frame_num)
+        elif self.use_ffms2 and self.source:
+            return self._get_frame_ffms2_by_index(frame_num)
+        elif self.use_opencv and self.cap:
+            # OpenCV doesn't have reliable frame-accurate seeking by index
+            # Fall back to time-based seeking with best effort
+            time_ms = int(frame_num * 1000.0 / self.fps) if self.fps else 0
+            return self._get_frame_opencv(time_ms)
+        else:
+            # FFmpeg fallback - use time-based
+            time_ms = int(frame_num * 1000.0 / self.fps) if self.fps else 0
+            return self._get_frame_ffmpeg(time_ms)
+
+    def _get_frame_vapoursynth_by_index(self, frame_num: int) -> Optional['Image.Image']:
+        """Extract frame by index using VapourSynth (frame-accurate)."""
+        try:
+            from PIL import Image
+            import numpy as np
+
+            # Clamp to valid range
+            frame_num = max(0, min(frame_num, len(self.vs_clip) - 1))
+
+            # Get frame directly by index (no time conversion!)
+            frame = self.vs_clip.get_frame(frame_num)
+
+            # Extract Y (luma) plane as grayscale
+            y_plane = np.asarray(frame[0])
+
+            # Normalize bit depth to 8-bit for PIL
+            # VapourSynth can provide 8-bit, 10-bit, 12-bit, or 16-bit data
+            if y_plane.dtype == np.uint16:
+                # For 10-bit (0-1023) or 16-bit (0-65535), normalize to 8-bit (0-255)
+                # Most anime is 10-bit, so values are in 0-1023 range
+                # Right-shift by (bit_depth - 8) to normalize
+                # For 10-bit: shift right by 2 (divide by 4)
+                # For 16-bit: shift right by 8 (divide by 256)
+                max_val = y_plane.max()
+                if max_val <= 1023:  # 10-bit
+                    y_plane = (y_plane >> 2).astype(np.uint8)
+                else:  # 12-bit or 16-bit
+                    y_plane = (y_plane >> 8).astype(np.uint8)
+            elif y_plane.dtype != np.uint8:
+                # Ensure we have uint8
+                y_plane = y_plane.astype(np.uint8)
+
+            return Image.fromarray(y_plane, 'L')
+
+        except Exception as e:
+            self.runner._log_message(f"[FrameUtils] ERROR: VapourSynth frame extraction by index failed: {e}")
+            return None
+
+    def _get_frame_ffms2_by_index(self, frame_num: int) -> Optional['Image.Image']:
+        """Extract frame by index using FFMS2 (frame-accurate)."""
+        try:
+            from PIL import Image
+            import numpy as np
+
+            # Clamp to valid range
+            frame_num = max(0, min(frame_num, self.source.properties.NumFrames - 1))
+
+            # Get frame directly by index (no time conversion!)
+            frame = self.source.get_frame(frame_num)
+
+            # Convert to PIL Image
+            # FFMS2 typically returns Y plane as first plane for grayscale, or RGB
+            frame_array = frame.planes[0]
+
+            # Normalize bit depth to 8-bit for PIL if needed
+            if frame_array.dtype == np.uint16:
+                max_val = frame_array.max()
+                if max_val <= 1023:  # 10-bit
+                    frame_array = (frame_array >> 2).astype(np.uint8)
+                else:  # 12-bit or 16-bit
+                    frame_array = (frame_array >> 8).astype(np.uint8)
+            elif frame_array.dtype != np.uint8:
+                frame_array = frame_array.astype(np.uint8)
+
+            return Image.fromarray(frame_array)
+
+        except Exception as e:
+            self.runner._log_message(f"[FrameUtils] ERROR: FFMS2 frame extraction by index failed: {e}")
+            return None
+
+    def _get_frame_vapoursynth(self, time_ms: int) -> Optional['Image.Image']:
+        """
+        Extract frame using VapourSynth (instant indexed seeking with persistent cache).
+
+        Extracts only the luma (Y) plane as grayscale for better perceptual hashing.
+        Luma contains most of the perceptual information and avoids color conversion artifacts.
+        """
+        try:
+            from PIL import Image
+            import numpy as np
+
+            # Convert time to frame number
+            frame_num = int((time_ms / 1000.0) * self.fps)
+
+            # Clamp to valid range
+            frame_num = max(0, min(frame_num, len(self.vs_clip) - 1))
+
+            # Get frame (instant - uses FFMS2 index!)
+            frame = self.vs_clip.get_frame(frame_num)
+
+            # VapourSynth frames support the array protocol
+            # frame[0] is the Y (luma) plane, np.asarray handles stride automatically
+            y_plane = np.asarray(frame[0])
+
+            # Normalize bit depth to 8-bit for PIL
+            # VapourSynth can provide 8-bit, 10-bit, 12-bit, or 16-bit data
+            if y_plane.dtype == np.uint16:
+                # For 10-bit (0-1023) or 16-bit (0-65535), normalize to 8-bit (0-255)
+                # Most anime is 10-bit, so values are in 0-1023 range
+                # Right-shift by (bit_depth - 8) to normalize
+                # For 10-bit: shift right by 2 (divide by 4)
+                # For 16-bit: shift right by 8 (divide by 256)
+                max_val = y_plane.max()
+                if max_val <= 1023:  # 10-bit
+                    y_plane = (y_plane >> 2).astype(np.uint8)
+                else:  # 12-bit or 16-bit
+                    y_plane = (y_plane >> 8).astype(np.uint8)
+            elif y_plane.dtype != np.uint8:
+                # Ensure we have uint8
+                y_plane = y_plane.astype(np.uint8)
+
+            # Convert to PIL Image (grayscale mode 'L')
+            return Image.fromarray(y_plane, 'L')
+
+        except Exception as e:
+            self.runner._log_message(f"[FrameUtils] ERROR: VapourSynth frame extraction failed: {e}")
+            return None
+
+    def _get_frame_ffms2(self, time_ms: int) -> Optional['Image.Image']:
+        """Extract frame using FFMS2 (instant indexed seeking)."""
+        try:
+            from PIL import Image
+            import numpy as np
+
+            # Convert time to frame number
+            frame_num = int((time_ms / 1000.0) * self.fps)
+
+            # Clamp to valid range
+            frame_num = max(0, min(frame_num, self.source.properties.NumFrames - 1))
+
+            # Get frame (instant - uses index!)
+            frame = self.source.get_frame(frame_num)
+
+            # Convert to PIL Image
+            # FFMS2 returns frames as numpy arrays in RGB format
+            frame_array = frame.planes[0]  # Get RGB data
+
+            # Normalize bit depth to 8-bit for PIL if needed
+            if frame_array.dtype == np.uint16:
+                max_val = frame_array.max()
+                if max_val <= 1023:  # 10-bit
+                    frame_array = (frame_array >> 2).astype(np.uint8)
+                else:  # 12-bit or 16-bit
+                    frame_array = (frame_array >> 8).astype(np.uint8)
+            elif frame_array.dtype != np.uint8:
+                frame_array = frame_array.astype(np.uint8)
+
+            # Create PIL Image from numpy array
+            return Image.fromarray(frame_array)
+
+        except Exception as e:
+            self.runner._log_message(f"[FrameUtils] ERROR: FFMS2 frame extraction failed: {e}")
+            return None
+
+    def _get_frame_opencv(self, time_ms: int) -> Optional['Image.Image']:
+        """Extract frame using opencv (fast)."""
+        try:
+            from PIL import Image
+
+            # Seek to timestamp (opencv uses milliseconds)
+            self.cap.set(self.cv2.CAP_PROP_POS_MSEC, time_ms)
+
+            # Read frame
+            ret, frame_bgr = self.cap.read()
+
+            if not ret or frame_bgr is None:
+                return None
+
+            # Convert BGR to RGB
+            frame_rgb = self.cv2.cvtColor(frame_bgr, self.cv2.COLOR_BGR2RGB)
+
+            # Convert to PIL Image
+            return Image.fromarray(frame_rgb)
+
+        except Exception as e:
+            self.runner._log_message(f"[FrameUtils] ERROR: opencv frame extraction failed: {e}")
+            return None
+
+    def _get_frame_ffmpeg(self, time_ms: int) -> Optional['Image.Image']:
+        """Extract frame using ffmpeg (slow fallback)."""
+        from PIL import Image
+        import subprocess
+        import os
+
+        tmp_path = None
+        try:
+            time_sec = time_ms / 1000.0
+
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+                tmp_path = tmp.name
+
+            cmd = [
+                'ffmpeg',
+                '-ss', f'{time_sec:.3f}',
+                '-i', str(self.video_path),
+                '-vframes', '1',
+                '-q:v', '2',
+                '-y',
+                tmp_path
+            ]
+
+            # Import GPU environment support
+            try:
+                from vsg_core.system.gpu_env import get_subprocess_environment
+                env = get_subprocess_environment()
+            except ImportError:
+                env = os.environ.copy()
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                env=env
+            )
+
+            if result.returncode != 0:
+                return None
+
+            frame = Image.open(tmp_path)
+            frame.load()
+
+            return frame
+
+        except Exception:
+            return None
+        finally:
+            # Always clean up temp file
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
+    def close(self):
+        """Release video resources."""
+
+        # VapourSynth cleanup
+        if self.vs_clip:
+            # VapourSynth clips are reference counted, just clear reference
+            self.vs_clip = None
+
+        # FFMS2 cleanup
+        if self.source:
+            # FFMS2 sources don't need explicit closing, but clear reference
+            self.source = None
+
+        # OpenCV cleanup
+        if self.cap:
+            self.cap.release()
+            self.cap = None
+
+        # Force garbage collection to release nanobind objects
+        gc.collect()
+
+
+# ============================================================================
+# FRAME HASHING - Perceptual hash functions for frame comparison
+# ============================================================================
+
+def compute_frame_hash(frame: 'Image.Image', hash_size: int = 8, method: str = 'phash') -> Optional[Any]:
+    """
+    Compute perceptual hash of a frame.
+
+    Args:
+        frame: PIL Image object
+        hash_size: Hash size (8x8 = 64 bits, 16x16 = 256 bits)
+        method: Hash method ('phash', 'dhash', 'average_hash', 'whash')
+
+    Returns:
+        ImageHash object, or None on failure
+    """
+    try:
+        import imagehash
+
+        if method == 'dhash':
+            return imagehash.dhash(frame, hash_size=hash_size)
+        elif method == 'average_hash':
+            return imagehash.average_hash(frame, hash_size=hash_size)
+        elif method == 'whash':
+            return imagehash.whash(frame, hash_size=hash_size)
+        else:  # 'phash' or default
+            return imagehash.phash(frame, hash_size=hash_size)
+
+    except ImportError:
+        return None
+    except Exception:
+        return None
+
+
+def compute_hamming_distance(hash1, hash2) -> int:
+    """
+    Compute Hamming distance between two perceptual hashes.
+
+    Args:
+        hash1: First ImageHash object
+        hash2: Second ImageHash object
+
+    Returns:
+        Hamming distance (number of differing bits). Lower = more similar.
+        Returns 0 for identical frames, typically <5 for matching frames,
+        and >10 for different frames.
+    """
+    # ImageHash objects support subtraction to get Hamming distance
+    return hash1 - hash2

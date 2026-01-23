@@ -1426,11 +1426,11 @@ class SubtitleSyncTab(QWidget):
         specific_layout = QFormLayout(specific_group)
 
         # --- Time-based options ---
-        self.widgets['time_based_use_raw_values'] = QCheckBox("Apply delay directly to subtitle file (pysubs2)")
+        self.widgets['time_based_use_raw_values'] = QCheckBox("Apply delay directly to subtitle file")
         self.widgets['time_based_use_raw_values'].setToolTip(
             "How to apply the delay:\n\n"
             "• Unchecked (Default): Use mkvmerge --sync (delay in container)\n"
-            "• Checked: Modify subtitle timestamps directly with pysubs2"
+            "• Checked: Modify subtitle timestamps directly in the file"
         )
         specific_layout.addRow("", self.widgets['time_based_use_raw_values'])
 

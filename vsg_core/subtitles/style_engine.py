@@ -3,8 +3,8 @@
 """
 Style engine using SubtitleData for subtitle manipulation.
 
-Provides the same API as before but uses the unified SubtitleData
-system instead of pysubs2 directly.
+Provides style modification operations (font replacement, size scaling,
+rescaling, color changes) using the unified SubtitleData system.
 """
 import hashlib
 import re

@@ -144,14 +144,14 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
 
         log(f"[SubAnchor] Selected {len(checkpoints)} checkpoints")
 
-        # Try to import frame matching
+        # Try to import frame utilities
         try:
-            from ..frame_matching import VideoReader, compute_frame_hash, compute_hamming_distance
+            from ..frame_utils import VideoReader, compute_frame_hash, compute_hamming_distance
         except ImportError as e:
             return OperationResult(
                 success=False,
                 operation='sync',
-                error=f'Frame matching module not available: {e}'
+                error=f'Frame utilities not available: {e}'
             )
 
         # Open video readers
