@@ -3,6 +3,7 @@
 //! This crate contains all business logic with zero UI dependencies.
 //! It can be used by the GUI application or a CLI tool.
 
+pub mod config;
 pub mod models;
 
 /// Returns the crate version.
