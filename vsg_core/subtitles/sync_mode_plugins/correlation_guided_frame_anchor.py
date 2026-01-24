@@ -136,12 +136,12 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
 
         log(f"[CorrGuided] Source duration: ~{source_duration/1000:.1f}s")
 
-        # Try to import frame matching
+        # Try to import frame utilities
         try:
-            from ..frame_matching import VideoReader, compute_frame_hash, compute_hamming_distance
+            from ..frame_utils import VideoReader, compute_frame_hash, compute_hamming_distance
         except ImportError as e:
             # Fall back to just correlation
-            log(f"[CorrGuided] Frame matching unavailable: {e}")
+            log(f"[CorrGuided] Frame utilities unavailable: {e}")
             log(f"[CorrGuided] Falling back to correlation-only offset")
             return self._apply_correlation_only(
                 subtitle_data, total_delay_ms, global_shift_ms, sync_exclusion_styles, sync_exclusion_mode, runner

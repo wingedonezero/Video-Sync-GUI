@@ -1426,11 +1426,11 @@ class SubtitleSyncTab(QWidget):
         specific_layout = QFormLayout(specific_group)
 
         # --- Time-based options ---
-        self.widgets['time_based_use_raw_values'] = QCheckBox("Apply delay directly to subtitle file (pysubs2)")
+        self.widgets['time_based_use_raw_values'] = QCheckBox("Apply delay directly to subtitle file")
         self.widgets['time_based_use_raw_values'].setToolTip(
             "How to apply the delay:\n\n"
             "• Unchecked (Default): Use mkvmerge --sync (delay in container)\n"
-            "• Checked: Modify subtitle timestamps directly with pysubs2"
+            "• Checked: Modify subtitle timestamps directly in the file"
         )
         specific_layout.addRow("", self.widgets['time_based_use_raw_values'])
 
@@ -1483,6 +1483,20 @@ class SubtitleSyncTab(QWidget):
         specific_layout.addRow("", self.widgets['duration_align_verify_with_frames'])
         specific_layout.addRow("", self.widgets['duration_align_skip_validation_generated_tracks'])
         specific_layout.addRow("DA Fallback:", self.widgets['duration_align_fallback_mode'])
+
+        # --- Timebase-frame-locked options ---
+        self.widgets['frame_lock_submillisecond_precision'] = QCheckBox("Use sub-millisecond precision")
+        self.widgets['frame_lock_submillisecond_precision'].setToolTip(
+            "Experimental: Preserve sub-millisecond precision when calculating frame boundaries.\n\n"
+            "Default (unchecked): Truncates to integer milliseconds before frame calculation.\n"
+            "  e.g., 1234.567ms → 1234ms → frame lookup\n\n"
+            "Checked: Preserves fractional milliseconds in frame calculation.\n"
+            "  e.g., 1234.567ms → 1234.567ms → frame lookup\n\n"
+            "The difference only matters when timing is very close to a frame boundary.\n"
+            "Since ASS format saves at 10ms (centisecond) precision anyway, this rarely matters.\n"
+            "Try enabling if you see 1-frame alignment issues."
+        )
+        specific_layout.addRow("", self.widgets['frame_lock_submillisecond_precision'])
 
         # --- Correlation-frame-snap options ---
         self.widgets['correlation_snap_fallback_mode'] = QComboBox()
@@ -1559,6 +1573,9 @@ class SubtitleSyncTab(QWidget):
 
         # Time-based specific
         self.widgets['time_based_use_raw_values'].setEnabled(is_time_based)
+
+        # Timebase-frame-locked specific
+        self.widgets['frame_lock_submillisecond_precision'].setEnabled(is_frame_locked)
 
         # Duration-align specific
         self.widgets['duration_align_validate'].setEnabled(is_duration_align)

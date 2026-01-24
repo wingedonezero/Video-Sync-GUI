@@ -225,18 +225,15 @@ class FontManagerDialog(QDialog):
 
     def _get_styles_from_subtitle(self) -> Dict[str, str]:
         """Get style names and their fonts from the subtitle file."""
-        import pysubs2
+        from vsg_core.subtitles.data import SubtitleData
 
         try:
-            subs = pysubs2.load(self.subtitle_path, encoding='utf-8')
+            subtitle_data = SubtitleData.from_file(self.subtitle_path)
         except Exception:
-            try:
-                subs = pysubs2.load(self.subtitle_path)
-            except Exception:
-                return {}
+            return {}
 
         styles_info = {}
-        for style_name, style in subs.styles.items():
+        for style_name, style in subtitle_data.styles.items():
             styles_info[style_name] = style.fontname
 
         return styles_info
