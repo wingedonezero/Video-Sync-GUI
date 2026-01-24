@@ -1,0 +1,21 @@
+[package]
+name = "vsg_ui"
+description = "Video Sync GUI - Slint-based user interface"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+build = "build.rs"
+
+[[bin]]
+name = "video-sync-gui"
+path = "src/main.rs"
+
+[dependencies]
+vsg_core = { path = "../vsg_core" }
+slint = "1.14"
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[build-dependencies]
+slint-build = "1.14"

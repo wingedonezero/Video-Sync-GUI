@@ -1,0 +1,218 @@
+import { VerticalBox, HorizontalBox, Button, LineEdit, TextEdit, GroupBox, CheckBox, ProgressIndicator } from "std-widgets.slint";
+
+export component MainWindow inherits Window {
+    title: "Video/Audio Sync & Merge";
+    min-width: 1000px;
+    min-height: 600px;
+
+    // Properties that Rust can read/write
+    in-out property <string> log-text: "";
+    in-out property <string> status-text: "Ready";
+    in-out property <float> progress-value: 0;
+    in-out property <bool> archive-logs: true;
+
+    // Source paths
+    in-out property <string> source1-path: "";
+    in-out property <string> source2-path: "";
+    in-out property <string> source3-path: "";
+
+    // Latest job results (delays in ms, empty string = not calculated)
+    in-out property <string> delay-source2: "";
+    in-out property <string> delay-source3: "";
+
+    // Callbacks that Rust can handle
+    callback settings-clicked();
+    callback queue-jobs-clicked();
+    callback browse-source1();
+    callback browse-source2();
+    callback browse-source3();
+    callback analyze-only-clicked();
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 12px;
+
+        // Top Toolbar
+        HorizontalLayout {
+            alignment: end;
+            Button {
+                text: "Settings…";
+                clicked => { settings-clicked(); }
+            }
+        }
+
+        // Main Workflow Section
+        GroupBox {
+            title: "Main Workflow";
+
+            VerticalBox {
+                padding: 12px;
+                spacing: 8px;
+
+                HorizontalLayout {
+                    spacing: 16px;
+                    alignment: start;
+
+                    Button {
+                        text: "Queue Jobs…";
+                        min-width: 120px;
+                        clicked => { queue-jobs-clicked(); }
+                    }
+
+                    CheckBox {
+                        text: "Archive logs to zip on batch completion";
+                        checked <=> archive-logs;
+                    }
+                }
+            }
+        }
+
+        // Quick Analysis Section
+        GroupBox {
+            title: "Analyze Only";
+
+            VerticalBox {
+                padding: 12px;
+                spacing: 8px;
+
+                // Source 1 (Reference)
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: "Source 1 (Reference):";
+                        vertical-alignment: center;
+                        min-width: 140px;
+                    }
+                    LineEdit {
+                        text <=> source1-path;
+                        placeholder-text: "Path to reference video file...";
+                        horizontal-stretch: 1;
+                    }
+                    Button {
+                        text: "Browse";
+                        clicked => { browse-source1(); }
+                    }
+                }
+
+                // Source 2
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: "Source 2:";
+                        vertical-alignment: center;
+                        min-width: 140px;
+                    }
+                    LineEdit {
+                        text <=> source2-path;
+                        placeholder-text: "Path to second video file...";
+                        horizontal-stretch: 1;
+                    }
+                    Button {
+                        text: "Browse";
+                        clicked => { browse-source2(); }
+                    }
+                }
+
+                // Source 3
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: "Source 3:";
+                        vertical-alignment: center;
+                        min-width: 140px;
+                    }
+                    LineEdit {
+                        text <=> source3-path;
+                        placeholder-text: "Path to third video file (optional)...";
+                        horizontal-stretch: 1;
+                    }
+                    Button {
+                        text: "Browse";
+                        clicked => { browse-source3(); }
+                    }
+                }
+
+                // Analyze Only button (right-aligned)
+                HorizontalLayout {
+                    alignment: end;
+                    Button {
+                        text: "Analyze Only";
+                        clicked => { analyze-only-clicked(); }
+                    }
+                }
+            }
+        }
+
+        // Status Bar
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: stretch;
+
+            Text {
+                text: status-text;
+                vertical-alignment: center;
+                min-width: 200px;
+            }
+
+            ProgressIndicator {
+                progress: progress-value / 100;
+                horizontal-stretch: 1;
+                min-height: 20px;
+            }
+        }
+
+        // Latest Job Results
+        GroupBox {
+            title: "Latest Job Results";
+
+            HorizontalLayout {
+                padding: 12px;
+                spacing: 24px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: "Source 2 Delay:";
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: delay-source2 == "" ? "—" : delay-source2;
+                        vertical-alignment: center;
+                        color: delay-source2 == "" ? #888888 : #000000;
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text {
+                        text: "Source 3 Delay:";
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: delay-source3 == "" ? "—" : delay-source3;
+                        vertical-alignment: center;
+                        color: delay-source3 == "" ? #888888 : #000000;
+                    }
+                }
+
+                // Stretch to push results to the left
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+            }
+        }
+
+        // Log Output Section
+        GroupBox {
+            title: "Log Output";
+            vertical-stretch: 1;
+
+            TextEdit {
+                text <=> log-text;
+                read-only: true;
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+            }
+        }
+    }
+}

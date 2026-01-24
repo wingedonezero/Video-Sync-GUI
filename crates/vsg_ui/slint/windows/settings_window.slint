@@ -1,0 +1,479 @@
+import { VerticalBox, HorizontalBox, Button, LineEdit, GroupBox, CheckBox, SpinBox, ComboBox, TabWidget } from "std-widgets.slint";
+
+export component SettingsWindow inherits Window {
+    title: "Settings";
+    min-width: 700px;
+    min-height: 500px;
+
+    // Storage settings
+    in-out property <string> output-folder: "sync_output";
+    in-out property <string> temp-root: ".temp";
+    in-out property <string> logs-folder: ".logs";
+
+    // Logging settings
+    in-out property <bool> compact-logging: true;
+    in-out property <bool> autoscroll: true;
+    in-out property <int> error-tail: 20;
+    in-out property <int> progress-step: 20;
+    in-out property <bool> show-options-pretty: false;
+    in-out property <bool> show-options-json: false;
+
+    // Analysis settings
+    in-out property <int> analysis-mode-index: 0;  // 0 = Audio, 1 = Video
+    in-out property <string> lang-source1: "";
+    in-out property <string> lang-others: "";
+    in-out property <int> chunk-count: 10;
+    in-out property <int> chunk-duration: 15;
+    in-out property <float> min-match-pct: 5.0;
+    in-out property <float> scan-start-pct: 5.0;
+    in-out property <float> scan-end-pct: 95.0;
+
+    // Chapter settings
+    in-out property <bool> chapter-rename: false;
+    in-out property <bool> chapter-snap: false;
+    in-out property <int> snap-mode-index: 0;  // 0 = Previous, 1 = Nearest
+    in-out property <int> snap-threshold-ms: 250;
+    in-out property <bool> snap-starts-only: true;
+
+    // Post-process settings
+    in-out property <bool> disable-track-stats: false;
+    in-out property <bool> disable-header-compression: true;
+    in-out property <bool> apply-dialog-norm: false;
+
+    // Callbacks
+    callback save-clicked();
+    callback cancel-clicked();
+    callback browse-output();
+    callback browse-temp();
+    callback browse-logs();
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 12px;
+
+        TabWidget {
+            Tab {
+                title: "Storage";
+
+                VerticalBox {
+                    padding: 16px;
+                    spacing: 12px;
+
+                    GroupBox {
+                        title: "Paths";
+
+                        VerticalBox {
+                            padding: 12px;
+                            spacing: 8px;
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Output Directory:";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                LineEdit {
+                                    text <=> output-folder;
+                                    horizontal-stretch: 1;
+                                }
+                                Button {
+                                    text: "Browse";
+                                    clicked => { browse-output(); }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Temporary Directory:";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                LineEdit {
+                                    text <=> temp-root;
+                                    horizontal-stretch: 1;
+                                }
+                                Button {
+                                    text: "Browse";
+                                    clicked => { browse-temp(); }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Logs Directory:";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                LineEdit {
+                                    text <=> logs-folder;
+                                    horizontal-stretch: 1;
+                                }
+                                Button {
+                                    text: "Browse";
+                                    clicked => { browse-logs(); }
+                                }
+                            }
+                        }
+                    }
+
+                    // Spacer
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
+
+            Tab {
+                title: "Analysis";
+
+                VerticalBox {
+                    padding: 16px;
+                    spacing: 12px;
+
+                    GroupBox {
+                        title: "Core Settings";
+
+                        VerticalBox {
+                            padding: 12px;
+                            spacing: 8px;
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Analysis Mode:";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                ComboBox {
+                                    model: ["Audio Correlation", "Video Diff"];
+                                    current-index <=> analysis-mode-index;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Number of Chunks:";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                SpinBox {
+                                    value <=> chunk-count;
+                                    minimum: 1;
+                                    maximum: 100;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Chunk Duration (sec):";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                SpinBox {
+                                    value <=> chunk-duration;
+                                    minimum: 5;
+                                    maximum: 60;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Min Match %:";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                SpinBox {
+                                    value: round(min-match-pct);
+                                    minimum: 1;
+                                    maximum: 100;
+                                    edited(v) => { min-match-pct = v; }
+                                }
+                            }
+                        }
+                    }
+
+                    GroupBox {
+                        title: "Audio Track Selection";
+
+                        VerticalBox {
+                            padding: 12px;
+                            spacing: 8px;
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Source 1 Language:";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                LineEdit {
+                                    text <=> lang-source1;
+                                    placeholder-text: "e.g., jpn (leave empty for any)";
+                                    horizontal-stretch: 1;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Other Sources Lang:";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                LineEdit {
+                                    text <=> lang-others;
+                                    placeholder-text: "e.g., eng (leave empty for any)";
+                                    horizontal-stretch: 1;
+                                }
+                            }
+                        }
+                    }
+
+                    GroupBox {
+                        title: "Scan Range";
+
+                        VerticalBox {
+                            padding: 12px;
+                            spacing: 8px;
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Scan Start %:";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                SpinBox {
+                                    value: round(scan-start-pct);
+                                    minimum: 0;
+                                    maximum: 50;
+                                    edited(v) => { scan-start-pct = v; }
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Scan End %:";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                SpinBox {
+                                    value: round(scan-end-pct);
+                                    minimum: 50;
+                                    maximum: 100;
+                                    edited(v) => { scan-end-pct = v; }
+                                }
+                            }
+                        }
+                    }
+
+                    // Spacer
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
+
+            Tab {
+                title: "Chapters";
+
+                VerticalBox {
+                    padding: 16px;
+                    spacing: 12px;
+
+                    GroupBox {
+                        title: "Chapter Processing";
+
+                        VerticalBox {
+                            padding: 12px;
+                            spacing: 8px;
+
+                            CheckBox {
+                                text: "Rename chapters to standard format (Chapter NN)";
+                                checked <=> chapter-rename;
+                            }
+
+                            CheckBox {
+                                text: "Snap chapter timestamps to nearest keyframe";
+                                checked <=> chapter-snap;
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Snap Mode:";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                ComboBox {
+                                    model: ["Previous Keyframe", "Nearest Keyframe"];
+                                    current-index <=> snap-mode-index;
+                                    enabled: chapter-snap;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Snap Threshold (ms):";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                SpinBox {
+                                    value <=> snap-threshold-ms;
+                                    minimum: 50;
+                                    maximum: 1000;
+                                    enabled: chapter-snap;
+                                }
+                            }
+
+                            CheckBox {
+                                text: "Only snap chapter start times (not ends)";
+                                checked <=> snap-starts-only;
+                                enabled: chapter-snap;
+                            }
+                        }
+                    }
+
+                    // Spacer
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
+
+            Tab {
+                title: "Merge Behavior";
+
+                VerticalBox {
+                    padding: 16px;
+                    spacing: 12px;
+
+                    GroupBox {
+                        title: "Track Options";
+
+                        VerticalBox {
+                            padding: 12px;
+                            spacing: 8px;
+
+                            CheckBox {
+                                text: "Remove dialog normalization gain (AC3/E-AC3)";
+                                checked <=> apply-dialog-norm;
+                            }
+
+                            CheckBox {
+                                text: "Disable track statistics tags";
+                                checked <=> disable-track-stats;
+                            }
+
+                            CheckBox {
+                                text: "Disable header removal compression";
+                                checked <=> disable-header-compression;
+                            }
+                        }
+                    }
+
+                    // Spacer
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
+
+            Tab {
+                title: "Logging";
+
+                VerticalBox {
+                    padding: 16px;
+                    spacing: 12px;
+
+                    GroupBox {
+                        title: "Log Output";
+
+                        VerticalBox {
+                            padding: 12px;
+                            spacing: 8px;
+
+                            CheckBox {
+                                text: "Use compact logging";
+                                checked <=> compact-logging;
+                            }
+
+                            CheckBox {
+                                text: "Auto-scroll log view during jobs";
+                                checked <=> autoscroll;
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Progress Step %:";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                SpinBox {
+                                    value <=> progress-step;
+                                    minimum: 1;
+                                    maximum: 50;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Error Tail (lines):";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                SpinBox {
+                                    value <=> error-tail;
+                                    minimum: 5;
+                                    maximum: 200;
+                                }
+                            }
+                        }
+                    }
+
+                    GroupBox {
+                        title: "mkvmerge Options Display";
+
+                        VerticalBox {
+                            padding: 12px;
+                            spacing: 8px;
+
+                            CheckBox {
+                                text: "Show mkvmerge options (pretty format)";
+                                checked <=> show-options-pretty;
+                            }
+
+                            CheckBox {
+                                text: "Show mkvmerge options (raw JSON)";
+                                checked <=> show-options-json;
+                            }
+                        }
+                    }
+
+                    // Spacer
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
+        }
+
+        // Bottom buttons
+        HorizontalLayout {
+            alignment: end;
+            spacing: 8px;
+
+            Button {
+                text: "Cancel";
+                clicked => { cancel-clicked(); }
+            }
+
+            Button {
+                text: "Save";
+                clicked => { save-clicked(); }
+            }
+        }
+    }
+}

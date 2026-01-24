@@ -1,0 +1,3 @@
+fn main() {
+    slint_build::compile("slint/app.slint").expect("Slint UI build failed");
+}

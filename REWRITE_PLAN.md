@@ -14,7 +14,7 @@
 
 - **Language**: Rust
 - **UI Framework**: Slint (`.slint` markup + Rust logic = natural UI/logic separation)
-- **Config Format**: JSON (same as original `settings.json`)
+- **Config Format**: TOML (section-level atomic updates, human-readable with comments)
 - **Merge Tool**: mkvmerge (preserve existing JSON options format exactly)
 
 ---
@@ -44,16 +44,22 @@ video-sync-gui/
 │   └── vsg_ui/                   # Slint UI application
 │       ├── src/
 │       │   ├── main.rs
-│       │   ├── windows/          # Per-window logic
+│       │   ├── windows/          # Per-window Rust logic
 │       │   │   ├── main_window.rs
 │       │   │   ├── job_queue.rs
 │       │   │   ├── track_settings.rs
 │       │   │   └── ...
 │       │   └── common/           # Shared UI logic (reused across windows)
-│       ├── ui/                   # .slint files (presentation only)
-│       │   ├── main_window.slint
-│       │   ├── job_queue.slint
-│       │   └── ...
+│       ├── slint/                # .slint files (presentation only)
+│       │   ├── windows/          # Window definitions
+│       │   │   ├── main_window.slint
+│       │   │   ├── job_queue.slint
+│       │   │   └── ...
+│       │   ├── components/       # Reusable widgets
+│       │   │   ├── log_panel.slint
+│       │   │   ├── track_widget.slint
+│       │   │   └── ...
+│       │   └── theme.slint       # Shared colors, fonts, spacing
 │       └── Cargo.toml
 └── Reference Only original/      # Python reference code
 ```
@@ -68,7 +74,7 @@ All paths relative to binary location:
 <binary_dir>/
 ├── video-sync-gui(.exe)
 ├── .config/
-│   └── settings.json             # App settings
+│   └── settings.toml             # App settings (TOML format)
 ├── .logs/                        # Log files
 ├── .temp/                        # Temporary processing files
 └── sync_output/                  # Completed merged files
@@ -82,14 +88,16 @@ Goal: Basic working pipeline to test architecture
 
 | Component | Status | Description |
 |-----------|--------|-------------|
-| UI Shell | [ ] | Main window, file inputs, log display, run button |
-| Orchestrator | [ ] | Main pipeline coordinator |
-| Step: Analyze | [ ] | Stub - just pass through for now |
-| Step: Extract | [ ] | Stub - basic track extraction |
-| Step: Mux | [ ] | Build mkvmerge command, execute |
-| Config System | [ ] | Load/save settings.json with atomic writes |
+| Project Setup | [X] | Cargo workspace, crates, Slint build |
+| Models + Enums | [X] | Data types: TrackType, AnalysisMode, Track, JobSpec, etc. |
+| Config System | [X] | TOML settings with section-level atomic updates |
+| Logging | [X] | Per-job loggers, compact mode, file + GUI callback output |
+| UI Shell | [P] | Main window, file inputs, log display, run button |
+| Orchestrator | [X] | Main pipeline coordinator (trait, context, state, runner) |
+| Step: Analyze | [X] | Stub - pass through with zero delays |
+| Step: Extract | [X] | Stub - pass through, no extraction |
+| Step: Mux | [X] | mkvmerge options builder + execution |
 | Job Layouts | [ ] | Save/load track configurations |
-| Logging | [ ] | Debug levels, compact mode, pretty mkvmerge output |
 
 ---
 
@@ -237,20 +245,19 @@ mkvmerge.json    → HOW to merge (final mkvmerge command options)
 ## Config System Requirements
 
 ### On Load
-1. Read `settings.json` from `.config/`
+1. Read `settings.toml` from `.config/`
 2. Validate all values against schema
-3. Remove any invalid/unknown keys
-4. Apply defaults for missing keys
-5. Write cleaned config back (if changes made)
+3. Apply defaults for missing keys (via serde `#[serde(default)]`)
+4. Write cleaned config back (if changes made)
 
 ### At Runtime
-- Single-value atomic updates only
-- Don't rewrite entire file for one change
-- Use file locking to prevent corruption
+- Section-level atomic updates (only changed section rewritten)
+- Uses `toml_edit` to preserve comments and formatting
+- Write to temp file, then atomic rename
 
 ### Format
-- Preserve exact format from original Python app
-- Same key names, same structure
+- TOML for human-readability and comment support
+- Sections: paths, logging, analysis, chapters, postprocess
 
 ---
 
@@ -336,10 +343,10 @@ Within vsg_core:
 ### Data Models (`models/`)
 | Status | Original | Purpose | Notes |
 |--------|----------|---------|-------|
-| [ ] | `enums.py` | TrackType, AnalysisMode, SnapMode | Rust enums |
-| [ ] | `media.py` | Track, StreamProps, Attachment | Structs with validation |
-| [ ] | `settings.py` | AppSettings config model | Serde for JSON |
-| [ ] | `jobs.py` | JobSpec, Delays, MergePlan, JobResult | Immutable structs |
+| [X] | `enums.py` | TrackType, AnalysisMode, SnapMode | Rust enums with serde |
+| [X] | `media.py` | Track, StreamProps, Attachment | Structs with validation |
+| [X] | `settings.py` | AppSettings config model | Moved to config module |
+| [X] | `jobs.py` | JobSpec, Delays, MergePlan, JobResult | Immutable structs |
 | [ ] | `converters.py` | Type conversions | Trait impls (From/Into) |
 | [ ] | `results.py` | Result types | Result<T, E> patterns |
 
@@ -348,7 +355,7 @@ Within vsg_core:
 ### Configuration (`config/`)
 | Status | Original | Purpose | Notes |
 |--------|----------|---------|-------|
-| [ ] | `config.py` | Settings persistence | Atomic writes, validation on load |
+| [X] | `config.py` | Settings persistence | TOML format, section-level atomic updates, validation on load |
 
 ---
 
@@ -397,23 +404,23 @@ Within vsg_core:
 ### Muxing (`mux/`)
 | Status | Original | Purpose | Notes |
 |--------|----------|---------|-------|
-| [ ] | `options_builder.py` | mkvmerge command builder | **Preserve JSON format exactly** |
+| [X] | `options_builder.py` | mkvmerge command builder | Builds command-line tokens, handles delays |
 
 ---
 
 ### Orchestrator (`orchestrator/`)
 | Status | Original | Purpose | Notes |
 |--------|----------|---------|-------|
-| [ ] | `pipeline.py` | Main orchestrator | Step coordination |
-| [ ] | `validation.py` | Step validation | Gates between steps |
-| [ ] | `steps/context.py` | Shared context | Passed through pipeline |
-| [ ] | `steps/analysis_step.py` | Analyze step | |
-| [ ] | `steps/extract_step.py` | Extract step | |
+| [X] | `pipeline.py` | Main orchestrator | Pipeline runner with step coordination |
+| [X] | `validation.py` | Step validation | Built into PipelineStep trait |
+| [X] | `steps/context.py` | Shared context | Context + JobState structs |
+| [X] | `steps/analysis_step.py` | Analyze step | Stub implementation |
+| [X] | `steps/extract_step.py` | Extract step | Stub implementation |
 | [ ] | `steps/audio_correction_step.py` | Correction step | |
 | [ ] | `steps/subtitles_step.py` | Subtitles step | |
 | [ ] | `steps/chapters_step.py` | Chapters step | |
 | [ ] | `steps/attachments_step.py` | Attachments step | |
-| [ ] | `steps/mux_step.py` | Mux step | |
+| [X] | `steps/mux_step.py` | Mux step | mkvmerge options builder |
 
 ---
 
@@ -440,7 +447,7 @@ Within vsg_core:
 ### Logging (`logging/`)
 | Status | Original | Purpose | Notes |
 |--------|----------|---------|-------|
-| [ ] | (new) | Structured logging | Compact, pretty, debug modes |
+| [X] | (new) | Structured logging | tracing + per-job loggers, compact mode, file + GUI callback |
 
 ---
 
@@ -496,3 +503,9 @@ Within vsg_core:
 - **2025-01-24**: Clarified 3-layer architecture (presentation / UI logic / core), per-window logic files, common modules for reuse
 - **2025-01-24**: Added Job State Manifest (write-once record), Step trait contract, error context chains
 - **2025-01-24**: Added Code Standards (naming, module structure, dependency rules, file guidelines)
+- **2025-01-24**: Project setup complete - Cargo workspace, vsg_core lib, vsg_ui bin with Slint, basic main window
+- **2025-01-24**: Models module complete - enums, media types, job types
+- **2025-01-24**: Config module complete - TOML format with section-level atomic updates
+- **2025-01-24**: Logging module complete - tracing integration, per-job loggers with file + GUI callback, compact mode
+- **2025-01-24**: Orchestrator base complete - PipelineStep trait, Context, JobState, Pipeline runner, error chain
+- **2025-01-24**: Pipeline steps complete - Analyze (stub), Extract (stub), Mux with mkvmerge options builder
