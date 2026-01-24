@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from ..data import SubtitleData
 
 
-def write_srt_file(data: 'SubtitleData', path: Path) -> None:
+def write_srt_file(data: 'SubtitleData', path: Path, rounding: str = 'round') -> None:
     """
     Write SubtitleData to SRT file.
 
@@ -40,8 +40,8 @@ def write_srt_file(data: 'SubtitleData', path: Path) -> None:
         lines.append(str(srt_idx))
 
         # Timing line (round to integer ms)
-        start_str = _format_srt_time(event.start_ms)
-        end_str = _format_srt_time(event.end_ms)
+        start_str = _format_srt_time(event.start_ms, rounding)
+        end_str = _format_srt_time(event.end_ms, rounding)
         lines.append(f'{start_str} --> {end_str}')
 
         # Text (convert ASS tags to HTML-ish)
@@ -63,7 +63,7 @@ def write_srt_file(data: 'SubtitleData', path: Path) -> None:
         f.write(content)
 
 
-def _format_srt_time(ms: float) -> str:
+def _format_srt_time(ms: float, rounding: str) -> str:
     """
     Format float milliseconds to SRT timestamp.
 
@@ -76,7 +76,7 @@ def _format_srt_time(ms: float) -> str:
         SRT timestamp (HH:MM:SS,mmm)
     """
     # Round to integer ms
-    total_ms = int(round(ms))
+    total_ms = _round_ms(ms, rounding)
 
     if total_ms < 0:
         total_ms = 0
@@ -89,6 +89,16 @@ def _format_srt_time(ms: float) -> str:
     hours = total_minutes // 60
 
     return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
+
+
+def _round_ms(ms: float, rounding: str) -> int:
+    """Round milliseconds to integer based on rounding mode."""
+    mode = (rounding or 'round').lower()
+    if mode == 'ceil':
+        return int(math.ceil(ms))
+    if mode == 'floor':
+        return int(math.floor(ms))
+    return int(round(ms))
 
 
 def _convert_ass_to_srt(text: str) -> str:

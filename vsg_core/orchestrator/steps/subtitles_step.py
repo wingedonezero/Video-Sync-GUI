@@ -304,7 +304,8 @@ class SubtitlesStep:
 
         runner._log_message(f"[SubtitleData] Saving to {output_path.name}...")
         try:
-            subtitle_data.save(output_path)
+            rounding_mode = ctx.settings_dict.get('subtitle_rounding', 'floor')
+            subtitle_data.save(output_path, rounding=rounding_mode)
             item.extracted_path = output_path
             runner._log_message(f"[SubtitleData] Saved successfully ({len(subtitle_data.events)} events)")
         except Exception as e:
