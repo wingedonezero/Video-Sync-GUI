@@ -93,7 +93,7 @@ Goal: Basic working pipeline to test architecture
 | Config System | [X] | TOML settings with section-level atomic updates |
 | Logging | [X] | Per-job loggers, compact mode, file + GUI callback output |
 | UI Shell | [P] | Main window, file inputs, log display, run button |
-| Orchestrator | [ ] | Main pipeline coordinator |
+| Orchestrator | [X] | Main pipeline coordinator (trait, context, state, runner) |
 | Step: Analyze | [ ] | Stub - just pass through for now |
 | Step: Extract | [ ] | Stub - basic track extraction |
 | Step: Mux | [ ] | Build mkvmerge command, execute |
@@ -411,9 +411,9 @@ Within vsg_core:
 ### Orchestrator (`orchestrator/`)
 | Status | Original | Purpose | Notes |
 |--------|----------|---------|-------|
-| [ ] | `pipeline.py` | Main orchestrator | Step coordination |
-| [ ] | `validation.py` | Step validation | Gates between steps |
-| [ ] | `steps/context.py` | Shared context | Passed through pipeline |
+| [X] | `pipeline.py` | Main orchestrator | Pipeline runner with step coordination |
+| [X] | `validation.py` | Step validation | Built into PipelineStep trait |
+| [X] | `steps/context.py` | Shared context | Context + JobState structs |
 | [ ] | `steps/analysis_step.py` | Analyze step | |
 | [ ] | `steps/extract_step.py` | Extract step | |
 | [ ] | `steps/audio_correction_step.py` | Correction step | |
@@ -507,3 +507,4 @@ Within vsg_core:
 - **2025-01-24**: Models module complete - enums, media types, job types
 - **2025-01-24**: Config module complete - TOML format with section-level atomic updates
 - **2025-01-24**: Logging module complete - tracing integration, per-job loggers with file + GUI callback, compact mode
+- **2025-01-24**: Orchestrator base complete - PipelineStep trait, Context, JobState, Pipeline runner, error chain

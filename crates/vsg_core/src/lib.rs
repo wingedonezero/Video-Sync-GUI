@@ -6,6 +6,7 @@
 pub mod config;
 pub mod logging;
 pub mod models;
+pub mod orchestrator;
 
 /// Returns the crate version.
 pub fn version() -> &'static str {
