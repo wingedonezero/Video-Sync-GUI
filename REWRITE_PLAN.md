@@ -44,8 +44,16 @@ video-sync-gui/
 │   └── vsg_ui/                   # Slint UI application
 │       ├── src/
 │       │   ├── main.rs
-│       │   └── controllers/      # UI logic (calls core, no business logic)
-│       ├── ui/                   # .slint files
+│       │   ├── windows/          # Per-window logic
+│       │   │   ├── main_window.rs
+│       │   │   ├── job_queue.rs
+│       │   │   ├── track_settings.rs
+│       │   │   └── ...
+│       │   └── common/           # Shared UI logic (reused across windows)
+│       ├── ui/                   # .slint files (presentation only)
+│       │   ├── main_window.slint
+│       │   ├── job_queue.slint
+│       │   └── ...
 │       └── Cargo.toml
 └── Reference Only original/      # Python reference code
 ```
@@ -87,15 +95,36 @@ Goal: Basic working pipeline to test architecture
 
 ## Architecture Principles
 
-### Separation of Concerns
-- **UI Layer** (`vsg_ui`): Only handles display and user input
-  - `.slint` files define layout/styling
-  - Rust controllers call into `vsg_core`, no business logic
-  - UI just calls functions, doesn't contain logic
+### Separation of Concerns (3 Layers)
 
-- **Core Layer** (`vsg_core`): All business logic
-  - No UI dependencies whatsoever
-  - Could run headless/CLI with same core
+```
+┌─────────────────────────────────────────────────────────┐
+│  UI Presentation (.slint files)                         │
+│  - Layout, styling, visual elements                     │
+│  - No logic whatsoever                                  │
+├─────────────────────────────────────────────────────────┤
+│  UI Logic (vsg_ui/src/)                                 │
+│  - Window-specific logic (each window has own file)     │
+│  - Common UI logic (shared across windows)              │
+│  - Calls into vsg_core for backend operations           │
+├─────────────────────────────────────────────────────────┤
+│  Core/Backend (vsg_core/)                               │
+│  - All business logic                                   │
+│  - No UI dependencies                                   │
+│  - Could run headless/CLI                               │
+└─────────────────────────────────────────────────────────┘
+```
+
+**UI Layer** (`vsg_ui/`):
+- `.slint` files = presentation only (layout, styling)
+- Per-window logic files (e.g., `main_window_logic.rs`, `job_queue_logic.rs`)
+- `common/` = UI logic reused across multiple windows
+- Windows call their logic file OR common if shared
+
+**Core Layer** (`vsg_core/`):
+- Pure backend, zero UI dependencies
+- Could be used by CLI tool with same code
+- All processing, analysis, muxing logic lives here
 
 ### Orchestrator Pattern
 ```
@@ -116,13 +145,20 @@ Each step:
 - Reports progress via callbacks
 
 ### Reusable Operations
-If a function/operation can be reused → extract to `common/` module
 
-Examples:
+**Rule**: If code is used in 2+ places → extract to appropriate `common/` module
+
+**Backend reuse** (`vsg_core/common/`):
 - Command execution (ffmpeg, mkvmerge, etc.)
 - File I/O utilities
 - Time/duration parsing
 - Path resolution
+
+**UI reuse** (`vsg_ui/src/common/`):
+- Shared dialog behaviors
+- Common widget helpers
+- Validation display patterns
+- Progress/status display logic
 
 ### Data Flow
 - Unidirectional: data flows one way through pipeline
@@ -343,3 +379,4 @@ Reference: `Reference Only original/vsg_core/mux/options_builder.py`
 
 - **2025-01-24**: Initial plan created from Reference Only original analysis
 - **2025-01-24**: Decided on Rust + Slint stack, defined MVP scope, directory structure, config/logging requirements
+- **2025-01-24**: Clarified 3-layer architecture (presentation / UI logic / core), per-window logic files, common modules for reuse
