@@ -3,8 +3,6 @@
 //! Uses audio cross-correlation to find the time offset between
 //! a reference source (Source 1) and other sources.
 
-use std::sync::Arc;
-
 use crate::analysis::Analyzer;
 use crate::models::Delays;
 use crate::orchestrator::errors::{StepError, StepResult};
@@ -82,15 +80,9 @@ impl PipelineStep for AnalyzeStep {
             ref_path.file_name().unwrap_or_default().to_string_lossy()
         ));
 
-        // Create log callback that forwards to the job logger
-        let logger_clone = ctx.logger.clone();
-        let log_callback = Arc::new(move |msg: &str| {
-            logger_clone.info(msg);
-        });
-
-        // Create analyzer from settings with log callback
+        // Create analyzer from settings with job logger for detailed progress
         let analyzer = Analyzer::from_settings(&ctx.settings.analysis)
-            .with_log_callback(log_callback);
+            .with_logger(ctx.logger.clone());
 
         ctx.logger.info(&format!(
             "Method: SCC, SOXR: {}, Peak fit: {}",

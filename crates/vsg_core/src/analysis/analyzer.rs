@@ -10,15 +10,13 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::config::AnalysisSettings;
+use crate::logging::JobLogger;
 
 use super::ffmpeg::{extract_full_audio, get_duration, DEFAULT_ANALYSIS_SAMPLE_RATE};
 use super::methods::{CorrelationMethod, Scc};
 use super::peak_fit::find_and_fit_peak;
 use super::tracks::{find_track_by_language, get_audio_tracks};
 use super::types::{AnalysisError, AnalysisResult, ChunkResult, SourceAnalysisResult};
-
-/// Callback type for logging messages from the analyzer.
-pub type AnalyzerLogCallback = Arc<dyn Fn(&str) + Send + Sync>;
 
 /// Audio sync analyzer.
 ///
@@ -47,8 +45,8 @@ pub struct Analyzer {
     lang_source1: Option<String>,
     /// Language filter for other sources.
     lang_others: Option<String>,
-    /// Optional logging callback for progress messages.
-    log_callback: Option<AnalyzerLogCallback>,
+    /// Optional job logger for progress messages (goes to job log, not app log).
+    logger: Option<Arc<JobLogger>>,
 }
 
 impl Analyzer {
@@ -66,7 +64,7 @@ impl Analyzer {
             min_correlation: 0.3,
             lang_source1: None,
             lang_others: None,
-            log_callback: None,
+            logger: None,
         }
     }
 
@@ -84,13 +82,14 @@ impl Analyzer {
             min_correlation: settings.min_match_pct / 100.0, // Convert from percentage
             lang_source1: settings.lang_source1.clone(),
             lang_others: settings.lang_others.clone(),
-            log_callback: None,
+            logger: None,
         }
     }
 
-    /// Set the logging callback.
-    pub fn with_log_callback(mut self, callback: AnalyzerLogCallback) -> Self {
-        self.log_callback = Some(callback);
+    /// Set the job logger for progress messages.
+    /// Messages logged here go to the job log (GUI), not the app log.
+    pub fn with_logger(mut self, logger: Arc<JobLogger>) -> Self {
+        self.logger = Some(logger);
         self
     }
 
@@ -112,13 +111,13 @@ impl Analyzer {
         self
     }
 
-    /// Log a message using the callback if set, otherwise use tracing.
+    /// Log a message to the job log (if logger is set).
+    /// These messages go to the job log for detailed per-chunk progress.
+    /// They do NOT go to the app log (tracing) - that's for high-level app events.
     fn log(&self, msg: &str) {
-        if let Some(ref callback) = self.log_callback {
-            callback(msg);
+        if let Some(ref logger) = self.logger {
+            logger.info(msg);
         }
-        // Always also log to tracing for file/console output
-        tracing::info!("{}", msg);
     }
 
     /// Analyze the sync offset between reference and other source.
@@ -379,16 +378,6 @@ impl Analyzer {
             .map(|r| r.correlation.correlation_peak)
             .sum::<f64>()
             / valid_count as f64;
-
-        tracing::info!(
-            "{}: median delay={:.2}ms, confidence={:.3}, valid={}/{}, drift={}",
-            source_name,
-            median_delay,
-            confidence,
-            valid_count,
-            total_chunks,
-            drift_detected
-        );
 
         Ok(SourceAnalysisResult {
             source_name: source_name.to_string(),
