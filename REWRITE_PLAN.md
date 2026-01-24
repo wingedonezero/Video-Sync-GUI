@@ -5,31 +5,172 @@
 1. **Discuss Before Changes** - No implementations without approval
 2. **Libs Discussed As Needed** - Research replacements/alternatives together
 3. **Research, Don't Assume** - Especially for Rust, consult official docs
-4. **Latest Lib Versions** - Use latest stable, discuss if issues arise
+4. **Latest Lib Versions** - Use latest stable, discuss issues first
 5. **Rewrite for Quality** - Same features, better architecture, no single points of failure
 
 ---
 
-## Planned Architecture
+## Technology Stack
 
-### Core Principles
-- **Separation of Concerns**: UI, Core Logic, and Data layers completely separate
-- **Unidirectional Data Flow**: Data flows one direction to prevent state confusion
-- **Immutable Data Passing**: Pass copies/new objects between components
-- **Explicit Error Handling**: No silent failures, all errors surface appropriately
-- **Single Responsibility**: Each module does one thing well
+- **Language**: Rust
+- **UI Framework**: Slint (`.slint` markup + Rust logic = natural UI/logic separation)
+- **Config Format**: JSON (same as original `settings.json`)
+- **Merge Tool**: mkvmerge (preserve existing JSON options format exactly)
 
-### Technology Stack (To Discuss)
-- **UI**: PySide6 (or discuss alternatives)
-- **Core**: Python + potential Rust modules for performance-critical paths
-- **Data Models**: Pydantic or dataclasses with validation
-- **IPC**: TBD if Rust modules used
+---
 
-### Key Patterns
-- **Pipeline**: Clear step-based processing with validation gates
-- **Repository Pattern**: Centralized data access
-- **Event-Driven UI**: Signals/slots with clear boundaries
-- **Context Objects**: Typed, immutable context passed through pipeline
+## Project Structure
+
+```
+video-sync-gui/
+├── Cargo.toml                    # Workspace root
+├── crates/
+│   ├── vsg_core/                 # Core library (no UI dependencies)
+│   │   ├── src/
+│   │   │   ├── lib.rs
+│   │   │   ├── models/           # Data types, enums
+│   │   │   ├── config/           # Settings, atomic JSON
+│   │   │   ├── orchestrator/     # Main pipeline + steps
+│   │   │   ├── analysis/         # Audio correlation, drift
+│   │   │   ├── correction/       # PAL, linear, stepping
+│   │   │   ├── subtitles/        # Parsing, sync, OCR
+│   │   │   ├── extraction/       # Track/attachment extraction
+│   │   │   ├── mux/              # mkvmerge options builder
+│   │   │   ├── jobs/             # Job discovery, layouts
+│   │   │   ├── postprocess/      # Auditors, validation
+│   │   │   ├── logging/          # Structured logging
+│   │   │   └── common/           # Shared utilities, reusable ops
+│   │   └── Cargo.toml
+│   └── vsg_ui/                   # Slint UI application
+│       ├── src/
+│       │   ├── main.rs
+│       │   └── controllers/      # UI logic (calls core, no business logic)
+│       ├── ui/                   # .slint files
+│       └── Cargo.toml
+└── Reference Only original/      # Python reference code
+```
+
+---
+
+## Runtime Directory Structure
+
+All paths relative to binary location:
+
+```
+<binary_dir>/
+├── video-sync-gui(.exe)
+├── .config/
+│   └── settings.json             # App settings
+├── .logs/                        # Log files
+├── .temp/                        # Temporary processing files
+└── sync_output/                  # Completed merged files
+```
+
+---
+
+## Phase 1: MVP Scope
+
+Goal: Basic working pipeline to test architecture
+
+| Component | Status | Description |
+|-----------|--------|-------------|
+| UI Shell | [ ] | Main window, file inputs, log display, run button |
+| Orchestrator | [ ] | Main pipeline coordinator |
+| Step: Analyze | [ ] | Stub - just pass through for now |
+| Step: Extract | [ ] | Stub - basic track extraction |
+| Step: Mux | [ ] | Build mkvmerge command, execute |
+| Config System | [ ] | Load/save settings.json with atomic writes |
+| Job Layouts | [ ] | Save/load track configurations |
+| Logging | [ ] | Debug levels, compact mode, pretty mkvmerge output |
+
+---
+
+## Architecture Principles
+
+### Separation of Concerns
+- **UI Layer** (`vsg_ui`): Only handles display and user input
+  - `.slint` files define layout/styling
+  - Rust controllers call into `vsg_core`, no business logic
+  - UI just calls functions, doesn't contain logic
+
+- **Core Layer** (`vsg_core`): All business logic
+  - No UI dependencies whatsoever
+  - Could run headless/CLI with same core
+
+### Orchestrator Pattern
+```
+Main Orchestrator
+    ├── Step: Analyze (micro-orchestrator for analysis tasks)
+    ├── Step: Extract (micro-orchestrator for extraction)
+    ├── Step: Correct (micro-orchestrator for audio correction)
+    ├── Step: Subtitles (micro-orchestrator for subtitle processing)
+    ├── Step: Chapters (micro-orchestrator for chapters)
+    ├── Step: Attachments (micro-orchestrator for attachments)
+    └── Step: Mux (micro-orchestrator for merge)
+```
+
+Each step:
+- Orchestrates its own sub-operations
+- Stays focused and small
+- Validates its inputs/outputs
+- Reports progress via callbacks
+
+### Reusable Operations
+If a function/operation can be reused → extract to `common/` module
+
+Examples:
+- Command execution (ffmpeg, mkvmerge, etc.)
+- File I/O utilities
+- Time/duration parsing
+- Path resolution
+
+### Data Flow
+- Unidirectional: data flows one way through pipeline
+- Context object carries state between steps
+- Steps don't reach back into previous steps
+
+---
+
+## Config System Requirements
+
+### On Load
+1. Read `settings.json` from `.config/`
+2. Validate all values against schema
+3. Remove any invalid/unknown keys
+4. Apply defaults for missing keys
+5. Write cleaned config back (if changes made)
+
+### At Runtime
+- Single-value atomic updates only
+- Don't rewrite entire file for one change
+- Use file locking to prevent corruption
+
+### Format
+- Preserve exact format from original Python app
+- Same key names, same structure
+
+---
+
+## Logging Requirements
+
+### Levels
+- Error, Warn, Info, Debug, Trace
+- Configurable at runtime
+
+### Features
+- **Compact mode**: Condensed output option
+- **Pretty mkvmerge**: Format mkvmerge options nicely
+- **Extract debug**: Detailed extraction logging (for troubleshooting)
+- **File logging**: Write to `.logs/` directory
+- **UI display**: Stream to log panel in UI
+
+---
+
+## mkvmerge JSON Options
+
+**Note**: Preserve the exact JSON format from original implementation. This took significant effort to get right and is the best approach for mkvmerge integration.
+
+Reference: `Reference Only original/vsg_core/mux/options_builder.py`
 
 ---
 
@@ -42,267 +183,163 @@
 
 ---
 
-### Entry Point
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
-| [ ] | `main.py` | App entry, Qt init, env setup | Simplify, clean startup |
+### Data Models (`models/`)
+| Status | Original | Purpose | Notes |
+|--------|----------|---------|-------|
+| [ ] | `enums.py` | TrackType, AnalysisMode, SnapMode | Rust enums |
+| [ ] | `media.py` | Track, StreamProps, Attachment | Structs with validation |
+| [ ] | `settings.py` | AppSettings config model | Serde for JSON |
+| [ ] | `jobs.py` | JobSpec, Delays, MergePlan, JobResult | Immutable structs |
+| [ ] | `converters.py` | Type conversions | Trait impls (From/Into) |
+| [ ] | `results.py` | Result types | Result<T, E> patterns |
 
 ---
 
-### Data Models (`vsg_core/models/`)
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
-| [ ] | `enums.py` | TrackType, AnalysisMode, SnapMode | Keep clean enums |
-| [ ] | `media.py` | Track, StreamProps, Attachment | Validate on creation |
-| [ ] | `settings.py` | AppSettings config model | Add validation |
-| [ ] | `jobs.py` | JobSpec, Delays, MergePlan, JobResult | Immutable where possible |
-| [ ] | `converters.py` | Type conversions | Centralize all conversions |
-| [ ] | `results.py` | Result types | Standardize result handling |
+### Configuration (`config/`)
+| Status | Original | Purpose | Notes |
+|--------|----------|---------|-------|
+| [ ] | `config.py` | Settings persistence | Atomic writes, validation on load |
 
 ---
 
-### Configuration (`vsg_core/`)
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
-| [ ] | `config.py` | Settings persistence (JSON) | Single source of truth |
+### Analysis (`analysis/`)
+| Status | Original | Purpose | Notes |
+|--------|----------|---------|-------|
+| [ ] | `audio_corr.py` | Audio cross-correlation | Core sync logic |
+| [ ] | `drift_detection.py` | DBSCAN for stepping/drift | |
+| [ ] | `sync_stability.py` | Delay consistency | Quality metrics |
+| [ ] | `videodiff.py` | Frame-based sync | GPU TBD |
+| [ ] | `source_separation.py` | Vocal isolation | Heavy DSP |
 
 ---
 
-### Analysis (`vsg_core/analysis/`)
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
-| [ ] | `audio_corr.py` | Audio cross-correlation delay detection | Core sync logic |
-| [ ] | `drift_detection.py` | DBSCAN clustering for stepping/drift | Consider Rust for perf |
-| [ ] | `sync_stability.py` | Delay consistency analysis | Quality metrics |
-| [ ] | `videodiff.py` | Frame-based video sync | GPU acceleration TBD |
-| [ ] | `source_separation.py` | Vocal isolation for cleaner correlation | Heavy DSP work |
+### Audio Correction (`correction/`)
+| Status | Original | Purpose | Notes |
+|--------|----------|---------|-------|
+| [ ] | `linear.py` | Constant drift fix | ffmpeg |
+| [ ] | `pal.py` | PAL speed fix | ffmpeg |
+| [ ] | `stepping.py` | Stepping pattern fix | EDL timing |
 
 ---
 
-### Audio Correction (`vsg_core/correction/`)
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
-| [ ] | `linear.py` | Constant drift correction (resample) | ffmpeg based |
-| [ ] | `pal.py` | PAL speed correction (50/60Hz) | ffmpeg based |
-| [ ] | `stepping.py` | Stepping pattern correction | EDL-based timing |
+### Subtitle Processing (`subtitles/`)
+| Status | Original | Purpose | Notes |
+|--------|----------|---------|-------|
+| [ ] | `data.py` | SubtitleData container | Load once, write once |
+| [ ] | `convert.py` | Format conversion | ASS/SRT |
+| [ ] | `edit_plan.py` | Edit operations | |
+| [ ] | `frame_utils.py` | Frame timing | Precision critical |
+| [ ] | `parsers/` | ASS/SRT parsing | |
+| [ ] | `writers/` | ASS/SRT writing | |
+| [ ] | `operations/` | Style patches, rescaling | |
+| [ ] | `ocr/` | OCR subsystem | Tesseract integration |
 
 ---
 
-### Subtitle Processing (`vsg_core/subtitles/`)
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
-| [ ] | `data.py` | SubtitleData container | Single load, process, write |
-| [ ] | `convert.py` | Format conversion | ASS/SRT handling |
-| [ ] | `edit_plan.py` | Edit operations | Clear operation order |
-| [ ] | `frame_utils.py` | Frame timing utilities | Precision critical |
-| [ ] | `frame_verification.py` | Verify frame timing | Validation |
-| [ ] | `checkpoint_selection.py` | Anchor point selection | Sync algorithm |
-
-#### Subtitle Parsers/Writers
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
-| [ ] | `parsers/` | ASS/SRT parsing | Robust error handling |
-| [ ] | `writers/` | ASS/SRT writing | Preserve formatting |
-| [ ] | `operations/` | Style patches, rescaling | Composable ops |
-| [ ] | `style.py` | Style definitions | |
-| [ ] | `style_engine.py` | Style manipulation | |
-
-#### OCR Subsystem (`vsg_core/subtitles/ocr/`)
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
-| [ ] | `engine.py` | Tesseract wrapper | Confidence tracking |
-| [ ] | `preprocessing.py` | Image enhancement | OpenCV based |
-| [ ] | `postprocess.py` | Text cleanup | |
-| [ ] | `pipeline.py` | OCR orchestration | Subprocess isolation |
-| [ ] | `backends.py` | OCR backend abstraction | |
-| [ ] | `dictionaries.py` | Custom word lists | |
-| [ ] | `debug.py` | OCR debug output | |
-| [ ] | `output.py` | OCR result formatting | |
-| [ ] | `parsers/` | VobSub etc parsing | |
-| [ ] | `preview_subprocess.py` | Preview in subprocess | Thread safety |
+### Extraction (`extraction/`)
+| Status | Original | Purpose | Notes |
+|--------|----------|---------|-------|
+| [ ] | `tracks.py` | Track extraction | ffmpeg/mkvextract |
+| [ ] | `attachments.py` | Attachment extraction | Fonts etc |
 
 ---
 
-### Extraction (`vsg_core/extraction/`)
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
-| [ ] | `tracks.py` | Track extraction (ffmpeg/mkvextract) | Probe codec info |
-| [ ] | `attachments.py` | Attachment extraction | Fonts, etc |
+### Muxing (`mux/`)
+| Status | Original | Purpose | Notes |
+|--------|----------|---------|-------|
+| [ ] | `options_builder.py` | mkvmerge command builder | **Preserve JSON format exactly** |
 
 ---
 
-### Muxing (`vsg_core/mux/`)
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
-| [ ] | `options_builder.py` | Build mkvmerge command tokens | Token-based |
+### Orchestrator (`orchestrator/`)
+| Status | Original | Purpose | Notes |
+|--------|----------|---------|-------|
+| [ ] | `pipeline.py` | Main orchestrator | Step coordination |
+| [ ] | `validation.py` | Step validation | Gates between steps |
+| [ ] | `steps/context.py` | Shared context | Passed through pipeline |
+| [ ] | `steps/analysis_step.py` | Analyze step | |
+| [ ] | `steps/extract_step.py` | Extract step | |
+| [ ] | `steps/audio_correction_step.py` | Correction step | |
+| [ ] | `steps/subtitles_step.py` | Subtitles step | |
+| [ ] | `steps/chapters_step.py` | Chapters step | |
+| [ ] | `steps/attachments_step.py` | Attachments step | |
+| [ ] | `steps/mux_step.py` | Mux step | |
 
 ---
 
-### Pipeline/Orchestration
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
-| [ ] | `pipeline.py` (legacy) | Old linear orchestrator | Reference only |
-| [ ] | `orchestrator/pipeline.py` | New step-based orchestrator | Preferred pattern |
-| [ ] | `orchestrator/validation.py` | Step validation | Gate between steps |
-| [ ] | `orchestrator/steps/context.py` | Shared context object | Immutable passing |
-
-#### Pipeline Steps
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
-| [ ] | `steps/analysis_step.py` | Calculate sync delays | |
-| [ ] | `steps/extract_step.py` | Extract tracks | |
-| [ ] | `steps/audio_correction_step.py` | Apply corrections | |
-| [ ] | `steps/subtitles_step.py` | Process subtitles | |
-| [ ] | `steps/chapters_step.py` | Handle chapters | |
-| [ ] | `steps/attachments_step.py` | Handle attachments | |
-| [ ] | `steps/mux_step.py` | Build merge command | |
-
-#### Pipeline Components (legacy)
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
-| [ ] | `pipeline_components/tool_validator.py` | Validate tools exist | |
-| [ ] | `pipeline_components/log_manager.py` | Logging setup | |
-| [ ] | `pipeline_components/sync_planner.py` | Plan sync strategy | |
-| [ ] | `pipeline_components/sync_executor.py` | Execute sync | |
-| [ ] | `pipeline_components/output_writer.py` | Write output | |
-| [ ] | `pipeline_components/result_auditor.py` | Audit results | |
-
----
-
-### Job Management
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
+### Job Management (`jobs/`)
+| Status | Original | Purpose | Notes |
+|--------|----------|---------|-------|
 | [ ] | `job_discovery.py` | Find/match source files | |
-
-#### Job Layouts (`vsg_core/job_layouts/`)
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
-| [ ] | `manager.py` | Layout API | |
-| [ ] | `signature.py` | File signatures | |
-| [ ] | `persistence.py` | Save/load JSON | |
-| [ ] | `validation.py` | Layout validation | |
+| [ ] | `job_layouts/manager.py` | Layout API | |
+| [ ] | `job_layouts/signature.py` | File signatures | |
+| [ ] | `job_layouts/persistence.py` | Save/load JSON | |
+| [ ] | `job_layouts/validation.py` | Layout validation | |
 
 ---
 
-### Post-Processing (`vsg_core/postprocess/`)
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
-| [ ] | `final_auditor.py` | Coordinate all auditors | |
+### Post-Processing (`postprocess/`)
+| Status | Original | Purpose | Notes |
+|--------|----------|---------|-------|
+| [ ] | `final_auditor.py` | Coordinate auditors | |
 | [ ] | `finalizer.py` | Output finalization | |
-| [ ] | `chapter_backup.py` | Chapter backup | |
-
-#### Auditors (`vsg_core/postprocess/auditors/`)
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
-| [ ] | `base.py` | Base auditor class | |
-| [ ] | `track_flags.py` | Default/forced flags | |
-| [ ] | `audio_sync.py` | Verify sync applied | |
-| [ ] | `audio_quality.py` | Audio integrity | |
-| [ ] | `audio_channels.py` | Channel layout | |
-| [ ] | `audio_object_based.py` | Atmos/DTS:X | |
-| [ ] | `drift_correction.py` | Drift fix validation | |
-| [ ] | `stepping_correction.py` | Stepping validation | |
-| [ ] | `global_shift.py` | Global shift check | |
-| [ ] | `video_metadata.py` | Video properties | |
-| [ ] | `subtitle_formats.py` | Subtitle integrity | |
-| [ ] | `chapters.py` | Chapter validation | |
-| [ ] | `attachments.py` | Attachment validation | |
-| [ ] | `track_order.py` | Track ordering | |
-| [ ] | `track_names.py` | Track naming | |
-| [ ] | `language_tags.py` | Language tags | |
-| [ ] | `codec_integrity.py` | Codec checks | |
-| [ ] | `dolby_vision.py` | DV layer handling | |
+| [ ] | `auditors/*.py` | Individual auditors (18+) | Add as needed |
 
 ---
 
-### Chapters (`vsg_core/chapters/`)
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
-| [ ] | `process.py` | Chapter processing | |
-| [ ] | `keyframes.py` | Keyframe handling | |
+### Logging (`logging/`)
+| Status | Original | Purpose | Notes |
+|--------|----------|---------|-------|
+| [ ] | (new) | Structured logging | Compact, pretty, debug modes |
 
 ---
 
-### Audit Trail (`vsg_core/audit/`)
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
-| [ ] | `trail.py` | Debug audit trail | Pipeline debugging |
+### Common Utilities (`common/`)
+| Status | Original | Purpose | Notes |
+|--------|----------|---------|-------|
+| [ ] | `io/runner.py` | Command execution | Subprocess handling |
+| [ ] | (new) | File utilities | Atomic writes, path helpers |
+| [ ] | (new) | Time parsing | Duration, timestamps |
 
 ---
 
-### Reporting (`vsg_core/reporting/`)
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
-| [ ] | `report_writer.py` | Markdown reports | |
+### UI Layer (`vsg_ui/`)
+| Status | Original | Purpose | Notes |
+|--------|----------|---------|-------|
+| [ ] | `main_window/` | Main window | Slint + controller |
+| [ ] | `job_queue_dialog/` | Job queue | |
+| [ ] | `track_settings_dialog/` | Track config | |
+| [ ] | `options_dialog/` | Settings | |
+| [ ] | `style_editor_dialog/` | Style editor | Video preview |
+| [ ] | Other dialogs | Various | Add as needed |
 
 ---
 
-### I/O (`vsg_core/io/`)
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
-| [ ] | `runner.py` | Command execution | Subprocess handling |
+## Implementation Order
 
----
+### Phase 1: Foundation + MVP
+1. Project setup (Cargo workspace, crates)
+2. Models + Enums (basic types)
+3. Config system (load/save with atomic writes)
+4. Logging infrastructure
+5. Orchestrator skeleton + stub steps
+6. Mux step (mkvmerge JSON builder)
+7. Basic UI shell (file select, run, log display)
+8. Job layouts (save/load configurations)
 
-### Utilities
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
-| [ ] | `font_manager.py` | Font replacement | |
-| [ ] | `favorite_colors.py` | Color presets | |
+### Phase 2: Core Features
+- Analysis step (audio correlation)
+- Extract step
+- Correction steps
 
----
-
-### UI Layer (`vsg_qt/`)
-
-#### Main Window
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
-| [ ] | `main_window/window.py` | UI shell | |
-| [ ] | `main_window/controller.py` | Main logic | Clean MVC |
-
-#### Worker/Threading
-| Status | File | Purpose | Notes |
-|--------|------|---------|-------|
-| [ ] | `worker/runner.py` | Background job runner | Thread pool |
-| [ ] | `worker/signals.py` | Qt signals | Thread-safe |
-
-#### Dialogs
-| Status | Dialog | Purpose | Notes |
-|--------|--------|---------|-------|
-| [ ] | `job_queue_dialog/` | Batch queue management | |
-| [ ] | `track_settings_dialog/` | Track configuration | |
-| [ ] | `manual_selection_dialog/` | Manual track mapping | |
-| [ ] | `options_dialog/` | Global settings | |
-| [ ] | `style_editor_dialog/` | Subtitle style editor | Video preview |
-| [ ] | `track_widget/` | Track display widget | |
-| [ ] | `report_dialogs/` | Results display | |
-| [ ] | `add_job_dialog/` | Add new jobs | |
-| [ ] | `font_manager_dialog/` | Font editor | |
-| [ ] | `ocr_dictionary_dialog/` | OCR word lists | |
-| [ ] | `source_settings_dialog/` | Source correlation | |
-| [ ] | `sync_exclusion_dialog/` | Style exclusions | |
-| [ ] | `resample_dialog/` | Resampling options | |
-| [ ] | `generated_track_dialog/` | Filtered tracks | |
-| [ ] | `favorites_dialog/` | Favorites | |
-| [ ] | `batch_completion_dialog/` | Batch results | |
-
----
-
-## Implementation Order (Suggested)
-
-1. **Foundation**: Models, Enums, Config
-2. **Core Pipeline**: Orchestrator, Context, Steps
-3. **Analysis**: Audio correlation, drift detection
-4. **Processing**: Corrections, Subtitles
-5. **Extraction/Muxing**: Track handling, mkvmerge
-6. **Validation**: Auditors, Post-processing
-7. **UI**: Main window, Dialogs, Workers
-8. **Polish**: Reporting, Layouts, Edge cases
+### Phase 3: Full Features
+- Subtitle processing + OCR
+- Post-processing auditors
+- Full UI with all dialogs
 
 ---
 
 ## Session Notes
 
-_Add notes here as we progress_
-
 - **2025-01-24**: Initial plan created from Reference Only original analysis
+- **2025-01-24**: Decided on Rust + Slint stack, defined MVP scope, directory structure, config/logging requirements
