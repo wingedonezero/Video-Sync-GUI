@@ -4,6 +4,7 @@
 //! It can be used by the GUI application or a CLI tool.
 
 pub mod config;
+pub mod logging;
 pub mod models;
 
 /// Returns the crate version.
