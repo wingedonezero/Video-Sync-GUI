@@ -1,5 +1,5 @@
 // Reusable source input component
-// Note: External file drag-drop from OS not yet supported in Slint 1.14
+// Note: External file drag-drop API (drop-enabled/drop-event) not found in Slint 1.14.1
 // Users can: Browse button, paste paths, or type paths directly
 import { Button, LineEdit } from "std-widgets.slint";
 
@@ -11,7 +11,6 @@ export component SourceInput inherits Rectangle {
     callback browse-clicked();
     callback path-changed(string);
 
-    // Minimum height for the row
     min-height: 32px;
 
     HorizontalLayout {
