@@ -1,4 +1,4 @@
-import { VerticalBox, HorizontalBox, Button, LineEdit, GroupBox, CheckBox, SpinBox, ComboBox, TabWidget } from "std-widgets.slint";
+import { VerticalBox, HorizontalBox, Button, LineEdit, GroupBox, CheckBox, SpinBox, ComboBox, TabWidget, ScrollView } from "std-widgets.slint";
 
 export component SettingsWindow inherits Window {
     title: "Settings";
@@ -130,12 +130,13 @@ export component SettingsWindow inherits Window {
             Tab {
                 title: "Analysis";
 
-                VerticalBox {
-                    padding: 16px;
-                    spacing: 12px;
+                ScrollView {
+                    VerticalBox {
+                        padding: 16px;
+                        spacing: 12px;
 
-                    GroupBox {
-                        title: "Core Settings";
+                        GroupBox {
+                            title: "Core Settings";
 
                         VerticalBox {
                             padding: 12px;
@@ -286,8 +287,9 @@ export component SettingsWindow inherits Window {
                         }
                     }
 
-                    // Spacer
-                    Rectangle { vertical-stretch: 1; }
+                        // Spacer
+                        Rectangle { vertical-stretch: 1; }
+                    }
                 }
             }
 
