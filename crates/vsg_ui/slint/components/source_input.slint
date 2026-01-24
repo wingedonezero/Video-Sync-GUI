@@ -1,0 +1,52 @@
+// Reusable source input component with drag-and-drop support
+import { Button, LineEdit } from "std-widgets.slint";
+
+export component SourceInput inherits Rectangle {
+    in property <string> label: "Source:";
+    in-out property <string> path: "";
+    in property <string> placeholder: "Drop file here or browse...";
+
+    callback browse-clicked();
+    callback path-changed(string);
+
+    // Minimum height for the row
+    min-height: 32px;
+
+    // DropArea wraps everything for drag-drop support
+    DropArea {
+        width: 100%;
+        height: 100%;
+
+        // Handle dropped content
+        dropped(event) => {
+            // For file drops, data contains the file path/URL
+            root.path = event.data;
+            root.path-changed(root.path);
+        }
+
+        HorizontalLayout {
+            spacing: 6px;
+
+            Text {
+                text: root.label;
+                vertical-alignment: center;
+                min-width: 110px;
+            }
+
+            LineEdit {
+                text <=> root.path;
+                placeholder-text: root.placeholder;
+                horizontal-stretch: 1;
+
+                edited => {
+                    root.path-changed(root.path);
+                }
+            }
+
+            Button {
+                text: "Browse...";
+                clicked => { root.browse-clicked(); }
+            }
+        }
+    }
+}

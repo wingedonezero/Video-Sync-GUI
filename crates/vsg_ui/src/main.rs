@@ -147,6 +147,30 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
+    // Handle source path changes (from drag-drop or manual edit)
+    let window_weak = main_window.as_weak();
+    main_window.on_source_path_changed(move |source_idx, path| {
+        if let Some(window) = window_weak.upgrade() {
+            // Clean up file:// URL if present (from drag-drop)
+            let clean_path = clean_file_url(&path);
+
+            // Update the path in the UI if it was cleaned
+            if clean_path != path.as_str() {
+                match source_idx {
+                    1 => window.set_source1_path(clean_path.clone().into()),
+                    2 => window.set_source2_path(clean_path.clone().into()),
+                    3 => window.set_source3_path(clean_path.clone().into()),
+                    _ => {}
+                }
+            }
+
+            // Log the change
+            if !clean_path.is_empty() {
+                append_log(&window, &format!("Source {}: {}", source_idx, clean_path));
+            }
+        }
+    });
+
     // Analyze Only button
     let window_weak = main_window.as_weak();
     main_window.on_analyze_only_clicked(move || {
@@ -205,6 +229,48 @@ fn pick_video_file(title: &str) -> Option<PathBuf> {
         .add_filter("Video Files", &["mkv", "mp4", "avi", "mov", "webm", "m4v", "ts", "m2ts"])
         .add_filter("All Files", &["*"])
         .pick_file()
+}
+
+/// Clean up a file URL (from drag-drop) to a regular path
+/// Handles file:// URLs and URL-encoded characters
+fn clean_file_url(url: &str) -> String {
+    let path = if url.starts_with("file://") {
+        // Remove file:// prefix
+        let without_prefix = &url[7..];
+        // URL decode (handle %20 for spaces, etc.)
+        percent_decode(without_prefix)
+    } else {
+        url.to_string()
+    };
+
+    // Trim any trailing whitespace/newlines
+    path.trim().to_string()
+}
+
+/// Simple percent decoding for file paths
+fn percent_decode(input: &str) -> String {
+    let mut result = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            // Try to read two hex digits
+            let hex: String = chars.by_ref().take(2).collect();
+            if hex.len() == 2 {
+                if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                    result.push(byte as char);
+                    continue;
+                }
+            }
+            // If decoding failed, keep the original
+            result.push('%');
+            result.push_str(&hex);
+        } else {
+            result.push(c);
+        }
+    }
+
+    result
 }
 
 /// Populate settings window with values from config
