@@ -19,9 +19,36 @@ fn main() -> Result<(), slint::PlatformError> {
     main_window.on_settings_clicked(move || {
         if let Some(window) = window_weak.upgrade() {
             append_log(&window, "Opening settings...");
-            // Settings window would be shown here
-            // For now just log
-            append_log(&window, "Settings dialog not yet wired up");
+
+            // Create and show settings window
+            match SettingsWindow::new() {
+                Ok(settings) => {
+                    // Wire up cancel button to close
+                    let settings_weak = settings.as_weak();
+                    settings.on_cancel_clicked(move || {
+                        if let Some(s) = settings_weak.upgrade() {
+                            s.hide().ok();
+                        }
+                    });
+
+                    // Wire up save button (just close for now, saving not implemented)
+                    let settings_weak = settings.as_weak();
+                    settings.on_save_clicked(move || {
+                        if let Some(s) = settings_weak.upgrade() {
+                            // TODO: Actually save settings to config
+                            s.hide().ok();
+                        }
+                    });
+
+                    // Show the settings window
+                    if let Err(e) = settings.show() {
+                        append_log(&window, &format!("Failed to show settings: {}", e));
+                    }
+                }
+                Err(e) => {
+                    append_log(&window, &format!("Failed to create settings window: {}", e));
+                }
+            }
         }
     });
 
