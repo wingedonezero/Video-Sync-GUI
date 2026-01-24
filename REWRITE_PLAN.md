@@ -277,6 +277,53 @@ Reference: `Reference Only original/vsg_core/mux/options_builder.py`
 
 ---
 
+## Code Standards
+
+### Naming Conventions
+- Files: `snake_case.rs`
+- Types/Structs/Enums: `PascalCase`
+- Functions/Methods: `snake_case`
+- Constants: `SCREAMING_SNAKE_CASE`
+
+### Module Structure
+Each module follows consistent layout:
+```
+module/
+  mod.rs       # Public API only (pub use re-exports)
+  types.rs     # Structs/enums for this module
+  errors.rs    # Module-specific errors (if needed)
+  [impl].rs    # Implementation files
+```
+
+### Dependency Rules (What Can Import What)
+```
+vsg_ui ──────► vsg_core     ✓ (UI can use core)
+vsg_core ────► vsg_ui       ✗ (Core CANNOT use UI)
+
+Within vsg_core:
+  orchestrator → steps, models, common  ✓
+  steps → models, common, own domain    ✓
+  models → common                       ✓
+  common → (nothing - leaf module)
+```
+
+### File Guidelines
+- File > ~500 lines → consider splitting
+- Function > ~50 lines → consider breaking down
+- `mod.rs` = re-exports only, no implementation
+
+### Testing
+- Unit tests: `#[cfg(test)]` block in same file
+- Integration tests: `tests/` directory
+- Each step should have basic tests
+
+### Comments
+- `///` doc comments on public items
+- Inline comments explain WHY, not WHAT
+- No commented-out code (git has history)
+
+---
+
 ## Reference Code Tracking
 
 ### Legend
@@ -448,3 +495,4 @@ Reference: `Reference Only original/vsg_core/mux/options_builder.py`
 - **2025-01-24**: Decided on Rust + Slint stack, defined MVP scope, directory structure, config/logging requirements
 - **2025-01-24**: Clarified 3-layer architecture (presentation / UI logic / core), per-window logic files, common modules for reuse
 - **2025-01-24**: Added Job State Manifest (write-once record), Step trait contract, error context chains
+- **2025-01-24**: Added Code Standards (naming, module structure, dependency rules, file guidelines)
