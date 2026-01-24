@@ -39,11 +39,13 @@
 mod errors;
 mod pipeline;
 mod step;
+pub mod steps;
 mod types;
 
 pub use errors::{PipelineError, PipelineResult, StepError, StepResult};
 pub use pipeline::{CancelHandle, Pipeline, PipelineRunResult};
 pub use step::PipelineStep;
+pub use steps::{AnalyzeStep, ExtractStep, MuxStep};
 pub use types::{
     AnalysisOutput, ChaptersOutput, Context, CorrectionOutput, ExtractOutput, JobState, MuxOutput,
     ProgressCallback, StepOutcome, SubtitlesOutput,

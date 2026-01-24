@@ -72,6 +72,8 @@ impl Delays {
 pub struct PlanItem {
     /// The track to process.
     pub track: Track,
+    /// Path to the source file containing this track.
+    pub source_path: PathBuf,
     /// Path to extracted file (if extracted).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extracted_path: Option<PathBuf>,
@@ -94,9 +96,10 @@ pub struct PlanItem {
 
 impl PlanItem {
     /// Create a new plan item for a track.
-    pub fn new(track: Track) -> Self {
+    pub fn new(track: Track, source_path: impl Into<PathBuf>) -> Self {
         Self {
             track,
+            source_path: source_path.into(),
             extracted_path: None,
             is_default: false,
             is_forced_display: false,

@@ -94,9 +94,9 @@ Goal: Basic working pipeline to test architecture
 | Logging | [X] | Per-job loggers, compact mode, file + GUI callback output |
 | UI Shell | [P] | Main window, file inputs, log display, run button |
 | Orchestrator | [X] | Main pipeline coordinator (trait, context, state, runner) |
-| Step: Analyze | [ ] | Stub - just pass through for now |
-| Step: Extract | [ ] | Stub - basic track extraction |
-| Step: Mux | [ ] | Build mkvmerge command, execute |
+| Step: Analyze | [X] | Stub - pass through with zero delays |
+| Step: Extract | [X] | Stub - pass through, no extraction |
+| Step: Mux | [X] | mkvmerge options builder + execution |
 | Job Layouts | [ ] | Save/load track configurations |
 
 ---
@@ -404,7 +404,7 @@ Within vsg_core:
 ### Muxing (`mux/`)
 | Status | Original | Purpose | Notes |
 |--------|----------|---------|-------|
-| [ ] | `options_builder.py` | mkvmerge command builder | **Preserve JSON format exactly** |
+| [X] | `options_builder.py` | mkvmerge command builder | Builds command-line tokens, handles delays |
 
 ---
 
@@ -414,13 +414,13 @@ Within vsg_core:
 | [X] | `pipeline.py` | Main orchestrator | Pipeline runner with step coordination |
 | [X] | `validation.py` | Step validation | Built into PipelineStep trait |
 | [X] | `steps/context.py` | Shared context | Context + JobState structs |
-| [ ] | `steps/analysis_step.py` | Analyze step | |
-| [ ] | `steps/extract_step.py` | Extract step | |
+| [X] | `steps/analysis_step.py` | Analyze step | Stub implementation |
+| [X] | `steps/extract_step.py` | Extract step | Stub implementation |
 | [ ] | `steps/audio_correction_step.py` | Correction step | |
 | [ ] | `steps/subtitles_step.py` | Subtitles step | |
 | [ ] | `steps/chapters_step.py` | Chapters step | |
 | [ ] | `steps/attachments_step.py` | Attachments step | |
-| [ ] | `steps/mux_step.py` | Mux step | |
+| [X] | `steps/mux_step.py` | Mux step | mkvmerge options builder |
 
 ---
 
@@ -508,3 +508,4 @@ Within vsg_core:
 - **2025-01-24**: Config module complete - TOML format with section-level atomic updates
 - **2025-01-24**: Logging module complete - tracing integration, per-job loggers with file + GUI callback, compact mode
 - **2025-01-24**: Orchestrator base complete - PipelineStep trait, Context, JobState, Pipeline runner, error chain
+- **2025-01-24**: Pipeline steps complete - Analyze (stub), Extract (stub), Mux with mkvmerge options builder
