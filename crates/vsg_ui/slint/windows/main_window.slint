@@ -2,10 +2,8 @@ import { VerticalBox, HorizontalBox, Button, LineEdit, TextEdit, GroupBox, Check
 
 export component MainWindow inherits Window {
     title: "Video/Audio Sync & Merge";
-    min-width: 1000px;
-    min-height: 600px;
-    preferred-width: 1000px;
-    preferred-height: 600px;
+    width: 1000px;
+    height: 600px;
     default-font-size: 14px;
 
     // Properties that Rust can read/write
@@ -201,8 +199,8 @@ export component MainWindow inherits Window {
         // Log Section - should expand to fill remaining space
         GroupBox {
             title: "Log";
-            vertical-stretch: 1;
-            min-height: 150px;
+            vertical-stretch: 3;
+            min-height: 200px;
 
             TextEdit {
                 text <=> log-text;
