@@ -1,13 +1,17 @@
 # vsg_core/mux/options_builder.py
 # -*- coding: utf-8 -*-
 from pathlib import Path
-from typing import List
+from typing import List, Optional, TYPE_CHECKING
+
 from ..models.jobs import MergePlan, PlanItem
 from ..models.settings import AppSettings
 from ..models.enums import TrackType
 
+if TYPE_CHECKING:
+    from ..audit import AuditTrail
+
 class MkvmergeOptionsBuilder:
-    def build(self, plan: MergePlan, settings: AppSettings) -> List[str]:
+    def build(self, plan: MergePlan, settings: AppSettings, audit: Optional['AuditTrail'] = None) -> List[str]:
         tokens: List[str] = []
 
         if plan.chapters_xml:
@@ -54,6 +58,52 @@ class MkvmergeOptionsBuilder:
             tr = item.track
 
             delay_ms = self._effective_delay_ms(plan, item)
+
+            # Record delay calculation in audit trail
+            sync_key = item.sync_to if tr.source == 'External' else tr.source
+            stepping_adj = getattr(item, 'stepping_adjusted', False)
+            frame_adj = getattr(item, 'frame_adjusted', False)
+
+            # Determine reason for delay value
+            if tr.source == "Source 1" and tr.type == TrackType.VIDEO:
+                reason = "global_shift_only (video defines timeline)"
+            elif tr.source == "Source 1" and tr.type == TrackType.AUDIO:
+                reason = f"container_delay({round(item.container_delay_ms)}ms) + global_shift({plan.delays.global_shift_ms}ms)"
+            elif tr.type == TrackType.SUBTITLES and stepping_adj:
+                reason = "stepping_adjusted=True (delay embedded in subtitle file)"
+            elif tr.type == TrackType.SUBTITLES and frame_adj:
+                reason = "frame_adjusted=True (delay embedded in subtitle file)"
+            else:
+                reason = f"source_delays_ms[{sync_key}]"
+
+            # DIAGNOSTIC: Log the delay calculation for subtitle tracks
+            if tr.type == TrackType.SUBTITLES:
+                raw_delay = plan.delays.source_delays_ms.get(sync_key, 0) if plan.delays else 0
+                print(f"[MUX DEBUG] Subtitle track {tr.id} ({tr.source}):")
+                print(f"[MUX DEBUG]   sync_key={sync_key}, raw_delay={raw_delay}ms")
+                print(f"[MUX DEBUG]   stepping_adjusted={stepping_adj}, frame_adjusted={frame_adj}")
+                print(f"[MUX DEBUG]   final_delay_to_mkvmerge={delay_ms}ms")
+                print(f"[MUX DEBUG]   reason={reason}")
+
+            # === AUDIT: Record mux track delay ===
+            if audit:
+                raw_delay_available = None
+                if plan.delays and sync_key in plan.delays.raw_source_delays_ms:
+                    raw_delay_available = plan.delays.raw_source_delays_ms.get(sync_key)
+
+                audit.record_mux_track_delay(
+                    track_idx=i,
+                    source=tr.source,
+                    track_type=tr.type.value,
+                    track_id=tr.id,
+                    final_delay_ms=delay_ms,
+                    reason=reason,
+                    raw_delay_available_ms=raw_delay_available,
+                    stepping_adjusted=stepping_adj,
+                    frame_adjusted=frame_adj,
+                    sync_key=sync_key
+                )
+
             is_default = (i == first_video_idx) or (i == default_audio_idx) or (i == default_sub_idx)
 
             # NEW: Use custom language if set, otherwise use original from track
@@ -96,6 +146,10 @@ class MkvmergeOptionsBuilder:
 
         if order_entries:
             tokens += ['--track-order', ','.join(order_entries)]
+
+        # === AUDIT: Record final tokens ===
+        if audit:
+            audit.record_mux_tokens(tokens)
 
         return tokens
 

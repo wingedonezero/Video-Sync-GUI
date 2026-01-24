@@ -15,6 +15,7 @@ from vsg_core.orchestrator.steps import (
     ChaptersStep, AttachmentsStep, MuxStep
 )
 from vsg_core.orchestrator.validation import StepValidator, PipelineValidationError
+from vsg_core.audit import AuditTrail
 
 
 class Orchestrator:
@@ -58,6 +59,19 @@ class Orchestrator:
 
         runner = CommandRunner(settings_dict, log)
 
+        # Create audit trail for debugging timing issues
+        job_name = Path(source1_file).stem
+        audit = AuditTrail(job_temp, job_name)
+        log(f'[Audit] Trail created: {audit.get_path()}')
+
+        # Record sources in audit
+        for src_key, src_path in sources.items():
+            audit.record_source(src_key, src_path)
+        audit.append_event('milestone', 'Pipeline started', {
+            'sources': list(sources.keys()),
+            'and_merge': and_merge
+        })
+
         ctx = Context(
             settings=settings,
             settings_dict=settings_dict,
@@ -66,6 +80,7 @@ class Orchestrator:
             progress=progress,
             output_dir=str(output_dir),
             temp_dir=job_temp,
+            audit=audit,
             sources=sources,
             and_merge=bool(and_merge),
             manual_layout=manual_layout or [],
@@ -159,4 +174,9 @@ class Orchestrator:
             raise RuntimeError(f"Merge planning phase failed: {e}") from e
 
         progress(0.80)
+
+        # Finalize audit trail
+        audit.finalize(output_file=ctx.out_file, success=True)
+        log(f'[Audit] Trail finalized: {audit.get_path()}')
+
         return ctx

@@ -23,7 +23,7 @@ class MuxStep:
         builder = MkvmergeOptionsBuilder()
         # FIX: The builder no longer needs the output path.
         # The --output flag will be added later by the JobPipeline.
-        tokens = builder.build(plan, ctx.settings)
+        tokens = builder.build(plan, ctx.settings, audit=ctx.audit)
 
         # The pipeline will now determine the final output file
         ctx.out_file = None
