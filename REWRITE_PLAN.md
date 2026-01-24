@@ -82,7 +82,8 @@ Goal: Basic working pipeline to test architecture
 
 | Component | Status | Description |
 |-----------|--------|-------------|
-| UI Shell | [ ] | Main window, file inputs, log display, run button |
+| Project Setup | [X] | Cargo workspace, crates, Slint build |
+| UI Shell | [P] | Main window, file inputs, log display, run button |
 | Orchestrator | [ ] | Main pipeline coordinator |
 | Step: Analyze | [ ] | Stub - just pass through for now |
 | Step: Extract | [ ] | Stub - basic track extraction |
@@ -496,3 +497,4 @@ Within vsg_core:
 - **2025-01-24**: Clarified 3-layer architecture (presentation / UI logic / core), per-window logic files, common modules for reuse
 - **2025-01-24**: Added Job State Manifest (write-once record), Step trait contract, error context chains
 - **2025-01-24**: Added Code Standards (naming, module structure, dependency rules, file guidelines)
+- **2025-01-24**: Project setup complete - Cargo workspace, vsg_core lib, vsg_ui bin with Slint, basic main window
