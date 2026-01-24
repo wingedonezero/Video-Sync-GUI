@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::models::{AnalysisMode, SnapMode};
+use crate::models::{AnalysisMode, FilteringMethod, SnapMode};
 
 /// Root settings structure containing all configuration sections.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -183,6 +183,18 @@ pub struct AnalysisSettings {
     /// Scan end position as percentage.
     #[serde(default = "default_scan_end")]
     pub scan_end_pct: f64,
+
+    /// Use SOXR high-quality resampling via FFmpeg.
+    #[serde(default = "default_true")]
+    pub use_soxr: bool,
+
+    /// Use quadratic peak fitting for sub-sample accuracy.
+    #[serde(default = "default_true")]
+    pub audio_peak_fit: bool,
+
+    /// Audio filtering method before correlation.
+    #[serde(default)]
+    pub filtering_method: FilteringMethod,
 }
 
 fn default_chunk_count() -> u32 {
@@ -216,6 +228,9 @@ impl Default for AnalysisSettings {
             min_match_pct: default_min_match_pct(),
             scan_start_pct: default_scan_start(),
             scan_end_pct: default_scan_end(),
+            use_soxr: true,
+            audio_peak_fit: true,
+            filtering_method: FilteringMethod::default(),
         }
     }
 }
