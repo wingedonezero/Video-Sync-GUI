@@ -414,6 +414,7 @@ fn run_analyze_only(
     let logger = match JobLogger::new(&job_name, &logs_dir, log_config, Some(log_callback)) {
         Ok(l) => Arc::new(l),
         Err(e) => {
+            tracing::error!("Failed to create job logger for '{}': {}", job_name, e);
             return AnalysisResult {
                 delay_source2_ms: None,
                 delay_source3_ms: None,
@@ -422,6 +423,8 @@ fn run_analyze_only(
             };
         }
     };
+
+    tracing::info!("Starting analysis for job '{}'", job_name);
 
     // Create context
     let ctx = Context::new(
@@ -451,6 +454,11 @@ fn run_analyze_only(
                 (None, None)
             };
 
+            tracing::info!(
+                "Analysis complete for '{}': Source 2 delay={:?}ms, Source 3 delay={:?}ms",
+                job_name, delay2, delay3
+            );
+
             AnalysisResult {
                 delay_source2_ms: delay2,
                 delay_source3_ms: delay3,
@@ -458,11 +466,14 @@ fn run_analyze_only(
                 error: None,
             }
         }
-        Err(e) => AnalysisResult {
-            delay_source2_ms: None,
-            delay_source3_ms: None,
-            success: false,
-            error: Some(format!("Pipeline failed: {}", e)),
-        },
+        Err(e) => {
+            tracing::error!("Pipeline failed for '{}': {}", job_name, e);
+            AnalysisResult {
+                delay_source2_ms: None,
+                delay_source3_ms: None,
+                success: false,
+                error: Some(format!("Pipeline failed: {}", e)),
+            }
+        }
     }
 }
