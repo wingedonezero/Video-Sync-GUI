@@ -17,11 +17,13 @@ from __future__ import annotations
 
 import copy
 import json
+import math
+import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional, Dict, Any, TYPE_CHECKING
+from typing import Optional, Dict, Any, List, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from vsg_core.subtitles.data import SubtitleData
@@ -30,6 +32,80 @@ from vsg_core.io.runner import CommandRunner
 from vsg_core.orchestrator.steps.context import Context
 from vsg_core.models.enums import TrackType
 from vsg_core.models.media import StreamProps, Track
+
+
+def _read_raw_ass_timestamps(file_path: Path, max_events: int = 5) -> List[Tuple[str, str, str]]:
+    """
+    Read raw timestamp strings from an ASS file without full parsing.
+
+    Returns list of (start_str, end_str, text_preview) tuples for first N dialogue events.
+    Used for diagnostics to compare original file timestamps with parsed values.
+    """
+    results = []
+    try:
+        # Try to detect encoding
+        encodings = ['utf-8-sig', 'utf-8', 'utf-16', 'cp1252', 'latin1']
+        content = None
+        for enc in encodings:
+            try:
+                with open(file_path, 'r', encoding=enc) as f:
+                    content = f.read()
+                break
+            except (UnicodeDecodeError, LookupError):
+                continue
+
+        if not content:
+            return results
+
+        # Pattern: Dialogue: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+        # We want Start and End fields
+        pattern = re.compile(r'^Dialogue:\s*\d+,(\d+:\d+:\d+\.\d+),(\d+:\d+:\d+\.\d+),([^,]*),', re.MULTILINE)
+
+        for match in pattern.finditer(content):
+            if len(results) >= max_events:
+                break
+            start_str = match.group(1)
+            end_str = match.group(2)
+            style = match.group(3)
+            results.append((start_str, end_str, style))
+    except Exception:
+        pass
+    return results
+
+
+def _check_timestamp_precision(timestamp_str: str) -> int:
+    """
+    Check the precision of a timestamp string (number of fractional digits).
+
+    Standard ASS uses centiseconds (2 digits: "0:00:00.00").
+    Some tools may output milliseconds (3 digits: "0:00:00.000").
+
+    Returns number of fractional digits.
+    """
+    try:
+        parts = timestamp_str.split('.')
+        if len(parts) == 2:
+            return len(parts[1])
+    except Exception:
+        pass
+    return 2  # Default assumption
+
+
+def _parse_ass_time_str(time_str: str) -> float:
+    """Parse ASS timestamp string to float ms (same logic as SubtitleData)."""
+    try:
+        parts = time_str.strip().split(':')
+        if len(parts) == 3:
+            hours = int(parts[0])
+            minutes = int(parts[1])
+            seconds_cs = parts[2].split('.')
+            seconds = int(seconds_cs[0])
+            centiseconds = int(seconds_cs[1]) if len(seconds_cs) > 1 else 0
+            total_ms = hours * 3600000 + minutes * 60000 + seconds * 1000 + centiseconds * 10
+            return float(total_ms)
+    except (ValueError, IndexError):
+        pass
+    return 0.0
 
 
 class SubtitlesStep:
@@ -158,9 +234,44 @@ class SubtitlesStep:
             # Load from file
             runner._log_message(f"[SubtitleData] Loading track {item.track.id}: {item.extracted_path.name}")
 
+            # DIAGNOSTIC: Read raw timestamps from original file BEFORE parsing
+            raw_timestamps_before = []
+            if item.extracted_path.suffix.lower() in ('.ass', '.ssa'):
+                raw_timestamps_before = _read_raw_ass_timestamps(item.extracted_path, max_events=3)
+                if raw_timestamps_before:
+                    runner._log_message(f"[DIAG] Original file first 3 event timestamps:")
+                    for i, (start_str, end_str, style) in enumerate(raw_timestamps_before):
+                        start_ms = _parse_ass_time_str(start_str)
+                        end_ms = _parse_ass_time_str(end_str)
+                        start_precision = _check_timestamp_precision(start_str)
+                        runner._log_message(f"[DIAG]   Event {i}: start='{start_str}'({start_ms}ms) end='{end_str}'({end_ms}ms) style='{style}'")
+
+                        # Warn about non-standard precision (3+ digits = milliseconds instead of centiseconds)
+                        if start_precision != 2:
+                            runner._log_message(f"[DIAG] WARNING: Non-standard timestamp precision detected! "
+                                              f"Found {start_precision} fractional digits (expected 2 for centiseconds)")
+                            runner._log_message(f"[DIAG] This could cause timing loss during load/save cycle!")
+
             try:
                 subtitle_data = SubtitleDataClass.from_file(item.extracted_path)
                 runner._log_message(f"[SubtitleData] Loaded {len(subtitle_data.events)} events, {len(subtitle_data.styles)} styles")
+
+                # DIAGNOSTIC: Compare parsed timestamps with raw file timestamps
+                if raw_timestamps_before and subtitle_data.events:
+                    runner._log_message(f"[DIAG] Parsed SubtitleData first 3 event timestamps:")
+                    for i, event in enumerate(subtitle_data.events[:3]):
+                        runner._log_message(f"[DIAG]   Event {i}: start={event.start_ms}ms end={event.end_ms}ms style='{event.style}'")
+
+                    # Check for differences
+                    for i, (start_str, end_str, _) in enumerate(raw_timestamps_before[:min(3, len(subtitle_data.events))]):
+                        raw_start = _parse_ass_time_str(start_str)
+                        raw_end = _parse_ass_time_str(end_str)
+                        parsed_start = subtitle_data.events[i].start_ms
+                        parsed_end = subtitle_data.events[i].end_ms
+                        if abs(raw_start - parsed_start) > 0.001 or abs(raw_end - parsed_end) > 0.001:
+                            runner._log_message(f"[DIAG] WARNING: Timestamp mismatch at event {i}!")
+                            runner._log_message(f"[DIAG]   Raw: start={raw_start}ms, end={raw_end}ms")
+                            runner._log_message(f"[DIAG]   Parsed: start={parsed_start}ms, end={parsed_end}ms")
 
                 # === AUDIT: Record parsed subtitle info ===
                 if ctx.audit and subtitle_data.events:
@@ -326,9 +437,54 @@ class SubtitlesStep:
         runner._log_message(f"[SubtitleData] Saving to {output_path.name}...")
         try:
             rounding_mode = ctx.settings_dict.get('subtitle_rounding', 'floor')
+
+            # DIAGNOSTIC: Log timestamps BEFORE save (what SubtitleData has in memory)
+            if subtitle_data.events:
+                runner._log_message(f"[DIAG] Pre-save SubtitleData first 3 events (rounding_mode={rounding_mode}):")
+                for i, event in enumerate(subtitle_data.events[:3]):
+                    runner._log_message(f"[DIAG]   Event {i}: start={event.start_ms}ms end={event.end_ms}ms")
+
             subtitle_data.save(output_path, rounding=rounding_mode)
             item.extracted_path = output_path
             runner._log_message(f"[SubtitleData] Saved successfully ({len(subtitle_data.events)} events)")
+
+            # DIAGNOSTIC: Read back saved file timestamps to verify
+            if output_path.suffix.lower() in ('.ass', '.ssa'):
+                saved_timestamps = _read_raw_ass_timestamps(output_path, max_events=3)
+                if saved_timestamps:
+                    runner._log_message(f"[DIAG] Post-save file first 3 event timestamps:")
+                    for i, (start_str, end_str, style) in enumerate(saved_timestamps):
+                        start_ms = _parse_ass_time_str(start_str)
+                        end_ms = _parse_ass_time_str(end_str)
+                        runner._log_message(f"[DIAG]   Event {i}: start='{start_str}'({start_ms}ms) end='{end_str}'({end_ms}ms)")
+
+                    # Compare with pre-save values
+                    if subtitle_data.events:
+                        for i, (start_str, end_str, _) in enumerate(saved_timestamps[:min(3, len(subtitle_data.events))]):
+                            saved_start_ms = _parse_ass_time_str(start_str)
+                            saved_end_ms = _parse_ass_time_str(end_str)
+                            pre_start_ms = subtitle_data.events[i].start_ms
+                            pre_end_ms = subtitle_data.events[i].end_ms
+
+                            # Calculate expected saved value based on rounding mode
+                            if rounding_mode == 'ceil':
+                                expected_start_cs = int(math.ceil(pre_start_ms / 10))
+                                expected_end_cs = int(math.ceil(pre_end_ms / 10))
+                            elif rounding_mode == 'round':
+                                expected_start_cs = int(round(pre_start_ms / 10))
+                                expected_end_cs = int(round(pre_end_ms / 10))
+                            else:  # floor (default)
+                                expected_start_cs = int(math.floor(pre_start_ms / 10))
+                                expected_end_cs = int(math.floor(pre_end_ms / 10))
+
+                            expected_start_ms = expected_start_cs * 10
+                            expected_end_ms = expected_end_cs * 10
+
+                            if abs(saved_start_ms - expected_start_ms) > 0.001 or abs(saved_end_ms - expected_end_ms) > 0.001:
+                                runner._log_message(f"[DIAG] WARNING: Save rounding mismatch at event {i}!")
+                                runner._log_message(f"[DIAG]   Pre-save: start={pre_start_ms}ms, end={pre_end_ms}ms")
+                                runner._log_message(f"[DIAG]   Expected: start={expected_start_ms}ms, end={expected_end_ms}ms")
+                                runner._log_message(f"[DIAG]   Actual saved: start={saved_start_ms}ms, end={saved_end_ms}ms")
         except Exception as e:
             runner._log_message(f"[SubtitleData] ERROR: Failed to save: {e}")
             raise
