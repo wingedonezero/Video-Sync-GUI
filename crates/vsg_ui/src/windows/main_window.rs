@@ -404,14 +404,22 @@ fn run_analyze_only(
         })
         .unwrap_or_else(|| "job".to_string());
 
+    // Generate timestamp for unique temp folder
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
     // Set up directories
-    let work_dir = PathBuf::from(&settings.paths.temp_root).join(&job_name);
+    // Temp folder uses orch_{name}_{timestamp} pattern to avoid conflicts
+    let work_dir = PathBuf::from(&settings.paths.temp_root)
+        .join(format!("orch_{}_{}", job_name, timestamp));
     let output_dir = PathBuf::from(&settings.paths.output_folder);
-    let logs_dir = PathBuf::from(&settings.paths.logs_folder);
 
     // Create logger with GUI callback
+    // Job log goes next to output file, not in .logs folder
     let log_config = log_config_from_settings(&settings);
-    let logger = match JobLogger::new(&job_name, &logs_dir, log_config, Some(log_callback)) {
+    let logger = match JobLogger::new(&job_name, &output_dir, log_config, Some(log_callback)) {
         Ok(l) => Arc::new(l),
         Err(e) => {
             tracing::error!("Failed to create job logger for '{}': {}", job_name, e);
