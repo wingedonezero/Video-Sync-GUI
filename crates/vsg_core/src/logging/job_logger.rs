@@ -256,9 +256,10 @@ impl JobLogger {
 
     /// Output a formatted message to file and GUI.
     fn output(&self, formatted: &str) {
-        // Write to file
+        // Write to file and flush immediately for real-time logging
         if let Some(ref mut writer) = *self.file_writer.lock() {
             let _ = writeln!(writer, "{}", formatted);
+            let _ = writer.flush(); // Flush so log file updates in real-time
         }
 
         // Send to GUI callback
