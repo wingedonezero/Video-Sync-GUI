@@ -42,11 +42,13 @@ mod analyzer;
 mod ffmpeg;
 pub mod methods;
 mod peak_fit;
+mod tracks;
 pub mod types;
 
 // Re-export main types
 pub use analyzer::Analyzer;
 pub use ffmpeg::{extract_audio, extract_audio_segment, get_duration, DEFAULT_ANALYSIS_SAMPLE_RATE};
+pub use tracks::{find_track_by_language, get_audio_tracks, AudioTrack};
 pub use peak_fit::{find_and_fit_peak, fit_peak};
 pub use types::{
     AnalysisError, AnalysisResult, AudioChunk, AudioData, ChunkResult, CorrelationResult,

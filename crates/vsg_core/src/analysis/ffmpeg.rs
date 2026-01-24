@@ -122,12 +122,14 @@ pub fn extract_audio(
 /// * `duration_secs` - Duration to extract in seconds
 /// * `sample_rate` - Target sample rate for analysis
 /// * `use_soxr` - Whether to use SOXR high-quality resampling
+/// * `audio_stream_index` - Optional audio stream index (for `-map 0:a:N`)
 pub fn extract_audio_segment(
     input_path: &Path,
     start_secs: f64,
     duration_secs: f64,
     sample_rate: u32,
     use_soxr: bool,
+    audio_stream_index: Option<usize>,
 ) -> AnalysisResult<AudioData> {
     if !input_path.exists() {
         return Err(AnalysisError::SourceNotFound(
@@ -140,8 +142,14 @@ pub fn extract_audio_segment(
     cmd.arg("-ss")
         .arg(format!("{:.3}", start_secs)) // Seek to start
         .arg("-i")
-        .arg(input_path)
-        .arg("-t")
+        .arg(input_path);
+
+    // Map specific audio stream if index provided
+    if let Some(idx) = audio_stream_index {
+        cmd.arg("-map").arg(format!("0:a:{}", idx));
+    }
+
+    cmd.arg("-t")
         .arg(format!("{:.3}", duration_secs)) // Duration
         .arg("-vn") // No video
         .arg("-ac")

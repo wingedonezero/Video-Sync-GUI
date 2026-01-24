@@ -13,6 +13,7 @@ use crate::config::AnalysisSettings;
 use super::ffmpeg::{extract_audio_segment, get_duration, DEFAULT_ANALYSIS_SAMPLE_RATE};
 use super::methods::{CorrelationMethod, Scc};
 use super::peak_fit::find_and_fit_peak;
+use super::tracks::{find_track_by_language, get_audio_tracks};
 use super::types::{AnalysisError, AnalysisResult, ChunkResult, SourceAnalysisResult};
 
 /// Audio sync analyzer.
@@ -38,6 +39,10 @@ pub struct Analyzer {
     scan_end_pct: f64,
     /// Minimum correlation peak for valid result.
     min_correlation: f64,
+    /// Language filter for Source 1 (reference).
+    lang_source1: Option<String>,
+    /// Language filter for other sources.
+    lang_others: Option<String>,
 }
 
 impl Analyzer {
@@ -53,6 +58,8 @@ impl Analyzer {
             scan_start_pct: 5.0,
             scan_end_pct: 95.0,
             min_correlation: 0.3,
+            lang_source1: None,
+            lang_others: None,
         }
     }
 
@@ -68,6 +75,8 @@ impl Analyzer {
             scan_start_pct: settings.scan_start_pct,
             scan_end_pct: settings.scan_end_pct,
             min_correlation: settings.min_match_pct / 100.0, // Convert from percentage
+            lang_source1: settings.lang_source1.clone(),
+            lang_others: settings.lang_others.clone(),
         }
     }
 
@@ -110,6 +119,16 @@ impl Analyzer {
             self.method.name()
         );
 
+        // Detect audio tracks and find matching language
+        let ref_track_idx = self.find_audio_track(reference_path, self.lang_source1.as_deref())?;
+        let other_track_idx = self.find_audio_track(other_path, self.lang_others.as_deref())?;
+
+        tracing::info!(
+            "Using audio tracks: reference={}, other={}",
+            ref_track_idx.map_or("default".to_string(), |i| i.to_string()),
+            other_track_idx.map_or("default".to_string(), |i| i.to_string())
+        );
+
         // Get durations
         let ref_duration = get_duration(reference_path)?;
         let other_duration = get_duration(other_path)?;
@@ -145,7 +164,7 @@ impl Analyzer {
         for (idx, &start_time) in chunk_positions.iter().enumerate() {
             tracing::debug!("Processing chunk {} at {:.2}s", idx, start_time);
 
-            match self.analyze_chunk(reference_path, other_path, start_time, idx) {
+            match self.analyze_chunk(reference_path, other_path, start_time, idx, ref_track_idx, other_track_idx) {
                 Ok(result) => {
                     tracing::debug!(
                         "Chunk {}: delay={:.2}ms, correlation={:.3}",
@@ -190,6 +209,33 @@ impl Analyzer {
             .collect()
     }
 
+    /// Find audio track index by language.
+    fn find_audio_track(&self, path: &Path, language: Option<&str>) -> AnalysisResult<Option<usize>> {
+        // Get all audio tracks
+        let tracks = get_audio_tracks(path)?;
+
+        if tracks.is_empty() {
+            return Err(AnalysisError::InvalidAudio(format!(
+                "No audio tracks found in {}",
+                path.display()
+            )));
+        }
+
+        // Log available tracks
+        for track in &tracks {
+            tracing::debug!(
+                "  Track {}: lang={}, name={}, codec={}",
+                track.stream_index,
+                track.language.as_deref().unwrap_or("und"),
+                track.name.as_deref().unwrap_or(""),
+                track.codec.as_deref().unwrap_or("unknown")
+            );
+        }
+
+        // Find matching track
+        Ok(find_track_by_language(&tracks, language))
+    }
+
     /// Analyze a single chunk.
     fn analyze_chunk(
         &self,
@@ -197,6 +243,8 @@ impl Analyzer {
         other_path: &Path,
         start_time: f64,
         chunk_index: usize,
+        ref_track_idx: Option<usize>,
+        other_track_idx: Option<usize>,
     ) -> AnalysisResult<ChunkResult> {
         // Extract audio segments
         let ref_audio = extract_audio_segment(
@@ -205,6 +253,7 @@ impl Analyzer {
             self.chunk_duration,
             self.sample_rate,
             self.use_soxr,
+            ref_track_idx,
         )?;
 
         let other_audio = extract_audio_segment(
@@ -213,6 +262,7 @@ impl Analyzer {
             self.chunk_duration,
             self.sample_rate,
             self.use_soxr,
+            other_track_idx,
         )?;
 
         // Create chunks
