@@ -144,6 +144,21 @@ Each step:
 - Validates its inputs/outputs
 - Reports progress via callbacks
 
+**Step Trait Contract** (all steps implement):
+```rust
+trait PipelineStep {
+    fn name(&self) -> &str;
+    fn validate_input(&self, ctx: &Context) -> Result<()>;
+    fn execute(&self, ctx: &mut Context, state: &mut JobState) -> Result<()>;
+    fn validate_output(&self, ctx: &Context) -> Result<()>;
+}
+```
+
+**Error Handling:**
+- Errors carry context chain (Job → Step → Operation → Detail)
+- Each layer adds info as errors bubble up
+- Example: `Job 'movie_xyz' → MuxStep → mkvmerge → exit code 2: "Invalid track"`
+
 ### Reusable Operations
 
 **Rule**: If code is used in 2+ places → extract to appropriate `common/` module
@@ -164,6 +179,58 @@ Each step:
 - Unidirectional: data flows one way through pipeline
 - Context object carries state between steps
 - Steps don't reach back into previous steps
+
+### Job State Manifest (Write-Once Record)
+
+Each job gets a `state.json` that records all calculated values.
+
+**Purpose:**
+- Single source of truth for job data
+- Prevents accidental overwrites between steps
+- Debugging: see exactly what each step calculated
+- Audit trail after job completes
+
+**Rules:**
+- Steps can ADD new values (write)
+- Steps CANNOT overwrite existing values (error if tried)
+- Persisted atomically after each write
+- Readable by any step
+
+**Implementation:** Typed struct with `Option<T>` fields
+- `None` = not set yet
+- `Some(value)` = set, cannot change
+- Compile-time safety for field names
+- Each step's output is its own sub-struct
+
+**File relationships:**
+```
+job_layout.json  → WHAT to do (track selections, user settings)
+state.json       → WHAT HAPPENED (calculated values, paths, results)
+mkvmerge.json    → HOW to merge (final mkvmerge command options)
+```
+
+**Location:** `.temp/<job_id>/state.json`
+
+**Example structure:**
+```json
+{
+  "job_id": "a1b2c3",
+  "created": "2025-01-24T10:30:00Z",
+  "analysis": {
+    "raw_delay_ms": -178.5555,
+    "confidence": 0.94,
+    "drift_detected": true
+  },
+  "extract": {
+    "video_track": "...",
+    "audio_tracks": ["..."]
+  },
+  "mux": {
+    "output_path": "...",
+    "exit_code": 0
+  }
+}
+```
 
 ---
 
@@ -380,3 +447,4 @@ Reference: `Reference Only original/vsg_core/mux/options_builder.py`
 - **2025-01-24**: Initial plan created from Reference Only original analysis
 - **2025-01-24**: Decided on Rust + Slint stack, defined MVP scope, directory structure, config/logging requirements
 - **2025-01-24**: Clarified 3-layer architecture (presentation / UI logic / core), per-window logic files, common modules for reuse
+- **2025-01-24**: Added Job State Manifest (write-once record), Step trait contract, error context chains
