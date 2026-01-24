@@ -113,18 +113,28 @@ class TimebaseFrameDelaySync(SyncPlugin):
         else:  # 'nearest' (default)
             delay_frames = round(delay_frames_exact)
 
+        # Apply frame offset adjustment (for correcting systematic correlation errors)
+        frame_offset = config.get('frame_delay_offset', 0)
+        if frame_offset != 0:
+            delay_frames += frame_offset
+            log(f"[FrameDelay] Frame offset adjustment: {frame_offset:+d} frames")
+
         # Convert back to milliseconds
         # Simple multiplication is accurate for CFR videos
         frame_delay_ms = delay_frames * frame_duration_ms
 
-        # Calculate the rounding delta
+        # Calculate the rounding delta (from original raw delay)
         rounding_delta_ms = frame_delay_ms - total_delay_ms
         rounding_delta_frames = rounding_delta_ms / frame_duration_ms
 
         log(f"[FrameDelay] Delay calculation:")
         log(f"[FrameDelay]   Raw: {total_delay_ms:+.3f}ms = {delay_frames_exact:+.3f} frames")
-        log(f"[FrameDelay]   Rounded ({rounding_mode}): {delay_frames} frames = {frame_delay_ms:+.3f}ms")
-        log(f"[FrameDelay]   Rounding delta: {rounding_delta_ms:+.3f}ms ({rounding_delta_frames:+.3f} frames)")
+        if frame_offset != 0:
+            log(f"[FrameDelay]   Rounded ({rounding_mode}): {delay_frames - frame_offset} frames + offset {frame_offset:+d} = {delay_frames} frames")
+        else:
+            log(f"[FrameDelay]   Rounded ({rounding_mode}): {delay_frames} frames = {frame_delay_ms:+.3f}ms")
+        log(f"[FrameDelay]   Final delay: {delay_frames} frames = {frame_delay_ms:+.3f}ms")
+        log(f"[FrameDelay]   Total adjustment: {rounding_delta_ms:+.3f}ms ({rounding_delta_frames:+.3f} frames)")
 
         # Statistics tracking
         stats = {
@@ -133,6 +143,7 @@ class TimebaseFrameDelaySync(SyncPlugin):
             'raw_delay_ms': total_delay_ms,
             'raw_delay_frames': delay_frames_exact,
             'rounded_delay_frames': delay_frames,
+            'frame_offset': frame_offset,
             'frame_delay_ms': frame_delay_ms,
             'rounding_delta_ms': rounding_delta_ms,
             'rounding_mode': rounding_mode,
