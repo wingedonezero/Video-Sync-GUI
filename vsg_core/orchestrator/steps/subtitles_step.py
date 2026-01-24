@@ -161,6 +161,18 @@ class SubtitlesStep:
             try:
                 subtitle_data = SubtitleDataClass.from_file(item.extracted_path)
                 runner._log_message(f"[SubtitleData] Loaded {len(subtitle_data.events)} events, {len(subtitle_data.styles)} styles")
+
+                # === AUDIT: Record parsed subtitle info ===
+                if ctx.audit and subtitle_data.events:
+                    track_key = f"track_{item.track.id}_{item.track.source.replace(' ', '_')}"
+                    ctx.audit.record_subtitle_parsed(
+                        track_key=track_key,
+                        event_count=len(subtitle_data.events),
+                        first_event_start_ms=subtitle_data.events[0].start_ms,
+                        last_event_end_ms=subtitle_data.events[-1].end_ms,
+                        style_count=len(subtitle_data.styles),
+                        source_path=str(item.extracted_path)
+                    )
             except Exception as e:
                 runner._log_message(f"[SubtitleData] ERROR: Failed to load: {e}")
                 raise
@@ -401,6 +413,25 @@ class SubtitlesStep:
                 runner._log_message(f"[Sync] {result.summary}")
             else:
                 runner._log_message(f"[Sync] WARNING: {result.error or 'Sync failed'}")
+
+            # === AUDIT: Record sync operation details ===
+            if ctx.audit:
+                track_key = f"track_{item.track.id}_{item.track.source.replace(' ', '_')}"
+                rounded_delay = ctx.delays.source_delays_ms.get(source_key, 0) if ctx.delays else 0
+                ctx.audit.record_subtitle_sync(
+                    track_key=track_key,
+                    sync_mode=sync_mode,
+                    delay_from_context_raw_ms=total_delay_ms,
+                    delay_from_context_rounded_ms=rounded_delay,
+                    global_shift_raw_ms=global_shift_ms,
+                    source_key=source_key,
+                    plugin_name=plugin.name,
+                    events_modified=result.events_affected if hasattr(result, 'events_affected') else 0,
+                    stepping_adjusted_before=getattr(item, 'stepping_adjusted', False),
+                    stepping_adjusted_after=getattr(item, 'stepping_adjusted', False),
+                    frame_adjusted_before=getattr(item, 'frame_adjusted', False),
+                    frame_adjusted_after=getattr(item, 'frame_adjusted', False)  # Updated in caller
+                )
 
             return result
 

@@ -5,8 +5,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional, List, Dict, Any
 
+from typing import TYPE_CHECKING
+
 from vsg_core.models.settings import AppSettings
 from vsg_core.models.jobs import PlanItem, Delays
+
+if TYPE_CHECKING:
+    from vsg_core.audit import AuditTrail
 
 @dataclass
 class Context:
@@ -18,6 +23,7 @@ class Context:
     progress: Callable[[float], None]
     output_dir: str
     temp_dir: Path
+    audit: Optional['AuditTrail'] = None  # Pipeline audit trail for debugging
     sources: Dict[str, str] = field(default_factory=dict)
     and_merge: bool = False
     manual_layout: List[Dict[str, Any]] = field(default_factory=list)

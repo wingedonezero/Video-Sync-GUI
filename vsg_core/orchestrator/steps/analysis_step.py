@@ -945,6 +945,21 @@ class AnalysisStep:
             source_delays[source_key] = final_delay_ms
             raw_source_delays[source_key] = final_delay_raw
 
+            # === AUDIT: Record delay calculation chain ===
+            if ctx.audit:
+                accepted_count = len([r for r in results if r.get('accepted', False)])
+                ctx.audit.record_delay_calculation(
+                    source_key=source_key,
+                    correlation_raw_ms=correlation_delay_raw,
+                    correlation_rounded_ms=correlation_delay_ms,
+                    container_delay_ms=actual_container_delay,
+                    final_raw_ms=final_delay_raw,
+                    final_rounded_ms=final_delay_ms,
+                    selection_method=source_config.get('delay_selection_mode', 'Mode (Most Common)'),
+                    accepted_chunks=accepted_count,
+                    total_chunks=len(results)
+                )
+
             # --- Handle drift detection flags ---
             # CRITICAL: Drift/stepping corrections are NOT compatible with source separation
             # The separated stems have different waveform characteristics that make
@@ -1122,6 +1137,24 @@ class AnalysisStep:
                         runner._log_message(f"  - Track {tid} ({track_type}): {delay:+.1f}ms → {final_delay:+.1f}ms{note}")
         else:
             runner._log_message(f"[Delay] All relevant delays are non-negative. No global shift needed.")
+
+        # === AUDIT: Record global shift calculation ===
+        if ctx.audit:
+            ctx.audit.record_global_shift(
+                most_negative_raw_ms=most_negative_raw,
+                most_negative_rounded_ms=most_negative,
+                shift_raw_ms=raw_global_shift_ms,
+                shift_rounded_ms=global_shift_ms,
+                sync_mode=sync_mode
+            )
+            # Record final delays for each source
+            for src_key in sorted(source_delays.keys()):
+                ctx.audit.record_final_delay(
+                    source_key=src_key,
+                    raw_ms=raw_source_delays[src_key],
+                    rounded_ms=source_delays[src_key],
+                    includes_global_shift=True
+                )
 
         # Store the calculated delays with global shift
         ctx.delays = Delays(
