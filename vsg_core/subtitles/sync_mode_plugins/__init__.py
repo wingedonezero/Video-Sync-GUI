@@ -16,6 +16,7 @@ import importlib
 _MODULE_MAP = {
     'TimeBasedSync': ('time_based', 'TimeBasedSync'),
     'TimebaseFrameLockedSync': ('timebase_frame_locked', 'TimebaseFrameLockedSync'),
+    'TimebaseFrameDelaySync': ('timebase_frame_delay', 'TimebaseFrameDelaySync'),
     'DurationAlignSync': ('duration_align', 'DurationAlignSync'),
     'CorrelationFrameSnapSync': ('correlation_frame_snap', 'CorrelationFrameSnapSync'),
     'SubtitleAnchoredFrameSnapSync': ('subtitle_anchored_frame_snap', 'SubtitleAnchoredFrameSnapSync'),
@@ -25,6 +26,7 @@ _MODULE_MAP = {
 _SUBMODULES = [
     'time_based',
     'timebase_frame_locked',
+    'timebase_frame_delay',
     'duration_align',
     'correlation_frame_snap',
     'subtitle_anchored_frame_snap',
@@ -58,6 +60,7 @@ def __getattr__(name):
 __all__ = [
     'TimeBasedSync',
     'TimebaseFrameLockedSync',
+    'TimebaseFrameDelaySync',
     'DurationAlignSync',
     'CorrelationFrameSnapSync',
     'SubtitleAnchoredFrameSnapSync',

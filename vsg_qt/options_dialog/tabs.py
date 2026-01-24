@@ -1299,6 +1299,7 @@ class SubtitleSyncTab(QWidget):
         self.widgets['subtitle_sync_mode'] = QComboBox()
         self.widgets['subtitle_sync_mode'].addItems([
             'time-based',
+            'timebase-frame-delay',
             'timebase-frame-locked-timestamps',
             'duration-align',
             'correlation-frame-snap',
@@ -1308,6 +1309,7 @@ class SubtitleSyncTab(QWidget):
         self.widgets['subtitle_sync_mode'].setToolTip(
             "Subtitle synchronization method:\n\n"
             "• time-based: Simple delay via mkvmerge --sync (fastest)\n"
+            "• timebase-frame-delay: Frame-rounded delay, no per-event snapping\n"
             "• timebase-frame-locked: Time-based + VideoTimestamps frame-alignment\n"
             "• duration-align: Align by video duration difference\n"
             "• correlation-frame-snap: Correlation + scene-based frame verification\n"
@@ -1434,6 +1436,17 @@ class SubtitleSyncTab(QWidget):
         )
         specific_layout.addRow("", self.widgets['time_based_use_raw_values'])
 
+        # --- Timebase-frame-delay options ---
+        self.widgets['frame_delay_rounding'] = QComboBox()
+        self.widgets['frame_delay_rounding'].addItems(['nearest', 'floor', 'ceil'])
+        self.widgets['frame_delay_rounding'].setToolTip(
+            "How to round the delay to whole frames:\n\n"
+            "• nearest (Default): Round to closest frame\n"
+            "• floor: Round down - subtitles appear slightly earlier\n"
+            "• ceil: Round up - subtitles appear slightly later"
+        )
+        specific_layout.addRow("Frame Rounding:", self.widgets['frame_delay_rounding'])
+
         # --- Duration-align options ---
         self.widgets['duration_align_validate'] = QCheckBox("Validate frame alignment")
         self.widgets['duration_align_validate'].setChecked(True)
@@ -1555,6 +1568,7 @@ class SubtitleSyncTab(QWidget):
     def _update_mode_visibility(self, text: str):
         """Show/hide settings based on selected sync mode."""
         is_time_based = (text == 'time-based')
+        is_frame_delay = (text == 'timebase-frame-delay')
         is_frame_locked = (text == 'timebase-frame-locked-timestamps')
         is_duration_align = (text == 'duration-align')
         is_correlation_snap = (text == 'correlation-frame-snap')
@@ -1573,6 +1587,9 @@ class SubtitleSyncTab(QWidget):
 
         # Time-based specific
         self.widgets['time_based_use_raw_values'].setEnabled(is_time_based)
+
+        # Timebase-frame-delay specific
+        self.widgets['frame_delay_rounding'].setEnabled(is_frame_delay)
 
         # Timebase-frame-locked specific
         self.widgets['frame_lock_submillisecond_precision'].setEnabled(is_frame_locked)
