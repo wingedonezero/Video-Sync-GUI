@@ -374,6 +374,7 @@ class SubtitlesStep:
 
         runner._log_message(f"[Sync] Mode: {sync_mode}")
         runner._log_message(f"[Sync] Delay: {total_delay_ms:+.3f}ms (global: {global_shift_ms:+.3f}ms)")
+        runner._log_message(f"[Sync] DEBUG: source_key={source_key}, stepping_adjusted={getattr(item, 'stepping_adjusted', False)}, frame_adjusted={getattr(item, 'frame_adjusted', False)}")
 
         # Try to use new plugin system
         plugin = get_sync_plugin(sync_mode)

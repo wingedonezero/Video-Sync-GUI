@@ -54,6 +54,18 @@ class MkvmergeOptionsBuilder:
             tr = item.track
 
             delay_ms = self._effective_delay_ms(plan, item)
+
+            # DIAGNOSTIC: Log the delay calculation for subtitle tracks
+            if tr.type == TrackType.SUBTITLES:
+                sync_key = item.sync_to if tr.source == 'External' else tr.source
+                raw_delay = plan.delays.source_delays_ms.get(sync_key, 0) if plan.delays else 0
+                stepping_adj = getattr(item, 'stepping_adjusted', False)
+                frame_adj = getattr(item, 'frame_adjusted', False)
+                print(f"[MUX DEBUG] Subtitle track {tr.id} ({tr.source}):")
+                print(f"[MUX DEBUG]   sync_key={sync_key}, raw_delay={raw_delay}ms")
+                print(f"[MUX DEBUG]   stepping_adjusted={stepping_adj}, frame_adjusted={frame_adj}")
+                print(f"[MUX DEBUG]   final_delay_to_mkvmerge={delay_ms}ms")
+
             is_default = (i == first_video_idx) or (i == default_audio_idx) or (i == default_sub_idx)
 
             # NEW: Use custom language if set, otherwise use original from track
