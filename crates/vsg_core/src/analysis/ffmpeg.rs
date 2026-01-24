@@ -209,6 +209,108 @@ pub fn extract_audio_segment(
     Ok(AudioData::new(samples, sample_rate))
 }
 
+/// Extract full audio from a video file to memory.
+///
+/// This decodes the entire audio track once, which is more efficient
+/// when multiple chunks need to be analyzed (avoids repeated FFmpeg calls).
+///
+/// # Arguments
+/// * `input_path` - Path to the input video file
+/// * `sample_rate` - Target sample rate for analysis
+/// * `use_soxr` - Whether to use SOXR high-quality resampling
+/// * `audio_stream_index` - Optional audio stream index (for `-map 0:a:N`)
+pub fn extract_full_audio(
+    input_path: &Path,
+    sample_rate: u32,
+    use_soxr: bool,
+    audio_stream_index: Option<usize>,
+) -> AnalysisResult<AudioData> {
+    if !input_path.exists() {
+        return Err(AnalysisError::SourceNotFound(
+            input_path.display().to_string(),
+        ));
+    }
+
+    // Build FFmpeg command
+    let mut cmd = Command::new("ffmpeg");
+    cmd.arg("-i").arg(input_path);
+
+    // Map specific audio stream if index provided
+    if let Some(idx) = audio_stream_index {
+        cmd.arg("-map").arg(format!("0:a:{}", idx));
+    }
+
+    cmd.arg("-vn") // No video
+        .arg("-ac")
+        .arg("1") // Mono
+        .arg("-ar")
+        .arg(sample_rate.to_string()); // Sample rate
+
+    // Use SOXR resampler if requested
+    if use_soxr {
+        cmd.arg("-resampler").arg("soxr");
+    }
+
+    // Output raw f64 samples to stdout
+    cmd.arg("-f")
+        .arg("f64le") // 64-bit float, little endian
+        .arg("-acodec")
+        .arg("pcm_f64le")
+        .arg("pipe:1"); // Output to stdout
+
+    // Suppress FFmpeg's stderr output
+    cmd.stderr(Stdio::null()).stdout(Stdio::piped());
+
+    tracing::debug!("Running FFmpeg (full audio): {:?}", cmd);
+
+    // Execute FFmpeg
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| AnalysisError::FfmpegError(format!("Failed to spawn FFmpeg: {}", e)))?;
+
+    // Read output
+    let mut stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| AnalysisError::FfmpegError("Failed to capture FFmpeg stdout".to_string()))?;
+
+    let mut buffer = Vec::new();
+    stdout.read_to_end(&mut buffer).map_err(|e| {
+        AnalysisError::FfmpegError(format!("Failed to read FFmpeg output: {}", e))
+    })?;
+
+    // Wait for FFmpeg to finish
+    let status = child
+        .wait()
+        .map_err(|e| AnalysisError::FfmpegError(format!("FFmpeg process error: {}", e)))?;
+
+    if !status.success() {
+        return Err(AnalysisError::FfmpegError(format!(
+            "FFmpeg exited with code: {:?}",
+            status.code()
+        )));
+    }
+
+    // Convert bytes to f64 samples
+    let samples = bytes_to_f64_samples(&buffer);
+
+    if samples.is_empty() {
+        return Err(AnalysisError::ExtractionError(
+            "No audio samples extracted".to_string(),
+        ));
+    }
+
+    let duration_secs = samples.len() as f64 / sample_rate as f64;
+    tracing::info!(
+        "Extracted {} samples ({:.2}s) from {}",
+        samples.len(),
+        duration_secs,
+        input_path.display()
+    );
+
+    Ok(AudioData::new(samples, sample_rate))
+}
+
 /// Get the duration of a media file using FFprobe.
 pub fn get_duration(input_path: &Path) -> AnalysisResult<f64> {
     if !input_path.exists() {
