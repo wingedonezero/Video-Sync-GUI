@@ -46,7 +46,8 @@ def _build_cluster_diagnostics(
         chunk_numbers.sort()
 
         # Get match scores for quality analysis
-        match_scores = [chunk.get('match_pct', 0) for chunk in member_chunks]
+        # Note: chunks use 'match' key (0-100 percentage scale)
+        match_scores = [chunk.get('match', 0) for chunk in member_chunks]
         mean_match = np.mean(match_scores)
         min_match = min(match_scores)
 
@@ -225,11 +226,15 @@ def _validate_cluster(
     cluster_members: List[int],
     accepted_chunks: List[Dict[str, Any]],
     total_chunks: int,
-    thresholds: Dict[str, Any]
+    thresholds: Dict[str, Any],
+    chunk_duration: float = 15.0
 ) -> Dict[str, Any]:
     """
     Validates a single cluster against quality thresholds.
     Returns a dict with validation results and reasons.
+
+    Args:
+        chunk_duration: Duration of each chunk in seconds (from config 'scan_chunk_duration')
     """
     # Get cluster data
     cluster_size = len(cluster_members)
@@ -239,8 +244,7 @@ def _validate_cluster(
     chunk_times = [accepted_chunks[i]['start'] for i in cluster_members]
     min_time = min(chunk_times)
     max_time = max(chunk_times)
-    # Get the chunk duration from the first chunk (assumes uniform chunk duration)
-    chunk_duration = accepted_chunks[0].get('duration', 15.0) if accepted_chunks else 15.0
+    # chunk_duration comes from config, not from chunk data
     cluster_duration_s = (max_time - min_time) + chunk_duration
 
     # Calculate match quality
@@ -311,8 +315,11 @@ def _filter_clusters(
     invalid_clusters = {}
     validation_results = {}
 
+    # Get chunk duration from config (used for cluster duration calculation)
+    chunk_duration = float(config.get('scan_chunk_duration', 15.0))
+
     for label, members in cluster_members.items():
-        validation = _validate_cluster(label, members, accepted_chunks, total_chunks, thresholds)
+        validation = _validate_cluster(label, members, accepted_chunks, total_chunks, thresholds, chunk_duration)
         validation_results[label] = validation
 
         if validation['valid']:
