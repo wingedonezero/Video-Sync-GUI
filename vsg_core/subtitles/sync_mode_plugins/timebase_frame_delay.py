@@ -85,13 +85,19 @@ class TimebaseFrameDelaySync(SyncPlugin):
         log(f"[FrameDelay] Target FPS: {target_fps:.3f}")
         log(f"[FrameDelay] Raw delay: {total_delay_ms:+.3f}ms (global shift: {global_shift_ms:+.3f}ms)")
 
-        # Calculate frame-rounded delay
-        frame_duration_ms = 1000.0 / target_fps
-
-        # Try to get VideoTimestamps for precise frame timing
-        vts = None
-        if target_video:
-            vts = self._get_video_timestamps(target_video, target_fps, runner, config)
+        # Calculate frame duration for this FPS
+        # Use exact fraction for NTSC rates to avoid floating point drift
+        if abs(target_fps - 23.976) < 0.001:
+            # 23.976fps = 24000/1001, frame duration = 1001/24 ms
+            frame_duration_ms = 1001.0 / 24.0  # 41.7083... ms
+        elif abs(target_fps - 29.97) < 0.01:
+            # 29.97fps = 30000/1001, frame duration = 1001/30 ms
+            frame_duration_ms = 1001.0 / 30.0  # 33.3666... ms
+        elif abs(target_fps - 59.94) < 0.01:
+            # 59.94fps = 60000/1001, frame duration = 1001/60 ms
+            frame_duration_ms = 1001.0 / 60.0  # 16.6833... ms
+        else:
+            frame_duration_ms = 1000.0 / target_fps
 
         # Calculate delay in frames and round to nearest whole frame
         delay_frames_exact = total_delay_ms / frame_duration_ms
@@ -107,17 +113,9 @@ class TimebaseFrameDelaySync(SyncPlugin):
         else:  # 'nearest' (default)
             delay_frames = round(delay_frames_exact)
 
-        # Convert back to milliseconds using VideoTimestamps if available
-        if vts:
-            try:
-                from video_timestamps import TimeType
-                frame_delay_ms = float(vts.frame_to_time(delay_frames, TimeType.START))
-                log(f"[FrameDelay] Using VideoTimestamps for precise timing")
-            except Exception as e:
-                log(f"[FrameDelay] VideoTimestamps failed ({e}), using calculated timing")
-                frame_delay_ms = delay_frames * frame_duration_ms
-        else:
-            frame_delay_ms = delay_frames * frame_duration_ms
+        # Convert back to milliseconds
+        # Simple multiplication is accurate for CFR videos
+        frame_delay_ms = delay_frames * frame_duration_ms
 
         # Calculate the rounding delta
         rounding_delta_ms = frame_delay_ms - total_delay_ms
