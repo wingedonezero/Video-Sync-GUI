@@ -859,7 +859,7 @@ class SubtitleData:
     # Save Methods
     # =========================================================================
 
-    def save_ass(self, path: Path | str) -> None:
+    def save_ass(self, path: Path | str, rounding: str = 'floor') -> None:
         """
         Save as ASS file.
 
@@ -867,26 +867,27 @@ class SubtitleData:
         Float ms → centiseconds happens here.
         """
         from .writers.ass_writer import write_ass_file
-        write_ass_file(self, Path(path))
+        write_ass_file(self, Path(path), rounding=rounding)
 
-    def save_srt(self, path: Path | str) -> None:
+    def save_srt(self, path: Path | str, rounding: str = 'round') -> None:
         """
         Save as SRT file.
 
         Float ms → integer ms happens here.
         """
         from .writers.srt_writer import write_srt_file
-        write_srt_file(self, Path(path))
+        write_srt_file(self, Path(path), rounding=rounding)
 
-    def save(self, path: Path | str) -> None:
+    def save(self, path: Path | str, rounding: str | None = None) -> None:
         """Save to file, format determined by extension."""
         path = Path(path)
         ext = path.suffix.lower()
+        rounding_mode = rounding or 'floor'
 
         if ext in ('.ass', '.ssa'):
-            self.save_ass(path)
+            self.save_ass(path, rounding=rounding_mode)
         elif ext == '.srt':
-            self.save_srt(path)
+            self.save_srt(path, rounding=rounding_mode)
         else:
             raise ValueError(f"Unsupported output format: {ext}")
 

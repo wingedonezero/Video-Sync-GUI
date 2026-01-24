@@ -89,6 +89,7 @@ class AppConfig:
 
             # --- Unified Rounding Settings ---
             'subtitle_rounding': 'floor',  # Final rounding for all sync modes: floor, round, ceil
+            'videotimestamps_snap_mode': 'start',  # Frame snap mode for VideoTimestamps: start, exact
 
             # --- Duration-Align Sync Settings ---
             'duration_align_validate': True,  # Enable validation of duration-based sync

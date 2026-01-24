@@ -110,11 +110,19 @@ class TimebaseFrameLockedSync(SyncPlugin):
         # When True, preserves sub-ms precision in frame calculations
         use_submillisecond = config.get('frame_lock_submillisecond_precision', False)
 
+        snap_mode = (config.get('videotimestamps_snap_mode', 'start') or 'start').upper()
+        snap_time_type = 'EXACT' if snap_mode == 'EXACT' else 'START'
+        log(f"[FrameLocked] Frame snap mode: {snap_time_type}")
+
         if vts:
             frame_aligned_delay = self._frame_align_delay(
                 total_delay_ms, vts, target_fps, log,
-                use_submillisecond=use_submillisecond
+                use_submillisecond=use_submillisecond,
+                snap_time_type=snap_time_type,
             )
+            if not use_submillisecond:
+                frame_aligned_delay = float(int(frame_aligned_delay))
+                log(f"[FrameLocked] Truncated frame-aligned delay to integer ms: {frame_aligned_delay:+.3f}ms")
             stats['frame_aligned_delay_ms'] = frame_aligned_delay
             stats['alignment_delta_ms'] = frame_aligned_delay - total_delay_ms
         else:
@@ -148,7 +156,13 @@ class TimebaseFrameLockedSync(SyncPlugin):
 
             # Frame-snap start time
             if vts:
-                snapped_start, start_frame = self._snap_to_frame_start(delayed_start, vts, target_fps)
+                snapped_start, start_frame = self._snap_to_frame_start(
+                    delayed_start,
+                    vts,
+                    target_fps,
+                    use_submillisecond=use_submillisecond,
+                    snap_time_type=snap_time_type,
+                )
                 start_delta = snapped_start - delayed_start
 
                 if abs(start_delta) > 0.5:
@@ -162,10 +176,20 @@ class TimebaseFrameLockedSync(SyncPlugin):
 
                 # Safety: ensure end is after start (at least next frame)
                 if vts:
-                    end_frame = self._time_to_frame(snapped_end, vts, target_fps)
+                    end_frame = self._time_to_frame(
+                        snapped_end,
+                        vts,
+                        target_fps,
+                        use_submillisecond=use_submillisecond,
+                    )
                     if end_frame <= start_frame:
                         # Push end to next frame start
-                        snapped_end = self._frame_to_time(start_frame + 1, vts, target_fps)
+                        snapped_end = self._frame_to_time(
+                            start_frame + 1,
+                            vts,
+                            target_fps,
+                            snap_time_type=snap_time_type,
+                        )
                         stats['duration_adjusted'] += 1
 
                 event.start_ms = snapped_start
@@ -258,7 +282,15 @@ class TimebaseFrameLockedSync(SyncPlugin):
                 runner._log_message(f"[FrameLocked] WARNING: Could not get VideoTimestamps: {e}")
             return None
 
-    def _frame_align_delay(self, delay_ms: float, vts, fps: float, log, use_submillisecond: bool = False) -> float:
+    def _frame_align_delay(
+        self,
+        delay_ms: float,
+        vts,
+        fps: float,
+        log,
+        use_submillisecond: bool = False,
+        snap_time_type: str = 'START',
+    ) -> float:
         """
         Align delay to nearest frame boundary.
 
@@ -297,7 +329,7 @@ class TimebaseFrameLockedSync(SyncPlugin):
             frame = vts.time_to_frame(delay_frac, TimeType.EXACT)
 
             # Get exact frame start time
-            frame_start = vts.frame_to_time(frame, TimeType.START)
+            frame_start = vts.frame_to_time(frame, getattr(TimeType, snap_time_type))
             aligned_ms = float(frame_start)
 
             log(f"[FrameLocked] Frame alignment: {delay_ms:.3f}ms -> frame {frame} -> {aligned_ms:.3f}ms")
@@ -309,7 +341,14 @@ class TimebaseFrameLockedSync(SyncPlugin):
             log(f"[FrameLocked] WARNING: Frame alignment failed: {e}")
             return delay_ms
 
-    def _snap_to_frame_start(self, time_ms: float, vts, fps: float) -> tuple:
+    def _snap_to_frame_start(
+        self,
+        time_ms: float,
+        vts,
+        fps: float,
+        use_submillisecond: bool = False,
+        snap_time_type: str = 'START',
+    ) -> tuple:
         """
         Snap time to frame start boundary.
 
@@ -318,9 +357,9 @@ class TimebaseFrameLockedSync(SyncPlugin):
         try:
             from video_timestamps import TimeType
 
-            time_frac = Fraction(int(time_ms), 1)
+            time_frac = self._time_to_fraction(time_ms, use_submillisecond)
             frame = vts.time_to_frame(time_frac, TimeType.EXACT)
-            frame_start = vts.frame_to_time(frame, TimeType.START)
+            frame_start = vts.frame_to_time(frame, getattr(TimeType, snap_time_type))
 
             return (float(frame_start), frame)
 
@@ -331,18 +370,30 @@ class TimebaseFrameLockedSync(SyncPlugin):
             snapped = frame * frame_duration
             return (snapped, frame)
 
-    def _time_to_frame(self, time_ms: float, vts, fps: float) -> int:
+    def _time_to_frame(
+        self,
+        time_ms: float,
+        vts,
+        fps: float,
+        use_submillisecond: bool = False
+    ) -> int:
         """Convert time to frame number."""
         try:
             from video_timestamps import TimeType
-            return vts.time_to_frame(Fraction(int(time_ms), 1), TimeType.EXACT)
+            return vts.time_to_frame(self._time_to_fraction(time_ms, use_submillisecond), TimeType.EXACT)
         except Exception:
             return int(time_ms / (1000.0 / fps))
 
-    def _frame_to_time(self, frame: int, vts, fps: float) -> float:
+    def _frame_to_time(self, frame: int, vts, fps: float, snap_time_type: str = 'START') -> float:
         """Convert frame number to time (frame start)."""
         try:
             from video_timestamps import TimeType
-            return float(vts.frame_to_time(frame, TimeType.START))
+            return float(vts.frame_to_time(frame, getattr(TimeType, snap_time_type)))
         except Exception:
             return frame * (1000.0 / fps)
+
+    def _time_to_fraction(self, time_ms: float, use_submillisecond: bool) -> Fraction:
+        """Convert time to Fraction for VideoTimestamps."""
+        if use_submillisecond:
+            return Fraction(int(time_ms * 1000), 1000)
+        return Fraction(int(time_ms), 1)

@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from ..data import SubtitleData
 
 
-def write_ass_file(data: 'SubtitleData', path: Path) -> None:
+def write_ass_file(data: 'SubtitleData', path: Path, rounding: str = 'floor') -> None:
     """
     Write SubtitleData to ASS file.
 
@@ -53,7 +53,7 @@ def write_ass_file(data: 'SubtitleData', path: Path) -> None:
             written_sections.add('[v4 styles]')
 
         elif section_lower == '[events]':
-            _write_events(data, lines)
+            _write_events(data, lines, rounding)
             written_sections.add(section_lower)
 
         elif section_lower == '[fonts]':
@@ -88,7 +88,7 @@ def write_ass_file(data: 'SubtitleData', path: Path) -> None:
         _write_styles(data, lines, '[V4+ Styles]')
 
     if '[events]' not in written_sections and data.events:
-        _write_events(data, lines)
+        _write_events(data, lines, rounding)
 
     if '[fonts]' not in written_sections and data.fonts:
         _write_fonts(data, lines)
@@ -188,7 +188,7 @@ def _write_styles(data: 'SubtitleData', lines: list, section_name: str) -> None:
     lines.append('')
 
 
-def _write_events(data: 'SubtitleData', lines: list) -> None:
+def _write_events(data: 'SubtitleData', lines: list, rounding_mode: str) -> None:
     """
     Write [Events] section.
 
@@ -213,10 +213,10 @@ def _write_events(data: 'SubtitleData', lines: list) -> None:
                 values.append(str(event.layer))
             elif field_lower == 'start':
                 # ROUNDING HAPPENS HERE
-                values.append(_format_ass_time(event.start_ms))
+                values.append(_format_ass_time(event.start_ms, rounding_mode))
             elif field_lower == 'end':
                 # ROUNDING HAPPENS HERE
-                values.append(_format_ass_time(event.end_ms))
+                values.append(_format_ass_time(event.end_ms, rounding_mode))
             elif field_lower == 'style':
                 values.append(event.style)
             elif field_lower in ('name', 'actor'):
@@ -296,7 +296,7 @@ def _write_aegisub_extradata(data: 'SubtitleData', lines: list) -> None:
     lines.append('')
 
 
-def _format_ass_time(ms: float) -> str:
+def _format_ass_time(ms: float, rounding: str) -> str:
     """
     Format float milliseconds to ASS timestamp.
 
@@ -309,8 +309,7 @@ def _format_ass_time(ms: float) -> str:
     Returns:
         ASS timestamp (H:MM:SS.cc)
     """
-    # Floor to centiseconds for consistency
-    total_cs = int(math.floor(ms / 10))
+    total_cs = _round_centiseconds(ms, rounding)
 
     # Ensure non-negative
     if total_cs < 0:
@@ -324,3 +323,14 @@ def _format_ass_time(ms: float) -> str:
     hours = total_minutes // 60
 
     return f"{hours}:{minutes:02d}:{seconds:02d}.{cs:02d}"
+
+
+def _round_centiseconds(ms: float, rounding: str) -> int:
+    """Round milliseconds to centiseconds based on rounding mode."""
+    mode = (rounding or 'floor').lower()
+    value = ms / 10
+    if mode == 'ceil':
+        return int(math.ceil(value))
+    if mode == 'round':
+        return int(round(value))
+    return int(math.floor(value))
