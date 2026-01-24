@@ -10,6 +10,6 @@ mod jobs;
 mod media;
 
 // Re-export all public types
-pub use enums::{AnalysisMode, JobStatus, SnapMode, TrackType};
+pub use enums::{AnalysisMode, FilteringMethod, JobStatus, SnapMode, TrackType};
 pub use jobs::{Delays, JobResult, JobSpec, MergePlan, PlanItem};
 pub use media::{Attachment, StreamProps, Track};

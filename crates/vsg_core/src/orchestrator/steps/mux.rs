@@ -39,8 +39,15 @@ impl MuxStep {
     }
 
     /// Build the output file path.
+    ///
+    /// Uses the source1 filename (e.g., movie.mkv -> output/movie.mkv)
     fn output_path(&self, ctx: &Context) -> PathBuf {
-        let filename = format!("{}_synced.mkv", ctx.job_name);
+        // Get filename from Source 1, fallback to job_name.mkv
+        let filename = ctx
+            .primary_source()
+            .and_then(|p| p.file_name())
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| format!("{}.mkv", ctx.job_name));
         ctx.output_dir.join(filename)
     }
 

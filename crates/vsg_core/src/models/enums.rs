@@ -42,6 +42,31 @@ impl std::fmt::Display for AnalysisMode {
     }
 }
 
+/// Audio filtering method for correlation analysis.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum FilteringMethod {
+    /// No filtering applied.
+    #[default]
+    None,
+    /// Low-pass filter.
+    LowPass,
+    /// Band-pass filter.
+    BandPass,
+    /// High-pass filter.
+    HighPass,
+}
+
+impl std::fmt::Display for FilteringMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FilteringMethod::None => write!(f, "None"),
+            FilteringMethod::LowPass => write!(f, "Low Pass"),
+            FilteringMethod::BandPass => write!(f, "Band Pass"),
+            FilteringMethod::HighPass => write!(f, "High Pass"),
+        }
+    }
+}
+
 /// Mode for snapping chapters to keyframes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

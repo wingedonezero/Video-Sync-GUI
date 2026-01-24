@@ -114,6 +114,32 @@ impl ConfigManager {
         Ok(())
     }
 
+    /// Ensure all configured directories exist.
+    ///
+    /// Creates output, temp, and logs directories if they don't exist.
+    /// Should be called after `load_or_create()`.
+    pub fn ensure_dirs_exist(&self) -> ConfigResult<()> {
+        let dirs = [
+            &self.settings.paths.output_folder,
+            &self.settings.paths.temp_root,
+            &self.settings.paths.logs_folder,
+        ];
+
+        for dir in dirs {
+            let path = PathBuf::from(dir);
+            if !path.exists() {
+                fs::create_dir_all(&path)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get the logs folder path.
+    pub fn logs_folder(&self) -> PathBuf {
+        PathBuf::from(&self.settings.paths.logs_folder)
+    }
+
     /// Parse and validate config content.
     fn parse_and_validate(&self, content: &str) -> ConfigResult<Settings> {
         let settings: Settings = toml::from_str(content)?;

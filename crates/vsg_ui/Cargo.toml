@@ -13,11 +13,11 @@ path = "src/main.rs"
 
 [dependencies]
 vsg_core = { path = "../vsg_core" }
-slint = "1.14"
+slint = "1.14.1"
 serde = { workspace = true }
 serde_json = { workspace = true }
-rfd = "0.15"
-dirs = "5.0"
+rfd = "0.17.2"
+tracing = "0.1.44"
 
 [build-dependencies]
-slint-build = "1.14"
+slint-build = "1.14.1"
