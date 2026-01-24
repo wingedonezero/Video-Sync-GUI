@@ -221,7 +221,11 @@ class SubtitlesStep:
             )
 
             if sync_result and sync_result.success:
-                item.frame_adjusted = True
+                # Only set frame_adjusted if sync actually modified events
+                # time-based mode with mkvmerge returns events_affected=0
+                # because it relies on mkvmerge --sync to apply the delay
+                if sync_result.events_affected > 0:
+                    item.frame_adjusted = True
                 if hasattr(sync_result, 'details'):
                     item.framelocked_stats = sync_result.details
 
