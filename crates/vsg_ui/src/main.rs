@@ -58,14 +58,6 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
-    // Browse Source 4
-    let window_weak = main_window.as_weak();
-    main_window.on_browse_source4(move || {
-        if let Some(window) = window_weak.upgrade() {
-            append_log(&window, "Browse Source 4 clicked (file dialog not yet implemented)");
-        }
-    });
-
     // Analyze Only button
     let window_weak = main_window.as_weak();
     main_window.on_analyze_only_clicked(move || {
@@ -90,11 +82,6 @@ fn main() -> Result<(), slint::PlatformError> {
                 append_log(&window, &format!("Source 3: {}", source3));
             }
 
-            let source4 = window.get_source4_path();
-            if !source4.is_empty() {
-                append_log(&window, &format!("Source 4: {}", source4));
-            }
-
             // Simulate progress
             window.set_progress_value(50.0);
             append_log(&window, "Analysis step not yet implemented - using stub");
@@ -103,9 +90,6 @@ fn main() -> Result<(), slint::PlatformError> {
             window.set_delay_source2("0 ms".into());
             if !source3.is_empty() {
                 window.set_delay_source3("0 ms".into());
-            }
-            if !source4.is_empty() {
-                window.set_delay_source4("0 ms".into());
             }
 
             window.set_progress_value(100.0);

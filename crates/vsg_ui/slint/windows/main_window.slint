@@ -2,8 +2,10 @@ import { VerticalBox, HorizontalBox, Button, LineEdit, TextEdit, GroupBox, Check
 
 export component MainWindow inherits Window {
     title: "Video/Audio Sync & Merge";
-    min-width: 800px;
-    min-height: 600px;
+    min-width: 850px;
+    min-height: 550px;
+    preferred-width: 850px;
+    preferred-height: 550px;
 
     // Properties that Rust can read/write
     in-out property <string> log-text: "";
@@ -11,11 +13,10 @@ export component MainWindow inherits Window {
     in-out property <float> progress-value: 0;
     in-out property <bool> archive-logs: true;
 
-    // Source paths
+    // Source paths (only 3 inputs, Source 4 is results-only)
     in-out property <string> source1-path: "";
     in-out property <string> source2-path: "";
     in-out property <string> source3-path: "";
-    in-out property <string> source4-path: "";
 
     // Latest job results (delays in ms, empty string = not calculated)
     in-out property <string> delay-source2: "";
@@ -28,12 +29,11 @@ export component MainWindow inherits Window {
     callback browse-source1();
     callback browse-source2();
     callback browse-source3();
-    callback browse-source4();
     callback analyze-only-clicked();
 
     VerticalBox {
         padding: 8px;
-        spacing: 6px;
+        spacing: 4px;
 
         // Settings button (top left)
         HorizontalLayout {
@@ -49,8 +49,8 @@ export component MainWindow inherits Window {
             title: "Main Workflow";
 
             VerticalBox {
-                padding: 8px;
-                spacing: 6px;
+                padding: 6px;
+                spacing: 4px;
 
                 Button {
                     text: "Open Job Queue for Merging...";
@@ -70,7 +70,7 @@ export component MainWindow inherits Window {
             title: "Quick Analysis (Analyze Only)";
 
             VerticalBox {
-                padding: 8px;
+                padding: 6px;
                 spacing: 4px;
 
                 // Source 1 (Reference)
@@ -127,24 +127,6 @@ export component MainWindow inherits Window {
                     }
                 }
 
-                // Source 4
-                HorizontalLayout {
-                    spacing: 6px;
-                    Text {
-                        text: "Source 4:";
-                        vertical-alignment: center;
-                        min-width: 110px;
-                    }
-                    LineEdit {
-                        text <=> source4-path;
-                        horizontal-stretch: 1;
-                    }
-                    Button {
-                        text: "Browse...";
-                        clicked => { browse-source4(); }
-                    }
-                }
-
                 // Analyze Only button (right-aligned)
                 HorizontalLayout {
                     alignment: end;
@@ -178,7 +160,7 @@ export component MainWindow inherits Window {
             title: "Latest Job Results";
 
             HorizontalLayout {
-                padding: 6px;
+                padding: 4px;
                 spacing: 16px;
 
                 Text {
@@ -215,10 +197,11 @@ export component MainWindow inherits Window {
             }
         }
 
-        // Log Section
+        // Log Section - should expand to fill remaining space
         GroupBox {
             title: "Log";
             vertical-stretch: 1;
+            min-height: 150px;
 
             TextEdit {
                 text <=> log-text;
