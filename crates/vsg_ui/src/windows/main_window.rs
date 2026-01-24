@@ -5,7 +5,9 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
+use std::thread;
 
 use slint::ComponentHandle;
 use vsg_core::config::{ConfigManager, Settings};
@@ -176,6 +178,21 @@ fn setup_source_path_changed(main_window: &MainWindow) {
     });
 }
 
+/// Messages sent from background analysis thread to UI.
+enum AnalysisMessage {
+    /// Log message to append.
+    Log(String),
+    /// Progress update (0-100).
+    Progress(f32),
+    /// Analysis completed successfully.
+    Complete {
+        delay_source2_ms: Option<i64>,
+        delay_source3_ms: Option<i64>,
+    },
+    /// Analysis failed.
+    Failed(String),
+}
+
 /// Set up the Analyze Only button handler.
 fn setup_analyze_only_button(main_window: &MainWindow, config: Arc<Mutex<ConfigManager>>) {
     let window_weak = main_window.as_weak();
@@ -215,56 +232,107 @@ fn setup_analyze_only_button(main_window: &MainWindow, config: Arc<Mutex<ConfigM
                 cfg.settings().clone()
             };
 
-            // Create log buffer for collecting pipeline output
-            let log_buffer: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-            let log_buffer_clone = Arc::clone(&log_buffer);
+            // Create channel for communication with background thread
+            let (tx, rx) = mpsc::channel::<AnalysisMessage>();
 
-            // Create callback that collects log messages
-            let log_callback: GuiLogCallback = Box::new(move |msg: &str| {
-                let mut buffer = log_buffer_clone.lock().unwrap();
-                buffer.push(msg.to_string());
+            // Spawn background thread for analysis
+            thread::spawn(move || {
+                // Create callback that sends log messages to UI thread
+                let tx_log = tx.clone();
+                let log_callback: GuiLogCallback = Box::new(move |msg: &str| {
+                    let _ = tx_log.send(AnalysisMessage::Log(msg.to_string()));
+                });
+
+                // Send initial progress
+                let _ = tx.send(AnalysisMessage::Progress(10.0));
+
+                // Run the analysis pipeline
+                let result = run_analyze_only(job_spec, settings, log_callback);
+
+                // Send results
+                if result.success {
+                    let _ = tx.send(AnalysisMessage::Complete {
+                        delay_source2_ms: result.delay_source2_ms,
+                        delay_source3_ms: result.delay_source3_ms,
+                    });
+                } else {
+                    let error_msg = result.error.unwrap_or_else(|| "Unknown error".to_string());
+                    let _ = tx.send(AnalysisMessage::Failed(error_msg));
+                }
             });
 
-            window.set_progress_value(25.0);
+            // Set up timer to poll for messages from background thread
+            let window_weak_timer = window.as_weak();
+            let timer = slint::Timer::default();
+            let rx = Arc::new(Mutex::new(Some(rx)));
+            let rx_clone = Arc::clone(&rx);
 
-            // Run the analysis pipeline
-            let result = run_analyze_only(job_spec, settings, log_callback);
+            timer.start(
+                slint::TimerMode::Repeated,
+                std::time::Duration::from_millis(50),
+                move || {
+                    if let Some(window) = window_weak_timer.upgrade() {
+                        let mut rx_guard = rx_clone.lock().unwrap();
+                        if let Some(ref receiver) = *rx_guard {
+                            // Process all pending messages
+                            loop {
+                                match receiver.try_recv() {
+                                    Ok(AnalysisMessage::Log(msg)) => {
+                                        append_log(&window, &msg);
+                                    }
+                                    Ok(AnalysisMessage::Progress(pct)) => {
+                                        window.set_progress_value(pct);
+                                    }
+                                    Ok(AnalysisMessage::Complete { delay_source2_ms, delay_source3_ms }) => {
+                                        if let Some(delay_ms) = delay_source2_ms {
+                                            let delay_str = format!("{} ms", delay_ms);
+                                            window.set_delay_source2(delay_str.into());
+                                            append_log(&window, &format!("Source 2 delay: {} ms", delay_ms));
+                                        }
 
-            window.set_progress_value(75.0);
+                                        if let Some(delay_ms) = delay_source3_ms {
+                                            let delay_str = format!("{} ms", delay_ms);
+                                            window.set_delay_source3(delay_str.into());
+                                            append_log(&window, &format!("Source 3 delay: {} ms", delay_ms));
+                                        }
 
-            // Append collected log messages to UI
-            {
-                let buffer = log_buffer.lock().unwrap();
-                for msg in buffer.iter() {
-                    append_log(&window, msg);
-                }
-            }
+                                        window.set_progress_value(100.0);
+                                        window.set_status_text("Ready".into());
+                                        append_log(&window, "=== Analysis Complete ===");
 
-            // Update UI with results
-            if result.success {
-                // Show calculated delays
-                if let Some(delay_ms) = result.delay_source2_ms {
-                    let delay_str = format!("{} ms", delay_ms);
-                    window.set_delay_source2(delay_str.into());
-                    append_log(&window, &format!("Source 2 delay: {} ms", delay_ms));
-                }
+                                        // Stop the timer by dropping the receiver
+                                        *rx_guard = None;
+                                        return;
+                                    }
+                                    Ok(AnalysisMessage::Failed(error_msg)) => {
+                                        append_log(&window, &format!("[ERROR] {}", error_msg));
+                                        window.set_progress_value(0.0);
+                                        window.set_status_text("Analysis Failed".into());
 
-                if let Some(delay_ms) = result.delay_source3_ms {
-                    let delay_str = format!("{} ms", delay_ms);
-                    window.set_delay_source3(delay_str.into());
-                    append_log(&window, &format!("Source 3 delay: {} ms", delay_ms));
-                }
+                                        // Stop the timer
+                                        *rx_guard = None;
+                                        return;
+                                    }
+                                    Err(mpsc::TryRecvError::Empty) => {
+                                        // No more messages, break the loop
+                                        break;
+                                    }
+                                    Err(mpsc::TryRecvError::Disconnected) => {
+                                        // Channel closed unexpectedly
+                                        append_log(&window, "[ERROR] Analysis thread disconnected unexpectedly");
+                                        window.set_status_text("Analysis Failed".into());
+                                        *rx_guard = None;
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+            );
 
-                window.set_progress_value(100.0);
-                window.set_status_text("Ready".into());
-                append_log(&window, "=== Analysis Complete ===");
-            } else {
-                // Show error
-                let error_msg = result.error.unwrap_or_else(|| "Unknown error".to_string());
-                append_log(&window, &format!("[ERROR] {}", error_msg));
-                window.set_progress_value(0.0);
-                window.set_status_text("Analysis Failed".into());
-            }
+            // Keep timer alive by storing it (it will be dropped when analysis completes)
+            // Note: The timer keeps itself alive via the closure
         }
     });
 }

@@ -34,6 +34,11 @@ impl AudioData {
         self.samples.is_empty()
     }
 
+    /// Get the duration in seconds.
+    pub fn duration(&self) -> f64 {
+        self.duration_secs
+    }
+
     /// Extract a chunk of audio starting at the given time offset.
     ///
     /// Returns None if the chunk would extend past the end of the audio.

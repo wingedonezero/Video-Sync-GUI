@@ -10,7 +10,7 @@ use std::path::Path;
 
 use crate::config::AnalysisSettings;
 
-use super::ffmpeg::{extract_audio_segment, get_duration, DEFAULT_ANALYSIS_SAMPLE_RATE};
+use super::ffmpeg::{extract_full_audio, get_duration, DEFAULT_ANALYSIS_SAMPLE_RATE};
 use super::methods::{CorrelationMethod, Scc};
 use super::peak_fit::find_and_fit_peak;
 use super::tracks::{find_track_by_language, get_audio_tracks};
@@ -129,14 +129,14 @@ impl Analyzer {
             other_track_idx.map_or("default".to_string(), |i| i.to_string())
         );
 
-        // Get durations
+        // Get durations first (fast ffprobe call)
         let ref_duration = get_duration(reference_path)?;
         let other_duration = get_duration(other_path)?;
 
         // Use shorter duration for chunk calculation
         let effective_duration = ref_duration.min(other_duration);
 
-        tracing::debug!(
+        tracing::info!(
             "Reference duration: {:.2}s, Other duration: {:.2}s, Effective: {:.2}s",
             ref_duration,
             other_duration,
@@ -153,29 +153,55 @@ impl Analyzer {
         }
 
         tracing::info!(
-            "Analyzing {} chunks of {:.1}s each",
+            "Will analyze {} chunks of {:.1}s each",
             chunk_positions.len(),
             self.chunk_duration
         );
 
-        // Analyze each chunk
+        // DECODE FULL AUDIO ONCE (not per-chunk!)
+        tracing::info!("Decoding reference audio...");
+        let ref_audio = extract_full_audio(
+            reference_path,
+            self.sample_rate,
+            self.use_soxr,
+            ref_track_idx,
+        )?;
+
+        tracing::info!("Decoding {} audio...", source_name);
+        let other_audio = extract_full_audio(
+            other_path,
+            self.sample_rate,
+            self.use_soxr,
+            other_track_idx,
+        )?;
+
+        tracing::info!("Audio decoded. Analyzing {} chunks...", chunk_positions.len());
+
+        // Analyze each chunk from the in-memory audio data
         let mut chunk_results = Vec::with_capacity(chunk_positions.len());
 
         for (idx, &start_time) in chunk_positions.iter().enumerate() {
-            tracing::debug!("Processing chunk {} at {:.2}s", idx, start_time);
-
-            match self.analyze_chunk(reference_path, other_path, start_time, idx, ref_track_idx, other_track_idx) {
+            match self.analyze_chunk_from_memory(&ref_audio, &other_audio, start_time, idx) {
                 Ok(result) => {
-                    tracing::debug!(
-                        "Chunk {}: delay={:.2}ms, correlation={:.3}",
-                        idx,
+                    // Detailed per-chunk logging (like Python original)
+                    let status = if result.valid { "OK" } else { "LOW" };
+                    tracing::info!(
+                        "  Chunk {:2}/{}: delay={:+8.2}ms  corr={:.3}  [{}]",
+                        idx + 1,
+                        chunk_positions.len(),
                         result.correlation.delay_ms,
-                        result.correlation.correlation_peak
+                        result.correlation.correlation_peak,
+                        status
                     );
                     chunk_results.push(result);
                 }
                 Err(e) => {
-                    tracing::warn!("Chunk {} failed: {}", idx, e);
+                    tracing::warn!(
+                        "  Chunk {:2}/{}: FAILED - {}",
+                        idx + 1,
+                        chunk_positions.len(),
+                        e
+                    );
                     chunk_results.push(ChunkResult::invalid(idx, start_time, e.to_string()));
                 }
             }
@@ -236,43 +262,34 @@ impl Analyzer {
         Ok(find_track_by_language(&tracks, language))
     }
 
-    /// Analyze a single chunk.
-    fn analyze_chunk(
+    /// Analyze a single chunk from in-memory audio data.
+    fn analyze_chunk_from_memory(
         &self,
-        reference_path: &Path,
-        other_path: &Path,
+        ref_audio: &super::types::AudioData,
+        other_audio: &super::types::AudioData,
         start_time: f64,
         chunk_index: usize,
-        ref_track_idx: Option<usize>,
-        other_track_idx: Option<usize>,
     ) -> AnalysisResult<ChunkResult> {
-        // Extract audio segments
-        let ref_audio = extract_audio_segment(
-            reference_path,
-            start_time,
-            self.chunk_duration,
-            self.sample_rate,
-            self.use_soxr,
-            ref_track_idx,
-        )?;
-
-        let other_audio = extract_audio_segment(
-            other_path,
-            start_time,
-            self.chunk_duration,
-            self.sample_rate,
-            self.use_soxr,
-            other_track_idx,
-        )?;
-
-        // Create chunks
+        // Extract chunks from the in-memory audio data
         let ref_chunk = ref_audio
-            .extract_chunk(0.0, self.chunk_duration)
-            .ok_or_else(|| AnalysisError::InvalidAudio("Failed to create reference chunk".to_string()))?;
+            .extract_chunk(start_time, self.chunk_duration)
+            .ok_or_else(|| {
+                AnalysisError::InvalidAudio(format!(
+                    "Failed to extract reference chunk at {:.2}s (audio length: {:.2}s)",
+                    start_time,
+                    ref_audio.duration()
+                ))
+            })?;
 
         let other_chunk = other_audio
-            .extract_chunk(0.0, self.chunk_duration)
-            .ok_or_else(|| AnalysisError::InvalidAudio("Failed to create other chunk".to_string()))?;
+            .extract_chunk(start_time, self.chunk_duration)
+            .ok_or_else(|| {
+                AnalysisError::InvalidAudio(format!(
+                    "Failed to extract other chunk at {:.2}s (audio length: {:.2}s)",
+                    start_time,
+                    other_audio.duration()
+                ))
+            })?;
 
         // Correlate
         let correlation_result = if self.use_peak_fit {
