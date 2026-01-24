@@ -1,9 +1,13 @@
 //! Video Sync GUI - Main entry point
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use vsg_core::config::{ConfigManager, Settings};
+use vsg_core::logging::{GuiLogCallback, JobLogger, LogConfig};
+use vsg_core::models::JobSpec;
+use vsg_core::orchestrator::{AnalyzeStep, Context, JobState, Pipeline};
 
 // Include the Slint-generated code
 slint::include_modules!();
@@ -173,15 +177,18 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // Analyze Only button
     let window_weak = main_window.as_weak();
+    let config_for_analyze = Arc::clone(&config);
     main_window.on_analyze_only_clicked(move || {
         if let Some(window) = window_weak.upgrade() {
-            let source1 = window.get_source1_path();
-            let source2 = window.get_source2_path();
+            let source1 = window.get_source1_path().to_string();
+            let source2 = window.get_source2_path().to_string();
 
             if source1.is_empty() || source2.is_empty() {
                 append_log(&window, "[WARNING] Please select at least Source 1 and Source 2");
                 return;
             }
+
+            let source3 = window.get_source3_path().to_string();
 
             window.set_status_text("Analyzing...".into());
             window.set_progress_value(0.0);
@@ -189,25 +196,69 @@ fn main() -> Result<(), slint::PlatformError> {
             append_log(&window, "=== Starting Analysis ===");
             append_log(&window, &format!("Source 1: {}", source1));
             append_log(&window, &format!("Source 2: {}", source2));
-
-            let source3 = window.get_source3_path();
             if !source3.is_empty() {
                 append_log(&window, &format!("Source 3: {}", source3));
             }
 
-            // Simulate progress
-            window.set_progress_value(50.0);
-            append_log(&window, "Analysis step not yet implemented - using stub");
+            // Build job spec
+            let job_spec = build_job_spec(&source1, &source2, &source3);
 
-            // Show stub results
-            window.set_delay_source2("0 ms".into());
-            if !source3.is_empty() {
-                window.set_delay_source3("0 ms".into());
+            // Get settings
+            let settings = {
+                let cfg = config_for_analyze.lock().unwrap();
+                cfg.settings().clone()
+            };
+
+            // Create log buffer for collecting pipeline output
+            let log_buffer: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+            let log_buffer_clone = Arc::clone(&log_buffer);
+
+            // Create callback that collects log messages
+            let log_callback: GuiLogCallback = Box::new(move |msg: &str| {
+                let mut buffer = log_buffer_clone.lock().unwrap();
+                buffer.push(msg.to_string());
+            });
+
+            window.set_progress_value(25.0);
+
+            // Run the analysis pipeline
+            let result = run_analyze_only(job_spec, settings, log_callback);
+
+            window.set_progress_value(75.0);
+
+            // Append collected log messages to UI
+            {
+                let buffer = log_buffer.lock().unwrap();
+                for msg in buffer.iter() {
+                    append_log(&window, msg);
+                }
             }
 
-            window.set_progress_value(100.0);
-            window.set_status_text("Ready".into());
-            append_log(&window, "=== Analysis Complete ===");
+            // Update UI with results
+            if result.success {
+                // Show calculated delays
+                if let Some(delay_ms) = result.delay_source2_ms {
+                    let delay_str = format!("{} ms", delay_ms);
+                    window.set_delay_source2(delay_str.into());
+                    append_log(&window, &format!("Source 2 delay: {} ms", delay_ms));
+                }
+
+                if let Some(delay_ms) = result.delay_source3_ms {
+                    let delay_str = format!("{} ms", delay_ms);
+                    window.set_delay_source3(delay_str.into());
+                    append_log(&window, &format!("Source 3 delay: {} ms", delay_ms));
+                }
+
+                window.set_progress_value(100.0);
+                window.set_status_text("Ready".into());
+                append_log(&window, "=== Analysis Complete ===");
+            } else {
+                // Show error
+                let error_msg = result.error.unwrap_or_else(|| "Unknown error".to_string());
+                append_log(&window, &format!("[ERROR] {}", error_msg));
+                window.set_progress_value(0.0);
+                window.set_status_text("Analysis Failed".into());
+            }
         }
     });
 
@@ -371,4 +422,118 @@ fn read_settings_from_window(settings: &SettingsWindow, cfg: &mut Settings) {
     cfg.postprocess.disable_track_stats_tags = settings.get_disable_track_stats();
     cfg.postprocess.disable_header_compression = settings.get_disable_header_compression();
     cfg.postprocess.apply_dialog_norm = settings.get_apply_dialog_norm();
+}
+
+/// Build a JobSpec from UI source paths.
+fn build_job_spec(source1: &str, source2: &str, source3: &str) -> JobSpec {
+    let mut sources = HashMap::new();
+
+    if !source1.is_empty() {
+        sources.insert("Source 1".to_string(), PathBuf::from(source1));
+    }
+    if !source2.is_empty() {
+        sources.insert("Source 2".to_string(), PathBuf::from(source2));
+    }
+    if !source3.is_empty() {
+        sources.insert("Source 3".to_string(), PathBuf::from(source3));
+    }
+
+    JobSpec::new(sources)
+}
+
+/// Create LogConfig from application Settings.
+fn log_config_from_settings(settings: &Settings) -> LogConfig {
+    LogConfig {
+        compact: settings.logging.compact,
+        progress_step: settings.logging.progress_step,
+        error_tail: settings.logging.error_tail as usize,
+        ..LogConfig::default()
+    }
+}
+
+/// Result of running analysis.
+struct AnalysisResult {
+    /// Delay for Source 2 in milliseconds.
+    delay_source2_ms: Option<i64>,
+    /// Delay for Source 3 in milliseconds.
+    delay_source3_ms: Option<i64>,
+    /// Whether analysis succeeded.
+    success: bool,
+    /// Error message if failed.
+    error: Option<String>,
+}
+
+/// Run the analyze-only pipeline.
+///
+/// This creates the pipeline infrastructure and runs just the Analyze step.
+fn run_analyze_only(
+    job_spec: JobSpec,
+    settings: Settings,
+    log_callback: GuiLogCallback,
+) -> AnalysisResult {
+    // Generate job name from primary source
+    let job_name = job_spec
+        .sources
+        .get("Source 1")
+        .map(|p| {
+            p.file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "job".to_string())
+        })
+        .unwrap_or_else(|| "job".to_string());
+
+    // Set up directories
+    let work_dir = PathBuf::from(&settings.paths.temp_root).join(&job_name);
+    let output_dir = PathBuf::from(&settings.paths.output_folder);
+    let logs_dir = PathBuf::from(&settings.paths.logs_folder);
+
+    // Create logger with GUI callback
+    let log_config = log_config_from_settings(&settings);
+    let logger = match JobLogger::new(&job_name, &logs_dir, log_config, Some(log_callback)) {
+        Ok(l) => Arc::new(l),
+        Err(e) => {
+            return AnalysisResult {
+                delay_source2_ms: None,
+                delay_source3_ms: None,
+                success: false,
+                error: Some(format!("Failed to create logger: {}", e)),
+            };
+        }
+    };
+
+    // Create context
+    let ctx = Context::new(job_spec, settings, &job_name, work_dir, output_dir, logger.clone());
+
+    // Create job state
+    let mut state = JobState::new(&job_name);
+
+    // Create pipeline with just the Analyze step
+    let pipeline = Pipeline::new().with_step(AnalyzeStep::new());
+
+    // Run the pipeline
+    match pipeline.run(&ctx, &mut state) {
+        Ok(_result) => {
+            // Extract delays from analysis output
+            let (delay2, delay3) = if let Some(ref analysis) = state.analysis {
+                let d2 = analysis.delays.source_delays_ms.get("Source 2").copied();
+                let d3 = analysis.delays.source_delays_ms.get("Source 3").copied();
+                (d2, d3)
+            } else {
+                (None, None)
+            };
+
+            AnalysisResult {
+                delay_source2_ms: delay2,
+                delay_source3_ms: delay3,
+                success: true,
+                error: None,
+            }
+        }
+        Err(e) => AnalysisResult {
+            delay_source2_ms: None,
+            delay_source3_ms: None,
+            success: false,
+            error: Some(format!("Pipeline failed: {}", e)),
+        },
+    }
 }
