@@ -1498,6 +1498,17 @@ class SubtitleSyncTab(QWidget):
         )
         specific_layout.addRow("", self.widgets['frame_lock_submillisecond_precision'])
 
+        self.widgets['videotimestamps_snap_mode'] = QComboBox()
+        self.widgets['videotimestamps_snap_mode'].addItems(['start', 'exact'])
+        self.widgets['videotimestamps_snap_mode'].setToolTip(
+            "Frame snapping mode for VideoTimestamps:\n\n"
+            "• start: Snap to the exact frame START boundary (current behavior)\n"
+            "• exact: Snap to the frame's display window boundary\n\n"
+            "Use exact if you see consistent 1-3 frame offsets on VFR-like sources.\n"
+            "Start is typically safer for CFR sources."
+        )
+        specific_layout.addRow("Frame Snap Mode:", self.widgets['videotimestamps_snap_mode'])
+
         # --- Correlation-frame-snap options ---
         self.widgets['correlation_snap_fallback_mode'] = QComboBox()
         self.widgets['correlation_snap_fallback_mode'].addItems(['snap-to-frame', 'use-raw', 'abort'])
@@ -1576,6 +1587,7 @@ class SubtitleSyncTab(QWidget):
 
         # Timebase-frame-locked specific
         self.widgets['frame_lock_submillisecond_precision'].setEnabled(is_frame_locked)
+        self.widgets['videotimestamps_snap_mode'].setEnabled(is_frame_locked)
 
         # Duration-align specific
         self.widgets['duration_align_validate'].setEnabled(is_duration_align)
