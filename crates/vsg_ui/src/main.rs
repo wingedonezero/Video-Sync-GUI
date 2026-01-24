@@ -232,18 +232,28 @@ fn pick_video_file(title: &str) -> Option<PathBuf> {
 }
 
 /// Clean up a file URL (from drag-drop) to a regular path
-/// Handles file:// URLs and URL-encoded characters
+/// Handles text/uri-list format (multiple URIs separated by newlines)
+/// and file:// URLs with URL-encoded characters
 fn clean_file_url(url: &str) -> String {
-    let path = if url.starts_with("file://") {
+    // text/uri-list can contain multiple URIs separated by \r\n or \n
+    // Lines starting with # are comments (per RFC 2483)
+    // We take the first valid file:// URI
+    let first_uri = url
+        .lines()
+        .map(|line| line.trim())
+        .find(|line| !line.is_empty() && !line.starts_with('#'))
+        .unwrap_or("");
+
+    let path = if first_uri.starts_with("file://") {
         // Remove file:// prefix
-        let without_prefix = &url[7..];
+        let without_prefix = &first_uri[7..];
         // URL decode (handle %20 for spaces, etc.)
         percent_decode(without_prefix)
     } else {
-        url.to_string()
+        first_uri.to_string()
     };
 
-    // Trim any trailing whitespace/newlines
+    // Trim any trailing whitespace
     path.trim().to_string()
 }
 
