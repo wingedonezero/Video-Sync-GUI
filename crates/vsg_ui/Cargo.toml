@@ -16,6 +16,8 @@ vsg_core = { path = "../vsg_core" }
 slint = "1.14"
 serde = { workspace = true }
 serde_json = { workspace = true }
+rfd = "0.15"
+dirs = "5.0"
 
 [build-dependencies]
 slint-build = "1.14"
