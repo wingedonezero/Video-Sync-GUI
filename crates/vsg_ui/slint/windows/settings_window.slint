@@ -2,8 +2,11 @@ import { VerticalBox, HorizontalBox, Button, LineEdit, GroupBox, CheckBox, SpinB
 
 export component SettingsWindow inherits Window {
     title: "Settings";
-    min-width: 700px;
+    min-width: 750px;
     min-height: 500px;
+    preferred-width: 800px;
+    preferred-height: 550px;
+    default-font-size: 13px;
 
     // Storage settings
     in-out property <string> output-folder: "sync_output";
@@ -163,7 +166,9 @@ export component SettingsWindow inherits Window {
                                     value <=> chunk-count;
                                     minimum: 1;
                                     maximum: 100;
+                                    max-width: 100px;
                                 }
+                                Rectangle { horizontal-stretch: 1; }
                             }
 
                             HorizontalLayout {
@@ -177,7 +182,9 @@ export component SettingsWindow inherits Window {
                                     value <=> chunk-duration;
                                     minimum: 5;
                                     maximum: 60;
+                                    max-width: 100px;
                                 }
+                                Rectangle { horizontal-stretch: 1; }
                             }
 
                             HorizontalLayout {
@@ -192,7 +199,9 @@ export component SettingsWindow inherits Window {
                                     minimum: 1;
                                     maximum: 100;
                                     edited(v) => { min-match-pct = v; }
+                                    max-width: 100px;
                                 }
+                                Rectangle { horizontal-stretch: 1; }
                             }
                         }
                     }
@@ -253,7 +262,9 @@ export component SettingsWindow inherits Window {
                                     minimum: 0;
                                     maximum: 50;
                                     edited(v) => { scan-start-pct = v; }
+                                    max-width: 100px;
                                 }
+                                Rectangle { horizontal-stretch: 1; }
                             }
 
                             HorizontalLayout {
@@ -268,7 +279,9 @@ export component SettingsWindow inherits Window {
                                     minimum: 50;
                                     maximum: 100;
                                     edited(v) => { scan-end-pct = v; }
+                                    max-width: 100px;
                                 }
+                                Rectangle { horizontal-stretch: 1; }
                             }
                         }
                     }
@@ -329,7 +342,9 @@ export component SettingsWindow inherits Window {
                                     minimum: 50;
                                     maximum: 1000;
                                     enabled: chapter-snap;
+                                    max-width: 100px;
                                 }
+                                Rectangle { horizontal-stretch: 1; }
                             }
 
                             CheckBox {
@@ -416,7 +431,9 @@ export component SettingsWindow inherits Window {
                                     value <=> progress-step;
                                     minimum: 1;
                                     maximum: 50;
+                                    max-width: 100px;
                                 }
+                                Rectangle { horizontal-stretch: 1; }
                             }
 
                             HorizontalLayout {
@@ -430,7 +447,9 @@ export component SettingsWindow inherits Window {
                                     value <=> error-tail;
                                     minimum: 5;
                                     maximum: 200;
+                                    max-width: 100px;
                                 }
+                                Rectangle { horizontal-stretch: 1; }
                             }
                         }
                     }
