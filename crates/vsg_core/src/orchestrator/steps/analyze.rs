@@ -80,8 +80,9 @@ impl PipelineStep for AnalyzeStep {
             ref_path.file_name().unwrap_or_default().to_string_lossy()
         ));
 
-        // Create analyzer from settings
-        let analyzer = Analyzer::from_settings(&ctx.settings.analysis);
+        // Create analyzer from settings with job logger for detailed progress
+        let analyzer = Analyzer::from_settings(&ctx.settings.analysis)
+            .with_logger(ctx.logger.clone());
 
         ctx.logger.info(&format!(
             "Method: SCC, SOXR: {}, Peak fit: {}",

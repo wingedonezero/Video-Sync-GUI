@@ -7,8 +7,10 @@
 //! 4. Aggregate results and calculate final delay
 
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::config::AnalysisSettings;
+use crate::logging::JobLogger;
 
 use super::ffmpeg::{extract_full_audio, get_duration, DEFAULT_ANALYSIS_SAMPLE_RATE};
 use super::methods::{CorrelationMethod, Scc};
@@ -43,6 +45,8 @@ pub struct Analyzer {
     lang_source1: Option<String>,
     /// Language filter for other sources.
     lang_others: Option<String>,
+    /// Optional job logger for progress messages (goes to job log, not app log).
+    logger: Option<Arc<JobLogger>>,
 }
 
 impl Analyzer {
@@ -60,6 +64,7 @@ impl Analyzer {
             min_correlation: 0.3,
             lang_source1: None,
             lang_others: None,
+            logger: None,
         }
     }
 
@@ -77,7 +82,15 @@ impl Analyzer {
             min_correlation: settings.min_match_pct / 100.0, // Convert from percentage
             lang_source1: settings.lang_source1.clone(),
             lang_others: settings.lang_others.clone(),
+            logger: None,
         }
+    }
+
+    /// Set the job logger for progress messages.
+    /// Messages logged here go to the job log (GUI), not the app log.
+    pub fn with_logger(mut self, logger: Arc<JobLogger>) -> Self {
+        self.logger = Some(logger);
+        self
     }
 
     /// Set the correlation method.
@@ -98,6 +111,15 @@ impl Analyzer {
         self
     }
 
+    /// Log a message to the job log (if logger is set).
+    /// These messages go to the job log for detailed per-chunk progress.
+    /// They do NOT go to the app log (tracing) - that's for high-level app events.
+    fn log(&self, msg: &str) {
+        if let Some(ref logger) = self.logger {
+            logger.info(msg);
+        }
+    }
+
     /// Analyze the sync offset between reference and other source.
     ///
     /// # Arguments
@@ -113,21 +135,21 @@ impl Analyzer {
         other_path: &Path,
         source_name: &str,
     ) -> AnalysisResult<SourceAnalysisResult> {
-        tracing::info!(
+        self.log(&format!(
             "Analyzing {} vs reference using {}",
             source_name,
             self.method.name()
-        );
+        ));
 
         // Detect audio tracks and find matching language
         let ref_track_idx = self.find_audio_track(reference_path, self.lang_source1.as_deref())?;
         let other_track_idx = self.find_audio_track(other_path, self.lang_others.as_deref())?;
 
-        tracing::info!(
+        self.log(&format!(
             "Using audio tracks: reference={}, other={}",
             ref_track_idx.map_or("default".to_string(), |i| i.to_string()),
             other_track_idx.map_or("default".to_string(), |i| i.to_string())
-        );
+        ));
 
         // Get durations first (fast ffprobe call)
         let ref_duration = get_duration(reference_path)?;
@@ -136,12 +158,12 @@ impl Analyzer {
         // Use shorter duration for chunk calculation
         let effective_duration = ref_duration.min(other_duration);
 
-        tracing::info!(
+        self.log(&format!(
             "Reference duration: {:.2}s, Other duration: {:.2}s, Effective: {:.2}s",
             ref_duration,
             other_duration,
             effective_duration
-        );
+        ));
 
         // Calculate chunk positions
         let chunk_positions = self.calculate_chunk_positions(effective_duration);
@@ -152,14 +174,14 @@ impl Analyzer {
             ));
         }
 
-        tracing::info!(
+        self.log(&format!(
             "Will analyze {} chunks of {:.1}s each",
             chunk_positions.len(),
             self.chunk_duration
-        );
+        ));
 
         // DECODE FULL AUDIO ONCE (not per-chunk!)
-        tracing::info!("Decoding reference audio...");
+        self.log("Decoding reference audio...");
         let ref_audio = extract_full_audio(
             reference_path,
             self.sample_rate,
@@ -167,7 +189,7 @@ impl Analyzer {
             ref_track_idx,
         )?;
 
-        tracing::info!("Decoding {} audio...", source_name);
+        self.log(&format!("Decoding {} audio...", source_name));
         let other_audio = extract_full_audio(
             other_path,
             self.sample_rate,
@@ -175,7 +197,7 @@ impl Analyzer {
             other_track_idx,
         )?;
 
-        tracing::info!("Audio decoded. Analyzing {} chunks...", chunk_positions.len());
+        self.log(&format!("Audio decoded. Analyzing {} chunks...", chunk_positions.len()));
 
         // Analyze each chunk from the in-memory audio data
         let mut chunk_results = Vec::with_capacity(chunk_positions.len());
@@ -185,23 +207,23 @@ impl Analyzer {
                 Ok(result) => {
                     // Detailed per-chunk logging (like Python original)
                     let status = if result.valid { "OK" } else { "LOW" };
-                    tracing::info!(
+                    self.log(&format!(
                         "  Chunk {:2}/{}: delay={:+8.2}ms  corr={:.3}  [{}]",
                         idx + 1,
                         chunk_positions.len(),
                         result.correlation.delay_ms,
                         result.correlation.correlation_peak,
                         status
-                    );
+                    ));
                     chunk_results.push(result);
                 }
                 Err(e) => {
-                    tracing::warn!(
+                    self.log(&format!(
                         "  Chunk {:2}/{}: FAILED - {}",
                         idx + 1,
                         chunk_positions.len(),
                         e
-                    );
+                    ));
                     chunk_results.push(ChunkResult::invalid(idx, start_time, e.to_string()));
                 }
             }
@@ -356,16 +378,6 @@ impl Analyzer {
             .map(|r| r.correlation.correlation_peak)
             .sum::<f64>()
             / valid_count as f64;
-
-        tracing::info!(
-            "{}: median delay={:.2}ms, confidence={:.3}, valid={}/{}, drift={}",
-            source_name,
-            median_delay,
-            confidence,
-            valid_count,
-            total_chunks,
-            drift_detected
-        );
 
         Ok(SourceAnalysisResult {
             source_name: source_name.to_string(),
