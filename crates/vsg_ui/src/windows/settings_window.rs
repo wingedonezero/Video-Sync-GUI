@@ -3,8 +3,11 @@
 //! This module contains functions for populating and reading
 //! values from the settings window UI.
 
+use std::path::PathBuf;
+
+use slint::ComponentHandle;
 use vsg_core::config::Settings;
-use vsg_core::models::{AnalysisMode, SnapMode};
+use vsg_core::models::{AnalysisMode, FilteringMethod, SnapMode};
 
 use crate::ui::SettingsWindow;
 
@@ -35,6 +38,14 @@ pub fn populate_settings_window(settings: &SettingsWindow, cfg: &Settings) {
     settings.set_min_match_pct(cfg.analysis.min_match_pct as f32);
     settings.set_scan_start_pct(cfg.analysis.scan_start_pct as f32);
     settings.set_scan_end_pct(cfg.analysis.scan_end_pct as f32);
+    settings.set_filtering_method_index(match cfg.analysis.filtering_method {
+        FilteringMethod::None => 0,
+        FilteringMethod::LowPass => 1,
+        FilteringMethod::BandPass => 2,
+        FilteringMethod::HighPass => 3,
+    });
+    settings.set_use_soxr(cfg.analysis.use_soxr);
+    settings.set_audio_peak_fit(cfg.analysis.audio_peak_fit);
 
     // Chapters tab
     settings.set_chapter_rename(cfg.chapters.rename);
@@ -85,6 +96,14 @@ pub fn read_settings_from_window(settings: &SettingsWindow, cfg: &mut Settings) 
     cfg.analysis.min_match_pct = settings.get_min_match_pct() as f64;
     cfg.analysis.scan_start_pct = settings.get_scan_start_pct() as f64;
     cfg.analysis.scan_end_pct = settings.get_scan_end_pct() as f64;
+    cfg.analysis.filtering_method = match settings.get_filtering_method_index() {
+        0 => FilteringMethod::None,
+        1 => FilteringMethod::LowPass,
+        2 => FilteringMethod::BandPass,
+        _ => FilteringMethod::HighPass,
+    };
+    cfg.analysis.use_soxr = settings.get_use_soxr();
+    cfg.analysis.audio_peak_fit = settings.get_audio_peak_fit();
 
     // Chapters tab
     cfg.chapters.rename = settings.get_chapter_rename();
@@ -100,4 +119,42 @@ pub fn read_settings_from_window(settings: &SettingsWindow, cfg: &mut Settings) 
     cfg.postprocess.disable_track_stats_tags = settings.get_disable_track_stats();
     cfg.postprocess.disable_header_compression = settings.get_disable_header_compression();
     cfg.postprocess.apply_dialog_norm = settings.get_apply_dialog_norm();
+}
+
+/// Set up browse button callbacks for the settings window.
+pub fn setup_settings_browse_buttons(settings: &SettingsWindow) {
+    // Browse output folder
+    let settings_weak = settings.as_weak();
+    settings.on_browse_output(move || {
+        if let Some(s) = settings_weak.upgrade() {
+            if let Some(path) = pick_folder("Select Output Directory") {
+                s.set_output_folder(path.to_string_lossy().to_string().into());
+            }
+        }
+    });
+
+    // Browse temp folder
+    let settings_weak = settings.as_weak();
+    settings.on_browse_temp(move || {
+        if let Some(s) = settings_weak.upgrade() {
+            if let Some(path) = pick_folder("Select Temporary Directory") {
+                s.set_temp_root(path.to_string_lossy().to_string().into());
+            }
+        }
+    });
+
+    // Browse logs folder
+    let settings_weak = settings.as_weak();
+    settings.on_browse_logs(move || {
+        if let Some(s) = settings_weak.upgrade() {
+            if let Some(path) = pick_folder("Select Logs Directory") {
+                s.set_logs_folder(path.to_string_lossy().to_string().into());
+            }
+        }
+    });
+}
+
+/// Open a folder picker dialog.
+fn pick_folder(title: &str) -> Option<PathBuf> {
+    rfd::FileDialog::new().set_title(title).pick_folder()
 }

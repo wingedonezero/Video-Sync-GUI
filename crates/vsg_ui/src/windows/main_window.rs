@@ -14,7 +14,7 @@ use vsg_core::models::JobSpec;
 use vsg_core::orchestrator::{AnalyzeStep, Context, JobState, Pipeline};
 
 use crate::ui::{MainWindow, SettingsWindow};
-use crate::windows::settings_window::{populate_settings_window, read_settings_from_window};
+use crate::windows::settings_window::{populate_settings_window, read_settings_from_window, setup_settings_browse_buttons};
 
 /// Set up all callbacks and handlers for the main window.
 ///
@@ -54,6 +54,9 @@ fn setup_settings_button(main_window: &MainWindow, config: Arc<Mutex<ConfigManag
                         let cfg = config_clone.lock().unwrap();
                         populate_settings_window(&settings, cfg.settings());
                     }
+
+                    // Set up browse buttons
+                    setup_settings_browse_buttons(&settings);
 
                     // Wire up cancel button to close
                     let settings_weak = settings.as_weak();

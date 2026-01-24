@@ -30,6 +30,9 @@ export component SettingsWindow inherits Window {
     in-out property <float> min-match-pct: 5.0;
     in-out property <float> scan-start-pct: 5.0;
     in-out property <float> scan-end-pct: 95.0;
+    in-out property <int> filtering-method-index: 0;  // 0 = None, 1 = Low Pass, 2 = Band Pass, 3 = High Pass
+    in-out property <bool> use-soxr: true;
+    in-out property <bool> audio-peak-fit: true;
 
     // Chapter settings
     in-out property <bool> chapter-rename: false;
@@ -283,6 +286,48 @@ export component SettingsWindow inherits Window {
                                     max-width: 100px;
                                 }
                                 Rectangle { horizontal-stretch: 1; }
+                            }
+                        }
+                    }
+
+                    GroupBox {
+                        title: "Audio Preparation";
+
+                        VerticalBox {
+                            padding: 12px;
+                            spacing: 8px;
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Audio Filtering:";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                ComboBox {
+                                    model: ["None", "Low-Pass Filter", "Band-Pass Filter", "High-Pass Filter"];
+                                    current-index <=> filtering-method-index;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+                        }
+                    }
+
+                    GroupBox {
+                        title: "Advanced";
+
+                        VerticalBox {
+                            padding: 12px;
+                            spacing: 8px;
+
+                            CheckBox {
+                                text: "Use High-Quality Resampling (SoXR)";
+                                checked <=> use-soxr;
+                            }
+
+                            CheckBox {
+                                text: "Enable Sub-Sample Peak Fitting";
+                                checked <=> audio-peak-fit;
                             }
                         }
                     }
