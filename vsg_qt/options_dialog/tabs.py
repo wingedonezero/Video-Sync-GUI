@@ -1447,6 +1447,19 @@ class SubtitleSyncTab(QWidget):
         )
         specific_layout.addRow("Frame Rounding:", self.widgets['frame_delay_rounding'])
 
+        self.widgets['frame_delay_offset'] = QSpinBox()
+        self.widgets['frame_delay_offset'].setRange(-10, 10)
+        self.widgets['frame_delay_offset'].setValue(0)
+        self.widgets['frame_delay_offset'].setSuffix(" frames")
+        self.widgets['frame_delay_offset'].setToolTip(
+            "Additional frame offset to apply after rounding:\n\n"
+            "Use this to correct systematic timing errors.\n"
+            "• +N: Subtitles appear N frames later\n"
+            "• -N: Subtitles appear N frames earlier\n"
+            "• 0 (Default): No additional offset"
+        )
+        specific_layout.addRow("Frame Offset:", self.widgets['frame_delay_offset'])
+
         # --- Duration-align options ---
         self.widgets['duration_align_validate'] = QCheckBox("Validate frame alignment")
         self.widgets['duration_align_validate'].setChecked(True)
@@ -1590,6 +1603,7 @@ class SubtitleSyncTab(QWidget):
 
         # Timebase-frame-delay specific
         self.widgets['frame_delay_rounding'].setEnabled(is_frame_delay)
+        self.widgets['frame_delay_offset'].setEnabled(is_frame_delay)
 
         # Timebase-frame-locked specific
         self.widgets['frame_lock_submillisecond_precision'].setEnabled(is_frame_locked)
