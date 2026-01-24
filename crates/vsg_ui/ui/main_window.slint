@@ -1,0 +1,91 @@
+import { VerticalBox, Button, LineEdit, TextEdit, GroupBox } from "std-widgets.slint";
+
+export component MainWindow inherits Window {
+    title: "Video Sync GUI";
+    min-width: 800px;
+    min-height: 600px;
+
+    // Properties that Rust can read/write
+    in-out property <string> log-text: "";
+    in-out property <string> status-text: "Ready";
+    in-out property <string> source1-path: "";
+    in-out property <string> source2-path: "";
+
+    // Callbacks that Rust can handle
+    callback browse-source1();
+    callback browse-source2();
+    callback run-clicked();
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 12px;
+
+        // Source Files Section
+        GroupBox {
+            title: "Source Files";
+
+            VerticalBox {
+                spacing: 8px;
+                padding: 8px;
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text { text: "Source 1:"; vertical-alignment: center; min-width: 80px; }
+                    LineEdit {
+                        text <=> source1-path;
+                        placeholder-text: "Path to first video file...";
+                        horizontal-stretch: 1;
+                    }
+                    Button {
+                        text: "Browse";
+                        clicked => { browse-source1(); }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    Text { text: "Source 2:"; vertical-alignment: center; min-width: 80px; }
+                    LineEdit {
+                        text <=> source2-path;
+                        placeholder-text: "Path to second video file...";
+                        horizontal-stretch: 1;
+                    }
+                    Button {
+                        text: "Browse";
+                        clicked => { browse-source2(); }
+                    }
+                }
+            }
+        }
+
+        // Log Output Section
+        GroupBox {
+            title: "Log Output";
+            vertical-stretch: 1;
+
+            TextEdit {
+                text <=> log-text;
+                read-only: true;
+                horizontal-stretch: 1;
+                vertical-stretch: 1;
+            }
+        }
+
+        // Bottom Controls
+        HorizontalLayout {
+            spacing: 12px;
+            alignment: stretch;
+
+            Text {
+                text: status-text;
+                vertical-alignment: center;
+                horizontal-stretch: 1;
+            }
+
+            Button {
+                text: "Run";
+                clicked => { run-clicked(); }
+            }
+        }
+    }
+}
