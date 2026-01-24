@@ -22,12 +22,9 @@ mod windows;
 use ui::MainWindow;
 use windows::setup_main_window;
 
-/// Default config path: ~/.config/video-sync-gui/settings.toml
+/// Default config path: .config/settings.toml (relative to current working directory)
 fn default_config_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("video-sync-gui")
-        .join("settings.toml")
+    PathBuf::from(".config").join("settings.toml")
 }
 
 fn main() -> Result<(), slint::PlatformError> {
