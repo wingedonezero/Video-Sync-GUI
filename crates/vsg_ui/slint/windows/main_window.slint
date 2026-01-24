@@ -1,4 +1,5 @@
-import { VerticalBox, HorizontalBox, Button, LineEdit, TextEdit, GroupBox, CheckBox, ProgressIndicator } from "std-widgets.slint";
+import { VerticalBox, HorizontalBox, Button, TextEdit, GroupBox, CheckBox, ProgressIndicator } from "std-widgets.slint";
+import { SourceInput } from "../components/source_input.slint";
 
 export component MainWindow inherits Window {
     title: "Video/Audio Sync & Merge";
@@ -31,6 +32,7 @@ export component MainWindow inherits Window {
     callback browse-source2();
     callback browse-source3();
     callback analyze-only-clicked();
+    callback source-path-changed(int, string);  // source index (1-3), new path
 
     VerticalBox {
         padding: 8px;
@@ -75,57 +77,30 @@ export component MainWindow inherits Window {
                 spacing: 4px;
 
                 // Source 1 (Reference)
-                HorizontalLayout {
-                    spacing: 6px;
-                    Text {
-                        text: "Source 1 (Reference):";
-                        vertical-alignment: center;
-                        min-width: 110px;
-                    }
-                    LineEdit {
-                        text <=> source1-path;
-                        horizontal-stretch: 1;
-                    }
-                    Button {
-                        text: "Browse...";
-                        clicked => { browse-source1(); }
-                    }
+                SourceInput {
+                    label: "Source 1 (Reference):";
+                    path <=> source1-path;
+                    placeholder: "Drop video file here or browse...";
+                    browse-clicked => { browse-source1(); }
+                    path-changed(p) => { source-path-changed(1, p); }
                 }
 
                 // Source 2
-                HorizontalLayout {
-                    spacing: 6px;
-                    Text {
-                        text: "Source 2:";
-                        vertical-alignment: center;
-                        min-width: 110px;
-                    }
-                    LineEdit {
-                        text <=> source2-path;
-                        horizontal-stretch: 1;
-                    }
-                    Button {
-                        text: "Browse...";
-                        clicked => { browse-source2(); }
-                    }
+                SourceInput {
+                    label: "Source 2:";
+                    path <=> source2-path;
+                    placeholder: "Drop video file here or browse...";
+                    browse-clicked => { browse-source2(); }
+                    path-changed(p) => { source-path-changed(2, p); }
                 }
 
                 // Source 3
-                HorizontalLayout {
-                    spacing: 6px;
-                    Text {
-                        text: "Source 3:";
-                        vertical-alignment: center;
-                        min-width: 110px;
-                    }
-                    LineEdit {
-                        text <=> source3-path;
-                        horizontal-stretch: 1;
-                    }
-                    Button {
-                        text: "Browse...";
-                        clicked => { browse-source3(); }
-                    }
+                SourceInput {
+                    label: "Source 3:";
+                    path <=> source3-path;
+                    placeholder: "Drop video file here or browse...";
+                    browse-clicked => { browse-source3(); }
+                    path-changed(p) => { source-path-changed(3, p); }
                 }
 
                 // Analyze Only button (right-aligned)
