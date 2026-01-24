@@ -44,16 +44,22 @@ video-sync-gui/
 │   └── vsg_ui/                   # Slint UI application
 │       ├── src/
 │       │   ├── main.rs
-│       │   ├── windows/          # Per-window logic
+│       │   ├── windows/          # Per-window Rust logic
 │       │   │   ├── main_window.rs
 │       │   │   ├── job_queue.rs
 │       │   │   ├── track_settings.rs
 │       │   │   └── ...
 │       │   └── common/           # Shared UI logic (reused across windows)
-│       ├── ui/                   # .slint files (presentation only)
-│       │   ├── main_window.slint
-│       │   ├── job_queue.slint
-│       │   └── ...
+│       ├── slint/                # .slint files (presentation only)
+│       │   ├── windows/          # Window definitions
+│       │   │   ├── main_window.slint
+│       │   │   ├── job_queue.slint
+│       │   │   └── ...
+│       │   ├── components/       # Reusable widgets
+│       │   │   ├── log_panel.slint
+│       │   │   ├── track_widget.slint
+│       │   │   └── ...
+│       │   └── theme.slint       # Shared colors, fonts, spacing
 │       └── Cargo.toml
 └── Reference Only original/      # Python reference code
 ```
