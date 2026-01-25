@@ -10,7 +10,7 @@ export struct SourceInputData {
     is-reference: bool,
 }
 
-// Source input row - matches Qt SourceInputWidget layout (1:4 ratio)
+// Source input row - matches Qt SourceInputWidget layout
 component SourceInputRow inherits Rectangle {
     in property <int> index;
     in-out property <string> path;
@@ -19,22 +19,21 @@ component SourceInputRow inherits Rectangle {
     callback browse-clicked();
     callback path-changed(string);
 
-    height: 28px;
+    height: 32px;
 
     HorizontalBox {
         spacing: 6px;
 
-        // Label (1 stretch)
+        // Label (fixed width to match Qt)
         Text {
             text: is-reference ? "Source " + index + " (Reference):" : "Source " + index + ":";
             vertical-alignment: center;
-            horizontal-stretch: 1;
-            min-width: 130px;
+            width: 140px;
         }
 
-        // Path input with drop support (4 stretch)
+        // Path input with drop support (stretches to fill)
         DropArea {
-            horizontal-stretch: 4;
+            horizontal-stretch: 1;
 
             dropped(event) => {
                 if (event.mime-type == "text/uri-list") {
@@ -45,7 +44,7 @@ component SourceInputRow inherits Rectangle {
 
             LineEdit {
                 text <=> root.path;
-                placeholder-text: "Drop file or browse...";
+                placeholder-text: "";
                 edited => { root.path-changed(root.path); }
             }
         }
@@ -62,6 +61,7 @@ export component AddJobDialog inherits Window {
     title: "Add Job(s) to Queue";
     min-width: 700px;
     min-height: 300px;
+    default-font-size: 14px;
 
     in-out property <[SourceInputData]> sources: [
         { index: 1, path: "", is-reference: true },
