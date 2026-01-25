@@ -16,10 +16,10 @@ use crate::models::DelaySelectionMode;
 
 use super::delay_selection::{get_selector, SelectorConfig};
 use super::ffmpeg::{extract_full_audio, get_duration, DEFAULT_ANALYSIS_SAMPLE_RATE};
-use super::methods::{CorrelationMethod as CorrelationMethodTrait, Scc};
+use super::methods::{all_methods, create_from_enum, CorrelationMethod as CorrelationMethodTrait, Scc};
 use super::peak_fit::find_and_fit_peak;
 use super::tracks::{find_track_by_language, get_audio_tracks};
-use super::types::{AnalysisError, AnalysisResult, ChunkResult, SourceAnalysisResult};
+use super::types::{AnalysisError, AnalysisResult, AudioData, ChunkResult, SourceAnalysisResult};
 
 /// Audio sync analyzer.
 ///
@@ -83,7 +83,7 @@ impl Analyzer {
     /// Create an analyzer from settings.
     pub fn from_settings(settings: &AnalysisSettings) -> Self {
         Self {
-            method: Box::new(Scc::new()),
+            method: create_from_enum(settings.correlation_method),
             sample_rate: DEFAULT_ANALYSIS_SAMPLE_RATE,
             use_soxr: settings.use_soxr,
             use_peak_fit: settings.audio_peak_fit,
@@ -250,6 +250,280 @@ impl Analyzer {
 
         // Aggregate results using delay selector
         self.aggregate_results(source_name, chunk_results)
+    }
+
+    /// Run multi-correlation: analyze with all available methods for comparison.
+    ///
+    /// This decodes audio once and runs each method on the same chunks.
+    /// Useful for comparing method performance on specific content.
+    ///
+    /// # Arguments
+    /// * `reference_path` - Path to the reference source (Source 1)
+    /// * `other_path` - Path to the source to analyze
+    /// * `source_name` - Name of the source being analyzed
+    ///
+    /// # Returns
+    /// HashMap mapping method names to their SourceAnalysisResult.
+    pub fn analyze_multi_correlation(
+        &self,
+        reference_path: &Path,
+        other_path: &Path,
+        source_name: &str,
+    ) -> AnalysisResult<std::collections::HashMap<String, SourceAnalysisResult>> {
+        self.log(&format!(
+            "\n{}\n  MULTI-CORRELATION ANALYSIS: {}\n{}",
+            "═".repeat(70),
+            source_name,
+            "═".repeat(70)
+        ));
+
+        // Detect audio tracks and find matching language
+        let ref_track_idx = self.find_audio_track(reference_path, self.lang_source1.as_deref())?;
+        let other_track_idx = self.find_audio_track(other_path, self.lang_others.as_deref())?;
+
+        self.log(&format!(
+            "Using audio tracks: reference={}, {}={}",
+            ref_track_idx.map_or("default".to_string(), |i| i.to_string()),
+            source_name,
+            other_track_idx.map_or("default".to_string(), |i| i.to_string())
+        ));
+
+        // Get durations
+        let ref_duration = get_duration(reference_path)?;
+        let other_duration = get_duration(other_path)?;
+        let effective_duration = ref_duration.min(other_duration);
+
+        self.log(&format!(
+            "Reference: {:.1}s, {}: {:.1}s",
+            ref_duration, source_name, other_duration
+        ));
+
+        // Calculate chunk positions
+        let chunk_positions = self.calculate_chunk_positions(effective_duration);
+
+        if chunk_positions.is_empty() {
+            return Err(AnalysisError::InvalidAudio(
+                "No valid chunk positions calculated".to_string(),
+            ));
+        }
+
+        // DECODE FULL AUDIO ONCE
+        self.log("Decoding reference audio...");
+        let ref_audio = extract_full_audio(
+            reference_path,
+            self.sample_rate,
+            self.use_soxr,
+            ref_track_idx,
+        )?;
+
+        self.log(&format!("Decoding {} audio...", source_name));
+        let other_audio = extract_full_audio(
+            other_path,
+            self.sample_rate,
+            self.use_soxr,
+            other_track_idx,
+        )?;
+
+        self.log(&format!(
+            "Audio decoded. Running {} methods on {} chunks...",
+            all_methods().len(),
+            chunk_positions.len()
+        ));
+
+        // Run each method on the same audio data
+        let mut results = std::collections::HashMap::new();
+        let methods = all_methods();
+
+        for method in methods {
+            let method_name = method.name().to_string();
+            self.log(&format!(
+                "\n{}\n  Method: {}\n{}",
+                "─".repeat(60),
+                method_name,
+                "─".repeat(60)
+            ));
+
+            match self.analyze_with_method(
+                method.as_ref(),
+                &ref_audio,
+                &other_audio,
+                &chunk_positions,
+                source_name,
+            ) {
+                Ok(result) => {
+                    self.log(&format!(
+                        "  {} Result: {:+}ms (raw: {:+.3}ms) | match: {:.1}% | accepted: {}/{}",
+                        method_name,
+                        result.delay.delay_ms_rounded,
+                        result.delay.delay_ms_raw,
+                        result.avg_match_pct,
+                        result.accepted_chunks,
+                        result.total_chunks
+                    ));
+                    results.insert(method_name, result);
+                }
+                Err(e) => {
+                    self.log(&format!("  {} FAILED: {}", method_name, e));
+                }
+            }
+        }
+
+        // Log summary comparison
+        self.log(&format!(
+            "\n{}\n  MULTI-CORRELATION SUMMARY\n{}",
+            "═".repeat(70),
+            "═".repeat(70)
+        ));
+        for (name, result) in &results {
+            self.log(&format!(
+                "  {:30} {:+6}ms | match: {:5.1}% | accepted: {}/{}",
+                name,
+                result.delay.delay_ms_rounded,
+                result.avg_match_pct,
+                result.accepted_chunks,
+                result.total_chunks
+            ));
+        }
+
+        Ok(results)
+    }
+
+    /// Analyze with a specific method using pre-decoded audio.
+    fn analyze_with_method(
+        &self,
+        method: &dyn CorrelationMethodTrait,
+        ref_audio: &AudioData,
+        other_audio: &AudioData,
+        chunk_positions: &[f64],
+        source_name: &str,
+    ) -> AnalysisResult<SourceAnalysisResult> {
+        let mut chunk_results = Vec::with_capacity(chunk_positions.len());
+        let total_chunks = chunk_positions.len();
+
+        for (idx, &start_time) in chunk_positions.iter().enumerate() {
+            let chunk_num = idx + 1;
+
+            match self.analyze_chunk_with_method(method, ref_audio, other_audio, start_time, chunk_num) {
+                Ok(result) => {
+                    self.log(&format!(
+                        "    Chunk {:2}/{} (@{:.1}s): delay = {:+} ms (match={:.2}) — {}",
+                        chunk_num,
+                        total_chunks,
+                        result.chunk_start_secs,
+                        result.delay_ms_rounded,
+                        result.match_pct,
+                        result.status_str()
+                    ));
+                    chunk_results.push(result);
+                }
+                Err(e) => {
+                    self.log(&format!(
+                        "    Chunk {:2}/{} (@{:.1}s): FAILED — {}",
+                        chunk_num, total_chunks, start_time, e
+                    ));
+                    chunk_results.push(ChunkResult::rejected(chunk_num, start_time, e.to_string()));
+                }
+            }
+        }
+
+        self.aggregate_results_with_method(source_name, method.name(), chunk_results)
+    }
+
+    /// Analyze a single chunk with a specific method.
+    fn analyze_chunk_with_method(
+        &self,
+        method: &dyn CorrelationMethodTrait,
+        ref_audio: &AudioData,
+        other_audio: &AudioData,
+        start_time: f64,
+        chunk_index: usize,
+    ) -> AnalysisResult<ChunkResult> {
+        let ref_chunk = ref_audio
+            .extract_chunk(start_time, self.chunk_duration)
+            .ok_or_else(|| {
+                AnalysisError::InvalidAudio(format!(
+                    "Failed to extract reference chunk at {:.2}s",
+                    start_time
+                ))
+            })?;
+
+        let other_chunk = other_audio
+            .extract_chunk(start_time, self.chunk_duration)
+            .ok_or_else(|| {
+                AnalysisError::InvalidAudio(format!(
+                    "Failed to extract other chunk at {:.2}s",
+                    start_time
+                ))
+            })?;
+
+        let correlation_result = if self.use_peak_fit {
+            let raw = method.raw_correlation(&ref_chunk, &other_chunk)?;
+            find_and_fit_peak(&raw, self.sample_rate)
+        } else {
+            method.correlate(&ref_chunk, &other_chunk)?
+        };
+
+        Ok(ChunkResult::new(
+            chunk_index,
+            start_time,
+            correlation_result,
+            self.min_match_pct,
+        ))
+    }
+
+    /// Aggregate results for a specific method.
+    fn aggregate_results_with_method(
+        &self,
+        source_name: &str,
+        method_name: &str,
+        chunk_results: Vec<ChunkResult>,
+    ) -> AnalysisResult<SourceAnalysisResult> {
+        let total_chunks = chunk_results.len();
+        let accepted_chunks: Vec<&ChunkResult> =
+            chunk_results.iter().filter(|r| r.accepted).collect();
+        let accepted_count = accepted_chunks.len();
+
+        if accepted_count < self.min_accepted_chunks {
+            return Err(AnalysisError::InsufficientChunks {
+                valid: accepted_count,
+                required: self.min_accepted_chunks,
+            });
+        }
+
+        let avg_match_pct: f64 =
+            accepted_chunks.iter().map(|c| c.match_pct).sum::<f64>() / accepted_count as f64;
+
+        let selector = get_selector(self.delay_selection_mode);
+        let accepted_for_selector: Vec<ChunkResult> = chunk_results
+            .iter()
+            .filter(|r| r.accepted)
+            .cloned()
+            .collect();
+
+        let delay = selector
+            .select(&accepted_for_selector, &self.selector_config)
+            .ok_or_else(|| AnalysisError::InsufficientChunks {
+                valid: accepted_count,
+                required: self.min_accepted_chunks,
+            })?;
+
+        let delays: Vec<f64> = accepted_chunks.iter().map(|c| c.delay_ms_raw).collect();
+        let mean_delay: f64 = delays.iter().sum::<f64>() / delays.len() as f64;
+        let variance: f64 =
+            delays.iter().map(|d| (d - mean_delay).powi(2)).sum::<f64>() / delays.len() as f64;
+        let std_dev = variance.sqrt();
+        let drift_detected = std_dev > 50.0;
+
+        Ok(SourceAnalysisResult {
+            source_name: source_name.to_string(),
+            delay,
+            avg_match_pct,
+            accepted_chunks: accepted_count,
+            total_chunks,
+            chunk_results,
+            drift_detected,
+            correlation_method: method_name.to_string(),
+        })
     }
 
     /// Calculate chunk start positions evenly distributed across the scan range.

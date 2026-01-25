@@ -4,11 +4,18 @@
 //! for different correlation algorithms. Each method can be used
 //! independently or combined with peak fitting for sub-sample accuracy.
 
+mod gcc_phat;
+mod gcc_scot;
 mod scc;
+mod whitened;
 
+pub use gcc_phat::GccPhat;
+pub use gcc_scot::GccScot;
 pub use scc::Scc;
+pub use whitened::Whitened;
 
 use crate::analysis::types::{AnalysisResult, AudioChunk, CorrelationResult};
+use crate::models::CorrelationMethod as CorrelationMethodEnum;
 
 /// Trait for audio correlation methods.
 ///
@@ -42,14 +49,41 @@ pub trait CorrelationMethod: Send + Sync {
 /// Factory for creating correlation methods by name.
 pub fn create_method(name: &str) -> Option<Box<dyn CorrelationMethod>> {
     match name.to_lowercase().as_str() {
-        "scc" | "standard" | "cross-correlation" => Some(Box::new(Scc::new())),
+        "scc" | "standard" | "cross-correlation" | "standard correlation (scc)" => {
+            Some(Box::new(Scc::new()))
+        }
+        "gcc-phat" | "phat" | "phase" | "phase correlation (gcc-phat)" => {
+            Some(Box::new(GccPhat::new()))
+        }
+        "gcc-scot" | "scot" => Some(Box::new(GccScot::new())),
+        "whitened" | "whitened cross-correlation" => Some(Box::new(Whitened::new())),
         _ => None,
     }
 }
 
 /// Get a list of available correlation method names.
 pub fn available_methods() -> Vec<&'static str> {
-    vec!["scc"]
+    vec!["scc", "gcc-phat", "gcc-scot", "whitened"]
+}
+
+/// Create a correlation method from the enum.
+pub fn create_from_enum(method: CorrelationMethodEnum) -> Box<dyn CorrelationMethod> {
+    match method {
+        CorrelationMethodEnum::Scc => Box::new(Scc::new()),
+        CorrelationMethodEnum::GccPhat => Box::new(GccPhat::new()),
+        CorrelationMethodEnum::GccScot => Box::new(GccScot::new()),
+        CorrelationMethodEnum::Whitened => Box::new(Whitened::new()),
+    }
+}
+
+/// Get all correlation methods (for multi-correlation mode).
+pub fn all_methods() -> Vec<Box<dyn CorrelationMethod>> {
+    vec![
+        Box::new(Scc::new()),
+        Box::new(GccPhat::new()),
+        Box::new(GccScot::new()),
+        Box::new(Whitened::new()),
+    ]
 }
 
 #[cfg(test)]
@@ -66,6 +100,24 @@ mod tests {
     fn factory_creates_scc_aliases() {
         assert!(create_method("standard").is_some());
         assert!(create_method("cross-correlation").is_some());
+    }
+
+    #[test]
+    fn factory_creates_gcc_phat() {
+        let method = create_method("gcc-phat").unwrap();
+        assert_eq!(method.name(), "GCC-PHAT");
+    }
+
+    #[test]
+    fn factory_creates_gcc_scot() {
+        let method = create_method("gcc-scot").unwrap();
+        assert_eq!(method.name(), "GCC-SCOT");
+    }
+
+    #[test]
+    fn factory_creates_whitened() {
+        let method = create_method("whitened").unwrap();
+        assert_eq!(method.name(), "Whitened");
     }
 
     #[test]

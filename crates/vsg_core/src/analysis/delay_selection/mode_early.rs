@@ -40,7 +40,8 @@ impl DelaySelector for ModeEarlySelector {
         }
 
         // Find delays that appear frequently in early window (including tolerance)
-        let mut early_stable_delays: Vec<(i64, usize)> = Vec::new();
+        // Store (delay, count, first_occurrence_index) for proper tiebreaking
+        let mut early_stable_delays: Vec<(i64, usize, usize)> = Vec::new();
         for (&delay, &_count) in &early_counts {
             // Count including tolerance
             let total_in_tolerance: usize = early_chunks
@@ -49,12 +50,23 @@ impl DelaySelector for ModeEarlySelector {
                 .count();
 
             if total_in_tolerance >= early_threshold {
-                early_stable_delays.push((delay, total_in_tolerance));
+                // Find first occurrence of this delay (or within tolerance)
+                let first_idx = early_chunks
+                    .iter()
+                    .position(|c| (c.delay_ms_rounded - delay).abs() <= tolerance)
+                    .unwrap_or(usize::MAX);
+                early_stable_delays.push((delay, total_in_tolerance, first_idx));
             }
         }
 
         // If we found early stable delays, use the most common one
-        if let Some((best_delay, _)) = early_stable_delays.iter().max_by_key(|(_, count)| count) {
+        // Tiebreaker: prefer the one that appears first (lower first_idx)
+        if let Some((best_delay, _, _)) = early_stable_delays
+            .iter()
+            .max_by(|(_, count_a, idx_a), (_, count_b, idx_b)| {
+                count_a.cmp(count_b).then_with(|| idx_b.cmp(idx_a)) // Higher count wins, then lower idx
+            })
+        {
             // Collect all chunks (not just early) within tolerance of this delay
             let cluster: Vec<&ChunkResult> = chunks
                 .iter()
@@ -73,7 +85,7 @@ impl DelaySelector for ModeEarlySelector {
                     details: Some(format!(
                         "early stable cluster around {:+}ms ({} in first {} chunks)",
                         best_delay,
-                        early_stable_delays.iter().find(|(d, _)| d == best_delay).map(|(_, c)| *c).unwrap_or(0),
+                        early_stable_delays.iter().find(|(d, _, _)| d == best_delay).map(|(_, c, _)| *c).unwrap_or(0),
                         early_window
                     )),
                 });
