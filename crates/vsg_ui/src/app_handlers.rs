@@ -7,13 +7,14 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command as StdCommand;
 
-use cosmic::app::Command;
+use cosmic::app::Task;
 use cosmic::iced::window;
 use cosmic::iced_core::Size;
+use cosmic::Action;
 
 use vsg_core::config::Settings;
-use vsg_core::jobs::{discover_jobs, FinalTrackEntry, ManualLayout, TrackConfig};
-use vsg_core::logging::{GuiLogCallback, JobLogger, LogConfig};
+use vsg_core::jobs::{discover_jobs, FinalTrackEntry, ManualLayout};
+use vsg_core::logging::{JobLogger, LogConfig};
 use vsg_core::models::{
     AnalysisMode, CorrelationMethod, DelaySelectionMode, FilteringMethod, JobSpec, SnapMode,
     SyncMode, TrackType,
@@ -31,9 +32,9 @@ impl App {
     // =========================================================================
 
     /// Open the settings window.
-    pub fn open_settings_window(&mut self) -> Command<Message> {
+    pub fn open_settings_window(&mut self) -> Task<Message> {
         if self.settings_window_id.is_some() {
-            return Command::none();
+            return Task::none();
         }
 
         // Clone current settings for editing
@@ -51,23 +52,23 @@ impl App {
         self.window_map.insert(id, WindowId::Settings);
         self.settings_window_id = Some(id);
 
-        command.map(|_| Message::Noop)
+        command.map(|_| Action::App(Message::Noop))
     }
 
     /// Close the settings window.
-    pub fn close_settings_window(&mut self) -> Command<Message> {
+    pub fn close_settings_window(&mut self) -> Task<Message> {
         if let Some(id) = self.settings_window_id.take() {
             self.window_map.remove(&id);
             self.pending_settings = None;
-            return window::close(id);
+            return window::close::<Action<Message>>(id);
         }
-        Command::none()
+        Task::none()
     }
 
     /// Open the job queue window.
-    pub fn open_job_queue_window(&mut self) -> Command<Message> {
+    pub fn open_job_queue_window(&mut self) -> Task<Message> {
         if self.job_queue_window_id.is_some() {
-            return Command::none();
+            return Task::none();
         }
 
         self.append_log("Opening job queue...");
@@ -82,22 +83,22 @@ impl App {
         self.window_map.insert(id, WindowId::JobQueue);
         self.job_queue_window_id = Some(id);
 
-        command.map(|_| Message::Noop)
+        command.map(|_| Action::App(Message::Noop))
     }
 
     /// Close the job queue window.
-    pub fn close_job_queue_window(&mut self) -> Command<Message> {
+    pub fn close_job_queue_window(&mut self) -> Task<Message> {
         if let Some(id) = self.job_queue_window_id.take() {
             self.window_map.remove(&id);
-            return window::close(id);
+            return window::close::<Action<Message>>(id);
         }
-        Command::none()
+        Task::none()
     }
 
     /// Open the add job window.
-    pub fn open_add_job_window(&mut self) -> Command<Message> {
+    pub fn open_add_job_window(&mut self) -> Task<Message> {
         if self.add_job_window_id.is_some() {
-            return Command::none();
+            return Task::none();
         }
 
         // Reset state
@@ -115,22 +116,22 @@ impl App {
         self.window_map.insert(id, WindowId::AddJob);
         self.add_job_window_id = Some(id);
 
-        command.map(|_| Message::Noop)
+        command.map(|_| Action::App(Message::Noop))
     }
 
     /// Close the add job window.
-    pub fn close_add_job_window(&mut self) -> Command<Message> {
+    pub fn close_add_job_window(&mut self) -> Task<Message> {
         if let Some(id) = self.add_job_window_id.take() {
             self.window_map.remove(&id);
-            return window::close(id);
+            return window::close::<Action<Message>>(id);
         }
-        Command::none()
+        Task::none()
     }
 
     /// Open the manual selection window for a job.
-    pub fn open_manual_selection_window(&mut self, job_idx: usize) -> Command<Message> {
+    pub fn open_manual_selection_window(&mut self, job_idx: usize) -> Task<Message> {
         if self.manual_selection_window_id.is_some() {
-            return Command::none();
+            return Task::none();
         }
 
         // Get job info
@@ -140,7 +141,7 @@ impl App {
                 Some(job) => (job.sources.clone(), job.name.clone()),
                 None => {
                     self.job_queue_status = "Job not found".to_string();
-                    return Command::none();
+                    return Task::none();
                 }
             }
         };
@@ -164,25 +165,25 @@ impl App {
         self.window_map.insert(id, WindowId::ManualSelection(job_idx));
         self.manual_selection_window_id = Some(id);
 
-        command.map(|_| Message::Noop)
+        command.map(|_| Action::App(Message::Noop))
     }
 
     /// Close the manual selection window.
-    pub fn close_manual_selection_window(&mut self) -> Command<Message> {
+    pub fn close_manual_selection_window(&mut self) -> Task<Message> {
         if let Some(id) = self.manual_selection_window_id.take() {
             self.window_map.remove(&id);
             self.manual_selection_job_idx = None;
             self.source_groups.clear();
             self.final_tracks.clear();
-            return window::close(id);
+            return window::close::<Action<Message>>(id);
         }
-        Command::none()
+        Task::none()
     }
 
     /// Open the track settings window.
-    pub fn open_track_settings_window(&mut self, track_idx: usize) -> Command<Message> {
+    pub fn open_track_settings_window(&mut self, track_idx: usize) -> Task<Message> {
         if self.track_settings_window_id.is_some() {
-            return Command::none();
+            return Task::none();
         }
 
         // Get track info
@@ -202,21 +203,21 @@ impl App {
         self.window_map.insert(id, WindowId::TrackSettings(track_idx));
         self.track_settings_window_id = Some(id);
 
-        command.map(|_| Message::Noop)
+        command.map(|_| Action::App(Message::Noop))
     }
 
     /// Close the track settings window.
-    pub fn close_track_settings_window(&mut self) -> Command<Message> {
+    pub fn close_track_settings_window(&mut self) -> Task<Message> {
         if let Some(id) = self.track_settings_window_id.take() {
             self.window_map.remove(&id);
             self.track_settings_idx = None;
-            return window::close(id);
+            return window::close::<Action<Message>>(id);
         }
-        Command::none()
+        Task::none()
     }
 
     /// Handle window closed event.
-    pub fn handle_window_closed(&mut self, id: window::Id) -> Command<Message> {
+    pub fn handle_window_closed(&mut self, id: window::Id) -> Task<Message> {
         if let Some(window_id) = self.window_map.remove(&id) {
             match window_id {
                 WindowId::Settings => {
@@ -240,13 +241,13 @@ impl App {
                 _ => {}
             }
         }
-        Command::none()
+        Task::none()
     }
 
     /// Handle window opened event.
-    pub fn handle_window_opened(&mut self, window_id: WindowId, id: window::Id) -> Command<Message> {
+    pub fn handle_window_opened(&mut self, window_id: WindowId, id: window::Id) -> Task<Message> {
         self.window_map.insert(id, window_id);
-        Command::none()
+        Task::none()
     }
 
     // =========================================================================
@@ -254,7 +255,7 @@ impl App {
     // =========================================================================
 
     /// Browse for a source file.
-    pub fn browse_source(&self, idx: usize) -> Command<Message> {
+    pub fn browse_source(&self, idx: usize) -> Task<Message> {
         let title = match idx {
             1 => "Select Source 1 (Reference)",
             2 => "Select Source 2",
@@ -262,7 +263,7 @@ impl App {
             _ => "Select Source",
         };
 
-        Command::perform(
+        Task::perform(
             async move {
                 let path = rfd::AsyncFileDialog::new()
                     .set_title(title)
@@ -276,7 +277,7 @@ impl App {
                     .map(|f| f.path().to_path_buf());
                 (idx, path)
             },
-            |(idx, path)| Message::FileSelected(idx, path),
+            |(idx, path)| Action::App(Message::FileSelected(idx, path)),
         )
     }
 
@@ -309,14 +310,14 @@ impl App {
     }
 
     /// Browse for a folder in settings.
-    pub fn browse_folder(&self, folder_type: FolderType) -> Command<Message> {
+    pub fn browse_folder(&self, folder_type: FolderType) -> Task<Message> {
         let title = match folder_type {
             FolderType::Output => "Select Output Directory",
             FolderType::Temp => "Select Temporary Directory",
             FolderType::Logs => "Select Logs Directory",
         };
 
-        Command::perform(
+        Task::perform(
             async move {
                 let path = rfd::AsyncFileDialog::new()
                     .set_title(title)
@@ -325,7 +326,7 @@ impl App {
                     .map(|f| f.path().to_path_buf());
                 (folder_type, path)
             },
-            |(folder_type, path)| Message::FolderSelected(folder_type, path),
+            |(folder_type, path)| Action::App(Message::FolderSelected(folder_type, path)),
         )
     }
 
@@ -342,14 +343,14 @@ impl App {
     }
 
     /// Browse for add job source file.
-    pub fn browse_add_job_source(&self, idx: usize) -> Command<Message> {
+    pub fn browse_add_job_source(&self, idx: usize) -> Task<Message> {
         let title = if idx == 0 {
             "Select Source 1 (Reference)"
         } else {
             "Select Source"
         };
 
-        Command::perform(
+        Task::perform(
             async move {
                 let path = rfd::AsyncFileDialog::new()
                     .set_title(title)
@@ -363,7 +364,7 @@ impl App {
                     .map(|f| f.path().to_path_buf());
                 (idx, path)
             },
-            |(idx, path)| Message::AddJobFileSelected(idx, path),
+            |(idx, path)| Action::App(Message::AddJobFileSelected(idx, path)),
         )
     }
 
@@ -377,8 +378,8 @@ impl App {
     }
 
     /// Browse for external subtitles.
-    pub fn browse_external_subtitles(&self) -> Command<Message> {
-        Command::perform(
+    pub fn browse_external_subtitles(&self) -> Task<Message> {
+        Task::perform(
             async {
                 let files = rfd::AsyncFileDialog::new()
                     .set_title("Select External Subtitle File(s)")
@@ -390,7 +391,7 @@ impl App {
                     .unwrap_or_default();
                 files
             },
-            Message::ExternalFilesSelected,
+            |files| Action::App(Message::ExternalFilesSelected(files)),
         )
     }
 
@@ -399,10 +400,10 @@ impl App {
     // =========================================================================
 
     /// Start the analysis pipeline.
-    pub fn start_analysis(&mut self) -> Command<Message> {
+    pub fn start_analysis(&mut self) -> Task<Message> {
         if self.source1_path.is_empty() || self.source2_path.is_empty() {
             self.append_log("[WARNING] Please select at least Source 1 and Source 2");
-            return Command::none();
+            return Task::none();
         }
 
         self.is_analyzing = true;
@@ -431,15 +432,15 @@ impl App {
         };
 
         // Run analysis in background
-        Command::perform(
+        Task::perform(
             async move { run_analyze_only(job_spec, settings).await },
-            |result| match result {
+            |result| Action::App(match result {
                 Ok((delay2, delay3)) => Message::AnalysisComplete {
                     delay_source2_ms: delay2,
                     delay_source3_ms: delay3,
                 },
                 Err(e) => Message::AnalysisFailed(e),
-            },
+            }),
         )
     }
 
@@ -635,9 +636,12 @@ impl App {
     /// Save settings to disk.
     pub fn save_settings(&mut self) {
         if let Some(pending) = self.pending_settings.take() {
-            let mut cfg = self.config.lock().unwrap();
-            *cfg.settings_mut() = pending;
-            if let Err(e) = cfg.save() {
+            let result = {
+                let mut cfg = self.config.lock().unwrap();
+                *cfg.settings_mut() = pending;
+                cfg.save()
+            };
+            if let Err(e) = result {
                 self.append_log(&format!("Failed to save settings: {}", e));
             } else {
                 self.append_log("Settings saved.");
@@ -736,34 +740,34 @@ impl App {
     }
 
     /// Start processing the queue.
-    pub fn start_processing(&mut self) -> Command<Message> {
+    pub fn start_processing(&mut self) -> Task<Message> {
         let q = self.job_queue.lock().unwrap();
         let ready_count = q.jobs_ready().len();
 
         if ready_count == 0 {
             self.job_queue_status =
                 "No configured jobs to process. Double-click jobs to configure them.".to_string();
-            return Command::none();
+            return Task::none();
         }
 
         self.is_processing = true;
         self.job_queue_status = format!("Processing {} job(s)...", ready_count);
 
         // TODO: Implement actual queue processing
-        Command::none()
+        Task::none()
     }
 
     /// Find and add jobs from source paths.
-    pub fn find_and_add_jobs(&mut self) -> Command<Message> {
+    pub fn find_and_add_jobs(&mut self) -> Task<Message> {
         // Validate Source 1 and 2
         if self.add_job_sources.is_empty() || self.add_job_sources[0].is_empty() {
             self.add_job_error = "Source 1 (Reference) is required.".to_string();
-            return Command::none();
+            return Task::none();
         }
 
         if self.add_job_sources.len() < 2 || self.add_job_sources[1].is_empty() {
             self.add_job_error = "Source 2 is required.".to_string();
-            return Command::none();
+            return Task::none();
         }
 
         self.is_finding_jobs = true;
@@ -780,7 +784,7 @@ impl App {
 
         let job_queue = self.job_queue.clone();
 
-        Command::perform(
+        Task::perform(
             async move {
                 match discover_jobs(&sources) {
                     Ok(jobs) if jobs.is_empty() => 0,
@@ -798,7 +802,7 @@ impl App {
                     Err(_) => 0,
                 }
             },
-            Message::JobsAdded,
+            |count| Action::App(Message::JobsAdded(count)),
         )
     }
 
@@ -835,13 +839,16 @@ impl App {
                 title,
                 tracks: tracks
                     .into_iter()
-                    .map(|t| TrackWidgetState {
-                        id: t.track_id,
-                        track_type: t.track_type,
-                        codec_id: t.codec_id,
-                        summary: t.summary,
-                        badges: t.badges,
-                        is_blocked: !is_reference && t.track_type == "video",
+                    .map(|t| {
+                        let is_blocked = !is_reference && t.track_type == "video";
+                        TrackWidgetState {
+                            id: t.track_id,
+                            track_type: t.track_type,
+                            codec_id: t.codec_id,
+                            summary: t.summary,
+                            badges: t.badges,
+                            is_blocked,
+                        }
                     })
                     .collect(),
                 is_expanded: true,
@@ -930,7 +937,7 @@ impl App {
                     .filter(|(_, &checked)| checked)
                     .map(|(k, _)| k.clone())
                     .collect(),
-                external_subtitles: self.external_subtitles.clone(),
+                source_settings: HashMap::new(),
             };
 
             // Save to job queue

@@ -1,72 +1,111 @@
 //! Add Job dialog view.
 
-use cosmic::iced::alignment::Vertical;
-use cosmic::iced::Length;
-use cosmic::widget::{self, button, column, container, horizontal_space, row, scrollable, text, text_input, vertical_space};
-use cosmic::Element;
+use cosmic::iced::{Alignment, Length};
+use cosmic::prelude::*;
+use cosmic::{widget, Element};
 
 use crate::app::{App, Message};
-use crate::theme::{font, spacing};
 
 pub fn view(app: &App) -> Element<Message> {
-    let content = column![
-        text("Add Job(s)").size(font::HEADER),
-        vertical_space().height(spacing::SM),
-        if !app.add_job_error.is_empty() {
-            container(text(&app.add_job_error).size(font::NORMAL)).into()
-        } else {
-            container(text("")).into()
-        },
-        vertical_space().height(spacing::SM),
-        scrollable(
-            column(
-                app.add_job_sources.iter().enumerate().map(|(idx, path)| {
-                    source_input_row(idx, path, !app.is_finding_jobs)
-                }).collect()
-            ).spacing(spacing::SM)
-        ).height(Length::Fill),
-        vertical_space().height(spacing::SM),
-        row![
-            button(text("+ Add Source").size(font::NORMAL))
-                .on_press_maybe(if !app.is_finding_jobs && app.add_job_sources.len() < 10 {
-                    Some(Message::AddSource)
-                } else { None })
-                .padding([spacing::SM, spacing::MD]),
-            horizontal_space(),
-        ],
-        vertical_space().height(spacing::MD),
-        row![
-            horizontal_space(),
-            button(text("Cancel").size(font::NORMAL))
-                .on_press_maybe(if app.is_finding_jobs { None } else { Some(Message::CloseAddJob) })
-                .padding([spacing::SM, spacing::LG]),
-            button(text(if app.is_finding_jobs { "Finding..." } else { "Find and Add Jobs" }).size(font::NORMAL))
-                .on_press_maybe(if app.is_finding_jobs { None } else { Some(Message::FindAndAddJobs) })
-                .padding([spacing::SM, spacing::LG]),
-        ].spacing(spacing::SM),
-    ].spacing(spacing::XS).padding(spacing::LG);
+    let spacing = cosmic::theme::active().cosmic().spacing;
 
-    container(content).width(Length::Fill).height(Length::Fill).into()
+    let mut content = widget::column()
+        .push(widget::text::title3("Add Job(s)"))
+        .push(widget::vertical_space().height(Length::Fixed(spacing.space_s.into())));
+
+    if !app.add_job_error.is_empty() {
+        content = content.push(widget::text::body(&app.add_job_error));
+    }
+
+    content = content
+        .push(widget::vertical_space().height(Length::Fixed(spacing.space_s.into())))
+        .push(
+            widget::scrollable(
+                app.add_job_sources.iter().enumerate().fold(
+                    widget::column().spacing(spacing.space_s),
+                    |col, (idx, path)| {
+                        col.push(source_input_row(idx, path, !app.is_finding_jobs))
+                    }
+                )
+            )
+            .height(Length::Fill)
+        )
+        .push(widget::vertical_space().height(Length::Fixed(spacing.space_s.into())));
+
+    let mut add_source_btn = widget::button::standard("+ Add Source");
+    if !app.is_finding_jobs && app.add_job_sources.len() < 10 {
+        add_source_btn = add_source_btn.on_press(Message::AddSource);
+    }
+
+    content = content
+        .push(
+            widget::row()
+                .push(add_source_btn)
+                .push(widget::horizontal_space())
+        )
+        .push(widget::vertical_space().height(Length::Fixed(spacing.space_m.into())));
+
+    let mut cancel_btn = widget::button::standard("Cancel");
+    if !app.is_finding_jobs {
+        cancel_btn = cancel_btn.on_press(Message::CloseAddJob);
+    }
+
+    let find_label = if app.is_finding_jobs { "Finding..." } else { "Find and Add Jobs" };
+    let mut find_btn = widget::button::suggested(find_label);
+    if !app.is_finding_jobs {
+        find_btn = find_btn.on_press(Message::FindAndAddJobs);
+    }
+
+    content = content
+        .push(
+            widget::row()
+                .push(widget::horizontal_space())
+                .push(cancel_btn)
+                .push(find_btn)
+                .spacing(spacing.space_s)
+        )
+        .spacing(spacing.space_xxs)
+        .padding(spacing.space_l);
+
+    widget::container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
 }
 
 fn source_input_row(idx: usize, path: &str, enabled: bool) -> Element<'static, Message> {
-    let label = if idx == 0 { "Source 1 (Reference):".to_string() } else { format!("Source {}:", idx + 1) };
+    let spacing = cosmic::theme::active().cosmic().spacing;
+
+    let label = if idx == 0 {
+        "Source 1 (Reference):".to_string()
+    } else {
+        format!("Source {}:", idx + 1)
+    };
     let path_owned = path.to_string();
 
-    row![
-        text(label).size(font::NORMAL).width(Length::Fixed(150.0)),
-        text_input("Drop file here or browse...", &path_owned)
-            .on_input(move |s| Message::AddJobSourceChanged(idx, s))
-            .width(Length::Fill).size(font::NORMAL),
-        button(text("Browse").size(font::SM))
-            .on_press_maybe(if enabled { Some(Message::AddJobBrowseSource(idx)) } else { None })
-            .padding([spacing::XS, spacing::SM]),
-        if idx >= 2 {
-            button(text("X").size(font::SM))
-                .on_press_maybe(if enabled { Some(Message::RemoveSource(idx)) } else { None })
-                .padding([spacing::XS, spacing::SM]).into()
-        } else {
-            horizontal_space().width(Length::Fixed(0.0)).into()
-        },
-    ].spacing(spacing::SM).align_y(Vertical::Center).into()
+    let mut browse_btn = widget::button::standard("Browse");
+    if enabled {
+        browse_btn = browse_btn.on_press(Message::AddJobBrowseSource(idx));
+    }
+
+    let mut row = widget::row()
+        .push(widget::text::body(label).width(Length::Fixed(150.0)))
+        .push(
+            widget::text_input::text_input("Drop file here or browse...", path_owned)
+                .on_input(move |s| Message::AddJobSourceChanged(idx, s))
+                .width(Length::Fill)
+        )
+        .push(browse_btn);
+
+    if idx >= 2 {
+        let mut remove_btn = widget::button::standard("X");
+        if enabled {
+            remove_btn = remove_btn.on_press(Message::RemoveSource(idx));
+        }
+        row = row.push(remove_btn);
+    }
+
+    row.spacing(spacing.space_s)
+        .align_y(Alignment::Center)
+        .into()
 }

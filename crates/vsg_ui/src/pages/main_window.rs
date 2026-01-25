@@ -3,35 +3,29 @@
 //! This is the primary application view with source inputs,
 //! analysis controls, and log panel.
 
-use cosmic::iced::alignment::{Horizontal, Vertical};
-use cosmic::iced::{Length, Padding};
-use cosmic::widget::{self, button, checkbox, column, container, horizontal_space, progress_bar, row, scrollable, text, text_input, vertical_space};
-use cosmic::Element;
+use cosmic::iced::{Alignment, Length};
+use cosmic::prelude::*;
+use cosmic::{widget, Element};
 
 use crate::app::{App, Message};
-use crate::theme::{colors, font, spacing};
 
 /// Build the main window view.
 pub fn view(app: &App) -> Element<Message> {
-    let content = column![
-        // Header with buttons
-        header_row(app),
-        vertical_space().height(spacing::MD),
-        // Quick Analysis section
-        quick_analysis_section(app),
-        vertical_space().height(spacing::MD),
-        // Latest Job Results
-        results_section(app),
-        vertical_space().height(spacing::MD),
-        // Log panel
-        log_section(app),
-        // Status bar
-        status_bar(app),
-    ]
-    .spacing(spacing::XS)
-    .padding(spacing::LG);
+    let spacing = cosmic::theme::active().cosmic().spacing;
 
-    container(content)
+    let content = widget::column()
+        .push(header_row(app))
+        .push(widget::vertical_space().height(Length::Fixed(spacing.space_m.into())))
+        .push(quick_analysis_section(app))
+        .push(widget::vertical_space().height(Length::Fixed(spacing.space_m.into())))
+        .push(results_section(app))
+        .push(widget::vertical_space().height(Length::Fixed(spacing.space_m.into())))
+        .push(log_section(app))
+        .push(status_bar(app))
+        .spacing(spacing.space_xxs)
+        .padding(spacing.space_m);
+
+    widget::container(content)
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
@@ -39,28 +33,33 @@ pub fn view(app: &App) -> Element<Message> {
 
 /// Header row with Settings and Job Queue buttons.
 fn header_row(app: &App) -> Element<Message> {
-    row![
-        button(text("Settings").size(font::NORMAL))
-            .on_press(Message::OpenSettings)
-            .padding([spacing::SM, spacing::LG]),
-        horizontal_space().width(spacing::SM),
-        button(text("Open Job Queue for Merging").size(font::NORMAL))
-            .on_press(Message::OpenJobQueue)
-            .padding([spacing::SM, spacing::LG]),
-        horizontal_space(),
-        checkbox("Archive logs", app.archive_logs)
-            .on_toggle(Message::ArchiveLogsChanged)
-            .text_size(font::NORMAL),
-    ]
-    .spacing(spacing::SM)
-    .align_y(Vertical::Center)
-    .into()
+    let spacing = cosmic::theme::active().cosmic().spacing;
+
+    widget::row()
+        .push(
+            widget::button::standard("Settings")
+                .on_press(Message::OpenSettings)
+        )
+        .push(widget::horizontal_space().width(Length::Fixed(spacing.space_s.into())))
+        .push(
+            widget::button::standard("Open Job Queue for Merging")
+                .on_press(Message::OpenJobQueue)
+        )
+        .push(widget::horizontal_space())
+        .push(
+            widget::checkbox("Archive logs", app.archive_logs)
+                .on_toggle(Message::ArchiveLogsChanged)
+        )
+        .spacing(spacing.space_s)
+        .align_y(Alignment::Center)
+        .into()
 }
 
 /// Quick Analysis section with source inputs.
 fn quick_analysis_section(app: &App) -> Element<Message> {
-    let section_header = text("Quick Analysis")
-        .size(font::LG);
+    let spacing = cosmic::theme::active().cosmic().spacing;
+
+    let section_header = widget::text::title4("Quick Analysis");
 
     let source1_row = source_input_row(
         "Source 1 (Reference):",
@@ -83,138 +82,143 @@ fn quick_analysis_section(app: &App) -> Element<Message> {
         !app.is_analyzing,
     );
 
-    let analyze_button = button(
-        text(if app.is_analyzing { "Analyzing..." } else { "Analyze Only" })
-            .size(font::NORMAL)
-    )
-    .on_press_maybe(if app.is_analyzing { None } else { Some(Message::AnalyzeOnly) })
-    .padding([spacing::SM, spacing::XL]);
+    let analyze_label = if app.is_analyzing { "Analyzing..." } else { "Analyze Only" };
+    let analyze_button = if app.is_analyzing {
+        widget::button::standard(analyze_label)
+    } else {
+        widget::button::suggested(analyze_label)
+            .on_press(Message::AnalyzeOnly)
+    };
 
-    let content = column![
-        section_header,
-        vertical_space().height(spacing::SM),
-        source1_row,
-        source2_row,
-        source3_row,
-        vertical_space().height(spacing::SM),
-        row![
-            horizontal_space(),
-            analyze_button,
-        ],
-    ]
-    .spacing(spacing::XS);
+    let content = widget::column()
+        .push(section_header)
+        .push(widget::vertical_space().height(Length::Fixed(spacing.space_s.into())))
+        .push(source1_row)
+        .push(source2_row)
+        .push(source3_row)
+        .push(widget::vertical_space().height(Length::Fixed(spacing.space_s.into())))
+        .push(
+            widget::row()
+                .push(widget::horizontal_space())
+                .push(analyze_button)
+        )
+        .spacing(spacing.space_xxs);
 
-    container(content)
-        .padding(spacing::MD)
+    widget::container(content)
+        .padding(spacing.space_s)
         .into()
 }
 
 /// Single source input row with label, text input, and browse button.
-fn source_input_row(
-    label: &str,
-    path: &str,
+fn source_input_row<'a>(
+    label: &'a str,
+    path: &'a str,
     source_idx: usize,
     enabled: bool,
-) -> Element<Message> {
-    row![
-        text(label)
-            .size(font::NORMAL)
-            .width(Length::Fixed(150.0)),
-        text_input("Drop file here or browse...", path)
-            .on_input(move |s| Message::SourcePathChanged(source_idx, s))
-            .width(Length::Fill)
-            .size(font::NORMAL),
-        button(text("Browse").size(font::SM))
-            .on_press_maybe(if enabled { Some(Message::BrowseSource(source_idx)) } else { None })
-            .padding([spacing::XS, spacing::SM]),
-    ]
-    .spacing(spacing::SM)
-    .align_y(Vertical::Center)
-    .into()
+) -> Element<'a, Message> {
+    let spacing = cosmic::theme::active().cosmic().spacing;
+
+    let browse_button = if enabled {
+        widget::button::standard("Browse")
+            .on_press(Message::BrowseSource(source_idx))
+    } else {
+        widget::button::standard("Browse")
+    };
+
+    widget::row()
+        .push(
+            widget::text::body(label)
+                .width(Length::Fixed(150.0))
+        )
+        .push(
+            widget::text_input::text_input("Drop file here or browse...", path)
+                .on_input(move |s| Message::SourcePathChanged(source_idx, s))
+                .width(Length::Fill)
+        )
+        .push(browse_button)
+        .spacing(spacing.space_s)
+        .align_y(Alignment::Center)
+        .into()
 }
 
 /// Results section showing delay values.
 fn results_section(app: &App) -> Element<Message> {
-    let section_header = text("Latest Job Results")
-        .size(font::LG);
+    let spacing = cosmic::theme::active().cosmic().spacing;
 
-    let delay2_row = row![
-        text("Source 2 Delay:")
-            .size(font::NORMAL)
-            .width(Length::Fixed(150.0)),
-        text(if app.delay_source2.is_empty() { "-" } else { &app.delay_source2 })
-            .size(font::NORMAL),
-    ]
-    .spacing(spacing::SM);
+    let section_header = widget::text::title4("Latest Job Results");
 
-    let delay3_row = row![
-        text("Source 3 Delay:")
-            .size(font::NORMAL)
-            .width(Length::Fixed(150.0)),
-        text(if app.delay_source3.is_empty() { "-" } else { &app.delay_source3 })
-            .size(font::NORMAL),
-    ]
-    .spacing(spacing::SM);
+    let delay2_text = if app.delay_source2.is_empty() { "-" } else { &app.delay_source2 };
+    let delay3_text = if app.delay_source3.is_empty() { "-" } else { &app.delay_source3 };
 
-    let content = column![
-        section_header,
-        vertical_space().height(spacing::SM),
-        delay2_row,
-        delay3_row,
-    ]
-    .spacing(spacing::XS);
+    let delay2_row = widget::row()
+        .push(widget::text::body("Source 2 Delay:").width(Length::Fixed(150.0)))
+        .push(widget::text::body(delay2_text))
+        .spacing(spacing.space_s);
 
-    container(content)
-        .padding(spacing::MD)
+    let delay3_row = widget::row()
+        .push(widget::text::body("Source 3 Delay:").width(Length::Fixed(150.0)))
+        .push(widget::text::body(delay3_text))
+        .spacing(spacing.space_s);
+
+    let content = widget::column()
+        .push(section_header)
+        .push(widget::vertical_space().height(Length::Fixed(spacing.space_s.into())))
+        .push(delay2_row)
+        .push(delay3_row)
+        .spacing(spacing.space_xxs);
+
+    widget::container(content)
+        .padding(spacing.space_s)
         .into()
 }
 
 /// Log section with scrollable text area.
 fn log_section(app: &App) -> Element<Message> {
-    let section_header = text("Log")
-        .size(font::LG);
+    let spacing = cosmic::theme::active().cosmic().spacing;
 
-    let log_content = text(&app.log_text)
-        .size(font::SM);
+    let section_header = widget::text::title4("Log");
 
-    let scroll = scrollable(
-        container(log_content)
-            .padding(spacing::SM)
+    let log_content = widget::text::body(&app.log_text);
+
+    let scroll = widget::scrollable(
+        widget::container(log_content)
+            .padding(spacing.space_s)
             .width(Length::Fill)
     )
     .height(Length::FillPortion(1));
 
-    let content = column![
-        section_header,
-        vertical_space().height(spacing::SM),
-        container(scroll)
-            .width(Length::Fill)
-            .height(Length::FillPortion(1)),
-    ]
-    .spacing(spacing::XS);
+    let content = widget::column()
+        .push(section_header)
+        .push(widget::vertical_space().height(Length::Fixed(spacing.space_s.into())))
+        .push(
+            widget::container(scroll)
+                .width(Length::Fill)
+                .height(Length::FillPortion(1))
+        )
+        .spacing(spacing.space_xxs);
 
-    container(content)
-        .padding(spacing::MD)
+    widget::container(content)
+        .padding(spacing.space_s)
         .height(Length::FillPortion(1))
         .into()
 }
 
 /// Status bar at the bottom.
 fn status_bar(app: &App) -> Element<Message> {
-    let status = text(&app.status_text)
-        .size(font::SM);
+    let spacing = cosmic::theme::active().cosmic().spacing;
 
-    let progress = progress_bar(0.0..=100.0, app.progress_value)
+    let status = widget::text::body(&app.status_text);
+
+    let progress = widget::progress_bar(0.0..=100.0, app.progress_value)
         .width(Length::Fixed(200.0))
-        .height(8);
+        .height(Length::Fixed(8.0));
 
-    row![
-        status,
-        horizontal_space(),
-        progress,
-    ]
-    .spacing(spacing::MD)
-    .padding([spacing::SM, 0])
-    .align_y(Vertical::Center)
-    .into()
+    widget::row()
+        .push(status)
+        .push(widget::horizontal_space())
+        .push(progress)
+        .spacing(spacing.space_m)
+        .padding([spacing.space_s, 0])
+        .align_y(Alignment::Center)
+        .into()
 }

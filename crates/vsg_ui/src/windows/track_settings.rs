@@ -1,12 +1,10 @@
 //! Track Settings dialog view.
 
-use cosmic::iced::alignment::Vertical;
-use cosmic::iced::Length;
-use cosmic::widget::{self, button, checkbox, column, container, dropdown, horizontal_space, row, spin_button, text, text_input, vertical_space};
-use cosmic::Element;
+use cosmic::iced::{Alignment, Length};
+use cosmic::prelude::*;
+use cosmic::{widget, Element};
 
 use crate::app::{App, Message};
-use crate::theme::{font, spacing};
 
 const LANGUAGE_OPTIONS: &[(&str, &str)] = &[
     ("und", "Undetermined"), ("eng", "English"), ("jpn", "Japanese"), ("spa", "Spanish"),
@@ -19,59 +17,100 @@ const LANGUAGE_OPTIONS: &[(&str, &str)] = &[
     ("ukr", "Ukrainian"),
 ];
 
+static LANGUAGE_NAMES: &[&str] = &[
+    "Undetermined", "English", "Japanese", "Spanish", "French", "German", "Italian", "Portuguese",
+    "Russian", "Chinese", "Korean", "Arabic", "Hindi", "Thai", "Vietnamese", "Polish",
+    "Dutch", "Swedish", "Norwegian", "Danish", "Finnish", "Turkish", "Greek", "Hebrew",
+    "Hungarian", "Czech", "Romanian", "Bulgarian", "Ukrainian",
+];
+
 pub fn view(app: &App) -> Element<Message> {
+    let spacing = cosmic::theme::active().cosmic().spacing;
+
     let is_subtitle = app.track_settings.track_type == "subtitles";
-    let language_names: Vec<&str> = LANGUAGE_OPTIONS.iter().map(|(_, name)| *name).collect();
 
-    let content = column![
-        text("Track Settings").size(font::HEADER),
-        vertical_space().height(spacing::MD),
-        row![
-            text("Language:").size(font::NORMAL).width(Length::Fixed(120.0)),
-            dropdown(&language_names, Some(app.track_settings.selected_language_idx), Message::TrackLanguageChanged),
-        ].spacing(spacing::SM).align_y(Vertical::Center),
-        vertical_space().height(spacing::SM),
-        row![
-            text("Custom Name:").size(font::NORMAL).width(Length::Fixed(120.0)),
-            text_input("", &app.track_settings.custom_name)
-                .on_input(Message::TrackCustomNameChanged)
-                .width(Length::Fill).size(font::NORMAL),
-        ].spacing(spacing::SM).align_y(Vertical::Center),
-        vertical_space().height(spacing::LG),
-        if is_subtitle {
-            column![
-                text("Subtitle Options").size(font::MD),
-                vertical_space().height(spacing::SM),
-                checkbox("Perform OCR (image-based subtitles)", app.track_settings.perform_ocr)
-                    .on_toggle(Message::TrackPerformOcrChanged).text_size(font::NORMAL),
-                checkbox("Convert to ASS format", app.track_settings.convert_to_ass)
-                    .on_toggle(Message::TrackConvertToAssChanged).text_size(font::NORMAL),
-                row![
-                    checkbox("Rescale", app.track_settings.rescale)
-                        .on_toggle(Message::TrackRescaleChanged).text_size(font::NORMAL),
-                    horizontal_space().width(spacing::SM),
-                    text("Size multiplier:").size(font::NORMAL),
-                    spin_button("", app.track_settings.size_multiplier_pct)
-                        .on_change(Message::TrackSizeMultiplierChanged).min(50).max(200).step(5),
-                    text("%").size(font::NORMAL),
-                ].spacing(spacing::SM).align_y(Vertical::Center),
-                vertical_space().height(spacing::SM),
-                button(text("Configure Sync Exclusion...").size(font::NORMAL))
+    let mut content = widget::column()
+        .push(widget::text::title3("Track Settings"))
+        .push(widget::vertical_space().height(Length::Fixed(spacing.space_m.into())))
+        .push(
+            widget::row()
+                .push(widget::text::body("Language:").width(Length::Fixed(120.0)))
+                .push(
+                    widget::dropdown(LANGUAGE_NAMES, Some(app.track_settings.selected_language_idx), Message::TrackLanguageChanged)
+                )
+                .spacing(spacing.space_s)
+                .align_y(Alignment::Center)
+        )
+        .push(widget::vertical_space().height(Length::Fixed(spacing.space_s.into())))
+        .push(
+            widget::row()
+                .push(widget::text::body("Custom Name:").width(Length::Fixed(120.0)))
+                .push(
+                    widget::text_input::text_input("", &app.track_settings.custom_name)
+                        .on_input(Message::TrackCustomNameChanged)
+                        .width(Length::Fill)
+                )
+                .spacing(spacing.space_s)
+                .align_y(Alignment::Center)
+        )
+        .push(widget::vertical_space().height(Length::Fixed(spacing.space_l.into())));
+
+    if is_subtitle {
+        content = content
+            .push(widget::text::title4("Subtitle Options"))
+            .push(widget::vertical_space().height(Length::Fixed(spacing.space_s.into())))
+            .push(
+                widget::checkbox("Perform OCR (image-based subtitles)", app.track_settings.perform_ocr)
+                    .on_toggle(Message::TrackPerformOcrChanged)
+            )
+            .push(
+                widget::checkbox("Convert to ASS format", app.track_settings.convert_to_ass)
+                    .on_toggle(Message::TrackConvertToAssChanged)
+            )
+            .push(
+                widget::row()
+                    .push(
+                        widget::checkbox("Rescale", app.track_settings.rescale)
+                            .on_toggle(Message::TrackRescaleChanged)
+                    )
+                    .push(widget::horizontal_space().width(Length::Fixed(spacing.space_s.into())))
+                    .push(widget::text::body("Size multiplier:"))
+                    .push(
+                        widget::text_input::text_input("100", app.track_settings.size_multiplier_pct.to_string())
+                            .on_input(|v| Message::TrackSizeMultiplierChanged(v.parse().unwrap_or(100)))
+                            .width(Length::Fixed(60.0))
+                    )
+                    .push(widget::text::body("%"))
+                    .spacing(spacing.space_s)
+                    .align_y(Alignment::Center)
+            )
+            .push(widget::vertical_space().height(Length::Fixed(spacing.space_s.into())))
+            .push(
+                widget::button::standard("Configure Sync Exclusion...")
                     .on_press(Message::ConfigureSyncExclusion)
-                    .padding([spacing::SM, spacing::MD]),
-            ].spacing(spacing::XS).into()
-        } else { container(text("")).into() },
-        vertical_space(),
-        row![
-            horizontal_space(),
-            button(text("Cancel").size(font::NORMAL))
-                .on_press(Message::CloseTrackSettings)
-                .padding([spacing::SM, spacing::LG]),
-            button(text("OK").size(font::NORMAL))
-                .on_press(Message::AcceptTrackSettings)
-                .padding([spacing::SM, spacing::LG]),
-        ].spacing(spacing::SM),
-    ].spacing(spacing::XS).padding(spacing::LG);
+            );
+    }
 
-    container(content).width(Length::Fill).height(Length::Fill).into()
+    content = content
+        .push(widget::vertical_space())
+        .push(
+            widget::row()
+                .push(widget::horizontal_space())
+                .push(
+                    widget::button::standard("Cancel")
+                        .on_press(Message::CloseTrackSettings)
+                )
+                .push(
+                    widget::button::suggested("OK")
+                        .on_press(Message::AcceptTrackSettings)
+                )
+                .spacing(spacing.space_s)
+        )
+        .spacing(spacing.space_xxs)
+        .padding(spacing.space_l);
+
+    widget::container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .into()
 }
