@@ -6,7 +6,7 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -14,6 +14,7 @@ use tracing_subscriber::{fmt, EnvFilter, Layer};
 
 use vsg_core::analysis::Analyzer;
 use vsg_core::config::{ConfigManager, ConfigSection};
+use vsg_core::logging::{JobLogger, LogConfig};
 
 // Global message queue for logging from Rust to C++
 static LOG_QUEUE: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
@@ -511,42 +512,79 @@ fn bridge_run_analysis(source_paths: &[String]) -> Vec<ffi::AnalysisResult> {
         vsg_core::config::Settings::default()
     };
 
-    bridge_log("=== Starting Analysis ===");
-    set_progress(0, "Initializing...");
-
     // Convert paths
     let paths: Vec<PathBuf> = source_paths.iter().map(PathBuf::from).collect();
     let reference = &paths[0];
 
-    bridge_log(&format!("Reference: {}", reference.display()));
+    // Derive job name from reference file
+    let job_name = reference
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "analysis".to_string());
+
+    // Get logs directory from settings
+    let logs_dir = PathBuf::from(&settings.paths.logs_folder);
+
+    // Create LogConfig from settings
+    let log_config = LogConfig {
+        compact: settings.logging.compact,
+        progress_step: settings.logging.progress_step,
+        error_tail: settings.logging.error_tail as usize,
+        ..LogConfig::default()
+    };
+
+    // Create GUI callback that feeds our message queue
+    let gui_callback: Box<dyn Fn(&str) + Send + Sync> = Box::new(|msg: &str| {
+        bridge_log(msg);
+    });
+
+    // Create JobLogger with dual output (file + GUI)
+    let logger = match JobLogger::new(&job_name, &logs_dir, log_config, Some(gui_callback)) {
+        Ok(l) => Arc::new(l),
+        Err(e) => {
+            bridge_log(&format!("[ERROR] Failed to create job logger: {}", e));
+            // Fallback to direct logging
+            return run_analysis_fallback(&paths, &settings);
+        }
+    };
+
+    logger.phase("Starting Analysis");
+    set_progress(0, "Initializing...");
+
+    logger.info(&format!("Job: {}", job_name));
+    logger.info(&format!("Log file: {}", logger.log_path().display()));
+    logger.info(&format!("Reference: {}", reference.display()));
 
     let mut results = Vec::new();
 
     // Analyze each non-reference source
     for (i, source) in paths.iter().skip(1).enumerate() {
         let source_idx = i + 2; // Source 2, 3, etc.
-        bridge_log(&format!("--- Analyzing Source {} ---", source_idx));
-        bridge_log(&format!("Path: {}", source.display()));
+        let source_name = format!("Source {}", source_idx);
 
-        set_progress(
-            ((i as f32 / (paths.len() - 1) as f32) * 100.0) as i32,
-            &format!("Analyzing Source {}...", source_idx),
-        );
+        logger.section(&format!("Analyzing {}", source_name));
+        logger.info(&format!("Path: {}", source.display()));
 
-        // Create analyzer with settings
-        let analyzer = Analyzer::new(&settings.analysis);
+        let progress_pct = ((i as f32 / (paths.len() - 1) as f32) * 100.0) as u32;
+        logger.progress(progress_pct);
+        set_progress(progress_pct as i32, &format!("Analyzing {}...", source_name));
+
+        // Create analyzer with settings and attach logger for detailed output
+        let analyzer = Analyzer::from_settings(&settings.analysis)
+            .with_logger(Arc::clone(&logger));
 
         // Run analysis
-        match analyzer.analyze(reference, source) {
-            Ok(delay_result) => {
-                let delay_ms = delay_result.delay.as_millis_f64();
-                let confidence = delay_result.confidence;
+        match analyzer.analyze(reference, source, &source_name) {
+            Ok(result) => {
+                let delay_ms = result.delay.delay_ms_raw;
+                let confidence = result.avg_match_pct / 100.0; // Convert to 0-1 range
 
-                bridge_log(&format!(
-                    "[SUCCESS] Source {} delay: {:.1}ms (confidence: {:.1}%)",
-                    source_idx,
+                logger.success(&format!(
+                    "{} delay: {:.1}ms (match: {:.1}%, {} chunks)",
+                    source_name,
                     delay_ms,
-                    confidence * 100.0
+                    result.avg_match_pct,
+                    result.accepted_chunks
                 ));
 
                 results.push(ffi::AnalysisResult {
@@ -558,7 +596,8 @@ fn bridge_run_analysis(source_paths: &[String]) -> Vec<ffi::AnalysisResult> {
                 });
             }
             Err(e) => {
-                bridge_log(&format!("[ERROR] Source {} analysis failed: {}", source_idx, e));
+                logger.error(&format!("{} analysis failed: {}", source_name, e));
+                logger.show_tail("error");
 
                 results.push(ffi::AnalysisResult {
                     source_index: source_idx as i32,
@@ -571,9 +610,62 @@ fn bridge_run_analysis(source_paths: &[String]) -> Vec<ffi::AnalysisResult> {
         }
     }
 
+    logger.progress(100);
     set_progress(100, "Analysis complete");
-    bridge_log("=== Analysis Complete ===");
+    logger.phase("Analysis Complete");
+    logger.flush();
 
+    results
+}
+
+/// Fallback analysis without JobLogger (in case of logger creation failure)
+fn run_analysis_fallback(paths: &[PathBuf], settings: &vsg_core::config::Settings) -> Vec<ffi::AnalysisResult> {
+    let reference = &paths[0];
+    let mut results = Vec::new();
+
+    bridge_log("=== Starting Analysis (fallback mode) ===");
+    bridge_log(&format!("Reference: {}", reference.display()));
+
+    for (i, source) in paths.iter().skip(1).enumerate() {
+        let source_idx = i + 2;
+        let source_name = format!("Source {}", source_idx);
+        bridge_log(&format!("--- Analyzing {} ---", source_name));
+
+        let analyzer = Analyzer::from_settings(&settings.analysis);
+
+        match analyzer.analyze(reference, source, &source_name) {
+            Ok(result) => {
+                let delay_ms = result.delay.delay_ms_raw;
+                let confidence = result.avg_match_pct / 100.0;
+
+                bridge_log(&format!(
+                    "[SUCCESS] {} delay: {:.1}ms (match: {:.1}%)",
+                    source_name, delay_ms, result.avg_match_pct
+                ));
+
+                results.push(ffi::AnalysisResult {
+                    source_index: source_idx as i32,
+                    delay_ms,
+                    confidence,
+                    success: true,
+                    error_message: String::new(),
+                });
+            }
+            Err(e) => {
+                bridge_log(&format!("[ERROR] {} analysis failed: {}", source_name, e));
+
+                results.push(ffi::AnalysisResult {
+                    source_index: source_idx as i32,
+                    delay_ms: 0.0,
+                    confidence: 0.0,
+                    success: false,
+                    error_message: e.to_string(),
+                });
+            }
+        }
+    }
+
+    bridge_log("=== Analysis Complete ===");
     results
 }
 
