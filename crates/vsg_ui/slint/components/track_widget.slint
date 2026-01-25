@@ -47,7 +47,7 @@ export component TrackWidget inherits Rectangle {
         padding: 0px;
         spacing: 0px;
 
-        // Top row: summary | badges | source
+        // Top row: summary | badges
         HorizontalLayout {
             spacing: 4px;
             height: 18px;
@@ -68,13 +68,15 @@ export component TrackWidget inherits Rectangle {
                 color: #ddaa55;
                 vertical-alignment: center;
             }
+        }
 
-            Text {
-                text: data.source;
-                font-size: 10px;
-                color: #666666;
-                vertical-alignment: center;
-            }
+        // Inline options/details summary (grey)
+        if data.options-summary != "": Text {
+            text: data.options-summary;
+            font-size: 9px;
+            color: #666666;
+            overflow: elide;
+            vertical-alignment: center;
         }
 
         // Bottom row: controls tightly packed

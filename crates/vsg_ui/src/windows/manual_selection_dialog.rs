@@ -70,21 +70,34 @@ fn populate_source_groups(
         let track_widgets: Vec<TrackWidgetData> = tracks
             .iter()
             .enumerate()
-            .map(|(idx, track)| TrackWidgetData {
-                id: idx as i32,
-                source: source_key.clone().into(),
-                track_type: track.track_type.clone(),
-                codec_id: track.codec_id.clone(),
-                summary: track.summary.clone(),
-                badges: track.badges.clone(),
-                options_summary: SharedString::new(),
-                is_default: false,
-                is_forced: false,
-                has_custom_name: false,
-                is_generated: false,
-                has_style_patch: false,
-                has_sync_exclusions: false,
-                sync_to_source: SharedString::new(),
+            .map(|(idx, track)| {
+                let type_initial = track
+                    .track_type
+                    .chars()
+                    .next()
+                    .unwrap_or('U')
+                    .to_ascii_uppercase();
+                let display_summary = format!(
+                    "[{}] [{}-{}] {}",
+                    source_key, type_initial, track.track_id, track.summary
+                );
+
+                TrackWidgetData {
+                    id: idx as i32,
+                    source: source_key.clone().into(),
+                    track_type: track.track_type.clone(),
+                    codec_id: track.codec_id.clone(),
+                    summary: display_summary.into(),
+                    badges: track.badges.clone(),
+                    options_summary: SharedString::new(),
+                    is_default: false,
+                    is_forced: false,
+                    has_custom_name: false,
+                    is_generated: false,
+                    has_style_patch: false,
+                    has_sync_exclusions: false,
+                    sync_to_source: SharedString::new(),
+                }
             })
             .collect();
 
@@ -125,6 +138,7 @@ struct TrackInfo {
     summary: SharedString,
     badges: SharedString,
     codec_id: SharedString,
+    track_id: i32,
 }
 
 /// Probe tracks from a video file using mkvmerge -J.
@@ -152,12 +166,14 @@ fn probe_tracks(path: &PathBuf) -> Vec<TrackInfo> {
                     summary: "Video Track (probe failed)".into(),
                     badges: SharedString::new(),
                     codec_id: SharedString::new(),
+                    track_id: 0,
                 },
                 TrackInfo {
                     track_type: "audio".into(),
                     summary: "Audio Track (probe failed)".into(),
                     badges: SharedString::new(),
                     codec_id: SharedString::new(),
+                    track_id: 1,
                 },
             ]
         }
@@ -169,12 +185,14 @@ fn probe_tracks(path: &PathBuf) -> Vec<TrackInfo> {
                     summary: "Video Track (mkvmerge not found)".into(),
                     badges: SharedString::new(),
                     codec_id: SharedString::new(),
+                    track_id: 0,
                 },
                 TrackInfo {
                     track_type: "audio".into(),
                     summary: "Audio Track (mkvmerge not found)".into(),
                     badges: SharedString::new(),
                     codec_id: SharedString::new(),
+                    track_id: 1,
                 },
             ]
         }
@@ -194,7 +212,7 @@ fn parse_mkvmerge_json(json_str: &str) -> Vec<TrackInfo> {
     let mut tracks = Vec::new();
 
     if let Some(track_array) = json.get("tracks").and_then(|t| t.as_array()) {
-        for track in track_array {
+        for (idx, track) in track_array.iter().enumerate() {
             let track_type = track
                 .get("type")
                 .and_then(|t| t.as_str())
@@ -227,6 +245,11 @@ fn parse_mkvmerge_json(json_str: &str) -> Vec<TrackInfo> {
                 .and_then(|p| p.get("forced_track"))
                 .and_then(|f| f.as_bool())
                 .unwrap_or(false);
+
+            let track_id = track
+                .get("id")
+                .and_then(|id| id.as_i64())
+                .unwrap_or(idx as i64) as i32;
 
             // Build summary based on track type
             let summary = match track_type {
@@ -265,6 +288,7 @@ fn parse_mkvmerge_json(json_str: &str) -> Vec<TrackInfo> {
                 summary: summary.into(),
                 badges: badges.join(" | ").into(),
                 codec_id: codec_id.into(),
+                track_id,
             });
         }
     }

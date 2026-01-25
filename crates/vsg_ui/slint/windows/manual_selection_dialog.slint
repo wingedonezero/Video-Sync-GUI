@@ -24,8 +24,8 @@ export struct AttachmentSourceOption {
 
 export component ManualSelectionDialog inherits Window {
     title: "Manual Track Selection";
-    min-width: 800px;
-    min-height: 450px;
+    min-width: 1200px;
+    min-height: 700px;
     default-font-size: 12px;
 
     in-out property <[SourceGroupData]> source-groups: [];
@@ -145,7 +145,7 @@ export component ManualSelectionDialog inherits Window {
 
                 // Header
                 Text {
-                    text: "Final Output (double-click to add, right-click for options)";
+                    text: "Final Output (Drag to reorder)";
                     font-weight: 600;
                     color: #d0d0d0;
                     font-size: 12px;
@@ -177,7 +177,7 @@ export component ManualSelectionDialog inherits Window {
                         padding: 4px;
 
                         Text {
-                            text: "Attachments:";
+                            text: "Include attachments from:";
                             font-weight: 600;
                             vertical-alignment: center;
                         }
