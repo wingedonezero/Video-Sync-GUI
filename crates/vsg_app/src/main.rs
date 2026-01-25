@@ -7,15 +7,20 @@
 //!   cargo build --release -p vsg_app
 //!   ./target/release/video-sync-gui
 
+use std::os::unix::process::CommandExt;
+use std::process::Command;
+
 fn main() {
     // The Qt executable is built by build.rs and copied to target/
-    // This Rust binary just prints a help message
     let qt_app = env!("VSG_QT_APP");
-    println!("Video Sync GUI");
-    println!();
-    println!("The Qt application has been built at:");
-    println!("  {}", qt_app);
-    println!();
-    println!("Run it directly:");
-    println!("  {}", qt_app);
+
+    // Replace this process with the Qt application
+    let err = Command::new(qt_app)
+        .args(std::env::args().skip(1))
+        .exec();
+
+    // exec() only returns on error
+    eprintln!("Failed to launch Qt application: {}", err);
+    eprintln!("Expected at: {}", qt_app);
+    std::process::exit(1);
 }
