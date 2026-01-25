@@ -1,5 +1,5 @@
 // TrackList - Reorderable list of tracks for final output.
-// Compact layout matching Qt's FinalList.
+// Dense Qt-style flat rows - NOT card UI.
 
 import { VerticalBox, HorizontalBox, ScrollView, Button } from "std-widgets.slint";
 import { TrackWidget, TrackWidgetData } from "track_widget.slint";
@@ -11,7 +11,7 @@ export struct FinalTrackData {
     sync-source-options: [string],
 }
 
-// Single entry - compact like Qt (no visible move buttons, use context menu)
+// Single entry - flat Qt-style row (~42px)
 component TrackListEntry inherits Rectangle {
     in property <FinalTrackData> data;
     in property <bool> show-move-buttons: true;
@@ -29,8 +29,10 @@ component TrackListEntry inherits Rectangle {
     callback style-editor-clicked();
     callback context-menu-requested();
 
-    background: touch.has-hover ? #3a3a3a : #333333;
-    border-radius: 3px;
+    // Flat style - no rounded corners, transparent bg, hover highlight only
+    background: touch.has-hover ? #2d3236 : transparent;
+    border-radius: 0px;
+    height: 42px;
 
     touch := TouchArea {
         pointer-event(event) => {
@@ -41,18 +43,18 @@ component TrackListEntry inherits Rectangle {
     }
 
     HorizontalLayout {
-        padding: 4px;
-        spacing: 4px;
+        padding-left: 2px;
+        padding-right: 2px;
+        spacing: 2px;
 
         // Track type bar
         Rectangle {
             width: 3px;
-            border-radius: 1px;
             background: data.track.track-type == "video" ? #8855dd :
                         data.track.track-type == "audio" ? #55aa55 : #ddaa55;
         }
 
-        // Track widget - compact two-row layout
+        // Track widget
         TrackWidget {
             horizontal-stretch: 1;
             data: data.track;
@@ -66,12 +68,20 @@ component TrackListEntry inherits Rectangle {
             style-editor-clicked => { root.style-editor-clicked(); }
         }
 
-        // Remove button (small X)
-        Button {
+        // Remove button - visible only on hover
+        if touch.has-hover: Button {
             text: "×";
-            max-width: 20px;
+            width: 20px;
+            height: 20px;
             clicked => { root.remove(); }
         }
+    }
+
+    // Bottom border separator
+    Rectangle {
+        y: parent.height - 1px;
+        height: 1px;
+        background: #3a3a3a;
     }
 }
 
@@ -88,28 +98,30 @@ export component TrackList inherits Rectangle {
     callback settings-clicked(int);
     callback style-editor-clicked(int);
 
-    background: #2a2a2a;
-    border-radius: 4px;
+    // Flat style - no rounded corners
+    background: transparent;
 
-    VerticalBox {
+    VerticalLayout {
         padding: 0px;
+        spacing: 0px;
 
         if tracks.length == 0: Rectangle {
             vertical-stretch: 1;
 
-            VerticalBox {
+            VerticalLayout {
                 alignment: center;
+                spacing: 2px;
 
                 Text {
                     text: "No tracks selected";
-                    font-size: 13px;
+                    font-size: 11px;
                     color: #666666;
                     horizontal-alignment: center;
                 }
 
                 Text {
                     text: "Double-click tracks on the left to add";
-                    font-size: 11px;
+                    font-size: 10px;
                     color: #555555;
                     horizontal-alignment: center;
                 }
@@ -119,9 +131,9 @@ export component TrackList inherits Rectangle {
         if tracks.length > 0: ScrollView {
             vertical-stretch: 1;
 
-            VerticalBox {
-                padding: 4px;
-                spacing: 4px;
+            VerticalLayout {
+                padding: 0px;
+                spacing: 0px;
 
                 for item[idx] in tracks: TrackListEntry {
                     data: item;
