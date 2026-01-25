@@ -45,6 +45,8 @@ impl App {
         let settings = window::Settings {
             size: Size::new(800.0, 700.0),
             resizable: true,
+            decorations: true,
+            transparent: false,
             ..Default::default()
         };
 
@@ -76,6 +78,8 @@ impl App {
         let settings = window::Settings {
             size: Size::new(1100.0, 600.0),
             resizable: true,
+            decorations: true,
+            transparent: false,
             ..Default::default()
         };
 
@@ -109,6 +113,8 @@ impl App {
         let settings = window::Settings {
             size: Size::new(700.0, 400.0),
             resizable: true,
+            decorations: true,
+            transparent: false,
             ..Default::default()
         };
 
@@ -158,6 +164,8 @@ impl App {
         let settings = window::Settings {
             size: Size::new(1200.0, 800.0),
             resizable: true,
+            decorations: true,
+            transparent: false,
             ..Default::default()
         };
 
@@ -196,6 +204,8 @@ impl App {
         let settings = window::Settings {
             size: Size::new(500.0, 450.0),
             resizable: false,
+            decorations: true,
+            transparent: false,
             ..Default::default()
         };
 
