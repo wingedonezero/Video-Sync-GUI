@@ -11,9 +11,9 @@ name = "video-sync-gui"
 path = "src/main.rs"
 
 [dependencies]
-vsg_core = { path = "../vsg_core" }
+# vsg_bridge dependency ensures it builds first (for CMake to find libvsg_bridge.a)
+# We don't actually use it in Rust - the Qt binary links against it
 vsg_bridge = { path = "../vsg_bridge" }
-cxx = "1.0"
 
 [build-dependencies]
 cc = "1.0"

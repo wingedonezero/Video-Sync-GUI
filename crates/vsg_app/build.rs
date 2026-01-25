@@ -91,9 +91,9 @@ fn main() {
     // Tell cargo where to find the executable
     println!("cargo:rustc-env=VSG_QT_APP={}", dst_exe.display());
 
-    // Link dependencies
-    println!("cargo:rustc-link-search=native={}", target_dir.display());
-    println!("cargo:rustc-link-lib=static=vsg_bridge");
+    // Note: We do NOT link vsg_bridge into the Rust binary.
+    // The Rust binary (vsg_app) just exec's the Qt application.
+    // The Qt binary (built by CMake above) links against libvsg_bridge.a directly.
 
     // Rerun if sources change
     for entry in walkdir(&qt_ui_dir) {
