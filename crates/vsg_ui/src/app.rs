@@ -275,30 +275,163 @@ pub struct TrackWidgetState {
 }
 
 /// State for a final track in the layout.
+/// Each track entry has its own unique settings - this is critical for the job system.
 #[derive(Debug, Clone)]
 pub struct FinalTrackState {
+    /// Unique ID for this entry (different from track_id, allows same track added multiple times)
+    pub entry_id: uuid::Uuid,
     pub track_id: usize,
     pub source_key: String,
     pub track_type: String,
+    pub codec_id: String,
     pub summary: String,
+
+    // Basic flags
     pub is_default: bool,
     pub is_forced: bool,
     pub sync_to_source: String,
-    pub has_custom_name: bool,
-    pub custom_name: String,
+
+    // Custom naming
+    pub custom_lang: Option<String>,
+    pub custom_name: Option<String>,
+
+    // Subtitle processing options (per-track, not global!)
+    pub perform_ocr: bool,           // Only for VOBSUB/PGS
+    pub convert_to_ass: bool,        // Only for SRT (S_TEXT/UTF8)
+    pub rescale: bool,               // Rescale subtitle timing
+    pub size_multiplier_pct: i32,    // Font size multiplier (100 = 100%)
+
+    // Style editing (for ASS/SSA subtitles)
+    pub style_patch: Option<String>,       // JSON-serialized style changes
+    pub font_replacements: Option<String>, // JSON-serialized font mappings
+
+    // Sync exclusion (for styled subtitles)
+    pub sync_exclusion_styles: Vec<String>,
+    pub sync_exclusion_mode: SyncExclusionMode,
+
+    // Generated track info
+    pub is_generated: bool,
+    pub generated_filter_styles: Vec<String>,
+    pub generated_from_entry_id: Option<uuid::Uuid>,
+}
+
+/// Sync exclusion mode for subtitle tracks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SyncExclusionMode {
+    #[default]
+    Exclude,  // Exclude listed styles from sync
+    Include,  // Only include listed styles in sync
 }
 
 /// State for track settings dialog.
+/// This is a temporary editing state - changes are applied back to the FinalTrackState on accept.
 #[derive(Debug, Clone, Default)]
 pub struct TrackSettingsState {
     pub track_type: String,
     pub codec_id: String,
     pub selected_language_idx: usize,
-    pub custom_name: String,
+    pub custom_lang: Option<String>,
+    pub custom_name: Option<String>,
     pub perform_ocr: bool,
     pub convert_to_ass: bool,
     pub rescale: bool,
     pub size_multiplier_pct: i32,
+    // Sync exclusion editing state
+    pub sync_exclusion_styles: Vec<String>,
+    pub sync_exclusion_mode: SyncExclusionMode,
+}
+
+impl FinalTrackState {
+    /// Create a new FinalTrackState with defaults.
+    pub fn new(track_id: usize, source_key: String, track_type: String, codec_id: String, summary: String) -> Self {
+        Self {
+            entry_id: uuid::Uuid::new_v4(),
+            track_id,
+            source_key,
+            track_type,
+            codec_id,
+            summary,
+            is_default: false,
+            is_forced: false,
+            sync_to_source: "Source 1".to_string(),
+            custom_lang: None,
+            custom_name: None,
+            perform_ocr: false,
+            convert_to_ass: false,
+            rescale: false,
+            size_multiplier_pct: 100,
+            style_patch: None,
+            font_replacements: None,
+            sync_exclusion_styles: Vec::new(),
+            sync_exclusion_mode: SyncExclusionMode::Exclude,
+            is_generated: false,
+            generated_filter_styles: Vec::new(),
+            generated_from_entry_id: None,
+        }
+    }
+
+    /// Check if this track is OCR-compatible (image-based subtitles).
+    pub fn is_ocr_compatible(&self) -> bool {
+        let codec_upper = self.codec_id.to_uppercase();
+        codec_upper.contains("VOBSUB") || codec_upper.contains("PGS")
+    }
+
+    /// Check if this track can be converted to ASS (SRT subtitles).
+    pub fn is_convert_to_ass_compatible(&self) -> bool {
+        self.codec_id.to_uppercase().contains("S_TEXT/UTF8")
+    }
+
+    /// Check if this track supports style editing (ASS/SSA subtitles).
+    pub fn is_style_editable(&self) -> bool {
+        let codec_upper = self.codec_id.to_uppercase();
+        codec_upper.contains("S_TEXT/ASS") || codec_upper.contains("S_TEXT/SSA")
+    }
+
+    /// Check if this track supports sync exclusion (styled subtitles).
+    pub fn supports_sync_exclusion(&self) -> bool {
+        self.is_style_editable()
+    }
+
+    /// Generate badges string for display.
+    pub fn badges(&self) -> String {
+        let mut badges = Vec::new();
+
+        if self.is_default {
+            badges.push("Default");
+        }
+        if self.is_forced {
+            badges.push("Forced");
+        }
+        if self.perform_ocr {
+            badges.push("OCR");
+        }
+        if self.convert_to_ass {
+            badges.push("→ASS");
+        }
+        if self.rescale {
+            badges.push("Rescale");
+        }
+        if self.size_multiplier_pct != 100 {
+            badges.push("Sized");
+        }
+        if self.style_patch.is_some() {
+            badges.push("Styled");
+        }
+        if self.font_replacements.is_some() {
+            badges.push("Fonts");
+        }
+        if !self.sync_exclusion_styles.is_empty() {
+            badges.push("SyncEx");
+        }
+        if self.is_generated {
+            badges.push("Generated");
+        }
+        if self.custom_name.is_some() {
+            badges.push("Named");
+        }
+
+        badges.join(" | ")
+    }
 }
 
 impl App {
@@ -615,7 +748,7 @@ impl App {
                 Task::none()
             }
             Message::TrackCustomNameChanged(name) => {
-                self.track_settings.custom_name = name;
+                self.track_settings.custom_name = if name.is_empty() { None } else { Some(name) };
                 Task::none()
             }
             Message::TrackPerformOcrChanged(value) => {

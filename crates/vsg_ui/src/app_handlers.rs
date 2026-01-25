@@ -87,9 +87,25 @@ impl App {
     }
 
     /// Close the job queue window.
+    /// This also performs cleanup similar to Qt's layout_manager.cleanup_all()
     pub fn close_job_queue_window(&mut self) -> Task<Message> {
         if let Some(id) = self.job_queue_window_id.take() {
             self.window_map.remove(&id);
+
+            // Cleanup: Clear job queue related state
+            self.selected_job_indices.clear();
+            self.job_queue_status.clear();
+            self.last_clicked_job_idx = None;
+            self.last_click_time = None;
+
+            // TODO: When temp file handling is implemented, clean up:
+            // - Extracted subtitle temp files
+            // - OCR preview files
+            // - Font extraction directories
+            // - Generated track temp files
+            // This would be: self.layout_manager.cleanup_all()
+
+            self.append_log("Job Queue closed.");
             return window::close(id);
         }
         Task::none()
@@ -171,12 +187,22 @@ impl App {
     }
 
     /// Close the manual selection window.
+    /// Cleans up all manual selection state (like Qt's cleanup on cancel)
     pub fn close_manual_selection_window(&mut self) -> Task<Message> {
         if let Some(id) = self.manual_selection_window_id.take() {
             self.window_map.remove(&id);
             self.manual_selection_job_idx = None;
             self.source_groups.clear();
             self.final_tracks.clear();
+            self.attachment_sources.clear();
+            self.external_subtitles.clear();
+            self.manual_selection_info.clear();
+
+            // TODO: When temp file handling is implemented, clean up:
+            // - Style editor preview files
+            // - OCR preview files for this job
+            // - Extracted subtitle files
+
             return window::close(id);
         }
         Task::none()
@@ -188,10 +214,18 @@ impl App {
             return Task::none();
         }
 
-        // Get track info
+        // Load all settings from the specific track entry
         if let Some(track) = self.final_tracks.get(track_idx) {
             self.track_settings.track_type = track.track_type.clone();
+            self.track_settings.codec_id = track.codec_id.clone();
+            self.track_settings.custom_lang = track.custom_lang.clone();
             self.track_settings.custom_name = track.custom_name.clone();
+            self.track_settings.perform_ocr = track.perform_ocr;
+            self.track_settings.convert_to_ass = track.convert_to_ass;
+            self.track_settings.rescale = track.rescale;
+            self.track_settings.size_multiplier_pct = track.size_multiplier_pct;
+            self.track_settings.sync_exclusion_styles = track.sync_exclusion_styles.clone();
+            self.track_settings.sync_exclusion_mode = track.sync_exclusion_mode;
             self.track_settings_idx = Some(track_idx);
         }
 
@@ -946,17 +980,14 @@ impl App {
                 return;
             }
 
-            self.final_tracks.push(FinalTrackState {
+            // Each added track gets its own unique entry with its own settings
+            self.final_tracks.push(FinalTrackState::new(
                 track_id,
-                source_key: source_key.to_string(),
-                track_type: track.track_type,
-                summary: track.summary,
-                is_default: false,
-                is_forced: false,
-                sync_to_source: "Source 1".to_string(),
-                has_custom_name: false,
-                custom_name: String::new(),
-            });
+                source_key.to_string(),
+                track.track_type,
+                track.codec_id,
+                track.summary,
+            ));
 
             self.manual_selection_info.clear();
         }
@@ -980,7 +1011,7 @@ impl App {
     /// Accept the layout and save to job.
     pub fn accept_layout(&mut self) {
         if let Some(job_idx) = self.manual_selection_job_idx {
-            // Build ManualLayout from state
+            // Build ManualLayout from state - transfer ALL per-track settings
             let layout = ManualLayout {
                 final_tracks: self
                     .final_tracks
@@ -994,12 +1025,23 @@ impl App {
                         };
 
                         let mut entry = FinalTrackEntry::new(t.track_id, t.source_key.clone(), track_type);
+
+                        // Basic flags
                         entry.config.is_default = t.is_default;
                         entry.config.is_forced = t.is_forced;
                         entry.config.sync_to_source = Some(t.sync_to_source.clone());
-                        if t.has_custom_name {
-                            entry.config.custom_name = Some(t.custom_name.clone());
-                        }
+
+                        // Custom naming
+                        entry.config.custom_lang = t.custom_lang.clone();
+                        entry.config.custom_name = t.custom_name.clone();
+
+                        // Subtitle processing options
+                        entry.config.perform_ocr = t.perform_ocr;
+                        entry.config.convert_to_ass = t.convert_to_ass;
+                        entry.config.rescale = t.rescale;
+                        entry.config.size_multiplier = t.size_multiplier_pct as f32 / 100.0;
+                        entry.config.sync_exclusion_styles = t.sync_exclusion_styles.clone();
+
                         entry
                     })
                     .collect(),
@@ -1023,12 +1065,19 @@ impl App {
         }
     }
 
-    /// Accept track settings.
+    /// Accept track settings - saves all settings back to the specific track entry.
     pub fn accept_track_settings(&mut self) {
         if let Some(track_idx) = self.track_settings_idx {
             if let Some(track) = self.final_tracks.get_mut(track_idx) {
-                track.has_custom_name = !self.track_settings.custom_name.is_empty();
+                // Save all settings back to this specific track
+                track.custom_lang = self.track_settings.custom_lang.clone();
                 track.custom_name = self.track_settings.custom_name.clone();
+                track.perform_ocr = self.track_settings.perform_ocr;
+                track.convert_to_ass = self.track_settings.convert_to_ass;
+                track.rescale = self.track_settings.rescale;
+                track.size_multiplier_pct = self.track_settings.size_multiplier_pct;
+                track.sync_exclusion_styles = self.track_settings.sync_exclusion_styles.clone();
+                track.sync_exclusion_mode = self.track_settings.sync_exclusion_mode;
             }
         }
     }

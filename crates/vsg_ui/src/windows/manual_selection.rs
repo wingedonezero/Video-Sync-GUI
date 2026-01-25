@@ -198,11 +198,35 @@ pub fn view(app: &App) -> Element<'_, Message> {
             let can_move_up = idx > 0;
             let can_move_down = idx < track_count.saturating_sub(1);
 
-            // Line 1: index + icon + summary + source tag
-            let line1 = row![
-                text(format!("{}.", idx + 1)).width(24),
-                text(icon).width(20),
-                text(&track.summary).width(Length::Fill).size(13),
+            // Generate badges for this track
+            let badges = track.badges();
+
+            // Line 1: index + icon + summary + badges + source tag
+            let mut line1_elements: Vec<Element<'_, Message>> = vec![
+                text(format!("{}.", idx + 1)).width(24).into(),
+                text(icon).width(20).into(),
+                text(&track.summary).width(Length::Fill).size(13).into(),
+            ];
+
+            // Add badges (if any)
+            if !badges.is_empty() {
+                line1_elements.push(
+                    container(text(badges).size(10).color(Color::from_rgb(0.7, 0.85, 1.0)))
+                        .padding([2, 6])
+                        .style(|_theme: &Theme| container::Style {
+                            background: Some(Background::Color(Color::from_rgb(0.2, 0.3, 0.4))),
+                            border: Border {
+                                radius: 3.0.into(),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        })
+                        .into()
+                );
+            }
+
+            // Add source tag
+            line1_elements.push(
                 container(text(&track.source_key).size(10))
                     .padding([2, 6])
                     .style(|_theme: &Theme| container::Style {
@@ -212,10 +236,11 @@ pub fn view(app: &App) -> Element<'_, Message> {
                             ..Default::default()
                         },
                         ..Default::default()
-                    }),
-            ]
-            .spacing(4)
-            .align_y(Alignment::Center);
+                    })
+                    .into()
+            );
+
+            let line1 = row(line1_elements).spacing(4).align_y(Alignment::Center);
 
             // Line 2: controls (D/F checkboxes, move, settings, delete)
             let move_up_btn = if can_move_up {
