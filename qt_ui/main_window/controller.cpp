@@ -152,6 +152,7 @@ void MainController::processJobs(const std::vector<JobData>& jobs)
 
     int completedCount = 0;
     int failedCount = 0;
+    QStringList workDirs;  // Track work directories for cleanup
 
     for (size_t i = 0; i < jobs.size(); ++i) {
         const auto& job = jobs[i];
@@ -185,6 +186,16 @@ void MainController::processJobs(const std::vector<JobData>& jobs)
 
         // Generate job ID from timestamp and index
         QString jobId = QString("job_%1_%2").arg(QDateTime::currentMSecsSinceEpoch()).arg(i);
+
+        // Track work directory for cleanup later
+        auto settings = VsgBridge::loadSettings();
+#ifdef VSG_HAS_BRIDGE
+        QString tempRoot = QString::fromStdString(std::string(settings.paths.temp_root));
+#else
+        QString tempRoot = settings.paths.temp_root;
+#endif
+        QString workDir = QString("%1/%2").arg(tempRoot).arg(jobId);
+        workDirs << workDir;
 
         // Convert track layout to JSON if available
         QString layoutJson;
@@ -253,6 +264,11 @@ void MainController::processJobs(const std::vector<JobData>& jobs)
     appendLog(QString("Completed: %1, Failed: %2").arg(completedCount).arg(failedCount));
     updateStatus("Ready");
     updateProgress(100);
+
+    // Clean up temp work directories
+    for (const QString& workDir : workDirs) {
+        VsgBridge::cleanupTemp(workDir);
+    }
 }
 
 void MainController::startAnalyzeOnly()

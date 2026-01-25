@@ -104,6 +104,11 @@ inline void clearLogs() {
     vsg::bridge_clear_logs();
 }
 
+/// Clean up temporary files from a work directory
+inline bool cleanupTemp(const QString& workDir) {
+    return vsg::bridge_cleanup_temp(rust::String(workDir.toStdString()));
+}
+
 /// Job result from running a job
 struct JobResultQt {
     bool success;
@@ -313,6 +318,9 @@ inline std::pair<int, QString> getProgress() {
 inline void log(const QString&) {}
 
 inline void clearLogs() {}
+
+/// Clean up temp stub
+inline bool cleanupTemp(const QString&) { return true; }
 
 /// Job result stub
 struct JobResultQt {

@@ -234,6 +234,9 @@ mod ffi {
 
         /// Clear all pending log messages
         fn bridge_clear_logs();
+
+        /// Clean up temporary files from the given work directory
+        fn bridge_cleanup_temp(work_dir: &str) -> bool;
     }
 }
 
@@ -301,9 +304,32 @@ fn bridge_init(logs_dir: &str) -> bool {
         return true;
     }
 
-    let logs_path = PathBuf::from(logs_dir);
+    let app_root = get_app_root();
 
-    // Create logs directory if it doesn't exist
+    // Resolve logs_dir - if relative, make it relative to app_root
+    let logs_path = if PathBuf::from(logs_dir).is_absolute() {
+        PathBuf::from(logs_dir)
+    } else {
+        app_root.join(logs_dir)
+    };
+
+    // Create all necessary directories relative to app root
+    let dirs_to_create = [
+        app_root.join(".config"),
+        app_root.join(".temp"),
+        app_root.join(".logs"),
+        app_root.join("sync_output"),
+    ];
+
+    for dir in &dirs_to_create {
+        if !dir.exists() {
+            if let Err(e) = std::fs::create_dir_all(dir) {
+                bridge_log(&format!("[WARNING] Failed to create directory {}: {}", dir.display(), e));
+            }
+        }
+    }
+
+    // Ensure logs directory exists
     if !logs_path.exists() {
         if let Err(e) = std::fs::create_dir_all(&logs_path) {
             bridge_log(&format!("[ERROR] Failed to create logs directory: {}", e));
@@ -342,7 +368,9 @@ fn bridge_init(logs_dir: &str) -> bool {
     match result {
         Ok(_) => {
             tracing::info!("Video Sync GUI initialized");
+            tracing::info!("App root: {}", app_root.display());
             tracing::info!("Logs directory: {}", logs_path.display());
+            tracing::info!("Config path: {}", get_config_path().display());
             true
         }
         Err(e) => {
@@ -411,22 +439,42 @@ fn set_progress(percent: i32, status: &str) {
 // Config Implementation
 // =============================================================================
 
-fn get_config_manager() -> ConfigManager {
-    let config_path = dirs_config_path();
-    ConfigManager::new(config_path)
+/// Get the application root directory (where the executable lives).
+/// All config, temp, output, and log directories are relative to this.
+fn get_app_root() -> PathBuf {
+    // Try to get the executable's directory
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(parent) = exe_path.parent() {
+            return parent.to_path_buf();
+        }
+    }
+
+    // Fallback to current working directory
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
 }
 
-fn dirs_config_path() -> PathBuf {
-    // Use XDG config dir on Linux, fallback to current dir
-    if let Some(config_dir) = dirs::config_dir() {
-        config_dir.join("video-sync-gui").join("settings.toml")
+/// Resolve a path relative to app root if it's a relative path.
+fn resolve_path(path: &str) -> PathBuf {
+    let p = PathBuf::from(path);
+    if p.is_absolute() {
+        p
     } else {
-        PathBuf::from("settings.toml")
+        get_app_root().join(path)
     }
 }
 
+fn get_config_manager() -> ConfigManager {
+    let config_path = get_config_path();
+    ConfigManager::new(config_path)
+}
+
+/// Get the config file path (relative to executable directory).
+fn get_config_path() -> PathBuf {
+    get_app_root().join(".config").join("settings.toml")
+}
+
 fn bridge_get_config_path() -> String {
-    dirs_config_path().to_string_lossy().to_string()
+    get_config_path().to_string_lossy().to_string()
 }
 
 fn bridge_version() -> String {
@@ -589,8 +637,8 @@ fn bridge_run_analysis(source_paths: &[String]) -> Vec<ffi::AnalysisResult> {
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "analysis".to_string());
 
-    // Get logs directory from settings
-    let logs_dir = PathBuf::from(&settings.paths.logs_folder);
+    // Get logs directory from settings (resolve relative to app root)
+    let logs_dir = resolve_path(&settings.paths.logs_folder);
 
     // Create LogConfig from settings
     let log_config = LogConfig {
@@ -737,18 +785,58 @@ fn run_analysis_fallback(paths: &[PathBuf], settings: &vsg_core::config::Setting
 }
 
 fn bridge_discover_jobs(paths: &[String]) -> Vec<ffi::DiscoveredJob> {
-    // TODO: Wire up to vsg_core job discovery
-    // For now, return stub
-    paths
-        .iter()
-        .map(|p| ffi::DiscoveredJob {
-            name: PathBuf::from(p)
-                .file_stem()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_else(|| "Unknown".to_string()),
-            source_paths: vec![p.clone()],
-        })
-        .collect()
+    use std::collections::HashMap;
+    use vsg_core::jobs::discover_jobs;
+
+    // Build sources map: paths[0] = "Source 1", paths[1] = "Source 2", etc.
+    let mut sources: HashMap<String, PathBuf> = HashMap::new();
+    for (i, path) in paths.iter().enumerate() {
+        if !path.is_empty() {
+            let source_key = format!("Source {}", i + 1);
+            sources.insert(source_key, PathBuf::from(path));
+        }
+    }
+
+    // If no valid sources, return empty
+    if sources.is_empty() {
+        return vec![];
+    }
+
+    // Call vsg_core discovery
+    match discover_jobs(&sources) {
+        Ok(jobs) => {
+            jobs.into_iter()
+                .map(|job| {
+                    // Convert sources map to ordered path list
+                    let mut source_paths: Vec<String> = Vec::new();
+                    for i in 1..=4 {
+                        let key = format!("Source {}", i);
+                        if let Some(path) = job.sources.get(&key) {
+                            source_paths.push(path.to_string_lossy().to_string());
+                        }
+                    }
+                    ffi::DiscoveredJob {
+                        name: job.name,
+                        source_paths,
+                    }
+                })
+                .collect()
+        }
+        Err(e) => {
+            bridge_log(&format!("[ERROR] Job discovery failed: {}", e));
+            // Fallback: create single job with all paths combined
+            let name = paths.first()
+                .map(|p| PathBuf::from(p)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "Unknown".to_string()))
+                .unwrap_or_else(|| "Unknown".to_string());
+            vec![ffi::DiscoveredJob {
+                name,
+                source_paths: paths.to_vec(),
+            }]
+        }
+    }
 }
 
 fn bridge_scan_file(path: &str) -> ffi::MediaFileInfo {
@@ -1003,10 +1091,10 @@ fn bridge_run_job(input: &ffi::JobInput) -> ffi::JobResult {
         }
     }
 
-    // Set up directories
-    let output_dir = PathBuf::from(&settings.paths.output_folder);
-    let work_dir = PathBuf::from(&settings.paths.temp_root).join(&input.job_id);
-    let logs_dir = PathBuf::from(&settings.paths.logs_folder);
+    // Set up directories (resolve relative to app root)
+    let output_dir = resolve_path(&settings.paths.output_folder);
+    let work_dir = resolve_path(&settings.paths.temp_root).join(&input.job_id);
+    let logs_dir = resolve_path(&settings.paths.logs_folder);
 
     // Create directories
     for dir in [&output_dir, &work_dir, &logs_dir] {
@@ -1125,6 +1213,27 @@ fn bridge_run_job(input: &ffi::JobInput) -> ffi::JobResult {
                 steps_skipped: vec![],
                 error_message: e.to_string(),
             }
+        }
+    }
+}
+
+/// Clean up temporary files from a work directory.
+fn bridge_cleanup_temp(work_dir: &str) -> bool {
+    // Resolve relative paths to app root
+    let path = resolve_path(work_dir);
+
+    if !path.exists() {
+        return true; // Nothing to clean
+    }
+
+    match std::fs::remove_dir_all(&path) {
+        Ok(_) => {
+            bridge_log(&format!("Cleaned up temp directory: {}", path.display()));
+            true
+        }
+        Err(e) => {
+            bridge_log(&format!("[WARNING] Failed to clean temp directory {}: {}", path.display(), e));
+            false
         }
     }
 }
