@@ -5,11 +5,11 @@ component LabelWithTip inherits HorizontalLayout {
     in property <string> label;
     in property <string> tooltip;
 
-    // Callback to show tooltip at position
-    callback request-tooltip(string, length, length);
-
     // Track if this icon is hovered (exposed for binding)
     out property <bool> icon-hovered: tip-icon.has-hover;
+    // Expose position for tooltip placement
+    out property <length> icon-x: tip-icon.absolute-position.x;
+    out property <length> icon-y: tip-icon.absolute-position.y;
 
     spacing: 4px;
 
@@ -37,11 +37,6 @@ component LabelWithTip inherits HorizontalLayout {
 
         tip-icon := TouchArea {
             mouse-cursor: help;
-
-            // Continuously update tooltip position while hovering
-            moved => {
-                root.request-tooltip(root.tooltip, self.absolute-position.x + self.mouse-x + 18px, self.absolute-position.y + self.mouse-y + 18px);
-            }
         }
     }
 }
@@ -54,10 +49,7 @@ export component SettingsWindow inherits Window {
     preferred-height: 550px;
     default-font-size: 13px;
 
-    // Global tooltip state (position and text updated by LabelWithTip callbacks)
-    property <string> tooltip-text: "";
-    property <length> tooltip-x: 0px;
-    property <length> tooltip-y: 0px;
+    // Global tooltip state - computed from which LabelWithTip is hovered
 
     // Storage settings
     in-out property <string> output-folder: "sync_output";
@@ -218,7 +210,6 @@ export component SettingsWindow inherits Window {
                                 tip-analysis-mode := LabelWithTip {
                                     label: "Analysis Mode:";
                                     tooltip: "Audio Correlation analyzes audio waveforms to find sync offset. Video Diff compares video frames (slower but works when audio differs).";
-                                    request-tooltip(text, x, y) => { root.tooltip-text = text; root.tooltip-x = x; root.tooltip-y = y; }
                                 }
                                 ComboBox {
                                     model: ["Audio Correlation", "Video Diff"];
@@ -232,7 +223,6 @@ export component SettingsWindow inherits Window {
                                 tip-corr-method := LabelWithTip {
                                     label: "Correlation Method:";
                                     tooltip: "SCC: Standard cross-correlation, good general purpose.\nGCC-PHAT: Phase-based, robust to volume differences.\nGCC-SCOT: Better when one source has more noise.\nWhitened: Robust to spectral/EQ differences.";
-                                    request-tooltip(text, x, y) => { root.tooltip-text = text; root.tooltip-x = x; root.tooltip-y = y; }
                                 }
                                 ComboBox {
                                     model: ["Standard (SCC)", "Phase (GCC-PHAT)", "GCC-SCOT", "Whitened"];
@@ -246,7 +236,6 @@ export component SettingsWindow inherits Window {
                                 tip-chunk-count := LabelWithTip {
                                     label: "Number of Chunks:";
                                     tooltip: "How many audio segments to analyze. More chunks = more reliable but slower. 10 is usually sufficient.";
-                                    request-tooltip(text, x, y) => { root.tooltip-text = text; root.tooltip-x = x; root.tooltip-y = y; }
                                 }
                                 SpinBox {
                                     value <=> chunk-count;
@@ -262,7 +251,6 @@ export component SettingsWindow inherits Window {
                                 tip-chunk-dur := LabelWithTip {
                                     label: "Chunk Duration (sec):";
                                     tooltip: "Length of each audio segment in seconds. Longer chunks are more accurate but use more memory. 15s is a good default.";
-                                    request-tooltip(text, x, y) => { root.tooltip-text = text; root.tooltip-x = x; root.tooltip-y = y; }
                                 }
                                 SpinBox {
                                     value <=> chunk-duration;
@@ -278,7 +266,6 @@ export component SettingsWindow inherits Window {
                                 tip-min-match := LabelWithTip {
                                     label: "Min Match %:";
                                     tooltip: "Minimum correlation confidence required to accept a chunk result. Lower values accept more results but may include false matches.";
-                                    request-tooltip(text, x, y) => { root.tooltip-text = text; root.tooltip-x = x; root.tooltip-y = y; }
                                 }
                                 SpinBox {
                                     value: round(min-match-pct);
@@ -797,12 +784,35 @@ export component SettingsWindow inherits Window {
     }
 
     // Global tooltip overlay - rendered LAST so it's always on top
-    // Visibility bound to any tooltip icon being hovered
+    // Pure binding approach: compute text and position based on which icon is hovered
     property <bool> any-tooltip-hovered: tip-analysis-mode.icon-hovered || tip-corr-method.icon-hovered || tip-chunk-count.icon-hovered || tip-chunk-dur.icon-hovered || tip-min-match.icon-hovered;
 
-    if root.any-tooltip-hovered && root.tooltip-text != "": Rectangle {
-        x: min(max(root.tooltip-x, 8px), root.width - tooltip-content.preferred-width - 32px);
-        y: min(max(root.tooltip-y, 8px), root.height - tooltip-content.preferred-height - 32px);
+    // Compute tooltip text based on which is hovered
+    property <string> active-tooltip-text:
+        tip-analysis-mode.icon-hovered ? tip-analysis-mode.tooltip :
+        tip-corr-method.icon-hovered ? tip-corr-method.tooltip :
+        tip-chunk-count.icon-hovered ? tip-chunk-count.tooltip :
+        tip-chunk-dur.icon-hovered ? tip-chunk-dur.tooltip :
+        tip-min-match.icon-hovered ? tip-min-match.tooltip : "";
+
+    // Compute tooltip position based on which is hovered
+    property <length> active-tooltip-x:
+        tip-analysis-mode.icon-hovered ? tip-analysis-mode.icon-x + 24px :
+        tip-corr-method.icon-hovered ? tip-corr-method.icon-x + 24px :
+        tip-chunk-count.icon-hovered ? tip-chunk-count.icon-x + 24px :
+        tip-chunk-dur.icon-hovered ? tip-chunk-dur.icon-x + 24px :
+        tip-min-match.icon-hovered ? tip-min-match.icon-x + 24px : 0px;
+
+    property <length> active-tooltip-y:
+        tip-analysis-mode.icon-hovered ? tip-analysis-mode.icon-y + 24px :
+        tip-corr-method.icon-hovered ? tip-corr-method.icon-y + 24px :
+        tip-chunk-count.icon-hovered ? tip-chunk-count.icon-y + 24px :
+        tip-chunk-dur.icon-hovered ? tip-chunk-dur.icon-y + 24px :
+        tip-min-match.icon-hovered ? tip-min-match.icon-y + 24px : 0px;
+
+    if root.any-tooltip-hovered && root.active-tooltip-text != "": Rectangle {
+        x: min(max(root.active-tooltip-x, 8px), root.width - tooltip-content.preferred-width - 32px);
+        y: min(max(root.active-tooltip-y, 8px), root.height - tooltip-content.preferred-height - 32px);
         width: tooltip-content.preferred-width + 24px;
         height: tooltip-content.preferred-height + 16px;
         background: #1e1e1e;
@@ -817,7 +827,7 @@ export component SettingsWindow inherits Window {
         tooltip-content := Text {
             x: 12px;
             y: 8px;
-            text: root.tooltip-text;
+            text: root.active-tooltip-text;
             color: #f5f5f5;
             font-size: 13px;
             wrap: word-wrap;
