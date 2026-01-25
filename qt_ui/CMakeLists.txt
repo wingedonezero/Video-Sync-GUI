@@ -11,6 +11,22 @@ set(CMAKE_AUTOUIC ON)
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 
 # =============================================================================
+# Rust/CXX Bridge Integration
+# =============================================================================
+# These paths are passed from the vsg_app build.rs
+# VSG_BRIDGE_LIB - path to libvsg_bridge.a
+# VSG_CXXBRIDGE_DIR - path to generated CXX headers
+
+if(DEFINED VSG_BRIDGE_LIB AND DEFINED VSG_CXXBRIDGE_DIR)
+    message(STATUS "Rust bridge: ${VSG_BRIDGE_LIB}")
+    message(STATUS "CXX headers: ${VSG_CXXBRIDGE_DIR}")
+    set(USE_RUST_BRIDGE ON)
+else()
+    message(WARNING "Rust bridge not configured - building without vsg_core integration")
+    set(USE_RUST_BRIDGE OFF)
+endif()
+
+# =============================================================================
 # Source files organized by component
 # =============================================================================
 
@@ -80,4 +96,34 @@ target_link_libraries(${PROJECT_NAME}
 # Include directories
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/bridge
 )
+
+# =============================================================================
+# Rust Bridge Linking
+# =============================================================================
+if(USE_RUST_BRIDGE)
+    # Add CXX include directory
+    target_include_directories(${PROJECT_NAME} PRIVATE
+        ${VSG_CXXBRIDGE_DIR}
+    )
+
+    # Link the Rust static library
+    target_link_libraries(${PROJECT_NAME}
+        ${VSG_BRIDGE_LIB}
+    )
+
+    # On Linux, Rust static libs need these system libraries
+    if(UNIX AND NOT APPLE)
+        target_link_libraries(${PROJECT_NAME}
+            pthread
+            dl
+            m
+        )
+    endif()
+
+    # Define macro so code knows bridge is available
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+        VSG_HAS_BRIDGE=1
+    )
+endif()

@@ -5,16 +5,12 @@
 #include "../options_dialog/ui.hpp"
 #include "../job_queue_dialog/ui.hpp"
 #include "../add_job_dialog/ui.hpp"
+#include "vsg_bridge.hpp"
 
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QScrollBar>
-
-// Include CXX bridge header
-// Note: The actual path depends on how CXX generates headers during build
-// For now we'll use forward declarations and implement bridge calls later
-// #include "vsg_bridge/src/lib.rs.h"
 
 MainController::MainController(MainWindow* view)
     : QObject(view)
@@ -26,19 +22,54 @@ MainController::~MainController() = default;
 
 void MainController::applyConfigToUi()
 {
-    // TODO: Load config from bridge and apply to UI
-    // For now, just log that we're ready
-    appendLog("Video Sync GUI initialized.");
+    // Show version and bridge status
+    appendLog(QString("Video Sync GUI v%1").arg(VsgBridge::version()));
+
+    if (VsgBridge::isAvailable()) {
+        appendLog(QString("Config: %1").arg(VsgBridge::getConfigPath()));
+
+        // Load settings from config
+        auto settings = VsgBridge::loadSettings();
+
+#ifdef VSG_HAS_BRIDGE
+        // Convert rust::String to QString
+        QString source1 = QString::fromStdString(std::string(settings.paths.last_source1_path));
+        QString source2 = QString::fromStdString(std::string(settings.paths.last_source2_path));
+#else
+        QString source1 = settings.paths.last_source1_path;
+        QString source2 = settings.paths.last_source2_path;
+#endif
+
+        // Apply last used paths if available
+        if (!source1.isEmpty()) {
+            m_view->refInput()->setText(source1);
+        }
+        if (!source2.isEmpty()) {
+            m_view->secInput()->setText(source2);
+        }
+    } else {
+        appendLog("[WARNING] Rust bridge not available - running in standalone mode");
+    }
+
     appendLog("Ready.");
 }
 
 void MainController::saveUiToConfig()
 {
-    // TODO: Save UI values to config via bridge
-    // vsg::AppSettings settings;
-    // settings.paths.last_source1_path = m_view->refInput()->text().toStdString();
-    // settings.paths.last_source2_path = m_view->secInput()->text().toStdString();
-    // vsg::bridge_save_settings(settings);
+    if (!VsgBridge::isAvailable()) return;
+
+    // Load current settings, update paths, save
+    auto settings = VsgBridge::loadSettings();
+
+#ifdef VSG_HAS_BRIDGE
+    settings.paths.last_source1_path = rust::String(m_view->refInput()->text().toStdString());
+    settings.paths.last_source2_path = rust::String(m_view->secInput()->text().toStdString());
+#else
+    settings.paths.last_source1_path = m_view->refInput()->text();
+    settings.paths.last_source2_path = m_view->secInput()->text();
+#endif
+
+    VsgBridge::saveSettings(settings);
 }
 
 void MainController::openOptionsDialog()
