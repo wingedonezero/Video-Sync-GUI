@@ -104,6 +104,55 @@ inline void clearLogs() {
     vsg::bridge_clear_logs();
 }
 
+/// Job result from running a job
+struct JobResultQt {
+    bool success;
+    QString output_path;
+    QStringList steps_completed;
+    QStringList steps_skipped;
+    QString error_message;
+};
+
+/// Run a full job (extract + analyze + mux)
+/// @param jobId Unique job identifier
+/// @param jobName Human-readable job name
+/// @param sourcePaths Source file paths (index 0 = Source 1, etc.)
+/// @param layoutJson Track layout as JSON string (empty = auto)
+inline JobResultQt runJob(const QString& jobId, const QString& jobName,
+                          const QStringList& sourcePaths, const QString& layoutJson = QString()) {
+    vsg::JobInput input;
+    input.job_id = rust::String(jobId.toStdString());
+    input.job_name = rust::String(jobName.toStdString());
+
+    // Build source paths
+    rust::Vec<rust::String> rustPaths;
+    for (const auto& path : sourcePaths) {
+        rustPaths.push_back(rust::String(path.toStdString()));
+    }
+    input.source_paths = std::move(rustPaths);
+
+    // Set layout JSON
+    input.layout_json = rust::String(layoutJson.toStdString());
+
+    // Run job via bridge
+    auto result = vsg::bridge_run_job(input);
+
+    // Convert to Qt result
+    JobResultQt out;
+    out.success = result.success;
+    out.output_path = QString::fromStdString(std::string(result.output_path));
+    out.error_message = QString::fromStdString(std::string(result.error_message));
+
+    for (const auto& step : result.steps_completed) {
+        out.steps_completed << QString::fromStdString(std::string(step));
+    }
+    for (const auto& step : result.steps_skipped) {
+        out.steps_skipped << QString::fromStdString(std::string(step));
+    }
+
+    return out;
+}
+
 /// Check if bridge is available
 inline constexpr bool isAvailable() { return true; }
 
@@ -264,6 +313,21 @@ inline std::pair<int, QString> getProgress() {
 inline void log(const QString&) {}
 
 inline void clearLogs() {}
+
+/// Job result stub
+struct JobResultQt {
+    bool success = false;
+    QString output_path;
+    QStringList steps_completed;
+    QStringList steps_skipped;
+    QString error_message = "Bridge not available";
+};
+
+/// Run job stub
+inline JobResultQt runJob(const QString&, const QString&,
+                          const QStringList&, const QString& = QString()) {
+    return JobResultQt{};
+}
 
 inline constexpr bool isAvailable() { return false; }
 

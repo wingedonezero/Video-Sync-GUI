@@ -5,10 +5,12 @@
 
 #include <QObject>
 #include <QString>
+#include <vector>
 
 class MainWindow;
 class QLineEdit;
 class QTimer;
+struct JobData;
 
 class MainController : public QObject
 {
@@ -57,6 +59,9 @@ private slots:
     void pollLogs();
 
 private:
+    /// Process a list of jobs via the bridge
+    void processJobs(const std::vector<JobData>& jobs);
+
     MainWindow* m_view;
     QTimer* m_logPollTimer;
 };
