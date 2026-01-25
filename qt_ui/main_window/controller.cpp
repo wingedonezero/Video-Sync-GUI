@@ -133,7 +133,7 @@ void MainController::openJobQueue()
 
     if (dialog.exec() == QDialog::Accepted) {
         auto jobs = dialog.getFinalJobs();
-        if (jobs.isEmpty()) {
+        if (jobs.empty()) {
             appendLog("No jobs to process.");
             return;
         }
@@ -199,7 +199,7 @@ void MainController::processJobs(const std::vector<JobData>& jobs)
                 // Convert track type enum to string
                 QString typeStr = "video";
                 if (track.type == TrackType::Audio) typeStr = "audio";
-                else if (track.type == TrackType::Subtitles) typeStr = "subtitles";
+                else if (track.type == TrackType::Subtitle) typeStr = "subtitles";
                 trackObj["track_type"] = typeStr;
 
                 QJsonObject configObj;
