@@ -263,7 +263,9 @@ fn setup_analyze_only_button(main_window: &MainWindow, config: Arc<Mutex<ConfigM
 
             // Set up timer to poll for messages from background thread
             let window_weak_timer = window.as_weak();
-            let timer = slint::Timer::default();
+            // Wrap timer in Arc so the closure can keep it alive
+            let timer = Arc::new(slint::Timer::default());
+            let timer_for_callback = Arc::clone(&timer);
             let rx = Arc::new(Mutex::new(Some(rx)));
             let rx_clone = Arc::clone(&rx);
 
@@ -271,6 +273,9 @@ fn setup_analyze_only_button(main_window: &MainWindow, config: Arc<Mutex<ConfigM
                 slint::TimerMode::Repeated,
                 std::time::Duration::from_millis(50),
                 move || {
+                    // The Arc<Timer> clone keeps timer alive as long as callback exists
+                    let _timer_keepalive = &timer_for_callback;
+
                     if let Some(window) = window_weak_timer.upgrade() {
                         let mut rx_guard = rx_clone.lock().unwrap();
                         if let Some(ref receiver) = *rx_guard {
@@ -300,7 +305,8 @@ fn setup_analyze_only_button(main_window: &MainWindow, config: Arc<Mutex<ConfigM
                                         window.set_status_text("Ready".into());
                                         append_log(&window, "=== Analysis Complete ===");
 
-                                        // Stop the timer by dropping the receiver
+                                        // Stop the timer and drop the receiver
+                                        timer_for_callback.stop();
                                         *rx_guard = None;
                                         return;
                                     }
@@ -310,6 +316,7 @@ fn setup_analyze_only_button(main_window: &MainWindow, config: Arc<Mutex<ConfigM
                                         window.set_status_text("Analysis Failed".into());
 
                                         // Stop the timer
+                                        timer_for_callback.stop();
                                         *rx_guard = None;
                                         return;
                                     }
@@ -321,6 +328,7 @@ fn setup_analyze_only_button(main_window: &MainWindow, config: Arc<Mutex<ConfigM
                                         // Channel closed unexpectedly
                                         append_log(&window, "[ERROR] Analysis thread disconnected unexpectedly");
                                         window.set_status_text("Analysis Failed".into());
+                                        timer_for_callback.stop();
                                         *rx_guard = None;
                                         return;
                                     }
@@ -330,9 +338,7 @@ fn setup_analyze_only_button(main_window: &MainWindow, config: Arc<Mutex<ConfigM
                     }
                 },
             );
-
-            // Keep timer alive by storing it (it will be dropped when analysis completes)
-            // Note: The timer keeps itself alive via the closure
+            // Timer is kept alive by timer_for_callback Arc inside the closure
         }
     });
 }
