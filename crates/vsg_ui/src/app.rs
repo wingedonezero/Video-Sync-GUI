@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use iced::event::{self, Event};
 use iced::widget::{self, text};
 use iced::window;
 use iced::{Element, Size, Subscription, Task, Theme};
@@ -69,8 +70,9 @@ pub enum Message {
 
     // Job Queue Dialog
     AddJobsClicked,
-    JobRowSelected(usize, bool),
-    JobRowDoubleClicked(usize),
+    JobRowClicked(usize),          // Single click - select row
+    JobRowDoubleClicked(usize),    // Double click - open config
+    JobRowCtrlClicked(usize),      // Ctrl+click - toggle selection
     RemoveSelectedJobs,
     MoveJobsUp,
     MoveJobsDown,
@@ -123,8 +125,12 @@ pub enum Message {
     OpenSourceSettings(String),
     CloseSourceSettings,
 
+    // File Drop
+    FileDropped(window::Id, PathBuf),
+
     // Internal
     Noop,
+    Tick,  // For time-based operations like double-click detection
 }
 
 /// Settings keys for type-safe settings updates.
@@ -218,6 +224,8 @@ pub struct App {
     // Job Queue Dialog State
     pub job_queue_window_id: Option<window::Id>,
     pub selected_job_indices: Vec<usize>,
+    pub last_clicked_job_idx: Option<usize>,
+    pub last_click_time: Option<std::time::Instant>,
     pub has_clipboard: bool,
     pub is_processing: bool,
     pub job_queue_status: String,
@@ -346,6 +354,8 @@ impl App {
 
                     job_queue_window_id: None,
                     selected_job_indices: Vec::new(),
+                    last_clicked_job_idx: None,
+                    last_click_time: None,
                     has_clipboard: false,
                     is_processing: false,
                     job_queue_status: String::new(),
@@ -404,7 +414,17 @@ impl App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        window::close_events().map(Message::WindowClosed)
+        Subscription::batch([
+            window::close_events().map(Message::WindowClosed),
+            event::listen_with(|event, _status, id| {
+                match event {
+                    Event::Window(window::Event::FileDropped(path)) => {
+                        Some(Message::FileDropped(id, path))
+                    }
+                    _ => None,
+                }
+            }),
+        ])
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -476,10 +496,6 @@ impl App {
             }
 
             Message::AddJobsClicked => self.open_add_job_window(),
-            Message::JobRowSelected(idx, selected) => {
-                self.handle_job_row_selected(idx, selected);
-                Task::none()
-            }
             Message::JobRowDoubleClicked(idx) => self.open_manual_selection_window(idx),
             Message::RemoveSelectedJobs => {
                 self.remove_selected_jobs();
@@ -629,7 +645,33 @@ impl App {
             Message::OpenSyncExclusion | Message::CloseSyncExclusion => Task::none(),
             Message::OpenSourceSettings(_) | Message::CloseSourceSettings => Task::none(),
 
+            // Job Queue click handling
+            Message::JobRowClicked(idx) => {
+                if self.handle_job_row_clicked(idx) {
+                    // It was a double-click - open manual selection
+                    self.open_manual_selection_window(idx)
+                } else {
+                    Task::none()
+                }
+            }
+            Message::JobRowCtrlClicked(idx) => {
+                // Toggle selection without clearing others
+                if self.selected_job_indices.contains(&idx) {
+                    self.selected_job_indices.retain(|&i| i != idx);
+                } else {
+                    self.selected_job_indices.push(idx);
+                }
+                Task::none()
+            }
+
+            // File drop handling
+            Message::FileDropped(window_id, path) => {
+                self.handle_file_dropped(window_id, path);
+                Task::none()
+            }
+
             Message::Noop => Task::none(),
+            Message::Tick => Task::none(),
         }
     }
 

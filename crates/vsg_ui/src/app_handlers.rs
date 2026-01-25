@@ -742,6 +742,75 @@ impl App {
         }
     }
 
+    /// Handle job row click - with double-click detection.
+    /// Returns true if this was a double-click.
+    pub fn handle_job_row_clicked(&mut self, idx: usize) -> bool {
+        use std::time::{Duration, Instant};
+
+        let now = Instant::now();
+        let double_click_threshold = Duration::from_millis(400);
+
+        // Check for double-click
+        let is_double_click = match (self.last_clicked_job_idx, self.last_click_time) {
+            (Some(last_idx), Some(last_time)) => {
+                last_idx == idx && now.duration_since(last_time) < double_click_threshold
+            }
+            _ => false,
+        };
+
+        if is_double_click {
+            // Reset click tracking
+            self.last_clicked_job_idx = None;
+            self.last_click_time = None;
+            // Will return true - caller should open manual selection
+            true
+        } else {
+            // Single click - select this row (clear previous selection)
+            self.selected_job_indices.clear();
+            self.selected_job_indices.push(idx);
+
+            // Track for potential double-click
+            self.last_clicked_job_idx = Some(idx);
+            self.last_click_time = Some(now);
+            false
+        }
+    }
+
+    /// Handle file dropped on a window.
+    pub fn handle_file_dropped(&mut self, window_id: window::Id, path: PathBuf) {
+        let path_str = path.to_string_lossy().to_string();
+
+        // Determine which window received the drop
+        if window_id == self.main_window_id {
+            // Drop on main window - fill first empty source
+            if self.source1_path.is_empty() {
+                self.source1_path = path_str.clone();
+                self.append_log(&format!("Source 1: {}", path_str));
+            } else if self.source2_path.is_empty() {
+                self.source2_path = path_str.clone();
+                self.append_log(&format!("Source 2: {}", path_str));
+            } else if self.source3_path.is_empty() {
+                self.source3_path = path_str.clone();
+                self.append_log(&format!("Source 3: {}", path_str));
+            } else {
+                self.append_log("All source slots are full");
+            }
+        } else if self.add_job_window_id == Some(window_id) {
+            // Drop on Add Job window - fill first empty source
+            for (idx, source) in self.add_job_sources.iter_mut().enumerate() {
+                if source.is_empty() {
+                    *source = path_str.clone();
+                    self.append_log(&format!("Add Job Source {}: {}", idx + 1, path_str));
+                    break;
+                }
+            }
+        } else if self.job_queue_window_id == Some(window_id) {
+            // Drop on Job Queue - auto-add as new job source
+            // For now, just log it - proper handling would discover jobs
+            self.append_log(&format!("File dropped on Job Queue: {}", path_str));
+        }
+    }
+
     /// Start processing the queue.
     pub fn start_processing(&mut self) -> Task<Message> {
         let q = self.job_queue.lock().unwrap();
