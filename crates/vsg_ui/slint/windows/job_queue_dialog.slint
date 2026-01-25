@@ -1,29 +1,21 @@
 // JobQueueDialog - Dialog for managing the job queue.
-// Shows a table of jobs with actions for add, remove, reorder, configure, and process.
+// Clean compact layout matching Qt original.
 
 import { VerticalBox, HorizontalBox, Button, ScrollView } from "std-widgets.slint";
-import { Theme } from "../theme.slint";
 
-// Job status enum (as string for Slint)
-// "Pending" - Not configured
-// "Configured" - Configured and ready
-// "Processing" - Currently being processed
-// "Complete" - Finished successfully
-// "Error" - Failed with error
-
-// Data for a single job in the queue
+// Job data
 export struct JobRowData {
-    id: string,           // Unique job identifier
-    name: string,         // Display name (usually filename)
-    source1: string,      // Source 1 path (truncated for display)
-    source2: string,      // Source 2 path
-    source3: string,      // Source 3 path (may be empty)
-    source4: string,      // Source 4 path (may be empty)
-    status: string,       // Job status
-    is-selected: bool,    // Selection state
+    id: string,
+    name: string,
+    source1: string,
+    source2: string,
+    source3: string,
+    source4: string,
+    status: string,
+    is-selected: bool,
 }
 
-// Single row in the job table (defined before use)
+// Table row
 component JobRow inherits Rectangle {
     in property <JobRowData> data;
     in property <int> row-index;
@@ -31,108 +23,80 @@ component JobRow inherits Rectangle {
 
     callback clicked();
     callback double-clicked();
-    callback configure-requested();
-    callback copy-requested();
-    callback paste-requested();
-    callback remove-requested();
 
-    min-height: 40px;
-    background: is-selected ? Theme.accent : (touch.has-hover ? Theme.surface-variant : transparent);
-    border-radius: Theme.radius-sm;
+    height: 28px;
+    background: is-selected ? #3d5a80 : (touch.has-hover ? #3a3a3a : transparent);
 
     touch := TouchArea {
         clicked => { root.clicked(); }
         double-clicked => { root.double-clicked(); }
-
-        pointer-event(event) => {
-            if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
-                // Context menu will be handled by Rust
-                root.clicked();  // Select the row first
-            }
-        }
     }
 
     HorizontalBox {
-        padding-left: Theme.padding-md;
-        padding-right: Theme.padding-md;
-        spacing: Theme.spacing-sm;
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 4px;
 
         // Row number
-        Rectangle {
-            width: 40px;
-            Text {
-                text: row-index + 1;
-                font-size: Theme.font-sm;
-                color: is-selected ? Theme.text-primary : Theme.text-muted;
-                vertical-alignment: center;
-                horizontal-alignment: center;
-            }
+        Text {
+            text: row-index + 1;
+            width: 30px;
+            color: is-selected ? #ffffff : #888888;
+            vertical-alignment: center;
+            horizontal-alignment: center;
         }
 
         // Job name
         Text {
             text: data.name;
-            font-size: Theme.font-md;
+            min-width: 150px;
             font-weight: 500;
-            color: Theme.text-primary;
             vertical-alignment: center;
-            min-width: 180px;
             overflow: elide;
         }
 
         // Source 1
         Text {
             text: data.source1;
-            font-size: Theme.font-sm;
-            color: is-selected ? Theme.text-primary : Theme.text-secondary;
-            vertical-alignment: center;
+            color: is-selected ? #ffffff : #aaaaaa;
             horizontal-stretch: 1;
+            vertical-alignment: center;
             overflow: elide;
         }
 
         // Source 2
         Text {
             text: data.source2;
-            font-size: Theme.font-sm;
-            color: is-selected ? Theme.text-primary : Theme.text-secondary;
-            vertical-alignment: center;
+            color: is-selected ? #ffffff : #aaaaaa;
             horizontal-stretch: 1;
+            vertical-alignment: center;
             overflow: elide;
         }
 
         // Source 3
         Text {
             text: data.source3 == "" ? "-" : data.source3;
-            font-size: Theme.font-sm;
-            color: is-selected ? Theme.text-primary : Theme.text-muted;
+            color: is-selected ? #ffffff : #666666;
+            min-width: 120px;
             vertical-alignment: center;
-            min-width: 150px;
             overflow: elide;
         }
 
-        // Status badge
+        // Status
         Rectangle {
-            min-width: 100px;
-            max-width: 100px;
+            width: 80px;
+            height: 20px;
+            border-radius: 3px;
+            background: data.status == "Configured" ? #2d5a2d :
+                        data.status == "Processing" ? #5a5a2d :
+                        data.status == "Complete" ? #2d5a5a :
+                        data.status == "Error" ? #5a2d2d : #333333;
 
-            Rectangle {
-                width: 90px;
-                height: 24px;
-                border-radius: Theme.radius-sm;
-                background: data.status == "Configured" ? #2d5a2d :
-                            data.status == "Processing" ? #5a5a2d :
-                            data.status == "Complete" ? #2d5a5a :
-                            data.status == "Error" ? #5a2d2d :
-                            #3a3a3a;
-
-                Text {
-                    text: data.status;
-                    font-size: Theme.font-xs;
-                    font-weight: 500;
-                    color: Theme.text-primary;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
+            Text {
+                text: data.status;
+                font-size: 11px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
             }
         }
     }
@@ -140,205 +104,107 @@ component JobRow inherits Rectangle {
 
 export component JobQueueDialog inherits Window {
     title: "Job Queue";
-    min-width: 1200px;
-    min-height: 600px;
-    preferred-width: 1400px;
-    preferred-height: 700px;
-    default-font-size: 13px;
+    min-width: 1000px;
+    min-height: 500px;
 
-    // Job data
     in-out property <[JobRowData]> jobs: [];
     in-out property <[int]> selected-indices: [];
     in-out property <bool> has-clipboard: false;
-
-    // Processing state
     in-out property <bool> is-processing: false;
     in-out property <string> status-message: "";
 
-    // Callbacks
     callback add-jobs();
     callback remove-selected();
     callback move-up();
     callback move-down();
-    callback configure-job(int);      // row index
-    callback copy-layout(int);        // row index
+    callback configure-job(int);
+    callback copy-layout(int);
     callback paste-layout();
-    callback row-selected(int, bool); // row index, is-selected (for multi-select)
-    callback row-double-clicked(int); // row index
+    callback row-selected(int, bool);
+    callback row-double-clicked(int);
     callback start-processing();
     callback cancel();
-
-    // Drop handling for files
     callback files-dropped([string]);
 
-    // Drop area for entire dialog
     DropArea {
         width: 100%;
         height: 100%;
 
         dropped(event) => {
             if (event.mime-type == "text/uri-list") {
-                // Pass to Rust to parse and handle
                 root.files-dropped([event.data]);
             }
         }
 
         VerticalBox {
-            padding: Theme.padding-lg;
-            spacing: Theme.spacing-md;
+            padding: 8px;
+            spacing: 6px;
 
-            // Status message (if any)
-            if status-message != "": Rectangle {
-                background: Theme.info;
-                border-radius: Theme.radius-sm;
-                max-height: 32px;
+            // Status message
+            if status-message != "": Text {
+                text: status-message;
+                color: #5599dd;
+                font-size: 12px;
+            }
+
+            // Table header
+            Rectangle {
+                background: #2a2a2a;
+                height: 28px;
+                border-radius: 3px;
 
                 HorizontalBox {
-                    padding: Theme.padding-sm;
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 4px;
 
-                    Text {
-                        text: status-message;
-                        color: Theme.text-primary;
-                        font-size: Theme.font-sm;
-                    }
+                    Text { text: "#"; width: 30px; font-weight: 600; color: #888888; vertical-alignment: center; horizontal-alignment: center; }
+                    Text { text: "Job Name"; min-width: 150px; font-weight: 600; color: #888888; vertical-alignment: center; }
+                    Text { text: "Source 1 (Reference)"; font-weight: 600; color: #888888; horizontal-stretch: 1; vertical-alignment: center; }
+                    Text { text: "Source 2"; font-weight: 600; color: #888888; horizontal-stretch: 1; vertical-alignment: center; }
+                    Text { text: "Source 3"; font-weight: 600; color: #888888; min-width: 120px; vertical-alignment: center; }
+                    Text { text: "Status"; font-weight: 600; color: #888888; width: 80px; vertical-alignment: center; horizontal-alignment: center; }
                 }
             }
 
-            // Job table
+            // Table body
             Rectangle {
                 vertical-stretch: 1;
-                background: Theme.surface;
-                border-radius: Theme.radius-md;
+                background: #1e1e1e;
+                border-radius: 3px;
 
-                VerticalBox {
-                    padding: 0px;
+                ScrollView {
+                    VerticalBox {
+                        spacing: 1px;
+                        padding: 2px;
 
-                    // Table header
-                    Rectangle {
-                        background: Theme.surface-variant;
-                        border-radius: Theme.radius-md;
-                        min-height: 36px;
-                        max-height: 36px;
+                        for job[idx] in jobs: JobRow {
+                            data: job;
+                            row-index: idx;
+                            is-selected: job.is-selected;
+                            clicked => { root.row-selected(idx, !job.is-selected); }
+                            double-clicked => { root.row-double-clicked(idx); }
+                        }
 
-                        HorizontalBox {
-                            padding-left: Theme.padding-md;
-                            padding-right: Theme.padding-md;
-                            spacing: Theme.spacing-sm;
+                        // Empty state
+                        if jobs.length == 0: Rectangle {
+                            min-height: 150px;
 
-                            // Checkbox column (for selection indicator)
-                            Rectangle {
-                                width: 40px;
+                            VerticalBox {
+                                alignment: center;
+
                                 Text {
-                                    text: "#";
-                                    font-weight: 600;
-                                    color: Theme.text-secondary;
-                                    vertical-alignment: center;
+                                    text: "No jobs in queue";
+                                    font-size: 14px;
+                                    color: #666666;
                                     horizontal-alignment: center;
                                 }
-                            }
 
-                            Text {
-                                text: "Job Name";
-                                font-weight: 600;
-                                color: Theme.text-secondary;
-                                vertical-alignment: center;
-                                min-width: 180px;
-                            }
-
-                            Text {
-                                text: "Source 1 (Reference)";
-                                font-weight: 600;
-                                color: Theme.text-secondary;
-                                vertical-alignment: center;
-                                horizontal-stretch: 1;
-                            }
-
-                            Text {
-                                text: "Source 2";
-                                font-weight: 600;
-                                color: Theme.text-secondary;
-                                vertical-alignment: center;
-                                horizontal-stretch: 1;
-                            }
-
-                            Text {
-                                text: "Source 3";
-                                font-weight: 600;
-                                color: Theme.text-secondary;
-                                vertical-alignment: center;
-                                min-width: 150px;
-                            }
-
-                            Text {
-                                text: "Status";
-                                font-weight: 600;
-                                color: Theme.text-secondary;
-                                vertical-alignment: center;
-                                min-width: 100px;
-                            }
-                        }
-                    }
-
-                    // Table body
-                    ScrollView {
-                        vertical-stretch: 1;
-
-                        VerticalBox {
-                            padding: Theme.padding-xs;
-                            spacing: 2px;
-
-                            for job[idx] in jobs: JobRow {
-                                data: job;
-                                row-index: idx;
-                                is-selected: job.is-selected;
-
-                                clicked => {
-                                    root.row-selected(idx, !job.is-selected);
-                                }
-
-                                double-clicked => {
-                                    root.row-double-clicked(idx);
-                                }
-
-                                configure-requested => {
-                                    root.configure-job(idx);
-                                }
-
-                                copy-requested => {
-                                    root.copy-layout(idx);
-                                }
-
-                                paste-requested => {
-                                    root.paste-layout();
-                                }
-
-                                remove-requested => {
-                                    // Toggle selection then remove
-                                    root.row-selected(idx, true);
-                                    root.remove-selected();
-                                }
-                            }
-
-                            // Empty state
-                            if jobs.length == 0: Rectangle {
-                                min-height: 200px;
-
-                                VerticalBox {
-                                    alignment: center;
-
-                                    Text {
-                                        text: "No jobs in queue";
-                                        font-size: Theme.font-xl;
-                                        color: Theme.text-muted;
-                                        horizontal-alignment: center;
-                                    }
-
-                                    Text {
-                                        text: "Click 'Add Job(s)...' or drop files here to add jobs";
-                                        font-size: Theme.font-md;
-                                        color: Theme.text-muted;
-                                        horizontal-alignment: center;
-                                    }
+                                Text {
+                                    text: "Click 'Add Job(s)...' or drop files here";
+                                    font-size: 12px;
+                                    color: #555555;
+                                    horizontal-alignment: center;
                                 }
                             }
                         }
@@ -348,7 +214,7 @@ export component JobQueueDialog inherits Window {
 
             // Action buttons
             HorizontalBox {
-                spacing: Theme.spacing-sm;
+                spacing: 6px;
 
                 Button {
                     text: "Add Job(s)...";
@@ -380,7 +246,7 @@ export component JobQueueDialog inherits Window {
             // Dialog buttons
             HorizontalBox {
                 alignment: end;
-                spacing: Theme.spacing-sm;
+                spacing: 6px;
 
                 Button {
                     text: "Cancel";

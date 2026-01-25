@@ -110,13 +110,13 @@ fn setup_path_changed(dialog: &AddJobDialog) {
             return;
         };
 
-        // Clean up file:// URL if present
+        // Clean up file:// URL if present (from drag-drop)
         let clean_path = clean_file_url(&path);
 
-        // Update if cleaned
-        if clean_path != path.as_str() {
-            update_source_path(&dialog, source_index, clean_path);
-        }
+        // Always update the model - this is critical!
+        // The Slint binding is one-way (model -> component), so we must
+        // update the model for the path to be saved and validated.
+        update_source_path(&dialog, source_index, clean_path);
 
         // Clear any previous error
         dialog.set_error_message(SharedString::new());

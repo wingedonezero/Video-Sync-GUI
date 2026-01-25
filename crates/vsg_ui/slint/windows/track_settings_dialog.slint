@@ -1,71 +1,64 @@
 // TrackSettingsDialog - Per-track configuration popup.
-// Shows language selection, custom name, and subtitle-specific options.
+// Clean compact layout matching Qt original.
 
 import { VerticalBox, HorizontalBox, Button, GroupBox, ComboBox, LineEdit, CheckBox, SpinBox } from "std-widgets.slint";
-import { Theme } from "../theme.slint";
 
-// Language option for dropdown - Rust populates display strings
+// Language option
 export struct LanguageOption {
-    code: string,      // e.g., "eng", "jpn", "und"
-    display: string,   // e.g., "English", "Japanese", "Undetermined"
+    code: string,
+    display: string,
 }
 
 export component TrackSettingsDialog inherits Window {
     title: "Track Settings";
-    min-width: 450px;
-    min-height: 350px;
-    preferred-width: 500px;
-    default-font-size: 13px;
+    min-width: 400px;
+    min-height: 300px;
 
-    // Track info (read-only, for conditional UI)
-    in property <string> track-type: "subtitles";  // "video", "audio", "subtitles"
+    // Track info
+    in property <string> track-type: "subtitles";
     in property <string> codec-id: "";
 
-    // Language settings - Rust provides display names directly
+    // Language
     in-out property <[string]> language-display-names: [];
     in-out property <int> selected-language-index: 0;
 
     // Custom name
     in-out property <string> custom-name: "";
 
-    // Subtitle-specific options
+    // Subtitle options
     in-out property <bool> perform-ocr: false;
     in-out property <bool> convert-to-ass: false;
     in-out property <bool> rescale: false;
-    in-out property <int> size-multiplier-pct: 100;  // Percentage (100 = 1.0x)
+    in-out property <int> size-multiplier-pct: 100;
 
-    // Visibility computed from track type/codec
+    // Visibility
     property <bool> is-subtitles: track-type == "subtitles";
     property <bool> is-image-based: codec-id == "S_HDMV/PGS" || codec-id == "S_VOBSUB";
     property <bool> is-srt: codec-id == "S_TEXT/UTF8";
     property <bool> is-ass: codec-id == "S_TEXT/ASS" || codec-id == "S_TEXT/SSA";
 
-    // Callbacks
-    callback configure-sync-exclusion();  // Open sync exclusion dialog (ASS/SSA only)
+    callback configure-sync-exclusion();
     callback accept();
     callback cancel();
 
-    // Result state
     out property <bool> accepted: false;
 
     VerticalBox {
-        padding: Theme.padding-lg;
-        spacing: Theme.spacing-md;
+        padding: 8px;
+        spacing: 6px;
 
-        // Language section (all track types)
+        // Language section
         GroupBox {
             title: "Language Settings";
 
             HorizontalBox {
-                padding: Theme.padding-sm;
-                spacing: Theme.spacing-sm;
+                padding: 6px;
+                spacing: 6px;
 
                 Text {
                     text: "Language:";
-                    font-size: Theme.font-md;
-                    color: Theme.text-primary;
                     vertical-alignment: center;
-                    min-width: 100px;
+                    min-width: 90px;
                 }
 
                 ComboBox {
@@ -76,86 +69,75 @@ export component TrackSettingsDialog inherits Window {
             }
         }
 
-        // Track name section (all track types)
+        // Track name section
         GroupBox {
             title: "Track Name";
 
             HorizontalBox {
-                padding: Theme.padding-sm;
-                spacing: Theme.spacing-sm;
+                padding: 6px;
+                spacing: 6px;
 
                 Text {
                     text: "Custom Name:";
-                    font-size: Theme.font-md;
-                    color: Theme.text-primary;
                     vertical-alignment: center;
-                    min-width: 100px;
+                    min-width: 90px;
                 }
 
                 LineEdit {
                     horizontal-stretch: 1;
                     text <=> custom-name;
-                    placeholder-text: "Leave empty to use default";
+                    placeholder-text: "Leave empty for default";
                 }
             }
         }
 
-        // Subtitle options (subtitles only)
+        // Subtitle options
         if root.is-subtitles: GroupBox {
             title: "Subtitle Options";
 
             VerticalBox {
-                padding: Theme.padding-sm;
-                spacing: Theme.spacing-sm;
+                padding: 6px;
+                spacing: 4px;
 
-                // OCR option (image-based only)
                 if root.is-image-based: CheckBox {
                     text: "Perform OCR (convert images to text)";
                     checked <=> perform-ocr;
                 }
 
-                // Convert to ASS (SRT only)
                 if root.is-srt: CheckBox {
                     text: "Convert to ASS format";
                     checked <=> convert-to-ass;
                 }
 
-                // Rescale (all subtitle types)
                 CheckBox {
                     text: "Rescale to video resolution";
                     checked <=> rescale;
                 }
 
-                // Size multiplier
                 HorizontalBox {
-                    spacing: Theme.spacing-sm;
+                    spacing: 6px;
 
                     Text {
                         text: "Size multiplier:";
-                        font-size: Theme.font-md;
-                        color: Theme.text-primary;
                         vertical-alignment: center;
-                        min-width: 100px;
+                        min-width: 90px;
                     }
 
                     SpinBox {
                         value <=> size-multiplier-pct;
                         minimum: 10;
                         maximum: 1000;
-                        max-width: 100px;
+                        max-width: 80px;
                     }
 
                     Text {
                         text: "%";
-                        font-size: Theme.font-md;
-                        color: Theme.text-secondary;
                         vertical-alignment: center;
                     }
 
                     Rectangle { horizontal-stretch: 1; }
                 }
 
-                // Sync exclusion button (ASS/SSA only)
                 if root.is-ass: Button {
                     text: "Configure Frame Sync Exclusions...";
                     clicked => { root.configure-sync-exclusion(); }
@@ -163,13 +145,12 @@ export component TrackSettingsDialog inherits Window {
             }
         }
 
-        // Spacer
         Rectangle { vertical-stretch: 1; }
 
         // Dialog buttons
         HorizontalBox {
             alignment: end;
-            spacing: Theme.spacing-sm;
+            spacing: 6px;
 
             Button {
                 text: "Cancel";
