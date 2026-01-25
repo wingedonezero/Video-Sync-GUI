@@ -1,17 +1,16 @@
 // AddJobDialog - Dialog for adding source files and discovering jobs.
-// Matches the original Qt layout: clean source list with browse buttons.
+// Clean compact layout matching Qt original.
 
 import { VerticalBox, HorizontalBox, Button, ScrollView, LineEdit } from "std-widgets.slint";
-import { Theme } from "../theme.slint";
 
 // Data for a single source input
 export struct SourceInputData {
     index: int,
     path: string,
-    is-reference: bool,  // true for Source 1
+    is-reference: bool,
 }
 
-// Source input row - matches Qt SourceInputWidget layout (1:4 ratio for label:input)
+// Source input row - matches Qt SourceInputWidget layout (1:4 ratio)
 component SourceInputRow inherits Rectangle {
     in property <int> index;
     in-out property <string> path;
@@ -20,50 +19,40 @@ component SourceInputRow inherits Rectangle {
     callback browse-clicked();
     callback path-changed(string);
 
-    min-height: 32px;
-    max-height: 40px;
+    height: 28px;
 
     HorizontalBox {
-        spacing: Theme.spacing-sm;
-        padding-top: 2px;
-        padding-bottom: 2px;
+        spacing: 6px;
 
-        // Label (1 unit stretch) - matches Qt layout.addWidget(label, 1)
+        // Label (1 stretch)
         Text {
             text: is-reference ? "Source " + index + " (Reference):" : "Source " + index + ":";
-            font-size: Theme.font-md;
-            color: Theme.text-primary;
             vertical-alignment: center;
             horizontal-stretch: 1;
-            min-width: 140px;
+            min-width: 130px;
         }
 
-        // Path input with drop support (4 units stretch) - matches Qt layout.addWidget(line_edit, 4)
+        // Path input with drop support (4 stretch)
         DropArea {
             horizontal-stretch: 4;
 
             dropped(event) => {
                 if (event.mime-type == "text/uri-list") {
-                    // Update local path first so LineEdit shows it immediately
                     root.path = event.data;
-                    // Then notify Rust to clean and save to model
                     root.path-changed(event.data);
                 }
             }
 
             LineEdit {
                 text <=> root.path;
-                placeholder-text: "Drop file here or click Browse...";
-
-                edited => {
-                    root.path-changed(root.path);
-                }
+                placeholder-text: "Drop file or browse...";
+                edited => { root.path-changed(root.path); }
             }
         }
 
-        // Browse button (fixed width) - matches Qt layout.addWidget(browse_btn)
+        // Browse button
         Button {
-            text: "Browse…";
+            text: "Browse...";
             clicked => { root.browse-clicked(); }
         }
     }
@@ -73,81 +62,60 @@ export component AddJobDialog inherits Window {
     title: "Add Job(s) to Queue";
     min-width: 700px;
     min-height: 300px;
-    preferred-width: 750px;
-    preferred-height: 350px;
-    default-font-size: 13px;
 
-    // Dialog state
     in-out property <[SourceInputData]> sources: [
         { index: 1, path: "", is-reference: true },
         { index: 2, path: "", is-reference: false },
     ];
     in-out property <string> error-message: "";
     in-out property <bool> is-processing: false;
-
-    // Result - set by Rust when jobs are discovered
     out property <bool> accepted: false;
 
-    // Callbacks for Rust logic
     callback add-source();
-    callback browse-source(int);  // source index
-    callback source-path-changed(int, string);  // source index, new path
+    callback browse-source(int);
+    callback source-path-changed(int, string);
     callback find-and-add-jobs();
     callback cancel();
 
     VerticalBox {
-        padding: Theme.padding-lg;
-        spacing: Theme.spacing-md;
+        padding: 8px;
+        spacing: 6px;
 
-        // Scrollable source inputs area (main content)
+        // Source inputs
         ScrollView {
             vertical-stretch: 1;
 
             VerticalBox {
-                spacing: Theme.spacing-xs;
-                padding: Theme.padding-xs;
+                spacing: 4px;
 
                 for source[idx] in sources: SourceInputRow {
                     index: source.index;
                     path: source.path;
                     is-reference: source.is-reference;
-
                     browse-clicked => { root.browse-source(source.index); }
                     path-changed(p) => { root.source-path-changed(source.index, p); }
                 }
             }
         }
 
-        // Add source button - matches Qt layout
+        // Add source button
         Button {
             text: "Add Another Source";
             enabled: sources.length < 10;
             clicked => { root.add-source(); }
         }
 
-        // Error message (if any) - subtle styling
-        if error-message != "": Rectangle {
-            background: #3a2020;
-            border-radius: Theme.radius-sm;
-            max-height: 40px;
-
-            HorizontalBox {
-                padding: Theme.padding-sm;
-
-                Text {
-                    text: error-message;
-                    color: #ff6666;
-                    font-size: Theme.font-sm;
-                    wrap: word-wrap;
-                    vertical-alignment: center;
-                }
-            }
+        // Error message
+        if error-message != "": Text {
+            text: error-message;
+            color: #ff6666;
+            font-size: 12px;
         }
 
-        // Dialog buttons - matches QDialogButtonBox(Ok | Cancel) layout
+        // Dialog buttons (right-aligned)
         HorizontalBox {
             alignment: end;
-            spacing: Theme.spacing-sm;
+            spacing: 6px;
 
             Button {
                 text: is-processing ? "Discovering..." : "Find & Add Jobs";

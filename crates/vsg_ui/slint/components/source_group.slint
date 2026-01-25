@@ -1,58 +1,50 @@
 // SourceGroup - Collapsible group of tracks from a single source.
-// Used in the left pane of ManualSelectionDialog.
+// Clean compact layout.
 
 import { VerticalBox, HorizontalBox, Button, GroupBox } from "std-widgets.slint";
-import { Theme } from "../theme.slint";
 import { TrackListItem, TrackWidgetData } from "track_widget.slint";
 
 export component SourceGroup inherits Rectangle {
     in property <string> title: "Source";
-    in property <string> source-key: "";  // e.g., "Source 1", "Source 2"
+    in property <string> source-key: "";
     in property <[TrackWidgetData]> tracks: [];
-    in property <bool> show-configure-button: true;  // Hide for External group
-
-    // Which tracks are blocked (e.g., video from non-reference)
+    in property <bool> show-configure-button: true;
     in property <[bool]> blocked-tracks: [];
-
-    // Collapsible state
     in-out property <bool> expanded: true;
 
-    // Callbacks
-    callback track-double-clicked(int);  // track id
-    callback track-context-menu(int);    // track id
+    callback track-double-clicked(int);
+    callback track-context-menu(int);
     callback configure-correlation();
 
-    background: Theme.surface;
-    border-radius: Theme.radius-md;
+    background: #2a2a2a;
+    border-radius: 4px;
 
     VerticalBox {
         padding: 0px;
         spacing: 0px;
 
-        // Header row
-        header := HorizontalBox {
-            padding: Theme.padding-sm;
-            spacing: Theme.spacing-sm;
+        // Header
+        HorizontalBox {
+            padding: 6px;
+            spacing: 6px;
 
             // Collapse toggle
-            collapse-btn := Rectangle {
-                width: 20px;
-                height: 20px;
-                background: collapse-touch.has-hover ? Theme.surface-variant : transparent;
-                border-radius: Theme.radius-sm;
+            Rectangle {
+                width: 18px;
+                height: 18px;
+                background: collapse-touch.has-hover ? #3a3a3a : transparent;
+                border-radius: 3px;
 
                 Text {
                     text: root.expanded ? "▼" : "►";
-                    font-size: Theme.font-sm;
-                    color: Theme.text-secondary;
+                    font-size: 10px;
+                    color: #888888;
                     horizontal-alignment: center;
                     vertical-alignment: center;
                 }
 
                 collapse-touch := TouchArea {
-                    clicked => {
-                        root.expanded = !root.expanded;
-                    }
+                    clicked => { root.expanded = !root.expanded; }
                 }
             }
 
@@ -60,52 +52,45 @@ export component SourceGroup inherits Rectangle {
             Text {
                 text: root.title;
                 font-weight: 600;
-                font-size: Theme.font-lg;
-                color: Theme.text-primary;
+                font-size: 13px;
                 horizontal-stretch: 1;
                 vertical-alignment: center;
             }
 
             // Track count
             Text {
-                text: "(" + tracks.length + " tracks)";
-                font-size: Theme.font-sm;
-                color: Theme.text-muted;
+                text: "(" + tracks.length + ")";
+                font-size: 11px;
+                color: #666666;
                 vertical-alignment: center;
             }
 
-            // Configure correlation button (for Source 2/3)
+            // Configure button
             if root.show-configure-button && root.source-key != "Source 1" && root.source-key != "External": Button {
                 text: "Configure...";
                 clicked => { root.configure-correlation(); }
             }
         }
 
-        // Content (collapsible)
-        if root.expanded: content := VerticalBox {
-            padding-left: Theme.padding-md;
-            padding-right: Theme.padding-sm;
-            padding-bottom: Theme.padding-sm;
-            spacing: Theme.spacing-xs;
+        // Content
+        if root.expanded: VerticalBox {
+            padding-left: 10px;
+            padding-right: 6px;
+            padding-bottom: 6px;
+            spacing: 2px;
 
             for track[idx] in tracks: TrackListItem {
                 data: track;
                 is-blocked: idx < blocked-tracks.length ? blocked-tracks[idx] : false;
 
-                double-clicked => {
-                    root.track-double-clicked(track.id);
-                }
-
-                context-menu-requested => {
-                    root.track-context-menu(track.id);
-                }
+                double-clicked => { root.track-double-clicked(track.id); }
+                context-menu-requested => { root.track-context-menu(track.id); }
             }
 
-            // Empty state
             if tracks.length == 0: Text {
-                text: "No tracks available";
-                font-size: Theme.font-sm;
-                color: Theme.text-muted;
+                text: "No tracks";
+                font-size: 11px;
+                color: #666666;
                 font-italic: true;
             }
         }
