@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/vsg_core",
     "crates/vsg_ui",
+    "crates/vsg_bridge",
 ]
 
 [workspace.package]

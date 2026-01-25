@@ -1,0 +1,186 @@
+// Main Window Controller Implementation
+
+#include "controller.hpp"
+#include "window.hpp"
+
+#include <QFileDialog>
+#include <QFileInfo>
+#include <QMessageBox>
+#include <QScrollBar>
+
+// Include CXX bridge header
+// Note: The actual path depends on how CXX generates headers during build
+// For now we'll use forward declarations and implement bridge calls later
+// #include "vsg_bridge/src/lib.rs.h"
+
+MainController::MainController(MainWindow* view)
+    : QObject(view)
+    , m_view(view)
+{
+}
+
+MainController::~MainController() = default;
+
+void MainController::applyConfigToUi()
+{
+    // TODO: Load config from bridge and apply to UI
+    // For now, just log that we're ready
+    appendLog("Video Sync GUI initialized.");
+    appendLog("Ready.");
+}
+
+void MainController::saveUiToConfig()
+{
+    // TODO: Save UI values to config via bridge
+    // vsg::AppSettings settings;
+    // settings.paths.last_source1_path = m_view->refInput()->text().toStdString();
+    // settings.paths.last_source2_path = m_view->secInput()->text().toStdString();
+    // vsg::bridge_save_settings(settings);
+}
+
+void MainController::openOptionsDialog()
+{
+    // TODO: Create and show OptionsDialog
+    QMessageBox::information(m_view, "Settings",
+        "Settings dialog not yet implemented.\n"
+        "This will open the full settings window.");
+    appendLog("Settings dialog opened (stub).");
+}
+
+void MainController::openJobQueue()
+{
+    saveUiToConfig();
+
+    // TODO: Create and show JobQueueDialog
+    QMessageBox::information(m_view, "Job Queue",
+        "Job Queue dialog not yet implemented.\n"
+        "This will open the job queue for merging.");
+    appendLog("Job Queue dialog opened (stub).");
+}
+
+void MainController::startAnalyzeOnly()
+{
+    // Get source paths from UI
+    QString ref = m_view->refInput()->text().trimmed();
+    QString sec = m_view->secInput()->text().trimmed();
+    QString ter = m_view->terInput()->text().trimmed();
+
+    // Validate inputs
+    if (ref.isEmpty()) {
+        QMessageBox::warning(m_view, "Missing Input",
+            "Please specify at least Source 1 (Reference).");
+        return;
+    }
+
+    if (sec.isEmpty() && ter.isEmpty()) {
+        QMessageBox::warning(m_view, "Missing Input",
+            "Please specify at least one additional source (Source 2 or 3).");
+        return;
+    }
+
+    // Clear previous results
+    clearDelayLabels();
+
+    // Update status
+    updateStatus("Analyzing...");
+    updateProgress(0);
+
+    // Log what we're doing
+    appendLog("Starting analysis...");
+    appendLog(QString("  Source 1 (Reference): %1").arg(ref));
+    if (!sec.isEmpty()) {
+        appendLog(QString("  Source 2: %1").arg(sec));
+    }
+    if (!ter.isEmpty()) {
+        appendLog(QString("  Source 3: %1").arg(ter));
+    }
+
+    // TODO: Call bridge to run analysis
+    // std::vector<std::string> paths;
+    // paths.push_back(ref.toStdString());
+    // if (!sec.isEmpty()) paths.push_back(sec.toStdString());
+    // if (!ter.isEmpty()) paths.push_back(ter.toStdString());
+    //
+    // auto results = vsg::bridge_run_analysis(paths);
+    // for (const auto& result : results) {
+    //     if (result.success) {
+    //         updateDelayLabel(result.source_index, result.delay_ms);
+    //     }
+    // }
+
+    // For now, just show a stub message
+    appendLog("Analysis not yet implemented - bridge integration pending.");
+    updateStatus("Ready");
+    updateProgress(100);
+}
+
+void MainController::browseForPath(QLineEdit* lineEdit, const QString& caption)
+{
+    // Determine starting directory
+    QString startDir;
+    QString currentPath = lineEdit->text();
+    if (!currentPath.isEmpty()) {
+        QFileInfo fi(currentPath);
+        startDir = fi.absolutePath();
+    }
+
+    // Open file dialog - allow selecting files or directories
+    QFileDialog dialog(m_view, caption);
+    dialog.setFileMode(QFileDialog::AnyFile);
+    if (!startDir.isEmpty()) {
+        dialog.setDirectory(startDir);
+    }
+
+    // Set filter for video files
+    dialog.setNameFilter("Video Files (*.mkv *.mp4 *.avi *.m4v *.mov *.ts);;All Files (*)");
+
+    if (dialog.exec() == QDialog::Accepted) {
+        QStringList selected = dialog.selectedFiles();
+        if (!selected.isEmpty()) {
+            lineEdit->setText(selected.first());
+        }
+    }
+}
+
+void MainController::appendLog(const QString& message)
+{
+    m_view->logOutput()->append(message);
+
+    // Auto-scroll to bottom (TODO: make configurable from settings)
+    QScrollBar* scrollBar = m_view->logOutput()->verticalScrollBar();
+    scrollBar->setValue(scrollBar->maximum());
+}
+
+void MainController::updateProgress(int percent)
+{
+    m_view->progressBar()->setValue(percent);
+}
+
+void MainController::updateStatus(const QString& status)
+{
+    m_view->statusLabel()->setText(status);
+}
+
+void MainController::updateDelayLabel(int sourceIndex, double delayMs)
+{
+    // sourceIndex is 2, 3, or 4 - map to array index 0, 1, 2
+    int arrayIndex = sourceIndex - 2;
+    auto& labels = m_view->delayLabels();
+
+    if (arrayIndex >= 0 && arrayIndex < static_cast<int>(labels.size())) {
+        QString text;
+        if (delayMs >= 0) {
+            text = QString("+%1 ms").arg(delayMs, 0, 'f', 1);
+        } else {
+            text = QString("%1 ms").arg(delayMs, 0, 'f', 1);
+        }
+        labels[arrayIndex]->setText(text);
+    }
+}
+
+void MainController::clearDelayLabels()
+{
+    for (auto* label : m_view->delayLabels()) {
+        label->setText(QString::fromUtf8("\u2014")); // em-dash
+    }
+}
