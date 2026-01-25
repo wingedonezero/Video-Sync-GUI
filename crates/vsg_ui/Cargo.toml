@@ -1,23 +1,44 @@
 [package]
 name = "vsg_ui"
-description = "Video Sync GUI - Slint-based user interface"
+description = "Video Sync GUI - libcosmic-based user interface"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-build = "build.rs"
 
 [[bin]]
 name = "video-sync-gui"
 path = "src/main.rs"
 
 [dependencies]
+# Core library
 vsg_core = { path = "../vsg_core" }
-slint = "1.14.1"
+
+# libcosmic - COSMIC desktop toolkit (based on iced)
+libcosmic = { git = "https://github.com/pop-os/libcosmic.git", default-features = false, features = [
+    "tokio",
+    "winit",
+    "wgpu",
+    "multi-window",
+    "xdg-portal",
+    "dbus-config",
+] }
+
+# Async runtime (required by libcosmic)
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "sync"] }
+
+# File dialogs (fallback if portal not available)
+rfd = "0.17.2"
+
+# Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
-rfd = "0.17.2"
+
+# Logging
 tracing = "0.1.44"
 
-[build-dependencies]
-slint-build = "1.14.1"
+# URL decoding for drag-drop
+percent-encoding = "2.3.2"
+
+# Unique IDs
+uuid = { version = "1.20.0", features = ["v4"] }
