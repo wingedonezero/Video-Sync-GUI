@@ -1,0 +1,18 @@
+[package]
+name = "vsg_bridge"
+description = "CXX bridge between vsg_core (Rust) and Qt UI (C++)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+vsg_core = { path = "../vsg_core" }
+cxx = "1.0"
+dirs = "5.0"
+
+[build-dependencies]
+cxx-build = "1.0"
