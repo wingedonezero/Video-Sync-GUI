@@ -12,6 +12,12 @@
 
 namespace VsgBridge {
 
+/// Initialize the bridge - call once at app startup
+/// Returns true on success
+inline bool init(const QString& logsDir = ".logs") {
+    return vsg::bridge_init(rust::String(logsDir.toStdString()));
+}
+
 /// Load application settings from config file
 inline vsg::AppSettings loadSettings() {
     return vsg::bridge_load_settings();
@@ -150,6 +156,10 @@ struct AnalysisResult {
     bool success = false;
     QString error_message = "Bridge not available";
 };
+
+inline bool init(const QString& = ".logs") {
+    return false;
+}
 
 inline AppSettings loadSettings() {
     return AppSettings{};

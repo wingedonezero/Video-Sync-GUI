@@ -5,7 +5,12 @@
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{fmt, EnvFilter, Layer};
 
 use vsg_core::analysis::Analyzer;
 use vsg_core::config::{ConfigManager, ConfigSection};
@@ -13,6 +18,7 @@ use vsg_core::config::{ConfigManager, ConfigSection};
 // Global message queue for logging from Rust to C++
 static LOG_QUEUE: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
 static PROGRESS: Mutex<(i32, String)> = Mutex::new((0, String::new()));
+static INITIALIZED: AtomicBool = AtomicBool::new(false);
 
 #[cxx::bridge(namespace = "vsg")]
 mod ffi {
@@ -121,6 +127,11 @@ mod ffi {
     // =========================================================================
 
     extern "Rust" {
+        /// Initialize the bridge - MUST be called before any other bridge function
+        /// Sets up logging to both file (app.log) and the message queue
+        /// logs_dir: Directory for log files (e.g., ".logs")
+        fn bridge_init(logs_dir: &str) -> bool;
+
         /// Load application settings from config file
         fn bridge_load_settings() -> AppSettings;
 
@@ -155,6 +166,121 @@ mod ffi {
 
         /// Clear all pending log messages
         fn bridge_clear_logs();
+    }
+}
+
+// =============================================================================
+// Initialization
+// =============================================================================
+
+/// Custom tracing layer that sends log messages to the GUI queue
+struct GuiLogLayer;
+
+impl<S> Layer<S> for GuiLogLayer
+where
+    S: tracing::Subscriber,
+{
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        // Format the event
+        let mut visitor = MessageVisitor::default();
+        event.record(&mut visitor);
+
+        let level = event.metadata().level();
+        let prefix = match *level {
+            tracing::Level::ERROR => "[ERROR] ",
+            tracing::Level::WARN => "[WARNING] ",
+            tracing::Level::DEBUG => "[DEBUG] ",
+            tracing::Level::TRACE => "[TRACE] ",
+            _ => "",
+        };
+
+        let message = format!("{}{}", prefix, visitor.message);
+        bridge_log(&message);
+    }
+}
+
+#[derive(Default)]
+struct MessageVisitor {
+    message: String,
+}
+
+impl tracing::field::Visit for MessageVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.message = format!("{:?}", value);
+            // Remove quotes from string debug output
+            if self.message.starts_with('"') && self.message.ends_with('"') {
+                self.message = self.message[1..self.message.len()-1].to_string();
+            }
+        }
+    }
+
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        if field.name() == "message" {
+            self.message = value.to_string();
+        }
+    }
+}
+
+fn bridge_init(logs_dir: &str) -> bool {
+    // Only initialize once
+    if INITIALIZED.swap(true, Ordering::SeqCst) {
+        bridge_log("[WARNING] Bridge already initialized");
+        return true;
+    }
+
+    let logs_path = PathBuf::from(logs_dir);
+
+    // Create logs directory if it doesn't exist
+    if !logs_path.exists() {
+        if let Err(e) = std::fs::create_dir_all(&logs_path) {
+            bridge_log(&format!("[ERROR] Failed to create logs directory: {}", e));
+            return false;
+        }
+    }
+
+    // Set up file appender for app.log
+    let file_appender = tracing_appender::rolling::never(&logs_path, "app.log");
+    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+
+    // Leak the guard so it lives for the program duration
+    // (Not ideal but simple for FFI)
+    std::mem::forget(_guard);
+
+    // Build filter
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+
+    // File layer (writes to app.log)
+    let file_layer = fmt::layer()
+        .with_target(true)
+        .with_ansi(false)
+        .with_writer(non_blocking);
+
+    // GUI layer (sends to message queue)
+    let gui_layer = GuiLogLayer;
+
+    // Build and set the subscriber
+    let result = tracing_subscriber::registry()
+        .with(filter)
+        .with(file_layer)
+        .with(gui_layer)
+        .try_init();
+
+    match result {
+        Ok(_) => {
+            tracing::info!("Video Sync GUI initialized");
+            tracing::info!("Logs directory: {}", logs_path.display());
+            true
+        }
+        Err(e) => {
+            bridge_log(&format!("[ERROR] Failed to initialize logging: {}", e));
+            false
+        }
     }
 }
 
