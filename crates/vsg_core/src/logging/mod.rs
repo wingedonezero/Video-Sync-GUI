@@ -137,12 +137,15 @@ pub fn init_test_tracing() {
         .try_init();
 }
 
-/// Convert LogLevel to filter string.
+/// Convert LogLevel to filter string with noise reduction for verbose crates.
+///
+/// This adds filters to suppress verbose logging from graphics/UI subsystems
+/// that would otherwise flood the logs at INFO level.
 fn level_to_filter_str(level: LogLevel) -> &'static str {
     match level {
-        LogLevel::Trace => "trace",
-        LogLevel::Debug => "debug",
-        LogLevel::Info => "info",
+        LogLevel::Trace => "trace,wgpu_core=warn,wgpu_hal=warn,wgpu=warn,naga=warn,cosmic_theme=warn",
+        LogLevel::Debug => "debug,wgpu_core=warn,wgpu_hal=warn,wgpu=warn,naga=warn,cosmic_theme=warn",
+        LogLevel::Info => "info,wgpu_core=warn,wgpu_hal=warn,wgpu=warn,naga=warn,cosmic_theme=warn",
         LogLevel::Warn => "warn",
         LogLevel::Error => "error",
     }
@@ -154,7 +157,9 @@ mod tests {
 
     #[test]
     fn level_to_filter_works() {
-        assert_eq!(level_to_filter_str(LogLevel::Debug), "debug");
-        assert_eq!(level_to_filter_str(LogLevel::Info), "info");
+        assert!(level_to_filter_str(LogLevel::Debug).starts_with("debug"));
+        assert!(level_to_filter_str(LogLevel::Info).starts_with("info"));
+        // Verify noise filters are applied
+        assert!(level_to_filter_str(LogLevel::Info).contains("wgpu_core=warn"));
     }
 }
