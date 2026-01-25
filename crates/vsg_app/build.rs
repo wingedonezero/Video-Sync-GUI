@@ -16,8 +16,8 @@ fn main() {
     // Target directory where Rust libraries are built
     let target_dir = workspace_root.join("target").join(&profile);
 
-    // Path to libvsg_bridge.a
-    let bridge_lib = target_dir.join("libvsg_bridge.a");
+    // Path to libvsg_bridge.a - search multiple locations
+    let bridge_lib = find_bridge_lib(&target_dir);
 
     // CXX bridge generates headers - we need to find the OUT_DIR for vsg_bridge
     // The headers are at: target/{profile}/build/vsg_bridge-{hash}/out/cxxbridge/
@@ -41,11 +41,11 @@ fn main() {
     ];
 
     // Add Rust bridge paths if available
-    if bridge_lib.exists() {
-        cmake_args.push(format!("-DVSG_BRIDGE_LIB={}", bridge_lib.display()));
-        println!("cargo:warning=Found Rust bridge: {}", bridge_lib.display());
+    if let Some(ref lib_path) = bridge_lib {
+        cmake_args.push(format!("-DVSG_BRIDGE_LIB={}", lib_path.display()));
+        println!("cargo:warning=Found Rust bridge: {}", lib_path.display());
     } else {
-        println!("cargo:warning=Rust bridge not found at {}", bridge_lib.display());
+        println!("cargo:warning=Rust bridge not found in target directory");
     }
 
     if let Some(ref cxx_dir) = cxxbridge_dir {
@@ -106,6 +106,50 @@ fn main() {
     // Rerun if bridge changes
     let bridge_src = workspace_root.join("crates").join("vsg_bridge").join("src");
     println!("cargo:rerun-if-changed={}", bridge_src.join("lib.rs").display());
+}
+
+/// Find libvsg_bridge.a in various possible locations
+fn find_bridge_lib(target_dir: &PathBuf) -> Option<PathBuf> {
+    // Check primary location
+    let primary = target_dir.join("libvsg_bridge.a");
+    if primary.exists() {
+        return Some(primary);
+    }
+
+    // Check deps directory (cargo sometimes puts libs here)
+    let deps_dir = target_dir.join("deps");
+    if deps_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&deps_dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                if name_str.starts_with("libvsg_bridge") && name_str.ends_with(".a") {
+                    return Some(entry.path());
+                }
+            }
+        }
+    }
+
+    // Check build output directory
+    let build_dir = target_dir.join("build");
+    if build_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&build_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                    if name.starts_with("vsg_bridge-") {
+                        let lib_path = path.join("out").join("libvsg_bridge.a");
+                        if lib_path.exists() {
+                            return Some(lib_path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Find the CXX bridge header directory
