@@ -21,5 +21,8 @@ public:
     void saveSettings();
 
 private:
+    /// Load default values when bridge not available
+    void loadDefaults();
+
     OptionsDialog* m_dialog;
 };
