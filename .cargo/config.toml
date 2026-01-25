@@ -1,0 +1,13 @@
+# Cargo configuration for Video Sync GUI
+
+[alias]
+# Build everything (Rust + Qt UI)
+build-all = ["xtask", "build"]
+
+# Quick run - builds and launches the Qt app
+run-app = ["xtask", "run"]
+
+# Note: These aliases require the xtask crate (see crates/xtask)
+# For now, use `make` from the project root instead:
+#   make        - Build everything
+#   make run    - Build and run
