@@ -313,10 +313,14 @@ impl App {
             logs_dir.display()
         );
 
-        let main_window_id = window::Id::unique();
-
         iced::daemon(
             move || {
+                // Open the main window and get its actual ID
+                let (main_window_id, open_task) = window::open(window::Settings {
+                    size: Size::new(900.0, 700.0),
+                    ..Default::default()
+                });
+
                 let mut window_map = HashMap::new();
                 window_map.insert(main_window_id, WindowKind::Main);
 
@@ -366,10 +370,7 @@ impl App {
                     window_map,
                 };
 
-                (app, window::open(window::Settings {
-                    size: Size::new(900.0, 700.0),
-                    ..Default::default()
-                }).1.map(move |_| Message::WindowOpened(WindowKind::Main, main_window_id)))
+                (app, open_task.map(|_| Message::Noop))
             },
             Self::update,
             Self::view,
