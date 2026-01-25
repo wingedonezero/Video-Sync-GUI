@@ -1,0 +1,188 @@
+// TrackSettingsDialog - Per-track configuration popup.
+// Shows language selection, custom name, and subtitle-specific options.
+
+import { VerticalBox, HorizontalBox, Button, GroupBox, ComboBox, LineEdit, CheckBox, SpinBox } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+
+// Language option for dropdown - Rust populates display strings
+export struct LanguageOption {
+    code: string,      // e.g., "eng", "jpn", "und"
+    display: string,   // e.g., "English", "Japanese", "Undetermined"
+}
+
+export component TrackSettingsDialog inherits Window {
+    title: "Track Settings";
+    min-width: 450px;
+    min-height: 350px;
+    preferred-width: 500px;
+    default-font-size: 13px;
+
+    // Track info (read-only, for conditional UI)
+    in property <string> track-type: "subtitles";  // "video", "audio", "subtitles"
+    in property <string> codec-id: "";
+
+    // Language settings - Rust provides display names directly
+    in-out property <[string]> language-display-names: [];
+    in-out property <int> selected-language-index: 0;
+
+    // Custom name
+    in-out property <string> custom-name: "";
+
+    // Subtitle-specific options
+    in-out property <bool> perform-ocr: false;
+    in-out property <bool> convert-to-ass: false;
+    in-out property <bool> rescale: false;
+    in-out property <int> size-multiplier-pct: 100;  // Percentage (100 = 1.0x)
+
+    // Visibility computed from track type/codec
+    property <bool> is-subtitles: track-type == "subtitles";
+    property <bool> is-image-based: codec-id == "S_HDMV/PGS" || codec-id == "S_VOBSUB";
+    property <bool> is-srt: codec-id == "S_TEXT/UTF8";
+    property <bool> is-ass: codec-id == "S_TEXT/ASS" || codec-id == "S_TEXT/SSA";
+
+    // Callbacks
+    callback configure-sync-exclusion();  // Open sync exclusion dialog (ASS/SSA only)
+    callback accept();
+    callback cancel();
+
+    // Result state
+    out property <bool> accepted: false;
+
+    VerticalBox {
+        padding: Theme.padding-lg;
+        spacing: Theme.spacing-md;
+
+        // Language section (all track types)
+        GroupBox {
+            title: "Language Settings";
+
+            HorizontalBox {
+                padding: Theme.padding-sm;
+                spacing: Theme.spacing-sm;
+
+                Text {
+                    text: "Language:";
+                    font-size: Theme.font-md;
+                    color: Theme.text-primary;
+                    vertical-alignment: center;
+                    min-width: 100px;
+                }
+
+                ComboBox {
+                    horizontal-stretch: 1;
+                    model: language-display-names;
+                    current-index <=> selected-language-index;
+                }
+            }
+        }
+
+        // Track name section (all track types)
+        GroupBox {
+            title: "Track Name";
+
+            HorizontalBox {
+                padding: Theme.padding-sm;
+                spacing: Theme.spacing-sm;
+
+                Text {
+                    text: "Custom Name:";
+                    font-size: Theme.font-md;
+                    color: Theme.text-primary;
+                    vertical-alignment: center;
+                    min-width: 100px;
+                }
+
+                LineEdit {
+                    horizontal-stretch: 1;
+                    text <=> custom-name;
+                    placeholder-text: "Leave empty to use default";
+                }
+            }
+        }
+
+        // Subtitle options (subtitles only)
+        if root.is-subtitles: GroupBox {
+            title: "Subtitle Options";
+
+            VerticalBox {
+                padding: Theme.padding-sm;
+                spacing: Theme.spacing-sm;
+
+                // OCR option (image-based only)
+                if root.is-image-based: CheckBox {
+                    text: "Perform OCR (convert images to text)";
+                    checked <=> perform-ocr;
+                }
+
+                // Convert to ASS (SRT only)
+                if root.is-srt: CheckBox {
+                    text: "Convert to ASS format";
+                    checked <=> convert-to-ass;
+                }
+
+                // Rescale (all subtitle types)
+                CheckBox {
+                    text: "Rescale to video resolution";
+                    checked <=> rescale;
+                }
+
+                // Size multiplier
+                HorizontalBox {
+                    spacing: Theme.spacing-sm;
+
+                    Text {
+                        text: "Size multiplier:";
+                        font-size: Theme.font-md;
+                        color: Theme.text-primary;
+                        vertical-alignment: center;
+                        min-width: 100px;
+                    }
+
+                    SpinBox {
+                        value <=> size-multiplier-pct;
+                        minimum: 10;
+                        maximum: 1000;
+                        max-width: 100px;
+                    }
+
+                    Text {
+                        text: "%";
+                        font-size: Theme.font-md;
+                        color: Theme.text-secondary;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle { horizontal-stretch: 1; }
+                }
+
+                // Sync exclusion button (ASS/SSA only)
+                if root.is-ass: Button {
+                    text: "Configure Frame Sync Exclusions...";
+                    clicked => { root.configure-sync-exclusion(); }
+                }
+            }
+        }
+
+        // Spacer
+        Rectangle { vertical-stretch: 1; }
+
+        // Dialog buttons
+        HorizontalBox {
+            alignment: end;
+            spacing: Theme.spacing-sm;
+
+            Button {
+                text: "Cancel";
+                clicked => { root.cancel(); }
+            }
+
+            Button {
+                text: "OK";
+                clicked => {
+                    root.accepted = true;
+                    root.accept();
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,251 @@
+// ManualSelectionDialog - The main track configuration dialog.
+// Left pane: Source tracks grouped by source (double-click to add to final)
+// Right pane: Final output list (drag to reorder) + attachment selection
+
+import { VerticalBox, HorizontalBox, Button, ScrollView, GroupBox, CheckBox } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { SourceGroup } from "../components/source_group.slint";
+import { TrackList, FinalTrackData } from "../components/track_list.slint";
+import { TrackWidgetData } from "../components/track_widget.slint";
+
+// Data for a source group
+export struct SourceGroupData {
+    source-key: string,      // e.g., "Source 1", "Source 2"
+    title: string,           // e.g., "Source 1 (Reference) Tracks ('movie.mkv')"
+    tracks: [TrackWidgetData],
+    blocked: [bool],         // Which tracks are blocked (e.g., video from non-ref)
+}
+
+// Attachment source option
+export struct AttachmentSourceOption {
+    source-key: string,
+    label: string,
+    checked: bool,
+}
+
+export component ManualSelectionDialog inherits Window {
+    title: "Manual Track Selection";
+    min-width: 1200px;
+    min-height: 700px;
+    preferred-width: 1400px;
+    preferred-height: 800px;
+    default-font-size: 13px;
+
+    // Data
+    in-out property <[SourceGroupData]> source-groups: [];
+    in-out property <[FinalTrackData]> final-tracks: [];
+
+    // External subtitles (shown when added)
+    in-out property <[TrackWidgetData]> external-tracks: [];
+    in-out property <bool> show-external-group: false;
+
+    // Attachment selection
+    in-out property <[AttachmentSourceOption]> attachment-options: [];
+
+    // Info message (e.g., "Pre-populated with previous layout")
+    in-out property <string> info-message: "";
+    in-out property <bool> show-info: false;
+
+    // Style clipboard state
+    in-out property <bool> has-style-clipboard: false;
+
+    // Callbacks for source list interactions
+    callback source-track-double-clicked(int, string);     // track-id, source-key
+    callback source-track-context-menu(int, string);       // track-id, source-key
+    callback external-track-double-clicked(int);           // track-id
+    callback configure-source-correlation(string);         // source-key
+    callback add-external-subtitles();
+
+    // Callbacks for final list interactions
+    callback final-track-moved(int, int);          // from-idx, to-idx
+    callback final-track-removed(int);             // idx
+    callback final-track-default-changed(int, bool);
+    callback final-track-forced-changed(int, bool);
+    callback final-track-name-changed(int, bool);
+    callback final-track-sync-changed(int, string);
+    callback final-track-settings-clicked(int);
+    callback final-track-style-editor-clicked(int);
+
+    // Attachment callbacks
+    callback attachment-toggled(string, bool);     // source-key, checked
+
+    // Dialog callbacks
+    callback accept();
+    callback cancel();
+
+    VerticalBox {
+        padding: Theme.padding-lg;
+        spacing: Theme.spacing-md;
+
+        // Info message (if any)
+        if root.show-info && info-message != "": Rectangle {
+            background: #2d4a2d;
+            border-radius: Theme.radius-sm;
+            padding: Theme.padding-sm;
+            max-height: 36px;
+
+            Text {
+                text: info-message;
+                color: Theme.success;
+                font-weight: 600;
+                font-size: Theme.font-md;
+                vertical-alignment: center;
+            }
+        }
+
+        // Main content - two panes
+        HorizontalBox {
+            vertical-stretch: 1;
+            spacing: Theme.spacing-md;
+
+            // Left pane - Source tracks
+            VerticalBox {
+                horizontal-stretch: 1;
+
+                ScrollView {
+                    vertical-stretch: 1;
+
+                    VerticalBox {
+                        padding: Theme.padding-xs;
+                        spacing: Theme.spacing-sm;
+
+                        // Source groups
+                        for group in source-groups: SourceGroup {
+                            title: group.title;
+                            source-key: group.source-key;
+                            tracks: group.tracks;
+                            blocked-tracks: group.blocked;
+
+                            track-double-clicked(id) => {
+                                root.source-track-double-clicked(id, group.source-key);
+                            }
+
+                            track-context-menu(id) => {
+                                root.source-track-context-menu(id, group.source-key);
+                            }
+
+                            configure-correlation => {
+                                root.configure-source-correlation(group.source-key);
+                            }
+                        }
+
+                        // External subtitles group
+                        if root.show-external-group: SourceGroup {
+                            title: "External Subtitles";
+                            source-key: "External";
+                            tracks: external-tracks;
+                            blocked-tracks: [];
+                            show-configure-button: false;
+
+                            track-double-clicked(id) => {
+                                root.external-track-double-clicked(id);
+                            }
+                        }
+
+                        // Spacer
+                        Rectangle { vertical-stretch: 1; }
+                    }
+                }
+
+                // Add external subtitles button
+                Button {
+                    text: "+ Add External Subtitle(s)...";
+                    clicked => { root.add-external-subtitles(); }
+                }
+            }
+
+            // Right pane - Final output and attachments
+            VerticalBox {
+                horizontal-stretch: 2;
+
+                // Final output list
+                GroupBox {
+                    title: "Final Output (Drag to reorder)";
+                    vertical-stretch: 1;
+
+                    TrackList {
+                        tracks: final-tracks;
+                        reorderable: true;
+
+                        track-moved(from, to) => {
+                            root.final-track-moved(from, to);
+                        }
+
+                        track-removed(idx) => {
+                            root.final-track-removed(idx);
+                        }
+
+                        default-changed(idx, val) => {
+                            root.final-track-default-changed(idx, val);
+                        }
+
+                        forced-changed(idx, val) => {
+                            root.final-track-forced-changed(idx, val);
+                        }
+
+                        name-changed(idx, val) => {
+                            root.final-track-name-changed(idx, val);
+                        }
+
+                        sync-source-changed(idx, src) => {
+                            root.final-track-sync-changed(idx, src);
+                        }
+
+                        settings-clicked(idx) => {
+                            root.final-track-settings-clicked(idx);
+                        }
+
+                        style-editor-clicked(idx) => {
+                            root.final-track-style-editor-clicked(idx);
+                        }
+                    }
+                }
+
+                // Attachments section
+                GroupBox {
+                    title: "Attachments";
+                    max-height: 80px;
+
+                    HorizontalBox {
+                        spacing: Theme.spacing-md;
+                        padding: Theme.padding-sm;
+
+                        Text {
+                            text: "Include attachments from:";
+                            font-size: Theme.font-md;
+                            color: Theme.text-primary;
+                            vertical-alignment: center;
+                        }
+
+                        for opt in attachment-options: CheckBox {
+                            text: opt.label;
+                            checked: opt.checked;
+
+                            toggled => {
+                                root.attachment-toggled(opt.source-key, self.checked);
+                            }
+                        }
+
+                        Rectangle { horizontal-stretch: 1; }
+                    }
+                }
+            }
+        }
+
+        // Dialog buttons
+        HorizontalBox {
+            alignment: end;
+            spacing: Theme.spacing-sm;
+
+            Button {
+                text: "Cancel";
+                clicked => { root.cancel(); }
+            }
+
+            Button {
+                text: "OK";
+                clicked => { root.accept(); }
+            }
+        }
+    }
+}

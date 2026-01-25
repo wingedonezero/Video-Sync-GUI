@@ -1,0 +1,202 @@
+// TrackList - Reorderable list of tracks for the final output.
+// Used in the right pane of ManualSelectionDialog.
+
+import { VerticalBox, HorizontalBox, ScrollView, Button } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { TrackWidget, TrackWidgetData } from "track_widget.slint";
+
+// Data for a track in the final list (extends TrackWidgetData)
+export struct FinalTrackData {
+    // Core track data
+    track: TrackWidgetData,
+
+    // List position (for display)
+    position: int,
+
+    // Sync source options for this track
+    sync-source-options: [string],
+}
+
+// Single entry in the track list with move/remove controls (defined before use)
+component TrackListEntry inherits Rectangle {
+    in property <FinalTrackData> data;
+    in property <bool> show-move-buttons: true;
+    in property <bool> is-first: false;
+    in property <bool> is-last: false;
+
+    callback move-up();
+    callback move-down();
+    callback remove();
+    callback default-changed(bool);
+    callback forced-changed(bool);
+    callback name-changed(bool);
+    callback sync-source-changed(string);
+    callback settings-clicked();
+    callback style-editor-clicked();
+
+    background: Theme.surface-variant;
+    border-radius: Theme.radius-md;
+    min-height: 70px;
+
+    HorizontalBox {
+        padding: Theme.padding-xs;
+        spacing: Theme.spacing-xs;
+
+        // Move/remove controls (left side)
+        if root.show-move-buttons: VerticalBox {
+            alignment: center;
+            spacing: 2px;
+            padding: Theme.padding-xs;
+
+            // Move up button
+            Button {
+                text: "^";
+                enabled: !root.is-first;
+                max-width: 28px;
+                clicked => { root.move-up(); }
+            }
+
+            // Position indicator
+            Text {
+                text: data.position + 1;
+                font-size: Theme.font-sm;
+                color: Theme.text-muted;
+                horizontal-alignment: center;
+            }
+
+            // Move down button
+            Button {
+                text: "v";
+                enabled: !root.is-last;
+                max-width: 28px;
+                clicked => { root.move-down(); }
+            }
+        }
+
+        // Track type indicator bar
+        Rectangle {
+            width: 4px;
+            border-radius: 2px;
+            background: data.track.track-type == "video" ? Theme.video-track :
+                        data.track.track-type == "audio" ? Theme.audio-track :
+                        Theme.subtitle-track;
+        }
+
+        // Main track widget
+        TrackWidget {
+            horizontal-stretch: 1;
+            data: data.track;
+            sync-source-options: data.sync-source-options;
+
+            default-changed(val) => { root.default-changed(val); }
+            forced-changed(val) => { root.forced-changed(val); }
+            name-changed(val) => { root.name-changed(val); }
+            sync-source-changed(src) => { root.sync-source-changed(src); }
+            settings-clicked => { root.settings-clicked(); }
+            style-editor-clicked => { root.style-editor-clicked(); }
+        }
+
+        // Remove button
+        Button {
+            text: "X";
+            max-width: 32px;
+            clicked => { root.remove(); }
+        }
+    }
+}
+
+export component TrackList inherits Rectangle {
+    in property <[FinalTrackData]> tracks: [];
+    in property <bool> reorderable: true;
+
+    // Callbacks for track interactions
+    callback track-moved(int, int);      // from-position, to-position
+    callback track-removed(int);         // position
+    callback default-changed(int, bool); // position, is-default
+    callback forced-changed(int, bool);  // position, is-forced
+    callback name-changed(int, bool);    // position, has-name
+    callback sync-source-changed(int, string); // position, source
+    callback settings-clicked(int);      // position
+    callback style-editor-clicked(int);  // position
+
+    background: Theme.surface;
+    border-radius: Theme.radius-md;
+
+    VerticalBox {
+        padding: 0px;
+
+        if tracks.length == 0: Rectangle {
+            vertical-stretch: 1;
+
+            VerticalBox {
+                alignment: center;
+
+                Text {
+                    text: "No tracks selected";
+                    font-size: Theme.font-lg;
+                    color: Theme.text-muted;
+                    horizontal-alignment: center;
+                }
+
+                Text {
+                    text: "Double-click tracks on the left to add them";
+                    font-size: Theme.font-sm;
+                    color: Theme.text-muted;
+                    horizontal-alignment: center;
+                }
+            }
+        }
+
+        if tracks.length > 0: ScrollView {
+            vertical-stretch: 1;
+
+            VerticalBox {
+                padding: Theme.padding-sm;
+                spacing: Theme.spacing-xs;
+
+                for item[idx] in tracks: TrackListEntry {
+                    data: item;
+                    show-move-buttons: root.reorderable;
+                    is-first: idx == 0;
+                    is-last: idx == tracks.length - 1;
+
+                    move-up => {
+                        root.track-moved(idx, idx - 1);
+                    }
+
+                    move-down => {
+                        root.track-moved(idx, idx + 1);
+                    }
+
+                    remove => {
+                        root.track-removed(idx);
+                    }
+
+                    default-changed(val) => {
+                        root.default-changed(idx, val);
+                    }
+
+                    forced-changed(val) => {
+                        root.forced-changed(idx, val);
+                    }
+
+                    name-changed(val) => {
+                        root.name-changed(idx, val);
+                    }
+
+                    sync-source-changed(src) => {
+                        root.sync-source-changed(idx, src);
+                    }
+
+                    settings-clicked => {
+                        root.settings-clicked(idx);
+                    }
+
+                    style-editor-clicked => {
+                        root.style-editor-clicked(idx);
+                    }
+                }
+            }
+        }
+    }
+}
