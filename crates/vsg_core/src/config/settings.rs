@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::models::{AnalysisMode, CorrelationMethod, DelaySelectionMode, FilteringMethod, SnapMode};
+use crate::models::{AnalysisMode, CorrelationMethod, DelaySelectionMode, FilteringMethod, SnapMode, SyncMode};
 
 /// Root settings structure containing all configuration sections.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -252,6 +252,12 @@ pub struct AnalysisSettings {
     /// [Early Cluster] Minimum chunks in early window for stability.
     #[serde(default = "default_early_cluster_threshold")]
     pub early_cluster_threshold: u32,
+
+    /// Sync mode controls how negative delays are handled.
+    /// PositiveOnly applies global shift to eliminate negatives.
+    /// AllowNegative keeps delays as-is (may not work with some players).
+    #[serde(default)]
+    pub sync_mode: SyncMode,
 }
 
 fn default_chunk_count() -> u32 {
@@ -326,6 +332,7 @@ impl Default for AnalysisSettings {
             first_stable_skip_unstable: false,
             early_cluster_window: default_early_cluster_window(),
             early_cluster_threshold: default_early_cluster_threshold(),
+            sync_mode: SyncMode::default(),
         }
     }
 }

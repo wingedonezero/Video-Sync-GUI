@@ -148,10 +148,30 @@ pub struct AnalysisOutput {
     pub delays: Delays,
     /// Analysis confidence score (0.0 - 1.0).
     pub confidence: f64,
-    /// Whether drift was detected.
+    /// Whether drift was detected in any source.
     pub drift_detected: bool,
     /// Analysis method used.
     pub method: String,
+    /// Per-source stability metrics.
+    #[serde(default)]
+    pub source_stability: HashMap<String, SourceStability>,
+}
+
+/// Stability metrics for a single source analysis.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceStability {
+    /// Number of chunks that passed the match threshold.
+    pub accepted_chunks: usize,
+    /// Total chunks analyzed.
+    pub total_chunks: usize,
+    /// Average match percentage across accepted chunks.
+    pub avg_match_pct: f64,
+    /// Standard deviation of delay measurements (ms).
+    pub delay_std_dev_ms: f64,
+    /// Whether drift was detected for this source.
+    pub drift_detected: bool,
+    /// Acceptance rate as percentage (accepted / total * 100).
+    pub acceptance_rate: f64,
 }
 
 /// Output from the Extraction step.
