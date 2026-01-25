@@ -4,7 +4,9 @@
 //! It can be used by the GUI application or a CLI tool.
 
 pub mod analysis;
+pub mod chapters;
 pub mod config;
+pub mod extraction;
 pub mod jobs;
 pub mod logging;
 pub mod models;

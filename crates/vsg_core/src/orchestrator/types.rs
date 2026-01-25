@@ -244,6 +244,7 @@ mod tests {
             confidence: 0.95,
             drift_detected: false,
             method: "audio_correlation".to_string(),
+            source_stability: HashMap::new(),
         });
 
         assert!(state.has_analysis());
