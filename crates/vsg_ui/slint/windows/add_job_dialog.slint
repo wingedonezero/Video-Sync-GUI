@@ -19,7 +19,8 @@ component SourceInputRow inherits Rectangle {
     callback browse-clicked();
     callback path-changed(string);
 
-    height: 28px;
+    height: 30px;
+    horizontal-stretch: 1;
 
     HorizontalLayout {
         spacing: 6px;
@@ -30,7 +31,7 @@ component SourceInputRow inherits Rectangle {
         Text {
             text: is-reference ? "Source " + index + " (Reference):" : "Source " + index + ":";
             vertical-alignment: center;
-            min-width: 120px;
+            width: 170px;
         }
 
         // Path input with drop support (stretches to fill)
@@ -54,6 +55,7 @@ component SourceInputRow inherits Rectangle {
         // Browse button
         Button {
             text: "Browse...";
+            min-width: 90px;
             clicked => { root.browse-clicked(); }
         }
     }
