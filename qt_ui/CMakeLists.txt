@@ -106,6 +106,7 @@ if(USE_RUST_BRIDGE)
     # Add CXX include directory
     target_include_directories(${PROJECT_NAME} PRIVATE
         ${VSG_CXXBRIDGE_DIR}
+        ${VSG_CXXBRIDGE_DIR}/vsg_bridge/src
     )
 
     # Link the Rust static library
