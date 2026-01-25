@@ -15,13 +15,12 @@ path = "src/main.rs"
 vsg_core = { path = "../vsg_core" }
 
 # libcosmic - COSMIC desktop toolkit (based on iced)
+# Note: dbus-config disabled for non-COSMIC desktop compatibility
 libcosmic = { git = "https://github.com/pop-os/libcosmic.git", default-features = false, features = [
     "tokio",
     "winit",
     "wgpu",
     "multi-window",
-    "xdg-portal",
-    "dbus-config",
 ] }
 
 # Async runtime (required by libcosmic)
