@@ -1,17 +1,15 @@
 //! Main application module for Video Sync GUI.
 //!
 //! This module contains the core Application struct, Message enum,
-//! and the update/view logic following the libcosmic MVU pattern.
+//! and the update/view logic following the iced MVU pattern.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use cosmic::app::Task;
-use cosmic::iced::window;
-use cosmic::iced_core::Size;
-use cosmic::prelude::*;
-use cosmic::{widget, Application, Core, Element};
+use iced::widget::{self, text};
+use iced::window;
+use iced::{Element, Size, Task, Theme};
 
 use vsg_core::config::{ConfigManager, Settings};
 use vsg_core::jobs::JobQueue;
@@ -19,12 +17,9 @@ use vsg_core::jobs::JobQueue;
 use crate::pages;
 use crate::windows;
 
-/// Application ID for COSMIC desktop integration.
-pub const APP_ID: &str = "com.videosync.gui";
-
 /// Unique identifier for windows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum WindowId {
+pub enum WindowKind {
     Main,
     Settings,
     JobQueue,
@@ -48,7 +43,7 @@ pub enum Message {
     OpenTrackSettings(usize),
     CloseTrackSettings,
     WindowClosed(window::Id),
-    WindowOpened(WindowId, window::Id),
+    WindowOpened(WindowKind, window::Id),
 
     // Main Window
     SourcePathChanged(usize, String),
@@ -67,8 +62,10 @@ pub enum Message {
     // Settings Window
     SettingChanged(SettingKey, SettingValue),
     SaveSettings,
+    CancelSettings,
     BrowseFolder(FolderType),
     FolderSelected(FolderType, Option<PathBuf>),
+    SettingsTabSelected(usize),
 
     // Job Queue Dialog
     AddJobsClicked,
@@ -197,11 +194,11 @@ pub enum FolderType {
 
 /// Main application state.
 pub struct App {
-    core: Core,
     pub config: Arc<Mutex<ConfigManager>>,
     pub job_queue: Arc<Mutex<JobQueue>>,
 
     // Main Window State
+    pub main_window_id: window::Id,
     pub source1_path: String,
     pub source2_path: String,
     pub source3_path: String,
@@ -216,6 +213,7 @@ pub struct App {
     // Settings Window State
     pub settings_window_id: Option<window::Id>,
     pub pending_settings: Option<Settings>,
+    pub settings_active_tab: usize,
 
     // Job Queue Dialog State
     pub job_queue_window_id: Option<window::Id>,
@@ -245,7 +243,7 @@ pub struct App {
     pub track_settings: TrackSettingsState,
 
     // Window ID Mapping
-    pub window_map: HashMap<window::Id, WindowId>,
+    pub window_map: HashMap<window::Id, WindowKind>,
 }
 
 /// State for a source group in manual selection.
@@ -295,86 +293,97 @@ pub struct TrackSettingsState {
     pub size_multiplier_pct: i32,
 }
 
-impl cosmic::Application for App {
-    type Executor = cosmic::executor::Default;
-    type Flags = AppFlags;
-    type Message = Message;
-
-    const APP_ID: &'static str = APP_ID;
-
-    fn core(&self) -> &Core {
-        &self.core
-    }
-
-    fn core_mut(&mut self) -> &mut Core {
-        &mut self.core
-    }
-
-    fn init(core: Core, flags: Self::Flags) -> (Self, Task<Self::Message>) {
+impl App {
+    /// Create and run the application.
+    pub fn run(
+        config: Arc<Mutex<ConfigManager>>,
+        job_queue: Arc<Mutex<JobQueue>>,
+        config_path: PathBuf,
+        logs_dir: PathBuf,
+    ) -> iced::Result {
         let archive_logs = {
-            let cfg = flags.config.lock().unwrap();
+            let cfg = config.lock().unwrap();
             cfg.settings().logging.archive_logs
         };
 
         let version_info = format!(
             "Video Sync GUI started.\nCore version: {}\nConfig: {}\nLogs: {}\n",
             vsg_core::version(),
-            flags.config_path.display(),
-            flags.logs_dir.display()
+            config_path.display(),
+            logs_dir.display()
         );
 
-        let app = Self {
-            core,
-            config: flags.config,
-            job_queue: flags.job_queue,
+        let main_window_id = window::Id::unique();
 
-            source1_path: String::new(),
-            source2_path: String::new(),
-            source3_path: String::new(),
-            archive_logs,
-            status_text: "Ready".to_string(),
-            progress_value: 0.0,
-            delay_source2: String::new(),
-            delay_source3: String::new(),
-            log_text: version_info,
-            is_analyzing: false,
+        iced::application(
+            move || {
+                let app = App {
+                    config: config.clone(),
+                    job_queue: job_queue.clone(),
 
-            settings_window_id: None,
-            pending_settings: None,
+                    main_window_id,
+                    source1_path: String::new(),
+                    source2_path: String::new(),
+                    source3_path: String::new(),
+                    archive_logs,
+                    status_text: "Ready".to_string(),
+                    progress_value: 0.0,
+                    delay_source2: String::new(),
+                    delay_source3: String::new(),
+                    log_text: version_info.clone(),
+                    is_analyzing: false,
 
-            job_queue_window_id: None,
-            selected_job_indices: Vec::new(),
-            has_clipboard: false,
-            is_processing: false,
-            job_queue_status: String::new(),
+                    settings_window_id: None,
+                    pending_settings: None,
+                    settings_active_tab: 0,
 
-            add_job_window_id: None,
-            add_job_sources: vec![String::new(), String::new()],
-            add_job_error: String::new(),
-            is_finding_jobs: false,
+                    job_queue_window_id: None,
+                    selected_job_indices: Vec::new(),
+                    has_clipboard: false,
+                    is_processing: false,
+                    job_queue_status: String::new(),
 
-            manual_selection_window_id: None,
-            manual_selection_job_idx: None,
-            source_groups: Vec::new(),
-            final_tracks: Vec::new(),
-            attachment_sources: HashMap::new(),
-            external_subtitles: Vec::new(),
-            manual_selection_info: String::new(),
+                    add_job_window_id: None,
+                    add_job_sources: vec![String::new(), String::new()],
+                    add_job_error: String::new(),
+                    is_finding_jobs: false,
 
-            track_settings_window_id: None,
-            track_settings_idx: None,
-            track_settings: TrackSettingsState::default(),
+                    manual_selection_window_id: None,
+                    manual_selection_job_idx: None,
+                    source_groups: Vec::new(),
+                    final_tracks: Vec::new(),
+                    attachment_sources: HashMap::new(),
+                    external_subtitles: Vec::new(),
+                    manual_selection_info: String::new(),
 
-            window_map: HashMap::new(),
-        };
+                    track_settings_window_id: None,
+                    track_settings_idx: None,
+                    track_settings: TrackSettingsState::default(),
 
-        (app, Task::none())
+                    window_map: HashMap::new(),
+                };
+
+                (app, Task::none())
+            },
+            Self::update,
+            Self::view,
+        )
+        .title("Video Sync GUI")
+        .theme(Self::theme)
+        .window_size(Size::new(900.0, 700.0))
+        .centered()
+        .run()
     }
 
-    fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
+    fn theme(&self) -> Theme {
+        Theme::Dark
+    }
+
+    fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::OpenSettings => self.open_settings_window(),
             Message::CloseSettings => self.close_settings_window(),
+            Message::CancelSettings => self.close_settings_window(),
             Message::OpenJobQueue => self.open_job_queue_window(),
             Message::CloseJobQueue => self.close_job_queue_window(),
             Message::OpenAddJob => self.open_add_job_window(),
@@ -384,7 +393,7 @@ impl cosmic::Application for App {
             Message::OpenTrackSettings(idx) => self.open_track_settings_window(idx),
             Message::CloseTrackSettings => self.close_track_settings_window(),
             Message::WindowClosed(id) => self.handle_window_closed(id),
-            Message::WindowOpened(window_id, id) => self.handle_window_opened(window_id, id),
+            Message::WindowOpened(window_kind, id) => self.handle_window_opened(window_kind, id),
 
             Message::SourcePathChanged(idx, path) => {
                 self.handle_source_path_changed(idx, path);
@@ -431,6 +440,10 @@ impl cosmic::Application for App {
             Message::BrowseFolder(folder_type) => self.browse_folder(folder_type),
             Message::FolderSelected(folder_type, path) => {
                 self.handle_folder_selected(folder_type, path);
+                Task::none()
+            }
+            Message::SettingsTabSelected(tab) => {
+                self.settings_active_tab = tab;
                 Task::none()
             }
 
@@ -592,31 +605,23 @@ impl cosmic::Application for App {
         }
     }
 
-    fn view(&self) -> Element<Self::Message> {
+    fn view(&self) -> Element<Message> {
         pages::main_window::view(self)
     }
 
-    fn view_window(&self, id: window::Id) -> Element<Self::Message> {
+    pub fn view_window(&self, id: window::Id) -> Element<Message> {
         match self.window_map.get(&id) {
-            Some(WindowId::Settings) => windows::settings::view(self),
-            Some(WindowId::JobQueue) => windows::job_queue::view(self),
-            Some(WindowId::AddJob) => windows::add_job::view(self),
-            Some(WindowId::ManualSelection(_)) => windows::manual_selection::view(self),
-            Some(WindowId::TrackSettings(_)) => windows::track_settings::view(self),
-            _ => widget::text::body("Unknown window").into(),
+            Some(WindowKind::Settings) => windows::settings::view(self),
+            Some(WindowKind::JobQueue) => windows::job_queue::view(self),
+            Some(WindowKind::AddJob) => windows::add_job::view(self),
+            Some(WindowKind::ManualSelection(_)) => windows::manual_selection::view(self),
+            Some(WindowKind::TrackSettings(_)) => windows::track_settings::view(self),
+            _ => widget::container(text("Unknown window"))
+                .padding(20)
+                .into(),
         }
     }
-}
 
-/// Application flags for initialization.
-pub struct AppFlags {
-    pub config: Arc<Mutex<ConfigManager>>,
-    pub job_queue: Arc<Mutex<JobQueue>>,
-    pub config_path: PathBuf,
-    pub logs_dir: PathBuf,
-}
-
-impl App {
     pub fn append_log(&mut self, message: &str) {
         self.log_text.push_str(message);
         self.log_text.push('\n');

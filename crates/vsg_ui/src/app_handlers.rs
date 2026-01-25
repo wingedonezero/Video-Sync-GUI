@@ -7,10 +7,8 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command as StdCommand;
 
-use cosmic::app::Task;
-use cosmic::iced::window;
-use cosmic::iced_core::Size;
-use cosmic::Action;
+use iced::window;
+use iced::{Size, Task};
 
 use vsg_core::config::Settings;
 use vsg_core::jobs::{discover_jobs, FinalTrackEntry, ManualLayout};
@@ -23,7 +21,7 @@ use vsg_core::orchestrator::{AnalyzeStep, Context, JobState, Pipeline};
 
 use crate::app::{
     App, FinalTrackState, FolderType, Message, SettingKey, SettingValue, SourceGroupState,
-    TrackWidgetState, WindowId,
+    TrackWidgetState, WindowKind,
 };
 
 impl App {
@@ -43,18 +41,17 @@ impl App {
         drop(cfg);
 
         let settings = window::Settings {
-            size: Size::new(800.0, 700.0),
+            size: Size::new(900.0, 700.0),
             resizable: true,
             decorations: true,
-            transparent: false,
             ..Default::default()
         };
 
-        let (id, command) = window::open(settings);
-        self.window_map.insert(id, WindowId::Settings);
+        let (id, open_task) = window::open(settings);
+        self.window_map.insert(id, WindowKind::Settings);
         self.settings_window_id = Some(id);
 
-        command.map(|_| Action::App(Message::Noop))
+        open_task.map(|_| Message::Noop)
     }
 
     /// Close the settings window.
@@ -62,7 +59,7 @@ impl App {
         if let Some(id) = self.settings_window_id.take() {
             self.window_map.remove(&id);
             self.pending_settings = None;
-            return window::close::<Action<Message>>(id);
+            return window::close(id);
         }
         Task::none()
     }
@@ -79,22 +76,21 @@ impl App {
             size: Size::new(1100.0, 600.0),
             resizable: true,
             decorations: true,
-            transparent: false,
             ..Default::default()
         };
 
-        let (id, command) = window::open(settings);
-        self.window_map.insert(id, WindowId::JobQueue);
+        let (id, open_task) = window::open(settings);
+        self.window_map.insert(id, WindowKind::JobQueue);
         self.job_queue_window_id = Some(id);
 
-        command.map(|_| Action::App(Message::Noop))
+        open_task.map(|_| Message::Noop)
     }
 
     /// Close the job queue window.
     pub fn close_job_queue_window(&mut self) -> Task<Message> {
         if let Some(id) = self.job_queue_window_id.take() {
             self.window_map.remove(&id);
-            return window::close::<Action<Message>>(id);
+            return window::close(id);
         }
         Task::none()
     }
@@ -114,22 +110,21 @@ impl App {
             size: Size::new(700.0, 400.0),
             resizable: true,
             decorations: true,
-            transparent: false,
             ..Default::default()
         };
 
-        let (id, command) = window::open(settings);
-        self.window_map.insert(id, WindowId::AddJob);
+        let (id, open_task) = window::open(settings);
+        self.window_map.insert(id, WindowKind::AddJob);
         self.add_job_window_id = Some(id);
 
-        command.map(|_| Action::App(Message::Noop))
+        open_task.map(|_| Message::Noop)
     }
 
     /// Close the add job window.
     pub fn close_add_job_window(&mut self) -> Task<Message> {
         if let Some(id) = self.add_job_window_id.take() {
             self.window_map.remove(&id);
-            return window::close::<Action<Message>>(id);
+            return window::close(id);
         }
         Task::none()
     }
@@ -141,7 +136,7 @@ impl App {
         }
 
         // Get job info
-        let (sources, job_name) = {
+        let (sources, _job_name) = {
             let q = self.job_queue.lock().unwrap();
             match q.get(job_idx) {
                 Some(job) => (job.sources.clone(), job.name.clone()),
@@ -165,15 +160,14 @@ impl App {
             size: Size::new(1200.0, 800.0),
             resizable: true,
             decorations: true,
-            transparent: false,
             ..Default::default()
         };
 
-        let (id, command) = window::open(settings);
-        self.window_map.insert(id, WindowId::ManualSelection(job_idx));
+        let (id, open_task) = window::open(settings);
+        self.window_map.insert(id, WindowKind::ManualSelection(job_idx));
         self.manual_selection_window_id = Some(id);
 
-        command.map(|_| Action::App(Message::Noop))
+        open_task.map(|_| Message::Noop)
     }
 
     /// Close the manual selection window.
@@ -183,7 +177,7 @@ impl App {
             self.manual_selection_job_idx = None;
             self.source_groups.clear();
             self.final_tracks.clear();
-            return window::close::<Action<Message>>(id);
+            return window::close(id);
         }
         Task::none()
     }
@@ -205,15 +199,14 @@ impl App {
             size: Size::new(500.0, 450.0),
             resizable: false,
             decorations: true,
-            transparent: false,
             ..Default::default()
         };
 
-        let (id, command) = window::open(settings);
-        self.window_map.insert(id, WindowId::TrackSettings(track_idx));
+        let (id, open_task) = window::open(settings);
+        self.window_map.insert(id, WindowKind::TrackSettings(track_idx));
         self.track_settings_window_id = Some(id);
 
-        command.map(|_| Action::App(Message::Noop))
+        open_task.map(|_| Message::Noop)
     }
 
     /// Close the track settings window.
@@ -221,30 +214,30 @@ impl App {
         if let Some(id) = self.track_settings_window_id.take() {
             self.window_map.remove(&id);
             self.track_settings_idx = None;
-            return window::close::<Action<Message>>(id);
+            return window::close(id);
         }
         Task::none()
     }
 
     /// Handle window closed event.
     pub fn handle_window_closed(&mut self, id: window::Id) -> Task<Message> {
-        if let Some(window_id) = self.window_map.remove(&id) {
-            match window_id {
-                WindowId::Settings => {
+        if let Some(window_kind) = self.window_map.remove(&id) {
+            match window_kind {
+                WindowKind::Settings => {
                     self.settings_window_id = None;
                     self.pending_settings = None;
                 }
-                WindowId::JobQueue => {
+                WindowKind::JobQueue => {
                     self.job_queue_window_id = None;
                 }
-                WindowId::AddJob => {
+                WindowKind::AddJob => {
                     self.add_job_window_id = None;
                 }
-                WindowId::ManualSelection(_) => {
+                WindowKind::ManualSelection(_) => {
                     self.manual_selection_window_id = None;
                     self.manual_selection_job_idx = None;
                 }
-                WindowId::TrackSettings(_) => {
+                WindowKind::TrackSettings(_) => {
                     self.track_settings_window_id = None;
                     self.track_settings_idx = None;
                 }
@@ -255,8 +248,8 @@ impl App {
     }
 
     /// Handle window opened event.
-    pub fn handle_window_opened(&mut self, window_id: WindowId, id: window::Id) -> Task<Message> {
-        self.window_map.insert(id, window_id);
+    pub fn handle_window_opened(&mut self, window_kind: WindowKind, id: window::Id) -> Task<Message> {
+        self.window_map.insert(id, window_kind);
         Task::none()
     }
 
@@ -287,7 +280,7 @@ impl App {
                     .map(|f| f.path().to_path_buf());
                 (idx, path)
             },
-            |(idx, path)| Action::App(Message::FileSelected(idx, path)),
+            |(idx, path)| Message::FileSelected(idx, path),
         )
     }
 
@@ -336,7 +329,7 @@ impl App {
                     .map(|f| f.path().to_path_buf());
                 (folder_type, path)
             },
-            |(folder_type, path)| Action::App(Message::FolderSelected(folder_type, path)),
+            |(folder_type, path)| Message::FolderSelected(folder_type, path),
         )
     }
 
@@ -374,7 +367,7 @@ impl App {
                     .map(|f| f.path().to_path_buf());
                 (idx, path)
             },
-            |(idx, path)| Action::App(Message::AddJobFileSelected(idx, path)),
+            |(idx, path)| Message::AddJobFileSelected(idx, path),
         )
     }
 
@@ -401,7 +394,7 @@ impl App {
                     .unwrap_or_default();
                 files
             },
-            |files| Action::App(Message::ExternalFilesSelected(files)),
+            Message::ExternalFilesSelected,
         )
     }
 
@@ -444,13 +437,13 @@ impl App {
         // Run analysis in background
         Task::perform(
             async move { run_analyze_only(job_spec, settings).await },
-            |result| Action::App(match result {
+            |result| match result {
                 Ok((delay2, delay3)) => Message::AnalysisComplete {
                     delay_source2_ms: delay2,
                     delay_source3_ms: delay3,
                 },
                 Err(e) => Message::AnalysisFailed(e),
-            }),
+            },
         )
     }
 
@@ -812,7 +805,7 @@ impl App {
                     Err(_) => 0,
                 }
             },
-            |count| Action::App(Message::JobsAdded(count)),
+            Message::JobsAdded,
         )
     }
 
