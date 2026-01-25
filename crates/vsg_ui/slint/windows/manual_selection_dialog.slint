@@ -1,6 +1,6 @@
 // ManualSelectionDialog - Track configuration dialog.
 // Left pane: Source tracks. Right pane: Final output + attachments.
-// Clean compact layout matching Qt original.
+// Dense Qt-style layout - NOT modern card UI.
 
 import { VerticalBox, HorizontalBox, Button, ScrollView, GroupBox, CheckBox } from "std-widgets.slint";
 import { SourceGroup } from "../components/source_group.slint";
@@ -24,9 +24,9 @@ export struct AttachmentSourceOption {
 
 export component ManualSelectionDialog inherits Window {
     title: "Manual Track Selection";
-    min-width: 900px;
-    min-height: 500px;
-    default-font-size: 13px;
+    min-width: 800px;
+    min-height: 450px;
+    default-font-size: 12px;
 
     in-out property <[SourceGroupData]> source-groups: [];
     in-out property <[FinalTrackData]> final-tracks: [];
@@ -62,7 +62,7 @@ export component ManualSelectionDialog inherits Window {
     callback cancel();
 
     VerticalLayout {
-        padding: 6px;
+        padding: 4px;
         spacing: 4px;
 
         // Info message
@@ -73,21 +73,30 @@ export component ManualSelectionDialog inherits Window {
             font-weight: 600;
         }
 
-        // Main content - two panes
+        // Main content - two panes (35% / 65%)
         HorizontalLayout {
             vertical-stretch: 1;
-            spacing: 6px;
+            spacing: 4px;
 
-            // Left pane - Source tracks
+            // Left pane - Source tracks (35%)
             VerticalLayout {
-                horizontal-stretch: 1;
+                width: parent.width * 35%;
+
+                // Header
+                Text {
+                    text: "Available Tracks";
+                    font-weight: 600;
+                    color: #d0d0d0;
+                    font-size: 12px;
+                }
+                Rectangle { height: 1px; background: #3a3a3a; }
 
                 ScrollView {
                     vertical-stretch: 1;
 
                     VerticalLayout {
-                        padding: 2px;
-                        spacing: 4px;
+                        padding: 0px;
+                        spacing: 2px;
 
                         for group in source-groups: SourceGroup {
                             title: group.title;
@@ -124,44 +133,52 @@ export component ManualSelectionDialog inherits Window {
 
                 Button {
                     text: "+ Add External Subtitle(s)...";
+                    height: 24px;
                     clicked => { root.add-external-subtitles(); }
                 }
             }
 
-            // Right pane - Final output and attachments
+            // Right pane - Final output and attachments (65%)
             VerticalLayout {
-                horizontal-stretch: 2;
-                spacing: 4px;
+                horizontal-stretch: 1;
+                spacing: 2px;
 
-                GroupBox {
-                    title: "Final Output (double-click to add, right-click for options)";
+                // Header
+                Text {
+                    text: "Final Output (double-click to add, right-click for options)";
+                    font-weight: 600;
+                    color: #d0d0d0;
+                    font-size: 12px;
+                }
+                Rectangle { height: 1px; background: #3a3a3a; }
+
+                TrackList {
                     vertical-stretch: 1;
+                    tracks: final-tracks;
+                    reorderable: true;
 
-                    TrackList {
-                        tracks: final-tracks;
-                        reorderable: true;
-
-                        track-moved(from, to) => { root.final-track-moved(from, to); }
-                        track-removed(idx) => { root.final-track-removed(idx); }
-                        default-changed(idx, val) => { root.final-track-default-changed(idx, val); }
-                        forced-changed(idx, val) => { root.final-track-forced-changed(idx, val); }
-                        name-changed(idx, val) => { root.final-track-name-changed(idx, val); }
-                        sync-source-changed(idx, src) => { root.final-track-sync-changed(idx, src); }
-                        settings-clicked(idx) => { root.final-track-settings-clicked(idx); }
-                        style-editor-clicked(idx) => { root.final-track-style-editor-clicked(idx); }
-                    }
+                    track-moved(from, to) => { root.final-track-moved(from, to); }
+                    track-removed(idx) => { root.final-track-removed(idx); }
+                    default-changed(idx, val) => { root.final-track-default-changed(idx, val); }
+                    forced-changed(idx, val) => { root.final-track-forced-changed(idx, val); }
+                    name-changed(idx, val) => { root.final-track-name-changed(idx, val); }
+                    sync-source-changed(idx, src) => { root.final-track-sync-changed(idx, src); }
+                    settings-clicked(idx) => { root.final-track-settings-clicked(idx); }
+                    style-editor-clicked(idx) => { root.final-track-style-editor-clicked(idx); }
                 }
 
-                GroupBox {
-                    title: "Attachments";
-                    max-height: 50px;
+                // Attachments row
+                Rectangle {
+                    height: 28px;
+                    background: #2a2a2a;
 
                     HorizontalLayout {
-                        spacing: 6px;
-                        padding: 3px;
+                        spacing: 8px;
+                        padding: 4px;
 
                         Text {
-                            text: "Include from:";
+                            text: "Attachments:";
+                            font-weight: 600;
                             vertical-alignment: center;
                         }
 
@@ -184,11 +201,13 @@ export component ManualSelectionDialog inherits Window {
 
             Button {
                 text: "Cancel";
+                height: 24px;
                 clicked => { root.cancel(); }
             }
 
             Button {
                 text: "OK";
+                height: 24px;
                 clicked => { root.accept(); }
             }
         }

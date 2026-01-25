@@ -1,10 +1,10 @@
-// SourceGroup - Collapsible group of tracks from a single source.
-// Simple text items like Qt's SourceList.
+// SourceGroup - Group of tracks from a single source.
+// Dense Qt-style flat list - NOT accordion/card UI.
 
 import { VerticalBox, HorizontalBox, Button, GroupBox } from "std-widgets.slint";
 import { TrackWidgetData } from "track_widget.slint";
 
-// Simple text item for source list (matches Qt's SourceList)
+// Single-line track item (~20px) - flat style
 component SourceTrackItem inherits Rectangle {
     in property <TrackWidgetData> data;
     in property <bool> is-blocked: false;
@@ -12,10 +12,10 @@ component SourceTrackItem inherits Rectangle {
     callback double-clicked();
     callback context-menu-requested();
 
-    height: 22px;
-    background: touch.has-hover ? #3a3a3a : transparent;
-    border-radius: 2px;
-    opacity: is-blocked ? 0.5 : 1.0;
+    height: 20px;
+    // Flat style - transparent bg, hover highlight only
+    background: touch.has-hover ? #2d3236 : transparent;
+    opacity: is-blocked ? 0.4 : 1.0;
 
     touch := TouchArea {
         mouse-cursor: is-blocked ? not-allowed : pointer;
@@ -34,15 +34,22 @@ component SourceTrackItem inherits Rectangle {
     HorizontalLayout {
         padding-left: 4px;
         padding-right: 4px;
-        spacing: 0px;
 
-        // Simple text like Qt: [V-0] Description...
+        // Track type indicator bar
+        Rectangle {
+            width: 3px;
+            background: data.track-type == "video" ? #8855dd :
+                        data.track-type == "audio" ? #55aa55 : #ddaa55;
+        }
+
+        // Single-line text, elided
         Text {
             text: data.summary;
-            font-size: 12px;
-            color: root.is-blocked ? #666666 : #e0e0e0;
+            font-size: 11px;
+            color: root.is-blocked ? #555555 : #d0d0d0;
             vertical-alignment: center;
             overflow: elide;
+            horizontal-stretch: 1;
         }
     }
 }
@@ -53,49 +60,33 @@ export component SourceGroup inherits Rectangle {
     in property <[TrackWidgetData]> tracks: [];
     in property <bool> show-configure-button: true;
     in property <[bool]> blocked-tracks: [];
+    // Always expanded - no accordion
     in-out property <bool> expanded: true;
 
     callback track-double-clicked(int);
     callback track-context-menu(int);
     callback configure-correlation();
 
-    background: #2a2a2a;
-    border-radius: 4px;
+    // Flat style - no rounded corners
+    background: transparent;
 
-    VerticalBox {
+    VerticalLayout {
         padding: 0px;
         spacing: 0px;
 
-        // Header
-        HorizontalBox {
-            padding: 4px;
+        // Header with divider
+        HorizontalLayout {
+            height: 22px;
+            padding-left: 2px;
+            padding-right: 2px;
             spacing: 4px;
 
-            // Collapse toggle
-            Rectangle {
-                width: 16px;
-                height: 16px;
-                background: collapse-touch.has-hover ? #3a3a3a : transparent;
-                border-radius: 2px;
-
-                Text {
-                    text: root.expanded ? "▼" : "►";
-                    font-size: 9px;
-                    color: #888888;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-
-                collapse-touch := TouchArea {
-                    clicked => { root.expanded = !root.expanded; }
-                }
-            }
-
-            // Title
+            // Title (bold, slightly brighter)
             Text {
                 text: root.title;
                 font-weight: 600;
-                font-size: 12px;
+                font-size: 11px;
+                color: #d0d0d0;
                 horizontal-stretch: 1;
                 vertical-alignment: center;
             }
@@ -108,19 +99,21 @@ export component SourceGroup inherits Rectangle {
                 vertical-alignment: center;
             }
 
-            // Configure button
+            // Configure button (small)
             if root.show-configure-button && root.source-key != "Source 1" && root.source-key != "External": Button {
                 text: "Configure...";
+                height: 18px;
                 clicked => { root.configure-correlation(); }
             }
         }
 
-        // Content - simple text items
-        if root.expanded: VerticalBox {
-            padding-left: 8px;
-            padding-right: 4px;
-            padding-bottom: 4px;
-            spacing: 1px;
+        // Divider line under header
+        Rectangle { height: 1px; background: #3a3a3a; }
+
+        // Track list - always visible, no collapse
+        VerticalLayout {
+            padding: 0px;
+            spacing: 0px;
 
             for track[idx] in tracks: SourceTrackItem {
                 data: track;
@@ -132,10 +125,16 @@ export component SourceGroup inherits Rectangle {
 
             if tracks.length == 0: Text {
                 text: "No tracks";
-                font-size: 11px;
-                color: #666666;
+                font-size: 10px;
+                color: #555555;
                 font-italic: true;
+                horizontal-alignment: center;
+                height: 20px;
+                vertical-alignment: center;
             }
         }
+
+        // Bottom spacing
+        Rectangle { height: 4px; }
     }
 }
