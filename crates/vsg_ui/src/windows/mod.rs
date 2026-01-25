@@ -5,5 +5,9 @@
 
 mod main_window;
 mod settings_window;
+pub mod add_job_dialog;
+pub mod job_queue_dialog;
+pub mod manual_selection_dialog;
+pub mod track_settings_dialog;
 
 pub use main_window::setup_main_window;
