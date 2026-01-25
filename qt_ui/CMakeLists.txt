@@ -23,19 +23,65 @@ FetchContent_MakeAvailable(Corrosion)
 corrosion_import_crate(MANIFEST_PATH ../Cargo.toml CRATES vsg_bridge)
 
 # Get the CXX generated header directory
-# CXX generates headers during build, we need to find them
 set(CXX_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/corrosion_generated/crates/vsg_bridge/cxxbridge")
 
-# Main window sources
+# =============================================================================
+# Source files organized by component
+# =============================================================================
+
+# Main window
 set(MAIN_WINDOW_SOURCES
     main_window/window.cpp
     main_window/controller.cpp
 )
 
-# All sources
+# Options dialog (settings)
+set(OPTIONS_DIALOG_SOURCES
+    options_dialog/ui.cpp
+    options_dialog/logic.cpp
+)
+
+# Add job dialog
+set(ADD_JOB_DIALOG_SOURCES
+    add_job_dialog/ui.cpp
+)
+
+# Job queue dialog
+set(JOB_QUEUE_DIALOG_SOURCES
+    job_queue_dialog/ui.cpp
+    job_queue_dialog/logic.cpp
+)
+
+# Track widget component
+set(TRACK_WIDGET_SOURCES
+    track_widget/ui.cpp
+    track_widget/logic.cpp
+)
+
+# Manual selection dialog
+set(MANUAL_SELECTION_DIALOG_SOURCES
+    manual_selection_dialog/ui.cpp
+    manual_selection_dialog/logic.cpp
+)
+
+# Track settings dialog
+set(TRACK_SETTINGS_DIALOG_SOURCES
+    track_settings_dialog/ui.cpp
+    track_settings_dialog/logic.cpp
+)
+
+# =============================================================================
+# All sources combined
+# =============================================================================
 set(SOURCES
     main.cpp
     ${MAIN_WINDOW_SOURCES}
+    ${OPTIONS_DIALOG_SOURCES}
+    ${ADD_JOB_DIALOG_SOURCES}
+    ${JOB_QUEUE_DIALOG_SOURCES}
+    ${TRACK_WIDGET_SOURCES}
+    ${MANUAL_SELECTION_DIALOG_SOURCES}
+    ${TRACK_SETTINGS_DIALOG_SOURCES}
 )
 
 # Create executable
@@ -53,6 +99,5 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CXX_INCLUDE_DIR}
 )
 
-# CXX generates a crate header, include it
-# The header is generated at build time in the corrosion build dir
+# CXX generates a crate header at build time
 add_dependencies(${PROJECT_NAME} cargo-build_vsg_bridge)
