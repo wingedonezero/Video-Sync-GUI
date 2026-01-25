@@ -2,6 +2,9 @@
 
 #include "controller.hpp"
 #include "window.hpp"
+#include "../options_dialog/ui.hpp"
+#include "../job_queue_dialog/ui.hpp"
+#include "../add_job_dialog/ui.hpp"
 
 #include <QFileDialog>
 #include <QFileInfo>
@@ -40,22 +43,39 @@ void MainController::saveUiToConfig()
 
 void MainController::openOptionsDialog()
 {
-    // TODO: Create and show OptionsDialog
-    QMessageBox::information(m_view, "Settings",
-        "Settings dialog not yet implemented.\n"
-        "This will open the full settings window.");
-    appendLog("Settings dialog opened (stub).");
+    OptionsDialog dialog(m_view);
+    if (dialog.exec() == QDialog::Accepted) {
+        appendLog("Settings saved.");
+    }
 }
 
 void MainController::openJobQueue()
 {
     saveUiToConfig();
 
-    // TODO: Create and show JobQueueDialog
-    QMessageBox::information(m_view, "Job Queue",
-        "Job Queue dialog not yet implemented.\n"
-        "This will open the job queue for merging.");
-    appendLog("Job Queue dialog opened (stub).");
+    // Pre-populate with current source paths if any
+    JobQueueDialog dialog(m_view);
+
+    // Add initial job from main window if sources are specified
+    QString ref = m_view->refInput()->text().trimmed();
+    QString sec = m_view->secInput()->text().trimmed();
+    QString ter = m_view->terInput()->text().trimmed();
+
+    if (!ref.isEmpty()) {
+        JobData job;
+        job.name = QFileInfo(ref).baseName();
+        job.sources["Source 1"] = ref;
+        if (!sec.isEmpty()) job.sources["Source 2"] = sec;
+        if (!ter.isEmpty()) job.sources["Source 3"] = ter;
+        job.status = "Needs Configuration";
+        dialog.addJobs({job});
+    }
+
+    if (dialog.exec() == QDialog::Accepted) {
+        auto jobs = dialog.getFinalJobs();
+        appendLog(QString("Starting %1 job(s)...").arg(jobs.size()));
+        // TODO: Process jobs via bridge
+    }
 }
 
 void MainController::startAnalyzeOnly()
