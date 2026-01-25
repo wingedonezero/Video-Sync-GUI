@@ -26,30 +26,48 @@ SourceList::SourceList(QWidget* parent)
 
 void SourceList::addTrackItem(const SourceTrackInfo& track, bool blocked)
 {
+    // Store the track info
+    int trackIndex = static_cast<int>(m_tracks.size());
+    m_tracks.push_back(track);
+
     auto* item = new QListWidgetItem(track.description);
-    item->setData(Qt::UserRole, QVariant::fromValue(track.id));
+    item->setData(Qt::UserRole, trackIndex);  // Store index into m_tracks
 
     if (blocked) {
         item->setFlags(item->flags() & ~Qt::ItemIsEnabled);
         item->setForeground(Qt::gray);
     }
 
-    // Color-coded icon based on track type
-    // (Could add actual icons here)
+    // Color-coded background based on track type
+    QString typeStr = track.type.toLower();
+    if (typeStr == "video") {
+        item->setBackground(QColor(200, 230, 255, 50));  // Light blue tint
+    } else if (typeStr == "audio") {
+        item->setBackground(QColor(200, 255, 200, 50));  // Light green tint
+    } else {
+        item->setBackground(QColor(255, 255, 200, 50));  // Light yellow tint
+    }
 
     addItem(item);
+}
+
+SourceTrackInfo SourceList::getTrackAt(int row) const
+{
+    if (row >= 0 && row < static_cast<int>(m_tracks.size())) {
+        return m_tracks[row];
+    }
+    return SourceTrackInfo{};
 }
 
 void SourceList::mouseDoubleClickEvent(QMouseEvent* event)
 {
     QListWidgetItem* item = itemAt(event->pos());
     if (item && (item->flags() & Qt::ItemIsEnabled)) {
-        // Get track info from item
-        // For now just emit with the track id
-        SourceTrackInfo track;
-        track.id = item->data(Qt::UserRole).toInt();
-        track.description = item->text();
-        emit trackDoubleClicked(track);
+        // Get the full track info from our stored data
+        int trackIndex = item->data(Qt::UserRole).toInt();
+        if (trackIndex >= 0 && trackIndex < static_cast<int>(m_tracks.size())) {
+            emit trackDoubleClicked(m_tracks[trackIndex]);
+        }
     }
     QListWidget::mouseDoubleClickEvent(event);
 }
@@ -236,6 +254,7 @@ void ManualSelectionDialog::buildUi()
     rightPaneLayout->setContentsMargins(0, 0, 0, 0);
 
     m_finalList = new FinalList();
+    m_finalList->setAvailableSources(m_availableSources);
     auto* finalGroup = new QGroupBox("Final Output (Drag to reorder)");
     auto* finalLayout = new QVBoxLayout(finalGroup);
     finalLayout->addWidget(m_finalList);
@@ -291,7 +310,7 @@ void ManualSelectionDialog::populateSources()
 
         for (const auto& track : tracks) {
             // Block video tracks from non-reference sources (only one video allowed)
-            bool blocked = (track.type == "video" && sourceKey != "Source 1");
+            bool blocked = (track.type.toLower() == "video" && sourceKey != "Source 1");
             sourceList->addTrackItem(track, blocked);
         }
     }
@@ -306,13 +325,24 @@ void ManualSelectionDialog::onSourceTrackDoubleClicked(const SourceTrackInfo& tr
     trackData.language = track.language;
     trackData.name = track.name;
     trackData.summary = track.description;
+    trackData.isDefault = track.isDefault;
+    trackData.isForced = track.isForced;
+    trackData.originalPath = track.originalPath;
 
-    // Determine track type
-    if (track.type == "video") {
+    // Copy additional metadata
+    trackData.channels = track.channels;
+    trackData.sampleRate = track.sampleRate;
+    trackData.width = track.width;
+    trackData.height = track.height;
+
+    // Determine track type (case-insensitive)
+    QString typeStr = track.type.toLower().trimmed();
+    if (typeStr == "video") {
         trackData.type = TrackType::Video;
-    } else if (track.type == "audio") {
+    } else if (typeStr == "audio") {
         trackData.type = TrackType::Audio;
     } else {
+        // "subtitles" (from mkvmerge) or any other type
         trackData.type = TrackType::Subtitle;
     }
 

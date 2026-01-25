@@ -564,8 +564,7 @@ fn bridge_save_settings(settings: &ffi::AppSettings) -> bool {
         s.logging.show_options_json = settings.logging.show_options_json;
         s.logging.archive_logs = settings.logging.archive_logs;
 
-        // Analysis - parse string enums back
-        // (For now just store, proper enum parsing can be added)
+        // Analysis - parse string enums back to proper types
         s.analysis.chunk_count = settings.analysis.chunk_count;
         s.analysis.chunk_duration = settings.analysis.chunk_duration;
         s.analysis.min_match_pct = settings.analysis.min_match_pct;
@@ -574,11 +573,36 @@ fn bridge_save_settings(settings: &ffi::AppSettings) -> bool {
         s.analysis.use_soxr = settings.analysis.use_soxr;
         s.analysis.audio_peak_fit = settings.analysis.audio_peak_fit;
 
+        // Parse analysis mode enum
+        s.analysis.mode = match settings.analysis.mode.to_lowercase().as_str() {
+            "video" | "videodiff" => vsg_core::models::AnalysisMode::VideoDiff,
+            _ => vsg_core::models::AnalysisMode::AudioCorrelation,
+        };
+
+        // Parse correlation method enum
+        s.analysis.correlation_method = match settings.analysis.correlation_method.to_lowercase().as_str() {
+            "gcc_phat" | "gccphat" => vsg_core::models::CorrelationMethod::GccPhat,
+            "gcc_scot" | "gccscot" => vsg_core::models::CorrelationMethod::GccScot,
+            _ => vsg_core::models::CorrelationMethod::Scc,
+        };
+
+        // Parse sync mode enum
+        s.analysis.sync_mode = match settings.analysis.sync_mode.to_lowercase().as_str() {
+            "allow_negative" | "allownegative" => vsg_core::models::SyncMode::AllowNegative,
+            _ => vsg_core::models::SyncMode::PositiveOnly,
+        };
+
         // Chapters
         s.chapters.rename = settings.chapters.rename;
         s.chapters.snap_enabled = settings.chapters.snap_enabled;
         s.chapters.snap_threshold_ms = settings.chapters.snap_threshold_ms;
         s.chapters.snap_starts_only = settings.chapters.snap_starts_only;
+
+        // Parse snap mode enum
+        s.chapters.snap_mode = match settings.chapters.snap_mode.to_lowercase().as_str() {
+            "nearest" => vsg_core::models::SnapMode::Nearest,
+            _ => vsg_core::models::SnapMode::Previous,
+        };
 
         // Postprocess
         s.postprocess.disable_track_stats_tags = settings.postprocess.disable_track_stats_tags;

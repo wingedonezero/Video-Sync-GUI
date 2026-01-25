@@ -36,6 +36,13 @@ struct TrackData {
     QString summary;             // Display summary
     QString badges;              // Warning badges
     std::map<QString, QString> properties;
+
+    // Track-specific metadata
+    int channels = 0;            // Audio: number of channels
+    int sampleRate = 0;          // Audio: sample rate in Hz
+    int width = 0;               // Video: width in pixels
+    int height = 0;              // Video: height in pixels
+    QString originalPath;        // Source file path
 };
 
 class TrackWidget : public QWidget

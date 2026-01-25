@@ -28,6 +28,12 @@ struct SourceTrackInfo {
     QString originalPath;
     bool isDefault = false;
     bool isForced = false;
+
+    // Additional metadata
+    int channels = 0;       // Audio: number of channels
+    int sampleRate = 0;     // Audio: sample rate in Hz
+    int width = 0;          // Video: width in pixels
+    int height = 0;         // Video: height in pixels
 };
 
 /// Source list widget (left pane) - shows available tracks from a source
@@ -40,11 +46,17 @@ public:
 
     void addTrackItem(const SourceTrackInfo& track, bool blocked = false);
 
+    /// Get track info by row index
+    SourceTrackInfo getTrackAt(int row) const;
+
 signals:
     void trackDoubleClicked(const SourceTrackInfo& track);
 
 protected:
     void mouseDoubleClickEvent(QMouseEvent* event) override;
+
+private:
+    std::vector<SourceTrackInfo> m_tracks;
 };
 
 /// Final list widget (right pane) - shows selected tracks with drag-to-reorder
@@ -60,6 +72,9 @@ public:
     void moveSelectedBy(int direction);
 
     std::vector<TrackData> getTracks() const;
+
+    /// Set available sources for sync combo in track widgets
+    void setAvailableSources(const QStringList& sources) { m_availableSources = sources; }
 
 protected:
     void keyPressEvent(QKeyEvent* event) override;
