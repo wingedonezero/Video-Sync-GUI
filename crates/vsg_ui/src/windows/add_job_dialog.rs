@@ -51,9 +51,8 @@ fn initialize_sources(dialog: &AddJobDialog) {
     dialog.set_sources(ModelRc::from(model));
 }
 
-/// Set up add/remove source management.
+/// Set up add source button.
 fn setup_source_management(dialog: &AddJobDialog) {
-    // Add source
     let dialog_weak = dialog.as_weak();
 
     dialog.on_add_source(move || {
@@ -78,54 +77,6 @@ fn setup_source_management(dialog: &AddJobDialog) {
             model.push(new_source);
         }
     });
-
-    // Remove source
-    let dialog_weak = dialog.as_weak();
-
-    dialog.on_remove_source(move |source_index| {
-        let Some(dialog) = dialog_weak.upgrade() else {
-            return;
-        };
-
-        let sources = dialog.get_sources();
-
-        // Find and remove the source with this index
-        if let Some(model) = sources.as_any().downcast_ref::<VecModel<SourceInputData>>() {
-            let count = model.row_count();
-
-            // Don't allow removal if only 2 sources remain
-            if count <= 2 {
-                return;
-            }
-
-            // Find the source to remove
-            for i in 0..count {
-                if let Some(source) = model.row_data(i) {
-                    if source.index == source_index && !source.is_reference {
-                        model.remove(i);
-                        // Renumber remaining sources
-                        renumber_sources(&dialog);
-                        break;
-                    }
-                }
-            }
-        }
-    });
-}
-
-/// Renumber sources after removal.
-fn renumber_sources(dialog: &AddJobDialog) {
-    let sources = dialog.get_sources();
-
-    if let Some(model) = sources.as_any().downcast_ref::<VecModel<SourceInputData>>() {
-        for i in 0..model.row_count() {
-            if let Some(mut source) = model.row_data(i) {
-                source.index = (i + 1) as i32;
-                source.is_reference = i == 0;
-                model.set_row_data(i, source);
-            }
-        }
-    }
 }
 
 /// Set up browse buttons for each source.
