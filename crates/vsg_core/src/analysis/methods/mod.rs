@@ -15,6 +15,7 @@ pub use scc::Scc;
 pub use whitened::Whitened;
 
 use crate::analysis::types::{AnalysisResult, AudioChunk, CorrelationResult};
+use crate::models::CorrelationMethod as CorrelationMethodEnum;
 
 /// Trait for audio correlation methods.
 ///
@@ -63,6 +64,26 @@ pub fn create_method(name: &str) -> Option<Box<dyn CorrelationMethod>> {
 /// Get a list of available correlation method names.
 pub fn available_methods() -> Vec<&'static str> {
     vec!["scc", "gcc-phat", "gcc-scot", "whitened"]
+}
+
+/// Create a correlation method from the enum.
+pub fn create_from_enum(method: CorrelationMethodEnum) -> Box<dyn CorrelationMethod> {
+    match method {
+        CorrelationMethodEnum::Scc => Box::new(Scc::new()),
+        CorrelationMethodEnum::GccPhat => Box::new(GccPhat::new()),
+        CorrelationMethodEnum::GccScot => Box::new(GccScot::new()),
+        CorrelationMethodEnum::Whitened => Box::new(Whitened::new()),
+    }
+}
+
+/// Get all correlation methods (for multi-correlation mode).
+pub fn all_methods() -> Vec<Box<dyn CorrelationMethod>> {
+    vec![
+        Box::new(Scc::new()),
+        Box::new(GccPhat::new()),
+        Box::new(GccScot::new()),
+        Box::new(Whitened::new()),
+    ]
 }
 
 #[cfg(test)]

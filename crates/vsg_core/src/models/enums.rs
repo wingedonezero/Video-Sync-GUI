@@ -99,18 +99,12 @@ pub enum CorrelationMethod {
     /// Generalized Cross-Correlation with Phase Transform.
     #[serde(rename = "Phase Correlation (GCC-PHAT)")]
     GccPhat,
-    /// Onset detection envelope correlation.
-    #[serde(rename = "Onset Detection")]
-    OnsetDetection,
     /// GCC with Smoothed Coherence Transform.
     #[serde(rename = "GCC-SCOT")]
     GccScot,
-    /// Dynamic Time Warping on MFCC features.
-    #[serde(rename = "DTW (Dynamic Time Warping)")]
-    Dtw,
-    /// Mel spectrogram correlation.
-    #[serde(rename = "Spectrogram Correlation")]
-    Spectrogram,
+    /// Whitened Cross-Correlation (robust to spectral differences).
+    #[serde(rename = "Whitened Cross-Correlation")]
+    Whitened,
 }
 
 impl CorrelationMethod {
@@ -119,10 +113,8 @@ impl CorrelationMethod {
         match self {
             Self::Scc => "Standard Correlation (SCC)",
             Self::GccPhat => "Phase Correlation (GCC-PHAT)",
-            Self::OnsetDetection => "Onset Detection",
             Self::GccScot => "GCC-SCOT",
-            Self::Dtw => "DTW (Dynamic Time Warping)",
-            Self::Spectrogram => "Spectrogram Correlation",
+            Self::Whitened => "Whitened Cross-Correlation",
         }
     }
 
@@ -131,10 +123,8 @@ impl CorrelationMethod {
         &[
             Self::Scc,
             Self::GccPhat,
-            Self::OnsetDetection,
             Self::GccScot,
-            Self::Dtw,
-            Self::Spectrogram,
+            Self::Whitened,
         ]
     }
 

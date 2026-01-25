@@ -23,6 +23,7 @@ export component SettingsWindow inherits Window {
 
     // Analysis settings
     in-out property <int> analysis-mode-index: 0;  // 0 = Audio, 1 = Video
+    in-out property <int> correlation-method-index: 0;  // 0 = SCC, 1 = GCC-PHAT, 2 = GCC-SCOT, 3 = Whitened
     in-out property <string> lang-source1: "";
     in-out property <string> lang-others: "";
     in-out property <int> chunk-count: 10;
@@ -31,8 +32,11 @@ export component SettingsWindow inherits Window {
     in-out property <float> scan-start-pct: 5.0;
     in-out property <float> scan-end-pct: 95.0;
     in-out property <int> filtering-method-index: 0;  // 0 = None, 1 = Low Pass, 2 = Band Pass, 3 = High Pass
+    in-out property <int> filter-low-cutoff-hz: 300;
+    in-out property <int> filter-high-cutoff-hz: 3400;
     in-out property <bool> use-soxr: true;
     in-out property <bool> audio-peak-fit: true;
+    in-out property <bool> multi-correlation-enabled: false;
 
     // Delay selection settings
     in-out property <int> delay-selection-mode-index: 0;  // 0 = Mode, 1 = Mode Clustered, 2 = Mode Early, 3 = First Stable, 4 = Average
@@ -163,6 +167,20 @@ export component SettingsWindow inherits Window {
                                 ComboBox {
                                     model: ["Audio Correlation", "Video Diff"];
                                     current-index <=> analysis-mode-index;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Correlation Method:";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                ComboBox {
+                                    model: ["Standard (SCC)", "Phase (GCC-PHAT)", "GCC-SCOT", "Whitened"];
+                                    current-index <=> correlation-method-index;
                                     horizontal-stretch: 1;
                                 }
                             }
@@ -318,6 +336,40 @@ export component SettingsWindow inherits Window {
                                     horizontal-stretch: 1;
                                 }
                             }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Low Cutoff (Hz):";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                SpinBox {
+                                    value <=> filter-low-cutoff-hz;
+                                    minimum: 20;
+                                    maximum: 8000;
+                                    enabled: filtering-method-index == 2 || filtering-method-index == 3;
+                                    max-width: 100px;
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "High Cutoff (Hz):";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                SpinBox {
+                                    value <=> filter-high-cutoff-hz;
+                                    minimum: 100;
+                                    maximum: 20000;
+                                    enabled: filtering-method-index == 1 || filtering-method-index == 2;
+                                    max-width: 100px;
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                            }
                         }
                     }
 
@@ -432,6 +484,11 @@ export component SettingsWindow inherits Window {
                             CheckBox {
                                 text: "Enable Sub-Sample Peak Fitting";
                                 checked <=> audio-peak-fit;
+                            }
+
+                            CheckBox {
+                                text: "Multi-Correlation Comparison (Analyze Only)";
+                                checked <=> multi-correlation-enabled;
                             }
                         }
                     }

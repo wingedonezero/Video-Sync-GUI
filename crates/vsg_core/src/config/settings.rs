@@ -204,6 +204,19 @@ pub struct AnalysisSettings {
     #[serde(default)]
     pub filtering_method: FilteringMethod,
 
+    /// Low cutoff frequency for filtering (Hz).
+    #[serde(default = "default_filter_low_cutoff")]
+    pub filter_low_cutoff_hz: f64,
+
+    /// High cutoff frequency for filtering (Hz).
+    #[serde(default = "default_filter_high_cutoff")]
+    pub filter_high_cutoff_hz: f64,
+
+    /// Enable multi-correlation comparison mode (Analyze Only).
+    /// Runs all correlation methods on the same data for comparison.
+    #[serde(default)]
+    pub multi_correlation_enabled: bool,
+
     /// Method for selecting final delay from chunk measurements.
     #[serde(default)]
     pub delay_selection_mode: DelaySelectionMode,
@@ -261,6 +274,14 @@ fn default_early_cluster_threshold() -> u32 {
     5
 }
 
+fn default_filter_low_cutoff() -> f64 {
+    300.0 // Dialogue low cutoff
+}
+
+fn default_filter_high_cutoff() -> f64 {
+    3400.0 // Dialogue high cutoff
+}
+
 impl Default for AnalysisSettings {
     fn default() -> Self {
         Self {
@@ -277,6 +298,9 @@ impl Default for AnalysisSettings {
             use_soxr: true,
             audio_peak_fit: true,
             filtering_method: FilteringMethod::default(),
+            filter_low_cutoff_hz: default_filter_low_cutoff(),
+            filter_high_cutoff_hz: default_filter_high_cutoff(),
+            multi_correlation_enabled: false,
             delay_selection_mode: DelaySelectionMode::default(),
             first_stable_min_chunks: default_first_stable_min_chunks(),
             first_stable_skip_unstable: false,

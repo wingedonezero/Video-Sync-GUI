@@ -58,5 +58,5 @@ pub use types::{
     DelaySelection, SourceAnalysisResult,
 };
 
-// Re-export method trait and implementations
-pub use methods::{CorrelationMethod, GccPhat, GccScot, Scc, Whitened};
+// Re-export method trait, implementations, and factory functions
+pub use methods::{all_methods, create_from_enum, create_method, CorrelationMethod, GccPhat, GccScot, Scc, Whitened};

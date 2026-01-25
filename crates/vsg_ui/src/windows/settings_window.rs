@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use slint::ComponentHandle;
 use vsg_core::config::Settings;
-use vsg_core::models::{AnalysisMode, DelaySelectionMode, FilteringMethod, SnapMode};
+use vsg_core::models::{AnalysisMode, CorrelationMethod, DelaySelectionMode, FilteringMethod, SnapMode};
 
 use crate::ui::SettingsWindow;
 
@@ -31,6 +31,12 @@ pub fn populate_settings_window(settings: &SettingsWindow, cfg: &Settings) {
         AnalysisMode::AudioCorrelation => 0,
         AnalysisMode::VideoDiff => 1,
     });
+    settings.set_correlation_method_index(match cfg.analysis.correlation_method {
+        CorrelationMethod::Scc => 0,
+        CorrelationMethod::GccPhat => 1,
+        CorrelationMethod::GccScot => 2,
+        CorrelationMethod::Whitened => 3,
+    });
     settings.set_lang_source1(cfg.analysis.lang_source1.clone().unwrap_or_default().into());
     settings.set_lang_others(cfg.analysis.lang_others.clone().unwrap_or_default().into());
     settings.set_chunk_count(cfg.analysis.chunk_count as i32);
@@ -44,8 +50,11 @@ pub fn populate_settings_window(settings: &SettingsWindow, cfg: &Settings) {
         FilteringMethod::BandPass => 2,
         FilteringMethod::HighPass => 3,
     });
+    settings.set_filter_low_cutoff_hz(cfg.analysis.filter_low_cutoff_hz as i32);
+    settings.set_filter_high_cutoff_hz(cfg.analysis.filter_high_cutoff_hz as i32);
     settings.set_use_soxr(cfg.analysis.use_soxr);
     settings.set_audio_peak_fit(cfg.analysis.audio_peak_fit);
+    settings.set_multi_correlation_enabled(cfg.analysis.multi_correlation_enabled);
 
     // Delay selection settings
     settings.set_delay_selection_mode_index(match cfg.analysis.delay_selection_mode {
@@ -97,6 +106,12 @@ pub fn read_settings_from_window(settings: &SettingsWindow, cfg: &mut Settings) 
         0 => AnalysisMode::AudioCorrelation,
         _ => AnalysisMode::VideoDiff,
     };
+    cfg.analysis.correlation_method = match settings.get_correlation_method_index() {
+        0 => CorrelationMethod::Scc,
+        1 => CorrelationMethod::GccPhat,
+        2 => CorrelationMethod::GccScot,
+        _ => CorrelationMethod::Whitened,
+    };
     let lang1 = settings.get_lang_source1().to_string();
     cfg.analysis.lang_source1 = if lang1.is_empty() { None } else { Some(lang1) };
     let lang_others = settings.get_lang_others().to_string();
@@ -116,8 +131,11 @@ pub fn read_settings_from_window(settings: &SettingsWindow, cfg: &mut Settings) 
         2 => FilteringMethod::BandPass,
         _ => FilteringMethod::HighPass,
     };
+    cfg.analysis.filter_low_cutoff_hz = settings.get_filter_low_cutoff_hz() as f64;
+    cfg.analysis.filter_high_cutoff_hz = settings.get_filter_high_cutoff_hz() as f64;
     cfg.analysis.use_soxr = settings.get_use_soxr();
     cfg.analysis.audio_peak_fit = settings.get_audio_peak_fit();
+    cfg.analysis.multi_correlation_enabled = settings.get_multi_correlation_enabled();
 
     // Delay selection settings
     cfg.analysis.delay_selection_mode = match settings.get_delay_selection_mode_index() {
