@@ -190,26 +190,43 @@ def categorize_items(items: List[CodeItem]) -> Dict[str, List[CodeItem]]:
     for item in items:
         path = item.file_path.lower()
 
-        if 'job_layouts' in path or 'job_discovery' in path:
-            categories['Jobs & Layout Management'].append(item)
-        elif 'analysis' in path or 'drift' in path or 'sync_stability' in path:
-            categories['Analysis & Detection'].append(item)
-        elif 'extraction' in path or ('tracks' in path and 'track_widget' not in path):
-            categories['Track Processing & Extraction'].append(item)
-        elif 'correction' in path and 'auditor' not in path:
-            categories['Audio Correction'].append(item)
-        elif 'subtitle' in path or 'ocr' in path or 'ass_' in path or 'srt_' in path:
-            categories['Subtitle Processing'].append(item)
-        elif 'orchestrator' in path or 'pipeline' in path:
-            categories['Orchestrator & Pipeline'].append(item)
-        elif 'postprocess' in path or 'auditor' in path or 'audit' in path:
+        # PRIORITY 1: Specific path patterns (most specific first)
+        # Auditors - check for auditors/ directory specifically
+        if 'postprocess/auditors/' in path or 'audit/trail' in path:
             categories['Post-Processing & Auditors'].append(item)
-        elif 'main_window' in path or 'worker' in path:
-            categories['Main Window & Workers'].append(item)
-        elif '_dialog' in path:
+        # Orchestrator steps - check for orchestrator/ directory specifically
+        elif 'orchestrator/' in path:
+            categories['Orchestrator & Pipeline'].append(item)
+        # Dialogs - check for _dialog in vsg_qt path
+        elif 'vsg_qt/' in path and '_dialog' in path:
             categories['Dialogs'].append(item)
-        elif 'widget' in path or 'vsg_qt' in path:
+        # Main window and workers
+        elif 'main_window' in path or ('worker' in path and 'vsg_qt' in path):
+            categories['Main Window & Workers'].append(item)
+        # Track widget
+        elif 'track_widget' in path:
             categories['Widgets & Components'].append(item)
+        # Other vsg_qt components
+        elif 'vsg_qt/' in path:
+            categories['Widgets & Components'].append(item)
+
+        # PRIORITY 2: vsg_core path-based patterns
+        elif 'job_layouts' in path or 'job_discovery' in path:
+            categories['Jobs & Layout Management'].append(item)
+        elif 'vsg_core/analysis/' in path:
+            categories['Analysis & Detection'].append(item)
+        elif 'extraction/' in path:
+            categories['Track Processing & Extraction'].append(item)
+        elif 'correction/' in path:
+            categories['Audio Correction'].append(item)
+        elif 'vsg_core/subtitles/' in path:
+            categories['Subtitle Processing'].append(item)
+        elif 'postprocess/' in path:
+            categories['Post-Processing & Auditors'].append(item)
+        elif 'pipeline' in path:
+            categories['Orchestrator & Pipeline'].append(item)
+
+        # PRIORITY 3: Fallback for remaining files
         else:
             categories['Config, Models & Utilities'].append(item)
 
