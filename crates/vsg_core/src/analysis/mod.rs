@@ -59,4 +59,4 @@ pub use types::{
 };
 
 // Re-export method trait, implementations, and factory functions
-pub use methods::{all_methods, create_from_enum, create_method, CorrelationMethod, GccPhat, GccScot, Scc, Whitened};
+pub use methods::{all_methods, create_from_enum, create_method, selected_methods, CorrelationMethod, GccPhat, GccScot, Scc, Whitened};

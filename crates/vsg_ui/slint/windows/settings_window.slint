@@ -1,5 +1,64 @@
 import { VerticalBox, HorizontalBox, Button, LineEdit, GroupBox, CheckBox, SpinBox, ComboBox, TabWidget, ScrollView } from "std-widgets.slint";
 
+// Row with label and tooltip icon
+component LabelWithTip inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> tooltip;
+
+    spacing: 4px;
+
+    Text {
+        text: root.label;
+        vertical-alignment: center;
+        min-width: 140px;
+    }
+
+    if root.tooltip != "": Rectangle {
+        width: 16px;
+        height: 16px;
+        background: #666666;
+        border-radius: 8px;
+
+        Text {
+            text: "?";
+            color: white;
+            font-size: 10px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        tip-area := TouchArea {}
+
+        Rectangle {
+            x: tip-area.mouse-x + 12px;
+            y: tip-area.mouse-y + 12px;
+            width: tip-label.preferred-width + 16px;
+            height: tip-label.preferred-height + 12px;
+            background: #2a2a2a;
+            border-radius: 4px;
+            opacity: 0;
+
+            states [
+                visible when tip-area.has-hover: {
+                    opacity: 0.98;
+                    in { animate opacity { duration: 150ms; delay: 400ms; } }
+                    out { animate opacity { duration: 100ms; } }
+                }
+            ]
+
+            tip-label := Text {
+                x: 8px;
+                y: 6px;
+                text: root.tooltip;
+                color: #eeeeee;
+                font-size: 11px;
+                wrap: word-wrap;
+                max-width: 280px;
+            }
+        }
+    }
+}
+
 export component SettingsWindow inherits Window {
     title: "Settings";
     min-width: 750px;
@@ -37,6 +96,11 @@ export component SettingsWindow inherits Window {
     in-out property <bool> use-soxr: true;
     in-out property <bool> audio-peak-fit: true;
     in-out property <bool> multi-correlation-enabled: false;
+    // Multi-correlation method selection
+    in-out property <bool> multi-corr-scc: true;
+    in-out property <bool> multi-corr-gcc-phat: true;
+    in-out property <bool> multi-corr-gcc-scot: true;
+    in-out property <bool> multi-corr-whitened: true;
 
     // Delay selection settings
     in-out property <int> delay-selection-mode-index: 0;  // 0 = Mode, 1 = Mode Clustered, 2 = Mode Early, 3 = First Stable, 4 = Average
@@ -159,10 +223,9 @@ export component SettingsWindow inherits Window {
 
                             HorizontalLayout {
                                 spacing: 8px;
-                                Text {
-                                    text: "Analysis Mode:";
-                                    vertical-alignment: center;
-                                    min-width: 140px;
+                                LabelWithTip {
+                                    label: "Analysis Mode:";
+                                    tooltip: "Audio Correlation analyzes audio waveforms to find sync offset. Video Diff compares video frames (slower but works when audio differs).";
                                 }
                                 ComboBox {
                                     model: ["Audio Correlation", "Video Diff"];
@@ -173,10 +236,9 @@ export component SettingsWindow inherits Window {
 
                             HorizontalLayout {
                                 spacing: 8px;
-                                Text {
-                                    text: "Correlation Method:";
-                                    vertical-alignment: center;
-                                    min-width: 140px;
+                                LabelWithTip {
+                                    label: "Correlation Method:";
+                                    tooltip: "SCC: Standard cross-correlation, good general purpose.\nGCC-PHAT: Phase-based, robust to volume differences.\nGCC-SCOT: Better when one source has more noise.\nWhitened: Robust to spectral/EQ differences.";
                                 }
                                 ComboBox {
                                     model: ["Standard (SCC)", "Phase (GCC-PHAT)", "GCC-SCOT", "Whitened"];
@@ -187,10 +249,9 @@ export component SettingsWindow inherits Window {
 
                             HorizontalLayout {
                                 spacing: 8px;
-                                Text {
-                                    text: "Number of Chunks:";
-                                    vertical-alignment: center;
-                                    min-width: 140px;
+                                LabelWithTip {
+                                    label: "Number of Chunks:";
+                                    tooltip: "How many audio segments to analyze. More chunks = more reliable but slower. 10 is usually sufficient.";
                                 }
                                 SpinBox {
                                     value <=> chunk-count;
@@ -203,10 +264,9 @@ export component SettingsWindow inherits Window {
 
                             HorizontalLayout {
                                 spacing: 8px;
-                                Text {
-                                    text: "Chunk Duration (sec):";
-                                    vertical-alignment: center;
-                                    min-width: 140px;
+                                LabelWithTip {
+                                    label: "Chunk Duration (sec):";
+                                    tooltip: "Length of each audio segment in seconds. Longer chunks are more accurate but use more memory. 15s is a good default.";
                                 }
                                 SpinBox {
                                     value <=> chunk-duration;
@@ -219,10 +279,9 @@ export component SettingsWindow inherits Window {
 
                             HorizontalLayout {
                                 spacing: 8px;
-                                Text {
-                                    text: "Min Match %:";
-                                    vertical-alignment: center;
-                                    min-width: 140px;
+                                LabelWithTip {
+                                    label: "Min Match %:";
+                                    tooltip: "Minimum correlation confidence required to accept a chunk result. Lower values accept more results but may include false matches.";
                                 }
                                 SpinBox {
                                     value: round(min-match-pct);
@@ -489,6 +548,42 @@ export component SettingsWindow inherits Window {
                             CheckBox {
                                 text: "Multi-Correlation Comparison (Analyze Only)";
                                 checked <=> multi-correlation-enabled;
+                            }
+
+                            // Method selection (shown when multi-correlation is enabled)
+                            if multi-correlation-enabled: VerticalBox {
+                                padding-left: 24px;
+                                spacing: 4px;
+
+                                Text {
+                                    text: "Methods to compare:";
+                                    font-size: 11px;
+                                    color: #888888;
+                                }
+
+                                HorizontalLayout {
+                                    spacing: 16px;
+
+                                    CheckBox {
+                                        text: "SCC";
+                                        checked <=> multi-corr-scc;
+                                    }
+
+                                    CheckBox {
+                                        text: "GCC-PHAT";
+                                        checked <=> multi-corr-gcc-phat;
+                                    }
+
+                                    CheckBox {
+                                        text: "GCC-SCOT";
+                                        checked <=> multi-corr-gcc-scot;
+                                    }
+
+                                    CheckBox {
+                                        text: "Whitened";
+                                        checked <=> multi-corr-whitened;
+                                    }
+                                }
                             }
                         }
                     }
