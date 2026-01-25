@@ -1,5 +1,5 @@
 // TrackWidget - Track display components.
-// Clean compact layout.
+// Compact two-row layout matching Qt's TrackWidget.
 
 import { HorizontalBox, VerticalBox, CheckBox, ComboBox, Button } from "std-widgets.slint";
 
@@ -21,7 +21,7 @@ export struct TrackWidgetData {
     sync-to-source: string,
 }
 
-// Full widget for final list
+// Full widget for final list - compact two-row layout like Qt
 export component TrackWidget inherits Rectangle {
     in property <TrackWidgetData> data;
     in property <[string]> sync-source-options: [];
@@ -43,18 +43,12 @@ export component TrackWidget inherits Rectangle {
     in-out property <bool> is-forced: data.is-forced;
     in-out property <bool> has-custom-name: data.has-custom-name;
 
-    min-height: 44px;
-    background: touch.has-hover ? #3a3a3a : transparent;
-    border-radius: 3px;
-
-    touch := TouchArea { }
-
-    VerticalBox {
-        padding: 4px;
+    VerticalLayout {
+        padding: 3px;
         spacing: 2px;
 
-        // Summary + badges
-        HorizontalBox {
+        // Top row: summary | badges | source
+        HorizontalLayout {
             spacing: 6px;
 
             Text {
@@ -63,6 +57,7 @@ export component TrackWidget inherits Rectangle {
                 font-size: 12px;
                 horizontal-stretch: 1;
                 overflow: elide;
+                vertical-alignment: center;
             }
 
             if data.badges != "": Text {
@@ -70,27 +65,30 @@ export component TrackWidget inherits Rectangle {
                 font-weight: 600;
                 font-size: 11px;
                 color: #ddaa55;
+                vertical-alignment: center;
+            }
+
+            Text {
+                text: data.source;
+                font-size: 11px;
+                color: #888888;
+                vertical-alignment: center;
             }
         }
 
-        // Options summary
-        if data.options-summary != "": Text {
-            text: data.options-summary;
-            font-size: 11px;
-            color: #aaaaaa;
-        }
+        // Bottom row: stretch | sync dropdown | checkboxes | buttons
+        HorizontalLayout {
+            spacing: 4px;
 
-        // Controls
-        HorizontalBox {
-            spacing: 6px;
-            alignment: end;
+            // Stretch to push controls right
+            Rectangle { horizontal-stretch: 1; }
 
-            if root.show-sync-dropdown: HorizontalBox {
-                spacing: 4px;
+            if root.show-sync-dropdown: HorizontalLayout {
+                spacing: 3px;
 
                 Text {
-                    text: "Sync to:";
-                    font-size: 11px;
+                    text: "Sync:";
+                    font-size: 10px;
                     color: #888888;
                     vertical-alignment: center;
                 }
@@ -98,7 +96,7 @@ export component TrackWidget inherits Rectangle {
                 ComboBox {
                     model: sync-source-options;
                     current-value: data.sync-to-source;
-                    min-width: 90px;
+                    min-width: 80px;
                     selected(val) => { root.sync-source-changed(val); }
                 }
             }

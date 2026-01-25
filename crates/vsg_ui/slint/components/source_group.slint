@@ -1,8 +1,51 @@
 // SourceGroup - Collapsible group of tracks from a single source.
-// Clean compact layout.
+// Simple text items like Qt's SourceList.
 
 import { VerticalBox, HorizontalBox, Button, GroupBox } from "std-widgets.slint";
-import { TrackListItem, TrackWidgetData } from "track_widget.slint";
+import { TrackWidgetData } from "track_widget.slint";
+
+// Simple text item for source list (matches Qt's SourceList)
+component SourceTrackItem inherits Rectangle {
+    in property <TrackWidgetData> data;
+    in property <bool> is-blocked: false;
+
+    callback double-clicked();
+    callback context-menu-requested();
+
+    height: 22px;
+    background: touch.has-hover ? #3a3a3a : transparent;
+    border-radius: 2px;
+    opacity: is-blocked ? 0.5 : 1.0;
+
+    touch := TouchArea {
+        mouse-cursor: is-blocked ? not-allowed : pointer;
+
+        double-clicked => {
+            if (!root.is-blocked) { root.double-clicked(); }
+        }
+
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                root.context-menu-requested();
+            }
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 4px;
+        padding-right: 4px;
+        spacing: 0px;
+
+        // Simple text like Qt: [V-0] Description...
+        Text {
+            text: data.summary;
+            font-size: 12px;
+            color: root.is-blocked ? #666666 : #e0e0e0;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+}
 
 export component SourceGroup inherits Rectangle {
     in property <string> title: "Source";
@@ -25,19 +68,19 @@ export component SourceGroup inherits Rectangle {
 
         // Header
         HorizontalBox {
-            padding: 6px;
-            spacing: 6px;
+            padding: 4px;
+            spacing: 4px;
 
             // Collapse toggle
             Rectangle {
-                width: 18px;
-                height: 18px;
+                width: 16px;
+                height: 16px;
                 background: collapse-touch.has-hover ? #3a3a3a : transparent;
-                border-radius: 3px;
+                border-radius: 2px;
 
                 Text {
                     text: root.expanded ? "▼" : "►";
-                    font-size: 10px;
+                    font-size: 9px;
                     color: #888888;
                     horizontal-alignment: center;
                     vertical-alignment: center;
@@ -52,7 +95,7 @@ export component SourceGroup inherits Rectangle {
             Text {
                 text: root.title;
                 font-weight: 600;
-                font-size: 13px;
+                font-size: 12px;
                 horizontal-stretch: 1;
                 vertical-alignment: center;
             }
@@ -60,7 +103,7 @@ export component SourceGroup inherits Rectangle {
             // Track count
             Text {
                 text: "(" + tracks.length + ")";
-                font-size: 11px;
+                font-size: 10px;
                 color: #666666;
                 vertical-alignment: center;
             }
@@ -72,14 +115,14 @@ export component SourceGroup inherits Rectangle {
             }
         }
 
-        // Content
+        // Content - simple text items
         if root.expanded: VerticalBox {
-            padding-left: 10px;
-            padding-right: 6px;
-            padding-bottom: 6px;
-            spacing: 2px;
+            padding-left: 8px;
+            padding-right: 4px;
+            padding-bottom: 4px;
+            spacing: 1px;
 
-            for track[idx] in tracks: TrackListItem {
+            for track[idx] in tracks: SourceTrackItem {
                 data: track;
                 is-blocked: idx < blocked-tracks.length ? blocked-tracks[idx] : false;
 

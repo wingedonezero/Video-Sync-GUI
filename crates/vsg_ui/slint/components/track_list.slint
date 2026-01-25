@@ -1,5 +1,5 @@
 // TrackList - Reorderable list of tracks for final output.
-// Clean compact layout.
+// Compact layout matching Qt's FinalList.
 
 import { VerticalBox, HorizontalBox, ScrollView, Button } from "std-widgets.slint";
 import { TrackWidget, TrackWidgetData } from "track_widget.slint";
@@ -11,7 +11,7 @@ export struct FinalTrackData {
     sync-source-options: [string],
 }
 
-// Single entry
+// Single entry - compact like Qt (no visible move buttons, use context menu)
 component TrackListEntry inherits Rectangle {
     in property <FinalTrackData> data;
     in property <bool> show-move-buttons: true;
@@ -27,42 +27,22 @@ component TrackListEntry inherits Rectangle {
     callback sync-source-changed(string);
     callback settings-clicked();
     callback style-editor-clicked();
+    callback context-menu-requested();
 
-    background: #333333;
-    border-radius: 4px;
-    min-height: 56px;
+    background: touch.has-hover ? #3a3a3a : #333333;
+    border-radius: 3px;
 
-    HorizontalBox {
-        padding: 4px;
-        spacing: 4px;
-
-        // Move controls
-        if root.show-move-buttons: VerticalBox {
-            alignment: center;
-            spacing: 2px;
-            padding: 2px;
-
-            Button {
-                text: "^";
-                enabled: !root.is-first;
-                max-width: 24px;
-                clicked => { root.move-up(); }
-            }
-
-            Text {
-                text: data.position + 1;
-                font-size: 10px;
-                color: #666666;
-                horizontal-alignment: center;
-            }
-
-            Button {
-                text: "v";
-                enabled: !root.is-last;
-                max-width: 24px;
-                clicked => { root.move-down(); }
+    touch := TouchArea {
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                root.context-menu-requested();
             }
         }
+    }
+
+    HorizontalLayout {
+        padding: 4px;
+        spacing: 4px;
 
         // Track type bar
         Rectangle {
@@ -72,7 +52,7 @@ component TrackListEntry inherits Rectangle {
                         data.track.track-type == "audio" ? #55aa55 : #ddaa55;
         }
 
-        // Track widget
+        // Track widget - compact two-row layout
         TrackWidget {
             horizontal-stretch: 1;
             data: data.track;
@@ -86,10 +66,10 @@ component TrackListEntry inherits Rectangle {
             style-editor-clicked => { root.style-editor-clicked(); }
         }
 
-        // Remove button
+        // Remove button (small X)
         Button {
-            text: "X";
-            max-width: 28px;
+            text: "×";
+            max-width: 20px;
             clicked => { root.remove(); }
         }
     }
