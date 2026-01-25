@@ -89,6 +89,133 @@ pub enum JobStatus {
     Failed,
 }
 
+/// Audio correlation algorithm.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum CorrelationMethod {
+    /// Standard Cross-Correlation (SCC).
+    #[default]
+    #[serde(rename = "Standard Correlation (SCC)")]
+    Scc,
+    /// Generalized Cross-Correlation with Phase Transform.
+    #[serde(rename = "Phase Correlation (GCC-PHAT)")]
+    GccPhat,
+    /// Onset detection envelope correlation.
+    #[serde(rename = "Onset Detection")]
+    OnsetDetection,
+    /// GCC with Smoothed Coherence Transform.
+    #[serde(rename = "GCC-SCOT")]
+    GccScot,
+    /// Dynamic Time Warping on MFCC features.
+    #[serde(rename = "DTW (Dynamic Time Warping)")]
+    Dtw,
+    /// Mel spectrogram correlation.
+    #[serde(rename = "Spectrogram Correlation")]
+    Spectrogram,
+}
+
+impl CorrelationMethod {
+    /// Get the display name for this method.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Scc => "Standard Correlation (SCC)",
+            Self::GccPhat => "Phase Correlation (GCC-PHAT)",
+            Self::OnsetDetection => "Onset Detection",
+            Self::GccScot => "GCC-SCOT",
+            Self::Dtw => "DTW (Dynamic Time Warping)",
+            Self::Spectrogram => "Spectrogram Correlation",
+        }
+    }
+
+    /// Get all available methods as a list.
+    pub fn all() -> &'static [CorrelationMethod] {
+        &[
+            Self::Scc,
+            Self::GccPhat,
+            Self::OnsetDetection,
+            Self::GccScot,
+            Self::Dtw,
+            Self::Spectrogram,
+        ]
+    }
+
+    /// Create from index (for UI combo boxes).
+    pub fn from_index(index: usize) -> Self {
+        Self::all().get(index).copied().unwrap_or_default()
+    }
+
+    /// Get index of this method (for UI combo boxes).
+    pub fn to_index(&self) -> usize {
+        Self::all().iter().position(|m| m == self).unwrap_or(0)
+    }
+}
+
+impl std::fmt::Display for CorrelationMethod {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name())
+    }
+}
+
+/// Method for selecting final delay from multiple chunk measurements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum DelaySelectionMode {
+    /// Most common rounded delay value.
+    #[default]
+    #[serde(rename = "Mode (Most Common)")]
+    Mode,
+    /// Mode with ±1ms clustering to handle vote-splitting.
+    #[serde(rename = "Mode (Clustered)")]
+    ModeClustered,
+    /// Mode prioritizing clusters that appear early in the file.
+    #[serde(rename = "Mode (Early Cluster)")]
+    ModeEarly,
+    /// First stable segment's delay (for stepping detection).
+    #[serde(rename = "First Stable")]
+    FirstStable,
+    /// Average of all raw delay values.
+    #[serde(rename = "Average")]
+    Average,
+}
+
+impl DelaySelectionMode {
+    /// Get the display name for this mode.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Mode => "Mode (Most Common)",
+            Self::ModeClustered => "Mode (Clustered)",
+            Self::ModeEarly => "Mode (Early Cluster)",
+            Self::FirstStable => "First Stable",
+            Self::Average => "Average",
+        }
+    }
+
+    /// Get all available modes as a list.
+    pub fn all() -> &'static [DelaySelectionMode] {
+        &[
+            Self::Mode,
+            Self::ModeClustered,
+            Self::ModeEarly,
+            Self::FirstStable,
+            Self::Average,
+        ]
+    }
+
+    /// Create from index (for UI combo boxes).
+    pub fn from_index(index: usize) -> Self {
+        Self::all().get(index).copied().unwrap_or_default()
+    }
+
+    /// Get index of this mode (for UI combo boxes).
+    pub fn to_index(&self) -> usize {
+        Self::all().iter().position(|m| m == self).unwrap_or(0)
+    }
+}
+
+impl std::fmt::Display for DelaySelectionMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -34,6 +34,14 @@ export component SettingsWindow inherits Window {
     in-out property <bool> use-soxr: true;
     in-out property <bool> audio-peak-fit: true;
 
+    // Delay selection settings
+    in-out property <int> delay-selection-mode-index: 0;  // 0 = Mode, 1 = Mode Clustered, 2 = Mode Early, 3 = First Stable, 4 = Average
+    in-out property <int> min-accepted-chunks: 3;
+    in-out property <int> first-stable-min-chunks: 3;
+    in-out property <bool> first-stable-skip-unstable: true;
+    in-out property <int> early-cluster-window: 10;
+    in-out property <int> early-cluster-threshold: 3;
+
     // Chapter settings
     in-out property <bool> chapter-rename: false;
     in-out property <bool> chapter-snap: false;
@@ -309,6 +317,102 @@ export component SettingsWindow inherits Window {
                                     current-index <=> filtering-method-index;
                                     horizontal-stretch: 1;
                                 }
+                            }
+                        }
+                    }
+
+                    GroupBox {
+                        title: "Delay Selection";
+
+                        VerticalBox {
+                            padding: 12px;
+                            spacing: 8px;
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Selection Mode:";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                ComboBox {
+                                    model: ["Mode (Most Common)", "Mode (Clustered)", "Mode (Early Cluster)", "First Stable", "Average"];
+                                    current-index <=> delay-selection-mode-index;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Min Accepted Chunks:";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                SpinBox {
+                                    value <=> min-accepted-chunks;
+                                    minimum: 1;
+                                    maximum: 50;
+                                    max-width: 100px;
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "First Stable Min:";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                SpinBox {
+                                    value <=> first-stable-min-chunks;
+                                    minimum: 2;
+                                    maximum: 20;
+                                    enabled: delay-selection-mode-index == 3;
+                                    max-width: 100px;
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                            }
+
+                            CheckBox {
+                                text: "First Stable: Skip unstable chunks before selection";
+                                checked <=> first-stable-skip-unstable;
+                                enabled: delay-selection-mode-index == 3;
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Early Cluster Window:";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                SpinBox {
+                                    value <=> early-cluster-window;
+                                    minimum: 3;
+                                    maximum: 50;
+                                    enabled: delay-selection-mode-index == 2;
+                                    max-width: 100px;
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text {
+                                    text: "Early Cluster Threshold:";
+                                    vertical-alignment: center;
+                                    min-width: 140px;
+                                }
+                                SpinBox {
+                                    value <=> early-cluster-threshold;
+                                    minimum: 2;
+                                    maximum: 20;
+                                    enabled: delay-selection-mode-index == 2;
+                                    max-width: 100px;
+                                }
+                                Rectangle { horizontal-stretch: 1; }
                             }
                         }
                     }

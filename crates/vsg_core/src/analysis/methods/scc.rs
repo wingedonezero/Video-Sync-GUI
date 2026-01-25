@@ -170,7 +170,7 @@ impl CorrelationMethod for Scc {
         Ok(CorrelationResult::new(
             delay_samples,
             reference.sample_rate,
-            peak_val,
+            peak_val * 100.0, // Convert 0-1 correlation to 0-100 match percentage
         ))
     }
 
@@ -218,9 +218,9 @@ mod tests {
             result.delay_samples
         );
         assert!(
-            result.correlation_peak > 0.9,
-            "Expected high correlation, got {}",
-            result.correlation_peak
+            result.match_pct > 90.0,
+            "Expected high match percentage, got {}",
+            result.match_pct
         );
     }
 
@@ -292,9 +292,9 @@ mod tests {
         let result = scc.correlate(&ref_chunk, &other_chunk).unwrap();
 
         assert!(
-            (result.delay_ms - 1.0).abs() < 0.1,
+            (result.delay_ms_raw - 1.0).abs() < 0.1,
             "Expected ~1ms delay, got {}ms",
-            result.delay_ms
+            result.delay_ms_raw
         );
     }
 

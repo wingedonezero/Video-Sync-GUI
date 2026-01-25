@@ -85,30 +85,31 @@ impl AudioChunk {
     }
 }
 
-/// Result of correlating two audio chunks.
+/// Result of correlating two audio chunks (internal calculation result).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CorrelationResult {
     /// Delay in samples (positive = second source is ahead).
     pub delay_samples: f64,
-    /// Delay in milliseconds.
-    pub delay_ms: f64,
-    /// Correlation peak value (0.0 - 1.0).
-    pub correlation_peak: f64,
-    /// Confidence score (0.0 - 1.0).
-    pub confidence: f64,
+    /// Raw delay in milliseconds (full precision).
+    pub delay_ms_raw: f64,
+    /// Rounded delay in milliseconds (for mode calculations, mkvmerge).
+    pub delay_ms_rounded: i64,
+    /// Match percentage (0-100 scale, like Python).
+    pub match_pct: f64,
     /// Whether peak fitting was applied.
     pub peak_fitted: bool,
 }
 
 impl CorrelationResult {
     /// Create a new correlation result.
-    pub fn new(delay_samples: f64, sample_rate: u32, correlation_peak: f64) -> Self {
-        let delay_ms = (delay_samples / sample_rate as f64) * 1000.0;
+    pub fn new(delay_samples: f64, sample_rate: u32, match_pct: f64) -> Self {
+        let delay_ms_raw = (delay_samples / sample_rate as f64) * 1000.0;
+        let delay_ms_rounded = delay_ms_raw.round() as i64;
         Self {
             delay_samples,
-            delay_ms,
-            correlation_peak,
-            confidence: correlation_peak.abs(), // Simple confidence = peak magnitude
+            delay_ms_raw,
+            delay_ms_rounded,
+            match_pct,
             peak_fitted: false,
         }
     }
@@ -118,56 +119,122 @@ impl CorrelationResult {
         self.peak_fitted = true;
         self
     }
-
-    /// Set the confidence score.
-    pub fn with_confidence(mut self, confidence: f64) -> Self {
-        self.confidence = confidence;
-        self
-    }
 }
 
 /// Result of analyzing a single chunk pair.
+///
+/// Stores all data needed for delay selection and later processing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChunkResult {
-    /// Chunk index (0-based).
+    /// Chunk index (1-based for display, matches Python).
     pub chunk_index: usize,
-    /// Start time of the chunk (seconds).
+    /// Start time of the chunk in seconds.
     pub chunk_start_secs: f64,
-    /// Correlation result for this chunk.
-    pub correlation: CorrelationResult,
-    /// Whether this chunk's result is considered valid.
-    pub valid: bool,
-    /// Reason for invalid result (if any).
-    pub invalid_reason: Option<String>,
+    /// Raw delay in milliseconds (full precision for averaging).
+    pub delay_ms_raw: f64,
+    /// Rounded delay in milliseconds (for mode calculations).
+    pub delay_ms_rounded: i64,
+    /// Match percentage (0-100 scale).
+    pub match_pct: f64,
+    /// Whether this chunk passed the match threshold.
+    pub accepted: bool,
+    /// Reason for rejection (if not accepted).
+    pub reject_reason: Option<String>,
 }
 
 impl ChunkResult {
-    /// Create a new valid chunk result.
-    pub fn new(chunk_index: usize, chunk_start_secs: f64, correlation: CorrelationResult) -> Self {
+    /// Create a new chunk result from correlation output.
+    pub fn new(
+        chunk_index: usize,
+        chunk_start_secs: f64,
+        correlation: CorrelationResult,
+        min_match_pct: f64,
+    ) -> Self {
+        let accepted = correlation.match_pct >= min_match_pct;
+        let reject_reason = if accepted {
+            None
+        } else {
+            Some(format!("below {:.1}%", min_match_pct))
+        };
+
         Self {
             chunk_index,
             chunk_start_secs,
-            correlation,
-            valid: true,
-            invalid_reason: None,
+            delay_ms_raw: correlation.delay_ms_raw,
+            delay_ms_rounded: correlation.delay_ms_rounded,
+            match_pct: correlation.match_pct,
+            accepted,
+            reject_reason,
         }
     }
 
-    /// Create an invalid chunk result.
-    pub fn invalid(chunk_index: usize, chunk_start_secs: f64, reason: impl Into<String>) -> Self {
+    /// Create a rejected chunk result (e.g., extraction failed).
+    pub fn rejected(
+        chunk_index: usize,
+        chunk_start_secs: f64,
+        reason: impl Into<String>,
+    ) -> Self {
         Self {
             chunk_index,
             chunk_start_secs,
-            correlation: CorrelationResult {
-                delay_samples: 0.0,
-                delay_ms: 0.0,
-                correlation_peak: 0.0,
-                confidence: 0.0,
-                peak_fitted: false,
-            },
-            valid: false,
-            invalid_reason: Some(reason.into()),
+            delay_ms_raw: 0.0,
+            delay_ms_rounded: 0,
+            match_pct: 0.0,
+            accepted: false,
+            reject_reason: Some(reason.into()),
         }
+    }
+
+    /// Get the status string for logging (ACCEPTED or REJECTED with reason).
+    pub fn status_str(&self) -> String {
+        if self.accepted {
+            "ACCEPTED".to_string()
+        } else {
+            format!(
+                "REJECTED ({})",
+                self.reject_reason.as_deref().unwrap_or("unknown")
+            )
+        }
+    }
+}
+
+/// Result of delay selection from multiple chunks.
+///
+/// Produced by a DelaySelector after analyzing all accepted chunks.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DelaySelection {
+    /// Raw delay in milliseconds (full precision).
+    pub delay_ms_raw: f64,
+    /// Rounded delay in milliseconds.
+    pub delay_ms_rounded: i64,
+    /// Name of the selection method used.
+    pub method_name: String,
+    /// Number of chunks used in calculation.
+    pub chunks_used: usize,
+    /// Additional details for logging (e.g., "starting at 71.0s").
+    pub details: Option<String>,
+}
+
+impl DelaySelection {
+    /// Create a new delay selection result.
+    pub fn new(
+        delay_ms_raw: f64,
+        method_name: impl Into<String>,
+        chunks_used: usize,
+    ) -> Self {
+        Self {
+            delay_ms_raw,
+            delay_ms_rounded: delay_ms_raw.round() as i64,
+            method_name: method_name.into(),
+            chunks_used,
+            details: None,
+        }
+    }
+
+    /// Add details for logging.
+    pub fn with_details(mut self, details: impl Into<String>) -> Self {
+        self.details = Some(details.into());
+        self
     }
 }
 
@@ -176,29 +243,39 @@ impl ChunkResult {
 pub struct SourceAnalysisResult {
     /// Name of the source being analyzed (e.g., "Source 2").
     pub source_name: String,
-    /// Final calculated delay in milliseconds.
-    pub delay_ms: f64,
-    /// Overall confidence score (0.0 - 1.0).
-    pub confidence: f64,
-    /// Number of valid chunks used.
-    pub valid_chunks: usize,
+    /// Selected delay result.
+    pub delay: DelaySelection,
+    /// Average match percentage of accepted chunks.
+    pub avg_match_pct: f64,
+    /// Number of accepted chunks.
+    pub accepted_chunks: usize,
     /// Total number of chunks analyzed.
     pub total_chunks: usize,
-    /// Individual chunk results.
+    /// Individual chunk results (all chunks, for drift analysis, stepping, etc.).
     pub chunk_results: Vec<ChunkResult>,
     /// Whether drift was detected (inconsistent delays across chunks).
     pub drift_detected: bool,
-    /// Analysis method used.
-    pub method: String,
+    /// Correlation method used (e.g., "SCC", "GCC-PHAT").
+    pub correlation_method: String,
 }
 
 impl SourceAnalysisResult {
-    /// Calculate the match percentage (valid chunks / total chunks).
-    pub fn match_percentage(&self) -> f64 {
+    /// Get the raw delay in milliseconds.
+    pub fn delay_ms_raw(&self) -> f64 {
+        self.delay.delay_ms_raw
+    }
+
+    /// Get the rounded delay in milliseconds.
+    pub fn delay_ms_rounded(&self) -> i64 {
+        self.delay.delay_ms_rounded
+    }
+
+    /// Calculate the acceptance rate (accepted / total).
+    pub fn acceptance_rate(&self) -> f64 {
         if self.total_chunks == 0 {
             0.0
         } else {
-            (self.valid_chunks as f64 / self.total_chunks as f64) * 100.0
+            (self.accepted_chunks as f64 / self.total_chunks as f64) * 100.0
         }
     }
 }
@@ -265,7 +342,31 @@ mod tests {
 
     #[test]
     fn correlation_result_calculates_delay_ms() {
-        let result = CorrelationResult::new(48.0, 48000, 0.95);
-        assert!((result.delay_ms - 1.0).abs() < 0.001); // 48 samples at 48kHz = 1ms
+        let result = CorrelationResult::new(48.0, 48000, 95.0);
+        assert!((result.delay_ms_raw - 1.0).abs() < 0.001); // 48 samples at 48kHz = 1ms
+        assert_eq!(result.delay_ms_rounded, 1);
+        assert!((result.match_pct - 95.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn chunk_result_accepts_above_threshold() {
+        let corr = CorrelationResult::new(48.0, 48000, 95.0);
+        let chunk = ChunkResult::new(1, 10.0, corr, 5.0);
+        assert!(chunk.accepted);
+        assert!(chunk.reject_reason.is_none());
+    }
+
+    #[test]
+    fn chunk_result_rejects_below_threshold() {
+        let corr = CorrelationResult::new(48.0, 48000, 3.0);
+        let chunk = ChunkResult::new(1, 10.0, corr, 5.0);
+        assert!(!chunk.accepted);
+        assert!(chunk.reject_reason.is_some());
+    }
+
+    #[test]
+    fn delay_selection_rounds_correctly() {
+        let sel = DelaySelection::new(-1000.979, "mode", 10);
+        assert_eq!(sel.delay_ms_rounded, -1001);
     }
 }

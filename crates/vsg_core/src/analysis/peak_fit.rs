@@ -25,7 +25,7 @@ pub fn fit_peak(correlation: &[f64], peak_index: usize, sample_rate: u32) -> Cor
     if peak_index == 0 || peak_index >= correlation.len() - 1 {
         // Can't interpolate at edges, return discrete result
         let offset = peak_index as f64 - center as f64;
-        return CorrelationResult::new(offset, sample_rate, peak_val);
+        return CorrelationResult::new(offset, sample_rate, peak_val * 100.0);
     }
 
     let y0 = correlation[peak_index - 1];
@@ -67,7 +67,7 @@ pub fn fit_peak(correlation: &[f64], peak_index: usize, sample_rate: u32) -> Cor
     let discrete_offset = peak_index as f64 - center as f64;
     let refined_offset = discrete_offset + delta;
 
-    CorrelationResult::new(refined_offset, sample_rate, refined_peak).with_peak_fitting()
+    CorrelationResult::new(refined_offset, sample_rate, refined_peak * 100.0).with_peak_fitting()
 }
 
 /// Find peak index in correlation array and apply peak fitting.
@@ -176,11 +176,11 @@ mod tests {
         let correlation = vec![0.5, 0.8, 1.0, 0.9, 0.6];
         let result = fit_peak(&correlation, 2, 48000);
 
-        // Result should have delay_ms calculated correctly
+        // Result should have delay_ms_raw calculated correctly
         let expected_ms = (result.delay_samples / 48000.0) * 1000.0;
         assert!(
-            (result.delay_ms - expected_ms).abs() < 0.001,
-            "delay_ms calculation wrong"
+            (result.delay_ms_raw - expected_ms).abs() < 0.001,
+            "delay_ms_raw calculation wrong"
         );
     }
 
@@ -191,6 +191,6 @@ mod tests {
 
         // Should find peak around index 3
         assert!(result.peak_fitted);
-        assert!(result.correlation_peak > 0.9);
+        assert!(result.match_pct > 90.0);
     }
 }

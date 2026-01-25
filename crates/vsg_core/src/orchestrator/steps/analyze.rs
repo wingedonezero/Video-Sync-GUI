@@ -121,11 +121,11 @@ impl PipelineStep for AnalyzeStep {
             match analyzer.analyze(ref_path, source_path, source_name) {
                 Ok(result) => {
                     ctx.logger.info(&format!(
-                        "{}: delay={:.2}ms, confidence={:.1}%, valid={}/{}",
+                        "{}: delay={:+}ms, match={:.1}%, accepted={}/{}",
                         source_name,
-                        result.delay_ms,
-                        result.confidence * 100.0,
-                        result.valid_chunks,
+                        result.delay_ms_rounded(),
+                        result.avg_match_pct,
+                        result.accepted_chunks,
                         result.total_chunks
                     ));
 
@@ -137,10 +137,10 @@ impl PipelineStep for AnalyzeStep {
                         any_drift = true;
                     }
 
-                    delays.set_delay(source_name, result.delay_ms);
-                    total_confidence += result.confidence;
+                    delays.set_delay(source_name, result.delay_ms_raw());
+                    total_confidence += result.avg_match_pct / 100.0; // Convert to 0-1 for averaging
                     source_count += 1;
-                    method_name = result.method;
+                    method_name = result.correlation_method.clone();
                 }
                 Err(e) => {
                     ctx.logger.error(&format!(
