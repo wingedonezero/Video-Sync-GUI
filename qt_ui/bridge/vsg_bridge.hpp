@@ -5,7 +5,13 @@
 
 #ifdef VSG_HAS_BRIDGE
 // Include the CXX-generated header when bridge is available
+#if __has_include("vsg_bridge/src/lib.rs.h")
 #include "vsg_bridge/src/lib.rs.h"
+#elif __has_include("lib.rs.h")
+#include "lib.rs.h"
+#else
+#error "Missing CXX bridge header: lib.rs.h"
+#endif
 #include <QString>
 #include <QStringList>
 #include <vector>
