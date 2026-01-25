@@ -175,20 +175,51 @@ void JobQueueLogic::configureJobAtRow(int row)
                     track.isForced = t.is_forced;
                     track.originalPath = path;
 
-                    // Build description
-                    QString desc = QString("%1 Track %2 (%3)")
-                        .arg(track.type)
-                        .arg(track.id)
-                        .arg(track.language);
+                    // Store additional metadata
+                    track.channels = t.channels;
+                    track.sampleRate = t.sample_rate;
+                    track.width = t.width;
+                    track.height = t.height;
+
+                    // Build description with detailed info
+                    QString desc = QString("[%1-%2]")
+                        .arg(track.type.left(1).toUpper())
+                        .arg(track.id);
+
+                    // Add codec
+                    if (!track.codecId.isEmpty()) {
+                        // Simplify codec names
+                        QString codec = track.codecId;
+                        if (codec.startsWith("V_")) codec = codec.mid(2);
+                        if (codec.startsWith("A_")) codec = codec.mid(2);
+                        if (codec.startsWith("S_")) codec = codec.mid(2);
+                        desc += QString(" %1").arg(codec);
+                    }
+
+                    // Add language
+                    if (!track.language.isEmpty() && track.language != "und") {
+                        desc += QString(" (%1)").arg(track.language);
+                    }
+
+                    // Add name
                     if (!track.name.isEmpty()) {
-                        desc += QString(" - %1").arg(track.name);
+                        desc += QString(" \"%1\"").arg(track.name);
                     }
-                    if (track.type == "audio" && t.channels > 0) {
-                        desc += QString(" [%1ch]").arg(t.channels);
+
+                    // Add audio info
+                    if (track.type.toLower() == "audio" && t.channels > 0) {
+                        desc += QString(" [%1ch").arg(t.channels);
+                        if (t.sample_rate > 0) {
+                            desc += QString(" %1kHz").arg(t.sample_rate / 1000.0, 0, 'f', 1);
+                        }
+                        desc += "]";
                     }
-                    if (track.type == "video" && t.width > 0) {
+
+                    // Add video info
+                    if (track.type.toLower() == "video" && t.width > 0) {
                         desc += QString(" [%1x%2]").arg(t.width).arg(t.height);
                     }
+
                     track.description = desc;
 
                     tracks.push_back(track);
@@ -205,7 +236,14 @@ void JobQueueLogic::configureJobAtRow(int row)
                     track.isDefault = t.is_default;
                     track.isForced = t.is_forced;
                     track.originalPath = path;
-                    track.description = QString("%1 Track %2").arg(track.type).arg(track.id);
+                    track.channels = t.channels;
+                    track.sampleRate = t.sample_rate;
+                    track.width = t.width;
+                    track.height = t.height;
+                    track.description = QString("[%1-%2] %3")
+                        .arg(track.type.left(1).toUpper())
+                        .arg(track.id)
+                        .arg(track.codecId);
                     tracks.push_back(track);
                 }
 #endif
