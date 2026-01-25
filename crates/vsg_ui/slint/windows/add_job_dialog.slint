@@ -148,13 +148,16 @@ export component AddJobDialog inherits Window {
         if error-message != "": Rectangle {
             background: #442222;
             border-radius: Theme.radius-sm;
-            padding: Theme.padding-sm;
 
-            Text {
-                text: error-message;
-                color: Theme.error;
-                font-size: Theme.font-sm;
-                wrap: word-wrap;
+            HorizontalBox {
+                padding: Theme.padding-sm;
+
+                Text {
+                    text: error-message;
+                    color: Theme.error;
+                    font-size: Theme.font-sm;
+                    wrap: word-wrap;
+                }
             }
         }
 
