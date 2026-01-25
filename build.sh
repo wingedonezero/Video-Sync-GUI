@@ -15,7 +15,7 @@ cd "$SCRIPT_DIR"
 case "${1:-build}" in
     build|release)
         echo "==> Building (release)..."
-        cargo build --release -p vsg_app
+        cargo build --release
         echo ""
         echo "==> Build complete!"
         echo "    Run: ./target/release/video-sync-gui"
@@ -23,7 +23,7 @@ case "${1:-build}" in
 
     debug)
         echo "==> Building (debug)..."
-        cargo build -p vsg_app
+        cargo build
         echo ""
         echo "==> Build complete!"
         echo "    Run: ./target/debug/video-sync-gui"

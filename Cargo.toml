@@ -6,6 +6,7 @@ members = [
     "crates/vsg_bridge",
     "crates/vsg_app",
 ]
+default-members = ["crates/vsg_app"]
 
 [workspace.package]
 version = "0.1.0"

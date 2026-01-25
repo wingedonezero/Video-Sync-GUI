@@ -13,13 +13,13 @@ all: release
 
 # Release build
 release:
-	cargo build --release -p vsg_app
+	cargo build --release
 	@echo ""
 	@echo "Build complete: ./target/release/video-sync-gui"
 
 # Debug build
 debug:
-	cargo build -p vsg_app
+	cargo build
 	@echo ""
 	@echo "Build complete: ./target/debug/video-sync-gui"
 
