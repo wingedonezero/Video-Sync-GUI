@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use slint::ComponentHandle;
 use vsg_core::config::Settings;
-use vsg_core::models::{AnalysisMode, FilteringMethod, SnapMode};
+use vsg_core::models::{AnalysisMode, DelaySelectionMode, FilteringMethod, SnapMode};
 
 use crate::ui::SettingsWindow;
 
@@ -46,6 +46,20 @@ pub fn populate_settings_window(settings: &SettingsWindow, cfg: &Settings) {
     });
     settings.set_use_soxr(cfg.analysis.use_soxr);
     settings.set_audio_peak_fit(cfg.analysis.audio_peak_fit);
+
+    // Delay selection settings
+    settings.set_delay_selection_mode_index(match cfg.analysis.delay_selection_mode {
+        DelaySelectionMode::Mode => 0,
+        DelaySelectionMode::ModeClustered => 1,
+        DelaySelectionMode::ModeEarly => 2,
+        DelaySelectionMode::FirstStable => 3,
+        DelaySelectionMode::Average => 4,
+    });
+    settings.set_min_accepted_chunks(cfg.analysis.min_accepted_chunks as i32);
+    settings.set_first_stable_min_chunks(cfg.analysis.first_stable_min_chunks as i32);
+    settings.set_first_stable_skip_unstable(cfg.analysis.first_stable_skip_unstable);
+    settings.set_early_cluster_window(cfg.analysis.early_cluster_window as i32);
+    settings.set_early_cluster_threshold(cfg.analysis.early_cluster_threshold as i32);
 
     // Chapters tab
     settings.set_chapter_rename(cfg.chapters.rename);
@@ -104,6 +118,20 @@ pub fn read_settings_from_window(settings: &SettingsWindow, cfg: &mut Settings) 
     };
     cfg.analysis.use_soxr = settings.get_use_soxr();
     cfg.analysis.audio_peak_fit = settings.get_audio_peak_fit();
+
+    // Delay selection settings
+    cfg.analysis.delay_selection_mode = match settings.get_delay_selection_mode_index() {
+        0 => DelaySelectionMode::Mode,
+        1 => DelaySelectionMode::ModeClustered,
+        2 => DelaySelectionMode::ModeEarly,
+        3 => DelaySelectionMode::FirstStable,
+        _ => DelaySelectionMode::Average,
+    };
+    cfg.analysis.min_accepted_chunks = settings.get_min_accepted_chunks() as u32;
+    cfg.analysis.first_stable_min_chunks = settings.get_first_stable_min_chunks() as u32;
+    cfg.analysis.first_stable_skip_unstable = settings.get_first_stable_skip_unstable();
+    cfg.analysis.early_cluster_window = settings.get_early_cluster_window() as u32;
+    cfg.analysis.early_cluster_threshold = settings.get_early_cluster_threshold() as u32;
 
     // Chapters tab
     cfg.chapters.rename = settings.get_chapter_rename();

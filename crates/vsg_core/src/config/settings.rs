@@ -5,7 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::models::{AnalysisMode, FilteringMethod, SnapMode};
+use crate::models::{AnalysisMode, CorrelationMethod, DelaySelectionMode, FilteringMethod, SnapMode};
 
 /// Root settings structure containing all configuration sections.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,6 +156,10 @@ pub struct AnalysisSettings {
     #[serde(default)]
     pub mode: AnalysisMode,
 
+    /// Correlation algorithm to use.
+    #[serde(default)]
+    pub correlation_method: CorrelationMethod,
+
     /// Language filter for source 1 audio.
     #[serde(default)]
     pub lang_source1: Option<String>,
@@ -176,6 +180,10 @@ pub struct AnalysisSettings {
     #[serde(default = "default_min_match_pct")]
     pub min_match_pct: f64,
 
+    /// Minimum number of accepted chunks required for valid analysis.
+    #[serde(default = "default_min_accepted_chunks")]
+    pub min_accepted_chunks: u32,
+
     /// Scan start position as percentage.
     #[serde(default = "default_scan_start")]
     pub scan_start_pct: f64,
@@ -195,6 +203,26 @@ pub struct AnalysisSettings {
     /// Audio filtering method before correlation.
     #[serde(default)]
     pub filtering_method: FilteringMethod,
+
+    /// Method for selecting final delay from chunk measurements.
+    #[serde(default)]
+    pub delay_selection_mode: DelaySelectionMode,
+
+    /// [First Stable] Minimum consecutive chunks with same delay for stability.
+    #[serde(default = "default_first_stable_min_chunks")]
+    pub first_stable_min_chunks: u32,
+
+    /// [First Stable] Skip segments below min chunk threshold.
+    #[serde(default)]
+    pub first_stable_skip_unstable: bool,
+
+    /// [Early Cluster] Number of early chunks to check for stability.
+    #[serde(default = "default_early_cluster_window")]
+    pub early_cluster_window: u32,
+
+    /// [Early Cluster] Minimum chunks in early window for stability.
+    #[serde(default = "default_early_cluster_threshold")]
+    pub early_cluster_threshold: u32,
 }
 
 fn default_chunk_count() -> u32 {
@@ -217,20 +245,43 @@ fn default_scan_end() -> f64 {
     95.0
 }
 
+fn default_min_accepted_chunks() -> u32 {
+    3
+}
+
+fn default_first_stable_min_chunks() -> u32 {
+    3
+}
+
+fn default_early_cluster_window() -> u32 {
+    10
+}
+
+fn default_early_cluster_threshold() -> u32 {
+    5
+}
+
 impl Default for AnalysisSettings {
     fn default() -> Self {
         Self {
             mode: AnalysisMode::default(),
+            correlation_method: CorrelationMethod::default(),
             lang_source1: None,
             lang_others: None,
             chunk_count: default_chunk_count(),
             chunk_duration: default_chunk_duration(),
             min_match_pct: default_min_match_pct(),
+            min_accepted_chunks: default_min_accepted_chunks(),
             scan_start_pct: default_scan_start(),
             scan_end_pct: default_scan_end(),
             use_soxr: true,
             audio_peak_fit: true,
             filtering_method: FilteringMethod::default(),
+            delay_selection_mode: DelaySelectionMode::default(),
+            first_stable_min_chunks: default_first_stable_min_chunks(),
+            first_stable_skip_unstable: false,
+            early_cluster_window: default_early_cluster_window(),
+            early_cluster_threshold: default_early_cluster_threshold(),
         }
     }
 }

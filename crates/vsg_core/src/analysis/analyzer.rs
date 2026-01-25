@@ -4,16 +4,19 @@
 //! 1. Get media duration
 //! 2. Calculate chunk positions
 //! 3. Extract and correlate audio chunks
-//! 4. Aggregate results and calculate final delay
+//! 4. Select final delay using configured mode
+//! 5. Return comprehensive analysis result
 
 use std::path::Path;
 use std::sync::Arc;
 
 use crate::config::AnalysisSettings;
 use crate::logging::JobLogger;
+use crate::models::DelaySelectionMode;
 
+use super::delay_selection::{get_selector, SelectorConfig};
 use super::ffmpeg::{extract_full_audio, get_duration, DEFAULT_ANALYSIS_SAMPLE_RATE};
-use super::methods::{CorrelationMethod, Scc};
+use super::methods::{CorrelationMethod as CorrelationMethodTrait, Scc};
 use super::peak_fit::find_and_fit_peak;
 use super::tracks::{find_track_by_language, get_audio_tracks};
 use super::types::{AnalysisError, AnalysisResult, ChunkResult, SourceAnalysisResult};
@@ -24,7 +27,7 @@ use super::types::{AnalysisError, AnalysisResult, ChunkResult, SourceAnalysisRes
 /// using chunked cross-correlation.
 pub struct Analyzer {
     /// Correlation method to use.
-    method: Box<dyn CorrelationMethod>,
+    method: Box<dyn CorrelationMethodTrait>,
     /// Sample rate for analysis.
     sample_rate: u32,
     /// Whether to use SOXR resampling.
@@ -39,8 +42,14 @@ pub struct Analyzer {
     scan_start_pct: f64,
     /// End position as percentage (0-100).
     scan_end_pct: f64,
-    /// Minimum correlation peak for valid result.
-    min_correlation: f64,
+    /// Minimum match percentage for valid result (0-100).
+    min_match_pct: f64,
+    /// Minimum accepted chunks for valid analysis.
+    min_accepted_chunks: usize,
+    /// Delay selection mode.
+    delay_selection_mode: DelaySelectionMode,
+    /// Selector configuration.
+    selector_config: SelectorConfig,
     /// Language filter for Source 1 (reference).
     lang_source1: Option<String>,
     /// Language filter for other sources.
@@ -61,7 +70,10 @@ impl Analyzer {
             chunk_duration: 15.0,
             scan_start_pct: 5.0,
             scan_end_pct: 95.0,
-            min_correlation: 0.3,
+            min_match_pct: 5.0,
+            min_accepted_chunks: 3,
+            delay_selection_mode: DelaySelectionMode::default(),
+            selector_config: SelectorConfig::default(),
             lang_source1: None,
             lang_others: None,
             logger: None,
@@ -79,7 +91,10 @@ impl Analyzer {
             chunk_duration: settings.chunk_duration as f64,
             scan_start_pct: settings.scan_start_pct,
             scan_end_pct: settings.scan_end_pct,
-            min_correlation: settings.min_match_pct / 100.0, // Convert from percentage
+            min_match_pct: settings.min_match_pct,
+            min_accepted_chunks: settings.min_accepted_chunks as usize,
+            delay_selection_mode: settings.delay_selection_mode,
+            selector_config: SelectorConfig::from(settings),
             lang_source1: settings.lang_source1.clone(),
             lang_others: settings.lang_others.clone(),
             logger: None,
@@ -94,7 +109,7 @@ impl Analyzer {
     }
 
     /// Set the correlation method.
-    pub fn with_method(mut self, method: Box<dyn CorrelationMethod>) -> Self {
+    pub fn with_method(mut self, method: Box<dyn CorrelationMethodTrait>) -> Self {
         self.method = method;
         self
     }
@@ -146,8 +161,9 @@ impl Analyzer {
         let other_track_idx = self.find_audio_track(other_path, self.lang_others.as_deref())?;
 
         self.log(&format!(
-            "Using audio tracks: reference={}, other={}",
+            "Using audio tracks: reference={}, {}={}",
             ref_track_idx.map_or("default".to_string(), |i| i.to_string()),
+            source_name,
             other_track_idx.map_or("default".to_string(), |i| i.to_string())
         ));
 
@@ -159,10 +175,8 @@ impl Analyzer {
         let effective_duration = ref_duration.min(other_duration);
 
         self.log(&format!(
-            "Reference duration: {:.2}s, Other duration: {:.2}s, Effective: {:.2}s",
-            ref_duration,
-            other_duration,
-            effective_duration
+            "Reference: {:.1}s, {}: {:.1}s",
+            ref_duration, source_name, other_duration
         ));
 
         // Calculate chunk positions
@@ -175,7 +189,7 @@ impl Analyzer {
         }
 
         self.log(&format!(
-            "Will analyze {} chunks of {:.1}s each",
+            "Analyzing {} chunks of {:.0}s each",
             chunk_positions.len(),
             self.chunk_duration
         ));
@@ -197,39 +211,44 @@ impl Analyzer {
             other_track_idx,
         )?;
 
-        self.log(&format!("Audio decoded. Analyzing {} chunks...", chunk_positions.len()));
+        self.log(&format!(
+            "Audio decoded. Analyzing {} chunks...",
+            chunk_positions.len()
+        ));
 
         // Analyze each chunk from the in-memory audio data
         let mut chunk_results = Vec::with_capacity(chunk_positions.len());
+        let total_chunks = chunk_positions.len();
 
         for (idx, &start_time) in chunk_positions.iter().enumerate() {
-            match self.analyze_chunk_from_memory(&ref_audio, &other_audio, start_time, idx) {
+            let chunk_num = idx + 1; // 1-based for display
+
+            match self.analyze_chunk_from_memory(&ref_audio, &other_audio, start_time, chunk_num) {
                 Ok(result) => {
-                    // Detailed per-chunk logging (like Python original)
-                    let status = if result.valid { "OK" } else { "LOW" };
+                    // Log in Python-compatible format
                     self.log(&format!(
-                        "  Chunk {:2}/{}: delay={:+8.2}ms  corr={:.3}  [{}]",
-                        idx + 1,
-                        chunk_positions.len(),
-                        result.correlation.delay_ms,
-                        result.correlation.correlation_peak,
-                        status
+                        "  Chunk {:2}/{} (@{:.1}s): delay = {:+} ms (raw={:+.3}, match={:.2}) — {}",
+                        chunk_num,
+                        total_chunks,
+                        result.chunk_start_secs,
+                        result.delay_ms_rounded,
+                        result.delay_ms_raw,
+                        result.match_pct,
+                        result.status_str()
                     ));
                     chunk_results.push(result);
                 }
                 Err(e) => {
                     self.log(&format!(
-                        "  Chunk {:2}/{}: FAILED - {}",
-                        idx + 1,
-                        chunk_positions.len(),
-                        e
+                        "  Chunk {:2}/{} (@{:.1}s): FAILED — {}",
+                        chunk_num, total_chunks, start_time, e
                     ));
-                    chunk_results.push(ChunkResult::invalid(idx, start_time, e.to_string()));
+                    chunk_results.push(ChunkResult::rejected(chunk_num, start_time, e.to_string()));
                 }
             }
         }
 
-        // Aggregate results
+        // Aggregate results using delay selector
         self.aggregate_results(source_name, chunk_results)
     }
 
@@ -258,7 +277,11 @@ impl Analyzer {
     }
 
     /// Find audio track index by language.
-    fn find_audio_track(&self, path: &Path, language: Option<&str>) -> AnalysisResult<Option<usize>> {
+    fn find_audio_track(
+        &self,
+        path: &Path,
+        language: Option<&str>,
+    ) -> AnalysisResult<Option<usize>> {
         // Get all audio tracks
         let tracks = get_audio_tracks(path)?;
 
@@ -317,77 +340,100 @@ impl Analyzer {
         let correlation_result = if self.use_peak_fit {
             // Get raw correlation for peak fitting
             let raw = self.method.raw_correlation(&ref_chunk, &other_chunk)?;
+            // find_and_fit_peak returns CorrelationResult with match_pct in 0-100 scale
             find_and_fit_peak(&raw, self.sample_rate)
         } else {
+            // correlate returns CorrelationResult with match_pct in 0-100 scale
             self.method.correlate(&ref_chunk, &other_chunk)?
         };
 
-        // Check validity based on correlation peak
-        let peak = correlation_result.correlation_peak;
-        let valid = peak >= self.min_correlation;
-
-        if valid {
-            Ok(ChunkResult::new(chunk_index, start_time, correlation_result))
-        } else {
-            Ok(ChunkResult {
-                chunk_index,
-                chunk_start_secs: start_time,
-                correlation: correlation_result,
-                valid: false,
-                invalid_reason: Some(format!(
-                    "Correlation {:.3} below threshold {:.3}",
-                    peak, self.min_correlation
-                )),
-            })
-        }
+        // Create chunk result with acceptance check
+        Ok(ChunkResult::new(
+            chunk_index,
+            start_time,
+            correlation_result,
+            self.min_match_pct,
+        ))
     }
 
-    /// Aggregate chunk results into final analysis result.
+    /// Aggregate chunk results into final analysis result using delay selector.
     fn aggregate_results(
         &self,
         source_name: &str,
         chunk_results: Vec<ChunkResult>,
     ) -> AnalysisResult<SourceAnalysisResult> {
         let total_chunks = chunk_results.len();
-        let valid_chunks: Vec<&ChunkResult> = chunk_results.iter().filter(|r| r.valid).collect();
-        let valid_count = valid_chunks.len();
 
-        if valid_count == 0 {
+        // Get accepted chunks
+        let accepted_chunks: Vec<&ChunkResult> =
+            chunk_results.iter().filter(|r| r.accepted).collect();
+        let accepted_count = accepted_chunks.len();
+
+        // Check minimum accepted chunks
+        if accepted_count < self.min_accepted_chunks {
             return Err(AnalysisError::InsufficientChunks {
-                valid: 0,
-                required: 1,
+                valid: accepted_count,
+                required: self.min_accepted_chunks,
             });
         }
 
-        // Calculate median delay (more robust than mean)
-        let mut delays: Vec<f64> = valid_chunks.iter().map(|r| r.correlation.delay_ms).collect();
-        delays.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-        let median_delay = delays[delays.len() / 2];
+        // Calculate average match percentage
+        let avg_match_pct: f64 =
+            accepted_chunks.iter().map(|c| c.match_pct).sum::<f64>() / accepted_count as f64;
 
-        // Calculate mean for drift detection
-        let mean_delay: f64 = delays.iter().sum::<f64>() / delays.len() as f64;
+        // Use delay selector to choose final delay
+        let selector = get_selector(self.delay_selection_mode);
+
+        // Filter to only accepted chunks for selector
+        let accepted_for_selector: Vec<ChunkResult> = chunk_results
+            .iter()
+            .filter(|r| r.accepted)
+            .cloned()
+            .collect();
+
+        let delay = selector
+            .select(&accepted_for_selector, &self.selector_config)
+            .ok_or_else(|| AnalysisError::InsufficientChunks {
+                valid: accepted_count,
+                required: self.min_accepted_chunks,
+            })?;
+
+        // Log delay selection result
+        if let Some(ref details) = delay.details {
+            self.log(&format!(
+                "[{}] Found stable segment: {}",
+                delay.method_name, details
+            ));
+        }
+        self.log(&format!(
+            "{} delay determined: {:+} ms ({}).",
+            source_name, delay.delay_ms_rounded, delay.method_name
+        ));
 
         // Check for drift (significant variation in delays)
-        let variance: f64 = delays.iter().map(|d| (d - mean_delay).powi(2)).sum::<f64>() / delays.len() as f64;
+        let delays: Vec<f64> = accepted_chunks.iter().map(|c| c.delay_ms_raw).collect();
+        let mean_delay: f64 = delays.iter().sum::<f64>() / delays.len() as f64;
+        let variance: f64 =
+            delays.iter().map(|d| (d - mean_delay).powi(2)).sum::<f64>() / delays.len() as f64;
         let std_dev = variance.sqrt();
         let drift_detected = std_dev > 50.0; // More than 50ms variation suggests drift
 
-        // Calculate confidence (average of valid chunk correlations)
-        let confidence: f64 = valid_chunks
-            .iter()
-            .map(|r| r.correlation.correlation_peak)
-            .sum::<f64>()
-            / valid_count as f64;
+        if drift_detected {
+            self.log(&format!(
+                "[Drift] Warning: {} shows delay variation (stddev: {:.1}ms)",
+                source_name, std_dev
+            ));
+        }
 
         Ok(SourceAnalysisResult {
             source_name: source_name.to_string(),
-            delay_ms: median_delay,
-            confidence,
-            valid_chunks: valid_count,
+            delay,
+            avg_match_pct,
+            accepted_chunks: accepted_count,
             total_chunks,
             chunk_results,
             drift_detected,
-            method: self.method.name().to_string(),
+            correlation_method: self.method.name().to_string(),
         })
     }
 }
@@ -432,7 +478,7 @@ mod tests {
         // Should still get some positions (may be fewer)
         // With 5-95% of 20s = 1s to 19s, usable = 18s - 15s = 3s
         // Can fit a few chunks
-        assert!(positions.len() > 0);
+        assert!(!positions.is_empty());
     }
 
     #[test]
@@ -442,6 +488,7 @@ mod tests {
         settings.chunk_duration = 20;
         settings.use_soxr = false;
         settings.audio_peak_fit = false;
+        settings.delay_selection_mode = DelaySelectionMode::FirstStable;
 
         let analyzer = Analyzer::from_settings(&settings);
 
@@ -449,5 +496,6 @@ mod tests {
         assert_eq!(analyzer.chunk_duration, 20.0);
         assert!(!analyzer.use_soxr);
         assert!(!analyzer.use_peak_fit);
+        assert_eq!(analyzer.delay_selection_mode, DelaySelectionMode::FirstStable);
     }
 }

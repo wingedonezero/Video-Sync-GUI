@@ -39,6 +39,7 @@
 //! ```
 
 mod analyzer;
+pub mod delay_selection;
 mod ffmpeg;
 pub mod methods;
 mod peak_fit;
@@ -52,7 +53,7 @@ pub use tracks::{find_track_by_language, get_audio_tracks, AudioTrack};
 pub use peak_fit::{find_and_fit_peak, fit_peak};
 pub use types::{
     AnalysisError, AnalysisResult, AudioChunk, AudioData, ChunkResult, CorrelationResult,
-    SourceAnalysisResult,
+    DelaySelection, SourceAnalysisResult,
 };
 
 // Re-export method trait
