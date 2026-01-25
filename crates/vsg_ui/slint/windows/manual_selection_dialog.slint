@@ -24,8 +24,9 @@ export struct AttachmentSourceOption {
 
 export component ManualSelectionDialog inherits Window {
     title: "Manual Track Selection";
-    min-width: 1000px;
-    min-height: 600px;
+    min-width: 900px;
+    min-height: 500px;
+    default-font-size: 13px;
 
     in-out property <[SourceGroupData]> source-groups: [];
     in-out property <[FinalTrackData]> final-tracks: [];
@@ -60,33 +61,33 @@ export component ManualSelectionDialog inherits Window {
     callback accept();
     callback cancel();
 
-    VerticalBox {
-        padding: 8px;
-        spacing: 6px;
+    VerticalLayout {
+        padding: 6px;
+        spacing: 4px;
 
         // Info message
         if root.show-info && info-message != "": Text {
             text: info-message;
             color: #55aa55;
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 600;
         }
 
         // Main content - two panes
-        HorizontalBox {
+        HorizontalLayout {
             vertical-stretch: 1;
-            spacing: 8px;
+            spacing: 6px;
 
             // Left pane - Source tracks
-            VerticalBox {
+            VerticalLayout {
                 horizontal-stretch: 1;
 
                 ScrollView {
                     vertical-stretch: 1;
 
-                    VerticalBox {
-                        padding: 4px;
-                        spacing: 6px;
+                    VerticalLayout {
+                        padding: 2px;
+                        spacing: 4px;
 
                         for group in source-groups: SourceGroup {
                             title: group.title;
@@ -128,11 +129,12 @@ export component ManualSelectionDialog inherits Window {
             }
 
             // Right pane - Final output and attachments
-            VerticalBox {
+            VerticalLayout {
                 horizontal-stretch: 2;
+                spacing: 4px;
 
                 GroupBox {
-                    title: "Final Output (Drag to reorder)";
+                    title: "Final Output (double-click to add, right-click for options)";
                     vertical-stretch: 1;
 
                     TrackList {
@@ -152,11 +154,11 @@ export component ManualSelectionDialog inherits Window {
 
                 GroupBox {
                     title: "Attachments";
-                    max-height: 60px;
+                    max-height: 50px;
 
-                    HorizontalBox {
-                        spacing: 8px;
-                        padding: 4px;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        padding: 3px;
 
                         Text {
                             text: "Include from:";
@@ -176,9 +178,9 @@ export component ManualSelectionDialog inherits Window {
         }
 
         // Dialog buttons
-        HorizontalBox {
+        HorizontalLayout {
             alignment: end;
-            spacing: 6px;
+            spacing: 4px;
 
             Button {
                 text: "Cancel";
