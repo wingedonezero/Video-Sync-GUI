@@ -5,11 +5,11 @@ component LabelWithTip inherits HorizontalLayout {
     in property <string> label;
     in property <string> tooltip;
 
-    // Callback to show tooltip at position
-    callback request-tooltip(string, length, length);
-
     // Track if this icon is hovered (exposed for binding)
     out property <bool> icon-hovered: tip-icon.has-hover;
+    // Expose position for tooltip placement
+    out property <length> icon-x: tip-icon.absolute-position.x;
+    out property <length> icon-y: tip-icon.absolute-position.y;
 
     spacing: 4px;
 
@@ -37,11 +37,6 @@ component LabelWithTip inherits HorizontalLayout {
 
         tip-icon := TouchArea {
             mouse-cursor: help;
-
-            // Continuously update tooltip position while hovering
-            moved => {
-                root.request-tooltip(root.tooltip, self.absolute-position.x + self.mouse-x + 18px, self.absolute-position.y + self.mouse-y + 18px);
-            }
         }
     }
 }
@@ -54,10 +49,7 @@ export component SettingsWindow inherits Window {
     preferred-height: 550px;
     default-font-size: 13px;
 
-    // Global tooltip state (position and text updated by LabelWithTip callbacks)
-    property <string> tooltip-text: "";
-    property <length> tooltip-x: 0px;
-    property <length> tooltip-y: 0px;
+    // Global tooltip state - computed from which LabelWithTip is hovered
 
     // Storage settings
     in-out property <string> output-folder: "sync_output";
@@ -93,6 +85,9 @@ export component SettingsWindow inherits Window {
     in-out property <bool> multi-corr-gcc-phat: true;
     in-out property <bool> multi-corr-gcc-scot: true;
     in-out property <bool> multi-corr-whitened: true;
+
+    // Sync mode (0 = Positive Only, 1 = Allow Negative)
+    in-out property <int> sync-mode-index: 0;
 
     // Delay selection settings
     in-out property <int> delay-selection-mode-index: 0;  // 0 = Mode, 1 = Mode Clustered, 2 = Mode Early, 3 = First Stable, 4 = Average
@@ -218,7 +213,6 @@ export component SettingsWindow inherits Window {
                                 tip-analysis-mode := LabelWithTip {
                                     label: "Analysis Mode:";
                                     tooltip: "Audio Correlation analyzes audio waveforms to find sync offset. Video Diff compares video frames (slower but works when audio differs).";
-                                    request-tooltip(text, x, y) => { root.tooltip-text = text; root.tooltip-x = x; root.tooltip-y = y; }
                                 }
                                 ComboBox {
                                     model: ["Audio Correlation", "Video Diff"];
@@ -232,7 +226,6 @@ export component SettingsWindow inherits Window {
                                 tip-corr-method := LabelWithTip {
                                     label: "Correlation Method:";
                                     tooltip: "SCC: Standard cross-correlation, good general purpose.\nGCC-PHAT: Phase-based, robust to volume differences.\nGCC-SCOT: Better when one source has more noise.\nWhitened: Robust to spectral/EQ differences.";
-                                    request-tooltip(text, x, y) => { root.tooltip-text = text; root.tooltip-x = x; root.tooltip-y = y; }
                                 }
                                 ComboBox {
                                     model: ["Standard (SCC)", "Phase (GCC-PHAT)", "GCC-SCOT", "Whitened"];
@@ -243,10 +236,22 @@ export component SettingsWindow inherits Window {
 
                             HorizontalLayout {
                                 spacing: 8px;
+                                tip-sync-mode := LabelWithTip {
+                                    label: "Sync Mode:";
+                                    tooltip: "Positive Only: Shifts all delays so none are negative (required for mkvmerge delay application).\nAllow Negative: Keeps original delay values which may include negative offsets.";
+                                }
+                                ComboBox {
+                                    model: ["Positive Only", "Allow Negative"];
+                                    current-index <=> sync-mode-index;
+                                    horizontal-stretch: 1;
+                                }
+                            }
+
+                            HorizontalLayout {
+                                spacing: 8px;
                                 tip-chunk-count := LabelWithTip {
                                     label: "Number of Chunks:";
                                     tooltip: "How many audio segments to analyze. More chunks = more reliable but slower. 10 is usually sufficient.";
-                                    request-tooltip(text, x, y) => { root.tooltip-text = text; root.tooltip-x = x; root.tooltip-y = y; }
                                 }
                                 SpinBox {
                                     value <=> chunk-count;
@@ -262,7 +267,6 @@ export component SettingsWindow inherits Window {
                                 tip-chunk-dur := LabelWithTip {
                                     label: "Chunk Duration (sec):";
                                     tooltip: "Length of each audio segment in seconds. Longer chunks are more accurate but use more memory. 15s is a good default.";
-                                    request-tooltip(text, x, y) => { root.tooltip-text = text; root.tooltip-x = x; root.tooltip-y = y; }
                                 }
                                 SpinBox {
                                     value <=> chunk-duration;
@@ -278,7 +282,6 @@ export component SettingsWindow inherits Window {
                                 tip-min-match := LabelWithTip {
                                     label: "Min Match %:";
                                     tooltip: "Minimum correlation confidence required to accept a chunk result. Lower values accept more results but may include false matches.";
-                                    request-tooltip(text, x, y) => { root.tooltip-text = text; root.tooltip-x = x; root.tooltip-y = y; }
                                 }
                                 SpinBox {
                                     value: round(min-match-pct);
@@ -532,19 +535,43 @@ export component SettingsWindow inherits Window {
                             padding: 12px;
                             spacing: 8px;
 
-                            CheckBox {
-                                text: "Use High-Quality Resampling (SoXR)";
-                                checked <=> use-soxr;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                CheckBox {
+                                    text: "Use High-Quality Resampling (SoXR)";
+                                    checked <=> use-soxr;
+                                }
+                                tip-soxr := LabelWithTip {
+                                    label: "";
+                                    tooltip: "SoXR provides higher quality audio resampling compared to FFmpeg's default. Slightly slower but more accurate for sync detection.";
+                                }
+                                Rectangle { horizontal-stretch: 1; }
                             }
 
-                            CheckBox {
-                                text: "Enable Sub-Sample Peak Fitting";
-                                checked <=> audio-peak-fit;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                CheckBox {
+                                    text: "Enable Sub-Sample Peak Fitting";
+                                    checked <=> audio-peak-fit;
+                                }
+                                tip-peak-fit := LabelWithTip {
+                                    label: "";
+                                    tooltip: "Uses quadratic interpolation to achieve sub-sample accuracy in delay detection. Improves precision from ~20ms to ~1ms at 48kHz.";
+                                }
+                                Rectangle { horizontal-stretch: 1; }
                             }
 
-                            CheckBox {
-                                text: "Multi-Correlation Comparison (Analyze Only)";
-                                checked <=> multi-correlation-enabled;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                CheckBox {
+                                    text: "Multi-Correlation Comparison (Analyze Only)";
+                                    checked <=> multi-correlation-enabled;
+                                }
+                                tip-multi-corr := LabelWithTip {
+                                    label: "";
+                                    tooltip: "Runs multiple correlation methods on the same data and compares results. Useful for troubleshooting difficult sync scenarios.";
+                                }
+                                Rectangle { horizontal-stretch: 1; }
                             }
 
                             // Method selection (shown when multi-correlation is enabled)
@@ -797,12 +824,50 @@ export component SettingsWindow inherits Window {
     }
 
     // Global tooltip overlay - rendered LAST so it's always on top
-    // Visibility bound to any tooltip icon being hovered
-    property <bool> any-tooltip-hovered: tip-analysis-mode.icon-hovered || tip-corr-method.icon-hovered || tip-chunk-count.icon-hovered || tip-chunk-dur.icon-hovered || tip-min-match.icon-hovered;
+    // Pure binding approach: compute text and position based on which icon is hovered
+    property <bool> any-tooltip-hovered:
+        tip-analysis-mode.icon-hovered || tip-corr-method.icon-hovered || tip-sync-mode.icon-hovered ||
+        tip-chunk-count.icon-hovered || tip-chunk-dur.icon-hovered || tip-min-match.icon-hovered ||
+        tip-soxr.icon-hovered || tip-peak-fit.icon-hovered || tip-multi-corr.icon-hovered;
 
-    if root.any-tooltip-hovered && root.tooltip-text != "": Rectangle {
-        x: min(max(root.tooltip-x, 8px), root.width - tooltip-content.preferred-width - 32px);
-        y: min(max(root.tooltip-y, 8px), root.height - tooltip-content.preferred-height - 32px);
+    // Compute tooltip text based on which is hovered
+    property <string> active-tooltip-text:
+        tip-analysis-mode.icon-hovered ? tip-analysis-mode.tooltip :
+        tip-corr-method.icon-hovered ? tip-corr-method.tooltip :
+        tip-sync-mode.icon-hovered ? tip-sync-mode.tooltip :
+        tip-chunk-count.icon-hovered ? tip-chunk-count.tooltip :
+        tip-chunk-dur.icon-hovered ? tip-chunk-dur.tooltip :
+        tip-min-match.icon-hovered ? tip-min-match.tooltip :
+        tip-soxr.icon-hovered ? tip-soxr.tooltip :
+        tip-peak-fit.icon-hovered ? tip-peak-fit.tooltip :
+        tip-multi-corr.icon-hovered ? tip-multi-corr.tooltip : "";
+
+    // Compute tooltip position based on which is hovered
+    property <length> active-tooltip-x:
+        tip-analysis-mode.icon-hovered ? tip-analysis-mode.icon-x + 24px :
+        tip-corr-method.icon-hovered ? tip-corr-method.icon-x + 24px :
+        tip-sync-mode.icon-hovered ? tip-sync-mode.icon-x + 24px :
+        tip-chunk-count.icon-hovered ? tip-chunk-count.icon-x + 24px :
+        tip-chunk-dur.icon-hovered ? tip-chunk-dur.icon-x + 24px :
+        tip-min-match.icon-hovered ? tip-min-match.icon-x + 24px :
+        tip-soxr.icon-hovered ? tip-soxr.icon-x + 24px :
+        tip-peak-fit.icon-hovered ? tip-peak-fit.icon-x + 24px :
+        tip-multi-corr.icon-hovered ? tip-multi-corr.icon-x + 24px : 0px;
+
+    property <length> active-tooltip-y:
+        tip-analysis-mode.icon-hovered ? tip-analysis-mode.icon-y + 24px :
+        tip-corr-method.icon-hovered ? tip-corr-method.icon-y + 24px :
+        tip-sync-mode.icon-hovered ? tip-sync-mode.icon-y + 24px :
+        tip-chunk-count.icon-hovered ? tip-chunk-count.icon-y + 24px :
+        tip-chunk-dur.icon-hovered ? tip-chunk-dur.icon-y + 24px :
+        tip-min-match.icon-hovered ? tip-min-match.icon-y + 24px :
+        tip-soxr.icon-hovered ? tip-soxr.icon-y + 24px :
+        tip-peak-fit.icon-hovered ? tip-peak-fit.icon-y + 24px :
+        tip-multi-corr.icon-hovered ? tip-multi-corr.icon-y + 24px : 0px;
+
+    if root.any-tooltip-hovered && root.active-tooltip-text != "": Rectangle {
+        x: min(max(root.active-tooltip-x, 8px), root.width - tooltip-content.preferred-width - 32px);
+        y: min(max(root.active-tooltip-y, 8px), root.height - tooltip-content.preferred-height - 32px);
         width: tooltip-content.preferred-width + 24px;
         height: tooltip-content.preferred-height + 16px;
         background: #1e1e1e;
@@ -817,7 +882,7 @@ export component SettingsWindow inherits Window {
         tooltip-content := Text {
             x: 12px;
             y: 8px;
-            text: root.tooltip-text;
+            text: root.active-tooltip-text;
             color: #f5f5f5;
             font-size: 13px;
             wrap: word-wrap;

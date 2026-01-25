@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use slint::ComponentHandle;
 use vsg_core::config::Settings;
-use vsg_core::models::{AnalysisMode, CorrelationMethod, DelaySelectionMode, FilteringMethod, SnapMode};
+use vsg_core::models::{AnalysisMode, CorrelationMethod, DelaySelectionMode, FilteringMethod, SnapMode, SyncMode};
 
 use crate::ui::SettingsWindow;
 
@@ -36,6 +36,10 @@ pub fn populate_settings_window(settings: &SettingsWindow, cfg: &Settings) {
         CorrelationMethod::GccPhat => 1,
         CorrelationMethod::GccScot => 2,
         CorrelationMethod::Whitened => 3,
+    });
+    settings.set_sync_mode_index(match cfg.analysis.sync_mode {
+        SyncMode::PositiveOnly => 0,
+        SyncMode::AllowNegative => 1,
     });
     settings.set_lang_source1(cfg.analysis.lang_source1.clone().unwrap_or_default().into());
     settings.set_lang_others(cfg.analysis.lang_others.clone().unwrap_or_default().into());
@@ -115,6 +119,10 @@ pub fn read_settings_from_window(settings: &SettingsWindow, cfg: &mut Settings) 
         1 => CorrelationMethod::GccPhat,
         2 => CorrelationMethod::GccScot,
         _ => CorrelationMethod::Whitened,
+    };
+    cfg.analysis.sync_mode = match settings.get_sync_mode_index() {
+        0 => SyncMode::PositiveOnly,
+        _ => SyncMode::AllowNegative,
     };
     let lang1 = settings.get_lang_source1().to_string();
     cfg.analysis.lang_source1 = if lang1.is_empty() { None } else { Some(lang1) };

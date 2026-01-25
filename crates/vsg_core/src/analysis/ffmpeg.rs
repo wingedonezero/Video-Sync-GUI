@@ -311,6 +311,131 @@ pub fn extract_full_audio(
     Ok(AudioData::new(samples, sample_rate))
 }
 
+/// Container delay information for a stream.
+#[derive(Debug, Clone)]
+pub struct StreamDelay {
+    /// Stream index.
+    pub index: usize,
+    /// Stream type ("audio", "video", "subtitle").
+    pub stream_type: String,
+    /// Language tag if available.
+    pub language: Option<String>,
+    /// Container delay in milliseconds (start_time relative to 0).
+    pub delay_ms: f64,
+}
+
+/// Get container delays for all streams in a media file.
+///
+/// Container delays come from the "start_time" field in ffprobe output.
+/// These delays are embedded in the container and affect when each stream
+/// starts playing relative to the container timeline.
+///
+/// # Returns
+/// Vector of StreamDelay for each stream in the file.
+pub fn get_container_delays(input_path: &Path) -> AnalysisResult<Vec<StreamDelay>> {
+    if !input_path.exists() {
+        return Err(AnalysisError::SourceNotFound(
+            input_path.display().to_string(),
+        ));
+    }
+
+    // Use ffprobe with JSON output to get stream information
+    let output = Command::new("ffprobe")
+        .arg("-v")
+        .arg("quiet")
+        .arg("-print_format")
+        .arg("json")
+        .arg("-show_streams")
+        .arg(input_path)
+        .output()
+        .map_err(|e| AnalysisError::FfmpegError(format!("Failed to run ffprobe: {}", e)))?;
+
+    if !output.status.success() {
+        return Err(AnalysisError::FfmpegError(
+            "ffprobe failed to get stream info".to_string(),
+        ));
+    }
+
+    // Parse JSON output
+    let json_str = String::from_utf8_lossy(&output.stdout);
+    let json: serde_json::Value = serde_json::from_str(&json_str)
+        .map_err(|e| AnalysisError::FfmpegError(format!("Failed to parse ffprobe JSON: {}", e)))?;
+
+    let mut delays = Vec::new();
+
+    if let Some(streams) = json.get("streams").and_then(|s| s.as_array()) {
+        for (idx, stream) in streams.iter().enumerate() {
+            let stream_type = stream
+                .get("codec_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+
+            // Get start_time - this is the container delay
+            let start_time = stream
+                .get("start_time")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(0.0);
+
+            // Convert to milliseconds
+            let delay_ms = start_time * 1000.0;
+
+            // Get language from tags
+            let language = stream
+                .get("tags")
+                .and_then(|t| t.get("language"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+
+            delays.push(StreamDelay {
+                index: idx,
+                stream_type,
+                language,
+                delay_ms,
+            });
+        }
+    }
+
+    Ok(delays)
+}
+
+/// Get container delay for audio streams, relative to video.
+///
+/// This calculates the audio-to-video delay, which is what matters for sync.
+/// If the video starts at 100ms and audio starts at 150ms, the relative
+/// audio delay is +50ms.
+///
+/// # Returns
+/// Map of audio stream index -> relative delay in milliseconds
+pub fn get_audio_container_delays_relative(
+    input_path: &Path,
+) -> AnalysisResult<std::collections::HashMap<usize, f64>> {
+    let delays = get_container_delays(input_path)?;
+
+    // Find video stream delay (use first video track)
+    let video_delay = delays
+        .iter()
+        .find(|d| d.stream_type == "video")
+        .map(|d| d.delay_ms)
+        .unwrap_or(0.0);
+
+    // Calculate relative delays for audio streams
+    let mut audio_delays = std::collections::HashMap::new();
+    let mut audio_idx = 0;
+
+    for delay in &delays {
+        if delay.stream_type == "audio" {
+            // Relative delay = audio start time - video start time
+            let relative_delay = delay.delay_ms - video_delay;
+            audio_delays.insert(audio_idx, relative_delay);
+            audio_idx += 1;
+        }
+    }
+
+    Ok(audio_delays)
+}
+
 /// Get the duration of a media file using FFprobe.
 pub fn get_duration(input_path: &Path) -> AnalysisResult<f64> {
     if !input_path.exists() {

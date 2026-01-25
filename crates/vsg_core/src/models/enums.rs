@@ -89,6 +89,56 @@ pub enum JobStatus {
     Failed,
 }
 
+/// Sync mode controls how negative delays are handled.
+///
+/// When multiple sources are merged, some may need negative delays
+/// (meaning they need to start before the reference). This affects
+/// mkvmerge compatibility.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum SyncMode {
+    /// Apply global shift to eliminate negative delays.
+    /// All tracks shifted so none have negative delay.
+    /// Required when secondary audio tracks are being merged.
+    #[default]
+    #[serde(rename = "positive_only")]
+    PositiveOnly,
+    /// Allow negative delays (no global shift).
+    /// Use when you know your player/workflow handles negatives.
+    #[serde(rename = "allow_negative")]
+    AllowNegative,
+}
+
+impl SyncMode {
+    /// Get the display name for this mode.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::PositiveOnly => "Positive Only (shift negatives)",
+            Self::AllowNegative => "Allow Negative Delays",
+        }
+    }
+
+    /// Get all available modes.
+    pub fn all() -> &'static [SyncMode] {
+        &[Self::PositiveOnly, Self::AllowNegative]
+    }
+
+    /// Create from index (for UI combo boxes).
+    pub fn from_index(index: usize) -> Self {
+        Self::all().get(index).copied().unwrap_or_default()
+    }
+
+    /// Get index of this mode (for UI combo boxes).
+    pub fn to_index(&self) -> usize {
+        Self::all().iter().position(|m| m == self).unwrap_or(0)
+    }
+}
+
+impl std::fmt::Display for SyncMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name())
+    }
+}
+
 /// Audio correlation algorithm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum CorrelationMethod {
