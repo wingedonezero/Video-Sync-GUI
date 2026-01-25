@@ -1,0 +1,113 @@
+// SourceGroup - Collapsible group of tracks from a single source.
+// Used in the left pane of ManualSelectionDialog.
+
+import { VerticalBox, HorizontalBox, Button, GroupBox } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { TrackListItem, TrackWidgetData } from "track_widget.slint";
+
+export component SourceGroup inherits Rectangle {
+    in property <string> title: "Source";
+    in property <string> source-key: "";  // e.g., "Source 1", "Source 2"
+    in property <[TrackWidgetData]> tracks: [];
+    in property <bool> show-configure-button: true;  // Hide for External group
+
+    // Which tracks are blocked (e.g., video from non-reference)
+    in property <[bool]> blocked-tracks: [];
+
+    // Collapsible state
+    in-out property <bool> expanded: true;
+
+    // Callbacks
+    callback track-double-clicked(int);  // track id
+    callback track-context-menu(int);    // track id
+    callback configure-correlation();
+
+    background: Theme.surface;
+    border-radius: Theme.radius-md;
+
+    VerticalBox {
+        padding: 0px;
+        spacing: 0px;
+
+        // Header row
+        header := HorizontalBox {
+            padding: Theme.padding-sm;
+            spacing: Theme.spacing-sm;
+
+            // Collapse toggle
+            collapse-btn := Rectangle {
+                width: 20px;
+                height: 20px;
+                background: collapse-touch.has-hover ? Theme.surface-variant : transparent;
+                border-radius: Theme.radius-sm;
+
+                Text {
+                    text: root.expanded ? "▼" : "►";
+                    font-size: Theme.font-sm;
+                    color: Theme.text-secondary;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                collapse-touch := TouchArea {
+                    clicked => {
+                        root.expanded = !root.expanded;
+                    }
+                }
+            }
+
+            // Title
+            Text {
+                text: root.title;
+                font-weight: 600;
+                font-size: Theme.font-lg;
+                color: Theme.text-primary;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+            }
+
+            // Track count
+            Text {
+                text: "(" + tracks.length + " tracks)";
+                font-size: Theme.font-sm;
+                color: Theme.text-muted;
+                vertical-alignment: center;
+            }
+
+            // Configure correlation button (for Source 2/3)
+            if root.show-configure-button && root.source-key != "Source 1" && root.source-key != "External": Button {
+                text: "Configure...";
+                clicked => { root.configure-correlation(); }
+            }
+        }
+
+        // Content (collapsible)
+        if root.expanded: content := VerticalBox {
+            padding-left: Theme.padding-md;
+            padding-right: Theme.padding-sm;
+            padding-bottom: Theme.padding-sm;
+            spacing: Theme.spacing-xs;
+
+            for track[idx] in tracks: TrackListItem {
+                data: track;
+                is-blocked: idx < blocked-tracks.length ? blocked-tracks[idx] : false;
+
+                double-clicked => {
+                    root.track-double-clicked(track.id);
+                }
+
+                context-menu-requested => {
+                    root.track-context-menu(track.id);
+                }
+            }
+
+            // Empty state
+            if tracks.length == 0: Text {
+                text: "No tracks available";
+                font-size: Theme.font-sm;
+                color: Theme.text-muted;
+                font-italic: true;
+            }
+        }
+    }
+}

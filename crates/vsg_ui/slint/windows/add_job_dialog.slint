@@ -1,0 +1,179 @@
+// AddJobDialog - Dialog for adding source files and discovering jobs.
+// Users can add multiple source inputs, browse/drag-drop files, and discover matching jobs.
+
+import { VerticalBox, HorizontalBox, Button, ScrollView, LineEdit } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { SourceInput } from "../components/source_input.slint";
+
+// Data for a single source input
+export struct SourceInputData {
+    index: int,
+    path: string,
+    is-reference: bool,  // true for Source 1
+}
+
+// Source input row with remove button (defined before use)
+component SourceInputRow inherits Rectangle {
+    in property <int> index;
+    in-out property <string> path;
+    in property <bool> is-reference;
+    in property <bool> can-remove: false;
+
+    callback browse-clicked();
+    callback path-changed(string);
+    callback remove-clicked();
+
+    min-height: 36px;
+
+    HorizontalBox {
+        spacing: Theme.spacing-sm;
+
+        // Label
+        Text {
+            text: is-reference ? "Source " + index + " (Reference):" : "Source " + index + ":";
+            font-size: Theme.font-md;
+            color: Theme.text-primary;
+            vertical-alignment: center;
+            min-width: 140px;
+        }
+
+        // Path input with drop support
+        DropArea {
+            horizontal-stretch: 1;
+
+            dropped(event) => {
+                if (event.mime-type == "text/uri-list") {
+                    root.path-changed(event.data);
+                }
+            }
+
+            LineEdit {
+                text <=> root.path;
+                placeholder-text: "Drop file here or browse...";
+                horizontal-stretch: 1;
+
+                edited => {
+                    root.path-changed(root.path);
+                }
+            }
+        }
+
+        // Browse button
+        Button {
+            text: "Browse...";
+            clicked => { root.browse-clicked(); }
+        }
+
+        // Remove button (only for non-reference sources when more than 2)
+        if root.can-remove: Button {
+            text: "X";
+            max-width: 32px;
+            clicked => { root.remove-clicked(); }
+        }
+    }
+}
+
+export component AddJobDialog inherits Window {
+    title: "Add Job(s) to Queue";
+    min-width: 700px;
+    min-height: 350px;
+    preferred-width: 750px;
+    preferred-height: 400px;
+    default-font-size: 13px;
+
+    // Dialog state
+    in-out property <[SourceInputData]> sources: [
+        { index: 1, path: "", is-reference: true },
+        { index: 2, path: "", is-reference: false },
+    ];
+    in-out property <string> error-message: "";
+    in-out property <bool> is-processing: false;
+
+    // Result - set by Rust when jobs are discovered
+    out property <bool> accepted: false;
+
+    // Callbacks for Rust logic
+    callback add-source();
+    callback remove-source(int);  // source index
+    callback browse-source(int);  // source index
+    callback source-path-changed(int, string);  // source index, new path
+    callback find-and-add-jobs();
+    callback cancel();
+
+    VerticalBox {
+        padding: Theme.padding-lg;
+        spacing: Theme.spacing-md;
+
+        // Instructions
+        Text {
+            text: "Add source files to discover jobs. Source 1 is the reference for sync analysis.";
+            font-size: Theme.font-sm;
+            color: Theme.text-secondary;
+            wrap: word-wrap;
+        }
+
+        // Scrollable source inputs area
+        ScrollView {
+            vertical-stretch: 1;
+            min-height: 150px;
+
+            VerticalBox {
+                spacing: Theme.spacing-sm;
+
+                for source[idx] in sources: SourceInputRow {
+                    index: source.index;
+                    path: source.path;
+                    is-reference: source.is-reference;
+                    can-remove: sources.length > 2 && !source.is-reference;
+
+                    browse-clicked => { root.browse-source(source.index); }
+                    path-changed(p) => { root.source-path-changed(source.index, p); }
+                    remove-clicked => { root.remove-source(source.index); }
+                }
+            }
+        }
+
+        // Add source button
+        HorizontalBox {
+            alignment: start;
+
+            Button {
+                text: "+ Add Another Source";
+                enabled: sources.length < 10;  // Reasonable limit
+                clicked => { root.add-source(); }
+            }
+        }
+
+        // Error message (if any)
+        if error-message != "": Rectangle {
+            background: #442222;
+            border-radius: Theme.radius-sm;
+            padding: Theme.padding-sm;
+
+            Text {
+                text: error-message;
+                color: Theme.error;
+                font-size: Theme.font-sm;
+                wrap: word-wrap;
+            }
+        }
+
+        // Dialog buttons
+        HorizontalBox {
+            alignment: end;
+            spacing: Theme.spacing-sm;
+
+            Button {
+                text: "Cancel";
+                enabled: !is-processing;
+                clicked => { root.cancel(); }
+            }
+
+            Button {
+                text: is-processing ? "Discovering..." : "Find & Add Jobs";
+                enabled: !is-processing;
+                clicked => { root.find-and-add-jobs(); }
+            }
+        }
+    }
+}

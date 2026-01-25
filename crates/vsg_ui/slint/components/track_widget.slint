@@ -1,0 +1,242 @@
+// TrackWidget - Reusable component for displaying a single track in the final list.
+// Shows track summary, badges, and inline controls for configuration.
+
+import { HorizontalBox, VerticalBox, CheckBox, ComboBox, Button } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+
+// Data structure for track display (populated from Rust)
+export struct TrackWidgetData {
+    // Identity
+    id: int,
+    source: string,
+    track-type: string,  // "video", "audio", "subtitles"
+    codec-id: string,
+
+    // Display text
+    summary: string,           // e.g., "[Source 1] [V-0] H.265, 1920x1080"
+    badges: string,            // e.g., "Default | Styled"
+    options-summary: string,   // e.g., "└ ⚙ OCR, →ASS, 1.2x Size"
+
+    // State flags
+    is-default: bool,
+    is-forced: bool,
+    has-custom-name: bool,
+    is-generated: bool,
+    has-style-patch: bool,
+    has-sync-exclusions: bool,
+
+    // Sync configuration (for external subs)
+    sync-to-source: string,
+}
+
+export component TrackWidget inherits Rectangle {
+    // Input data
+    in property <TrackWidgetData> data;
+
+    // Sync source options for dropdown
+    in property <[string]> sync-source-options: [];
+
+    // Visibility controls (computed from track type)
+    property <bool> is-subtitles: data.track-type == "subtitles";
+    property <bool> is-external: data.source == "External";
+    property <bool> show-sync-dropdown: is-subtitles && is-external;
+    property <bool> show-forced: is-subtitles;
+    property <bool> show-style-editor: is-subtitles;
+
+    // Callbacks for user interactions
+    callback default-changed(bool);
+    callback forced-changed(bool);
+    callback name-changed(bool);
+    callback sync-source-changed(string);
+    callback settings-clicked();
+    callback style-editor-clicked();
+
+    // Expose checked states for two-way binding
+    in-out property <bool> is-default: data.is-default;
+    in-out property <bool> is-forced: data.is-forced;
+    in-out property <bool> has-custom-name: data.has-custom-name;
+
+    min-height: 52px;
+    background: touch.has-hover ? Theme.surface-variant : transparent;
+    border-radius: Theme.radius-sm;
+
+    touch := TouchArea {
+        // Allow clicks to pass through to child controls
+    }
+
+    VerticalBox {
+        padding: Theme.padding-xs;
+        spacing: Theme.spacing-xs;
+
+        // Top row: summary + badges
+        HorizontalBox {
+            spacing: Theme.spacing-sm;
+
+            // Summary (main track description)
+            Text {
+                text: data.summary;
+                font-weight: 700;
+                font-size: Theme.font-md;
+                color: Theme.text-primary;
+                horizontal-stretch: 1;
+                overflow: elide;
+            }
+
+            // Badges (status indicators)
+            if data.badges != "": Text {
+                text: data.badges;
+                font-weight: 600;
+                font-size: Theme.font-sm;
+                color: Theme.warning;
+            }
+        }
+
+        // Options summary line (if any special options set)
+        if data.options-summary != "": Text {
+            text: data.options-summary;
+            font-size: Theme.font-sm;
+            color: Theme.text-secondary;
+        }
+
+        // Bottom row: controls
+        HorizontalBox {
+            spacing: Theme.spacing-sm;
+            alignment: end;
+
+            // Sync dropdown (external subs only)
+            if root.show-sync-dropdown: HorizontalBox {
+                spacing: Theme.spacing-xs;
+
+                Text {
+                    text: "Sync to:";
+                    font-size: Theme.font-sm;
+                    color: Theme.text-secondary;
+                    vertical-alignment: center;
+                }
+
+                ComboBox {
+                    model: sync-source-options;
+                    current-value: data.sync-to-source;
+                    min-width: 100px;
+
+                    selected(val) => {
+                        root.sync-source-changed(val);
+                    }
+                }
+            }
+
+            // Default checkbox (all track types)
+            CheckBox {
+                text: "Default";
+                checked <=> root.is-default;
+
+                toggled => {
+                    root.default-changed(root.is-default);
+                }
+            }
+
+            // Forced checkbox (subtitles only)
+            if root.show-forced: CheckBox {
+                text: "Forced";
+                checked <=> root.is-forced;
+
+                toggled => {
+                    root.forced-changed(root.is-forced);
+                }
+            }
+
+            // Set Name checkbox
+            CheckBox {
+                text: "Set Name";
+                checked <=> root.has-custom-name;
+
+                toggled => {
+                    root.name-changed(root.has-custom-name);
+                }
+            }
+
+            // Style Editor button (subtitles only)
+            if root.show-style-editor: Button {
+                text: "Style Editor...";
+                clicked => { root.style-editor-clicked(); }
+            }
+
+            // Settings button (all track types)
+            Button {
+                text: "Settings...";
+                clicked => { root.settings-clicked(); }
+            }
+        }
+    }
+}
+
+// Compact version for source lists (double-click to add)
+export component TrackListItem inherits Rectangle {
+    in property <TrackWidgetData> data;
+    in property <bool> is-blocked: false;  // e.g., video from non-reference source
+
+    callback double-clicked();
+    callback context-menu-requested();
+
+    min-height: 36px;
+    background: touch.has-hover ? Theme.surface-variant : transparent;
+    border-radius: Theme.radius-sm;
+    opacity: is-blocked ? 0.5 : 1.0;
+
+    touch := TouchArea {
+        mouse-cursor: is-blocked ? not-allowed : pointer;
+
+        double-clicked => {
+            if (!root.is-blocked) {
+                root.double-clicked();
+            }
+        }
+
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.right && event.kind == PointerEventKind.up) {
+                root.context-menu-requested();
+            }
+        }
+    }
+
+    HorizontalBox {
+        padding: Theme.padding-sm;
+        spacing: Theme.spacing-sm;
+
+        // Track type indicator
+        Rectangle {
+            width: 4px;
+            height: 100%;
+            border-radius: 2px;
+            background: data.track-type == "video" ? Theme.video-track :
+                        data.track-type == "audio" ? Theme.audio-track :
+                        Theme.subtitle-track;
+        }
+
+        // Summary text
+        Text {
+            text: data.summary;
+            font-size: Theme.font-md;
+            color: root.is-blocked ? Theme.text-muted : Theme.text-primary;
+            horizontal-stretch: 1;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+
+        // Badges
+        if data.badges != "": Text {
+            text: data.badges;
+            font-size: Theme.font-sm;
+            color: Theme.warning;
+            vertical-alignment: center;
+        }
+
+        // Blocked indicator
+        if root.is-blocked: Text {
+            text: "(blocked)";
+            font-size: Theme.font-xs;
+            color: Theme.text-muted;
+            vertical-alignment: center;
+        }
+    }
+}
