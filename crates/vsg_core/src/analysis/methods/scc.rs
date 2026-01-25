@@ -3,6 +3,8 @@
 //! Uses FFT-based cross-correlation for efficient computation.
 //! This is the primary method for audio sync analysis.
 
+use std::sync::Mutex;
+
 use rustfft::{num_complex::Complex, FftPlanner};
 
 use crate::analysis::types::{AnalysisError, AnalysisResult, AudioChunk, CorrelationResult};
@@ -16,18 +18,26 @@ use super::CorrelationMethod;
 pub struct Scc {
     /// Whether to normalize the correlation output.
     normalize: bool,
+    /// Cached FFT planner for efficiency (plans are reused across correlations).
+    planner: Mutex<FftPlanner<f64>>,
 }
 
 impl Scc {
     /// Create a new SCC correlator.
     pub fn new() -> Self {
-        Self { normalize: true }
+        Self {
+            normalize: true,
+            planner: Mutex::new(FftPlanner::new()),
+        }
     }
 
     /// Create a non-normalizing SCC correlator.
     #[allow(dead_code)]
     pub fn without_normalization() -> Self {
-        Self { normalize: false }
+        Self {
+            normalize: false,
+            planner: Mutex::new(FftPlanner::new()),
+        }
     }
 
     /// Compute FFT-based cross-correlation.
@@ -40,10 +50,11 @@ impl Scc {
         let correlation_len = reference.len() + other.len() - 1;
         let fft_len = correlation_len.next_power_of_two();
 
-        // Create FFT planner
-        let mut planner = FftPlanner::<f64>::new();
+        // Get cached FFT plans (planner caches plans by size)
+        let mut planner = self.planner.lock().unwrap();
         let fft = planner.plan_fft_forward(fft_len);
         let ifft = planner.plan_fft_inverse(fft_len);
+        drop(planner); // Release lock before computation
 
         // Prepare reference signal (zero-padded)
         let mut ref_complex: Vec<Complex<f64>> = reference
