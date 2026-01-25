@@ -71,9 +71,12 @@ fn main() -> cosmic::iced::Result {
     };
 
     // Application settings
+    // Disable client-side decorations and transparency for KDE/non-COSMIC desktop compatibility
     let settings = AppSettings::default()
         .size(Size::new(900.0, 700.0))
-        .antialiasing(true);
+        .antialiasing(true)
+        .client_decorations(false)
+        .transparent(false);
 
     tracing::info!("Application initialized, starting event loop");
 
