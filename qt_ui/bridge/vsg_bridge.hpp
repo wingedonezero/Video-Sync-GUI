@@ -50,6 +50,31 @@ inline std::vector<vsg::AnalysisResult> runAnalysis(const QStringList& paths) {
     return out;
 }
 
+/// Poll for next log message - returns empty string if no message
+inline QString pollLog() {
+    auto msg = vsg::bridge_poll_log();
+    if (msg.has_message) {
+        return QString::fromStdString(std::string(msg.message));
+    }
+    return QString();
+}
+
+/// Get current progress (percent, status message)
+inline std::pair<int, QString> getProgress() {
+    auto prog = vsg::bridge_get_progress();
+    return {prog.percent, QString::fromStdString(std::string(prog.status))};
+}
+
+/// Push a log message
+inline void log(const QString& message) {
+    vsg::bridge_log(rust::String(message.toStdString()));
+}
+
+/// Clear all pending log messages
+inline void clearLogs() {
+    vsg::bridge_clear_logs();
+}
+
 /// Check if bridge is available
 inline constexpr bool isAvailable() { return true; }
 
@@ -61,6 +86,7 @@ inline constexpr bool isAvailable() { return true; }
 #include <QString>
 #include <QStringList>
 #include <vector>
+#include <utility>
 
 namespace VsgBridge {
 
@@ -144,6 +170,18 @@ inline QString version() {
 inline std::vector<AnalysisResult> runAnalysis(const QStringList&) {
     return {};
 }
+
+inline QString pollLog() {
+    return QString();
+}
+
+inline std::pair<int, QString> getProgress() {
+    return {0, QString()};
+}
+
+inline void log(const QString&) {}
+
+inline void clearLogs() {}
 
 inline constexpr bool isAvailable() { return false; }
 

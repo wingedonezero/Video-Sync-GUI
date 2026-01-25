@@ -11,14 +11,39 @@
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QScrollBar>
+#include <QTimer>
+#include <QApplication>
 
 MainController::MainController(MainWindow* view)
     : QObject(view)
     , m_view(view)
+    , m_logPollTimer(new QTimer(this))
 {
+    // Set up log polling timer
+    connect(m_logPollTimer, &QTimer::timeout, this, &MainController::pollLogs);
+    m_logPollTimer->start(50); // Poll every 50ms
 }
 
 MainController::~MainController() = default;
+
+void MainController::pollLogs()
+{
+    // Poll for log messages from bridge
+    if (VsgBridge::isAvailable()) {
+        QString msg = VsgBridge::pollLog();
+        while (!msg.isEmpty()) {
+            appendLog(msg);
+            msg = VsgBridge::pollLog();
+        }
+
+        // Update progress
+        auto [percent, status] = VsgBridge::getProgress();
+        if (!status.isEmpty()) {
+            updateProgress(percent);
+            updateStatus(status);
+        }
+    }
+}
 
 void MainController::applyConfigToUi()
 {
@@ -129,6 +154,9 @@ void MainController::startAnalyzeOnly()
         return;
     }
 
+    // Save paths to config
+    saveUiToConfig();
+
     // Clear previous results
     clearDelayLabels();
 
@@ -136,33 +164,40 @@ void MainController::startAnalyzeOnly()
     updateStatus("Analyzing...");
     updateProgress(0);
 
-    // Log what we're doing
-    appendLog("Starting analysis...");
-    appendLog(QString("  Source 1 (Reference): %1").arg(ref));
-    if (!sec.isEmpty()) {
-        appendLog(QString("  Source 2: %1").arg(sec));
-    }
-    if (!ter.isEmpty()) {
-        appendLog(QString("  Source 3: %1").arg(ter));
-    }
+    // Build path list
+    QStringList paths;
+    paths << ref;
+    if (!sec.isEmpty()) paths << sec;
+    if (!ter.isEmpty()) paths << ter;
 
-    // TODO: Call bridge to run analysis
-    // std::vector<std::string> paths;
-    // paths.push_back(ref.toStdString());
-    // if (!sec.isEmpty()) paths.push_back(sec.toStdString());
-    // if (!ter.isEmpty()) paths.push_back(ter.toStdString());
-    //
-    // auto results = vsg::bridge_run_analysis(paths);
-    // for (const auto& result : results) {
-    //     if (result.success) {
-    //         updateDelayLabel(result.source_index, result.delay_ms);
-    //     }
-    // }
+    if (VsgBridge::isAvailable()) {
+        // Run analysis via bridge
+        // Note: This is synchronous for now - consider threading for long operations
+        auto results = VsgBridge::runAnalysis(paths);
 
-    // For now, just show a stub message
-    appendLog("Analysis not yet implemented - bridge integration pending.");
-    updateStatus("Ready");
-    updateProgress(100);
+        // Process results
+        for (const auto& result : results) {
+#ifdef VSG_HAS_BRIDGE
+            if (result.success) {
+                updateDelayLabel(result.source_index, result.delay_ms);
+            }
+#else
+            if (result.success) {
+                updateDelayLabel(result.source_index, result.delay_ms);
+            }
+#endif
+        }
+
+        // Poll any remaining log messages
+        pollLogs();
+
+        updateStatus("Ready");
+        updateProgress(100);
+    } else {
+        appendLog("[ERROR] Bridge not available - cannot run analysis");
+        updateStatus("Ready");
+        updateProgress(100);
+    }
 }
 
 void MainController::browseForPath(QLineEdit* lineEdit, const QString& caption)
@@ -197,7 +232,7 @@ void MainController::appendLog(const QString& message)
 {
     m_view->logOutput()->append(message);
 
-    // Auto-scroll to bottom (TODO: make configurable from settings)
+    // Auto-scroll to bottom
     QScrollBar* scrollBar = m_view->logOutput()->verticalScrollBar();
     scrollBar->setValue(scrollBar->maximum());
 }

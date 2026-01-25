@@ -3,8 +3,16 @@
 //! This crate provides safe FFI bindings using the CXX library.
 //! All vsg_core functionality is exposed through this bridge.
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::Mutex;
+
+use vsg_core::analysis::Analyzer;
 use vsg_core::config::{ConfigManager, ConfigSection};
+
+// Global message queue for logging from Rust to C++
+static LOG_QUEUE: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
+static PROGRESS: Mutex<(i32, String)> = Mutex::new((0, String::new()));
 
 #[cxx::bridge(namespace = "vsg")]
 mod ffi {
@@ -94,6 +102,20 @@ mod ffi {
         source_paths: Vec<String>,
     }
 
+    /// Log message from Rust
+    #[derive(Debug, Clone)]
+    struct LogMessage {
+        message: String,
+        has_message: bool,
+    }
+
+    /// Progress update
+    #[derive(Debug, Clone)]
+    struct ProgressUpdate {
+        percent: i32,
+        status: String,
+    }
+
     // =========================================================================
     // Rust functions exposed to C++
     // =========================================================================
@@ -117,11 +139,82 @@ mod ffi {
 
         /// Get vsg_core version string
         fn bridge_version() -> String;
+
+        // =====================================================================
+        // Logging functions
+        // =====================================================================
+
+        /// Poll for next log message (returns empty if none)
+        fn bridge_poll_log() -> LogMessage;
+
+        /// Get current progress
+        fn bridge_get_progress() -> ProgressUpdate;
+
+        /// Push a log message (for internal use and testing)
+        fn bridge_log(message: &str);
+
+        /// Clear all pending log messages
+        fn bridge_clear_logs();
     }
 }
 
 // =============================================================================
-// Implementation of bridge functions
+// Logging Implementation
+// =============================================================================
+
+fn bridge_log(message: &str) {
+    if let Ok(mut queue) = LOG_QUEUE.lock() {
+        queue.push_back(message.to_string());
+        // Keep queue bounded
+        while queue.len() > 1000 {
+            queue.pop_front();
+        }
+    }
+}
+
+fn bridge_poll_log() -> ffi::LogMessage {
+    if let Ok(mut queue) = LOG_QUEUE.lock() {
+        if let Some(msg) = queue.pop_front() {
+            return ffi::LogMessage {
+                message: msg,
+                has_message: true,
+            };
+        }
+    }
+    ffi::LogMessage {
+        message: String::new(),
+        has_message: false,
+    }
+}
+
+fn bridge_clear_logs() {
+    if let Ok(mut queue) = LOG_QUEUE.lock() {
+        queue.clear();
+    }
+}
+
+fn bridge_get_progress() -> ffi::ProgressUpdate {
+    if let Ok(progress) = PROGRESS.lock() {
+        ffi::ProgressUpdate {
+            percent: progress.0,
+            status: progress.1.clone(),
+        }
+    } else {
+        ffi::ProgressUpdate {
+            percent: 0,
+            status: String::new(),
+        }
+    }
+}
+
+fn set_progress(percent: i32, status: &str) {
+    if let Ok(mut progress) = PROGRESS.lock() {
+        *progress = (percent, status.to_string());
+    }
+}
+
+// =============================================================================
+// Config Implementation
 // =============================================================================
 
 fn get_config_manager() -> ConfigManager {
@@ -150,7 +243,7 @@ fn bridge_load_settings() -> ffi::AppSettings {
     let mut manager = get_config_manager();
 
     if let Err(e) = manager.load_or_create() {
-        eprintln!("Failed to load config: {}", e);
+        bridge_log(&format!("[ERROR] Failed to load config: {}", e));
         return default_app_settings();
     }
 
@@ -205,7 +298,7 @@ fn bridge_save_settings(settings: &ffi::AppSettings) -> bool {
 
     // Load existing or create new
     if let Err(e) = manager.load_or_create() {
-        eprintln!("Failed to load config for saving: {}", e);
+        bridge_log(&format!("[ERROR] Failed to load config for saving: {}", e));
         return false;
     }
 
@@ -260,7 +353,7 @@ fn bridge_save_settings(settings: &ffi::AppSettings) -> bool {
         ConfigSection::Postprocess,
     ] {
         if let Err(e) = manager.update_section(section) {
-            eprintln!("Failed to save section {:?}: {}", section, e);
+            bridge_log(&format!("[ERROR] Failed to save section {:?}: {}", section, e));
             return false;
         }
     }
@@ -268,10 +361,13 @@ fn bridge_save_settings(settings: &ffi::AppSettings) -> bool {
     true
 }
 
+// =============================================================================
+// Analysis Implementation
+// =============================================================================
+
 fn bridge_run_analysis(source_paths: &[String]) -> Vec<ffi::AnalysisResult> {
-    // TODO: Wire up to vsg_core orchestrator
-    // For now, return stub results
     if source_paths.len() < 2 {
+        bridge_log("[ERROR] Need at least 2 sources for analysis");
         return vec![ffi::AnalysisResult {
             source_index: 0,
             delay_ms: 0.0,
@@ -281,19 +377,78 @@ fn bridge_run_analysis(source_paths: &[String]) -> Vec<ffi::AnalysisResult> {
         }];
     }
 
-    // Stub: return placeholder results for each non-reference source
-    source_paths
-        .iter()
-        .skip(1) // Skip reference source
-        .enumerate()
-        .map(|(i, _path)| ffi::AnalysisResult {
-            source_index: (i + 2) as i32, // Source 2, 3, etc.
-            delay_ms: 0.0,
-            confidence: 0.0,
-            success: false,
-            error_message: "Analysis not yet implemented".to_string(),
-        })
-        .collect()
+    // Load settings for analysis config
+    let mut config_manager = get_config_manager();
+    let settings = if config_manager.load_or_create().is_ok() {
+        config_manager.settings().clone()
+    } else {
+        vsg_core::config::Settings::default()
+    };
+
+    bridge_log("=== Starting Analysis ===");
+    set_progress(0, "Initializing...");
+
+    // Convert paths
+    let paths: Vec<PathBuf> = source_paths.iter().map(PathBuf::from).collect();
+    let reference = &paths[0];
+
+    bridge_log(&format!("Reference: {}", reference.display()));
+
+    let mut results = Vec::new();
+
+    // Analyze each non-reference source
+    for (i, source) in paths.iter().skip(1).enumerate() {
+        let source_idx = i + 2; // Source 2, 3, etc.
+        bridge_log(&format!("--- Analyzing Source {} ---", source_idx));
+        bridge_log(&format!("Path: {}", source.display()));
+
+        set_progress(
+            ((i as f32 / (paths.len() - 1) as f32) * 100.0) as i32,
+            &format!("Analyzing Source {}...", source_idx),
+        );
+
+        // Create analyzer with settings
+        let analyzer = Analyzer::new(&settings.analysis);
+
+        // Run analysis
+        match analyzer.analyze(reference, source) {
+            Ok(delay_result) => {
+                let delay_ms = delay_result.delay.as_millis_f64();
+                let confidence = delay_result.confidence;
+
+                bridge_log(&format!(
+                    "[SUCCESS] Source {} delay: {:.1}ms (confidence: {:.1}%)",
+                    source_idx,
+                    delay_ms,
+                    confidence * 100.0
+                ));
+
+                results.push(ffi::AnalysisResult {
+                    source_index: source_idx as i32,
+                    delay_ms,
+                    confidence,
+                    success: true,
+                    error_message: String::new(),
+                });
+            }
+            Err(e) => {
+                bridge_log(&format!("[ERROR] Source {} analysis failed: {}", source_idx, e));
+
+                results.push(ffi::AnalysisResult {
+                    source_index: source_idx as i32,
+                    delay_ms: 0.0,
+                    confidence: 0.0,
+                    success: false,
+                    error_message: e.to_string(),
+                });
+            }
+        }
+    }
+
+    set_progress(100, "Analysis complete");
+    bridge_log("=== Analysis Complete ===");
+
+    results
 }
 
 fn bridge_discover_jobs(paths: &[String]) -> Vec<ffi::DiscoveredJob> {
