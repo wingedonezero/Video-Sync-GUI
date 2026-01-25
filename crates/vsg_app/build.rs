@@ -60,7 +60,7 @@ fn main() {
     std::fs::create_dir_all(&target_dir).ok();
 
     let src_exe = build_dir.join("video-sync-gui");
-    let dst_exe = target_dir.join("video-sync-gui");
+    let dst_exe = target_dir.join("video-sync-gui-qt");
 
     if src_exe.exists() {
         std::fs::copy(&src_exe, &dst_exe).expect("Failed to copy executable");
