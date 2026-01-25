@@ -44,6 +44,9 @@ component SourceInputRow inherits Rectangle {
 
             dropped(event) => {
                 if (event.mime-type == "text/uri-list") {
+                    // Update local path first so LineEdit shows it immediately
+                    root.path = event.data;
+                    // Then notify Rust to clean and save to model
                     root.path-changed(event.data);
                 }
             }
