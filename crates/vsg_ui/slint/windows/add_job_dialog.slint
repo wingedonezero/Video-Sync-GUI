@@ -19,16 +19,18 @@ component SourceInputRow inherits Rectangle {
     callback browse-clicked();
     callback path-changed(string);
 
-    height: 32px;
+    height: 28px;
 
-    HorizontalBox {
+    HorizontalLayout {
         spacing: 6px;
+        padding-left: 4px;
+        padding-right: 4px;
 
-        // Label (fixed width to match Qt)
+        // Label (compact width)
         Text {
             text: is-reference ? "Source " + index + " (Reference):" : "Source " + index + ":";
             vertical-alignment: center;
-            width: 140px;
+            min-width: 120px;
         }
 
         // Path input with drop support (stretches to fill)

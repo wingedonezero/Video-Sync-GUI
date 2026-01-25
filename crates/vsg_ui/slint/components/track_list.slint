@@ -11,7 +11,7 @@ export struct FinalTrackData {
     sync-source-options: [string],
 }
 
-// Single entry - compact like Qt (no visible move buttons, use context menu)
+// Single entry - very compact like Qt
 component TrackListEntry inherits Rectangle {
     in property <FinalTrackData> data;
     in property <bool> show-move-buttons: true;
@@ -29,8 +29,9 @@ component TrackListEntry inherits Rectangle {
     callback style-editor-clicked();
     callback context-menu-requested();
 
-    background: touch.has-hover ? #3a3a3a : #333333;
-    border-radius: 3px;
+    background: touch.has-hover ? #3a3a3a : #2d2d2d;
+    border-radius: 2px;
+    height: 48px;
 
     touch := TouchArea {
         pointer-event(event) => {
@@ -41,8 +42,8 @@ component TrackListEntry inherits Rectangle {
     }
 
     HorizontalLayout {
-        padding: 4px;
-        spacing: 4px;
+        padding: 2px;
+        spacing: 3px;
 
         // Track type bar
         Rectangle {
@@ -52,7 +53,7 @@ component TrackListEntry inherits Rectangle {
                         data.track.track-type == "audio" ? #55aa55 : #ddaa55;
         }
 
-        // Track widget - compact two-row layout
+        // Track widget
         TrackWidget {
             horizontal-stretch: 1;
             data: data.track;
@@ -69,7 +70,7 @@ component TrackListEntry inherits Rectangle {
         // Remove button (small X)
         Button {
             text: "×";
-            max-width: 20px;
+            max-width: 18px;
             clicked => { root.remove(); }
         }
     }
@@ -119,9 +120,9 @@ export component TrackList inherits Rectangle {
         if tracks.length > 0: ScrollView {
             vertical-stretch: 1;
 
-            VerticalBox {
-                padding: 4px;
-                spacing: 4px;
+            VerticalLayout {
+                padding: 2px;
+                spacing: 2px;
 
                 for item[idx] in tracks: TrackListEntry {
                     data: item;
