@@ -81,15 +81,18 @@ export component ManualSelectionDialog inherits Window {
         if root.show-info && info-message != "": Rectangle {
             background: #2d4a2d;
             border-radius: Theme.radius-sm;
-            padding: Theme.padding-sm;
             max-height: 36px;
 
-            Text {
-                text: info-message;
-                color: Theme.success;
-                font-weight: 600;
-                font-size: Theme.font-md;
-                vertical-alignment: center;
+            HorizontalBox {
+                padding: Theme.padding-sm;
+
+                Text {
+                    text: info-message;
+                    color: Theme.success;
+                    font-weight: 600;
+                    font-size: Theme.font-md;
+                    vertical-alignment: center;
+                }
             }
         }
 

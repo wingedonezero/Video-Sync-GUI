@@ -191,13 +191,16 @@ export component JobQueueDialog inherits Window {
             if status-message != "": Rectangle {
                 background: Theme.info;
                 border-radius: Theme.radius-sm;
-                padding: Theme.padding-sm;
                 max-height: 32px;
 
-                Text {
-                    text: status-message;
-                    color: Theme.text-primary;
-                    font-size: Theme.font-sm;
+                HorizontalBox {
+                    padding: Theme.padding-sm;
+
+                    Text {
+                        text: status-message;
+                        color: Theme.text-primary;
+                        font-size: Theme.font-sm;
+                    }
                 }
             }
 
