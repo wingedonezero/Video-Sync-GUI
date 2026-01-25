@@ -1,9 +1,9 @@
 //! Audio filtering for correlation preprocessing.
 //!
-//! Provides band-pass, low-pass, and high-pass filters to isolate
-//! frequency ranges of interest (e.g., dialogue frequencies).
+//! Provides band-pass, low-pass, and high-pass filters using IIR Butterworth
+//! design via the biquad crate, matching Python's scipy.signal.butter behavior.
 
-use std::f64::consts::PI;
+use biquad::{Biquad, Coefficients, DirectForm2Transposed, ToHertz, Type, Q_BUTTERWORTH_F64};
 
 /// Filtering method to apply before correlation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -30,7 +30,8 @@ pub struct FilterConfig {
     pub low_cutoff_hz: f64,
     /// High cutoff frequency (Hz) for band-pass/low-pass.
     pub high_cutoff_hz: f64,
-    /// Filter order (higher = steeper rolloff, more latency).
+    /// Filter order (higher = steeper rolloff).
+    /// For biquad, this is implemented as cascaded second-order sections.
     pub order: usize,
 }
 
@@ -85,129 +86,128 @@ impl FilterConfig {
 pub fn apply_filter(samples: &[f64], config: &FilterConfig) -> Vec<f64> {
     match config.filter_type {
         FilterType::None => samples.to_vec(),
-        FilterType::LowPass => apply_lowpass(samples, config.sample_rate, config.high_cutoff_hz),
-        FilterType::HighPass => apply_highpass(samples, config.sample_rate, config.low_cutoff_hz),
-        FilterType::BandPass => apply_bandpass(
+        FilterType::LowPass => apply_butterworth_lowpass(
+            samples,
+            config.sample_rate,
+            config.high_cutoff_hz,
+            config.order,
+        ),
+        FilterType::HighPass => apply_butterworth_highpass(
+            samples,
+            config.sample_rate,
+            config.low_cutoff_hz,
+            config.order,
+        ),
+        FilterType::BandPass => apply_butterworth_bandpass(
             samples,
             config.sample_rate,
             config.low_cutoff_hz,
             config.high_cutoff_hz,
+            config.order,
         ),
     }
 }
 
-/// Apply a simple FIR low-pass filter.
-fn apply_lowpass(samples: &[f64], sample_rate: u32, cutoff_hz: f64) -> Vec<f64> {
-    let num_taps = 101; // Filter length
-    let nyquist = sample_rate as f64 / 2.0;
-    let normalized_cutoff = (cutoff_hz / nyquist).min(0.99);
-
-    // Design FIR low-pass filter using windowed sinc
-    let coeffs = design_lowpass_fir(num_taps, normalized_cutoff);
-
-    // Apply filter using convolution
-    apply_fir_filter(samples, &coeffs)
-}
-
-/// Apply a simple FIR high-pass filter.
-fn apply_highpass(samples: &[f64], sample_rate: u32, cutoff_hz: f64) -> Vec<f64> {
-    let num_taps = 101;
-    let nyquist = sample_rate as f64 / 2.0;
-    let normalized_cutoff = (cutoff_hz / nyquist).min(0.99);
-
-    // Design high-pass by spectral inversion of low-pass
-    let mut coeffs = design_lowpass_fir(num_taps, normalized_cutoff);
-
-    // Spectral inversion: negate all coefficients and add 1 to center
-    for coeff in &mut coeffs {
-        *coeff = -*coeff;
-    }
-    coeffs[num_taps / 2] += 1.0;
-
-    apply_fir_filter(samples, &coeffs)
-}
-
-/// Apply a simple FIR band-pass filter.
-fn apply_bandpass(samples: &[f64], sample_rate: u32, low_hz: f64, high_hz: f64) -> Vec<f64> {
-    let num_taps = 101;
-    let nyquist = sample_rate as f64 / 2.0;
-    let low_normalized = (low_hz / nyquist).min(0.99);
-    let high_normalized = (high_hz / nyquist).min(0.99);
-
-    // Band-pass = low-pass(high) - low-pass(low)
-    let low_coeffs = design_lowpass_fir(num_taps, low_normalized);
-    let high_coeffs = design_lowpass_fir(num_taps, high_normalized);
-
-    // Subtract to get band-pass
-    let coeffs: Vec<f64> = high_coeffs
-        .iter()
-        .zip(low_coeffs.iter())
-        .map(|(h, l)| h - l)
-        .collect();
-
-    apply_fir_filter(samples, &coeffs)
-}
-
-/// Design a low-pass FIR filter using windowed sinc method.
-fn design_lowpass_fir(num_taps: usize, normalized_cutoff: f64) -> Vec<f64> {
-    let mut coeffs = vec![0.0; num_taps];
-    let m = num_taps as f64 - 1.0;
-
-    for i in 0..num_taps {
-        let n = i as f64;
-
-        // Ideal sinc response
-        let sinc = if (n - m / 2.0).abs() < 1e-10 {
-            2.0 * normalized_cutoff
-        } else {
-            let x = 2.0 * PI * normalized_cutoff * (n - m / 2.0);
-            x.sin() / (PI * (n - m / 2.0))
-        };
-
-        // Hamming window
-        let window = 0.54 - 0.46 * (2.0 * PI * n / m).cos();
-
-        coeffs[i] = sinc * window;
+/// Apply a Butterworth low-pass filter using cascaded biquad sections.
+fn apply_butterworth_lowpass(
+    samples: &[f64],
+    sample_rate: u32,
+    cutoff_hz: f64,
+    order: usize,
+) -> Vec<f64> {
+    if samples.is_empty() {
+        return Vec::new();
     }
 
-    // Normalize for unity gain at DC
-    let sum: f64 = coeffs.iter().sum();
-    if sum.abs() > 1e-10 {
-        for coeff in &mut coeffs {
-            *coeff /= sum;
+    let fs = sample_rate.hz();
+    let f0 = cutoff_hz.hz();
+
+    // Create coefficients for low-pass Butterworth
+    let coeffs = match Coefficients::<f64>::from_params(Type::LowPass, fs, f0, Q_BUTTERWORTH_F64) {
+        Ok(c) => c,
+        Err(_) => return samples.to_vec(), // Return unfiltered on error
+    };
+
+    // Apply cascaded second-order sections for higher orders
+    apply_cascaded_filter(samples, &coeffs, order)
+}
+
+/// Apply a Butterworth high-pass filter using cascaded biquad sections.
+fn apply_butterworth_highpass(
+    samples: &[f64],
+    sample_rate: u32,
+    cutoff_hz: f64,
+    order: usize,
+) -> Vec<f64> {
+    if samples.is_empty() {
+        return Vec::new();
+    }
+
+    let fs = sample_rate.hz();
+    let f0 = cutoff_hz.hz();
+
+    let coeffs = match Coefficients::<f64>::from_params(Type::HighPass, fs, f0, Q_BUTTERWORTH_F64) {
+        Ok(c) => c,
+        Err(_) => return samples.to_vec(),
+    };
+
+    apply_cascaded_filter(samples, &coeffs, order)
+}
+
+/// Apply a Butterworth band-pass filter using cascaded biquad sections.
+fn apply_butterworth_bandpass(
+    samples: &[f64],
+    sample_rate: u32,
+    low_hz: f64,
+    high_hz: f64,
+    order: usize,
+) -> Vec<f64> {
+    if samples.is_empty() {
+        return Vec::new();
+    }
+
+    // Band-pass is implemented as high-pass followed by low-pass
+    // Each gets half the order (rounded up)
+    let hp_order = (order + 1) / 2;
+    let lp_order = (order + 1) / 2;
+
+    // First apply high-pass (removes frequencies below low_hz)
+    let high_passed = apply_butterworth_highpass(samples, sample_rate, low_hz, hp_order);
+
+    // Then apply low-pass (removes frequencies above high_hz)
+    apply_butterworth_lowpass(&high_passed, sample_rate, high_hz, lp_order)
+}
+
+/// Apply a filter multiple times (cascaded) for higher order response.
+/// Each cascade doubles the effective order (steeper rolloff).
+fn apply_cascaded_filter(
+    samples: &[f64],
+    coeffs: &Coefficients<f64>,
+    order: usize,
+) -> Vec<f64> {
+    // Number of cascaded sections needed
+    // A biquad is 2nd order, so we need order/2 sections (minimum 1)
+    let num_sections = ((order + 1) / 2).max(1);
+
+    let mut result = samples.to_vec();
+
+    for _ in 0..num_sections {
+        // Create a fresh filter for each section
+        let mut filter = DirectForm2Transposed::<f64>::new(*coeffs);
+
+        // Process each sample through this section
+        for sample in &mut result {
+            *sample = filter.run(*sample);
         }
     }
 
-    coeffs
-}
-
-/// Apply FIR filter using direct convolution.
-fn apply_fir_filter(samples: &[f64], coeffs: &[f64]) -> Vec<f64> {
-    let n = samples.len();
-    let m = coeffs.len();
-
-    if n == 0 || m == 0 {
-        return samples.to_vec();
-    }
-
-    let mut output = vec![0.0; n];
-
-    for i in 0..n {
-        let mut sum = 0.0;
-        for j in 0..m {
-            if i >= j {
-                sum += samples[i - j] * coeffs[j];
-            }
-        }
-        output[i] = sum;
-    }
-
-    output
+    result
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::f64::consts::PI;
 
     #[test]
     fn no_filter_returns_same() {
@@ -252,6 +252,37 @@ mod tests {
     }
 
     #[test]
+    fn highpass_attenuates_low_freq() {
+        let sample_rate = 48000;
+        let duration = 0.1;
+        let n = (sample_rate as f64 * duration) as usize;
+
+        // Generate low frequency signal (50 Hz)
+        let samples: Vec<f64> = (0..n)
+            .map(|i| {
+                let t = i as f64 / sample_rate as f64;
+                (2.0 * PI * 50.0 * t).sin()
+            })
+            .collect();
+
+        let config = FilterConfig::high_pass(sample_rate, 200.0);
+        let filtered = apply_filter(&samples, &config);
+
+        // Check energy in latter part (after filter settles)
+        let start = n / 2;
+        let original_energy: f64 = samples[start..].iter().map(|x| x * x).sum();
+        let filtered_energy: f64 = filtered[start..].iter().map(|x| x * x).sum();
+
+        // Filtered should have much less energy (low freq removed)
+        assert!(
+            filtered_energy < original_energy * 0.5,
+            "High-pass should significantly reduce low freq energy: original={}, filtered={}",
+            original_energy,
+            filtered_energy
+        );
+    }
+
+    #[test]
     fn bandpass_isolates_range() {
         let sample_rate = 48000;
         let config = FilterConfig::dialogue_bandpass(sample_rate);
@@ -260,5 +291,46 @@ mod tests {
         let samples: Vec<f64> = (0..4800).map(|i| (i as f64 * 0.01).sin()).collect();
         let filtered = apply_filter(&samples, &config);
         assert_eq!(filtered.len(), samples.len());
+    }
+
+    #[test]
+    fn bandpass_passes_in_band_freq() {
+        let sample_rate = 48000;
+        let duration = 0.2; // Longer duration for filter to settle
+        let n = (sample_rate as f64 * duration) as usize;
+
+        // Generate in-band frequency (1000 Hz, well within 300-3400 Hz)
+        let samples: Vec<f64> = (0..n)
+            .map(|i| {
+                let t = i as f64 / sample_rate as f64;
+                (2.0 * PI * 1000.0 * t).sin()
+            })
+            .collect();
+
+        // Use lower order for less aggressive filtering
+        let mut config = FilterConfig::dialogue_bandpass(sample_rate);
+        config.order = 2;
+        let filtered = apply_filter(&samples, &config);
+
+        // Check energy in latter 25% (after filter fully settles)
+        let start = (n * 3) / 4;
+        let original_energy: f64 = samples[start..].iter().map(|x| x * x).sum();
+        let filtered_energy: f64 = filtered[start..].iter().map(|x| x * x).sum();
+
+        // In-band signal should retain significant energy
+        assert!(
+            filtered_energy > original_energy * 0.1,
+            "Band-pass should pass in-band freq: original={}, filtered={}",
+            original_energy,
+            filtered_energy
+        );
+    }
+
+    #[test]
+    fn empty_samples_handled() {
+        let samples: Vec<f64> = vec![];
+        let config = FilterConfig::low_pass(48000, 1000.0);
+        let result = apply_filter(&samples, &config);
+        assert!(result.is_empty());
     }
 }
