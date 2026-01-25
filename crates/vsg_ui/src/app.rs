@@ -13,10 +13,16 @@ use iced::window;
 use iced::{Element, Size, Subscription, Task, Theme};
 
 use vsg_core::config::{ConfigManager, Settings};
-use vsg_core::jobs::JobQueue;
+use vsg_core::jobs::{JobQueue, LayoutManager};
 
 use crate::pages;
 use crate::windows;
+
+/// Language codes matching the picker options in track_settings.rs.
+/// Index 0 = "und", 1 = "eng", 2 = "jpn", etc.
+pub const LANGUAGE_CODES: &[&str] = &[
+    "und", "eng", "jpn", "spa", "fre", "ger", "ita", "por", "rus", "chi", "kor", "ara",
+];
 
 /// Unique identifier for windows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -202,6 +208,7 @@ pub enum FolderType {
 pub struct App {
     pub config: Arc<Mutex<ConfigManager>>,
     pub job_queue: Arc<Mutex<JobQueue>>,
+    pub layout_manager: Arc<Mutex<LayoutManager>>,
 
     // Main Window State
     pub main_window_id: window::Id,
@@ -269,6 +276,7 @@ pub struct TrackWidgetState {
     pub id: usize,
     pub track_type: String,
     pub codec_id: String,
+    pub language: Option<String>,  // Original language from source
     pub summary: String,
     pub badges: String,
     pub is_blocked: bool,
@@ -291,8 +299,9 @@ pub struct FinalTrackState {
     pub is_forced: bool,
     pub sync_to_source: String,
 
-    // Custom naming
-    pub custom_lang: Option<String>,
+    // Language
+    pub original_lang: Option<String>,  // Language from source file
+    pub custom_lang: Option<String>,    // User override (None = use original)
     pub custom_name: Option<String>,
 
     // Subtitle processing options (per-track, not global!)
@@ -343,7 +352,14 @@ pub struct TrackSettingsState {
 
 impl FinalTrackState {
     /// Create a new FinalTrackState with defaults.
-    pub fn new(track_id: usize, source_key: String, track_type: String, codec_id: String, summary: String) -> Self {
+    pub fn new(
+        track_id: usize,
+        source_key: String,
+        track_type: String,
+        codec_id: String,
+        summary: String,
+        original_lang: Option<String>,
+    ) -> Self {
         Self {
             entry_id: uuid::Uuid::new_v4(),
             track_id,
@@ -354,6 +370,7 @@ impl FinalTrackState {
             is_default: false,
             is_forced: false,
             sync_to_source: "Source 1".to_string(),
+            original_lang,
             custom_lang: None,
             custom_name: None,
             perform_ocr: false,
@@ -447,11 +464,19 @@ impl App {
             cfg.settings().logging.archive_logs
         };
 
+        // Create layout manager - layouts stored in same directory as config
+        let layouts_dir = config_path
+            .parent()
+            .map(|p| p.join("layouts"))
+            .unwrap_or_else(|| PathBuf::from("layouts"));
+        let layout_manager = Arc::new(Mutex::new(LayoutManager::new(&layouts_dir)));
+
         let version_info = format!(
-            "Video Sync GUI started.\nCore version: {}\nConfig: {}\nLogs: {}\n",
+            "Video Sync GUI started.\nCore version: {}\nConfig: {}\nLogs: {}\nLayouts: {}\n",
             vsg_core::version(),
             config_path.display(),
-            logs_dir.display()
+            logs_dir.display(),
+            layouts_dir.display()
         );
 
         iced::daemon(
@@ -468,6 +493,7 @@ impl App {
                 let app = App {
                     config: config.clone(),
                     job_queue: job_queue.clone(),
+                    layout_manager: layout_manager.clone(),
 
                     main_window_id,
                     source1_path: String::new(),
@@ -745,6 +771,9 @@ impl App {
 
             Message::TrackLanguageChanged(idx) => {
                 self.track_settings.selected_language_idx = idx;
+                // Extract the language code from the selection (e.g., "jpn (Japanese)" -> "jpn")
+                let lang_code = LANGUAGE_CODES.get(idx).map(|s| s.to_string());
+                self.track_settings.custom_lang = lang_code;
                 Task::none()
             }
             Message::TrackCustomNameChanged(name) => {
