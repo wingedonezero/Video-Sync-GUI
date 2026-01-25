@@ -86,6 +86,30 @@ pub fn all_methods() -> Vec<Box<dyn CorrelationMethod>> {
     ]
 }
 
+/// Get selected correlation methods based on boolean flags.
+/// Used for multi-correlation mode where user can choose which methods to run.
+pub fn selected_methods(
+    scc: bool,
+    gcc_phat: bool,
+    gcc_scot: bool,
+    whitened: bool,
+) -> Vec<Box<dyn CorrelationMethod>> {
+    let mut methods: Vec<Box<dyn CorrelationMethod>> = Vec::new();
+    if scc {
+        methods.push(Box::new(Scc::new()));
+    }
+    if gcc_phat {
+        methods.push(Box::new(GccPhat::new()));
+    }
+    if gcc_scot {
+        methods.push(Box::new(GccScot::new()));
+    }
+    if whitened {
+        methods.push(Box::new(Whitened::new()));
+    }
+    methods
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

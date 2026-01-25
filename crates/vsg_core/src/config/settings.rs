@@ -217,6 +217,22 @@ pub struct AnalysisSettings {
     #[serde(default)]
     pub multi_correlation_enabled: bool,
 
+    /// [Multi-Correlation] Enable SCC method.
+    #[serde(default = "default_true")]
+    pub multi_corr_scc: bool,
+
+    /// [Multi-Correlation] Enable GCC-PHAT method.
+    #[serde(default = "default_true")]
+    pub multi_corr_gcc_phat: bool,
+
+    /// [Multi-Correlation] Enable GCC-SCOT method.
+    #[serde(default = "default_true")]
+    pub multi_corr_gcc_scot: bool,
+
+    /// [Multi-Correlation] Enable Whitened method.
+    #[serde(default = "default_true")]
+    pub multi_corr_whitened: bool,
+
     /// Method for selecting final delay from chunk measurements.
     #[serde(default)]
     pub delay_selection_mode: DelaySelectionMode,
@@ -301,6 +317,10 @@ impl Default for AnalysisSettings {
             filter_low_cutoff_hz: default_filter_low_cutoff(),
             filter_high_cutoff_hz: default_filter_high_cutoff(),
             multi_correlation_enabled: false,
+            multi_corr_scc: true,
+            multi_corr_gcc_phat: true,
+            multi_corr_gcc_scot: true,
+            multi_corr_whitened: true,
             delay_selection_mode: DelaySelectionMode::default(),
             first_stable_min_chunks: default_first_stable_min_chunks(),
             first_stable_skip_unstable: false,

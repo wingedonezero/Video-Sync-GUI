@@ -55,6 +55,10 @@ pub fn populate_settings_window(settings: &SettingsWindow, cfg: &Settings) {
     settings.set_use_soxr(cfg.analysis.use_soxr);
     settings.set_audio_peak_fit(cfg.analysis.audio_peak_fit);
     settings.set_multi_correlation_enabled(cfg.analysis.multi_correlation_enabled);
+    settings.set_multi_corr_scc(cfg.analysis.multi_corr_scc);
+    settings.set_multi_corr_gcc_phat(cfg.analysis.multi_corr_gcc_phat);
+    settings.set_multi_corr_gcc_scot(cfg.analysis.multi_corr_gcc_scot);
+    settings.set_multi_corr_whitened(cfg.analysis.multi_corr_whitened);
 
     // Delay selection settings
     settings.set_delay_selection_mode_index(match cfg.analysis.delay_selection_mode {
@@ -136,6 +140,10 @@ pub fn read_settings_from_window(settings: &SettingsWindow, cfg: &mut Settings) 
     cfg.analysis.use_soxr = settings.get_use_soxr();
     cfg.analysis.audio_peak_fit = settings.get_audio_peak_fit();
     cfg.analysis.multi_correlation_enabled = settings.get_multi_correlation_enabled();
+    cfg.analysis.multi_corr_scc = settings.get_multi_corr_scc();
+    cfg.analysis.multi_corr_gcc_phat = settings.get_multi_corr_gcc_phat();
+    cfg.analysis.multi_corr_gcc_scot = settings.get_multi_corr_gcc_scot();
+    cfg.analysis.multi_corr_whitened = settings.get_multi_corr_whitened();
 
     // Delay selection settings
     cfg.analysis.delay_selection_mode = match settings.get_delay_selection_mode_index() {

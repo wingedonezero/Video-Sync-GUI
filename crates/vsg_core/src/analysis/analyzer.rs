@@ -16,7 +16,7 @@ use crate::models::DelaySelectionMode;
 
 use super::delay_selection::{get_selector, SelectorConfig};
 use super::ffmpeg::{extract_full_audio, get_duration, DEFAULT_ANALYSIS_SAMPLE_RATE};
-use super::methods::{all_methods, create_from_enum, CorrelationMethod as CorrelationMethodTrait, Scc};
+use super::methods::{create_from_enum, selected_methods, CorrelationMethod as CorrelationMethodTrait, Scc};
 use super::peak_fit::find_and_fit_peak;
 use super::tracks::{find_track_by_language, get_audio_tracks};
 use super::types::{AnalysisError, AnalysisResult, AudioData, ChunkResult, SourceAnalysisResult};
@@ -56,6 +56,14 @@ pub struct Analyzer {
     lang_others: Option<String>,
     /// Optional job logger for progress messages (goes to job log, not app log).
     logger: Option<Arc<JobLogger>>,
+    /// [Multi-Correlation] Use SCC method.
+    multi_corr_scc: bool,
+    /// [Multi-Correlation] Use GCC-PHAT method.
+    multi_corr_gcc_phat: bool,
+    /// [Multi-Correlation] Use GCC-SCOT method.
+    multi_corr_gcc_scot: bool,
+    /// [Multi-Correlation] Use Whitened method.
+    multi_corr_whitened: bool,
 }
 
 impl Analyzer {
@@ -77,6 +85,10 @@ impl Analyzer {
             lang_source1: None,
             lang_others: None,
             logger: None,
+            multi_corr_scc: true,
+            multi_corr_gcc_phat: true,
+            multi_corr_gcc_scot: true,
+            multi_corr_whitened: true,
         }
     }
 
@@ -98,6 +110,10 @@ impl Analyzer {
             lang_source1: settings.lang_source1.clone(),
             lang_others: settings.lang_others.clone(),
             logger: None,
+            multi_corr_scc: settings.multi_corr_scc,
+            multi_corr_gcc_phat: settings.multi_corr_gcc_phat,
+            multi_corr_gcc_scot: settings.multi_corr_gcc_scot,
+            multi_corr_whitened: settings.multi_corr_whitened,
         }
     }
 
@@ -324,15 +340,28 @@ impl Analyzer {
             other_track_idx,
         )?;
 
+        // Get selected methods for multi-correlation
+        let methods = selected_methods(
+            self.multi_corr_scc,
+            self.multi_corr_gcc_phat,
+            self.multi_corr_gcc_scot,
+            self.multi_corr_whitened,
+        );
+
+        if methods.is_empty() {
+            return Err(AnalysisError::InvalidAudio(
+                "No correlation methods selected for multi-correlation".to_string(),
+            ));
+        }
+
         self.log(&format!(
             "Audio decoded. Running {} methods on {} chunks...",
-            all_methods().len(),
+            methods.len(),
             chunk_positions.len()
         ));
 
         // Run each method on the same audio data
         let mut results = std::collections::HashMap::new();
-        let methods = all_methods();
 
         for method in methods {
             let method_name = method.name().to_string();
