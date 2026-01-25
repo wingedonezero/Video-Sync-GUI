@@ -2,6 +2,7 @@
 
 #include "logic.hpp"
 #include "../manual_selection_dialog/ui.hpp"
+#include "../bridge/vsg_bridge.hpp"
 
 #include <QTableWidgetItem>
 #include <QHeaderView>
@@ -152,41 +153,105 @@ void JobQueueLogic::configureJobAtRow(int row)
 
     JobData& job = m_jobs[row];
 
-    // Build track info map from job sources
-    // TODO: Actually scan the files for tracks via bridge
-    // For now, create placeholder tracks based on source paths
+    // Build track info map by scanning each source file via bridge
     std::map<QString, std::vector<SourceTrackInfo>> trackInfo;
 
     for (const auto& [sourceKey, path] : job.sources) {
         std::vector<SourceTrackInfo> tracks;
 
-        // Placeholder: add some example tracks
-        // In real implementation, this would call vsg_core to probe the file
-        SourceTrackInfo video;
-        video.id = 0;
-        video.type = "video";
-        video.codecId = "V_MPEG4/ISO/AVC";
-        video.language = "und";
-        video.description = "Video track (placeholder)";
-        video.originalPath = path;
-        tracks.push_back(video);
+        if (VsgBridge::isAvailable()) {
+            auto fileInfo = VsgBridge::scanFile(path);
 
-        SourceTrackInfo audio;
-        audio.id = 1;
-        audio.type = "audio";
-        audio.codecId = "A_AAC";
-        audio.language = "eng";
-        audio.name = "English";
-        audio.description = "Audio track (placeholder)";
-        audio.originalPath = path;
-        tracks.push_back(audio);
+            if (fileInfo.success) {
+#ifdef VSG_HAS_BRIDGE
+                for (const auto& t : fileInfo.tracks) {
+                    SourceTrackInfo track;
+                    track.id = t.id;
+                    track.type = QString::fromStdString(std::string(t.track_type));
+                    track.codecId = QString::fromStdString(std::string(t.codec_id));
+                    track.language = QString::fromStdString(std::string(t.language));
+                    track.name = QString::fromStdString(std::string(t.name));
+                    track.isDefault = t.is_default;
+                    track.isForced = t.is_forced;
+                    track.originalPath = path;
+
+                    // Build description
+                    QString desc = QString("%1 Track %2 (%3)")
+                        .arg(track.type)
+                        .arg(track.id)
+                        .arg(track.language);
+                    if (!track.name.isEmpty()) {
+                        desc += QString(" - %1").arg(track.name);
+                    }
+                    if (track.type == "audio" && t.channels > 0) {
+                        desc += QString(" [%1ch]").arg(t.channels);
+                    }
+                    if (track.type == "video" && t.width > 0) {
+                        desc += QString(" [%1x%2]").arg(t.width).arg(t.height);
+                    }
+                    track.description = desc;
+
+                    tracks.push_back(track);
+                }
+#else
+                // Stub mode - use placeholder tracks
+                for (const auto& t : fileInfo.tracks) {
+                    SourceTrackInfo track;
+                    track.id = t.id;
+                    track.type = t.track_type;
+                    track.codecId = t.codec_id;
+                    track.language = t.language;
+                    track.name = t.name;
+                    track.isDefault = t.is_default;
+                    track.isForced = t.is_forced;
+                    track.originalPath = path;
+                    track.description = QString("%1 Track %2").arg(track.type).arg(track.id);
+                    tracks.push_back(track);
+                }
+#endif
+            } else {
+                // Scan failed - add error placeholder
+                VsgBridge::log(QString("[WARNING] Failed to scan %1: %2")
+                    .arg(path)
+#ifdef VSG_HAS_BRIDGE
+                    .arg(QString::fromStdString(std::string(fileInfo.error_message)))
+#else
+                    .arg(fileInfo.error_message)
+#endif
+                );
+            }
+        }
+
+        // Fallback: if no tracks found, add placeholders
+        if (tracks.empty()) {
+            SourceTrackInfo video;
+            video.id = 0;
+            video.type = "video";
+            video.codecId = "V_MPEG4/ISO/AVC";
+            video.language = "und";
+            video.description = "Video track (scan unavailable)";
+            video.originalPath = path;
+            tracks.push_back(video);
+
+            SourceTrackInfo audio;
+            audio.id = 1;
+            audio.type = "audio";
+            audio.codecId = "A_AAC";
+            audio.language = "eng";
+            audio.name = "English";
+            audio.description = "Audio track (scan unavailable)";
+            audio.originalPath = path;
+            tracks.push_back(audio);
+        }
 
         trackInfo[sourceKey] = tracks;
     }
 
     ManualSelectionDialog dialog(trackInfo, m_dialog);
     if (dialog.exec() == QDialog::Accepted) {
-        // Store the track layout in job (TODO: proper storage)
+        // Store the track layout in job
+        job.trackLayout = dialog.getFinalLayout();
+        job.attachmentSources = dialog.getAttachmentSources();
         job.status = "Configured";
     }
 
@@ -208,23 +273,42 @@ void JobQueueLogic::copyLayout(int row)
 {
     if (row < 0 || row >= static_cast<int>(m_jobs.size())) return;
 
-    m_layoutClipboard = m_jobs[row];
+    const JobData& job = m_jobs[row];
+    if (job.trackLayout.empty()) {
+        // Nothing to copy if job isn't configured
+        VsgBridge::log("[WARNING] Cannot copy layout from unconfigured job");
+        return;
+    }
 
-    // TODO: Actually copy the track layout configuration
+    m_layoutClipboard = job;
+    VsgBridge::log(QString("Copied layout from '%1' (%2 tracks)")
+        .arg(job.name)
+        .arg(job.trackLayout.size()));
 }
 
 void JobQueueLogic::pasteLayout()
 {
     if (!m_layoutClipboard.has_value()) return;
 
+    const JobData& source = m_layoutClipboard.value();
+    if (source.trackLayout.empty()) return;
+
     QTableWidget* table = m_dialog->table();
+    int pastedCount = 0;
 
     for (const auto& index : table->selectionModel()->selectedRows()) {
         int row = index.row();
         if (row >= 0 && row < static_cast<int>(m_jobs.size())) {
-            // TODO: Actually paste the track layout configuration
+            // Copy the track layout and attachment sources
+            m_jobs[row].trackLayout = source.trackLayout;
+            m_jobs[row].attachmentSources = source.attachmentSources;
             m_jobs[row].status = "Configured";
+            pastedCount++;
         }
+    }
+
+    if (pastedCount > 0) {
+        VsgBridge::log(QString("Pasted layout to %1 job(s)").arg(pastedCount));
     }
 
     populateTable();

@@ -26,6 +26,8 @@ struct SourceTrackInfo {
     QString name;
     QString description;    // Summary for display
     QString originalPath;
+    bool isDefault = false;
+    bool isForced = false;
 };
 
 /// Source list widget (left pane) - shows available tracks from a source
