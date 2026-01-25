@@ -102,6 +102,29 @@ mod ffi {
         error_message: String,
     }
 
+    /// Result of a job execution
+    #[derive(Debug, Clone)]
+    struct JobResult {
+        success: bool,
+        output_path: String,
+        steps_completed: Vec<String>,
+        steps_skipped: Vec<String>,
+        error_message: String,
+    }
+
+    /// Job input for running a full pipeline
+    #[derive(Debug, Clone)]
+    struct JobInput {
+        /// Unique job ID
+        job_id: String,
+        /// Job name (derived from filename)
+        job_name: String,
+        /// Source paths: index 0 = Source 1, index 1 = Source 2, etc.
+        source_paths: Vec<String>,
+        /// Track layout as JSON string (serialized ManualLayout)
+        layout_json: String,
+    }
+
     /// A discovered job from paths
     #[derive(Debug, Clone)]
     struct DiscoveredJob {
@@ -192,6 +215,9 @@ mod ffi {
 
         /// Get vsg_core version string
         fn bridge_version() -> String;
+
+        /// Run a full job (analysis + extract + mux)
+        fn bridge_run_job(input: &JobInput) -> JobResult;
 
         // =====================================================================
         // Logging functions
@@ -895,6 +921,211 @@ fn bridge_scan_file(path: &str) -> ffi::MediaFileInfo {
         duration_ms,
         success: true,
         error_message: String::new(),
+    }
+}
+
+// =============================================================================
+// Job Execution Implementation
+// =============================================================================
+
+fn bridge_run_job(input: &ffi::JobInput) -> ffi::JobResult {
+    use std::collections::HashMap;
+    use vsg_core::models::JobSpec;
+    use vsg_core::orchestrator::{Context, JobState, Pipeline};
+    use vsg_core::orchestrator::steps::{AnalyzeStep, ExtractStep, MuxStep};
+    use vsg_core::logging::LogConfig;
+
+    // Load settings
+    let mut config_manager = get_config_manager();
+    let settings = if config_manager.load_or_create().is_ok() {
+        config_manager.settings().clone()
+    } else {
+        vsg_core::config::Settings::default()
+    };
+
+    // Validate inputs
+    if input.source_paths.is_empty() {
+        return ffi::JobResult {
+            success: false,
+            output_path: String::new(),
+            steps_completed: vec![],
+            steps_skipped: vec![],
+            error_message: "No source paths provided".to_string(),
+        };
+    }
+
+    // Build sources map
+    let mut sources: HashMap<String, PathBuf> = HashMap::new();
+    for (i, path_str) in input.source_paths.iter().enumerate() {
+        if !path_str.is_empty() {
+            let source_key = format!("Source {}", i + 1);
+            sources.insert(source_key, PathBuf::from(path_str));
+        }
+    }
+
+    // Validate Source 1 exists
+    let source1 = match sources.get("Source 1") {
+        Some(p) => p,
+        None => {
+            return ffi::JobResult {
+                success: false,
+                output_path: String::new(),
+                steps_completed: vec![],
+                steps_skipped: vec![],
+                error_message: "Source 1 is required".to_string(),
+            };
+        }
+    };
+
+    if !source1.exists() {
+        return ffi::JobResult {
+            success: false,
+            output_path: String::new(),
+            steps_completed: vec![],
+            steps_skipped: vec![],
+            error_message: format!("Source 1 not found: {}", source1.display()),
+        };
+    }
+
+    // Create JobSpec
+    let mut job_spec = JobSpec::new(sources.clone());
+
+    // Parse layout JSON if provided
+    if !input.layout_json.is_empty() {
+        match serde_json::from_str::<Vec<HashMap<String, serde_json::Value>>>(&input.layout_json) {
+            Ok(layout) => {
+                job_spec.manual_layout = Some(layout);
+            }
+            Err(e) => {
+                bridge_log(&format!("[WARNING] Failed to parse layout JSON: {}", e));
+                // Continue without layout - will use auto-generated layout later
+            }
+        }
+    }
+
+    // Set up directories
+    let output_dir = PathBuf::from(&settings.paths.output_folder);
+    let work_dir = PathBuf::from(&settings.paths.temp_root).join(&input.job_id);
+    let logs_dir = PathBuf::from(&settings.paths.logs_folder);
+
+    // Create directories
+    for dir in [&output_dir, &work_dir, &logs_dir] {
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            return ffi::JobResult {
+                success: false,
+                output_path: String::new(),
+                steps_completed: vec![],
+                steps_skipped: vec![],
+                error_message: format!("Failed to create directory {}: {}", dir.display(), e),
+            };
+        }
+    }
+
+    // Create LogConfig from settings
+    let log_config = LogConfig {
+        compact: settings.logging.compact,
+        progress_step: settings.logging.progress_step,
+        error_tail: settings.logging.error_tail as usize,
+        ..LogConfig::default()
+    };
+
+    // Create GUI callback
+    let gui_callback: Box<dyn Fn(&str) + Send + Sync> = Box::new(|msg: &str| {
+        bridge_log(msg);
+    });
+
+    // Create JobLogger
+    let logger = match JobLogger::new(&input.job_name, &logs_dir, log_config, Some(gui_callback)) {
+        Ok(l) => Arc::new(l),
+        Err(e) => {
+            return ffi::JobResult {
+                success: false,
+                output_path: String::new(),
+                steps_completed: vec![],
+                steps_skipped: vec![],
+                error_message: format!("Failed to create logger: {}", e),
+            };
+        }
+    };
+
+    logger.phase("Starting Job");
+    logger.info(&format!("Job ID: {}", input.job_id));
+    logger.info(&format!("Job Name: {}", input.job_name));
+    logger.info(&format!("Sources: {}", sources.len()));
+    for (key, path) in &sources {
+        logger.info(&format!("  {}: {}", key, path.display()));
+    }
+
+    set_progress(0, "Initializing...");
+
+    // Create Context
+    let ctx = Context::new(
+        job_spec,
+        settings.clone(),
+        &input.job_name,
+        work_dir,
+        output_dir.clone(),
+        Arc::clone(&logger),
+    ).with_progress_callback(Box::new(|step, pct, msg| {
+        set_progress(pct as i32, &format!("{}: {}", step, msg));
+    }));
+
+    // Create JobState
+    let mut state = JobState::new(&input.job_id);
+
+    // Build pipeline
+    let mut pipeline = Pipeline::new();
+
+    // Add Extract step (reads container info for delays)
+    pipeline.add_step(ExtractStep::new());
+
+    // Add Analyze step (if multiple sources)
+    if sources.len() > 1 {
+        pipeline.add_step(AnalyzeStep::new());
+    }
+
+    // Add Mux step
+    pipeline.add_step(MuxStep::new());
+
+    logger.info(&format!("Pipeline steps: {:?}", pipeline.step_names()));
+
+    // Run pipeline
+    match pipeline.run(&ctx, &mut state) {
+        Ok(result) => {
+            let output_path = state.mux
+                .as_ref()
+                .map(|m| m.output_path.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            logger.phase("Job Complete");
+            logger.success(&format!("Output: {}", output_path));
+            logger.flush();
+
+            set_progress(100, "Complete");
+
+            ffi::JobResult {
+                success: true,
+                output_path,
+                steps_completed: result.steps_completed,
+                steps_skipped: result.steps_skipped,
+                error_message: String::new(),
+            }
+        }
+        Err(e) => {
+            logger.error(&format!("Job failed: {}", e));
+            logger.show_tail("error");
+            logger.flush();
+
+            set_progress(0, "Failed");
+
+            ffi::JobResult {
+                success: false,
+                output_path: String::new(),
+                steps_completed: vec![],
+                steps_skipped: vec![],
+                error_message: e.to_string(),
+            }
+        }
     }
 }
 

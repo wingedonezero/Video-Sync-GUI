@@ -7,6 +7,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::config::Settings;
+use crate::extraction::ContainerInfo;
 use crate::logging::JobLogger;
 use crate::models::{Delays, JobSpec, MergePlan};
 
@@ -177,7 +178,12 @@ pub struct SourceStability {
 /// Output from the Extraction step.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ExtractOutput {
+    /// Container info for each source (for delay calculation).
+    /// Key: source key ("Source 1", "Source 2", etc.)
+    #[serde(default)]
+    pub container_info: HashMap<String, ContainerInfo>,
     /// Extracted tracks and their paths.
+    /// Key: "{source_key}:{track_id}" (e.g., "Source 2:1")
     pub tracks: HashMap<String, PathBuf>,
     /// Extracted attachments and their paths.
     pub attachments: HashMap<String, PathBuf>,

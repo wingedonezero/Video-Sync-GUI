@@ -1,10 +1,14 @@
 //! Mux step - merges tracks into final output file using mkvmerge.
+//!
+//! This step builds a MergePlan from the job state (analysis, extraction results)
+//! and executes mkvmerge to create the final output file.
 
 use std::path::PathBuf;
 use std::process::Command;
 
+use crate::jobs::ManualLayout;
 use crate::models::MergePlan;
-use crate::mux::MkvmergeOptionsBuilder;
+use crate::mux::{build_merge_plan, build_remux_plan, MkvmergeOptionsBuilder, PlanBuildInput};
 use crate::orchestrator::errors::{StepError, StepResult};
 use crate::orchestrator::step::PipelineStep;
 use crate::orchestrator::types::{Context, JobState, MuxOutput, StepOutcome};
@@ -51,38 +55,141 @@ impl MuxStep {
         ctx.output_dir.join(filename)
     }
 
+    /// Parse ManualLayout from job spec's JSON layout.
+    ///
+    /// The job spec stores layout as JSON for CXX bridge compatibility.
+    /// This converts it to the proper ManualLayout type.
+    fn parse_manual_layout(ctx: &Context) -> Option<ManualLayout> {
+        ctx.job_spec.manual_layout.as_ref().and_then(|layout| {
+            // The layout is stored as Vec<HashMap<String, Value>>
+            // Try to convert to ManualLayout
+            serde_json::to_value(layout)
+                .ok()
+                .and_then(|v| serde_json::from_value::<ManualLayout>(v).ok())
+        })
+    }
+
     /// Build merge plan from job state.
     ///
-    /// In a real implementation, this would gather tracks from analysis/extraction.
-    /// For now, we create a minimal plan.
+    /// Uses the plan_builder module to create a MergePlan with correct delays.
     fn build_merge_plan(&self, ctx: &Context, state: &JobState) -> StepResult<MergePlan> {
-        // Use existing merge plan if available
+        // Use existing merge plan if available (e.g., from previous run)
         if let Some(ref plan) = state.merge_plan {
+            ctx.logger.debug("Using existing merge plan from state");
             return Ok(plan.clone());
         }
 
-        // Otherwise, create a minimal plan from job spec
-        // This is a stub - real implementation would build from extracted tracks
-        use crate::models::{PlanItem, StreamProps, Track, TrackType};
+        // Get the manual layout
+        let layout = Self::parse_manual_layout(ctx).ok_or_else(|| {
+            StepError::precondition_failed(
+                "No manual layout configured - please configure tracks in the UI",
+            )
+        })?;
 
-        let mut items = Vec::new();
+        if layout.final_tracks.is_empty() {
+            return Err(StepError::precondition_failed(
+                "Layout has no tracks selected",
+            ));
+        }
 
-        // Add primary source as video track (stub)
-        if let Some(source1_path) = ctx.job_spec.sources.get("Source 1") {
-            let video_track = Track::new(
-                "Source 1",
-                0,
-                TrackType::Video,
-                StreamProps::new("V_MPEG4/ISO/AVC"),
-            );
-            items.push(
-                PlanItem::new(video_track, source1_path.clone()).with_default(true),
+        // Check if we have analysis results (delays)
+        let has_analysis = state.analysis.is_some();
+        let has_extraction = state.extract.is_some();
+
+        // For simple remux (Source 1 only, no sync needed), use build_remux_plan
+        let needs_sync = ctx.job_spec.sources.len() > 1;
+
+        if !needs_sync {
+            ctx.logger.info("Single source - using remux plan (no sync)");
+            return build_remux_plan(&layout, &ctx.job_spec.sources).map_err(|e| {
+                StepError::other(format!("Failed to build remux plan: {}", e))
+            });
+        }
+
+        // Multi-source job - need delays and container info
+        if !has_analysis {
+            return Err(StepError::precondition_failed(
+                "Analysis step must complete before mux (delays not calculated)",
+            ));
+        }
+
+        let delays = state
+            .analysis
+            .as_ref()
+            .map(|a| &a.delays)
+            .ok_or_else(|| StepError::precondition_failed("No delays in analysis results"))?;
+
+        // Get container info (from extract step, or use empty if not extracted)
+        let container_info = state
+            .extract
+            .as_ref()
+            .map(|e| &e.container_info)
+            .cloned()
+            .unwrap_or_default();
+
+        if !has_extraction {
+            ctx.logger.warn(
+                "Extract step not completed - container delays may be incorrect",
             );
         }
 
-        let delays = state.delays().cloned().unwrap_or_default();
+        // Get chapters XML path (if chapters step completed)
+        let chapters_xml = state
+            .chapters
+            .as_ref()
+            .and_then(|c| c.chapters_xml.clone());
 
-        Ok(MergePlan::new(items, delays))
+        // Get extracted attachments
+        let attachments: Vec<PathBuf> = state
+            .extract
+            .as_ref()
+            .map(|e| e.attachments.values().cloned().collect())
+            .unwrap_or_default();
+
+        // Get extracted tracks (for corrected audio, etc.)
+        let extracted_tracks = state.extract.as_ref().map(|e| &e.tracks);
+
+        // Build the plan
+        ctx.logger.info(&format!(
+            "Building merge plan: {} tracks, {} sources",
+            layout.final_tracks.len(),
+            ctx.job_spec.sources.len()
+        ));
+
+        let input = PlanBuildInput {
+            layout: &layout,
+            delays,
+            container_info: &container_info,
+            sources: &ctx.job_spec.sources,
+            extracted_tracks,
+            chapters_xml,
+            attachments,
+        };
+
+        let plan = build_merge_plan(&input).map_err(|e| {
+            StepError::other(format!("Failed to build merge plan: {}", e))
+        })?;
+
+        // Log plan summary
+        ctx.logger.debug(&format!(
+            "Plan: {} items, global_shift={}ms",
+            plan.items.len(),
+            plan.delays.global_shift_ms
+        ));
+
+        for item in &plan.items {
+            ctx.logger.debug(&format!(
+                "  {} {} #{}: delay={}ms, default={}, forced={}",
+                item.track.source,
+                format!("{:?}", item.track.track_type),
+                item.track.id,
+                item.container_delay_ms,
+                item.is_default,
+                item.is_forced_display,
+            ));
+        }
+
+        Ok(plan)
     }
 
     /// Execute mkvmerge with the given tokens.
@@ -173,6 +280,13 @@ impl PipelineStep for MuxStep {
             return Err(StepError::invalid_input("No sources to merge"));
         }
 
+        // Check that we have a layout configured
+        if Self::parse_manual_layout(ctx).is_none() {
+            return Err(StepError::invalid_input(
+                "No track layout configured - please select tracks in the UI",
+            ));
+        }
+
         // Check output directory is writable (try to create it)
         if let Err(e) = std::fs::create_dir_all(&ctx.output_dir) {
             return Err(StepError::io_error("creating output directory", e));
@@ -182,7 +296,7 @@ impl PipelineStep for MuxStep {
     }
 
     fn execute(&self, ctx: &Context, state: &mut JobState) -> StepResult<StepOutcome> {
-        ctx.logger.info("Building mkvmerge command");
+        ctx.logger.section("Building Merge Plan");
 
         // Build merge plan
         let plan = self.build_merge_plan(ctx, state)?;

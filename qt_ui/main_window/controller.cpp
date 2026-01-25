@@ -13,6 +13,10 @@
 #include <QScrollBar>
 #include <QTimer>
 #include <QApplication>
+#include <QJsonDocument>
+#include <QJsonArray>
+#include <QJsonObject>
+#include <QDateTime>
 
 MainController::MainController(MainWindow* view)
     : QObject(view)
@@ -129,9 +133,126 @@ void MainController::openJobQueue()
 
     if (dialog.exec() == QDialog::Accepted) {
         auto jobs = dialog.getFinalJobs();
+        if (jobs.isEmpty()) {
+            appendLog("No jobs to process.");
+            return;
+        }
+
         appendLog(QString("Starting %1 job(s)...").arg(jobs.size()));
-        // TODO: Process jobs via bridge
+        processJobs(jobs);
     }
+}
+
+void MainController::processJobs(const std::vector<JobData>& jobs)
+{
+    if (!VsgBridge::isAvailable()) {
+        appendLog("[ERROR] Bridge not available - cannot process jobs");
+        return;
+    }
+
+    int completedCount = 0;
+    int failedCount = 0;
+
+    for (size_t i = 0; i < jobs.size(); ++i) {
+        const auto& job = jobs[i];
+
+        // Update status
+        QString statusMsg = QString("Processing job %1/%2: %3")
+            .arg(i + 1).arg(jobs.size()).arg(job.name);
+        updateStatus(statusMsg);
+        appendLog(QString("\n=== %1 ===").arg(statusMsg));
+
+        // Build source paths list (ordered by source key)
+        QStringList sourcePaths;
+        bool hasSource1 = false;
+        for (int j = 1; j <= 4; ++j) {
+            QString key = QString("Source %1").arg(j);
+            auto it = job.sources.find(key);
+            if (it != job.sources.end()) {
+                sourcePaths << it->second;
+                if (j == 1) hasSource1 = true;
+            } else if (j > 1) {
+                break; // Stop at first missing source after Source 1
+            }
+        }
+
+        if (!hasSource1) {
+            // Source 1 is required
+            appendLog("[ERROR] Job missing Source 1, skipping");
+            failedCount++;
+            continue;
+        }
+
+        // Generate job ID from timestamp and index
+        QString jobId = QString("job_%1_%2").arg(QDateTime::currentMSecsSinceEpoch()).arg(i);
+
+        // Convert track layout to JSON if available
+        QString layoutJson;
+        if (!job.trackLayout.empty()) {
+            // Serialize layout to JSON
+            QJsonArray tracksArray;
+            for (const auto& track : job.trackLayout) {
+                QJsonObject trackObj;
+                trackObj["track_id"] = track.id;
+                trackObj["source_key"] = track.sourceKey;
+
+                // Convert track type enum to string
+                QString typeStr = "video";
+                if (track.type == TrackType::Audio) typeStr = "audio";
+                else if (track.type == TrackType::Subtitles) typeStr = "subtitles";
+                trackObj["track_type"] = typeStr;
+
+                QJsonObject configObj;
+                configObj["is_default"] = track.isDefault;
+                configObj["is_forced"] = track.isForced;
+                if (!track.name.isEmpty()) {
+                    configObj["custom_name"] = track.name;
+                }
+                if (!track.language.isEmpty() && track.language != "und") {
+                    configObj["custom_lang"] = track.language;
+                }
+                trackObj["config"] = configObj;
+
+                tracksArray.append(trackObj);
+            }
+
+            QJsonObject layoutObj;
+            layoutObj["final_tracks"] = tracksArray;
+
+            QJsonArray attachmentSources;
+            for (const auto& src : job.attachmentSources) {
+                attachmentSources.append(src);
+            }
+            layoutObj["attachment_sources"] = attachmentSources;
+
+            QJsonDocument doc(layoutObj);
+            layoutJson = QString::fromUtf8(doc.toJson(QJsonDocument::Compact));
+        }
+
+        // Run the job
+        auto result = VsgBridge::runJob(jobId, job.name, sourcePaths, layoutJson);
+
+        // Poll remaining log messages
+        pollLogs();
+
+        if (result.success) {
+            completedCount++;
+            appendLog(QString("[SUCCESS] Output: %1").arg(result.output_path));
+            appendLog(QString("Steps completed: %1").arg(result.steps_completed.join(", ")));
+            if (!result.steps_skipped.isEmpty()) {
+                appendLog(QString("Steps skipped: %1").arg(result.steps_skipped.join(", ")));
+            }
+        } else {
+            failedCount++;
+            appendLog(QString("[FAILED] %1").arg(result.error_message));
+        }
+    }
+
+    // Final summary
+    appendLog(QString("\n=== Processing Complete ==="));
+    appendLog(QString("Completed: %1, Failed: %2").arg(completedCount).arg(failedCount));
+    updateStatus("Ready");
+    updateProgress(100);
 }
 
 void MainController::startAnalyzeOnly()
