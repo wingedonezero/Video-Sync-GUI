@@ -210,6 +210,8 @@ impl App {
 
     /// Open the track settings window.
     pub fn open_track_settings_window(&mut self, track_idx: usize) -> Task<Message> {
+        use crate::app::LANGUAGE_CODES;
+
         if self.track_settings_window_id.is_some() {
             return Task::none();
         }
@@ -227,6 +229,13 @@ impl App {
             self.track_settings.sync_exclusion_styles = track.sync_exclusion_styles.clone();
             self.track_settings.sync_exclusion_mode = track.sync_exclusion_mode;
             self.track_settings_idx = Some(track_idx);
+
+            // Set language picker index from custom_lang or original_lang
+            let lang_to_find = track.custom_lang.as_deref().or(track.original_lang.as_deref()).unwrap_or("und");
+            self.track_settings.selected_language_idx = LANGUAGE_CODES
+                .iter()
+                .position(|&code| code == lang_to_find)
+                .unwrap_or(0);
         }
 
         let settings = window::Settings {
@@ -951,6 +960,7 @@ impl App {
                             id: t.track_id,
                             track_type: t.track_type,
                             codec_id: t.codec_id,
+                            language: t.language,
                             summary: t.summary,
                             badges: t.badges,
                             is_blocked,
@@ -987,6 +997,7 @@ impl App {
                 track.track_type,
                 track.codec_id,
                 track.summary,
+                track.language,
             ));
 
             self.manual_selection_info.clear();
@@ -1009,6 +1020,7 @@ impl App {
     }
 
     /// Accept the layout and save to job.
+    /// Saves layout to both the job queue and to disk via LayoutManager.
     pub fn accept_layout(&mut self) {
         if let Some(job_idx) = self.manual_selection_job_idx {
             // Build ManualLayout from state - transfer ALL per-track settings
@@ -1054,7 +1066,23 @@ impl App {
                 source_settings: HashMap::new(),
             };
 
-            // Save to job queue
+            // Get job ID for layout persistence
+            let job_id = {
+                let q = self.job_queue.lock().unwrap();
+                q.get(job_idx).map(|j| j.id.clone())
+            };
+
+            // Save layout to disk via LayoutManager (for persistence across restarts)
+            if let Some(job_id) = &job_id {
+                let lm = self.layout_manager.lock().unwrap();
+                if let Err(e) = lm.save_layout(job_id, &layout) {
+                    tracing::warn!("Failed to save layout to disk: {}", e);
+                } else {
+                    tracing::debug!("Layout saved to disk for job '{}'", job_id);
+                }
+            }
+
+            // Save to job queue (and queue.json)
             let mut q = self.job_queue.lock().unwrap();
             q.set_layout(job_idx, layout);
             if let Err(e) = q.save() {
@@ -1134,7 +1162,8 @@ struct TrackInfo {
     track_id: usize,
     track_type: String,
     codec_id: String,
-    summary: String,
+    language: Option<String>,  // Raw language code (e.g., "jpn", "eng")
+    summary: String,           // Qt-style: "[TYPE-ID] CODEC (lang) | details"
     badges: String,
 }
 
@@ -1152,14 +1181,16 @@ fn probe_tracks(path: &PathBuf) -> Vec<TrackInfo> {
                     track_id: 0,
                     track_type: "video".to_string(),
                     codec_id: String::new(),
-                    summary: "Video Track (probe failed)".to_string(),
+                    language: None,
+                    summary: "[V-0] Video Track (probe failed)".to_string(),
                     badges: String::new(),
                 },
                 TrackInfo {
                     track_id: 1,
                     track_type: "audio".to_string(),
                     codec_id: String::new(),
-                    summary: "Audio Track (probe failed)".to_string(),
+                    language: None,
+                    summary: "[A-1] Audio Track (probe failed)".to_string(),
                     badges: String::new(),
                 },
             ]
@@ -1168,6 +1199,7 @@ fn probe_tracks(path: &PathBuf) -> Vec<TrackInfo> {
 }
 
 /// Parse mkvmerge -J JSON output.
+/// Produces Qt-style summaries: [TYPE-ID] CODEC (lang) | details
 fn parse_mkvmerge_json(json_str: &str) -> Vec<TrackInfo> {
     let json: serde_json::Value = match serde_json::from_str(json_str) {
         Ok(v) => v,
@@ -1191,11 +1223,11 @@ fn parse_mkvmerge_json(json_str: &str) -> Vec<TrackInfo> {
 
             let properties = track.get("properties");
 
-            let language = properties
+            // Get raw language code (e.g., "jpn", "eng", "und")
+            let lang_code = properties
                 .and_then(|p| p.get("language"))
                 .and_then(|l| l.as_str())
-                .map(language_display)
-                .unwrap_or_else(|| "und".to_string());
+                .map(|s| s.to_string());
 
             let codec_id = properties
                 .and_then(|p| p.get("codec_id"))
@@ -1218,26 +1250,54 @@ fn parse_mkvmerge_json(json_str: &str) -> Vec<TrackInfo> {
                 .and_then(|id| id.as_u64())
                 .unwrap_or(0) as usize;
 
+            // Type prefix for track ID display (V=video, A=audio, S=subtitles)
+            let type_prefix = match track_type.as_str() {
+                "video" => "V",
+                "audio" => "A",
+                "subtitles" => "S",
+                _ => "?",
+            };
+
+            // Build Qt-style summary: [TYPE-ID] CODEC (lang) | details
             let summary = match track_type.as_str() {
                 "video" => {
-                    let width = properties
+                    let dimensions = properties
                         .and_then(|p| p.get("pixel_dimensions"))
                         .and_then(|d| d.as_str())
                         .unwrap_or("");
-                    format!("{}, {}", codec, width)
+                    let fps = properties
+                        .and_then(|p| p.get("default_duration"))
+                        .and_then(|d| d.as_u64())
+                        .map(|ns| 1_000_000_000.0 / ns as f64)
+                        .map(|fps| format!("{:.3} fps", fps))
+                        .unwrap_or_default();
+                    let lang = lang_code.as_deref().unwrap_or("und");
+
+                    if fps.is_empty() {
+                        format!("[{}-{}] {} ({}) | {}", type_prefix, track_id, codec, lang, dimensions)
+                    } else {
+                        format!("[{}-{}] {} ({}) | {}, {}", type_prefix, track_id, codec, lang, dimensions, fps)
+                    }
                 }
                 "audio" => {
                     let channels = properties
                         .and_then(|p| p.get("audio_channels"))
                         .and_then(|c| c.as_u64())
                         .unwrap_or(2);
+                    let sample_rate = properties
+                        .and_then(|p| p.get("audio_sampling_frequency"))
+                        .and_then(|f| f.as_u64())
+                        .unwrap_or(48000);
                     let channel_str = channel_layout(channels as u8);
-                    format!("{}, {}, {}", language, codec, channel_str)
+                    let lang = lang_code.as_deref().unwrap_or("und");
+
+                    format!("[{}-{}] {} ({}) | {} Hz, {}", type_prefix, track_id, codec, lang, sample_rate, channel_str)
                 }
                 "subtitles" => {
-                    format!("{}, {}", language, codec)
+                    let lang = lang_code.as_deref().unwrap_or("und");
+                    format!("[{}-{}] {} ({})", type_prefix, track_id, codec, lang)
                 }
-                _ => codec.to_string(),
+                _ => format!("[?-{}] {}", track_id, codec),
             };
 
             let mut badges_list = Vec::new();
@@ -1252,6 +1312,7 @@ fn parse_mkvmerge_json(json_str: &str) -> Vec<TrackInfo> {
                 track_id,
                 track_type,
                 codec_id,
+                language: lang_code,
                 summary,
                 badges: badges_list.join(" | "),
             });
