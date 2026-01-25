@@ -13,9 +13,11 @@ fn main() {
     // Export paths for dependent crates' build scripts.
     // These become DEP_VSG_BRIDGE_* environment variables in dependents.
 
-    // The cxxbridge directory contains generated C++ headers
-    let cxxbridge_dir = out_dir.join("cxxbridge");
-    println!("cargo:cxxbridge={}", cxxbridge_dir.display());
+    // The cxxbridge/include directory contains generated C++ headers
+    // Headers are at: cxxbridge/include/vsg_bridge/src/lib.rs.h
+    //                 cxxbridge/include/rust/cxx.h
+    let cxxbridge_include = out_dir.join("cxxbridge").join("include");
+    println!("cargo:cxxbridge={}", cxxbridge_include.display());
 
     // The OUT_DIR for this crate (useful for finding build artifacts)
     println!("cargo:out_dir={}", out_dir.display());
