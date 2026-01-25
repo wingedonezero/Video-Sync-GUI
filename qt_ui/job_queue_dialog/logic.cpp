@@ -1,6 +1,7 @@
 // Job Queue Logic Implementation
 
 #include "logic.hpp"
+#include "../manual_selection_dialog/ui.hpp"
 
 #include <QTableWidgetItem>
 #include <QHeaderView>
@@ -149,14 +150,46 @@ void JobQueueLogic::configureJobAtRow(int row)
 {
     if (row < 0 || row >= static_cast<int>(m_jobs.size())) return;
 
-    // TODO: Open ManualSelectionDialog for this job
-    QMessageBox::information(m_dialog, "Configure Job",
-        QString("Configuration dialog for job %1 not yet implemented.\n"
-                "This will open the Manual Selection Dialog.")
-            .arg(row + 1));
+    JobData& job = m_jobs[row];
 
-    // For now, mark as configured
-    m_jobs[row].status = "Configured";
+    // Build track info map from job sources
+    // TODO: Actually scan the files for tracks via bridge
+    // For now, create placeholder tracks based on source paths
+    std::map<QString, std::vector<SourceTrackInfo>> trackInfo;
+
+    for (const auto& [sourceKey, path] : job.sources) {
+        std::vector<SourceTrackInfo> tracks;
+
+        // Placeholder: add some example tracks
+        // In real implementation, this would call vsg_core to probe the file
+        SourceTrackInfo video;
+        video.id = 0;
+        video.type = "video";
+        video.codecId = "V_MPEG4/ISO/AVC";
+        video.language = "und";
+        video.description = "Video track (placeholder)";
+        video.originalPath = path;
+        tracks.push_back(video);
+
+        SourceTrackInfo audio;
+        audio.id = 1;
+        audio.type = "audio";
+        audio.codecId = "A_AAC";
+        audio.language = "eng";
+        audio.name = "English";
+        audio.description = "Audio track (placeholder)";
+        audio.originalPath = path;
+        tracks.push_back(audio);
+
+        trackInfo[sourceKey] = tracks;
+    }
+
+    ManualSelectionDialog dialog(trackInfo, m_dialog);
+    if (dialog.exec() == QDialog::Accepted) {
+        // Store the track layout in job (TODO: proper storage)
+        job.status = "Configured";
+    }
+
     populateTable();
 }
 

@@ -8,6 +8,7 @@
 
 class MainWindow;
 class QLineEdit;
+class QTimer;
 
 class MainController : public QObject
 {
@@ -51,6 +52,11 @@ public slots:
     /// Clear delay labels
     void clearDelayLabels();
 
+private slots:
+    /// Poll for log messages from bridge
+    void pollLogs();
+
 private:
     MainWindow* m_view;
+    QTimer* m_logPollTimer;
 };

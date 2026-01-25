@@ -7,13 +7,22 @@ fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let profile = env::var("PROFILE").unwrap(); // "debug" or "release"
 
+    // Workspace root
+    let workspace_root = manifest_dir.parent().unwrap().parent().unwrap();
+
     // Path to qt_ui sources
-    let qt_ui_dir = manifest_dir
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("qt_ui");
+    let qt_ui_dir = workspace_root.join("qt_ui");
+
+    // Target directory where Rust libraries are built
+    let target_dir = workspace_root.join("target").join(&profile);
+
+    // Path to libvsg_bridge.a
+    let bridge_lib = target_dir.join("libvsg_bridge.a");
+
+    // CXX bridge generates headers - we need to find the OUT_DIR for vsg_bridge
+    // The headers are at: target/{profile}/build/vsg_bridge-{hash}/out/cxxbridge/
+    // We'll search for it
+    let cxxbridge_dir = find_cxxbridge_dir(&workspace_root.join("target").join(&profile).join("build"));
 
     let build_dir = out_dir.join("qt_build");
     std::fs::create_dir_all(&build_dir).unwrap();
@@ -25,11 +34,31 @@ fn main() {
         "Debug"
     };
 
+    // Build CMake args
+    let mut cmake_args = vec![
+        qt_ui_dir.to_string_lossy().to_string(),
+        format!("-DCMAKE_BUILD_TYPE={}", build_type),
+    ];
+
+    // Add Rust bridge paths if available
+    if bridge_lib.exists() {
+        cmake_args.push(format!("-DVSG_BRIDGE_LIB={}", bridge_lib.display()));
+        println!("cargo:warning=Found Rust bridge: {}", bridge_lib.display());
+    } else {
+        println!("cargo:warning=Rust bridge not found at {}", bridge_lib.display());
+    }
+
+    if let Some(ref cxx_dir) = cxxbridge_dir {
+        cmake_args.push(format!("-DVSG_CXXBRIDGE_DIR={}", cxx_dir.display()));
+        println!("cargo:warning=Found CXX headers: {}", cxx_dir.display());
+    } else {
+        println!("cargo:warning=CXX headers not found");
+    }
+
     // Run CMake configure
     let cmake_status = Command::new("cmake")
         .current_dir(&build_dir)
-        .arg(&qt_ui_dir)
-        .arg(format!("-DCMAKE_BUILD_TYPE={}", build_type))
+        .args(&cmake_args)
         .status()
         .expect("Failed to run cmake. Is cmake installed?");
 
@@ -49,14 +78,6 @@ fn main() {
     }
 
     // Copy the executable to target directory
-    let target_dir = manifest_dir
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
-        .join("target")
-        .join(&profile);
-
     std::fs::create_dir_all(&target_dir).ok();
 
     let src_exe = build_dir.join("video-sync-gui");
@@ -70,6 +91,10 @@ fn main() {
     // Tell cargo where to find the executable
     println!("cargo:rustc-env=VSG_QT_APP={}", dst_exe.display());
 
+    // Link dependencies
+    println!("cargo:rustc-link-search=native={}", target_dir.display());
+    println!("cargo:rustc-link-lib=static=vsg_bridge");
+
     // Rerun if sources change
     for entry in walkdir(&qt_ui_dir) {
         if entry.extension().map_or(false, |e| e == "cpp" || e == "hpp") {
@@ -77,6 +102,34 @@ fn main() {
         }
     }
     println!("cargo:rerun-if-changed={}", qt_ui_dir.join("CMakeLists.txt").display());
+
+    // Rerun if bridge changes
+    let bridge_src = workspace_root.join("crates").join("vsg_bridge").join("src");
+    println!("cargo:rerun-if-changed={}", bridge_src.join("lib.rs").display());
+}
+
+/// Find the CXX bridge header directory
+fn find_cxxbridge_dir(build_dir: &PathBuf) -> Option<PathBuf> {
+    if !build_dir.exists() {
+        return None;
+    }
+
+    // Look for vsg_bridge-*/out/cxxbridge/
+    if let Ok(entries) = std::fs::read_dir(build_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let name = path.file_name()?.to_string_lossy();
+                if name.starts_with("vsg_bridge-") {
+                    let cxxbridge = path.join("out").join("cxxbridge");
+                    if cxxbridge.exists() {
+                        return Some(cxxbridge);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 fn walkdir(dir: &PathBuf) -> Vec<PathBuf> {

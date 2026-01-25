@@ -13,6 +13,9 @@ crate-type = ["staticlib"]
 vsg_core = { path = "../vsg_core" }
 cxx = "1.0"
 dirs = "5.0"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2.4"
 
 [build-dependencies]
 cxx-build = "1.0"
