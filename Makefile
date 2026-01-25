@@ -1,66 +1,45 @@
-# Video Sync GUI - Unified Build
+# Video Sync GUI - Build System
 #
 # Usage:
-#   make          - Build everything (Rust + Qt)
-#   make rust     - Build Rust crates only
-#   make qt       - Build Qt UI only
+#   make          - Build everything (release)
+#   make debug    - Build debug version
+#   make run      - Build and run
 #   make clean    - Clean all build artifacts
-#   make run      - Build and run the application
 
-.PHONY: all rust qt clean run configure
+.PHONY: all release debug run clean help
 
-BUILD_DIR := qt_ui/build
-CARGO := cargo
-CMAKE := cmake
-MAKE_CMD := $(MAKE)
+# Default: build release
+all: release
 
-# Default: build everything
-all: rust qt
+# Release build
+release:
+	cargo build --release -p vsg_app
+	@echo ""
+	@echo "Build complete: ./target/release/video-sync-gui"
 
-# Build Rust crates (vsg_core, vsg_bridge)
-rust:
-	$(CARGO) build --release
-
-# Configure Qt build (only needs to run once or after CMakeLists changes)
-configure:
-	@mkdir -p $(BUILD_DIR)
-	cd $(BUILD_DIR) && $(CMAKE) ..
-
-# Build Qt UI (automatically configures if needed)
-qt: rust
-	@mkdir -p $(BUILD_DIR)
-	@if [ ! -f $(BUILD_DIR)/Makefile ]; then \
-		cd $(BUILD_DIR) && $(CMAKE) ..; \
-	fi
-	$(MAKE_CMD) -C $(BUILD_DIR)
-
-# Clean all build artifacts
-clean:
-	$(CARGO) clean
-	rm -rf $(BUILD_DIR)
+# Debug build
+debug:
+	cargo build -p vsg_app
+	@echo ""
+	@echo "Build complete: ./target/debug/video-sync-gui"
 
 # Build and run
-run: all
-	./$(BUILD_DIR)/video-sync-gui
+run: release
+	./target/release/video-sync-gui
 
-# Development build (debug mode)
-dev:
-	$(CARGO) build
-	@mkdir -p $(BUILD_DIR)
-	@if [ ! -f $(BUILD_DIR)/Makefile ]; then \
-		cd $(BUILD_DIR) && $(CMAKE) -DCMAKE_BUILD_TYPE=Debug ..; \
-	fi
-	$(MAKE_CMD) -C $(BUILD_DIR)
+# Clean all artifacts
+clean:
+	cargo clean
 
 # Help
 help:
 	@echo "Video Sync GUI Build System"
 	@echo ""
-	@echo "Targets:"
-	@echo "  make          - Build everything (Rust + Qt)"
-	@echo "  make rust     - Build Rust crates only"
-	@echo "  make qt       - Build Qt UI only"
-	@echo "  make clean    - Clean all build artifacts"
-	@echo "  make run      - Build and run the application"
-	@echo "  make dev      - Debug build"
-	@echo "  make configure - Re-run CMake configuration"
+	@echo "Usage:"
+	@echo "  make          - Build release version"
+	@echo "  make debug    - Build debug version"
+	@echo "  make run      - Build and run"
+	@echo "  make clean    - Clean all artifacts"
+	@echo ""
+	@echo "The Qt UI is automatically built via cargo."
+	@echo "Requires: Qt6, cmake, and Rust toolchain."

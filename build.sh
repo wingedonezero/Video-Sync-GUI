@@ -2,7 +2,8 @@
 # Video Sync GUI - Build Script
 #
 # Usage:
-#   ./build.sh          - Build everything
+#   ./build.sh          - Build everything (release)
+#   ./build.sh debug    - Build debug version
 #   ./build.sh run      - Build and run
 #   ./build.sh clean    - Clean build artifacts
 
@@ -11,52 +12,43 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-BUILD_DIR="qt_ui/build"
-
 case "${1:-build}" in
-    build|all)
-        echo "==> Building Rust crates..."
-        cargo build --release
-
-        echo "==> Building Qt UI..."
-        mkdir -p "$BUILD_DIR"
-        cd "$BUILD_DIR"
-        cmake ..
-        make -j$(nproc)
-        cd "$SCRIPT_DIR"
-
+    build|release)
+        echo "==> Building (release)..."
+        cargo build --release -p vsg_app
+        echo ""
         echo "==> Build complete!"
-        echo "    Run with: $BUILD_DIR/video-sync-gui"
+        echo "    Run: ./target/release/video-sync-gui"
+        ;;
+
+    debug)
+        echo "==> Building (debug)..."
+        cargo build -p vsg_app
+        echo ""
+        echo "==> Build complete!"
+        echo "    Run: ./target/debug/video-sync-gui"
         ;;
 
     run)
-        $0 build
+        $0 release
+        echo ""
         echo "==> Running..."
-        exec "$BUILD_DIR/video-sync-gui"
+        exec ./target/release/video-sync-gui
         ;;
 
     clean)
         echo "==> Cleaning..."
         cargo clean
-        rm -rf "$BUILD_DIR"
         echo "==> Clean complete"
         ;;
 
-    rust)
-        echo "==> Building Rust crates..."
-        cargo build --release
-        ;;
-
-    qt)
-        echo "==> Building Qt UI..."
-        mkdir -p "$BUILD_DIR"
-        cd "$BUILD_DIR"
-        cmake ..
-        make -j$(nproc)
-        ;;
-
     *)
-        echo "Usage: $0 [build|run|clean|rust|qt]"
+        echo "Usage: $0 [build|debug|run|clean]"
+        echo ""
+        echo "  build/release  - Build release version (default)"
+        echo "  debug          - Build debug version"
+        echo "  run            - Build and run"
+        echo "  clean          - Clean all build artifacts"
         exit 1
         ;;
 esac
