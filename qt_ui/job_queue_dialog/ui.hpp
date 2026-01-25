@@ -5,9 +5,12 @@
 
 #include <QDialog>
 #include <QTableWidget>
+#include <QStringList>
 #include <vector>
 #include <map>
 #include <memory>
+
+#include "../track_widget/ui.hpp"  // For TrackData
 
 class QPushButton;
 class JobQueueLogic;
@@ -15,8 +18,10 @@ class JobQueueLogic;
 /// Job data structure
 struct JobData {
     QString name;
-    std::map<QString, QString> sources;  // "Source 1" -> path, etc.
-    QString status;                       // "Needs Configuration", "Configured"
+    std::map<QString, QString> sources;     // "Source 1" -> path, etc.
+    QString status;                         // "Needs Configuration", "Configured"
+    std::vector<TrackData> trackLayout;     // Final track layout (from ManualSelection)
+    QStringList attachmentSources;          // Sources to include attachments from
 };
 
 class JobQueueDialog : public QDialog

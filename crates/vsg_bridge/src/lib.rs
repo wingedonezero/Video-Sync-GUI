@@ -109,6 +109,44 @@ mod ffi {
         source_paths: Vec<String>,
     }
 
+    /// Track type enumeration
+    #[derive(Debug, Clone)]
+    struct TrackInfo {
+        id: i32,
+        track_type: String,     // "video", "audio", "subtitles"
+        codec_id: String,
+        language: String,
+        name: String,
+        is_default: bool,
+        is_forced: bool,
+        // Audio-specific
+        channels: i32,
+        sample_rate: i32,
+        // Video-specific
+        width: i32,
+        height: i32,
+    }
+
+    /// Attachment info
+    #[derive(Debug, Clone)]
+    struct AttachmentInfo {
+        id: i32,
+        file_name: String,
+        mime_type: String,
+        size: i64,
+    }
+
+    /// Media file scan result
+    #[derive(Debug, Clone)]
+    struct MediaFileInfo {
+        path: String,
+        tracks: Vec<TrackInfo>,
+        attachments: Vec<AttachmentInfo>,
+        duration_ms: i64,
+        success: bool,
+        error_message: String,
+    }
+
     /// Log message from Rust
     #[derive(Debug, Clone)]
     struct LogMessage {
@@ -148,6 +186,9 @@ mod ffi {
 
         /// Discover jobs from the given paths (files or directories)
         fn bridge_discover_jobs(paths: &[String]) -> Vec<DiscoveredJob>;
+
+        /// Scan a media file for tracks and attachments
+        fn bridge_scan_file(path: &str) -> MediaFileInfo;
 
         /// Get vsg_core version string
         fn bridge_version() -> String;
@@ -682,6 +723,179 @@ fn bridge_discover_jobs(paths: &[String]) -> Vec<ffi::DiscoveredJob> {
             source_paths: vec![p.clone()],
         })
         .collect()
+}
+
+fn bridge_scan_file(path: &str) -> ffi::MediaFileInfo {
+    use std::process::Command;
+    use serde::Deserialize;
+
+    #[derive(Deserialize)]
+    struct MkvmergeInfo {
+        container: Option<MkvContainer>,
+        tracks: Vec<MkvTrack>,
+        attachments: Option<Vec<MkvAttachment>>,
+    }
+
+    #[derive(Deserialize)]
+    struct MkvContainer {
+        properties: Option<MkvContainerProps>,
+    }
+
+    #[derive(Deserialize)]
+    struct MkvContainerProps {
+        duration: Option<i64>,
+    }
+
+    #[derive(Deserialize)]
+    struct MkvTrack {
+        id: i64,
+        #[serde(rename = "type")]
+        track_type: String,
+        codec: Option<String>,
+        properties: MkvTrackProps,
+    }
+
+    #[derive(Deserialize)]
+    struct MkvTrackProps {
+        language: Option<String>,
+        track_name: Option<String>,
+        codec_id: Option<String>,
+        #[serde(default)]
+        default_track: bool,
+        #[serde(default)]
+        forced_track: bool,
+        // Audio
+        audio_channels: Option<i32>,
+        audio_sampling_frequency: Option<i32>,
+        // Video
+        pixel_dimensions: Option<String>,
+    }
+
+    #[derive(Deserialize)]
+    struct MkvAttachment {
+        id: i64,
+        file_name: Option<String>,
+        content_type: Option<String>,
+        size: Option<i64>,
+    }
+
+    let path_buf = PathBuf::from(path);
+
+    // Check file exists
+    if !path_buf.exists() {
+        return ffi::MediaFileInfo {
+            path: path.to_string(),
+            tracks: vec![],
+            attachments: vec![],
+            duration_ms: 0,
+            success: false,
+            error_message: format!("File not found: {}", path),
+        };
+    }
+
+    // Run mkvmerge -J
+    let output = match Command::new("mkvmerge").arg("-J").arg(path).output() {
+        Ok(o) => o,
+        Err(e) => {
+            return ffi::MediaFileInfo {
+                path: path.to_string(),
+                tracks: vec![],
+                attachments: vec![],
+                duration_ms: 0,
+                success: false,
+                error_message: format!("Failed to run mkvmerge: {}", e),
+            };
+        }
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return ffi::MediaFileInfo {
+            path: path.to_string(),
+            tracks: vec![],
+            attachments: vec![],
+            duration_ms: 0,
+            success: false,
+            error_message: format!("mkvmerge failed: {}", stderr),
+        };
+    }
+
+    // Parse JSON
+    let json_str = String::from_utf8_lossy(&output.stdout);
+    let info: MkvmergeInfo = match serde_json::from_str(&json_str) {
+        Ok(i) => i,
+        Err(e) => {
+            return ffi::MediaFileInfo {
+                path: path.to_string(),
+                tracks: vec![],
+                attachments: vec![],
+                duration_ms: 0,
+                success: false,
+                error_message: format!("Failed to parse mkvmerge output: {}", e),
+            };
+        }
+    };
+
+    // Extract duration
+    let duration_ms = info.container
+        .and_then(|c| c.properties)
+        .and_then(|p| p.duration)
+        .map(|d| d / 1_000_000) // nanoseconds to milliseconds
+        .unwrap_or(0);
+
+    // Convert tracks
+    let tracks: Vec<ffi::TrackInfo> = info.tracks.into_iter().map(|t| {
+        // Parse video dimensions
+        let (width, height) = t.properties.pixel_dimensions
+            .as_ref()
+            .and_then(|dims| {
+                let parts: Vec<&str> = dims.split('x').collect();
+                if parts.len() == 2 {
+                    Some((
+                        parts[0].parse().unwrap_or(0),
+                        parts[1].parse().unwrap_or(0),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .unwrap_or((0, 0));
+
+        ffi::TrackInfo {
+            id: t.id as i32,
+            track_type: t.track_type,
+            codec_id: t.properties.codec_id.unwrap_or_else(|| t.codec.unwrap_or_default()),
+            language: t.properties.language.unwrap_or_else(|| "und".to_string()),
+            name: t.properties.track_name.unwrap_or_default(),
+            is_default: t.properties.default_track,
+            is_forced: t.properties.forced_track,
+            channels: t.properties.audio_channels.unwrap_or(0),
+            sample_rate: t.properties.audio_sampling_frequency.unwrap_or(0),
+            width,
+            height,
+        }
+    }).collect();
+
+    // Convert attachments
+    let attachments: Vec<ffi::AttachmentInfo> = info.attachments
+        .unwrap_or_default()
+        .into_iter()
+        .map(|a| ffi::AttachmentInfo {
+            id: a.id as i32,
+            file_name: a.file_name.unwrap_or_default(),
+            mime_type: a.content_type.unwrap_or_default(),
+            size: a.size.unwrap_or(0),
+        })
+        .collect();
+
+    ffi::MediaFileInfo {
+        path: path.to_string(),
+        tracks,
+        attachments,
+        duration_ms,
+        success: true,
+        error_message: String::new(),
+    }
 }
 
 fn default_app_settings() -> ffi::AppSettings {

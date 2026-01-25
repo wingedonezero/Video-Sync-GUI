@@ -1,6 +1,7 @@
 // Add Job Dialog Implementation
 
 #include "ui.hpp"
+#include "../bridge/vsg_bridge.hpp"
 
 #include <QHBoxLayout>
 #include <QVBoxLayout>
@@ -169,33 +170,56 @@ void AddJobDialog::populateSourcesFromPaths(const QStringList& paths)
 void AddJobDialog::findAndAccept()
 {
     // Collect non-empty source paths
-    std::map<QString, QString> sources;
+    QStringList paths;
     for (size_t i = 0; i < m_sourceWidgets.size(); ++i) {
         QString path = m_sourceWidgets[i]->text().trimmed();
         if (!path.isEmpty()) {
-            sources[QString("Source %1").arg(i + 1)] = path;
+            paths << path;
         }
     }
 
     // Validate
-    if (sources.find("Source 1") == sources.end()) {
+    if (paths.isEmpty()) {
         QMessageBox::warning(this, "Input Required",
             "Source 1 (Reference) cannot be empty.");
         return;
     }
 
-    if (sources.size() < 2) {
+    if (paths.size() < 2) {
         QMessageBox::warning(this, "Input Required",
             "At least two sources are required to discover jobs.");
         return;
     }
 
-    // TODO: Call bridge to discover jobs
-    // auto jobs = vsg::bridge_discover_jobs(paths);
-
-    // For now, create a stub job from the inputs
     m_discoveredJobs.clear();
-    m_discoveredJobs.push_back(sources);
+
+    // Use bridge to discover jobs if available
+    if (VsgBridge::isAvailable()) {
+        auto discoveredJobs = VsgBridge::discoverJobs(paths);
+
+        for (const auto& job : discoveredJobs) {
+            std::map<QString, QString> sources;
+            // First path is always Source 1 (reference)
+            for (size_t i = 0; i < job.source_paths.size(); ++i) {
+#ifdef VSG_HAS_BRIDGE
+                QString sourcePath = QString::fromStdString(std::string(job.source_paths[i]));
+#else
+                QString sourcePath = job.source_paths[i];
+#endif
+                sources[QString("Source %1").arg(i + 1)] = sourcePath;
+            }
+            m_discoveredJobs.push_back(sources);
+        }
+    }
+
+    // Fallback: if no jobs discovered, create single job from inputs
+    if (m_discoveredJobs.empty()) {
+        std::map<QString, QString> sources;
+        for (int i = 0; i < paths.size(); ++i) {
+            sources[QString("Source %1").arg(i + 1)] = paths[i];
+        }
+        m_discoveredJobs.push_back(sources);
+    }
 
     accept();
 }

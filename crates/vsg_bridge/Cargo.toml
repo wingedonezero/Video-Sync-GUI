@@ -13,6 +13,8 @@ crate-type = ["staticlib"]
 vsg_core = { path = "../vsg_core" }
 cxx = "1.0"
 dirs = "5.0"
+serde = { workspace = true }
+serde_json = { workspace = true }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2.4"

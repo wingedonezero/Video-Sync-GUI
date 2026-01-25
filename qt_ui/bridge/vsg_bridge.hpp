@@ -56,6 +56,29 @@ inline std::vector<vsg::AnalysisResult> runAnalysis(const QStringList& paths) {
     return out;
 }
 
+/// Discover jobs from source paths (files or directories)
+inline std::vector<vsg::DiscoveredJob> discoverJobs(const QStringList& paths) {
+    rust::Vec<rust::String> rustPaths;
+    for (const auto& path : paths) {
+        rustPaths.push_back(rust::String(path.toStdString()));
+    }
+
+    auto jobs = vsg::bridge_discover_jobs(
+        rust::Slice<const rust::String>(rustPaths.data(), rustPaths.size())
+    );
+
+    std::vector<vsg::DiscoveredJob> out;
+    for (const auto& j : jobs) {
+        out.push_back(j);
+    }
+    return out;
+}
+
+/// Scan a media file for tracks and attachments
+inline vsg::MediaFileInfo scanFile(const QString& path) {
+    return vsg::bridge_scan_file(rust::String(path.toStdString()));
+}
+
 /// Poll for next log message - returns empty string if no message
 inline QString pollLog() {
     auto msg = vsg::bridge_poll_log();
@@ -157,6 +180,41 @@ struct AnalysisResult {
     QString error_message = "Bridge not available";
 };
 
+struct DiscoveredJob {
+    QString name;
+    QStringList source_paths;
+};
+
+struct TrackInfo {
+    int id = 0;
+    QString track_type;
+    QString codec_id;
+    QString language = "und";
+    QString name;
+    bool is_default = false;
+    bool is_forced = false;
+    int channels = 0;
+    int sample_rate = 0;
+    int width = 0;
+    int height = 0;
+};
+
+struct AttachmentInfo {
+    int id = 0;
+    QString file_name;
+    QString mime_type;
+    qint64 size = 0;
+};
+
+struct MediaFileInfo {
+    QString path;
+    std::vector<TrackInfo> tracks;
+    std::vector<AttachmentInfo> attachments;
+    qint64 duration_ms = 0;
+    bool success = false;
+    QString error_message = "Bridge not available";
+};
+
 inline bool init(const QString& = ".logs") {
     return false;
 }
@@ -179,6 +237,20 @@ inline QString version() {
 
 inline std::vector<AnalysisResult> runAnalysis(const QStringList&) {
     return {};
+}
+
+inline std::vector<DiscoveredJob> discoverJobs(const QStringList& paths) {
+    // Stub: return empty - caller will use fallback
+    (void)paths;
+    return {};
+}
+
+inline MediaFileInfo scanFile(const QString& path) {
+    // Stub: return error
+    MediaFileInfo info;
+    info.path = path;
+    info.error_message = "Bridge not available";
+    return info;
 }
 
 inline QString pollLog() {

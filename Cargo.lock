@@ -998,6 +998,8 @@ dependencies = [
  "cxx",
  "cxx-build",
  "dirs",
+ "serde",
+ "serde_json",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
