@@ -84,10 +84,16 @@ impl PipelineStep for AnalyzeStep {
         let analyzer = Analyzer::from_settings(&ctx.settings.analysis)
             .with_logger(ctx.logger.clone());
 
-        ctx.logger.info(&format!(
-            "Method: SCC, SOXR: {}, Peak fit: {}",
-            ctx.settings.analysis.use_soxr, ctx.settings.analysis.audio_peak_fit
-        ));
+        if ctx.settings.analysis.multi_correlation_enabled {
+            ctx.logger.info("Mode: Multi-Correlation Comparison");
+        } else {
+            ctx.logger.info(&format!(
+                "Method: {:?}, SOXR: {}, Peak fit: {}",
+                ctx.settings.analysis.correlation_method,
+                ctx.settings.analysis.use_soxr,
+                ctx.settings.analysis.audio_peak_fit
+            ));
+        }
         ctx.logger.info(&format!(
             "Chunks: {} x {}s, Range: {:.0}%-{:.0}%",
             ctx.settings.analysis.chunk_count,
@@ -118,37 +124,85 @@ impl PipelineStep for AnalyzeStep {
                 source_path.file_name().unwrap_or_default().to_string_lossy()
             ));
 
-            match analyzer.analyze(ref_path, source_path, source_name) {
-                Ok(result) => {
-                    ctx.logger.info(&format!(
-                        "{}: delay={:+}ms, match={:.1}%, accepted={}/{}",
-                        source_name,
-                        result.delay_ms_rounded(),
-                        result.avg_match_pct,
-                        result.accepted_chunks,
-                        result.total_chunks
-                    ));
-
-                    if result.drift_detected {
-                        ctx.logger.warn(&format!(
-                            "{}: Drift detected - delays vary across chunks",
-                            source_name
+            // Check if multi-correlation mode is enabled
+            if ctx.settings.analysis.multi_correlation_enabled {
+                // Multi-correlation: run all selected methods and compare
+                match analyzer.analyze_multi_correlation(ref_path, source_path, source_name) {
+                    Ok(results) => {
+                        // Log summary of all methods
+                        ctx.logger.info(&format!(
+                            "{}: Multi-correlation comparison ({} methods)",
+                            source_name,
+                            results.len()
                         ));
-                        any_drift = true;
-                    }
 
-                    delays.set_delay(source_name, result.delay_ms_raw());
-                    total_confidence += result.avg_match_pct / 100.0; // Convert to 0-1 for averaging
-                    source_count += 1;
-                    method_name = result.correlation_method.clone();
+                        // Use the first available result for the actual delay
+                        // (multi-correlation is primarily for comparison/analysis)
+                        if let Some((first_method, first_result)) = results.iter().next() {
+                            ctx.logger.info(&format!(
+                                "{}: Using {} result: delay={:+}ms, match={:.1}%",
+                                source_name,
+                                first_method,
+                                first_result.delay_ms_rounded(),
+                                first_result.avg_match_pct
+                            ));
+
+                            if first_result.drift_detected {
+                                ctx.logger.warn(&format!(
+                                    "{}: Drift detected - delays vary across chunks",
+                                    source_name
+                                ));
+                                any_drift = true;
+                            }
+
+                            delays.set_delay(source_name, first_result.delay_ms_raw());
+                            total_confidence += first_result.avg_match_pct / 100.0;
+                            source_count += 1;
+                            method_name = format!("Multi ({})", first_method);
+                        }
+                    }
+                    Err(e) => {
+                        ctx.logger.error(&format!(
+                            "{}: Multi-correlation analysis failed - {}",
+                            source_name, e
+                        ));
+                        delays.set_delay(source_name, 0.0);
+                    }
                 }
-                Err(e) => {
-                    ctx.logger.error(&format!(
-                        "{}: Analysis failed - {}",
-                        source_name, e
-                    ));
-                    // Set zero delay for failed source
-                    delays.set_delay(source_name, 0.0);
+            } else {
+                // Standard single-method analysis
+                match analyzer.analyze(ref_path, source_path, source_name) {
+                    Ok(result) => {
+                        ctx.logger.info(&format!(
+                            "{}: delay={:+}ms, match={:.1}%, accepted={}/{}",
+                            source_name,
+                            result.delay_ms_rounded(),
+                            result.avg_match_pct,
+                            result.accepted_chunks,
+                            result.total_chunks
+                        ));
+
+                        if result.drift_detected {
+                            ctx.logger.warn(&format!(
+                                "{}: Drift detected - delays vary across chunks",
+                                source_name
+                            ));
+                            any_drift = true;
+                        }
+
+                        delays.set_delay(source_name, result.delay_ms_raw());
+                        total_confidence += result.avg_match_pct / 100.0; // Convert to 0-1 for averaging
+                        source_count += 1;
+                        method_name = result.correlation_method.clone();
+                    }
+                    Err(e) => {
+                        ctx.logger.error(&format!(
+                            "{}: Analysis failed - {}",
+                            source_name, e
+                        ));
+                        // Set zero delay for failed source
+                        delays.set_delay(source_name, 0.0);
+                    }
                 }
             }
         }
