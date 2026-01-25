@@ -1,6 +1,6 @@
 //! Video Sync GUI - Main entry point
 //!
-//! This is the application entry point using libcosmic. It handles:
+//! This is the application entry point using iced. It handles:
 //! - Application-level logging initialization
 //! - Configuration loading
 //! - Directory creation
@@ -8,9 +8,6 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-
-use cosmic::app::Settings as AppSettings;
-use cosmic::iced::Size;
 
 use vsg_core::config::ConfigManager;
 use vsg_core::jobs::JobQueue;
@@ -22,14 +19,14 @@ mod pages;
 mod theme;
 mod windows;
 
-use app::{App, AppFlags, APP_ID};
+use app::App;
 
 /// Default config path: .config/settings.toml (relative to current working directory)
 fn default_config_path() -> PathBuf {
     PathBuf::from(".config").join("settings.toml")
 }
 
-fn main() -> cosmic::iced::Result {
+fn main() -> iced::Result {
     // Load configuration first (needed for logs directory path)
     let config_path = default_config_path();
     let mut config_manager = ConfigManager::new(&config_path);
@@ -62,24 +59,8 @@ fn main() -> cosmic::iced::Result {
     let job_queue = Arc::new(Mutex::new(JobQueue::new(&temp_folder)));
     tracing::debug!("Job queue initialized at {}", temp_folder.display());
 
-    // Application flags
-    let flags = AppFlags {
-        config,
-        job_queue,
-        config_path,
-        logs_dir,
-    };
-
-    // Application settings
-    // Disable client-side decorations and transparency for KDE/non-COSMIC desktop compatibility
-    let settings = AppSettings::default()
-        .size(Size::new(900.0, 700.0))
-        .antialiasing(true)
-        .client_decorations(false)
-        .transparent(false);
-
     tracing::info!("Application initialized, starting event loop");
 
     // Run the application
-    cosmic::app::run::<App>(settings, flags)
+    App::run(config, job_queue, config_path, logs_dir)
 }

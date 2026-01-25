@@ -1,6 +1,6 @@
 [package]
 name = "vsg_ui"
-description = "Video Sync GUI - libcosmic-based user interface"
+description = "Video Sync GUI - iced-based user interface"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -14,19 +14,16 @@ path = "src/main.rs"
 # Core library
 vsg_core = { path = "../vsg_core" }
 
-# libcosmic - COSMIC desktop toolkit (based on iced)
-# Note: dbus-config disabled for non-COSMIC desktop compatibility
-libcosmic = { git = "https://github.com/pop-os/libcosmic.git", default-features = false, features = [
-    "tokio",
-    "winit",
-    "wgpu",
-    "multi-window",
-] }
+# iced - Cross-platform GUI library
+iced = { version = "0.14.0", features = ["tokio", "advanced"] }
 
-# Async runtime (required by libcosmic)
+# iced_aw - Additional widgets (tabs, etc.)
+iced_aw = { version = "0.13.0", default-features = false, features = ["tabs", "card", "number_input"] }
+
+# Async runtime
 tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "sync"] }
 
-# File dialogs (fallback if portal not available)
+# File dialogs
 rfd = "0.17.2"
 
 # Serialization

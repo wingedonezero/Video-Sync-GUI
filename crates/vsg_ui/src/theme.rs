@@ -1,10 +1,8 @@
 //! Theme configuration for Video Sync GUI.
 //!
-//! This module provides COSMIC theming integration and custom colors.
+//! This module provides theming for iced and custom colors.
 
-use cosmic::iced::Color;
-use cosmic::theme::ThemeType;
-use cosmic::Theme;
+use iced::Color;
 
 /// Application theme colors (dark theme to match original).
 pub mod colors {
@@ -100,9 +98,4 @@ pub mod font {
     pub const LG: u16 = 16;
     /// Header font size
     pub const HEADER: u16 = 18;
-}
-
-/// Get the application theme.
-pub fn app_theme() -> Theme {
-    Theme::dark()
 }

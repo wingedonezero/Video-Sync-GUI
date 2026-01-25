@@ -2,83 +2,133 @@
 //!
 //! Multi-tab settings dialog with all configuration options.
 
-use cosmic::iced::{Alignment, Length};
-use cosmic::prelude::*;
-use cosmic::{widget, Element};
+use iced::widget::{
+    button, checkbox, column, container, pick_list, row, scrollable, text, text_input, Space,
+};
+use iced::{Alignment, Element, Length};
+
+use iced_aw::{TabLabel, Tabs};
 
 use crate::app::{App, FolderType, Message, SettingKey, SettingValue};
 
+/// Tab identifiers
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SettingsTab {
+    Storage,
+    Analysis,
+    MultiCorrelation,
+    DelaySelection,
+    Chapters,
+    MergeBehavior,
+    Logging,
+}
+
+impl SettingsTab {
+    fn all() -> &'static [SettingsTab] {
+        &[
+            SettingsTab::Storage,
+            SettingsTab::Analysis,
+            SettingsTab::MultiCorrelation,
+            SettingsTab::DelaySelection,
+            SettingsTab::Chapters,
+            SettingsTab::MergeBehavior,
+            SettingsTab::Logging,
+        ]
+    }
+
+    fn label(&self) -> &'static str {
+        match self {
+            SettingsTab::Storage => "Storage & Tools",
+            SettingsTab::Analysis => "Analysis",
+            SettingsTab::MultiCorrelation => "Multi-Correlation",
+            SettingsTab::DelaySelection => "Delay Selection",
+            SettingsTab::Chapters => "Chapters",
+            SettingsTab::MergeBehavior => "Merge Behavior",
+            SettingsTab::Logging => "Logging",
+        }
+    }
+}
+
 /// Build the settings window view.
 pub fn view(app: &App) -> Element<Message> {
-    let spacing = cosmic::theme::active().cosmic().spacing;
-
     let Some(settings) = &app.pending_settings else {
-        return widget::text::body("No settings loaded").into();
+        return container(text("No settings loaded"))
+            .padding(20)
+            .into();
     };
 
-    let content = widget::column()
-        .push(widget::text::title3("Settings"))
-        .push(widget::vertical_space().height(Length::Fixed(spacing.space_m.into())))
-        .push(
-            widget::scrollable(
-                widget::column()
-                    .push(storage_section(settings))
-                    .push(widget::vertical_space().height(Length::Fixed(spacing.space_l.into())))
-                    .push(logging_section(settings))
-                    .push(widget::vertical_space().height(Length::Fixed(spacing.space_l.into())))
-                    .push(analysis_section(settings))
-                    .push(widget::vertical_space().height(Length::Fixed(spacing.space_l.into())))
-                    .push(multi_correlation_section(settings))
-                    .push(widget::vertical_space().height(Length::Fixed(spacing.space_l.into())))
-                    .push(delay_selection_section(settings))
-                    .push(widget::vertical_space().height(Length::Fixed(spacing.space_l.into())))
-                    .push(chapters_section(settings))
-                    .push(widget::vertical_space().height(Length::Fixed(spacing.space_l.into())))
-                    .push(postprocess_section(settings))
-                    .spacing(spacing.space_xxs)
-                    .padding(spacing.space_s)
-            )
-            .height(Length::Fill)
-        )
-        .push(widget::vertical_space().height(Length::Fixed(spacing.space_m.into())))
-        .push(
-            widget::row()
-                .push(widget::horizontal_space())
-                .push(
-                    widget::button::standard("Cancel")
-                        .on_press(Message::CloseSettings)
-                )
-                .push(
-                    widget::button::suggested("Save")
-                        .on_press(Message::SaveSettings)
-                )
-                .spacing(spacing.space_s)
-        )
-        .spacing(spacing.space_xxs)
-        .padding(spacing.space_l);
+    let active_tab = SettingsTab::all()
+        .get(app.settings_active_tab)
+        .copied()
+        .unwrap_or(SettingsTab::Storage);
 
-    widget::container(content)
+    // Build tabs
+    let tabs = Tabs::new_with_tabs(
+        SettingsTab::all()
+            .iter()
+            .map(|tab| {
+                let content: Element<Message> = match tab {
+                    SettingsTab::Storage => storage_tab(settings),
+                    SettingsTab::Analysis => analysis_tab(settings),
+                    SettingsTab::MultiCorrelation => multi_correlation_tab(settings),
+                    SettingsTab::DelaySelection => delay_selection_tab(settings),
+                    SettingsTab::Chapters => chapters_tab(settings),
+                    SettingsTab::MergeBehavior => merge_behavior_tab(settings),
+                    SettingsTab::Logging => logging_tab(settings),
+                };
+                (*tab, TabLabel::Text(tab.label().to_string()), content)
+            }),
+        |tab| Message::SettingsTabSelected(SettingsTab::all().iter().position(|t| *t == tab).unwrap_or(0)),
+    )
+    .set_active_tab(&active_tab)
+    .tab_bar_position(iced_aw::TabBarPosition::Top)
+    .height(Length::Fill);
+
+    // Button row
+    let button_row = row![
+        Space::new().width(Length::Fill),
+        button("Cancel").on_press(Message::CancelSettings),
+        button("Save").on_press(Message::SaveSettings),
+    ]
+    .spacing(8);
+
+    let content = column![
+        text("Application Settings").size(24),
+        Space::new().height(12),
+        tabs,
+        Space::new().height(12),
+        button_row,
+    ]
+    .spacing(4)
+    .padding(16);
+
+    container(content)
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
 }
 
-fn storage_section(settings: &vsg_core::config::Settings) -> Element<'static, Message> {
-    let spacing = cosmic::theme::active().cosmic().spacing;
+/// Storage & Tools tab
+fn storage_tab(settings: &vsg_core::config::Settings) -> Element<'static, Message> {
+    let output_path = settings.paths.output_folder.clone();
+    let temp_path = settings.paths.temp_root.clone();
+    let logs_path = settings.paths.logs_folder.clone();
 
-    widget::column()
-        .push(widget::text::title4("Storage & Tools"))
-        .push(widget::vertical_space().height(Length::Fixed(spacing.space_s.into())))
-        .push(folder_row("Output Folder:", &settings.paths.output_folder, FolderType::Output))
-        .push(folder_row("Temp Folder:", &settings.paths.temp_root, FolderType::Temp))
-        .push(folder_row("Logs Folder:", &settings.paths.logs_folder, FolderType::Logs))
-        .spacing(spacing.space_xxs)
+    let content = column![
+        text("Storage & Tools").size(18),
+        Space::new().height(12),
+        folder_row("Output Folder:", &output_path, FolderType::Output),
+        folder_row("Temp Folder:", &temp_path, FolderType::Temp),
+        folder_row("Logs Folder:", &logs_path, FolderType::Logs),
+    ]
+    .spacing(8);
+
+    scrollable(container(content).padding(16).width(Length::Fill))
+        .height(Length::Fill)
         .into()
 }
 
 fn folder_row(label: &str, path: &str, folder_type: FolderType) -> Element<'static, Message> {
-    let spacing = cosmic::theme::active().cosmic().spacing;
-
     let key = match folder_type {
         FolderType::Output => SettingKey::OutputFolder,
         FolderType::Temp => SettingKey::TempRoot,
@@ -88,311 +138,374 @@ fn folder_row(label: &str, path: &str, folder_type: FolderType) -> Element<'stat
     let label_owned = label.to_string();
     let path_owned = path.to_string();
 
-    widget::row()
-        .push(
-            widget::text::body(label_owned)
-                .width(Length::Fixed(120.0))
-        )
-        .push(
-            widget::text_input::text_input("", path_owned)
-                .on_input(move |s| Message::SettingChanged(key.clone(), SettingValue::String(s)))
-                .width(Length::Fill)
-        )
-        .push(
-            widget::button::standard("Browse")
-                .on_press(Message::BrowseFolder(folder_type))
-        )
-        .spacing(spacing.space_s)
-        .align_y(Alignment::Center)
-        .into()
+    row![
+        text(label_owned).width(120),
+        text_input("", &path_owned)
+            .on_input(move |s| Message::SettingChanged(key.clone(), SettingValue::String(s)))
+            .width(Length::Fill),
+        button("Browse...").on_press(Message::BrowseFolder(folder_type)),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center)
+    .into()
 }
 
-fn logging_section(settings: &vsg_core::config::Settings) -> Element<'static, Message> {
-    let spacing = cosmic::theme::active().cosmic().spacing;
-
-    let error_tail_str = settings.logging.error_tail.to_string();
-    let progress_step_str = settings.logging.progress_step.to_string();
-
-    widget::column()
-        .push(widget::text::title4("Logging"))
-        .push(widget::vertical_space().height(Length::Fixed(spacing.space_s.into())))
-        .push(
-            widget::row()
-                .push(
-                    widget::checkbox("Compact logging", settings.logging.compact)
-                        .on_toggle(|v| Message::SettingChanged(SettingKey::CompactLogging, SettingValue::Bool(v)))
-                )
-                .push(widget::horizontal_space().width(Length::Fixed(spacing.space_l.into())))
-                .push(
-                    widget::checkbox("Autoscroll", settings.logging.autoscroll)
-                        .on_toggle(|v| Message::SettingChanged(SettingKey::Autoscroll, SettingValue::Bool(v)))
-                )
-        )
-        .push(
-            widget::row()
-                .push(widget::text::body("Error tail:"))
-                .push(
-                    widget::text_input::text_input("0", error_tail_str)
-                        .on_input(|v| {
-                            Message::SettingChanged(SettingKey::ErrorTail, SettingValue::I32(v.parse().unwrap_or(0)))
-                        })
-                        .width(Length::Fixed(60.0))
-                )
-                .push(widget::horizontal_space().width(Length::Fixed(spacing.space_l.into())))
-                .push(widget::text::body("Progress step:"))
-                .push(
-                    widget::text_input::text_input("1", progress_step_str)
-                        .on_input(|v| {
-                            Message::SettingChanged(SettingKey::ProgressStep, SettingValue::I32(v.parse().unwrap_or(1)))
-                        })
-                        .width(Length::Fixed(60.0))
-                )
-                .spacing(spacing.space_s)
-                .align_y(Alignment::Center)
-        )
-        .spacing(spacing.space_xxs)
-        .into()
-}
-
-// Static arrays for dropdown options
-static ANALYSIS_MODES: &[&str] = &["Audio Correlation", "Video Diff"];
-static CORRELATION_METHODS: &[&str] = &["SCC", "GCC-PHAT", "GCC-SCOT", "Whitened"];
-static SYNC_MODES: &[&str] = &["Positive Only", "Allow Negative"];
-static FILTERING_METHODS: &[&str] = &["None", "Low Pass", "Band Pass", "High Pass"];
-
-fn analysis_section(settings: &vsg_core::config::Settings) -> Element<'static, Message> {
-    let spacing = cosmic::theme::active().cosmic().spacing;
-
+/// Analysis tab
+fn analysis_tab(settings: &vsg_core::config::Settings) -> Element<'static, Message> {
     let analysis_mode_idx = match settings.analysis.mode {
-        vsg_core::models::AnalysisMode::AudioCorrelation => Some(0),
-        vsg_core::models::AnalysisMode::VideoDiff => Some(1),
+        vsg_core::models::AnalysisMode::AudioCorrelation => 0,
+        vsg_core::models::AnalysisMode::VideoDiff => 1,
     };
 
     let corr_method_idx = match settings.analysis.correlation_method {
-        vsg_core::models::CorrelationMethod::Scc => Some(0),
-        vsg_core::models::CorrelationMethod::GccPhat => Some(1),
-        vsg_core::models::CorrelationMethod::GccScot => Some(2),
-        vsg_core::models::CorrelationMethod::Whitened => Some(3),
+        vsg_core::models::CorrelationMethod::Scc => 0,
+        vsg_core::models::CorrelationMethod::GccPhat => 1,
+        vsg_core::models::CorrelationMethod::GccScot => 2,
+        vsg_core::models::CorrelationMethod::Whitened => 3,
     };
 
     let sync_mode_idx = match settings.analysis.sync_mode {
-        vsg_core::models::SyncMode::PositiveOnly => Some(0),
-        vsg_core::models::SyncMode::AllowNegative => Some(1),
+        vsg_core::models::SyncMode::PositiveOnly => 0,
+        vsg_core::models::SyncMode::AllowNegative => 1,
     };
 
     let filtering_idx = match settings.analysis.filtering_method {
-        vsg_core::models::FilteringMethod::None => Some(0),
-        vsg_core::models::FilteringMethod::LowPass => Some(1),
-        vsg_core::models::FilteringMethod::BandPass => Some(2),
-        vsg_core::models::FilteringMethod::HighPass => Some(3),
+        vsg_core::models::FilteringMethod::None => 0,
+        vsg_core::models::FilteringMethod::LowPass => 1,
+        vsg_core::models::FilteringMethod::BandPass => 2,
+        vsg_core::models::FilteringMethod::HighPass => 3,
     };
 
-    widget::column()
-        .push(widget::text::title4("Analysis"))
-        .push(widget::vertical_space().height(Length::Fixed(spacing.space_s.into())))
-        .push(
-            widget::row()
-                .push(widget::text::body("Analysis Mode:").width(Length::Fixed(140.0)))
-                .push(
-                    widget::dropdown(ANALYSIS_MODES, analysis_mode_idx, |idx| {
-                        Message::SettingChanged(SettingKey::AnalysisMode, SettingValue::I32(idx as i32))
-                    })
-                )
-                .push(widget::horizontal_space().width(Length::Fixed(spacing.space_l.into())))
-                .push(widget::text::body("Correlation:"))
-                .push(
-                    widget::dropdown(CORRELATION_METHODS, corr_method_idx, |idx| {
-                        Message::SettingChanged(SettingKey::CorrelationMethod, SettingValue::I32(idx as i32))
-                    })
-                )
-                .spacing(spacing.space_s)
-                .align_y(Alignment::Center)
-        )
-        .push(
-            widget::row()
-                .push(widget::text::body("Sync Mode:").width(Length::Fixed(140.0)))
-                .push(
-                    widget::dropdown(SYNC_MODES, sync_mode_idx, |idx| {
-                        Message::SettingChanged(SettingKey::SyncMode, SettingValue::I32(idx as i32))
-                    })
-                )
-                .push(widget::horizontal_space().width(Length::Fixed(spacing.space_l.into())))
-                .push(widget::text::body("Filtering:"))
-                .push(
-                    widget::dropdown(FILTERING_METHODS, filtering_idx, |idx| {
-                        Message::SettingChanged(SettingKey::FilteringMethod, SettingValue::I32(idx as i32))
-                    })
-                )
-                .spacing(spacing.space_s)
-                .align_y(Alignment::Center)
-        )
-        .push(
-            widget::row()
-                .push(widget::text::body("Chunk Count:").width(Length::Fixed(140.0)))
-                .push(
-                    widget::text_input::text_input("10", settings.analysis.chunk_count.to_string())
-                        .on_input(|v| Message::SettingChanged(SettingKey::ChunkCount, SettingValue::I32(v.parse().unwrap_or(10))))
-                        .width(Length::Fixed(60.0))
-                )
-                .push(widget::horizontal_space().width(Length::Fixed(spacing.space_l.into())))
-                .push(widget::text::body("Chunk Duration:"))
-                .push(
-                    widget::text_input::text_input("20", settings.analysis.chunk_duration.to_string())
-                        .on_input(|v| Message::SettingChanged(SettingKey::ChunkDuration, SettingValue::I32(v.parse().unwrap_or(20))))
-                        .width(Length::Fixed(60.0))
-                )
-                .spacing(spacing.space_s)
-                .align_y(Alignment::Center)
-        )
-        .push(
-            widget::checkbox("Peak fitting", settings.analysis.audio_peak_fit)
-                .on_toggle(|v| Message::SettingChanged(SettingKey::AudioPeakFit, SettingValue::Bool(v)))
-        )
-        .spacing(spacing.space_xxs)
+    let analysis_modes: Vec<&'static str> = vec!["Audio Correlation", "Video Diff"];
+    let correlation_methods: Vec<&'static str> = vec!["SCC", "GCC-PHAT", "GCC-SCOT", "Whitened"];
+    let sync_modes: Vec<&'static str> = vec!["Positive Only", "Allow Negative"];
+    let filtering_methods: Vec<&'static str> = vec!["None", "Low Pass", "Band Pass", "High Pass"];
+
+    let chunk_count_str = settings.analysis.chunk_count.to_string();
+    let chunk_duration_str = settings.analysis.chunk_duration.to_string();
+    let audio_peak_fit = settings.analysis.audio_peak_fit;
+
+    let content = column![
+        text("Analysis").size(18),
+        Space::new().height(12),
+        row![
+            text("Analysis Mode:").width(140),
+            pick_list(
+                analysis_modes.clone(),
+                Some(analysis_modes[analysis_mode_idx]),
+                move |selected| {
+                    let idx = analysis_modes.iter().position(|&m| m == selected).unwrap_or(0);
+                    Message::SettingChanged(SettingKey::AnalysisMode, SettingValue::I32(idx as i32))
+                }
+            ),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+        row![
+            text("Correlation Method:").width(140),
+            pick_list(
+                correlation_methods.clone(),
+                Some(correlation_methods[corr_method_idx]),
+                move |selected| {
+                    let idx = correlation_methods
+                        .iter()
+                        .position(|&m| m == selected)
+                        .unwrap_or(0);
+                    Message::SettingChanged(
+                        SettingKey::CorrelationMethod,
+                        SettingValue::I32(idx as i32)
+                    )
+                }
+            ),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+        row![
+            text("Sync Mode:").width(140),
+            pick_list(
+                sync_modes.clone(),
+                Some(sync_modes[sync_mode_idx]),
+                move |selected| {
+                    let idx = sync_modes.iter().position(|&m| m == selected).unwrap_or(0);
+                    Message::SettingChanged(SettingKey::SyncMode, SettingValue::I32(idx as i32))
+                }
+            ),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+        row![
+            text("Filtering:").width(140),
+            pick_list(
+                filtering_methods.clone(),
+                Some(filtering_methods[filtering_idx]),
+                move |selected| {
+                    let idx = filtering_methods
+                        .iter()
+                        .position(|&m| m == selected)
+                        .unwrap_or(0);
+                    Message::SettingChanged(
+                        SettingKey::FilteringMethod,
+                        SettingValue::I32(idx as i32)
+                    )
+                }
+            ),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+        Space::new().height(8),
+        row![
+            text("Chunk Count:").width(140),
+            text_input("10", &chunk_count_str)
+                .on_input(|v| Message::SettingChanged(
+                    SettingKey::ChunkCount,
+                    SettingValue::I32(v.parse().unwrap_or(10))
+                ))
+                .width(80),
+            Space::new().width(20),
+            text("Chunk Duration:"),
+            text_input("20", &chunk_duration_str)
+                .on_input(|v| Message::SettingChanged(
+                    SettingKey::ChunkDuration,
+                    SettingValue::I32(v.parse().unwrap_or(20))
+                ))
+                .width(80),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+        Space::new().height(8),
+        checkbox(audio_peak_fit)
+            .label("Peak fitting")
+            .on_toggle(|v| Message::SettingChanged(SettingKey::AudioPeakFit, SettingValue::Bool(v))),
+    ]
+    .spacing(8);
+
+    scrollable(container(content).padding(16).width(Length::Fill))
+        .height(Length::Fill)
         .into()
 }
 
-fn multi_correlation_section(settings: &vsg_core::config::Settings) -> Element<'static, Message> {
-    let spacing = cosmic::theme::active().cosmic().spacing;
+/// Multi-Correlation tab
+fn multi_correlation_tab(settings: &vsg_core::config::Settings) -> Element<'static, Message> {
+    let multi_corr_enabled = settings.analysis.multi_correlation_enabled;
+    let scc = settings.analysis.multi_corr_scc;
+    let gcc_phat = settings.analysis.multi_corr_gcc_phat;
+    let gcc_scot = settings.analysis.multi_corr_gcc_scot;
+    let whitened = settings.analysis.multi_corr_whitened;
 
-    widget::column()
-        .push(widget::text::title4("Multi-Correlation"))
-        .push(widget::vertical_space().height(Length::Fixed(spacing.space_s.into())))
-        .push(
-            widget::checkbox("Enable multi-correlation", settings.analysis.multi_correlation_enabled)
-                .on_toggle(|v| Message::SettingChanged(SettingKey::MultiCorrelationEnabled, SettingValue::Bool(v)))
-        )
-        .push(
-            widget::row()
-                .push(
-                    widget::checkbox("SCC", settings.analysis.multi_corr_scc)
-                        .on_toggle(|v| Message::SettingChanged(SettingKey::MultiCorrScc, SettingValue::Bool(v)))
-                )
-                .push(
-                    widget::checkbox("GCC-PHAT", settings.analysis.multi_corr_gcc_phat)
-                        .on_toggle(|v| Message::SettingChanged(SettingKey::MultiCorrGccPhat, SettingValue::Bool(v)))
-                )
-                .push(
-                    widget::checkbox("GCC-SCOT", settings.analysis.multi_corr_gcc_scot)
-                        .on_toggle(|v| Message::SettingChanged(SettingKey::MultiCorrGccScot, SettingValue::Bool(v)))
-                )
-                .push(
-                    widget::checkbox("Whitened", settings.analysis.multi_corr_whitened)
-                        .on_toggle(|v| Message::SettingChanged(SettingKey::MultiCorrWhitened, SettingValue::Bool(v)))
-                )
-                .spacing(spacing.space_m)
-        )
-        .spacing(spacing.space_xxs)
+    let content = column![
+        text("Multi-Correlation").size(18),
+        Space::new().height(12),
+        checkbox(multi_corr_enabled)
+            .label("Enable multi-correlation")
+            .on_toggle(|v| Message::SettingChanged(
+                SettingKey::MultiCorrelationEnabled,
+                SettingValue::Bool(v)
+            )),
+        Space::new().height(8),
+        text("Methods to use:"),
+        row![
+            checkbox(scc)
+                .label("SCC")
+                .on_toggle(|v| Message::SettingChanged(SettingKey::MultiCorrScc, SettingValue::Bool(v))),
+            checkbox(gcc_phat)
+                .label("GCC-PHAT")
+                .on_toggle(|v| Message::SettingChanged(SettingKey::MultiCorrGccPhat, SettingValue::Bool(v))),
+            checkbox(gcc_scot)
+                .label("GCC-SCOT")
+                .on_toggle(|v| Message::SettingChanged(SettingKey::MultiCorrGccScot, SettingValue::Bool(v))),
+            checkbox(whitened)
+                .label("Whitened")
+                .on_toggle(|v| Message::SettingChanged(SettingKey::MultiCorrWhitened, SettingValue::Bool(v))),
+        ]
+        .spacing(16),
+    ]
+    .spacing(8);
+
+    scrollable(container(content).padding(16).width(Length::Fill))
+        .height(Length::Fill)
         .into()
 }
 
-static DELAY_MODES: &[&str] = &["Mode", "Mode Clustered", "Mode Early", "First Stable", "Average"];
-
-fn delay_selection_section(settings: &vsg_core::config::Settings) -> Element<'static, Message> {
-    let spacing = cosmic::theme::active().cosmic().spacing;
-
+/// Delay Selection tab
+fn delay_selection_tab(settings: &vsg_core::config::Settings) -> Element<'static, Message> {
     let delay_mode_idx = match settings.analysis.delay_selection_mode {
-        vsg_core::models::DelaySelectionMode::Mode => Some(0),
-        vsg_core::models::DelaySelectionMode::ModeClustered => Some(1),
-        vsg_core::models::DelaySelectionMode::ModeEarly => Some(2),
-        vsg_core::models::DelaySelectionMode::FirstStable => Some(3),
-        vsg_core::models::DelaySelectionMode::Average => Some(4),
+        vsg_core::models::DelaySelectionMode::Mode => 0,
+        vsg_core::models::DelaySelectionMode::ModeClustered => 1,
+        vsg_core::models::DelaySelectionMode::ModeEarly => 2,
+        vsg_core::models::DelaySelectionMode::FirstStable => 3,
+        vsg_core::models::DelaySelectionMode::Average => 4,
     };
 
-    widget::column()
-        .push(widget::text::title4("Delay Selection"))
-        .push(widget::vertical_space().height(Length::Fixed(spacing.space_s.into())))
-        .push(
-            widget::row()
-                .push(widget::text::body("Mode:").width(Length::Fixed(140.0)))
-                .push(
-                    widget::dropdown(DELAY_MODES, delay_mode_idx, |idx| {
-                        Message::SettingChanged(SettingKey::DelaySelectionMode, SettingValue::I32(idx as i32))
-                    })
-                )
-                .spacing(spacing.space_s)
-                .align_y(Alignment::Center)
-        )
-        .push(
-            widget::row()
-                .push(widget::text::body("Min Accepted Chunks:").width(Length::Fixed(160.0)))
-                .push(
-                    widget::text_input::text_input("3", settings.analysis.min_accepted_chunks.to_string())
-                        .on_input(|v| Message::SettingChanged(SettingKey::MinAcceptedChunks, SettingValue::I32(v.parse().unwrap_or(3))))
-                        .width(Length::Fixed(60.0))
-                )
-                .spacing(spacing.space_s)
-                .align_y(Alignment::Center)
-        )
-        .spacing(spacing.space_xxs)
+    let delay_modes: Vec<&'static str> = vec!["Mode", "Mode Clustered", "Mode Early", "First Stable", "Average"];
+    let min_chunks_str = settings.analysis.min_accepted_chunks.to_string();
+
+    let content = column![
+        text("Delay Selection").size(18),
+        Space::new().height(12),
+        row![
+            text("Selection Mode:").width(160),
+            pick_list(
+                delay_modes.clone(),
+                Some(delay_modes[delay_mode_idx]),
+                move |selected| {
+                    let idx = delay_modes.iter().position(|&m| m == selected).unwrap_or(0);
+                    Message::SettingChanged(SettingKey::DelaySelectionMode, SettingValue::I32(idx as i32))
+                }
+            ),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+        row![
+            text("Min Accepted Chunks:").width(160),
+            text_input("3", &min_chunks_str)
+                .on_input(|v| Message::SettingChanged(
+                    SettingKey::MinAcceptedChunks,
+                    SettingValue::I32(v.parse().unwrap_or(3))
+                ))
+                .width(80),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+    ]
+    .spacing(8);
+
+    scrollable(container(content).padding(16).width(Length::Fill))
+        .height(Length::Fill)
         .into()
 }
 
-static SNAP_MODES: &[&str] = &["Previous", "Nearest"];
-
-fn chapters_section(settings: &vsg_core::config::Settings) -> Element<'static, Message> {
-    let spacing = cosmic::theme::active().cosmic().spacing;
-
+/// Chapters tab
+fn chapters_tab(settings: &vsg_core::config::Settings) -> Element<'static, Message> {
     let snap_mode_idx = match settings.chapters.snap_mode {
-        vsg_core::models::SnapMode::Previous => Some(0),
-        vsg_core::models::SnapMode::Nearest => Some(1),
+        vsg_core::models::SnapMode::Previous => 0,
+        vsg_core::models::SnapMode::Nearest => 1,
     };
 
-    widget::column()
-        .push(widget::text::title4("Chapters"))
-        .push(widget::vertical_space().height(Length::Fixed(spacing.space_s.into())))
-        .push(
-            widget::row()
-                .push(
-                    widget::checkbox("Rename chapters", settings.chapters.rename)
-                        .on_toggle(|v| Message::SettingChanged(SettingKey::ChapterRename, SettingValue::Bool(v)))
-                )
-                .push(widget::horizontal_space().width(Length::Fixed(spacing.space_l.into())))
-                .push(
-                    widget::checkbox("Snap to keyframes", settings.chapters.snap_enabled)
-                        .on_toggle(|v| Message::SettingChanged(SettingKey::ChapterSnap, SettingValue::Bool(v)))
-                )
-        )
-        .push(
-            widget::row()
-                .push(widget::text::body("Snap Mode:").width(Length::Fixed(120.0)))
-                .push(
-                    widget::dropdown(SNAP_MODES, snap_mode_idx, |idx| {
-                        Message::SettingChanged(SettingKey::SnapMode, SettingValue::I32(idx as i32))
-                    })
-                )
-                .push(widget::horizontal_space().width(Length::Fixed(spacing.space_l.into())))
-                .push(widget::text::body("Threshold (ms):"))
-                .push(
-                    widget::text_input::text_input("500", settings.chapters.snap_threshold_ms.to_string())
-                        .on_input(|v| Message::SettingChanged(SettingKey::SnapThresholdMs, SettingValue::I32(v.parse().unwrap_or(500))))
-                        .width(Length::Fixed(80.0))
-                )
-                .spacing(spacing.space_s)
-                .align_y(Alignment::Center)
-        )
-        .spacing(spacing.space_xxs)
+    let snap_modes: Vec<&'static str> = vec!["Previous", "Nearest"];
+    let threshold_str = settings.chapters.snap_threshold_ms.to_string();
+    let rename = settings.chapters.rename;
+    let snap_enabled = settings.chapters.snap_enabled;
+
+    let content = column![
+        text("Chapters").size(18),
+        Space::new().height(12),
+        checkbox(rename)
+            .label("Rename chapters")
+            .on_toggle(|v| Message::SettingChanged(SettingKey::ChapterRename, SettingValue::Bool(v))),
+        checkbox(snap_enabled)
+            .label("Snap to keyframes")
+            .on_toggle(|v| Message::SettingChanged(SettingKey::ChapterSnap, SettingValue::Bool(v))),
+        Space::new().height(8),
+        row![
+            text("Snap Mode:").width(140),
+            pick_list(snap_modes.clone(), Some(snap_modes[snap_mode_idx]), move |selected| {
+                let idx = snap_modes.iter().position(|&m| m == selected).unwrap_or(0);
+                Message::SettingChanged(SettingKey::SnapMode, SettingValue::I32(idx as i32))
+            }),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+        row![
+            text("Snap Threshold (ms):").width(140),
+            text_input("500", &threshold_str)
+                .on_input(|v| Message::SettingChanged(
+                    SettingKey::SnapThresholdMs,
+                    SettingValue::I32(v.parse().unwrap_or(500))
+                ))
+                .width(80),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+    ]
+    .spacing(8);
+
+    scrollable(container(content).padding(16).width(Length::Fill))
+        .height(Length::Fill)
         .into()
 }
 
-fn postprocess_section(settings: &vsg_core::config::Settings) -> Element<'static, Message> {
-    let spacing = cosmic::theme::active().cosmic().spacing;
+/// Merge Behavior tab
+fn merge_behavior_tab(settings: &vsg_core::config::Settings) -> Element<'static, Message> {
+    let disable_stats = settings.postprocess.disable_track_stats_tags;
+    let disable_compression = settings.postprocess.disable_header_compression;
+    let apply_norm = settings.postprocess.apply_dialog_norm;
 
-    widget::column()
-        .push(widget::text::title4("Merge Behavior"))
-        .push(widget::vertical_space().height(Length::Fixed(spacing.space_s.into())))
-        .push(
-            widget::checkbox("Disable track stats tags", settings.postprocess.disable_track_stats_tags)
-                .on_toggle(|v| Message::SettingChanged(SettingKey::DisableTrackStats, SettingValue::Bool(v)))
-        )
-        .push(
-            widget::checkbox("Disable header compression", settings.postprocess.disable_header_compression)
-                .on_toggle(|v| Message::SettingChanged(SettingKey::DisableHeaderCompression, SettingValue::Bool(v)))
-        )
-        .push(
-            widget::checkbox("Apply dialog normalization", settings.postprocess.apply_dialog_norm)
-                .on_toggle(|v| Message::SettingChanged(SettingKey::ApplyDialogNorm, SettingValue::Bool(v)))
-        )
-        .spacing(spacing.space_xxs)
+    let content = column![
+        text("Merge Behavior").size(18),
+        Space::new().height(12),
+        checkbox(disable_stats)
+            .label("Disable track stats tags")
+            .on_toggle(|v| Message::SettingChanged(
+                SettingKey::DisableTrackStats,
+                SettingValue::Bool(v)
+            )),
+        checkbox(disable_compression)
+            .label("Disable header compression")
+            .on_toggle(|v| Message::SettingChanged(
+                SettingKey::DisableHeaderCompression,
+                SettingValue::Bool(v)
+            )),
+        checkbox(apply_norm)
+            .label("Apply dialog normalization")
+            .on_toggle(|v| Message::SettingChanged(
+                SettingKey::ApplyDialogNorm,
+                SettingValue::Bool(v)
+            )),
+    ]
+    .spacing(8);
+
+    scrollable(container(content).padding(16).width(Length::Fill))
+        .height(Length::Fill)
+        .into()
+}
+
+/// Logging tab
+fn logging_tab(settings: &vsg_core::config::Settings) -> Element<'static, Message> {
+    let error_tail_str = settings.logging.error_tail.to_string();
+    let progress_step_str = settings.logging.progress_step.to_string();
+    let compact = settings.logging.compact;
+    let autoscroll = settings.logging.autoscroll;
+
+    let content = column![
+        text("Logging").size(18),
+        Space::new().height(12),
+        checkbox(compact)
+            .label("Compact logging")
+            .on_toggle(|v| Message::SettingChanged(SettingKey::CompactLogging, SettingValue::Bool(v))),
+        checkbox(autoscroll)
+            .label("Autoscroll")
+            .on_toggle(|v| Message::SettingChanged(SettingKey::Autoscroll, SettingValue::Bool(v))),
+        Space::new().height(8),
+        row![
+            text("Error tail:").width(140),
+            text_input("0", &error_tail_str)
+                .on_input(|v| {
+                    Message::SettingChanged(
+                        SettingKey::ErrorTail,
+                        SettingValue::I32(v.parse().unwrap_or(0)),
+                    )
+                })
+                .width(80),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+        row![
+            text("Progress step:").width(140),
+            text_input("1", &progress_step_str)
+                .on_input(|v| {
+                    Message::SettingChanged(
+                        SettingKey::ProgressStep,
+                        SettingValue::I32(v.parse().unwrap_or(1)),
+                    )
+                })
+                .width(80),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+    ]
+    .spacing(8);
+
+    scrollable(container(content).padding(16).width(Length::Fill))
+        .height(Length::Fill)
         .into()
 }
