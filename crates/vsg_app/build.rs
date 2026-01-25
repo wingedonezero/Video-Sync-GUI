@@ -19,10 +19,14 @@ fn main() {
     // Path to libvsg_bridge.a - search multiple locations
     let bridge_lib = find_bridge_lib(&target_dir);
 
-    // CXX bridge generates headers - we need to find the OUT_DIR for vsg_bridge
-    // The headers are at: target/{profile}/build/vsg_bridge-{hash}/out/cxxbridge/
-    // We'll search for it
-    let cxxbridge_dir = find_cxxbridge_dir(&workspace_root.join("target").join(&profile).join("build"));
+    // CXX bridge generates headers - get from DEP_VSG_BRIDGE_CXXBRIDGE if available
+    // (set by vsg_bridge's build.rs via the `links` key)
+    // Falls back to searching if not available
+    let cxxbridge_dir = env::var("DEP_VSG_BRIDGE_CXXBRIDGE")
+        .ok()
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+        .or_else(|| find_cxxbridge_dir(&workspace_root.join("target").join(&profile).join("build")));
 
     let build_dir = out_dir.join("qt_build");
     std::fs::create_dir_all(&build_dir).unwrap();

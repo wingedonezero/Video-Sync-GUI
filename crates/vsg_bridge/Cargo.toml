@@ -5,6 +5,11 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+# The `links` key tells cargo this crate provides a native library.
+# This creates a build script dependency chain: any crate that depends
+# on vsg_bridge will have its build.rs run AFTER vsg_bridge's build.rs,
+# and can access DEP_VSG_BRIDGE_* environment variables.
+links = "vsg_bridge"
 
 [lib]
 crate-type = ["staticlib", "rlib"]
