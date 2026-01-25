@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use iced::widget::{self, text};
 use iced::window;
-use iced::{Element, Size, Task, Theme};
+use iced::{Element, Size, Subscription, Task, Theme};
 
 use vsg_core::config::{ConfigManager, Settings};
 use vsg_core::jobs::JobQueue;
@@ -315,8 +315,11 @@ impl App {
 
         let main_window_id = window::Id::unique();
 
-        iced::application(
+        iced::daemon(
             move || {
+                let mut window_map = HashMap::new();
+                window_map.insert(main_window_id, WindowKind::Main);
+
                 let app = App {
                     config: config.clone(),
                     job_queue: job_queue.clone(),
@@ -360,23 +363,47 @@ impl App {
                     track_settings_idx: None,
                     track_settings: TrackSettingsState::default(),
 
-                    window_map: HashMap::new(),
+                    window_map,
                 };
 
-                (app, Task::none())
+                (app, window::open(window::Settings {
+                    size: Size::new(900.0, 700.0),
+                    ..Default::default()
+                }).1.map(move |_| Message::WindowOpened(WindowKind::Main, main_window_id)))
             },
             Self::update,
             Self::view,
         )
-        .title("Video Sync GUI")
+        .title(Self::title)
         .theme(Self::theme)
-        .window_size(Size::new(900.0, 700.0))
-        .centered()
+        .subscription(Self::subscription)
         .run()
     }
 
-    fn theme(&self) -> Theme {
+    fn title(&self, id: window::Id) -> String {
+        if id == self.main_window_id {
+            "Video Sync GUI".to_string()
+        } else if self.settings_window_id == Some(id) {
+            "Settings - Video Sync GUI".to_string()
+        } else if self.job_queue_window_id == Some(id) {
+            "Job Queue - Video Sync GUI".to_string()
+        } else if self.add_job_window_id == Some(id) {
+            "Add Jobs - Video Sync GUI".to_string()
+        } else if self.manual_selection_window_id == Some(id) {
+            "Manual Selection - Video Sync GUI".to_string()
+        } else if self.track_settings_window_id == Some(id) {
+            "Track Settings - Video Sync GUI".to_string()
+        } else {
+            "Video Sync GUI".to_string()
+        }
+    }
+
+    fn theme(&self, _id: window::Id) -> Theme {
         Theme::Dark
+    }
+
+    fn subscription(&self) -> Subscription<Message> {
+        window::close_events().map(Message::WindowClosed)
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
@@ -605,20 +632,24 @@ impl App {
         }
     }
 
-    fn view(&self) -> Element<Message> {
-        pages::main_window::view(self)
-    }
-
-    pub fn view_window(&self, id: window::Id) -> Element<Message> {
+    fn view(&self, id: window::Id) -> Element<Message> {
         match self.window_map.get(&id) {
+            Some(WindowKind::Main) => pages::main_window::view(self),
             Some(WindowKind::Settings) => windows::settings::view(self),
             Some(WindowKind::JobQueue) => windows::job_queue::view(self),
             Some(WindowKind::AddJob) => windows::add_job::view(self),
             Some(WindowKind::ManualSelection(_)) => windows::manual_selection::view(self),
             Some(WindowKind::TrackSettings(_)) => windows::track_settings::view(self),
-            _ => widget::container(text("Unknown window"))
-                .padding(20)
-                .into(),
+            _ => {
+                // Fallback: If window is main window ID but not in map yet
+                if id == self.main_window_id {
+                    pages::main_window::view(self)
+                } else {
+                    widget::container(text("Loading..."))
+                        .padding(20)
+                        .into()
+                }
+            }
         }
     }
 
