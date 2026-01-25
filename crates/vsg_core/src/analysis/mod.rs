@@ -41,6 +41,7 @@
 mod analyzer;
 pub mod delay_selection;
 mod ffmpeg;
+pub mod filtering;
 pub mod methods;
 mod peak_fit;
 mod tracks;
@@ -49,6 +50,7 @@ pub mod types;
 // Re-export main types
 pub use analyzer::Analyzer;
 pub use ffmpeg::{extract_audio, extract_audio_segment, extract_full_audio, get_duration, DEFAULT_ANALYSIS_SAMPLE_RATE};
+pub use filtering::{apply_filter, FilterConfig, FilterType};
 pub use tracks::{find_track_by_language, get_audio_tracks, AudioTrack};
 pub use peak_fit::{find_and_fit_peak, fit_peak};
 pub use types::{
@@ -56,5 +58,5 @@ pub use types::{
     DelaySelection, SourceAnalysisResult,
 };
 
-// Re-export method trait
-pub use methods::CorrelationMethod;
+// Re-export method trait and implementations
+pub use methods::{CorrelationMethod, GccPhat, GccScot, Scc, Whitened};
