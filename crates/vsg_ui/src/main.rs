@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 
 use slint::ComponentHandle;
 use vsg_core::config::ConfigManager;
+use vsg_core::jobs::JobQueue;
 use vsg_core::logging::{init_tracing_with_file, LogLevel};
 
 mod ui;
@@ -52,8 +53,15 @@ fn main() -> Result<(), slint::PlatformError> {
         eprintln!("Warning: Failed to create directories: {}", e);
     }
 
+    // Get temp folder path for job queue persistence
+    let temp_folder = PathBuf::from(&config_manager.settings().paths.temp_root);
+
     // Wrap config in Arc<Mutex> for sharing between callbacks
     let config = Arc::new(Mutex::new(config_manager));
+
+    // Create job queue with persistence to temp folder
+    let job_queue = Arc::new(Mutex::new(JobQueue::new(&temp_folder)));
+    tracing::debug!("Job queue initialized at {}", temp_folder.display());
 
     // Create the main window
     let main_window = MainWindow::new()?;
@@ -69,7 +77,7 @@ fn main() -> Result<(), slint::PlatformError> {
     main_window.set_log_text(version_info.into());
 
     // Set up all window callbacks and handlers
-    setup_main_window(&main_window, Arc::clone(&config));
+    setup_main_window(&main_window, Arc::clone(&config), Arc::clone(&job_queue));
 
     tracing::info!("Application initialized, starting event loop");
 

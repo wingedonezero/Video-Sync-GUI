@@ -5,6 +5,7 @@
 
 pub mod analysis;
 pub mod config;
+pub mod jobs;
 pub mod logging;
 pub mod models;
 pub mod mux;

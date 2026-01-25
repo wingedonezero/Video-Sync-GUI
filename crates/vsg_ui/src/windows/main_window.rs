@@ -11,11 +11,13 @@ use std::thread;
 
 use slint::ComponentHandle;
 use vsg_core::config::{ConfigManager, Settings};
+use vsg_core::jobs::JobQueue;
 use vsg_core::logging::{GuiLogCallback, JobLogger, LogConfig};
 use vsg_core::models::JobSpec;
 use vsg_core::orchestrator::{AnalyzeStep, Context, JobState, Pipeline};
 
-use crate::ui::{MainWindow, SettingsWindow};
+use crate::ui::{JobQueueDialog, MainWindow, SettingsWindow};
+use crate::windows::job_queue_dialog::{refresh_job_table, setup_job_queue_dialog};
 use crate::windows::settings_window::{populate_settings_window, read_settings_from_window, setup_settings_browse_buttons};
 
 /// Set up all callbacks and handlers for the main window.
@@ -25,6 +27,7 @@ use crate::windows::settings_window::{populate_settings_window, read_settings_fr
 pub fn setup_main_window(
     main_window: &MainWindow,
     config: Arc<Mutex<ConfigManager>>,
+    job_queue: Arc<Mutex<JobQueue>>,
 ) {
     // Set archive_logs from config
     {
@@ -33,7 +36,7 @@ pub fn setup_main_window(
     }
 
     setup_settings_button(main_window, Arc::clone(&config));
-    setup_queue_jobs_button(main_window);
+    setup_queue_jobs_button(main_window, Arc::clone(&job_queue));
     setup_browse_buttons(main_window);
     setup_source_path_changed(main_window);
     setup_analyze_only_button(main_window, Arc::clone(&config));
@@ -104,13 +107,27 @@ fn setup_settings_button(main_window: &MainWindow, config: Arc<Mutex<ConfigManag
 }
 
 /// Set up the Queue Jobs button handler.
-fn setup_queue_jobs_button(main_window: &MainWindow) {
+fn setup_queue_jobs_button(main_window: &MainWindow, job_queue: Arc<Mutex<JobQueue>>) {
     let window_weak = main_window.as_weak();
+    let queue = Arc::clone(&job_queue);
 
     main_window.on_queue_jobs_clicked(move || {
         if let Some(window) = window_weak.upgrade() {
             append_log(&window, "Opening job queue...");
-            append_log(&window, "Job queue dialog not yet implemented");
+
+            // Create and show JobQueueDialog
+            match JobQueueDialog::new() {
+                Ok(dialog) => {
+                    setup_job_queue_dialog(&dialog, Arc::clone(&queue));
+
+                    if let Err(e) = dialog.show() {
+                        append_log(&window, &format!("Failed to show job queue: {}", e));
+                    }
+                }
+                Err(e) => {
+                    append_log(&window, &format!("Failed to create job queue: {}", e));
+                }
+            }
         }
     });
 }
