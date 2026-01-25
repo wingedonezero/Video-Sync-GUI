@@ -234,6 +234,9 @@ mod ffi {
 
         /// Clear all pending log messages
         fn bridge_clear_logs();
+
+        /// Clean up temporary files from the given work directory
+        fn bridge_cleanup_temp(work_dir: &str) -> bool;
     }
 }
 
@@ -737,18 +740,58 @@ fn run_analysis_fallback(paths: &[PathBuf], settings: &vsg_core::config::Setting
 }
 
 fn bridge_discover_jobs(paths: &[String]) -> Vec<ffi::DiscoveredJob> {
-    // TODO: Wire up to vsg_core job discovery
-    // For now, return stub
-    paths
-        .iter()
-        .map(|p| ffi::DiscoveredJob {
-            name: PathBuf::from(p)
-                .file_stem()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_else(|| "Unknown".to_string()),
-            source_paths: vec![p.clone()],
-        })
-        .collect()
+    use std::collections::HashMap;
+    use vsg_core::jobs::discover_jobs;
+
+    // Build sources map: paths[0] = "Source 1", paths[1] = "Source 2", etc.
+    let mut sources: HashMap<String, PathBuf> = HashMap::new();
+    for (i, path) in paths.iter().enumerate() {
+        if !path.is_empty() {
+            let source_key = format!("Source {}", i + 1);
+            sources.insert(source_key, PathBuf::from(path));
+        }
+    }
+
+    // If no valid sources, return empty
+    if sources.is_empty() {
+        return vec![];
+    }
+
+    // Call vsg_core discovery
+    match discover_jobs(&sources) {
+        Ok(jobs) => {
+            jobs.into_iter()
+                .map(|job| {
+                    // Convert sources map to ordered path list
+                    let mut source_paths: Vec<String> = Vec::new();
+                    for i in 1..=4 {
+                        let key = format!("Source {}", i);
+                        if let Some(path) = job.sources.get(&key) {
+                            source_paths.push(path.to_string_lossy().to_string());
+                        }
+                    }
+                    ffi::DiscoveredJob {
+                        name: job.name,
+                        source_paths,
+                    }
+                })
+                .collect()
+        }
+        Err(e) => {
+            bridge_log(&format!("[ERROR] Job discovery failed: {}", e));
+            // Fallback: create single job with all paths combined
+            let name = paths.first()
+                .map(|p| PathBuf::from(p)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "Unknown".to_string()))
+                .unwrap_or_else(|| "Unknown".to_string());
+            vec![ffi::DiscoveredJob {
+                name,
+                source_paths: paths.to_vec(),
+            }]
+        }
+    }
 }
 
 fn bridge_scan_file(path: &str) -> ffi::MediaFileInfo {
@@ -1125,6 +1168,26 @@ fn bridge_run_job(input: &ffi::JobInput) -> ffi::JobResult {
                 steps_skipped: vec![],
                 error_message: e.to_string(),
             }
+        }
+    }
+}
+
+/// Clean up temporary files from a work directory.
+fn bridge_cleanup_temp(work_dir: &str) -> bool {
+    let path = PathBuf::from(work_dir);
+
+    if !path.exists() {
+        return true; // Nothing to clean
+    }
+
+    match std::fs::remove_dir_all(&path) {
+        Ok(_) => {
+            bridge_log(&format!("Cleaned up temp directory: {}", work_dir));
+            true
+        }
+        Err(e) => {
+            bridge_log(&format!("[WARNING] Failed to clean temp directory {}: {}", work_dir, e));
+            false
         }
     }
 }

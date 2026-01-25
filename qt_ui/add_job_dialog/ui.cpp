@@ -178,16 +178,11 @@ void AddJobDialog::findAndAccept()
         }
     }
 
-    // Validate
+    // Validate - only Source 1 is required
+    // Single-source mode allows remux-only workflows
     if (paths.isEmpty()) {
         QMessageBox::warning(this, "Input Required",
             "Source 1 (Reference) cannot be empty.");
-        return;
-    }
-
-    if (paths.size() < 2) {
-        QMessageBox::warning(this, "Input Required",
-            "At least two sources are required to discover jobs.");
         return;
     }
 
