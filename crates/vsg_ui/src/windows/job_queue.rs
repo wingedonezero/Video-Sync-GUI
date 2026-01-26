@@ -121,6 +121,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
                     .spacing(2)
                     .padding(4)
                 )
+                .width(140)
                 .style(|_theme: &Theme| container::Style {
                     background: Some(Background::Color(Color::from_rgb(0.2, 0.2, 0.2))),
                     border: Border {
@@ -156,6 +157,11 @@ pub fn view(app: &App) -> Element<'_, Message> {
             .into()
     };
 
+    // Get clipboard and selection state for button enabling
+    let has_clipboard = app.has_clipboard;
+    let has_selection = !app.selected_job_indices.is_empty();
+    let single_selected = app.selected_job_indices.len() == 1;
+
     // Action buttons row
     let action_buttons = row![
         button("Add Job(s)...").on_press(Message::OpenAddJob),
@@ -163,6 +169,18 @@ pub fn view(app: &App) -> Element<'_, Message> {
         Space::new().width(16),
         button("↑ Move Up").on_press(Message::MoveJobsUp),
         button("↓ Move Down").on_press(Message::MoveJobsDown),
+        Space::new().width(16),
+        // Copy/Paste buttons for layout
+        if single_selected {
+            button("Copy Layout").on_press(Message::CopyLayout(app.selected_job_indices[0]))
+        } else {
+            button("Copy Layout")
+        },
+        if has_clipboard && has_selection {
+            button("Paste Layout").on_press(Message::PasteLayout)
+        } else {
+            button("Paste Layout")
+        },
     ]
     .spacing(8);
 

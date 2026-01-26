@@ -80,6 +80,7 @@ pub enum Message {
     JobRowClicked(usize),          // Single click - select row
     JobRowDoubleClicked(usize),    // Double click - open config
     JobRowCtrlClicked(usize),      // Ctrl+click - toggle selection
+    JobRowShiftClicked(usize),     // Shift+click - range selection
     RemoveSelectedJobs,
     MoveJobsUp,
     MoveJobsDown,
@@ -931,6 +932,27 @@ impl App {
                     self.selected_job_indices.retain(|&i| i != idx);
                 } else {
                     self.selected_job_indices.push(idx);
+                }
+                // Track last clicked for shift-click range
+                self.last_clicked_job_idx = Some(idx);
+                Task::none()
+            }
+            Message::JobRowShiftClicked(idx) => {
+                // Range selection from last clicked to current
+                if let Some(anchor) = self.last_clicked_job_idx {
+                    let start = anchor.min(idx);
+                    let end = anchor.max(idx);
+                    // Add all indices in range (keep anchor, add range)
+                    for i in start..=end {
+                        if !self.selected_job_indices.contains(&i) {
+                            self.selected_job_indices.push(i);
+                        }
+                    }
+                } else {
+                    // No anchor - just select this one
+                    self.selected_job_indices.clear();
+                    self.selected_job_indices.push(idx);
+                    self.last_clicked_job_idx = Some(idx);
                 }
                 Task::none()
             }

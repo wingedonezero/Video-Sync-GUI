@@ -80,6 +80,7 @@ impl App {
     }
 
     /// Paste layout to selected jobs.
+    /// This copies the layout and saves layout files for each target job.
     pub fn paste_layout(&mut self) {
         if self.selected_job_indices.is_empty() {
             self.job_queue_status = "No jobs selected for paste".to_string();
@@ -87,15 +88,44 @@ impl App {
         }
 
         let mut q = self.job_queue.lock().unwrap();
+
+        // First paste to in-memory queue
         let count = q.paste_layout(&self.selected_job_indices);
-        if count > 0 {
-            if let Err(e) = q.save() {
-                tracing::warn!("Failed to save queue: {}", e);
-            }
-            self.job_queue_status = format!("Pasted layout to {} job(s)", count);
-        } else {
+        if count == 0 {
             self.job_queue_status = "No layout in clipboard".to_string();
+            return;
         }
+
+        // Save queue state
+        if let Err(e) = q.save() {
+            tracing::warn!("Failed to save queue: {}", e);
+        }
+
+        // Also save layout files for each pasted job via LayoutManager
+        let layout_manager = self.layout_manager.lock().unwrap();
+        let mut saved_count = 0;
+
+        for &idx in &self.selected_job_indices {
+            if let Some(job) = q.get(idx) {
+                if let Some(ref layout) = job.layout {
+                    // Save layout file for this job
+                    if let Err(e) = layout_manager.save_layout_with_metadata(
+                        &job.layout_id,
+                        &job.sources,
+                        layout,
+                    ) {
+                        tracing::warn!("Failed to save layout file for job {}: {}", job.id, e);
+                    } else {
+                        saved_count += 1;
+                    }
+                }
+            }
+        }
+
+        self.job_queue_status = format!(
+            "Pasted layout to {} job(s), saved {} layout file(s)",
+            count, saved_count
+        );
     }
 
     /// Handle job row click - with double-click detection.
