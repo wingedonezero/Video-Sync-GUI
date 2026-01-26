@@ -139,50 +139,90 @@ impl PipelineStep for AnalyzeStep {
         // to be added to correlation results for accurate sync.
         // We use mkvmerge -J to get minimum_timestamp per track, which is more
         // reliable than ffprobe's start_time for Matroska containers.
-        let (source1_audio_container_delay, source1_container_delays) = match probe_file(ref_path) {
-            Ok(probe) => {
-                // Get all audio container delays relative to video
-                let relative_delays = probe.get_audio_container_delays_relative();
+        ctx.logger.info("--- Getting Source 1 Container Delays for Analysis ---");
 
-                // Get delay for default audio track
-                let default_audio_delay = probe
-                    .default_audio()
-                    .map(|t| t.container_delay_ms - probe.video_container_delay())
-                    .unwrap_or(0);
+        let (source1_audio_container_delay, source1_container_delays, source1_selected_track) =
+            match probe_file(ref_path) {
+                Ok(probe) => {
+                    // Get video container delay first
+                    let video_delay = probe.video_container_delay();
 
-                if default_audio_delay != 0 {
-                    ctx.logger.info(&format!(
-                        "Source 1 audio container delay: {:+}ms (will be added to correlation results)",
-                        default_audio_delay
-                    ));
-
-                    // Log per-track delays if they differ
-                    for track in probe.audio_tracks() {
-                        let relative = track.container_delay_ms - probe.video_container_delay();
-                        if relative != default_audio_delay {
+                    // Log any non-zero container delays
+                    for track in &probe.tracks {
+                        if track.container_delay_ms != 0 {
+                            let track_type = match track.track_type {
+                                crate::extraction::TrackType::Video => "video",
+                                crate::extraction::TrackType::Audio => "audio",
+                                crate::extraction::TrackType::Subtitles => "subtitles",
+                            };
                             ctx.logger.info(&format!(
-                                "  Track {} ({}): {:+}ms",
-                                track.id,
-                                track.language.as_deref().unwrap_or("und"),
-                                relative
+                                "[Container Delay] Source 1 {} track {} has container delay: {:+}ms",
+                                track_type, track.id, track.container_delay_ms
                             ));
                         }
                     }
-                }
 
-                (default_audio_delay as f64, relative_delays)
-            }
-            Err(e) => {
-                ctx.logger.warn(&format!(
-                    "Could not probe Source 1 for container delays: {} (assuming 0)",
-                    e
-                ));
-                (0.0, HashMap::new())
-            }
-        };
+                    // Get all audio container delays relative to video
+                    let relative_delays = probe.get_audio_container_delays_relative();
+
+                    // Select audio track for correlation (default audio or first audio)
+                    let selected_track = probe.default_audio().or_else(|| probe.audio_tracks().next());
+
+                    let (default_audio_delay, track_info) = if let Some(track) = selected_track {
+                        let relative = track.container_delay_ms - video_delay;
+                        let lang = track.language.as_deref().unwrap_or("und");
+                        let codec = &track.codec_id;
+                        let channels = track.properties.channels.unwrap_or(2);
+                        let channel_str = match channels {
+                            1 => "Mono".to_string(),
+                            2 => "2.0".to_string(),
+                            6 => "5.1".to_string(),
+                            8 => "7.1".to_string(),
+                            n => format!("{}ch", n),
+                        };
+                        let name = track.name.as_deref().unwrap_or("");
+
+                        // Log selected track
+                        let mut track_details = format!("Track {}: {}, {} {}", track.id, lang, codec, channel_str);
+                        if !name.is_empty() {
+                            track_details.push_str(&format!(", '{}'", name));
+                        }
+                        ctx.logger.info(&format!("[Source 1] Selected: {}", track_details));
+
+                        (relative, Some((track.id, lang.to_string())))
+                    } else {
+                        ctx.logger.warn("[Source 1] No audio tracks found");
+                        (0, None)
+                    };
+
+                    // Log relative delay if non-zero
+                    if default_audio_delay != 0 {
+                        if let Some((track_id, _)) = &track_info {
+                            ctx.logger.info(&format!(
+                                "[Container Delay] Audio track {} relative delay (audio - video): {:+}ms. This will be added to correlation results.",
+                                track_id, default_audio_delay
+                            ));
+                        }
+                    } else {
+                        ctx.logger.info("[Container Delay] Source 1 audio has no container delay relative to video (0ms)");
+                    }
+
+                    (default_audio_delay as f64, relative_delays, track_info)
+                }
+                Err(e) => {
+                    ctx.logger.warn(&format!(
+                        "Could not probe Source 1 for container delays: {} (assuming 0)",
+                        e
+                    ));
+                    (0.0, HashMap::new(), None)
+                }
+            };
 
         // Store for potential per-track lookup later
         let _ = source1_container_delays; // Will be used for per-track delay selection
+        let _ = source1_selected_track; // Track ID and language of selected track
+
+        ctx.logger.info("--- Running Audio Correlation Analysis ---");
 
         // Create analyzer from settings with job logger for detailed progress
         let analyzer = Analyzer::from_settings(&ctx.settings.analysis)
