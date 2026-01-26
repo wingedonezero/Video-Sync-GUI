@@ -514,9 +514,10 @@ fn chapters_tab(settings: &vsg_core::config::Settings) -> Element<'static, Messa
     let snap_mode_idx = match settings.chapters.snap_mode {
         vsg_core::models::SnapMode::Previous => 0,
         vsg_core::models::SnapMode::Nearest => 1,
+        vsg_core::models::SnapMode::Next => 2,
     };
 
-    let snap_modes: Vec<&'static str> = vec!["Previous", "Nearest"];
+    let snap_modes: Vec<&'static str> = vec!["Previous", "Nearest", "Next"];
     let threshold_str = settings.chapters.snap_threshold_ms.to_string();
     let rename = settings.chapters.rename;
     let snap_enabled = settings.chapters.snap_enabled;

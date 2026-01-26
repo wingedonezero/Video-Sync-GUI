@@ -147,7 +147,8 @@ impl App {
             (SettingKey::SnapMode, SettingValue::I32(v)) => {
                 settings.chapters.snap_mode = match v {
                     0 => SnapMode::Previous,
-                    _ => SnapMode::Nearest,
+                    1 => SnapMode::Nearest,
+                    _ => SnapMode::Next,
                 };
             }
             (SettingKey::SnapThresholdMs, SettingValue::I32(v)) => {

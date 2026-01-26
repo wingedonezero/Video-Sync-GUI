@@ -188,6 +188,7 @@ impl PipelineStep for ChaptersStep {
                     let snap_mode = match ctx.settings.chapters.snap_mode {
                         crate::models::SnapMode::Previous => ChapterSnapMode::Previous,
                         crate::models::SnapMode::Nearest => ChapterSnapMode::Nearest,
+                        crate::models::SnapMode::Next => ChapterSnapMode::Next,
                     };
 
                     let mode_str = match snap_mode {
