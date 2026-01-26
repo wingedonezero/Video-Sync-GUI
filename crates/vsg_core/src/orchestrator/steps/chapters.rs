@@ -64,6 +64,7 @@ impl PipelineStep for ChaptersStep {
         };
 
         // Extract chapters using the chapters module
+        ctx.logger.command(&format!("mkvextract chapters \"{}\"", source1.display()));
         let chapter_xml = match extract_chapters_to_string(source1) {
             Ok(Some(xml)) => xml,
             Ok(None) => {
@@ -177,6 +178,10 @@ impl PipelineStep for ChaptersStep {
             ));
 
             // Extract keyframes from video
+            ctx.logger.command(&format!(
+                "ffprobe -v error -select_streams v:0 -show_frames -show_entries frame=pts_time,flags \"{}\"",
+                source1.display()
+            ));
             match extract_keyframes(source1) {
                 Ok(keyframes) => {
                     ctx.logger.info(&format!(

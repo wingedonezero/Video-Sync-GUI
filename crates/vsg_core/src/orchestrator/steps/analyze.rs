@@ -140,6 +140,7 @@ impl PipelineStep for AnalyzeStep {
         // We use mkvmerge -J to get minimum_timestamp per track, which is more
         // reliable than ffprobe's start_time for Matroska containers.
         ctx.logger.info("--- Getting Source 1 Container Delays for Analysis ---");
+        ctx.logger.command(&format!("mkvmerge -J \"{}\"", ref_path.display()));
 
         let (source1_audio_container_delay, source1_container_delays, source1_selected_track) =
             match probe_file(ref_path) {
