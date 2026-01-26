@@ -113,6 +113,14 @@ class AppConfig:
             'corr_anchor_refine_per_line': False,  # Refine each subtitle line to exact frames after checkpoint validation
             'corr_anchor_refine_workers': 4,  # Number of parallel workers for refinement
 
+            # --- Video-Verified Sync Settings ---
+            # Addresses subtitle sync where audio correlation differs from video alignment
+            # (e.g., audio correlation finds -46ms but video is actually 0ms aligned)
+            'video_verified_zero_check_frames': 3,  # If correlation < N frames, verify against video
+            'video_verified_min_quality_advantage': 0.1,  # Quality margin needed to prefer non-zero offset
+            'video_verified_num_checkpoints': 5,  # Number of checkpoint times for frame matching
+            'video_verified_search_range_frames': 3,  # Frame range to search around candidates
+
             # --- Timing Fix Settings ---
             'timing_fix_enabled': False,
             'timing_fix_overlaps': True,
