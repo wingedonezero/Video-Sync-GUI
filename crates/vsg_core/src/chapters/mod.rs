@@ -73,5 +73,5 @@ pub use shifter::{
 // Re-export snapping functions
 pub use snapper::{
     calculate_snap_stats, extract_keyframes, extract_keyframes_limited, snap_chapters,
-    snap_chapters_copy, SnapMode, SnapStats,
+    snap_chapters_copy, snap_chapters_with_threshold, SnapMode, SnapStats,
 };

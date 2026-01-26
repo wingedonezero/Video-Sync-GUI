@@ -147,23 +147,35 @@ fn parse_chapter_atom(atom: &roxmltree::Node) -> Option<ChapterEntry> {
 /// Parse a ChapterDisplay element.
 fn parse_chapter_display(display: &roxmltree::Node) -> Option<ChapterName> {
     let mut name: Option<String> = None;
-    let mut language = "und".to_string(); // Default to undefined
+    let mut language = "und".to_string(); // Default to undefined (ISO 639-2)
+    let mut language_ietf: Option<String> = None;
 
     for child in display.children().filter(|n| n.is_element()) {
         match child.tag_name().name() {
             "ChapterString" => {
                 name = child.text().map(|s| s.to_string());
             }
-            "ChapterLanguage" | "ChapLanguageIETF" => {
+            "ChapterLanguage" => {
+                // Legacy ISO 639-2 code (e.g., "eng", "jpn")
                 if let Some(text) = child.text() {
                     language = text.trim().to_string();
+                }
+            }
+            "ChapLanguageIETF" => {
+                // Modern BCP 47 code (e.g., "en", "ja")
+                if let Some(text) = child.text() {
+                    language_ietf = Some(text.trim().to_string());
                 }
             }
             _ => {}
         }
     }
 
-    name.map(|n| ChapterName { name: n, language })
+    name.map(|n| ChapterName {
+        name: n,
+        language,
+        language_ietf,
+    })
 }
 
 /// Serialize ChapterData to Matroska XML format.
@@ -222,6 +234,13 @@ pub fn serialize_chapter_xml(data: &ChapterData) -> String {
                 "        <ChapterLanguage>{}</ChapterLanguage>\n",
                 name.language
             ));
+            // Write IETF language if present, or derive from legacy code
+            let ietf = name.language_ietf.as_ref().map(|s| s.as_str())
+                .unwrap_or_else(|| legacy_to_ietf(&name.language));
+            xml.push_str(&format!(
+                "        <ChapLanguageIETF>{}</ChapLanguageIETF>\n",
+                ietf
+            ));
             xml.push_str("      </ChapterDisplay>\n");
         }
 
@@ -248,6 +267,37 @@ fn escape_xml(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
+}
+
+/// Convert legacy ISO 639-2 language code to IETF BCP 47 code.
+fn legacy_to_ietf(legacy: &str) -> &str {
+    match legacy {
+        "eng" => "en",
+        "jpn" => "ja",
+        "ger" | "deu" => "de",
+        "fre" | "fra" => "fr",
+        "spa" => "es",
+        "ita" => "it",
+        "por" => "pt",
+        "rus" => "ru",
+        "chi" | "zho" => "zh",
+        "kor" => "ko",
+        "ara" => "ar",
+        "hin" => "hi",
+        "pol" => "pl",
+        "nld" | "dut" => "nl",
+        "swe" => "sv",
+        "nor" => "no",
+        "dan" => "da",
+        "fin" => "fi",
+        "tur" => "tr",
+        "vie" => "vi",
+        "tha" => "th",
+        "ind" => "id",
+        "und" => "und",
+        // For unknown codes, return as-is (might already be IETF)
+        other => other,
+    }
 }
 
 #[cfg(test)]

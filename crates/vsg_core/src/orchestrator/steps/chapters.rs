@@ -6,7 +6,7 @@
 
 use crate::chapters::{
     extract_chapters_to_string, extract_keyframes, parse_chapter_xml, shift_chapters,
-    snap_chapters, write_chapter_file, SnapMode as ChapterSnapMode,
+    snap_chapters_with_threshold, write_chapter_file, SnapMode as ChapterSnapMode,
 };
 use crate::orchestrator::errors::{StepError, StepResult};
 use crate::orchestrator::step::PipelineStep;
@@ -118,10 +118,11 @@ impl PipelineStep for ChaptersStep {
         // Apply keyframe snapping if enabled in settings
         let mut snapped = false;
         if ctx.settings.chapters.snap_enabled {
+            let threshold_ms = ctx.settings.chapters.snap_threshold_ms as i64;
             ctx.logger.info(&format!(
                 "Chapter snapping enabled (mode: {:?}, threshold: {}ms)",
                 ctx.settings.chapters.snap_mode,
-                ctx.settings.chapters.snap_threshold_ms
+                threshold_ms
             ));
 
             // Extract keyframes from video
@@ -138,10 +139,32 @@ impl PipelineStep for ChaptersStep {
                         crate::models::SnapMode::Nearest => ChapterSnapMode::Nearest,
                     };
 
-                    // Snap chapters to keyframes
-                    snap_chapters(&mut chapter_data, &keyframes, snap_mode);
-                    snapped = true;
-                    ctx.logger.info("Chapters snapped to keyframes");
+                    // Snap chapters to keyframes with threshold enforcement
+                    let stats = snap_chapters_with_threshold(
+                        &mut chapter_data,
+                        &keyframes,
+                        snap_mode,
+                        Some(threshold_ms),
+                    );
+
+                    snapped = stats.moved > 0 || stats.already_aligned > 0;
+
+                    // Log detailed results
+                    ctx.logger.info(&format!(
+                        "Snap complete: {} moved, {} already on keyframe, {} skipped (exceeded {}ms threshold)",
+                        stats.moved,
+                        stats.already_aligned,
+                        stats.skipped,
+                        threshold_ms
+                    ));
+
+                    if stats.moved > 0 {
+                        ctx.logger.info(&format!(
+                            "Max shift: {}ms, avg shift: {:.1}ms",
+                            stats.max_shift_ms,
+                            stats.avg_shift_ms
+                        ));
+                    }
                 }
                 Err(e) => {
                     ctx.logger.warn(&format!(

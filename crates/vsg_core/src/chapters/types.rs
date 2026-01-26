@@ -46,6 +46,22 @@ impl ChapterEntry {
         self.names.push(ChapterName {
             name: name.into(),
             language: language.into(),
+            language_ietf: None,
+        });
+        self
+    }
+
+    /// Add a name for this chapter with both legacy and IETF language codes.
+    pub fn with_name_ietf(
+        mut self,
+        name: impl Into<String>,
+        language: impl Into<String>,
+        language_ietf: impl Into<String>,
+    ) -> Self {
+        self.names.push(ChapterName {
+            name: name.into(),
+            language: language.into(),
+            language_ietf: Some(language_ietf.into()),
         });
         self
     }
@@ -86,8 +102,14 @@ impl ChapterEntry {
 pub struct ChapterName {
     /// Display name.
     pub name: String,
-    /// Language code (ISO 639-2, e.g., "eng", "jpn").
+    /// Legacy language code (ISO 639-2, e.g., "eng", "jpn").
+    /// This is written as `ChapterLanguage` in the XML.
     pub language: String,
+    /// Modern IETF language code (BCP 47, e.g., "en", "ja").
+    /// This is written as `ChapLanguageIETF` in the XML.
+    /// If None, will be derived from `language` when serializing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language_ietf: Option<String>,
 }
 
 /// A collection of chapters (chapter atom in Matroska).
