@@ -25,6 +25,17 @@ impl Default for QueueState {
     }
 }
 
+/// Clipboard data for copy/paste between jobs.
+#[derive(Debug, Clone)]
+pub struct LayoutClipboard {
+    /// The copied layout.
+    pub layout: ManualLayout,
+    /// Job ID the layout was copied from.
+    pub source_job_id: String,
+    /// Layout ID (for signature lookup).
+    pub layout_id: String,
+}
+
 /// In-memory job queue with persistence to temp folder.
 #[derive(Debug)]
 pub struct JobQueue {
@@ -33,7 +44,7 @@ pub struct JobQueue {
     /// Path to queue.json for persistence.
     queue_file: PathBuf,
     /// Layout clipboard (for copy/paste between jobs).
-    clipboard: Option<ManualLayout>,
+    clipboard: Option<LayoutClipboard>,
 }
 
 impl JobQueue {
@@ -217,7 +228,11 @@ impl JobQueue {
     pub fn copy_layout(&mut self, index: usize) -> bool {
         if let Some(job) = self.jobs.get(index) {
             if let Some(ref layout) = job.layout {
-                self.clipboard = Some(layout.clone());
+                self.clipboard = Some(LayoutClipboard {
+                    layout: layout.clone(),
+                    source_job_id: job.id.clone(),
+                    layout_id: job.layout_id.clone(),
+                });
                 return true;
             }
         }
@@ -225,20 +240,28 @@ impl JobQueue {
     }
 
     /// Paste layout from clipboard to selected jobs.
+    /// Returns the number of jobs that were updated.
     pub fn paste_layout(&mut self, indices: &[usize]) -> usize {
-        let Some(ref layout) = self.clipboard else {
+        let Some(ref clipboard) = self.clipboard else {
             return 0;
         };
 
+        let layout_to_paste = clipboard.layout.clone();
         let mut count = 0;
+
         for &idx in indices {
             if let Some(job) = self.jobs.get_mut(idx) {
-                job.layout = Some(layout.clone());
+                job.layout = Some(layout_to_paste.clone());
                 job.status = JobQueueStatus::Configured;
                 count += 1;
             }
         }
         count
+    }
+
+    /// Get clipboard info for display (source job ID).
+    pub fn clipboard_source(&self) -> Option<&str> {
+        self.clipboard.as_ref().map(|c| c.source_job_id.as_str())
     }
 
     /// Check if clipboard has a layout.

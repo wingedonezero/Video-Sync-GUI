@@ -156,6 +156,139 @@ impl LayoutManager {
         }
         Ok(())
     }
+
+    /// Save a layout with track/structure signatures for compatibility checking.
+    pub fn save_layout_with_signatures(
+        &self,
+        job_id: &str,
+        sources: &HashMap<String, PathBuf>,
+        layout: &ManualLayout,
+        track_info: &HashMap<String, Vec<super::signature::TrackSignatureInfo>>,
+    ) -> Result<(), std::io::Error> {
+        self.ensure_dir()?;
+
+        let sig_gen = super::signature::SignatureGenerator::new();
+        let track_sig = sig_gen.generate_track_signature(track_info, false);
+        let struct_sig = sig_gen.generate_structure_signature(track_info);
+
+        let saved_data = SavedLayoutData::with_signatures(
+            job_id.to_string(),
+            sources.clone(),
+            layout.clone(),
+            track_sig,
+            struct_sig,
+        );
+
+        let path = self.layout_path(job_id);
+        let json = serde_json::to_string_pretty(&saved_data)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+        // Write atomically
+        let temp_path = path.with_extension("json.tmp");
+        fs::write(&temp_path, &json)?;
+        fs::rename(&temp_path, &path)?;
+
+        tracing::debug!("Saved layout with signatures for job '{}' to {}", job_id, path.display());
+        Ok(())
+    }
+
+    /// Copy a layout from one job to another if their structures are compatible.
+    ///
+    /// Returns Ok(true) if copy succeeded, Ok(false) if structures incompatible.
+    pub fn copy_layout_between_jobs(
+        &self,
+        source_job_id: &str,
+        target_job_id: &str,
+        target_sources: &HashMap<String, PathBuf>,
+        target_track_info: &HashMap<String, Vec<super::signature::TrackSignatureInfo>>,
+    ) -> Result<bool, std::io::Error> {
+        // Load source layout
+        let source_data = match self.load_layout_data(source_job_id)? {
+            Some(data) => data,
+            None => {
+                tracing::warn!("Cannot copy: Source layout {} not found", source_job_id);
+                return Ok(false);
+            }
+        };
+
+        // Check structure compatibility
+        let source_struct_sig = match &source_data.structure_signature {
+            Some(sig) => sig,
+            None => {
+                tracing::warn!("Cannot copy: Source layout {} has no structure signature", source_job_id);
+                return Ok(false);
+            }
+        };
+
+        let sig_gen = super::signature::SignatureGenerator::new();
+        let target_struct_sig = sig_gen.generate_structure_signature(target_track_info);
+
+        if !sig_gen.structures_are_compatible(source_struct_sig, &target_struct_sig) {
+            tracing::info!(
+                "Cannot copy layout: Incompatible track structures between {} and {}",
+                source_job_id, target_job_id
+            );
+            return Ok(false);
+        }
+
+        // Structures are compatible - create new layout for target
+        let target_track_sig = sig_gen.generate_track_signature(target_track_info, false);
+
+        let mut target_layout_data = SavedLayoutData::with_signatures(
+            target_job_id.to_string(),
+            target_sources.clone(),
+            source_data.layout.clone(), // Copy the actual layout
+            target_track_sig,
+            target_struct_sig,
+        );
+        target_layout_data.copied_from = Some(source_job_id.to_string());
+
+        // Save target layout
+        let path = self.layout_path(target_job_id);
+        let json = serde_json::to_string_pretty(&target_layout_data)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+        let temp_path = path.with_extension("json.tmp");
+        fs::write(&temp_path, &json)?;
+        fs::rename(&temp_path, &path)?;
+
+        tracing::info!(
+            "Copied layout from {} to {} (structures compatible)",
+            source_job_id, target_job_id
+        );
+        Ok(true)
+    }
+
+    /// Validate a loaded layout has all required fields.
+    pub fn validate_layout(data: &SavedLayoutData) -> Result<(), String> {
+        // Check required fields
+        if data.job_id.is_empty() {
+            return Err("Missing job_id".to_string());
+        }
+
+        // Validate each track in the layout
+        for (i, track) in data.layout.final_tracks.iter().enumerate() {
+            if track.source_key.is_empty() {
+                return Err(format!("Track {} missing source_key", i));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Load and validate a layout.
+    pub fn load_validated_layout(&self, job_id: &str) -> Result<Option<SavedLayoutData>, std::io::Error> {
+        match self.load_layout_data(job_id)? {
+            Some(data) => {
+                if let Err(e) = Self::validate_layout(&data) {
+                    tracing::warn!("Layout validation failed for {}: {}", job_id, e);
+                    return Ok(None);
+                }
+                Ok(Some(data))
+            }
+            None => Ok(None),
+        }
+    }
 }
 
 #[cfg(test)]

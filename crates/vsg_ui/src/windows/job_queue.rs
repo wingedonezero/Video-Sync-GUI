@@ -2,9 +2,11 @@
 //!
 //! Shows the list of queued jobs with controls to manage and process them.
 //! Click row to select, double-click to configure.
+//! Right-click for context menu (copy/paste layout).
 
 use iced::widget::{button, column, container, row, scrollable, text, Space};
 use iced::{Alignment, Background, Border, Color, Element, Length, Theme};
+use iced_aw::ContextMenu;
 
 use crate::app::{App, Message};
 
@@ -103,7 +105,35 @@ pub fn view(app: &App) -> Element<'_, Message> {
                     }
                 });
 
-            row_button.into()
+            // Wrap with context menu for right-click actions
+            let context_menu = ContextMenu::new(row_button, move || {
+                container(
+                    column![
+                        button("Copy Layout")
+                            .on_press(Message::CopyLayout(idx))
+                            .width(Length::Fill)
+                            .padding([6, 12]),
+                        button("Paste Layout")
+                            .on_press(Message::PasteLayout)
+                            .width(Length::Fill)
+                            .padding([6, 12]),
+                    ]
+                    .spacing(2)
+                    .padding(4)
+                )
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(Background::Color(Color::from_rgb(0.2, 0.2, 0.2))),
+                    border: Border {
+                        color: Color::from_rgb(0.4, 0.4, 0.4),
+                        width: 1.0,
+                        radius: 4.0.into(),
+                    },
+                    ..Default::default()
+                })
+                .into()
+            });
+
+            context_menu.into()
         })
         .collect();
 
