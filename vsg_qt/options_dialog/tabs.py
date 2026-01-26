@@ -1423,6 +1423,17 @@ class SubtitleSyncTab(QWidget):
             "• bwdif: Good quality with motion adaptation (requires plugin)"
         )
 
+        self.widgets['frame_comparison_method'] = QComboBox()
+        self.widgets['frame_comparison_method'].addItems(['hash', 'ssim', 'mse'])
+        self.widgets['frame_comparison_method'].setToolTip(
+            "Frame comparison method for video-verified sync:\n\n"
+            "• hash (Default): Perceptual hashing - fast, good for most cases\n"
+            "• ssim: Structural Similarity Index - more accurate, slightly slower\n"
+            "  Best for sources with color grading or encoding differences\n"
+            "• mse: Mean Squared Error - fast, works well for similar encodes\n\n"
+            "If hash gives inconsistent results, try SSIM for better accuracy."
+        )
+
         frame_layout.addRow("Hash Algorithm:", self.widgets['frame_hash_algorithm'])
         frame_layout.addRow("Hash Size:", self.widgets['frame_hash_size'])
         frame_layout.addRow("Hash Threshold:", self.widgets['frame_hash_threshold'])
@@ -1432,6 +1443,7 @@ class SubtitleSyncTab(QWidget):
         frame_layout.addRow("", self.widgets['frame_use_vapoursynth'])
         frame_layout.addRow("Deinterlace:", self.widgets['frame_deinterlace_mode'])
         frame_layout.addRow("Deinterlace Method:", self.widgets['frame_deinterlace_method'])
+        frame_layout.addRow("Comparison Method:", self.widgets['frame_comparison_method'])
         main_layout.addWidget(frame_group)
 
         # ===== SHARED OUTPUT SETTINGS =====

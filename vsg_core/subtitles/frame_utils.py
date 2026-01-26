@@ -2011,3 +2011,145 @@ def compute_hamming_distance(hash1, hash2) -> int:
     """
     # ImageHash objects support subtraction to get Hamming distance
     return hash1 - hash2
+
+
+def compute_ssim(frame1: 'Image.Image', frame2: 'Image.Image') -> float:
+    """
+    Compute Structural Similarity Index (SSIM) between two frames.
+
+    SSIM compares structural patterns and is more accurate than perceptual
+    hashing for detecting subtle differences.
+
+    Args:
+        frame1: First PIL Image object
+        frame2: Second PIL Image object
+
+    Returns:
+        SSIM value from 0.0 to 1.0. Higher = more similar.
+        1.0 = identical, >0.95 = very similar, <0.8 = noticeably different
+    """
+    try:
+        import numpy as np
+
+        # Convert to grayscale numpy arrays
+        arr1 = np.array(frame1.convert('L'))
+        arr2 = np.array(frame2.convert('L'))
+
+        # Resize to match if needed
+        if arr1.shape != arr2.shape:
+            from PIL import Image as PILImage
+            # Resize frame2 to match frame1
+            frame2_resized = frame2.resize(frame1.size, PILImage.Resampling.LANCZOS)
+            arr2 = np.array(frame2_resized.convert('L'))
+
+        # Try scikit-image SSIM first (most accurate)
+        try:
+            from skimage.metrics import structural_similarity
+            ssim_value = structural_similarity(arr1, arr2, data_range=255)
+            return float(ssim_value)
+        except ImportError:
+            pass
+
+        # Fallback: simplified SSIM calculation
+        # Using the formula: SSIM = (2*μ1*μ2 + C1)(2*σ12 + C2) / ((μ1² + μ2² + C1)(σ1² + σ2² + C2))
+        C1 = (0.01 * 255) ** 2
+        C2 = (0.03 * 255) ** 2
+
+        mu1 = arr1.mean()
+        mu2 = arr2.mean()
+        sigma1_sq = arr1.var()
+        sigma2_sq = arr2.var()
+        sigma12 = ((arr1 - mu1) * (arr2 - mu2)).mean()
+
+        ssim = ((2 * mu1 * mu2 + C1) * (2 * sigma12 + C2)) / \
+               ((mu1 ** 2 + mu2 ** 2 + C1) * (sigma1_sq + sigma2_sq + C2))
+
+        return float(ssim)
+
+    except Exception:
+        return 0.0
+
+
+def compute_mse(frame1: 'Image.Image', frame2: 'Image.Image') -> float:
+    """
+    Compute Mean Squared Error between two frames.
+
+    Lower MSE = more similar. 0 = identical.
+
+    Args:
+        frame1: First PIL Image object
+        frame2: Second PIL Image object
+
+    Returns:
+        MSE value. Lower = more similar.
+    """
+    try:
+        import numpy as np
+
+        arr1 = np.array(frame1.convert('L'), dtype=np.float64)
+        arr2 = np.array(frame2.convert('L'), dtype=np.float64)
+
+        # Resize to match if needed
+        if arr1.shape != arr2.shape:
+            from PIL import Image as PILImage
+            frame2_resized = frame2.resize(frame1.size, PILImage.Resampling.LANCZOS)
+            arr2 = np.array(frame2_resized.convert('L'), dtype=np.float64)
+
+        mse = np.mean((arr1 - arr2) ** 2)
+        return float(mse)
+
+    except Exception:
+        return float('inf')
+
+
+def compare_frames(
+    frame1: 'Image.Image',
+    frame2: 'Image.Image',
+    method: str = 'hash',
+    hash_algorithm: str = 'dhash',
+    hash_size: int = 8
+) -> tuple:
+    """
+    Compare two frames using the specified method.
+
+    Args:
+        frame1: First PIL Image object
+        frame2: Second PIL Image object
+        method: Comparison method ('hash', 'ssim', 'mse')
+        hash_algorithm: Hash algorithm when method='hash'
+        hash_size: Hash size when method='hash'
+
+    Returns:
+        Tuple of (distance, is_match):
+        - distance: Similarity metric (interpretation depends on method)
+        - is_match: Boolean indicating if frames are considered matching
+
+    Distance interpretation:
+    - hash: Hamming distance (0=identical, <5=match, >10=different)
+    - ssim: 1.0 - SSIM (0=identical, <0.05=match, >0.2=different)
+    - mse: Normalized MSE (0=identical, <100=match, >500=different)
+    """
+    if method == 'ssim':
+        ssim = compute_ssim(frame1, frame2)
+        # Convert to distance (0 = identical, higher = more different)
+        distance = (1.0 - ssim) * 100  # Scale to ~0-100 range
+        is_match = ssim > 0.90  # 90% similarity threshold
+        return (distance, is_match)
+
+    elif method == 'mse':
+        mse = compute_mse(frame1, frame2)
+        # Normalize to ~0-100 range (assuming 8-bit images)
+        distance = min(mse / 100, 100)  # Cap at 100
+        is_match = mse < 500  # Empirical threshold
+        return (distance, is_match)
+
+    else:  # 'hash' (default)
+        hash1 = compute_frame_hash(frame1, hash_size, hash_algorithm)
+        hash2 = compute_frame_hash(frame2, hash_size, hash_algorithm)
+
+        if hash1 is None or hash2 is None:
+            return (999, False)
+
+        distance = compute_hamming_distance(hash1, hash2)
+        is_match = distance <= 5  # Default threshold
+        return (distance, is_match)

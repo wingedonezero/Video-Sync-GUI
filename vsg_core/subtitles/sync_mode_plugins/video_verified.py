@@ -136,9 +136,11 @@ class VideoVerifiedSync(SyncPlugin):
         hash_size = int(config.get('frame_hash_size', 8))
         hash_threshold = int(config.get('frame_hash_threshold', 5))
         window_radius = int(config.get('frame_window_radius', 5))
+        comparison_method = config.get('frame_comparison_method', 'hash')
 
         log(f"[VideoVerified] Zero-check threshold: ±{zero_check_threshold_ms:.1f}ms ({zero_check_threshold_frames} frames)")
         log(f"[VideoVerified] Checkpoints: {num_checkpoints}, Search: ±{search_range_frames} frames")
+        log(f"[VideoVerified] Comparison method: {comparison_method}")
 
         # Determine if we need zero-check (correlation is small enough to be suspicious)
         needs_zero_check = abs(pure_correlation_ms) <= zero_check_threshold_ms
@@ -216,7 +218,7 @@ class VideoVerifiedSync(SyncPlugin):
             quality = self._measure_candidate_quality(
                 candidate_offset, checkpoint_times, source_reader, target_reader,
                 fps, frame_duration_ms, window_radius, hash_algorithm, hash_size,
-                hash_threshold, log
+                hash_threshold, comparison_method, log
             )
             candidate_results.append({
                 'offset_ms': candidate_offset,
@@ -356,6 +358,7 @@ class VideoVerifiedSync(SyncPlugin):
         hash_algorithm: str,
         hash_size: int,
         hash_threshold: int,
+        comparison_method: str,
         log
     ) -> Dict[str, Any]:
         """
@@ -363,16 +366,30 @@ class VideoVerifiedSync(SyncPlugin):
 
         Uses sliding window of frames around each checkpoint for robust matching.
 
+        Args:
+            comparison_method: 'hash', 'ssim', or 'mse'
+
         Returns dict with:
         - score: Overall quality score (higher = better)
         - matched: Number of checkpoints that matched well
-        - avg_distance: Average hash distance across all frames
+        - avg_distance: Average distance across all frames
         """
-        from ..frame_utils import compute_frame_hash, compute_hamming_distance
+        from ..frame_utils import compare_frames
 
         total_distance = 0
         total_frames = 0
         matched_checkpoints = 0
+
+        # Thresholds for different methods
+        if comparison_method == 'ssim':
+            match_threshold = 10.0  # (1 - 0.90) * 100 = 10
+            max_distance = 100.0
+        elif comparison_method == 'mse':
+            match_threshold = 5.0  # Normalized MSE
+            max_distance = 100.0
+        else:  # hash
+            match_threshold = hash_threshold * 1.5
+            max_distance = hash_size * hash_size
 
         for checkpoint_ms in checkpoint_times:
             # Get window of source frames around checkpoint
@@ -386,22 +403,19 @@ class VideoVerifiedSync(SyncPlugin):
                 target_frame = target_reader.get_frame_at_time(int(target_time_ms))
 
                 if source_frame is not None and target_frame is not None:
-                    source_hash = compute_frame_hash(
-                        source_frame, hash_size=hash_size, method=hash_algorithm
+                    distance, is_match = compare_frames(
+                        source_frame, target_frame,
+                        method=comparison_method,
+                        hash_algorithm=hash_algorithm,
+                        hash_size=hash_size
                     )
-                    target_hash = compute_frame_hash(
-                        target_frame, hash_size=hash_size, method=hash_algorithm
-                    )
-
-                    if source_hash is not None and target_hash is not None:
-                        distance = compute_hamming_distance(source_hash, target_hash)
-                        checkpoint_distances.append(distance)
-                        total_distance += distance
-                        total_frames += 1
+                    checkpoint_distances.append(distance)
+                    total_distance += distance
+                    total_frames += 1
 
             if checkpoint_distances:
                 avg_checkpoint_dist = sum(checkpoint_distances) / len(checkpoint_distances)
-                if avg_checkpoint_dist <= hash_threshold * 1.5:
+                if avg_checkpoint_dist <= match_threshold:
                     matched_checkpoints += 1
 
         if total_frames == 0:
@@ -412,7 +426,6 @@ class VideoVerifiedSync(SyncPlugin):
         # Score: prioritize low distance, bonus for matched checkpoints
         # Lower distance = higher score (invert)
         # More matches = higher score
-        max_distance = hash_size * hash_size  # Maximum possible hamming distance
         distance_score = max(0, 1 - (avg_distance / max_distance))
         match_ratio = matched_checkpoints / len(checkpoint_times)
 
