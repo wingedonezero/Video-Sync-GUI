@@ -270,6 +270,7 @@ impl App {
     }
 
     /// Close the track settings window.
+    /// Resets TrackSettingsState to prevent stale values from appearing when opening another track.
     pub fn close_track_settings_window(&mut self) -> Task<Message> {
         tracing::debug!(
             "close_track_settings_window called: window_id_is_some={}",
@@ -279,7 +280,9 @@ impl App {
         if let Some(id) = self.track_settings_window_id.take() {
             self.window_map.remove(&id);
             self.track_settings_idx = None;
-            tracing::debug!("Track settings window closed, ID cleared");
+            // Reset track settings state to prevent stale values from bleeding into next dialog
+            self.track_settings = crate::app::TrackSettingsState::default();
+            tracing::debug!("Track settings window closed, ID and state cleared");
             return window::close(id);
         }
         Task::none()
@@ -326,6 +329,8 @@ impl App {
                 WindowKind::TrackSettings(_) => {
                     self.track_settings_window_id = None;
                     self.track_settings_idx = None;
+                    // Reset track settings state to prevent stale values
+                    self.track_settings = crate::app::TrackSettingsState::default();
                 }
                 _ => {}
             }

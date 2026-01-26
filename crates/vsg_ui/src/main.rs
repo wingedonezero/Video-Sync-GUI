@@ -17,6 +17,7 @@ mod app;
 mod handlers;
 mod pages;
 mod theme;
+mod widgets;
 mod windows;
 
 use app::App;

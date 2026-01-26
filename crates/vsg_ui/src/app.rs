@@ -106,6 +106,11 @@ pub enum Message {
     SourceTrackDoubleClicked { track_id: usize, source_key: String },
     FinalTrackMoved(usize, usize),
     FinalTrackRemoved(usize),
+    // Drag-and-drop reordering
+    DragStart(usize),       // Start dragging item at index
+    DragHover(usize),       // Hovering over item at index
+    DragEnd,                // Release - commit reorder
+    DragCancel,             // Cancel drag operation
     FinalTrackDefaultChanged(usize, bool),
     FinalTrackForcedChanged(usize, bool),
     FinalTrackSyncChanged(usize, String),
@@ -267,6 +272,9 @@ pub struct App {
     pub track_settings_idx: Option<usize>,
     pub track_settings: TrackSettingsState,
 
+    // Drag-and-drop state for reorderable lists
+    pub drag_state: DragState,
+
     // Window ID Mapping
     pub window_map: HashMap<window::Id, WindowKind>,
 }
@@ -340,6 +348,15 @@ pub enum SyncExclusionMode {
     #[default]
     Exclude,  // Exclude listed styles from sync
     Include,  // Only include listed styles in sync
+}
+
+/// State for drag-and-drop reordering in lists.
+#[derive(Debug, Clone, Default)]
+pub struct DragState {
+    /// Index of the item currently being dragged (None if not dragging)
+    pub dragging_idx: Option<usize>,
+    /// Index of the item we're hovering over (drop target)
+    pub hover_idx: Option<usize>,
 }
 
 /// State for track settings dialog.
@@ -556,6 +573,8 @@ impl App {
                     track_settings_idx: None,
                     track_settings: TrackSettingsState::default(),
 
+                    drag_state: DragState::default(),
+
                     window_map,
                 };
 
@@ -768,6 +787,30 @@ impl App {
             }
             Message::FinalTrackMoved(from, to) => {
                 self.move_final_track(from, to);
+                Task::none()
+            }
+            Message::DragStart(idx) => {
+                self.drag_state.dragging_idx = Some(idx);
+                self.drag_state.hover_idx = Some(idx);
+                Task::none()
+            }
+            Message::DragHover(idx) => {
+                if self.drag_state.dragging_idx.is_some() {
+                    self.drag_state.hover_idx = Some(idx);
+                }
+                Task::none()
+            }
+            Message::DragEnd => {
+                if let (Some(from), Some(to)) = (self.drag_state.dragging_idx, self.drag_state.hover_idx) {
+                    if from != to {
+                        self.move_final_track(from, to);
+                    }
+                }
+                self.drag_state = DragState::default();
+                Task::none()
+            }
+            Message::DragCancel => {
+                self.drag_state = DragState::default();
                 Task::none()
             }
             Message::FinalTrackRemoved(idx) => {
