@@ -66,14 +66,20 @@ impl App {
             (SettingKey::ChunkDuration, SettingValue::I32(v)) => {
                 settings.analysis.chunk_duration = v as u32
             }
-            (SettingKey::MinMatchPct, SettingValue::F32(v)) => {
-                settings.analysis.min_match_pct = v as f64
+            (SettingKey::MinMatchPct, SettingValue::String(v)) => {
+                if let Ok(val) = v.parse::<f64>() {
+                    settings.analysis.min_match_pct = val;
+                }
             }
-            (SettingKey::ScanStartPct, SettingValue::F32(v)) => {
-                settings.analysis.scan_start_pct = v as f64
+            (SettingKey::ScanStartPct, SettingValue::String(v)) => {
+                if let Ok(val) = v.parse::<f64>() {
+                    settings.analysis.scan_start_pct = val;
+                }
             }
-            (SettingKey::ScanEndPct, SettingValue::F32(v)) => {
-                settings.analysis.scan_end_pct = v as f64
+            (SettingKey::ScanEndPct, SettingValue::String(v)) => {
+                if let Ok(val) = v.parse::<f64>() {
+                    settings.analysis.scan_end_pct = val;
+                }
             }
             (SettingKey::FilteringMethod, SettingValue::I32(v)) => {
                 settings.analysis.filtering_method = match v {
@@ -83,11 +89,15 @@ impl App {
                     _ => FilteringMethod::HighPass,
                 };
             }
-            (SettingKey::FilterLowCutoffHz, SettingValue::I32(v)) => {
-                settings.analysis.filter_low_cutoff_hz = v as f64
+            (SettingKey::FilterLowCutoffHz, SettingValue::String(v)) => {
+                if let Ok(val) = v.parse::<f64>() {
+                    settings.analysis.filter_low_cutoff_hz = val;
+                }
             }
-            (SettingKey::FilterHighCutoffHz, SettingValue::I32(v)) => {
-                settings.analysis.filter_high_cutoff_hz = v as f64
+            (SettingKey::FilterHighCutoffHz, SettingValue::String(v)) => {
+                if let Ok(val) = v.parse::<f64>() {
+                    settings.analysis.filter_high_cutoff_hz = val;
+                }
             }
             (SettingKey::UseSoxr, SettingValue::Bool(v)) => settings.analysis.use_soxr = v,
             (SettingKey::AudioPeakFit, SettingValue::Bool(v)) => settings.analysis.audio_peak_fit = v,
