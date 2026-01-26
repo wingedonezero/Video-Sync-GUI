@@ -156,6 +156,37 @@ class SubtitlesStep:
                     ocr_subtitle_data = ocr_result
 
             # ================================================================
+            # Check if we can skip SubtitleData processing for time-based mode
+            # This matches old behavior where time-based + mkvmerge just passed
+            # the file through unchanged
+            # ================================================================
+            subtitle_sync_mode = ctx.settings_dict.get('subtitle_sync_mode', 'time-based')
+            use_raw_values = ctx.settings_dict.get('time_based_use_raw_values', False)
+            bypass_subtitle_data = ctx.settings_dict.get('time_based_bypass_subtitle_data', True)
+
+            # Determine if we need SubtitleData processing
+            needs_subtitle_data = (
+                ocr_subtitle_data is not None or  # OCR requires SubtitleData
+                item.perform_ocr or  # OCR pending
+                item.style_patch or  # Style operations need SubtitleData
+                item.font_replacements or  # Font operations need SubtitleData
+                item.rescale or  # Rescale needs SubtitleData
+                (hasattr(item, 'size_multiplier') and abs(float(item.size_multiplier or 1.0) - 1.0) > 1e-6) or  # Size multiplier
+                item.convert_to_ass or  # Format conversion needs SubtitleData
+                item.is_generated or  # Generated tracks need style filtering
+                (subtitle_sync_mode != 'time-based') or  # Non-time-based modes need SubtitleData
+                use_raw_values or  # Raw values mode applies delay in SubtitleData
+                (item.track.source in ctx.stepping_edls and ctx.settings_dict.get('stepping_adjust_subtitles', True))  # Stepping needs SubtitleData
+            )
+
+            if not needs_subtitle_data and bypass_subtitle_data and subtitle_sync_mode == 'time-based':
+                # BYPASS: Time-based mode with no other processing needed
+                # Pass subtitle file through unchanged - mkvmerge --sync handles delay
+                runner._log_message(f"[Subtitles] Track {item.track.id}: BYPASS mode - passing through unchanged for mkvmerge --sync")
+                runner._log_message(f"[Subtitles]   (No OCR, style ops, stepping, or format conversion needed)")
+                continue  # Skip to next track - file is already in item.extracted_path
+
+            # ================================================================
             # Unified SubtitleData Processing
             # ================================================================
             if ocr_subtitle_data is not None:
