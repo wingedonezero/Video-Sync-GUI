@@ -184,11 +184,17 @@ class VideoVerifiedSync(SyncPlugin):
         )
         log(f"[VideoVerified] Candidates to test: {[f'{c:+.1f}ms' for c in candidates]}")
 
-        # Open video readers
+        # Open video readers with deinterlace support
         try:
-            use_vs = config.get('frame_use_vapoursynth', True)
-            source_reader = VideoReader(source_video, runner, use_vapoursynth=use_vs, temp_dir=temp_dir)
-            target_reader = VideoReader(target_video, runner, use_vapoursynth=use_vs, temp_dir=temp_dir)
+            deinterlace_mode = config.get('frame_deinterlace_mode', 'auto')
+            source_reader = VideoReader(
+                source_video, runner, temp_dir=temp_dir,
+                deinterlace=deinterlace_mode, config=config
+            )
+            target_reader = VideoReader(
+                target_video, runner, temp_dir=temp_dir,
+                deinterlace=deinterlace_mode, config=config
+            )
         except Exception as e:
             log(f"[VideoVerified] Failed to open videos: {e}")
             log(f"[VideoVerified] Falling back to correlation")

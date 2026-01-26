@@ -87,6 +87,8 @@ class AppConfig:
             'frame_search_range_ms': 2000,  # Search ±N ms around expected position
             'frame_agreement_tolerance_ms': 100,  # Checkpoints must agree within ±N ms
             'frame_use_vapoursynth': True,  # Use VapourSynth for frame extraction (faster with cache)
+            'frame_deinterlace_mode': 'auto',  # Deinterlace mode: 'auto', 'none', or specific method
+            'frame_deinterlace_method': 'yadif',  # Method for auto mode: 'yadif', 'bob', 'w3fdif', 'bwdif'
 
             # --- Unified Rounding Settings ---
             'subtitle_rounding': 'floor',  # Final rounding for all sync modes: floor, round, ceil

@@ -1399,6 +1399,30 @@ class SubtitleSyncTab(QWidget):
             "• Unchecked: Use ffprobe/ffmpeg fallback (slower but no dependencies)"
         )
 
+        self.widgets['frame_deinterlace_mode'] = QComboBox()
+        self.widgets['frame_deinterlace_mode'].addItems(['auto', 'none', 'yadif', 'bob', 'w3fdif', 'bwdif'])
+        self.widgets['frame_deinterlace_mode'].setToolTip(
+            "Deinterlacing mode for interlaced video sources:\n\n"
+            "• auto (Default): Detect interlaced content and deinterlace automatically\n"
+            "• none: Never deinterlace (use raw interlaced frames)\n"
+            "• yadif: YADIF deinterlacer (good quality, moderate speed)\n"
+            "• bob: Bob deinterlacer (fast, doubles framerate)\n"
+            "• w3fdif: W3FDIF - BBC's deinterlacer (high quality)\n"
+            "• bwdif: BWDIF - motion adaptive (good quality)\n\n"
+            "When comparing progressive to interlaced sources, 'auto' will\n"
+            "deinterlace only the interlaced source for accurate matching."
+        )
+
+        self.widgets['frame_deinterlace_method'] = QComboBox()
+        self.widgets['frame_deinterlace_method'].addItems(['yadif', 'bob', 'w3fdif', 'bwdif'])
+        self.widgets['frame_deinterlace_method'].setToolTip(
+            "Default deinterlace method when mode is 'auto':\n\n"
+            "• yadif (Default): Best balance of quality and speed\n"
+            "• bob: Fastest, but may have artifacts on motion\n"
+            "• w3fdif: Highest quality, slower (requires plugin)\n"
+            "• bwdif: Good quality with motion adaptation (requires plugin)"
+        )
+
         frame_layout.addRow("Hash Algorithm:", self.widgets['frame_hash_algorithm'])
         frame_layout.addRow("Hash Size:", self.widgets['frame_hash_size'])
         frame_layout.addRow("Hash Threshold:", self.widgets['frame_hash_threshold'])
@@ -1406,6 +1430,8 @@ class SubtitleSyncTab(QWidget):
         frame_layout.addRow("Search Range:", self.widgets['frame_search_range_ms'])
         frame_layout.addRow("Tolerance:", self.widgets['frame_agreement_tolerance_ms'])
         frame_layout.addRow("", self.widgets['frame_use_vapoursynth'])
+        frame_layout.addRow("Deinterlace:", self.widgets['frame_deinterlace_mode'])
+        frame_layout.addRow("Deinterlace Method:", self.widgets['frame_deinterlace_method'])
         main_layout.addWidget(frame_group)
 
         # ===== SHARED OUTPUT SETTINGS =====
