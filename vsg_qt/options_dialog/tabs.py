@@ -1303,7 +1303,8 @@ class SubtitleSyncTab(QWidget):
             'duration-align',
             'correlation-frame-snap',
             'subtitle-anchored-frame-snap',
-            'correlation-guided-frame-anchor'
+            'correlation-guided-frame-anchor',
+            'video-verified'
         ])
         self.widgets['subtitle_sync_mode'].setToolTip(
             "Subtitle synchronization method:\n\n"
@@ -1312,7 +1313,9 @@ class SubtitleSyncTab(QWidget):
             "• duration-align: Align by video duration difference\n"
             "• correlation-frame-snap: Correlation + scene-based frame verification\n"
             "• subtitle-anchored-frame-snap: Visual-only using subtitle positions\n"
-            "• correlation-guided-frame-anchor: Correlation-guided robust matching"
+            "• correlation-guided-frame-anchor: Correlation-guided robust matching\n"
+            "• video-verified: Audio correlation verified against video frames\n"
+            "  (catches cases where audio is offset but subs should be 0ms)"
         )
         mode_layout.addRow("Mode:", self.widgets['subtitle_sync_mode'])
         main_layout.addWidget(mode_group)
@@ -1556,6 +1559,60 @@ class SubtitleSyncTab(QWidget):
         specific_layout.addRow("", self.widgets['corr_anchor_refine_per_line'])
         specific_layout.addRow("Refine Workers:", self.widgets['corr_anchor_refine_workers'])
 
+        # --- Video-verified options ---
+        self.widgets['video_verified_zero_check_frames'] = QSpinBox()
+        self.widgets['video_verified_zero_check_frames'].setRange(1, 10)
+        self.widgets['video_verified_zero_check_frames'].setValue(3)
+        self.widgets['video_verified_zero_check_frames'].setToolTip(
+            "Frame threshold for zero-check verification:\n\n"
+            "When audio correlation is less than N frames, verify against video.\n"
+            "This catches cases where audio may be slightly offset but subtitles\n"
+            "should actually be at 0ms.\n\n"
+            "• 2: Only verify very small offsets (~80ms at 24fps)\n"
+            "• 3 (Default): Verify ~125ms offsets (recommended)\n"
+            "• 5: Verify larger offsets (~200ms)"
+        )
+
+        self.widgets['video_verified_min_quality_advantage'] = QDoubleSpinBox()
+        self.widgets['video_verified_min_quality_advantage'].setRange(0.0, 0.5)
+        self.widgets['video_verified_min_quality_advantage'].setValue(0.1)
+        self.widgets['video_verified_min_quality_advantage'].setSingleStep(0.05)
+        self.widgets['video_verified_min_quality_advantage'].setToolTip(
+            "Quality advantage needed to prefer non-zero offset:\n\n"
+            "When comparing candidates, the non-zero offset must be better\n"
+            "by at least this margin to be chosen over 0ms.\n\n"
+            "• 0.0: Always pick best quality (may prefer tiny offsets)\n"
+            "• 0.1 (Default): Slight preference for 0ms when close\n"
+            "• 0.2: Strong preference for 0ms (only use non-zero if clearly better)"
+        )
+
+        self.widgets['video_verified_num_checkpoints'] = QSpinBox()
+        self.widgets['video_verified_num_checkpoints'].setRange(3, 10)
+        self.widgets['video_verified_num_checkpoints'].setValue(5)
+        self.widgets['video_verified_num_checkpoints'].setToolTip(
+            "Number of checkpoint times for frame matching:\n\n"
+            "More checkpoints = more accurate but slower.\n\n"
+            "• 3: Fast (good for short videos)\n"
+            "• 5 (Default): Balanced\n"
+            "• 7+: Very thorough"
+        )
+
+        self.widgets['video_verified_search_range_frames'] = QSpinBox()
+        self.widgets['video_verified_search_range_frames'].setRange(1, 10)
+        self.widgets['video_verified_search_range_frames'].setValue(3)
+        self.widgets['video_verified_search_range_frames'].setToolTip(
+            "Frame range to search around candidate offsets:\n\n"
+            "Generates candidates at each frame within ±N frames of correlation.\n\n"
+            "• 2: Tight search (fewer candidates)\n"
+            "• 3 (Default): Standard search\n"
+            "• 5: Wide search (more thorough)"
+        )
+
+        specific_layout.addRow("Zero-Check Threshold:", self.widgets['video_verified_zero_check_frames'])
+        specific_layout.addRow("Quality Margin:", self.widgets['video_verified_min_quality_advantage'])
+        specific_layout.addRow("Checkpoints:", self.widgets['video_verified_num_checkpoints'])
+        specific_layout.addRow("Search Range:", self.widgets['video_verified_search_range_frames'])
+
         main_layout.addWidget(specific_group)
         main_layout.addStretch(1)
 
@@ -1571,9 +1628,10 @@ class SubtitleSyncTab(QWidget):
         is_correlation_snap = (text == 'correlation-frame-snap')
         is_sub_anchor_snap = (text == 'subtitle-anchored-frame-snap')
         is_corr_guided_anchor = (text == 'correlation-guided-frame-anchor')
+        is_video_verified = (text == 'video-verified')
 
         # Frame-based modes need frame matching settings
-        is_frame_based = is_frame_locked or is_duration_align or is_correlation_snap or is_sub_anchor_snap or is_corr_guided_anchor
+        is_frame_based = is_frame_locked or is_duration_align or is_correlation_snap or is_sub_anchor_snap or is_corr_guided_anchor or is_video_verified
 
         # Shared frame matching settings (enabled for all frame-based modes)
         for key in ['frame_hash_algorithm', 'frame_hash_size', 'frame_hash_threshold',
@@ -1607,6 +1665,12 @@ class SubtitleSyncTab(QWidget):
         self.widgets['corr_anchor_fallback_mode'].setEnabled(is_corr_guided_anchor)
         self.widgets['corr_anchor_refine_per_line'].setEnabled(is_corr_guided_anchor)
         self.widgets['corr_anchor_refine_workers'].setEnabled(is_corr_guided_anchor)
+
+        # Video-verified specific
+        self.widgets['video_verified_zero_check_frames'].setEnabled(is_video_verified)
+        self.widgets['video_verified_min_quality_advantage'].setEnabled(is_video_verified)
+        self.widgets['video_verified_num_checkpoints'].setEnabled(is_video_verified)
+        self.widgets['video_verified_search_range_frames'].setEnabled(is_video_verified)
 
 class ChaptersTab(QWidget):
     def __init__(self):
