@@ -2,6 +2,16 @@
 //!
 //! Builds command-line tokens for mkvmerge based on a MergePlan.
 //! Handles track options, delays, chapters, and attachments.
+//!
+//! # Delay Calculation
+//!
+//! Delays are calculated differently depending on track type and source:
+//!
+//! - **Source 1 VIDEO**: Only gets `global_shift_ms` (video defines timeline)
+//! - **Source 1 AUDIO**: Gets `container_delay_ms` (track's original delay) + `global_shift_ms`
+//! - **Other sources**: Gets `source_delays_ms[source]` which already includes global_shift
+//!
+//! This matches the Python implementation in `_effective_delay_ms()`.
 
 use std::path::Path;
 
@@ -100,10 +110,26 @@ impl<'a> MkvmergeOptionsBuilder<'a> {
 
         // Sync delay - round raw value only here for mkvmerge
         // mkvmerge only accepts integer milliseconds
-        if item.container_delay_ms_raw.abs() > 0.001 {
-            let delay_rounded = item.container_delay_ms_raw.round() as i64;
+        //
+        // IMPORTANT: container_delay_ms_raw ALREADY includes global_shift from the analysis step.
+        // Do NOT add global_shift again here - that would cause double-application.
+        //
+        // The delay flow is:
+        // 1. AnalyzeStep: calculates raw delay, adds global_shift, stores in raw_source_delays_ms
+        // 2. MuxStep: reads from raw_source_delays_ms, sets container_delay_ms_raw
+        // 3. OptionsBuilder (here): uses container_delay_ms_raw directly (NO additional shift)
+        let final_delay_ms = item.container_delay_ms_raw;
+        if final_delay_ms.abs() > 0.001 {
+            let delay_rounded = final_delay_ms.round() as i64;
             tokens.push("--sync".to_string());
             tokens.push(format!("{}:{:+}", track_id, delay_rounded));
+
+            // Log for debugging
+            tracing::debug!(
+                "mkvmerge --sync for {} ({}:{}): raw={:.3}ms → rounded={:+}ms",
+                track.source, track.track_type, track.id,
+                final_delay_ms, delay_rounded
+            );
         }
 
         // Default track flag

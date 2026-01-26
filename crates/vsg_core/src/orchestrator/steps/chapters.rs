@@ -1,10 +1,12 @@
 //! Chapters step - extracts and processes chapter information from Source 1.
 //!
 //! Extracts chapters XML from the primary source file using mkvextract,
-//! applies global shift to keep chapters in sync with shifted audio tracks.
+//! applies global shift to keep chapters in sync with shifted audio tracks,
+//! and optionally snaps chapters to video keyframes.
 
 use crate::chapters::{
-    extract_chapters_to_string, parse_chapter_xml, shift_chapters, write_chapter_file,
+    extract_chapters_to_string, extract_keyframes, parse_chapter_xml, shift_chapters,
+    snap_chapters, write_chapter_file, SnapMode as ChapterSnapMode,
 };
 use crate::orchestrator::errors::{StepError, StepResult};
 use crate::orchestrator::step::PipelineStep;
@@ -113,7 +115,46 @@ impl PipelineStep for ChaptersStep {
             shift_chapters(&mut chapter_data, global_shift);
         }
 
-        // Write the (possibly shifted) chapters to a file
+        // Apply keyframe snapping if enabled in settings
+        let mut snapped = false;
+        if ctx.settings.chapters.snap_enabled {
+            ctx.logger.info(&format!(
+                "Chapter snapping enabled (mode: {:?}, threshold: {}ms)",
+                ctx.settings.chapters.snap_mode,
+                ctx.settings.chapters.snap_threshold_ms
+            ));
+
+            // Extract keyframes from video
+            match extract_keyframes(source1) {
+                Ok(keyframes) => {
+                    ctx.logger.info(&format!(
+                        "Found {} keyframes in video",
+                        keyframes.timestamps_ns.len()
+                    ));
+
+                    // Convert settings snap_mode to chapter snap_mode
+                    let snap_mode = match ctx.settings.chapters.snap_mode {
+                        crate::models::SnapMode::Previous => ChapterSnapMode::Previous,
+                        crate::models::SnapMode::Nearest => ChapterSnapMode::Nearest,
+                    };
+
+                    // Snap chapters to keyframes
+                    snap_chapters(&mut chapter_data, &keyframes, snap_mode);
+                    snapped = true;
+                    ctx.logger.info("Chapters snapped to keyframes");
+                }
+                Err(e) => {
+                    ctx.logger.warn(&format!(
+                        "Failed to extract keyframes for snapping: {}",
+                        e
+                    ));
+                }
+            }
+        } else {
+            ctx.logger.info("Chapter snapping disabled");
+        }
+
+        // Write the (possibly shifted and snapped) chapters to a file
         let output_path = ctx.work_dir.join("chapters.xml");
         if let Err(e) = write_chapter_file(&chapter_data, &output_path) {
             ctx.logger.warn(&format!("Failed to write chapters: {}", e));
@@ -129,7 +170,7 @@ impl PipelineStep for ChaptersStep {
 
         state.chapters = Some(ChaptersOutput {
             chapters_xml: Some(output_path),
-            snapped: false,
+            snapped,
         });
 
         ctx.logger.info("Chapter processing complete");

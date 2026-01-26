@@ -43,17 +43,18 @@ impl PipelineStep for AttachmentsStep {
     fn execute(&self, ctx: &Context, state: &mut JobState) -> StepResult<StepOutcome> {
         ctx.logger.info("Extracting attachments...");
 
-        // Check if we have attachment sources specified in the layout
-        let attachment_sources: Vec<String> = ctx
-            .job_spec
-            .manual_layout
-            .as_ref()
-            .and_then(|_layout| {
-                // Look for attachment_sources in the layout metadata
-                // For now, default to Source 1 if not specified
-                Some(vec!["Source 1".to_string()])
-            })
-            .unwrap_or_else(|| vec!["Source 1".to_string()]);
+        // Get attachment sources from job spec
+        // If not specified, default to Source 1 only
+        let attachment_sources: Vec<String> = if ctx.job_spec.attachment_sources.is_empty() {
+            ctx.logger.info("No attachment sources specified - defaulting to Source 1");
+            vec!["Source 1".to_string()]
+        } else {
+            ctx.logger.info(&format!(
+                "Using specified attachment sources: {:?}",
+                ctx.job_spec.attachment_sources
+            ));
+            ctx.job_spec.attachment_sources.clone()
+        };
 
         if attachment_sources.is_empty() {
             ctx.logger.info("No attachment sources specified - skipping");

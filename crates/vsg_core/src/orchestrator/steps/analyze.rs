@@ -401,6 +401,12 @@ impl PipelineStep for AnalyzeStep {
         // Find most negative delay and apply shift if sync_mode is PositiveOnly
         ctx.logger.info("--- Calculating Global Shift ---");
 
+        // Log pre-shift delays for debugging
+        ctx.logger.info("Pre-shift delays (from correlation):");
+        for (source, delay) in delays.pre_shift_delays_ms.iter() {
+            ctx.logger.info(&format!("  {}: {:+.3}ms", source, delay));
+        }
+
         let most_negative_raw = delays.raw_source_delays_ms
             .values()
             .cloned()
@@ -424,13 +430,13 @@ impl PipelineStep for AnalyzeStep {
             delays.raw_global_shift_ms = raw_shift;
             delays.global_shift_ms = rounded_shift;
 
-            // Apply shift to all delays
+            // Apply shift to all delays (but keep pre_shift_delays_ms unchanged)
             ctx.logger.info("Adjusted delays after global shift:");
             for (source, raw_delay) in delays.raw_source_delays_ms.iter_mut() {
                 let original = *raw_delay;
                 *raw_delay += raw_shift;
                 ctx.logger.info(&format!(
-                    "  {}: {:+.3}ms → {:+.3}ms",
+                    "  {}: {:+.3}ms → {:+.3}ms (shift applied ONCE)",
                     source, original, *raw_delay
                 ));
             }
