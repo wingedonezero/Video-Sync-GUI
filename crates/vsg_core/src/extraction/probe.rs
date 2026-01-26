@@ -584,11 +584,18 @@ pub fn build_track_description(
             }
         }
         TrackType::Audio => {
-            // Bitrate
-            if let Some(fp) = ffprobe_info {
-                if let Some(br) = fp.bit_rate {
-                    let kbps = br / 1000;
-                    details.push(format!("{} kb/s", kbps));
+            // Bitrate - but skip for lossless codecs (TrueHD, FLAC, PCM)
+            // as ffprobe reports misleading values (e.g., AC3 core bitrate for TrueHD)
+            let is_lossless = track.codec_id.starts_with("A_TRUEHD")
+                || track.codec_id.starts_with("A_FLAC")
+                || track.codec_id.starts_with("A_PCM");
+
+            if !is_lossless {
+                if let Some(fp) = ffprobe_info {
+                    if let Some(br) = fp.bit_rate {
+                        let kbps = br / 1000;
+                        details.push(format!("{} kb/s", kbps));
+                    }
                 }
             }
 
