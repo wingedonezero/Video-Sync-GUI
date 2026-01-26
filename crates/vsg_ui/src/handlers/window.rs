@@ -187,7 +187,14 @@ impl App {
 
     /// Open the track settings window.
     pub fn open_track_settings_window(&mut self, track_idx: usize) -> Task<Message> {
+        tracing::debug!(
+            "open_track_settings_window called: track_idx={}, window_id_is_some={}",
+            track_idx,
+            self.track_settings_window_id.is_some()
+        );
+
         if self.track_settings_window_id.is_some() {
+            tracing::debug!("Track settings window already open, returning early");
             return Task::none();
         }
 
@@ -229,9 +236,15 @@ impl App {
 
     /// Close the track settings window.
     pub fn close_track_settings_window(&mut self) -> Task<Message> {
+        tracing::debug!(
+            "close_track_settings_window called: window_id_is_some={}",
+            self.track_settings_window_id.is_some()
+        );
+
         if let Some(id) = self.track_settings_window_id.take() {
             self.window_map.remove(&id);
             self.track_settings_idx = None;
+            tracing::debug!("Track settings window closed, ID cleared");
             return window::close(id);
         }
         Task::none()
