@@ -121,6 +121,35 @@ pub struct PlanItem {
     /// Custom track name override.
     #[serde(default)]
     pub custom_name: String,
+
+    // === Processing flags ===
+    /// Track has been adjusted by stepping correction.
+    #[serde(default)]
+    pub stepping_adjusted: bool,
+    /// Track has been adjusted by frame-level sync.
+    #[serde(default)]
+    pub frame_adjusted: bool,
+
+    // === Preservation/correction flags ===
+    /// Track was preserved from a previous run (not re-processed).
+    #[serde(default)]
+    pub is_preserved: bool,
+    /// Track was corrected from another source.
+    #[serde(default)]
+    pub is_corrected: bool,
+    /// Source used for correction (if is_corrected is true).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correction_source: Option<String>,
+
+    // === Video-specific options ===
+    /// Original aspect ratio to preserve (e.g., "16:9", "109:60").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aspect_ratio: Option<String>,
+
+    // === User modifications ===
+    /// Path to user-modified file (replaces extracted_path when set).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_modified_path: Option<PathBuf>,
 }
 
 impl PlanItem {
@@ -135,6 +164,13 @@ impl PlanItem {
             container_delay_ms_raw: 0.0,
             custom_lang: String::new(),
             custom_name: String::new(),
+            stepping_adjusted: false,
+            frame_adjusted: false,
+            is_preserved: false,
+            is_corrected: false,
+            correction_source: None,
+            aspect_ratio: None,
+            user_modified_path: None,
         }
     }
 

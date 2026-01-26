@@ -143,6 +143,37 @@ pub struct FinalTrackEntry {
     /// Position among tracks of same source and type (for robust matching).
     #[serde(default)]
     pub position_in_source_type: usize,
+
+    // === Generated track fields (for tracks created by filtering styles) ===
+    /// Marks this as a generated track (created from another track).
+    #[serde(default)]
+    pub is_generated: bool,
+    /// ID of the source track this was generated from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generated_source_track_id: Option<usize>,
+    /// Path to source subtitle file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub generated_source_path: Option<String>,
+    /// Filter mode: "include" or "exclude" styles.
+    #[serde(default = "default_filter_mode")]
+    pub generated_filter_mode: String,
+    /// Style names to include/exclude.
+    #[serde(default)]
+    pub generated_filter_styles: Vec<String>,
+    /// Complete style list from original source (for validation).
+    #[serde(default)]
+    pub generated_original_style_list: Vec<String>,
+    /// Verify only event lines removed, nothing else changed.
+    #[serde(default = "default_true")]
+    pub generated_verify_only_lines_removed: bool,
+}
+
+fn default_filter_mode() -> String {
+    "exclude".to_string()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl FinalTrackEntry {
@@ -155,6 +186,13 @@ impl FinalTrackEntry {
             config: TrackConfig::default(),
             user_order_index: 0,
             position_in_source_type: 0,
+            is_generated: false,
+            generated_source_track_id: None,
+            generated_source_path: None,
+            generated_filter_mode: "exclude".to_string(),
+            generated_filter_styles: Vec::new(),
+            generated_original_style_list: Vec::new(),
+            generated_verify_only_lines_removed: true,
         }
     }
 }
@@ -177,8 +215,11 @@ pub struct TrackConfig {
     /// Custom language override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub custom_lang: Option<String>,
+    /// Apply original track name from source (vs. custom_name override).
+    #[serde(default)]
+    pub apply_track_name: bool,
 
-    // Subtitle-specific options
+    // === Subtitle-specific options ===
     /// Perform OCR on image-based subtitles.
     #[serde(default)]
     pub perform_ocr: bool,
@@ -197,6 +238,25 @@ pub struct TrackConfig {
     /// Mode for sync exclusion: "exclude" or "include".
     #[serde(default = "default_sync_exclusion_mode")]
     pub sync_exclusion_mode: String,
+    /// Complete style list from original source (for validation).
+    #[serde(default)]
+    pub sync_exclusion_original_style_list: Vec<String>,
+    /// Skip duration-align frame validation.
+    #[serde(default)]
+    pub skip_frame_validation: bool,
+
+    // === Style modification options ===
+    /// Style patch to apply (property -> value mappings).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub style_patch: Option<HashMap<String, serde_json::Value>>,
+    /// Font replacement mappings (old_font -> new_font).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_replacements: Option<HashMap<String, String>>,
+
+    // === Video-specific options ===
+    /// Original aspect ratio to preserve (e.g., "16:9", "109:60").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aspect_ratio: Option<String>,
 }
 
 fn default_size_multiplier() -> f32 {
@@ -215,12 +275,18 @@ impl Default for TrackConfig {
             is_forced_display: false,
             custom_name: None,
             custom_lang: None,
+            apply_track_name: false,
             perform_ocr: false,
             convert_to_ass: false,
             rescale: false,
             size_multiplier: 1.0,
             sync_exclusion_styles: Vec::new(),
             sync_exclusion_mode: "exclude".to_string(),
+            sync_exclusion_original_style_list: Vec::new(),
+            skip_frame_validation: false,
+            style_patch: None,
+            font_replacements: None,
+            aspect_ratio: None,
         }
     }
 }
@@ -228,23 +294,39 @@ impl Default for TrackConfig {
 /// Per-source correlation settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SourceCorrelationSettings {
-    /// Audio track index to use for correlation.
+    /// Audio track index to use for correlation (this source).
     #[serde(default)]
     pub correlation_track: Option<usize>,
+    /// Reference audio track index to use from Source 1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correlation_ref_track: Option<usize>,
     /// Override start time for correlation window.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window_start_ms: Option<i64>,
     /// Override end time for correlation window.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window_end_ms: Option<i64>,
+    /// Enable source separation for this source.
+    #[serde(default)]
+    pub use_source_separation: bool,
+    /// Enable stepping correction for this source.
+    #[serde(default)]
+    pub stepping_enabled: bool,
+    /// Custom analysis settings (flexible key-value).
+    #[serde(default)]
+    pub custom_settings: HashMap<String, serde_json::Value>,
 }
 
 impl Default for SourceCorrelationSettings {
     fn default() -> Self {
         Self {
             correlation_track: None,
+            correlation_ref_track: None,
             window_start_ms: None,
             window_end_ms: None,
+            use_source_separation: false,
+            stepping_enabled: false,
+            custom_settings: HashMap::new(),
         }
     }
 }
