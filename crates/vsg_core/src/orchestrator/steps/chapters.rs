@@ -5,8 +5,9 @@
 //! and optionally snaps chapters to video keyframes.
 
 use crate::chapters::{
-    extract_chapters_to_string, extract_keyframes, parse_chapter_xml, shift_chapters,
-    snap_chapters_with_threshold, write_chapter_file, SnapMode as ChapterSnapMode,
+    extract_chapters_to_string, extract_keyframes, parse_chapter_xml, process_chapters,
+    shift_chapters, snap_chapters_with_threshold, write_chapter_file,
+    SnapMode as ChapterSnapMode,
 };
 use crate::orchestrator::errors::{StepError, StepResult};
 use crate::orchestrator::step::PipelineStep;
@@ -99,6 +100,33 @@ impl PipelineStep for ChaptersStep {
                 return Ok(StepOutcome::Success);
             }
         };
+
+        // Process chapters: deduplicate, normalize ends, and optionally rename
+        let proc_stats = process_chapters(
+            &mut chapter_data,
+            true,  // Always deduplicate
+            true,  // Always normalize ends
+            ctx.settings.chapters.rename,
+        );
+
+        if proc_stats.duplicates_removed > 0 {
+            ctx.logger.info(&format!(
+                "Removed {} duplicate chapters",
+                proc_stats.duplicates_removed
+            ));
+        }
+        if proc_stats.ends_normalized > 0 {
+            ctx.logger.info(&format!(
+                "Normalized {} chapter end times",
+                proc_stats.ends_normalized
+            ));
+        }
+        if proc_stats.chapters_renamed > 0 {
+            ctx.logger.info(&format!(
+                "Renamed {} chapters",
+                proc_stats.chapters_renamed
+            ));
+        }
 
         // Apply global shift if needed
         let global_shift = state
