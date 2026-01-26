@@ -649,9 +649,23 @@ impl App {
             }
             Message::PasteToSource(idx) => {
                 // Read clipboard and paste to the appropriate source input
-                if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                    if let Ok(text) = clipboard.get_text() {
-                        self.handle_source_path_changed(idx, text);
+                tracing::debug!("PasteToSource triggered for source {}", idx);
+                match arboard::Clipboard::new() {
+                    Ok(mut clipboard) => {
+                        match clipboard.get_text() {
+                            Ok(text) => {
+                                tracing::debug!("Clipboard text: {:?}", text);
+                                self.handle_source_path_changed(idx, text);
+                            }
+                            Err(e) => {
+                                tracing::warn!("Failed to get clipboard text: {}", e);
+                                self.append_log(&format!("Clipboard read failed: {}", e));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to create clipboard: {}", e);
+                        self.append_log(&format!("Clipboard access failed: {}", e));
                     }
                 }
                 Task::none()

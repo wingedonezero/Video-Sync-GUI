@@ -20,8 +20,8 @@ iced = { version = "0.14.0", features = ["tokio", "advanced"] }
 # iced_aw - Additional widgets (tabs, context menus, etc.)
 iced_aw = { version = "0.13.0", default-features = false, features = ["tabs", "card", "number_input", "context_menu"] }
 
-# Clipboard access for paste functionality
-arboard = "3.4"
+# Clipboard access for paste functionality (wayland-data-control needed for Wayland/KDE)
+arboard = { version = "3.4", features = ["wayland-data-control"] }
 
 # Async runtime
 tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "sync"] }
