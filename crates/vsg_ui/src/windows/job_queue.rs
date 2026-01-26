@@ -17,10 +17,13 @@ pub fn view(app: &App) -> Element<'_, Message> {
             .iter()
             .enumerate()
             .map(|(idx, job)| {
-                let status = if job.layout.is_some() {
-                    "✓ Configured"
-                } else {
-                    "○ Not Configured"
+                // Use the actual status field - it's set to Configured when layout is saved
+                let status_str = match job.status {
+                    vsg_core::jobs::JobQueueStatus::Pending => "○ Not Configured",
+                    vsg_core::jobs::JobQueueStatus::Configured => "✓ Configured",
+                    vsg_core::jobs::JobQueueStatus::Processing => "⟳ Processing",
+                    vsg_core::jobs::JobQueueStatus::Complete => "✓ Complete",
+                    vsg_core::jobs::JobQueueStatus::Error => "✗ Error",
                 };
                 // Get first source filename for display
                 let source1_name = job.sources
@@ -28,7 +31,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
                     .and_then(|p| p.file_name())
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| "-".to_string());
-                (idx, job.name.clone(), status.to_string(), job.sources.len(), source1_name)
+                (idx, job.name.clone(), status_str.to_string(), job.sources.len(), source1_name)
             })
             .collect()
     };
