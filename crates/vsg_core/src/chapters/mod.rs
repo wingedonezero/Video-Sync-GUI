@@ -75,11 +75,11 @@ pub use shifter::{
 // Re-export snapping functions
 pub use snapper::{
     calculate_snap_stats, extract_keyframes, extract_keyframes_limited, snap_chapters,
-    snap_chapters_copy, snap_chapters_with_threshold, SnapMode, SnapStats,
+    snap_chapters_copy, snap_chapters_with_threshold, SnapDetail, SnapMode, SnapStats,
 };
 
 // Re-export processing functions
 pub use processor::{
     deduplicate_chapters, normalize_chapter_ends, process_chapters, rename_chapters,
-    ProcessingStats,
+    DuplicateInfo, NormalizedEndInfo, ProcessingStats, RenamedInfo,
 };

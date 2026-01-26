@@ -5,37 +5,85 @@
 //! - Normalization (fix end times for seamless playback)
 //! - Renaming (standardize chapter names)
 
-use super::types::{ChapterData, ChapterName};
+use super::types::{ChapterData, ChapterName, format_timestamp_ns};
+
+/// Detail about a removed duplicate chapter.
+#[derive(Debug, Clone)]
+pub struct DuplicateInfo {
+    /// The name of the removed chapter.
+    pub name: String,
+    /// The timestamp where the duplicate was found.
+    pub timestamp_ns: u64,
+}
 
 /// Remove duplicate chapters at the same timestamp.
 ///
 /// When multiple chapters have the same start time, keeps only the first one.
-/// Returns the number of duplicates removed.
-pub fn deduplicate_chapters(data: &mut ChapterData) -> usize {
+/// Returns details about removed duplicates.
+pub fn deduplicate_chapters(data: &mut ChapterData) -> Vec<DuplicateInfo> {
     if data.chapters.len() < 2 {
-        return 0;
+        return Vec::new();
     }
 
     // Sort by time first
     data.sort_by_time();
 
-    let original_count = data.chapters.len();
+    let mut removed = Vec::new();
     let mut seen_starts = std::collections::HashSet::new();
 
+    // Collect info about duplicates before removing
+    for chapter in &data.chapters {
+        if seen_starts.contains(&chapter.start_ns) {
+            removed.push(DuplicateInfo {
+                name: chapter.display_name().unwrap_or("unnamed").to_string(),
+                timestamp_ns: chapter.start_ns,
+            });
+        } else {
+            seen_starts.insert(chapter.start_ns);
+        }
+    }
+
+    // Now remove them
+    seen_starts.clear();
     data.chapters.retain(|chapter| {
         if seen_starts.contains(&chapter.start_ns) {
-            false // Duplicate, remove it
+            false
         } else {
             seen_starts.insert(chapter.start_ns);
             true
         }
     });
 
-    let removed = original_count - data.chapters.len();
-    if removed > 0 {
-        tracing::debug!("Removed {} duplicate chapters", removed);
+    if !removed.is_empty() {
+        tracing::debug!("Removed {} duplicate chapters", removed.len());
     }
     removed
+}
+
+/// Detail about a normalized chapter end time.
+#[derive(Debug, Clone)]
+pub struct NormalizedEndInfo {
+    /// The name of the chapter.
+    pub name: String,
+    /// The original end time (None if wasn't set).
+    pub original_end_ns: Option<u64>,
+    /// The new end time.
+    pub new_end_ns: u64,
+}
+
+impl NormalizedEndInfo {
+    /// Format the change for logging.
+    pub fn format_change(&self) -> String {
+        let orig = self.original_end_ns
+            .map(|ns| format_timestamp_ns(ns))
+            .unwrap_or_else(|| "none".to_string());
+        format!(
+            "'{}' end time: {} -> {}",
+            self.name,
+            orig,
+            format_timestamp_ns(self.new_end_ns)
+        )
+    }
 }
 
 /// Normalize chapter end times for seamless playback.
@@ -44,16 +92,16 @@ pub fn deduplicate_chapters(data: &mut ChapterData) -> usize {
 /// creating seamless chapters without gaps. For the last chapter,
 /// sets end time to max(start + 1s, original_end).
 ///
-/// Returns the number of chapters modified.
-pub fn normalize_chapter_ends(data: &mut ChapterData) -> usize {
+/// Returns details about each normalized chapter.
+pub fn normalize_chapter_ends(data: &mut ChapterData) -> Vec<NormalizedEndInfo> {
     if data.chapters.is_empty() {
-        return 0;
+        return Vec::new();
     }
 
     // Sort first to ensure proper ordering
     data.sort_by_time();
 
-    let mut modified = 0;
+    let mut normalized = Vec::new();
     let len = data.chapters.len();
 
     for i in 0..len {
@@ -68,15 +116,34 @@ pub fn normalize_chapter_ends(data: &mut ChapterData) -> usize {
 
         let current_end = data.chapters[i].end_ns;
         if current_end != Some(desired_end) {
+            normalized.push(NormalizedEndInfo {
+                name: data.chapters[i].display_name().unwrap_or("unnamed").to_string(),
+                original_end_ns: current_end,
+                new_end_ns: desired_end,
+            });
             data.chapters[i].end_ns = Some(desired_end);
-            modified += 1;
         }
     }
 
-    if modified > 0 {
-        tracing::debug!("Normalized {} chapter end times", modified);
+    if !normalized.is_empty() {
+        tracing::debug!("Normalized {} chapter end times", normalized.len());
     }
-    modified
+    normalized
+}
+
+/// Detail about a renamed chapter.
+#[derive(Debug, Clone)]
+pub struct RenamedInfo {
+    /// Chapter number (1-indexed).
+    pub chapter_number: usize,
+    /// Original name (None if chapter had no name).
+    pub original_name: Option<String>,
+    /// New name.
+    pub new_name: String,
+    /// Language code (ISO 639-2).
+    pub language: String,
+    /// IETF language code (BCP 47).
+    pub language_ietf: Option<String>,
 }
 
 /// Rename all chapters to a standardized format.
@@ -84,9 +151,9 @@ pub fn normalize_chapter_ends(data: &mut ChapterData) -> usize {
 /// Renames chapters to "Chapter 01", "Chapter 02", etc.
 /// Preserves the original language codes.
 ///
-/// Returns the number of chapters renamed.
-pub fn rename_chapters(data: &mut ChapterData) -> usize {
-    let mut renamed = 0;
+/// Returns details about each renamed chapter.
+pub fn rename_chapters(data: &mut ChapterData) -> Vec<RenamedInfo> {
+    let mut renamed = Vec::new();
 
     for (i, chapter) in data.chapters.iter_mut().enumerate() {
         let new_name = format!("Chapter {:02}", i + 1);
@@ -94,37 +161,76 @@ pub fn rename_chapters(data: &mut ChapterData) -> usize {
         if chapter.names.is_empty() {
             // No name exists, add one
             chapter.names.push(ChapterName {
-                name: new_name,
+                name: new_name.clone(),
                 language: "eng".to_string(),
                 language_ietf: Some("en".to_string()),
             });
-            renamed += 1;
+            renamed.push(RenamedInfo {
+                chapter_number: i + 1,
+                original_name: None,
+                new_name,
+                language: "eng".to_string(),
+                language_ietf: Some("en".to_string()),
+            });
         } else {
-            // Update existing names
+            // Update existing names - track the first one for logging
+            let first_name = &chapter.names[0];
+            let original = first_name.name.clone();
+            let language = first_name.language.clone();
+            let language_ietf = first_name.language_ietf.clone();
+
+            let mut was_renamed = false;
             for name in &mut chapter.names {
                 if name.name != new_name {
                     name.name = new_name.clone();
-                    renamed += 1;
+                    was_renamed = true;
                 }
+            }
+
+            if was_renamed {
+                renamed.push(RenamedInfo {
+                    chapter_number: i + 1,
+                    original_name: Some(original),
+                    new_name,
+                    language,
+                    language_ietf,
+                });
             }
         }
     }
 
-    if renamed > 0 {
-        tracing::debug!("Renamed {} chapter names", renamed);
+    if !renamed.is_empty() {
+        tracing::debug!("Renamed {} chapters", renamed.len());
     }
     renamed
 }
 
-/// Processing statistics for chapter operations.
+/// Processing results for chapter operations with detailed info.
 #[derive(Debug, Clone, Default)]
 pub struct ProcessingStats {
+    /// Details about removed duplicates.
+    pub duplicates: Vec<DuplicateInfo>,
+    /// Details about normalized end times.
+    pub normalized: Vec<NormalizedEndInfo>,
+    /// Details about renamed chapters.
+    pub renamed: Vec<RenamedInfo>,
+}
+
+impl ProcessingStats {
     /// Number of duplicate chapters removed.
-    pub duplicates_removed: usize,
+    pub fn duplicates_removed(&self) -> usize {
+        self.duplicates.len()
+    }
+
     /// Number of chapter ends normalized.
-    pub ends_normalized: usize,
+    pub fn ends_normalized(&self) -> usize {
+        self.normalized.len()
+    }
+
     /// Number of chapters renamed.
-    pub chapters_renamed: usize,
+    pub fn chapters_renamed(&self) -> usize {
+        self.renamed.len()
+    }
 }
 
 /// Apply all chapter processing operations based on settings.
@@ -136,7 +242,7 @@ pub struct ProcessingStats {
 /// * `rename` - Rename chapters to "Chapter 01", "Chapter 02", etc.
 ///
 /// # Returns
-/// Statistics about the processing operations.
+/// Detailed results about all processing operations.
 pub fn process_chapters(
     data: &mut ChapterData,
     deduplicate: bool,
@@ -147,17 +253,17 @@ pub fn process_chapters(
 
     // Always deduplicate before other operations
     if deduplicate {
-        stats.duplicates_removed = deduplicate_chapters(data);
+        stats.duplicates = deduplicate_chapters(data);
     }
 
     // Normalize ends after deduplication
     if normalize_ends {
-        stats.ends_normalized = normalize_chapter_ends(data);
+        stats.normalized = normalize_chapter_ends(data);
     }
 
     // Rename last (so numbering is correct after deduplication)
     if rename {
-        stats.chapters_renamed = rename_chapters(data);
+        stats.renamed = rename_chapters(data);
     }
 
     stats
@@ -184,7 +290,7 @@ mod tests {
 
         assert_eq!(data.len(), 4);
         let removed = deduplicate_chapters(&mut data);
-        assert_eq!(removed, 1);
+        assert_eq!(removed.len(), 1);
         assert_eq!(data.len(), 3);
     }
 
@@ -201,7 +307,10 @@ mod tests {
     #[test]
     fn test_normalize_creates_seamless() {
         let mut data = create_test_chapters();
-        normalize_chapter_ends(&mut data);
+        let normalized = normalize_chapter_ends(&mut data);
+
+        // All 3 chapters should be normalized (they had no end times)
+        assert_eq!(normalized.len(), 3);
 
         // First chapter should end at second chapter's start
         assert_eq!(data.chapters[0].end_ns, Some(60_000_000_000));
@@ -214,8 +323,9 @@ mod tests {
     #[test]
     fn test_rename_chapters() {
         let mut data = create_test_chapters();
-        rename_chapters(&mut data);
+        let renamed = rename_chapters(&mut data);
 
+        assert_eq!(renamed.len(), 3);
         assert_eq!(data.chapters[0].display_name(), Some("Chapter 01"));
         assert_eq!(data.chapters[1].display_name(), Some("Chapter 02"));
         assert_eq!(data.chapters[2].display_name(), Some("Chapter 03"));
@@ -228,9 +338,9 @@ mod tests {
 
         let stats = process_chapters(&mut data, true, true, true);
 
-        assert_eq!(stats.duplicates_removed, 1);
-        assert!(stats.ends_normalized > 0);
-        assert!(stats.chapters_renamed > 0);
+        assert_eq!(stats.duplicates_removed(), 1);
+        assert!(stats.ends_normalized() > 0);
+        assert!(stats.chapters_renamed() > 0);
         assert_eq!(data.len(), 3);
     }
 }

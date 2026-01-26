@@ -5,9 +5,9 @@
 //! and optionally snaps chapters to video keyframes.
 
 use crate::chapters::{
-    extract_chapters_to_string, extract_keyframes, parse_chapter_xml, process_chapters,
-    shift_chapters, snap_chapters_with_threshold, write_chapter_file,
-    SnapMode as ChapterSnapMode,
+    extract_chapters_to_string, extract_keyframes, format_timestamp_ns, parse_chapter_xml,
+    process_chapters, shift_chapters, snap_chapters_with_threshold, write_chapter_file,
+    SnapDetail, SnapMode as ChapterSnapMode,
 };
 use crate::orchestrator::errors::{StepError, StepResult};
 use crate::orchestrator::step::PipelineStep;
@@ -109,23 +109,44 @@ impl PipelineStep for ChaptersStep {
             ctx.settings.chapters.rename,
         );
 
-        if proc_stats.duplicates_removed > 0 {
+        // Log duplicate removal details
+        if !proc_stats.duplicates.is_empty() {
             ctx.logger.info(&format!(
                 "Removed {} duplicate chapters",
-                proc_stats.duplicates_removed
+                proc_stats.duplicates.len()
             ));
+            for dup in &proc_stats.duplicates {
+                ctx.logger.info(&format!(
+                    "  - Removed duplicate '{}' at {}",
+                    dup.name,
+                    format_timestamp_ns(dup.timestamp_ns)
+                ));
+            }
         }
-        if proc_stats.ends_normalized > 0 {
-            ctx.logger.info(&format!(
-                "Normalized {} chapter end times",
-                proc_stats.ends_normalized
-            ));
+
+        // Log normalization details
+        if !proc_stats.normalized.is_empty() {
+            ctx.logger.info("Normalizing chapter data...");
+            for norm in &proc_stats.normalized {
+                ctx.logger.info(&format!(
+                    "  - Normalized {} (to create seamless chapters)",
+                    norm.format_change()
+                ));
+            }
         }
-        if proc_stats.chapters_renamed > 0 {
-            ctx.logger.info(&format!(
-                "Renamed {} chapters",
-                proc_stats.chapters_renamed
-            ));
+
+        // Log rename details
+        if !proc_stats.renamed.is_empty() {
+            ctx.logger.info("Renaming chapters to \"Chapter NN\"...");
+            for rename in &proc_stats.renamed {
+                let ietf = rename.language_ietf.as_deref().unwrap_or("und");
+                ctx.logger.info(&format!(
+                    "  - Renamed chapter {} (language: {}, IETF: {})",
+                    rename.chapter_number,
+                    rename.language,
+                    ietf
+                ));
+            }
         }
 
         // Apply global shift if needed
@@ -137,10 +158,12 @@ impl PipelineStep for ChaptersStep {
 
         if global_shift != 0 {
             ctx.logger.info(&format!(
-                "Applying global shift of +{}ms to chapters",
+                "Applying global shift of {:+}ms to chapters",
                 global_shift
             ));
             shift_chapters(&mut chapter_data, global_shift);
+        } else {
+            ctx.logger.info("No global shift needed for chapters");
         }
 
         // Apply keyframe snapping if enabled in settings
@@ -157,7 +180,7 @@ impl PipelineStep for ChaptersStep {
             match extract_keyframes(source1) {
                 Ok(keyframes) => {
                     ctx.logger.info(&format!(
-                        "Found {} keyframes in video",
+                        "Found {} keyframes for snapping.",
                         keyframes.timestamps_ns.len()
                     ));
 
@@ -166,6 +189,17 @@ impl PipelineStep for ChaptersStep {
                         crate::models::SnapMode::Previous => ChapterSnapMode::Previous,
                         crate::models::SnapMode::Nearest => ChapterSnapMode::Nearest,
                     };
+
+                    let mode_str = match snap_mode {
+                        ChapterSnapMode::Nearest => "nearest",
+                        ChapterSnapMode::Previous => "previous",
+                        ChapterSnapMode::Next => "next",
+                    };
+                    ctx.logger.info(&format!(
+                        "Snapping with mode={}, threshold={}ms...",
+                        mode_str,
+                        threshold_ms
+                    ));
 
                     // Snap chapters to keyframes with threshold enforcement
                     let stats = snap_chapters_with_threshold(
@@ -177,22 +211,44 @@ impl PipelineStep for ChaptersStep {
 
                     snapped = stats.moved > 0 || stats.already_aligned > 0;
 
-                    // Log detailed results
+                    // Log per-chapter details
+                    for detail in &stats.details {
+                        match detail {
+                            SnapDetail::AlreadyAligned { name, timestamp_ns } => {
+                                ctx.logger.info(&format!(
+                                    "  - Kept '{}' ({}) - already on keyframe.",
+                                    name,
+                                    SnapDetail::format_timestamp_full(*timestamp_ns)
+                                ));
+                            }
+                            SnapDetail::Snapped { name, original_ns, new_ns, shift_ns } => {
+                                ctx.logger.info(&format!(
+                                    "  - Snapped '{}' ({}) -> {} (moved by {})",
+                                    name,
+                                    SnapDetail::format_timestamp_full(*original_ns),
+                                    SnapDetail::format_timestamp_full(*new_ns),
+                                    SnapDetail::format_shift(*shift_ns)
+                                ));
+                            }
+                            SnapDetail::Skipped { name, timestamp_ns, would_shift_ns, threshold_ns } => {
+                                ctx.logger.info(&format!(
+                                    "  - Skipped '{}' ({}) - {} exceeds threshold of {}ms",
+                                    name,
+                                    SnapDetail::format_timestamp_full(*timestamp_ns),
+                                    SnapDetail::format_shift(*would_shift_ns),
+                                    threshold_ns / 1_000_000
+                                ));
+                            }
+                        }
+                    }
+
+                    // Log summary
                     ctx.logger.info(&format!(
-                        "Snap complete: {} moved, {} already on keyframe, {} skipped (exceeded {}ms threshold)",
+                        "Snap complete: {} moved, {} on keyframe, {} skipped.",
                         stats.moved,
                         stats.already_aligned,
-                        stats.skipped,
-                        threshold_ms
+                        stats.skipped
                     ));
-
-                    if stats.moved > 0 {
-                        ctx.logger.info(&format!(
-                            "Max shift: {}ms, avg shift: {:.1}ms",
-                            stats.max_shift_ms,
-                            stats.avg_shift_ms
-                        ));
-                    }
                 }
                 Err(e) => {
                     ctx.logger.warn(&format!(
@@ -216,15 +272,20 @@ impl PipelineStep for ChaptersStep {
             return Ok(StepOutcome::Success);
         }
 
-        ctx.logger
-            .info(&format!("Wrote chapters to: {}", output_path.display()));
+        ctx.logger.info(&format!(
+            "Chapters XML written to: {}",
+            output_path.display()
+        ));
 
         state.chapters = Some(ChaptersOutput {
-            chapters_xml: Some(output_path),
+            chapters_xml: Some(output_path.clone()),
             snapped,
         });
 
-        ctx.logger.info("Chapter processing complete");
+        ctx.logger.info(&format!(
+            "Successfully processed chapters: {}",
+            output_path.display()
+        ));
         Ok(StepOutcome::Success)
     }
 

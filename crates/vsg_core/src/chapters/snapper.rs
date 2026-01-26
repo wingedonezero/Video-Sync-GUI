@@ -61,6 +61,7 @@ pub fn snap_chapters_with_threshold(
             skipped: data.len(),
             max_shift_ms: 0,
             avg_shift_ms: 0.0,
+            details: Vec::new(),
         };
     }
 
@@ -76,9 +77,11 @@ pub fn snap_chapters_with_threshold(
     let mut skipped = 0;
     let mut total_shift_ns: i64 = 0;
     let mut max_shift_ns: i64 = 0;
+    let mut details = Vec::new();
 
     for chapter in data.iter_mut() {
         let original = chapter.start_ns;
+        let name = chapter.display_name().unwrap_or("unnamed").to_string();
         let snapped = match mode {
             SnapMode::Nearest => keyframes.nearest(original),
             SnapMode::Previous => keyframes.previous(original),
@@ -86,38 +89,54 @@ pub fn snap_chapters_with_threshold(
         };
 
         if let Some(new_start) = snapped {
-            let shift_ns = (new_start as i64 - original as i64).abs();
-            let shift_ms = shift_ns / 1_000_000;
+            let shift_ns = new_start as i64 - original as i64;
+            let abs_shift_ns = shift_ns.abs();
 
             if new_start == original {
                 // Already on keyframe
                 already_aligned += 1;
+                details.push(SnapDetail::AlreadyAligned {
+                    name,
+                    timestamp_ns: original,
+                });
                 tracing::trace!(
                     "Chapter '{}' ({}) - already on keyframe",
                     chapter.display_name().unwrap_or("unnamed"),
                     format_timestamp_for_log(original)
                 );
-            } else if threshold_ns.is_none() || shift_ns <= threshold_ns.unwrap() {
+            } else if threshold_ns.is_none() || abs_shift_ns <= threshold_ns.unwrap() {
                 // Within threshold (or no threshold), snap it
+                details.push(SnapDetail::Snapped {
+                    name,
+                    original_ns: original,
+                    new_ns: new_start,
+                    shift_ns,
+                });
                 tracing::trace!(
                     "Chapter '{}': {} -> {} ({:+}ms)",
                     chapter.display_name().unwrap_or("unnamed"),
                     format_timestamp_for_log(original),
                     format_timestamp_for_log(new_start),
-                    (new_start as i64 - original as i64) / 1_000_000
+                    shift_ns / 1_000_000
                 );
                 chapter.start_ns = new_start;
                 moved += 1;
-                total_shift_ns += shift_ns;
-                max_shift_ns = max_shift_ns.max(shift_ns);
+                total_shift_ns += abs_shift_ns;
+                max_shift_ns = max_shift_ns.max(abs_shift_ns);
             } else {
                 // Exceeds threshold, skip
                 skipped += 1;
+                details.push(SnapDetail::Skipped {
+                    name,
+                    timestamp_ns: original,
+                    would_shift_ns: shift_ns,
+                    threshold_ns: threshold_ns.unwrap(),
+                });
                 tracing::trace!(
                     "Chapter '{}' ({}) - skipped ({}ms exceeds threshold of {}ms)",
                     chapter.display_name().unwrap_or("unnamed"),
                     format_timestamp_for_log(original),
-                    shift_ms,
+                    abs_shift_ns / 1_000_000,
                     threshold_ms.unwrap_or(0)
                 );
             }
@@ -140,6 +159,7 @@ pub fn snap_chapters_with_threshold(
         skipped,
         max_shift_ms: max_shift_ns / 1_000_000,
         avg_shift_ms,
+        details,
     }
 }
 
@@ -246,6 +266,67 @@ pub fn extract_keyframes_limited(
     Ok(info)
 }
 
+/// Detail about what happened to a single chapter during snapping.
+#[derive(Debug, Clone)]
+pub enum SnapDetail {
+    /// Chapter was already on a keyframe.
+    AlreadyAligned {
+        name: String,
+        timestamp_ns: u64,
+    },
+    /// Chapter was snapped to a keyframe.
+    Snapped {
+        name: String,
+        original_ns: u64,
+        new_ns: u64,
+        shift_ns: i64,
+    },
+    /// Chapter was skipped (exceeded threshold).
+    Skipped {
+        name: String,
+        timestamp_ns: u64,
+        would_shift_ns: i64,
+        threshold_ns: i64,
+    },
+}
+
+impl SnapDetail {
+    /// Format timestamp for logging (HH:MM:SS.mmm.µµµ.nnn for full precision).
+    pub fn format_timestamp_full(ns: u64) -> String {
+        let total_ns = ns;
+        let nanos = total_ns % 1000;
+        let total_us = total_ns / 1000;
+        let micros = total_us % 1000;
+        let total_ms = total_us / 1000;
+        let millis = total_ms % 1000;
+        let total_secs = total_ms / 1000;
+        let secs = total_secs % 60;
+        let total_mins = total_secs / 60;
+        let mins = total_mins % 60;
+        let hours = total_mins / 60;
+        format!("{:02}:{:02}:{:02}.{:03}.{:03}.{:03}", hours, mins, secs, millis, micros, nanos)
+    }
+
+    /// Format the shift amount for logging.
+    pub fn format_shift(shift_ns: i64) -> String {
+        let sign = if shift_ns >= 0 { "+" } else { "" };
+        let abs_ns = shift_ns.unsigned_abs();
+
+        if abs_ns >= 1_000_000 {
+            // Milliseconds
+            let ms = abs_ns as f64 / 1_000_000.0;
+            format!("{}{}ms", sign, ms)
+        } else if abs_ns >= 1_000 {
+            // Microseconds
+            let us = abs_ns as f64 / 1_000.0;
+            format!("{}{}µs", sign, us)
+        } else {
+            // Nanoseconds
+            format!("{}{}ns", sign, abs_ns)
+        }
+    }
+}
+
 /// Calculate statistics about chapter-keyframe alignment.
 #[derive(Debug, Clone)]
 pub struct SnapStats {
@@ -261,6 +342,8 @@ pub struct SnapStats {
     pub max_shift_ms: i64,
     /// Average shift applied (in milliseconds).
     pub avg_shift_ms: f64,
+    /// Detailed info about each chapter's snap status.
+    pub details: Vec<SnapDetail>,
 }
 
 /// Calculate snapping statistics without modifying the chapters.
@@ -283,9 +366,11 @@ pub fn calculate_snap_stats(
     let mut skipped = 0;
     let mut total_shift_ns: i64 = 0;
     let mut max_shift_ns: i64 = 0;
+    let mut details = Vec::new();
 
     for chapter in data.iter() {
         let original = chapter.start_ns;
+        let name = chapter.display_name().unwrap_or("unnamed").to_string();
         let snapped = match mode {
             SnapMode::Nearest => keyframes.nearest(original),
             SnapMode::Previous => keyframes.previous(original),
@@ -293,15 +378,32 @@ pub fn calculate_snap_stats(
         };
 
         if let Some(new_start) = snapped {
-            let shift_ns = (new_start as i64 - original as i64).abs();
+            let shift_ns = new_start as i64 - original as i64;
+            let abs_shift_ns = shift_ns.abs();
             if new_start == original {
                 already_aligned += 1;
-            } else if threshold_ns.is_none() || shift_ns <= threshold_ns.unwrap() {
+                details.push(SnapDetail::AlreadyAligned {
+                    name,
+                    timestamp_ns: original,
+                });
+            } else if threshold_ns.is_none() || abs_shift_ns <= threshold_ns.unwrap() {
                 moved += 1;
-                total_shift_ns += shift_ns;
-                max_shift_ns = max_shift_ns.max(shift_ns);
+                total_shift_ns += abs_shift_ns;
+                max_shift_ns = max_shift_ns.max(abs_shift_ns);
+                details.push(SnapDetail::Snapped {
+                    name,
+                    original_ns: original,
+                    new_ns: new_start,
+                    shift_ns,
+                });
             } else {
                 skipped += 1;
+                details.push(SnapDetail::Skipped {
+                    name,
+                    timestamp_ns: original,
+                    would_shift_ns: shift_ns,
+                    threshold_ns: threshold_ns.unwrap(),
+                });
             }
         }
     }
@@ -319,6 +421,7 @@ pub fn calculate_snap_stats(
         skipped,
         max_shift_ms: max_shift_ns / 1_000_000,
         avg_shift_ms,
+        details,
     }
 }
 
