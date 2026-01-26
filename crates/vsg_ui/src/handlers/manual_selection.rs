@@ -107,13 +107,19 @@ impl App {
     /// Accept the layout and save to job.
     /// Saves layout to both the job queue and to disk via LayoutManager.
     pub fn accept_layout(&mut self) {
+        use crate::app::SyncExclusionMode;
+
         if let Some(job_idx) = self.manual_selection_job_idx {
+            // Track position counters for position_in_source_type
+            let mut source_type_counters: HashMap<String, usize> = HashMap::new();
+
             // Build ManualLayout from state - transfer ALL per-track settings
             let layout = ManualLayout {
                 final_tracks: self
                     .final_tracks
                     .iter()
-                    .map(|t| {
+                    .enumerate()
+                    .map(|(user_idx, t)| {
                         let track_type = match t.track_type.as_str() {
                             "video" => TrackType::Video,
                             "audio" => TrackType::Audio,
@@ -121,11 +127,20 @@ impl App {
                             _ => TrackType::Audio,
                         };
 
+                        // Calculate position_in_source_type
+                        let source_type_key = format!("{}_{}", t.source_key, t.track_type);
+                        let position = source_type_counters.get(&source_type_key).copied().unwrap_or(0);
+                        source_type_counters.insert(source_type_key, position + 1);
+
                         let mut entry = FinalTrackEntry::new(t.track_id, t.source_key.clone(), track_type);
+
+                        // Enhanced metadata
+                        entry.user_order_index = user_idx;
+                        entry.position_in_source_type = position;
 
                         // Basic flags
                         entry.config.is_default = t.is_default;
-                        entry.config.is_forced = t.is_forced;
+                        entry.config.is_forced_display = t.is_forced_display;
                         entry.config.sync_to_source = Some(t.sync_to_source.clone());
 
                         // Custom naming
@@ -138,6 +153,10 @@ impl App {
                         entry.config.rescale = t.rescale;
                         entry.config.size_multiplier = t.size_multiplier_pct as f32 / 100.0;
                         entry.config.sync_exclusion_styles = t.sync_exclusion_styles.clone();
+                        entry.config.sync_exclusion_mode = match t.sync_exclusion_mode {
+                            SyncExclusionMode::Exclude => "exclude".to_string(),
+                            SyncExclusionMode::Include => "include".to_string(),
+                        };
 
                         entry
                     })
@@ -151,16 +170,16 @@ impl App {
                 source_settings: HashMap::new(),
             };
 
-            // Get job ID for layout persistence
-            let job_id = {
+            // Get job ID and sources for layout persistence
+            let (job_id, sources) = {
                 let q = self.job_queue.lock().unwrap();
-                q.get(job_idx).map(|j| j.id.clone())
+                q.get(job_idx).map(|j| (j.id.clone(), j.sources.clone())).unzip()
             };
 
             // Save layout to disk via LayoutManager (for persistence across restarts)
-            if let Some(job_id) = &job_id {
+            if let (Some(job_id), Some(sources)) = (&job_id, &sources) {
                 let lm = self.layout_manager.lock().unwrap();
-                if let Err(e) = lm.save_layout(job_id, &layout) {
+                if let Err(e) = lm.save_layout_with_metadata(job_id, sources, &layout) {
                     tracing::warn!("Failed to save layout to disk: {}", e);
                 } else {
                     tracing::debug!("Layout saved to disk for job '{}'", job_id);

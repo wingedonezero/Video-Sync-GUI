@@ -260,7 +260,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 checkbox(track.is_default)
                     .label("Default")
                     .on_toggle(move |v| Message::FinalTrackDefaultChanged(idx, v)),
-                checkbox(track.is_forced)
+                checkbox(track.is_forced_display)
                     .label("Forced")
                     .on_toggle(move |v| Message::FinalTrackForcedChanged(idx, v)),
                 Space::new().width(Length::Fill),

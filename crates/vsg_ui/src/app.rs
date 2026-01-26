@@ -296,7 +296,7 @@ pub struct FinalTrackState {
 
     // Basic flags
     pub is_default: bool,
-    pub is_forced: bool,
+    pub is_forced_display: bool,
     pub sync_to_source: String,
 
     // Language
@@ -368,7 +368,7 @@ impl FinalTrackState {
             codec_id,
             summary,
             is_default: false,
-            is_forced: false,
+            is_forced_display: false,
             sync_to_source: "Source 1".to_string(),
             original_lang,
             custom_lang: None,
@@ -416,7 +416,7 @@ impl FinalTrackState {
         if self.is_default {
             badges.push("Default".to_string());
         }
-        if self.is_forced {
+        if self.is_forced_display {
             badges.push("Forced".to_string());
         }
         if self.perform_ocr {
@@ -749,7 +749,7 @@ impl App {
             }
             Message::FinalTrackForcedChanged(idx, value) => {
                 if let Some(track) = self.final_tracks.get_mut(idx) {
-                    track.is_forced = value;
+                    track.is_forced_display = value;
                 }
                 Task::none()
             }
