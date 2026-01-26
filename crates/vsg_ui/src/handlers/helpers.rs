@@ -132,10 +132,12 @@ pub fn probe_tracks(path: &PathBuf) -> Vec<TrackInfo> {
                 TrackType::Subtitles => "subtitle",
             };
 
-            let streams_of_type: Vec<_> = info
+            // Sort by index to ensure correct ordering (HashMap iteration is unordered)
+            let mut streams_of_type: Vec<_> = info
                 .values()
                 .filter(|s| s.codec_type == codec_type)
                 .collect();
+            streams_of_type.sort_by_key(|s| s.index);
 
             streams_of_type.get(stream_idx).copied()
         });
