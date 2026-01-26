@@ -112,6 +112,13 @@ impl ExtractStep {
 
             let bit_depth = track_info.and_then(|t| t.properties.bits_per_sample);
 
+            ctx.logger.command(&format!(
+                "ffmpeg -i \"{}\" -map 0:a:{} -vn -sn \"{}\"",
+                source_path.display(),
+                audio_stream_index,
+                output_path.display()
+            ));
+
             match extract_audio_with_ffmpeg(source_path, audio_stream_index, output_path, bit_depth)
             {
                 Ok(()) => {
@@ -128,6 +135,13 @@ impl ExtractStep {
         }
 
         // Standard mkvextract
+        ctx.logger.command(&format!(
+            "mkvextract \"{}\" tracks {}:\"{}\"",
+            source_path.display(),
+            track_id,
+            output_path.display()
+        ));
+
         match extract_track(source_path, track_id, output_path) {
             Ok(()) => Ok(()),
             Err(e) => Err(format!("mkvextract failed for track {}: {}", track_id, e)),
@@ -320,6 +334,7 @@ impl PipelineStep for ExtractStep {
                 let probe_result = if let Some(cached) = probe_cache.get(source_key) {
                     cached.clone()
                 } else {
+                    ctx.logger.command(&format!("mkvmerge -J \"{}\"", source_path.display()));
                     match probe_file(&source_path) {
                         Ok(probe) => {
                             // Log container delays if present
