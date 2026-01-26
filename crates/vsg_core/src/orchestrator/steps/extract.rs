@@ -1,19 +1,19 @@
-//! Extract step - extracts tracks and attachments from sources using mkvextract.
+//! Extract step - extracts tracks from sources using mkvextract.
 //!
 //! Extracts tracks specified in the job layout from their source files,
 //! placing them in the work directory for further processing.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::process::Command;
 
+use crate::extraction::{extract_track, probe_file, extension_for_codec};
 use crate::orchestrator::errors::{StepError, StepResult};
 use crate::orchestrator::step::PipelineStep;
 use crate::orchestrator::types::{Context, ExtractOutput, JobState, StepOutcome};
 
 /// Extract step for extracting tracks from source files.
 ///
-/// Uses mkvextract to pull individual tracks from MKV containers.
+/// Uses the extraction module to pull individual tracks from MKV containers.
 /// Stores extracted file paths in JobState.extract for use by later steps.
 pub struct ExtractStep;
 
@@ -22,78 +22,29 @@ impl ExtractStep {
         Self
     }
 
-    /// Extract a single track from a source file using mkvextract.
-    fn extract_track(
+    /// Build the output path for an extracted track.
+    fn build_output_path(
         &self,
-        source_path: &PathBuf,
+        source_path: &std::path::Path,
         track_id: usize,
-        work_dir: &PathBuf,
+        codec_id: &str,
+        work_dir: &std::path::Path,
         source_key: &str,
-        mkvextract_path: &str,
-    ) -> StepResult<PathBuf> {
-        // Determine output filename based on source and track
+    ) -> PathBuf {
         let source_stem = source_path
             .file_stem()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| "track".to_string());
 
-        // Output path: work_dir/source_stem_trackID.ext
-        // Extension will be determined by mkvextract based on codec
-        let output_base = work_dir.join(format!(
-            "{}_{}_track{}",
-            source_key.replace(" ", "_").to_lowercase(),
+        let extension = extension_for_codec(codec_id);
+
+        work_dir.join(format!(
+            "{}_{}_track{}.{}",
+            source_key.replace(' ', "_").to_lowercase(),
             source_stem,
-            track_id
-        ));
-
-        // mkvextract tracks <source> <trackID>:<output>
-        let track_spec = format!("{}:{}", track_id, output_base.display());
-
-        let output = Command::new(mkvextract_path)
-            .arg("tracks")
-            .arg(source_path)
-            .arg(&track_spec)
-            .output()
-            .map_err(|e| StepError::io_error("running mkvextract", e))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let exit_code = output.status.code().unwrap_or(-1);
-            return Err(StepError::command_failed(
-                "mkvextract",
-                exit_code,
-                format!("track {} extraction failed: {}", track_id, stderr),
-            ));
-        }
-
-        // Find the actual output file (mkvextract adds extension based on codec)
-        // Look for files matching the base pattern
-        if let Ok(entries) = std::fs::read_dir(work_dir) {
-            let base_name = output_base
-                .file_name()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_default();
-
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if let Some(name) = path.file_name() {
-                    let name_str = name.to_string_lossy();
-                    if name_str.starts_with(&base_name) && path.is_file() {
-                        return Ok(path);
-                    }
-                }
-            }
-        }
-
-        // If we can't find the file with extension, check if base exists
-        if output_base.exists() {
-            return Ok(output_base);
-        }
-
-        Err(StepError::file_not_found(format!(
-            "extracted track {} output file",
-            track_id
-        )))
+            track_id,
+            extension
+        ))
     }
 }
 
@@ -126,8 +77,8 @@ impl PipelineStep for ExtractStep {
         let mut tracks: HashMap<String, PathBuf> = HashMap::new();
         let attachments: HashMap<String, PathBuf> = HashMap::new();
 
-        // Use mkvextract from PATH (configurable tool paths not yet implemented)
-        let mkvextract_path = "mkvextract";
+        // Cache probed info for each source to avoid re-probing
+        let mut probe_cache: HashMap<String, crate::extraction::ProbeResult> = HashMap::new();
 
         // Check if we have a manual layout to extract
         if let Some(ref layout) = ctx.job_spec.manual_layout {
@@ -164,7 +115,7 @@ impl PipelineStep for ExtractStep {
 
                 // Get source path
                 let source_path = match ctx.job_spec.sources.get(source_key) {
-                    Some(p) => p,
+                    Some(p) => p.clone(),
                     None => {
                         ctx.logger.warn(&format!(
                             "Source {} not found, skipping track {}",
@@ -179,20 +130,49 @@ impl PipelineStep for ExtractStep {
                     track_type, track_id, source_key
                 ));
 
-                match self.extract_track(
-                    source_path,
+                // Get probe info (use cache)
+                let probe_result = if let Some(cached) = probe_cache.get(source_key) {
+                    cached.clone()
+                } else {
+                    match probe_file(&source_path) {
+                        Ok(probe) => {
+                            probe_cache.insert(source_key.to_string(), probe.clone());
+                            probe
+                        }
+                        Err(e) => {
+                            ctx.logger.warn(&format!(
+                                "Failed to probe {}: {}",
+                                source_key, e
+                            ));
+                            continue;
+                        }
+                    }
+                };
+
+                // Get codec for this track
+                let codec_id = probe_result
+                    .track_by_id(track_id)
+                    .map(|t| t.codec_id.as_str())
+                    .unwrap_or("");
+
+                // Build output path
+                let output_path = self.build_output_path(
+                    &source_path,
                     track_id,
+                    codec_id,
                     &ctx.work_dir,
                     source_key,
-                    mkvextract_path,
-                ) {
-                    Ok(extracted_path) => {
+                );
+
+                // Extract the track
+                match extract_track(&source_path, track_id, &output_path) {
+                    Ok(()) => {
                         let key = format!("{}_{}", source_key, track_id);
                         ctx.logger.info(&format!(
                             "  Extracted: {}",
-                            extracted_path.file_name().unwrap_or_default().to_string_lossy()
+                            output_path.file_name().unwrap_or_default().to_string_lossy()
                         ));
-                        tracks.insert(key, extracted_path);
+                        tracks.insert(key, output_path);
                     }
                     Err(e) => {
                         ctx.logger.warn(&format!(
