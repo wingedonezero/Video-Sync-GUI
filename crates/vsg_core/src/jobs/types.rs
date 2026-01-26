@@ -344,6 +344,15 @@ pub struct SavedLayoutData {
     pub layout: ManualLayout,
     /// ISO timestamp when layout was saved.
     pub saved_timestamp: String,
+    /// Track signature for comparing tracks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub track_signature: Option<super::signature::TrackSignature>,
+    /// Structure signature for exact compatibility checking.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub structure_signature: Option<super::signature::StructureSignature>,
+    /// Job ID this layout was copied from (if copied).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub copied_from: Option<String>,
 }
 
 impl SavedLayoutData {
@@ -354,6 +363,28 @@ impl SavedLayoutData {
             sources,
             layout,
             saved_timestamp: chrono::Utc::now().to_rfc3339(),
+            track_signature: None,
+            structure_signature: None,
+            copied_from: None,
+        }
+    }
+
+    /// Create with signatures for layout compatibility checking.
+    pub fn with_signatures(
+        job_id: String,
+        sources: HashMap<String, PathBuf>,
+        layout: ManualLayout,
+        track_signature: super::signature::TrackSignature,
+        structure_signature: super::signature::StructureSignature,
+    ) -> Self {
+        Self {
+            job_id,
+            sources,
+            layout,
+            saved_timestamp: chrono::Utc::now().to_rfc3339(),
+            track_signature: Some(track_signature),
+            structure_signature: Some(structure_signature),
+            copied_from: None,
         }
     }
 }
