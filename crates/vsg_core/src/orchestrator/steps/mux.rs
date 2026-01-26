@@ -178,16 +178,12 @@ impl MuxStep {
                     }
                 }
 
-                // Apply delay for non-primary sources
-                if source_key != "Source 1" {
-                    if let Some(delay_ms) = delays.source_delays_ms.get(source_key) {
-                        // Calculate total delay: source delay + global shift
-                        let total_delay = *delay_ms + delays.global_shift_ms;
-                        plan_item.container_delay_ms = total_delay;
-                    }
-                } else {
-                    // Primary source gets global shift only
-                    plan_item.container_delay_ms = delays.global_shift_ms;
+                // Apply delay from raw_source_delays_ms (already includes global shift from AnalyzeStep)
+                // Use raw f64 for precision - only rounded at final mkvmerge command
+                // Source 1 = global_shift (since its raw delay was 0)
+                // Source 2+ = original_delay + global_shift
+                if let Some(&delay_ms_raw) = delays.raw_source_delays_ms.get(source_key) {
+                    plan_item.container_delay_ms_raw = delay_ms_raw;
                 }
 
                 items.push(plan_item);

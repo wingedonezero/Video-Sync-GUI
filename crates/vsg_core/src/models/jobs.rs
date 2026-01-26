@@ -83,9 +83,10 @@ pub struct PlanItem {
     /// Whether this track has forced display flag.
     #[serde(default)]
     pub is_forced_display: bool,
-    /// Container delay to apply in milliseconds.
+    /// Container delay to apply in milliseconds (raw f64 for precision).
+    /// Only rounded to integer at the final mkvmerge command step.
     #[serde(default)]
-    pub container_delay_ms: i64,
+    pub container_delay_ms_raw: f64,
     /// Custom language override.
     #[serde(default)]
     pub custom_lang: String,
@@ -103,7 +104,7 @@ impl PlanItem {
             extracted_path: None,
             is_default: false,
             is_forced_display: false,
-            container_delay_ms: 0,
+            container_delay_ms_raw: 0.0,
             custom_lang: String::new(),
             custom_name: String::new(),
         }
@@ -116,8 +117,8 @@ impl PlanItem {
     }
 
     /// Set container delay.
-    pub fn with_delay(mut self, delay_ms: i64) -> Self {
-        self.container_delay_ms = delay_ms;
+    pub fn with_delay(mut self, delay_ms_raw: f64) -> Self {
+        self.container_delay_ms_raw = delay_ms_raw;
         self
     }
 }

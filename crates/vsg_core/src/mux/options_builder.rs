@@ -98,10 +98,12 @@ impl<'a> MkvmergeOptionsBuilder<'a> {
             tokens.push(format!("{}:{}", track_id, track.props.name));
         }
 
-        // Sync delay
-        if item.container_delay_ms != 0 {
+        // Sync delay - round raw value only here for mkvmerge
+        // mkvmerge only accepts integer milliseconds
+        if item.container_delay_ms_raw.abs() > 0.001 {
+            let delay_rounded = item.container_delay_ms_raw.round() as i64;
             tokens.push("--sync".to_string());
-            tokens.push(format!("{}:{:+}", track_id, item.container_delay_ms));
+            tokens.push(format!("{}:{:+}", track_id, delay_rounded));
         }
 
         // Default track flag
@@ -229,7 +231,7 @@ mod tests {
     #[test]
     fn adds_delay_option() {
         let mut item = PlanItem::new(make_test_track(TrackType::Audio), "/test/source.mkv");
-        item.container_delay_ms = -150;
+        item.container_delay_ms_raw = -150.0;
 
         let plan = MergePlan::new(vec![item], Delays::default());
         let settings = Settings::default();
