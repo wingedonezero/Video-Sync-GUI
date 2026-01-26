@@ -4,12 +4,12 @@
 //! analysis controls, and log panel.
 
 use iced::widget::{
-    button, checkbox, column, container, progress_bar, row, scrollable, text, text_input, Column,
-    Space,
+    button, checkbox, column, container, progress_bar, row, scrollable, text, Column, Space,
 };
 use iced::{Alignment, Element, Length};
 
 use crate::app::{App, Message};
+use crate::widgets::text_input_with_menu::text_input_with_paste;
 
 /// Build the main window view.
 pub fn view(app: &App) -> Element<Message> {
@@ -19,14 +19,15 @@ pub fn view(app: &App) -> Element<Message> {
         main_workflow_section(),
         Space::new().height(12),
         quick_analysis_section(app),
-        Space::new().height(12),
+        Space::new().height(8),
         results_section(app),
-        Space::new().height(12),
+        Space::new().height(8),
         log_section(app),
         status_bar(app),
     ]
     .spacing(4)
-    .padding(16);
+    .padding(16)
+    .height(Length::Fill);
 
     container(content)
         .width(Length::Fill)
@@ -112,7 +113,7 @@ fn quick_analysis_section(app: &App) -> Element<Message> {
         .into()
 }
 
-/// Single source input row with label, text input, and browse button.
+/// Single source input row with label, text input (with paste menu), and browse button.
 fn source_input_row<'a>(
     label: &'a str,
     path: &'a str,
@@ -121,9 +122,13 @@ fn source_input_row<'a>(
 ) -> Element<'a, Message> {
     let label_text = text(label).width(150);
 
-    let input = text_input("Drop file here or browse...", path)
-        .on_input(move |s| Message::SourcePathChanged(source_idx, s))
-        .width(Length::Fill);
+    // Text input with right-click context menu for paste
+    let input = text_input_with_paste(
+        "Drop file here or browse...",
+        path,
+        move |s| Message::SourcePathChanged(source_idx, s),
+        Message::PasteToSource(source_idx),
+    );
 
     let browse_button = if enabled {
         button("Browse...").on_press(Message::BrowseSource(source_idx))
@@ -172,27 +177,43 @@ fn results_section(app: &App) -> Element<Message> {
 }
 
 /// Log section with scrollable text area.
+/// Takes most of the vertical space and supports horizontal scrolling.
 fn log_section(app: &App) -> Element<Message> {
     let section_header = text("Log").size(18);
 
-    let log_content = text(app.log_text.clone()).font(iced::Font::MONOSPACE);
+    // Use monospace font, no wrapping (each line stays on one line)
+    let log_content = text(app.log_text.clone())
+        .font(iced::Font::MONOSPACE)
+        .size(12);
 
-    let scroll = scrollable(container(log_content).padding(8).width(Length::Fill))
-        .height(Length::FillPortion(1));
+    // Horizontal and vertical scrolling for log content
+    let scroll = scrollable(
+        container(log_content)
+            .padding(8)
+            .width(Length::Shrink), // Allow content to expand horizontally
+    )
+    .direction(scrollable::Direction::Both {
+        vertical: scrollable::Scrollbar::default(),
+        horizontal: scrollable::Scrollbar::default(),
+    })
+    .height(Length::Fill)
+    .width(Length::Fill);
 
     let content: Column<Message> = column![
         section_header,
         Space::new().height(8),
         container(scroll)
             .width(Length::Fill)
-            .height(Length::FillPortion(1))
+            .height(Length::Fill)
             .style(container::bordered_box),
     ]
-    .spacing(4);
+    .spacing(4)
+    .height(Length::Fill);
 
     container(content)
         .padding(12)
-        .height(Length::FillPortion(1))
+        .width(Length::Fill)
+        .height(Length::FillPortion(3)) // Log takes 3x more space than other sections
         .into()
 }
 

@@ -56,6 +56,7 @@ pub enum Message {
     SourcePathChanged(usize, String),
     BrowseSource(usize),
     FileSelected(usize, Option<PathBuf>),
+    PasteToSource(usize),  // Paste clipboard content to source input
     AnalyzeOnly,
     ArchiveLogsChanged(bool),
     AnalysisProgress(f32),
@@ -515,7 +516,8 @@ impl App {
             move || {
                 // Open the main window and get its actual ID
                 let (main_window_id, open_task) = window::open(window::Settings {
-                    size: Size::new(900.0, 700.0),
+                    size: Size::new(1200.0, 720.0),
+                    min_size: Some(Size::new(900.0, 600.0)),
                     ..Default::default()
                 });
 
@@ -643,6 +645,15 @@ impl App {
 
             Message::SourcePathChanged(idx, path) => {
                 self.handle_source_path_changed(idx, path);
+                Task::none()
+            }
+            Message::PasteToSource(idx) => {
+                // Read clipboard and paste to the appropriate source input
+                if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                    if let Ok(text) = clipboard.get_text() {
+                        self.handle_source_path_changed(idx, text);
+                    }
+                }
                 Task::none()
             }
             Message::BrowseSource(idx) => self.browse_source(idx),
