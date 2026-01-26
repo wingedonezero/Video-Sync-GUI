@@ -17,8 +17,11 @@ vsg_core = { path = "../vsg_core" }
 # iced - Cross-platform GUI library
 iced = { version = "0.14.0", features = ["tokio", "advanced"] }
 
-# iced_aw - Additional widgets (tabs, etc.)
-iced_aw = { version = "0.13.0", default-features = false, features = ["tabs", "card", "number_input"] }
+# iced_aw - Additional widgets (tabs, context menus, etc.)
+iced_aw = { version = "0.13.0", default-features = false, features = ["tabs", "card", "number_input", "context_menu"] }
+
+# Clipboard access for paste functionality
+arboard = "3.4"
 
 # Async runtime
 tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "sync"] }
