@@ -189,23 +189,24 @@ pub fn snap_chapters_copy(
 /// Extract keyframe timestamps from a video file.
 ///
 /// Uses ffprobe to get keyframe (I-frame) timestamps from the video stream.
+/// Uses packet-level inspection for fast extraction (doesn't decode frames).
 pub fn extract_keyframes(video_path: &Path) -> ChapterResult<KeyframeInfo> {
     tracing::debug!("Extracting keyframes from {}", video_path.display());
 
-    // Use ffprobe to get keyframe timestamps
+    // Use ffprobe to get keyframe timestamps from packet metadata
+    // This is MUCH faster than -show_frames because it doesn't decode frames
     // -select_streams v:0 = first video stream
-    // -show_frames = show frame info
-    // -show_entries frame=pts_time,pict_type = only show timestamp and frame type
+    // -show_entries packet=pts_time,flags = show packet timestamp and flags
     // -of csv=p=0 = output as CSV without headers
+    // Keyframes have 'K' in their flags
     let output = Command::new("ffprobe")
         .args([
             "-v",
             "error",
             "-select_streams",
             "v:0",
-            "-show_frames",
             "-show_entries",
-            "frame=pts_time,pict_type",
+            "packet=pts_time,flags",
             "-of",
             "csv=p=0",
         ])
@@ -226,8 +227,8 @@ pub fn extract_keyframes(video_path: &Path) -> ChapterResult<KeyframeInfo> {
     for line in stdout.lines() {
         let parts: Vec<&str> = line.split(',').collect();
         if parts.len() >= 2 {
-            // Check if it's a keyframe (I-frame)
-            if parts[1].trim() == "I" {
+            // Check if it's a keyframe - flags contain 'K'
+            if parts[1].contains('K') {
                 if let Ok(pts_secs) = parts[0].parse::<f64>() {
                     let pts_ns = (pts_secs * 1_000_000_000.0) as u64;
                     timestamps_ns.push(pts_ns);
