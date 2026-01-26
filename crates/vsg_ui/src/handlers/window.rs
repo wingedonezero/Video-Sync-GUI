@@ -140,14 +140,17 @@ impl App {
             }
         };
 
-        // Populate source groups
+        // Populate source groups (must happen before loading layout)
         self.populate_source_groups(&sources);
         self.manual_selection_job_idx = Some(job_idx);
         self.final_tracks.clear();
         self.attachment_sources.clear();
 
-        // Default to Source 1 for attachments
-        self.attachment_sources.insert("Source 1".to_string(), true);
+        // Try to load existing layout from disk
+        // If no layout exists, default to Source 1 for attachments
+        if !self.load_existing_layout(&sources) {
+            self.attachment_sources.insert("Source 1".to_string(), true);
+        }
 
         let settings = window::Settings {
             size: Size::new(1200.0, 800.0),
@@ -187,7 +190,14 @@ impl App {
 
     /// Open the track settings window.
     pub fn open_track_settings_window(&mut self, track_idx: usize) -> Task<Message> {
+        tracing::debug!(
+            "open_track_settings_window called: track_idx={}, window_id_is_some={}",
+            track_idx,
+            self.track_settings_window_id.is_some()
+        );
+
         if self.track_settings_window_id.is_some() {
+            tracing::debug!("Track settings window already open, returning early");
             return Task::none();
         }
 
@@ -229,9 +239,15 @@ impl App {
 
     /// Close the track settings window.
     pub fn close_track_settings_window(&mut self) -> Task<Message> {
+        tracing::debug!(
+            "close_track_settings_window called: window_id_is_some={}",
+            self.track_settings_window_id.is_some()
+        );
+
         if let Some(id) = self.track_settings_window_id.take() {
             self.window_map.remove(&id);
             self.track_settings_idx = None;
+            tracing::debug!("Track settings window closed, ID cleared");
             return window::close(id);
         }
         Task::none()

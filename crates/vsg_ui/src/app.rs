@@ -296,7 +296,7 @@ pub struct FinalTrackState {
 
     // Basic flags
     pub is_default: bool,
-    pub is_forced: bool,
+    pub is_forced_display: bool,
     pub sync_to_source: String,
 
     // Language
@@ -368,7 +368,7 @@ impl FinalTrackState {
             codec_id,
             summary,
             is_default: false,
-            is_forced: false,
+            is_forced_display: false,
             sync_to_source: "Source 1".to_string(),
             original_lang,
             custom_lang: None,
@@ -411,40 +411,47 @@ impl FinalTrackState {
 
     /// Generate badges string for display.
     pub fn badges(&self) -> String {
-        let mut badges = Vec::new();
+        let mut badges: Vec<String> = Vec::new();
 
         if self.is_default {
-            badges.push("Default");
+            badges.push("Default".to_string());
         }
-        if self.is_forced {
-            badges.push("Forced");
+        if self.is_forced_display {
+            badges.push("Forced".to_string());
         }
         if self.perform_ocr {
-            badges.push("OCR");
+            badges.push("OCR".to_string());
         }
         if self.convert_to_ass {
-            badges.push("→ASS");
+            badges.push("→ASS".to_string());
         }
         if self.rescale {
-            badges.push("Rescale");
+            badges.push("Rescale".to_string());
         }
         if self.size_multiplier_pct != 100 {
-            badges.push("Sized");
+            badges.push("Sized".to_string());
         }
         if self.style_patch.is_some() {
-            badges.push("Styled");
+            badges.push("Styled".to_string());
         }
         if self.font_replacements.is_some() {
-            badges.push("Fonts");
+            badges.push("Fonts".to_string());
         }
         if !self.sync_exclusion_styles.is_empty() {
-            badges.push("SyncEx");
+            badges.push("SyncEx".to_string());
         }
         if self.is_generated {
-            badges.push("Generated");
+            badges.push("Generated".to_string());
+        }
+        // Show badge if language was customized (different from original)
+        if let Some(ref custom_lang) = self.custom_lang {
+            let original = self.original_lang.as_deref().unwrap_or("und");
+            if custom_lang != original {
+                badges.push(format!("Lang: {}", custom_lang));
+            }
         }
         if self.custom_name.is_some() {
-            badges.push("Named");
+            badges.push("Named".to_string());
         }
 
         badges.join(" | ")
@@ -459,16 +466,14 @@ impl App {
         config_path: PathBuf,
         logs_dir: PathBuf,
     ) -> iced::Result {
-        let archive_logs = {
+        let (archive_logs, layouts_dir) = {
             let cfg = config.lock().unwrap();
-            cfg.settings().logging.archive_logs
+            let archive = cfg.settings().logging.archive_logs;
+            // Create layout manager - layouts stored in temp_root/job_layouts (like Qt version)
+            let temp_root = &cfg.settings().paths.temp_root;
+            let layouts = PathBuf::from(temp_root).join("job_layouts");
+            (archive, layouts)
         };
-
-        // Create layout manager - layouts stored in same directory as config
-        let layouts_dir = config_path
-            .parent()
-            .map(|p| p.join("layouts"))
-            .unwrap_or_else(|| PathBuf::from("layouts"));
         let layout_manager = Arc::new(Mutex::new(LayoutManager::new(&layouts_dir)));
 
         let version_info = format!(
@@ -744,7 +749,7 @@ impl App {
             }
             Message::FinalTrackForcedChanged(idx, value) => {
                 if let Some(track) = self.final_tracks.get_mut(idx) {
-                    track.is_forced = value;
+                    track.is_forced_display = value;
                 }
                 Task::none()
             }
@@ -754,7 +759,10 @@ impl App {
                 }
                 Task::none()
             }
-            Message::FinalTrackSettingsClicked(idx) => self.open_track_settings_window(idx),
+            Message::FinalTrackSettingsClicked(idx) => {
+                tracing::debug!("FinalTrackSettingsClicked received for idx={}", idx);
+                self.open_track_settings_window(idx)
+            }
             Message::AttachmentToggled(source, checked) => {
                 self.attachment_sources.insert(source, checked);
                 Task::none()

@@ -131,6 +131,12 @@ pub struct FinalTrackEntry {
     pub track_type: TrackType,
     /// User configuration for this track.
     pub config: TrackConfig,
+    /// Position in user's ordered output list (0-indexed).
+    #[serde(default)]
+    pub user_order_index: usize,
+    /// Position among tracks of same source and type (for robust matching).
+    #[serde(default)]
+    pub position_in_source_type: usize,
 }
 
 impl FinalTrackEntry {
@@ -141,6 +147,8 @@ impl FinalTrackEntry {
             source_key,
             track_type,
             config: TrackConfig::default(),
+            user_order_index: 0,
+            position_in_source_type: 0,
         }
     }
 }
@@ -154,9 +162,9 @@ pub struct TrackConfig {
     /// Set as default track of this type.
     #[serde(default)]
     pub is_default: bool,
-    /// Set forced display flag.
+    /// Set forced display flag (shows subtitles even when disabled).
     #[serde(default)]
-    pub is_forced: bool,
+    pub is_forced_display: bool,
     /// Custom track name override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub custom_name: Option<String>,
@@ -180,10 +188,17 @@ pub struct TrackConfig {
     /// Styles to exclude from frame sync.
     #[serde(default)]
     pub sync_exclusion_styles: Vec<String>,
+    /// Mode for sync exclusion: "exclude" or "include".
+    #[serde(default = "default_sync_exclusion_mode")]
+    pub sync_exclusion_mode: String,
 }
 
 fn default_size_multiplier() -> f32 {
     1.0
+}
+
+fn default_sync_exclusion_mode() -> String {
+    "exclude".to_string()
 }
 
 impl Default for TrackConfig {
@@ -191,7 +206,7 @@ impl Default for TrackConfig {
         Self {
             sync_to_source: None,
             is_default: false,
-            is_forced: false,
+            is_forced_display: false,
             custom_name: None,
             custom_lang: None,
             perform_ocr: false,
@@ -199,6 +214,7 @@ impl Default for TrackConfig {
             rescale: false,
             size_multiplier: 1.0,
             sync_exclusion_styles: Vec::new(),
+            sync_exclusion_mode: "exclude".to_string(),
         }
     }
 }
@@ -223,6 +239,33 @@ impl Default for SourceCorrelationSettings {
             correlation_track: None,
             window_start_ms: None,
             window_end_ms: None,
+        }
+    }
+}
+
+/// Wrapper for saved layout files with metadata.
+/// This is what gets serialized to disk by LayoutManager.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedLayoutData {
+    /// Job identifier (MD5 hash of source filenames).
+    pub job_id: String,
+    /// Source file paths at time of saving.
+    pub sources: HashMap<String, PathBuf>,
+    /// The actual layout configuration.
+    #[serde(flatten)]
+    pub layout: ManualLayout,
+    /// ISO timestamp when layout was saved.
+    pub saved_timestamp: String,
+}
+
+impl SavedLayoutData {
+    /// Create a new SavedLayoutData with current timestamp.
+    pub fn new(job_id: String, sources: HashMap<String, PathBuf>, layout: ManualLayout) -> Self {
+        Self {
+            job_id,
+            sources,
+            layout,
+            saved_timestamp: chrono::Utc::now().to_rfc3339(),
         }
     }
 }
