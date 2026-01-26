@@ -13,7 +13,8 @@
 
 use std::collections::HashMap;
 
-use crate::analysis::{get_audio_container_delays_relative, Analyzer};
+use crate::analysis::Analyzer;
+use crate::extraction::probe_file;
 use crate::models::{Delays, SyncMode};
 use crate::orchestrator::errors::{StepError, StepResult};
 use crate::orchestrator::step::PipelineStep;
@@ -132,31 +133,56 @@ impl PipelineStep for AnalyzeStep {
         ));
 
         // ============================================================
-        // GET SOURCE 1 CONTAINER DELAYS
+        // GET SOURCE 1 CONTAINER DELAYS (using mkvmerge minimum_timestamp)
         // ============================================================
         // Container delays are embedded timing offsets in the file that need
         // to be added to correlation results for accurate sync.
-        let source1_audio_container_delay = match get_audio_container_delays_relative(ref_path) {
-            Ok(delays) => {
-                // Use first audio track's delay (index 0) by default
-                // TODO: Support language-based track selection
-                let delay = delays.get(&0_usize).copied().unwrap_or(0.0);
-                if delay.abs() > 0.1 {
+        // We use mkvmerge -J to get minimum_timestamp per track, which is more
+        // reliable than ffprobe's start_time for Matroska containers.
+        let (source1_audio_container_delay, source1_container_delays) = match probe_file(ref_path) {
+            Ok(probe) => {
+                // Get all audio container delays relative to video
+                let relative_delays = probe.get_audio_container_delays_relative();
+
+                // Get delay for default audio track
+                let default_audio_delay = probe
+                    .default_audio()
+                    .map(|t| t.container_delay_ms - probe.video_container_delay())
+                    .unwrap_or(0);
+
+                if default_audio_delay != 0 {
                     ctx.logger.info(&format!(
-                        "Source 1 audio container delay: {:+.3}ms (will be added to correlation results)",
-                        delay
+                        "Source 1 audio container delay: {:+}ms (will be added to correlation results)",
+                        default_audio_delay
                     ));
+
+                    // Log per-track delays if they differ
+                    for track in probe.audio_tracks() {
+                        let relative = track.container_delay_ms - probe.video_container_delay();
+                        if relative != default_audio_delay {
+                            ctx.logger.info(&format!(
+                                "  Track {} ({}): {:+}ms",
+                                track.id,
+                                track.language.as_deref().unwrap_or("und"),
+                                relative
+                            ));
+                        }
+                    }
                 }
-                delay
+
+                (default_audio_delay as f64, relative_delays)
             }
             Err(e) => {
                 ctx.logger.warn(&format!(
-                    "Could not get Source 1 container delays: {} (assuming 0)",
+                    "Could not probe Source 1 for container delays: {} (assuming 0)",
                     e
                 ));
-                0.0
+                (0.0, HashMap::new())
             }
         };
+
+        // Store for potential per-track lookup later
+        let _ = source1_container_delays; // Will be used for per-track delay selection
 
         // Create analyzer from settings with job logger for detailed progress
         let analyzer = Analyzer::from_settings(&ctx.settings.analysis)

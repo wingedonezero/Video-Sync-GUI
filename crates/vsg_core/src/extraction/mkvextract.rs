@@ -239,6 +239,7 @@ pub fn extension_for_codec(codec_id: &str) -> &'static str {
         "A_MPEG/L3" => "mp3",
         "A_MPEG/L2" => "mp2",
         "A_TRUEHD" => "thd",
+        "A_MS/ACM" => "wav", // ACM needs ffmpeg extraction
 
         // Subtitle codecs
         "S_TEXT/UTF8" | "S_TEXT/ASCII" => "srt",
@@ -250,6 +251,123 @@ pub fn extension_for_codec(codec_id: &str) -> &'static str {
         // Default
         _ => "bin",
     }
+}
+
+/// Check if a codec requires ffmpeg for extraction.
+///
+/// Some codecs (like A_MS/ACM) cannot be extracted directly by mkvextract
+/// and need ffmpeg as a fallback.
+pub fn requires_ffmpeg_extraction(codec_id: &str) -> bool {
+    codec_id.to_uppercase().contains("A_MS/ACM")
+}
+
+/// Get the appropriate PCM codec name for ffmpeg based on bit depth.
+///
+/// Used when extracting A_MS/ACM audio that needs transcoding to PCM.
+pub fn pcm_codec_from_bit_depth(bit_depth: Option<u8>) -> &'static str {
+    match bit_depth.unwrap_or(16) {
+        64.. => "pcm_f64le",
+        32..=63 => "pcm_s32le",
+        24..=31 => "pcm_s24le",
+        _ => "pcm_s16le",
+    }
+}
+
+/// Extract an audio track using ffmpeg.
+///
+/// This is used as a fallback for codecs that mkvextract can't handle directly,
+/// like A_MS/ACM. First tries stream copy, then falls back to PCM transcoding.
+///
+/// # Arguments
+/// * `input_path` - Path to the source MKV file
+/// * `audio_stream_index` - The ffmpeg audio stream index (0-based within audio streams)
+/// * `output_path` - Path where the audio will be written (should end in .wav)
+/// * `bit_depth` - Optional bit depth for PCM conversion
+///
+/// # Returns
+/// `Ok(())` on success, `Err` on failure
+pub fn extract_audio_with_ffmpeg(
+    input_path: &Path,
+    audio_stream_index: usize,
+    output_path: &Path,
+    bit_depth: Option<u8>,
+) -> ExtractionResult<()> {
+    if !input_path.exists() {
+        return Err(ExtractionError::FileNotFound(input_path.to_path_buf()));
+    }
+
+    // First try: stream copy
+    let copy_output = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-v", "error",
+            "-nostdin",
+            "-i",
+        ])
+        .arg(input_path)
+        .args([
+            "-map", &format!("0:a:{}", audio_stream_index),
+            "-vn", "-sn",
+            "-c:a", "copy",
+        ])
+        .arg(output_path)
+        .output()
+        .map_err(|e| {
+            ExtractionError::ExtractionFailed(format!("Failed to run ffmpeg: {}", e))
+        })?;
+
+    if copy_output.status.success() {
+        tracing::info!(
+            "Extracted audio stream {} with ffmpeg (stream copy) to {}",
+            audio_stream_index,
+            output_path.display()
+        );
+        return Ok(());
+    }
+
+    // Second try: transcode to PCM
+    tracing::debug!(
+        "Stream copy failed for audio {}, falling back to PCM transcoding",
+        audio_stream_index
+    );
+
+    let pcm_codec = pcm_codec_from_bit_depth(bit_depth);
+    let pcm_output = Command::new("ffmpeg")
+        .args([
+            "-y",
+            "-v", "error",
+            "-nostdin",
+            "-i",
+        ])
+        .arg(input_path)
+        .args([
+            "-map", &format!("0:a:{}", audio_stream_index),
+            "-vn", "-sn",
+            "-acodec", pcm_codec,
+        ])
+        .arg(output_path)
+        .output()
+        .map_err(|e| {
+            ExtractionError::ExtractionFailed(format!("Failed to run ffmpeg: {}", e))
+        })?;
+
+    if pcm_output.status.success() {
+        tracing::info!(
+            "Extracted audio stream {} with ffmpeg (transcoded to {}) to {}",
+            audio_stream_index,
+            pcm_codec,
+            output_path.display()
+        );
+        return Ok(());
+    }
+
+    // Both failed
+    let stderr = String::from_utf8_lossy(&pcm_output.stderr);
+    Err(ExtractionError::ExtractionFailed(format!(
+        "Failed to extract audio stream {} with ffmpeg (both stream copy and PCM failed): {}",
+        audio_stream_index,
+        stderr
+    )))
 }
 
 #[cfg(test)]

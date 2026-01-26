@@ -76,6 +76,8 @@ pub enum SnapMode {
     Previous,
     /// Snap to nearest keyframe.
     Nearest,
+    /// Snap to next keyframe.
+    Next,
 }
 
 /// Status of a completed job.
