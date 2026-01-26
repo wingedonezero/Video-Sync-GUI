@@ -65,7 +65,9 @@ pub use types::{
 
 // Re-export probe functions
 pub use probe::{
-    count_tracks_by_type, get_attachments, get_duration_secs, get_tracks, is_matroska, probe_file,
+    build_track_description, count_tracks_by_type, friendly_codec_name, get_attachments,
+    get_detailed_stream_info, get_duration_secs, get_tracks, is_matroska, probe_file,
+    FfprobeStreamInfo,
 };
 
 // Re-export track extraction functions
@@ -82,6 +84,7 @@ pub use attachments::{
 
 // Re-export low-level mkvextract functions
 pub use mkvextract::{
-    extract_attachments, extract_chapters_xml, extract_cues, extract_tags, extract_timestamps,
-    extract_track, extract_tracks, extension_for_codec,
+    extract_attachments, extract_audio_with_ffmpeg, extract_chapters_xml, extract_cues,
+    extract_tags, extract_timestamps, extract_track, extract_tracks, extension_for_codec,
+    pcm_codec_from_bit_depth, requires_ffmpeg_extraction,
 };

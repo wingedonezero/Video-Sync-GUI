@@ -68,6 +68,10 @@ pub struct TrackInfo {
     pub is_forced: bool,
     /// Whether this track is enabled.
     pub is_enabled: bool,
+    /// Container delay in milliseconds (from minimum_timestamp).
+    /// This is the embedded timing offset for this track in the container.
+    /// For video/audio tracks, this affects when the track starts playing.
+    pub container_delay_ms: i64,
     /// Track-specific properties.
     pub properties: TrackProperties,
 }
@@ -186,18 +190,86 @@ pub struct AttachmentInfo {
 
 impl AttachmentInfo {
     /// Check if this is a font file (commonly embedded in MKV for subtitles).
+    ///
+    /// Uses comprehensive font detection covering all common cases:
+    /// - Standard font MIME types (font/*)
+    /// - TrueType fonts (multiple variations)
+    /// - OpenType fonts (multiple variations)
+    /// - WOFF/WOFF2 web fonts
+    /// - PostScript fonts
+    /// - Generic binary with font extensions
+    /// - File extension fallback (most reliable)
     pub fn is_font(&self) -> bool {
         let mime_lower = self.mime_type.to_lowercase();
         let name_lower = self.name.to_lowercase();
 
-        mime_lower.contains("font")
-            || mime_lower == "application/x-truetype-font"
-            || mime_lower == "application/vnd.ms-opentype"
-            || name_lower.ends_with(".ttf")
+        // Standard font MIME types
+        if mime_lower.starts_with("font/")
+            || mime_lower.starts_with("application/font")
+            || mime_lower.starts_with("application/x-font")
+        {
+            return true;
+        }
+
+        // TrueType fonts (multiple variations)
+        if mime_lower == "application/x-truetype-font"
+            || mime_lower == "application/truetype"
+            || mime_lower == "font/ttf"
+        {
+            return true;
+        }
+
+        // OpenType fonts (multiple variations)
+        if mime_lower == "application/vnd.ms-opentype"
+            || mime_lower == "application/opentype"
+            || mime_lower == "font/otf"
+        {
+            return true;
+        }
+
+        // WOFF fonts
+        if mime_lower == "application/font-woff"
+            || mime_lower == "font/woff"
+            || mime_lower == "font/woff2"
+        {
+            return true;
+        }
+
+        // PostScript fonts
+        if mime_lower == "application/postscript" || mime_lower == "application/x-font-type1" {
+            return true;
+        }
+
+        // Generic binary (some MKVs use this for fonts) - check extension
+        if (mime_lower == "application/octet-stream" || mime_lower == "binary/octet-stream")
+            && (name_lower.ends_with(".ttf")
+                || name_lower.ends_with(".otf")
+                || name_lower.ends_with(".ttc")
+                || name_lower.ends_with(".woff")
+                || name_lower.ends_with(".woff2"))
+        {
+            return true;
+        }
+
+        // Any MIME with 'font', 'truetype', or 'opentype' in it
+        if mime_lower.contains("font")
+            || mime_lower.contains("truetype")
+            || mime_lower.contains("opentype")
+        {
+            return true;
+        }
+
+        // File extension fallback (most reliable)
+        name_lower.ends_with(".ttf")
             || name_lower.ends_with(".otf")
             || name_lower.ends_with(".ttc")
             || name_lower.ends_with(".woff")
             || name_lower.ends_with(".woff2")
+            || name_lower.ends_with(".eot")
+            || name_lower.ends_with(".fon")
+            || name_lower.ends_with(".fnt")
+            || name_lower.ends_with(".pfb")
+            || name_lower.ends_with(".pfa")
     }
 }
 
@@ -266,6 +338,53 @@ impl ProbeResult {
     /// Get duration in seconds.
     pub fn duration_secs(&self) -> Option<f64> {
         self.duration_ns.map(|ns| ns as f64 / 1_000_000_000.0)
+    }
+
+    /// Get container delays for all tracks.
+    ///
+    /// Returns a map of track_id -> delay_ms.
+    pub fn get_container_delays(&self) -> std::collections::HashMap<usize, i64> {
+        self.tracks
+            .iter()
+            .map(|t| (t.id, t.container_delay_ms))
+            .collect()
+    }
+
+    /// Get container delay for the default video track.
+    pub fn video_container_delay(&self) -> i64 {
+        self.default_video()
+            .map(|t| t.container_delay_ms)
+            .unwrap_or(0)
+    }
+
+    /// Get container delay for the default audio track.
+    pub fn audio_container_delay(&self) -> i64 {
+        self.default_audio()
+            .map(|t| t.container_delay_ms)
+            .unwrap_or(0)
+    }
+
+    /// Get audio container delays relative to video.
+    ///
+    /// This calculates audio-to-video delay, which is what matters for sync.
+    /// If video starts at 100ms and audio starts at 150ms, the relative
+    /// audio delay is +50ms.
+    ///
+    /// Returns a map of track_id -> relative_delay_ms for audio tracks only.
+    pub fn get_audio_container_delays_relative(&self) -> std::collections::HashMap<usize, i64> {
+        let video_delay = self.video_container_delay();
+
+        self.audio_tracks()
+            .map(|t| (t.id, t.container_delay_ms - video_delay))
+            .collect()
+    }
+
+    /// Get container delay for a specific audio track, relative to video.
+    pub fn audio_container_delay_relative(&self, audio_track_id: usize) -> Option<i64> {
+        let video_delay = self.video_container_delay();
+        self.track_by_id(audio_track_id)
+            .filter(|t| t.track_type == TrackType::Audio)
+            .map(|t| t.container_delay_ms - video_delay)
     }
 }
 
