@@ -1,13 +1,15 @@
 //! Helper functions for handler modules.
 
 use std::path::PathBuf;
-use std::process::Command as StdCommand;
 
 use vsg_core::config::Settings;
+use vsg_core::extraction::{
+    build_track_description, get_detailed_stream_info, probe_file, TrackType,
+};
+use vsg_core::jobs::ManualLayout;
 use vsg_core::logging::{JobLogger, LogConfig};
 use vsg_core::models::JobSpec;
-use vsg_core::jobs::ManualLayout;
-use vsg_core::orchestrator::{AnalyzeStep, Context, JobState, Pipeline, create_standard_pipeline};
+use vsg_core::orchestrator::{create_standard_pipeline, AnalyzeStep, Context, JobState, Pipeline};
 
 /// Track info from probing.
 pub struct TrackInfo {
@@ -61,16 +63,17 @@ fn percent_decode(input: &str) -> String {
     result
 }
 
-/// Probe tracks from a video file using mkvmerge -J.
+/// Probe tracks from a video file using vsg_core extraction module.
+///
+/// Uses mkvmerge -J for basic info and optionally ffprobe for detailed info
+/// (bitrate, profile, HDR, Dolby Vision detection).
 pub fn probe_tracks(path: &PathBuf) -> Vec<TrackInfo> {
-    let output = StdCommand::new("mkvmerge").arg("-J").arg(path).output();
-
-    match output {
-        Ok(output) if output.status.success() => {
-            parse_mkvmerge_json(&String::from_utf8_lossy(&output.stdout))
-        }
-        _ => {
-            vec![
+    // Use core library's probe_file
+    let probe_result = match probe_file(path) {
+        Ok(result) => result,
+        Err(_) => {
+            // Fallback for probe failure
+            return vec![
                 TrackInfo {
                     track_id: 0,
                     track_type: "video".to_string(),
@@ -87,144 +90,91 @@ pub fn probe_tracks(path: &PathBuf) -> Vec<TrackInfo> {
                     summary: "[A-1] Audio Track (probe failed)".to_string(),
                     badges: String::new(),
                 },
-            ]
+            ];
         }
-    }
-}
-
-/// Parse mkvmerge -J JSON output.
-/// Produces Qt-style summaries: [TYPE-ID] CODEC (lang) | details
-fn parse_mkvmerge_json(json_str: &str) -> Vec<TrackInfo> {
-    let json: serde_json::Value = match serde_json::from_str(json_str) {
-        Ok(v) => v,
-        Err(_) => return Vec::new(),
     };
 
+    // Get detailed ffprobe info (optional enhancement)
+    let ffprobe_info = get_detailed_stream_info(path).ok();
+
+    // Build track info for each track
     let mut tracks = Vec::new();
+    let mut video_idx = 0usize;
+    let mut audio_idx = 0usize;
+    let mut sub_idx = 0usize;
 
-    if let Some(track_array) = json.get("tracks").and_then(|t| t.as_array()) {
-        for track in track_array {
-            let track_type = track
-                .get("type")
-                .and_then(|t| t.as_str())
-                .unwrap_or("unknown")
-                .to_string();
+    for track in &probe_result.tracks {
+        let (type_prefix, stream_idx) = match track.track_type {
+            TrackType::Video => {
+                let idx = video_idx;
+                video_idx += 1;
+                ("V", idx)
+            }
+            TrackType::Audio => {
+                let idx = audio_idx;
+                audio_idx += 1;
+                ("A", idx)
+            }
+            TrackType::Subtitles => {
+                let idx = sub_idx;
+                sub_idx += 1;
+                ("S", idx)
+            }
+        };
 
-            let codec = track
-                .get("codec")
-                .and_then(|c| c.as_str())
-                .unwrap_or("Unknown");
-
-            let properties = track.get("properties");
-
-            // Get raw language code (e.g., "jpn", "eng", "und")
-            let lang_code = properties
-                .and_then(|p| p.get("language"))
-                .and_then(|l| l.as_str())
-                .map(|s| s.to_string());
-
-            let codec_id = properties
-                .and_then(|p| p.get("codec_id"))
-                .and_then(|c| c.as_str())
-                .unwrap_or("")
-                .to_string();
-
-            let is_default = properties
-                .and_then(|p| p.get("default_track"))
-                .and_then(|d| d.as_bool())
-                .unwrap_or(false);
-
-            let is_forced = properties
-                .and_then(|p| p.get("forced_track"))
-                .and_then(|f| f.as_bool())
-                .unwrap_or(false);
-
-            let track_id = track
-                .get("id")
-                .and_then(|id| id.as_u64())
-                .unwrap_or(0) as usize;
-
-            // Type prefix for track ID display (V=video, A=audio, S=subtitles)
-            let type_prefix = match track_type.as_str() {
-                "video" => "V",
-                "audio" => "A",
-                "subtitles" => "S",
-                _ => "?",
+        // Get ffprobe info for this stream if available
+        // ffprobe indexes streams globally, so we need to find the right one
+        let fp_info = ffprobe_info.as_ref().and_then(|info| {
+            // Find the matching ffprobe stream by type and relative index
+            let codec_type = match track.track_type {
+                TrackType::Video => "video",
+                TrackType::Audio => "audio",
+                TrackType::Subtitles => "subtitle",
             };
 
-            // Build Qt-style summary: [TYPE-ID] CODEC (lang) | details
-            let summary = match track_type.as_str() {
-                "video" => {
-                    let dimensions = properties
-                        .and_then(|p| p.get("pixel_dimensions"))
-                        .and_then(|d| d.as_str())
-                        .unwrap_or("");
-                    let fps = properties
-                        .and_then(|p| p.get("default_duration"))
-                        .and_then(|d| d.as_u64())
-                        .map(|ns| 1_000_000_000.0 / ns as f64)
-                        .map(|fps| format!("{:.3} fps", fps))
-                        .unwrap_or_default();
-                    let lang = lang_code.as_deref().unwrap_or("und");
+            let streams_of_type: Vec<_> = info
+                .values()
+                .filter(|s| s.codec_type == codec_type)
+                .collect();
 
-                    if fps.is_empty() {
-                        format!("[{}-{}] {} ({}) | {}", type_prefix, track_id, codec, lang, dimensions)
-                    } else {
-                        format!("[{}-{}] {} ({}) | {}, {}", type_prefix, track_id, codec, lang, dimensions, fps)
-                    }
-                }
-                "audio" => {
-                    let channels = properties
-                        .and_then(|p| p.get("audio_channels"))
-                        .and_then(|c| c.as_u64())
-                        .unwrap_or(2);
-                    let sample_rate = properties
-                        .and_then(|p| p.get("audio_sampling_frequency"))
-                        .and_then(|f| f.as_u64())
-                        .unwrap_or(48000);
-                    let channel_str = channel_layout(channels as u8);
-                    let lang = lang_code.as_deref().unwrap_or("und");
+            streams_of_type.get(stream_idx).copied()
+        });
 
-                    format!("[{}-{}] {} ({}) | {} Hz, {}", type_prefix, track_id, codec, lang, sample_rate, channel_str)
-                }
-                "subtitles" => {
-                    let lang = lang_code.as_deref().unwrap_or("und");
-                    format!("[{}-{}] {} ({})", type_prefix, track_id, codec, lang)
-                }
-                _ => format!("[?-{}] {}", track_id, codec),
-            };
+        // Build rich description using core library
+        let description = build_track_description(track, fp_info);
 
-            let mut badges_list = Vec::new();
-            if is_default {
-                badges_list.push("Default");
-            }
-            if is_forced {
-                badges_list.push("Forced");
-            }
+        // Format as [TYPE-ID] description
+        let summary = format!("[{}-{}] {}", type_prefix, track.id, description);
 
-            tracks.push(TrackInfo {
-                track_id,
-                track_type,
-                codec_id,
-                language: lang_code,
-                summary,
-                badges: badges_list.join(" | "),
-            });
+        // Build badges
+        let mut badges_list = Vec::new();
+        if track.is_default {
+            badges_list.push("Default");
         }
+        if track.is_forced {
+            badges_list.push("Forced");
+        }
+        if track.container_delay_ms != 0 {
+            badges_list.push("Has Delay");
+        }
+
+        let track_type_str = match track.track_type {
+            TrackType::Video => "video",
+            TrackType::Audio => "audio",
+            TrackType::Subtitles => "subtitles",
+        };
+
+        tracks.push(TrackInfo {
+            track_id: track.id,
+            track_type: track_type_str.to_string(),
+            codec_id: track.codec_id.clone(),
+            language: track.language.clone(),
+            summary,
+            badges: badges_list.join(" | "),
+        });
     }
 
     tracks
-}
-
-/// Convert channel count to display string.
-fn channel_layout(channels: u8) -> String {
-    match channels {
-        1 => "Mono".to_string(),
-        2 => "Stereo".to_string(),
-        6 => "5.1".to_string(),
-        8 => "7.1".to_string(),
-        _ => format!("{} ch", channels),
-    }
 }
 
 /// Run analysis only pipeline (async wrapper).
