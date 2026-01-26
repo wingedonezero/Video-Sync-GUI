@@ -90,7 +90,7 @@ class VideoVerifiedSync(SyncPlugin):
             OperationResult with statistics
         """
         from ..data import OperationResult, OperationRecord, SyncEventData
-        from ..frame_utils import detect_video_fps, get_video_duration_ms
+        from ..frame_utils import detect_video_fps, detect_video_properties
 
         config = config or {}
 
@@ -166,7 +166,10 @@ class VideoVerifiedSync(SyncPlugin):
 
         # Get video duration for checkpoint selection
         try:
-            source_duration = get_video_duration_ms(source_video, runner)
+            props = detect_video_properties(source_video, runner)
+            source_duration = props.get('duration_ms', 0)
+            if source_duration <= 0:
+                raise ValueError("Could not detect video duration")
         except Exception:
             if subtitle_data.events:
                 source_duration = max(e.end_ms for e in subtitle_data.events) + 60000
