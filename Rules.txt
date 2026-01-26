@@ -1,5 +1,6 @@
 1. **Discuss Before Changes** - No implementations without approval
 2. **Libs Discussed As Needed** - Research replacements/alternatives together
-3. **Research, Don't Assume** - Especially for Rust, consult official docs
+3. **Research, Don't Assume** -  consult official docs
 4. **Latest Lib Versions** - Use latest stable, discuss issues first
 5. **Rewrite for Quality** - Same features, better architecture, no single points of failure
+6. Dont read Rust.tar.gz this was a experiment
