@@ -3546,6 +3546,7 @@ dependencies = [
  "chrono",
  "md5",
  "parking_lot",
+ "roxmltree",
  "rustfft",
  "serde",
  "serde_json",
