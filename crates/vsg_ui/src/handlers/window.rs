@@ -42,9 +42,26 @@ impl App {
     }
 
     /// Open the job queue window.
+    /// Clears any existing queue and layouts to start fresh (prevents stale data from crashes).
     pub fn open_job_queue_window(&mut self) -> Task<Message> {
         if self.job_queue_window_id.is_some() {
             return Task::none();
+        }
+
+        // Fresh start: Clear any existing queue and layouts
+        // This prevents loading stale data from crashes or abandoned sessions
+        {
+            let mut q = self.job_queue.lock().unwrap();
+            q.clear();
+            if let Err(e) = q.save() {
+                tracing::warn!("Failed to clear queue: {}", e);
+            }
+        }
+        {
+            let lm = self.layout_manager.lock().unwrap();
+            if let Err(e) = lm.cleanup_all() {
+                tracing::warn!("Failed to cleanup layouts: {}", e);
+            }
         }
 
         self.append_log("Opening job queue...");
@@ -64,25 +81,40 @@ impl App {
     }
 
     /// Close the job queue window.
-    /// This also performs cleanup similar to Qt's layout_manager.cleanup_all()
+    /// If NOT processing, clears queue and layouts (user cancelled).
+    /// If processing, keeps data intact (jobs are being used by batch processor).
     pub fn close_job_queue_window(&mut self) -> Task<Message> {
         if let Some(id) = self.job_queue_window_id.take() {
             self.window_map.remove(&id);
 
-            // Cleanup: Clear job queue related state
+            // Cleanup: Clear job queue UI state
             self.selected_job_indices.clear();
             self.job_queue_status.clear();
             self.last_clicked_job_idx = None;
             self.last_click_time = None;
 
-            // TODO: When temp file handling is implemented, clean up:
-            // - Extracted subtitle temp files
-            // - OCR preview files
-            // - Font extraction directories
-            // - Generated track temp files
-            // This would be: self.layout_manager.cleanup_all()
+            // Only clear queue and layouts if NOT processing
+            // (If processing, the batch processor needs the data)
+            if !self.is_processing {
+                // User cancelled or closed without processing - discard everything
+                {
+                    let mut q = self.job_queue.lock().unwrap();
+                    q.clear();
+                    if let Err(e) = q.save() {
+                        tracing::warn!("Failed to clear queue on close: {}", e);
+                    }
+                }
+                {
+                    let lm = self.layout_manager.lock().unwrap();
+                    if let Err(e) = lm.cleanup_all() {
+                        tracing::warn!("Failed to cleanup layouts on close: {}", e);
+                    }
+                }
+                self.append_log("Job Queue closed (cancelled - queue cleared).");
+            } else {
+                self.append_log("Job Queue closed (processing started).");
+            }
 
-            self.append_log("Job Queue closed.");
             return window::close(id);
         }
         Task::none()
@@ -253,7 +285,7 @@ impl App {
         Task::none()
     }
 
-    /// Handle window closed event.
+    /// Handle window closed event (e.g., user clicked X button).
     pub fn handle_window_closed(&mut self, id: window::Id) -> Task<Message> {
         if let Some(window_kind) = self.window_map.remove(&id) {
             match window_kind {
@@ -263,6 +295,26 @@ impl App {
                 }
                 WindowKind::JobQueue => {
                     self.job_queue_window_id = None;
+
+                    // Clear UI state
+                    self.selected_job_indices.clear();
+                    self.job_queue_status.clear();
+                    self.last_clicked_job_idx = None;
+                    self.last_click_time = None;
+
+                    // Only clear queue and layouts if NOT processing
+                    if !self.is_processing {
+                        {
+                            let mut q = self.job_queue.lock().unwrap();
+                            q.clear();
+                            let _ = q.save();
+                        }
+                        {
+                            let lm = self.layout_manager.lock().unwrap();
+                            let _ = lm.cleanup_all();
+                        }
+                        self.append_log("Job Queue closed (cancelled - queue cleared).");
+                    }
                 }
                 WindowKind::AddJob => {
                     self.add_job_window_id = None;

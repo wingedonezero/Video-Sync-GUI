@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use iced::window;
 use iced::Task;
 
-use vsg_core::jobs::discover_jobs;
+use vsg_core::jobs::{discover_jobs, JobQueueStatus};
 
 use crate::app::{App, Message};
 
@@ -166,21 +166,43 @@ impl App {
     }
 
     /// Start processing the queue.
+    /// Validates all jobs are configured, then hands off to main window for execution.
     pub fn start_processing(&mut self) -> Task<Message> {
         let q = self.job_queue.lock().unwrap();
-        let ready_count = q.jobs_ready().len();
+        let jobs = q.jobs();
 
-        if ready_count == 0 {
-            self.job_queue_status =
-                "No configured jobs to process. Double-click jobs to configure them.".to_string();
+        if jobs.is_empty() {
+            self.job_queue_status = "No jobs in queue.".to_string();
             return Task::none();
         }
 
-        self.is_processing = true;
-        self.job_queue_status = format!("Processing {} job(s)...", ready_count);
+        // Check that ALL jobs are configured - block if any aren't
+        let unconfigured: Vec<_> = jobs
+            .iter()
+            .enumerate()
+            .filter(|(_, job)| job.status != JobQueueStatus::Configured)
+            .collect();
 
-        // TODO: Implement actual queue processing
-        Task::none()
+        if !unconfigured.is_empty() {
+            let count = unconfigured.len();
+            let first_unconfigured = unconfigured.first().map(|(i, _)| i + 1).unwrap_or(1);
+            self.job_queue_status = format!(
+                "Cannot process: {} job(s) not configured. First: Job #{}. Double-click to configure.",
+                count, first_unconfigured
+            );
+            return Task::none();
+        }
+
+        // All jobs are configured - collect them for handoff to main window
+        let configured_jobs: Vec<_> = jobs.to_vec();
+        let job_count = configured_jobs.len();
+
+        tracing::info!("Starting batch processing of {} configured jobs", job_count);
+        self.job_queue_status = format!("Starting {} job(s)...", job_count);
+
+        // Hand off to main window via StartBatchProcessing message
+        // This will close the queue window and start the processing loop
+        Task::done(Message::StartBatchProcessing(configured_jobs))
     }
 
     /// Find and add jobs from source paths.

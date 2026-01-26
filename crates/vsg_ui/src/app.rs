@@ -13,7 +13,7 @@ use iced::window;
 use iced::{Element, Size, Subscription, Task, Theme};
 
 use vsg_core::config::{ConfigManager, Settings};
-use vsg_core::jobs::{JobQueue, LayoutManager};
+use vsg_core::jobs::{JobQueue, JobQueueEntry, LayoutManager};
 
 use crate::pages;
 use crate::windows;
@@ -85,9 +85,13 @@ pub enum Message {
     CopyLayout(usize),
     PasteLayout,
     StartProcessing,
+    StartBatchProcessing(Vec<JobQueueEntry>),  // Jobs handed off from queue to main
+    ProcessNextJob,                             // Trigger next job in batch
     ProcessingProgress { job_idx: usize, progress: f32 },
     ProcessingComplete,
     ProcessingFailed(String),
+    JobCompleted { job_idx: usize, success: bool, error: Option<String> },
+    BatchCompleted,
 
     // Add Job Dialog
     AddSource,
@@ -236,6 +240,12 @@ pub struct App {
     pub has_clipboard: bool,
     pub is_processing: bool,
     pub job_queue_status: String,
+
+    // Batch Processing State (jobs from queue running in main)
+    pub processing_jobs: Vec<JobQueueEntry>,
+    pub current_job_index: usize,
+    pub total_jobs: usize,
+    pub batch_status: String,
 
     // Add Job Dialog State
     pub add_job_window_id: Option<window::Id>,
@@ -524,6 +534,11 @@ impl App {
                     is_processing: false,
                     job_queue_status: String::new(),
 
+                    processing_jobs: Vec::new(),
+                    current_job_index: 0,
+                    total_jobs: 0,
+                    batch_status: String::new(),
+
                     add_job_window_id: None,
                     add_job_sources: vec![String::new(), String::new()],
                     add_job_error: String::new(),
@@ -682,7 +697,21 @@ impl App {
                 Task::none()
             }
             Message::StartProcessing => self.start_processing(),
-            Message::ProcessingProgress { .. } => Task::none(),
+            Message::StartBatchProcessing(jobs) => self.handle_start_batch_processing(jobs),
+            Message::ProcessNextJob => self.handle_process_next_job(),
+            Message::ProcessingProgress { job_idx, progress } => {
+                // Update progress display for current job
+                if job_idx == self.current_job_index && self.is_processing {
+                    self.progress_value = progress;
+                    self.batch_status = format!(
+                        "Processing job {} of {}: {:.0}%",
+                        job_idx + 1,
+                        self.total_jobs,
+                        progress * 100.0
+                    );
+                }
+                Task::none()
+            }
             Message::ProcessingComplete => {
                 self.is_processing = false;
                 self.job_queue_status = "Processing complete".to_string();
@@ -693,6 +722,10 @@ impl App {
                 self.job_queue_status = format!("Processing failed: {}", error);
                 Task::none()
             }
+            Message::JobCompleted { job_idx, success, error } => {
+                self.handle_job_completed(job_idx, success, error)
+            }
+            Message::BatchCompleted => self.handle_batch_completed(),
 
             Message::AddSource => {
                 if self.add_job_sources.len() < 10 {

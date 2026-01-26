@@ -45,6 +45,9 @@ pub struct JobQueueEntry {
     pub name: String,
     /// Map of source keys to file paths ("Source 1" -> path).
     pub sources: HashMap<String, PathBuf>,
+    /// Layout ID for referencing the layout file (MD5 hash of source filenames).
+    /// This is calculated from sources and used to find the layout in job_layouts/{id}.json.
+    pub layout_id: String,
     /// Current status.
     pub status: JobQueueStatus,
     /// Manual layout if configured.
@@ -57,11 +60,14 @@ pub struct JobQueueEntry {
 
 impl JobQueueEntry {
     /// Create a new pending job.
+    /// The layout_id is automatically calculated from source filenames.
     pub fn new(id: String, name: String, sources: HashMap<String, PathBuf>) -> Self {
+        let layout_id = super::generate_layout_id(&sources);
         Self {
             id,
             name,
             sources,
+            layout_id,
             status: JobQueueStatus::Pending,
             layout: None,
             error_message: None,

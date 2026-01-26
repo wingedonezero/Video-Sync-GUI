@@ -78,6 +78,9 @@ pub fn init_tracing(default_level: LogLevel) {
 /// - stderr (for terminal/console viewing)
 /// - `{logs_dir}/app.log` (for persistent application logs)
 ///
+/// On startup, if app.log exists, it is backed up with a timestamp.
+/// Only the 4 most recent backups are kept (5 total including current).
+///
 /// Returns a guard that must be kept alive for logging to work.
 /// When the guard is dropped, any remaining logs are flushed.
 ///
@@ -99,6 +102,9 @@ pub fn init_tracing_with_file(default_level: LogLevel, logs_dir: &Path) -> Worke
     if !logs_dir.exists() {
         let _ = std::fs::create_dir_all(logs_dir);
     }
+
+    // Backup existing app.log before creating new one
+    backup_existing_log(logs_dir);
 
     // Set up file appender (non-blocking for performance)
     let file_appender = tracing_appender::rolling::never(logs_dir, "app.log");
@@ -126,6 +132,69 @@ pub fn init_tracing_with_file(default_level: LogLevel, logs_dir: &Path) -> Worke
         .init();
 
     guard
+}
+
+/// Backup existing app.log with timestamp, keeping only 4 most recent backups.
+fn backup_existing_log(logs_dir: &Path) {
+    let app_log = logs_dir.join("app.log");
+
+    // Only backup if app.log exists and has content
+    if !app_log.exists() {
+        return;
+    }
+
+    // Check if log has content (don't backup empty files)
+    if let Ok(metadata) = std::fs::metadata(&app_log) {
+        if metadata.len() == 0 {
+            // Just remove empty log
+            let _ = std::fs::remove_file(&app_log);
+            return;
+        }
+    }
+
+    // Generate timestamped backup name
+    let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S");
+    let backup_name = format!("app_{}.log", timestamp);
+    let backup_path = logs_dir.join(&backup_name);
+
+    // Rename current log to backup
+    if let Err(e) = std::fs::rename(&app_log, &backup_path) {
+        eprintln!("Failed to backup app.log: {}", e);
+        // Try to just remove it so we can start fresh
+        let _ = std::fs::remove_file(&app_log);
+        return;
+    }
+
+    // Cleanup old backups - keep only 4 most recent
+    cleanup_old_backups(logs_dir, 4);
+}
+
+/// Remove old backup logs, keeping only the specified number of most recent.
+fn cleanup_old_backups(logs_dir: &Path, keep_count: usize) {
+    // Find all backup logs (app_YYYY-MM-DD_HH-MM-SS.log pattern)
+    let mut backups: Vec<_> = match std::fs::read_dir(logs_dir) {
+        Ok(entries) => entries
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                let name = e.file_name();
+                let name_str = name.to_string_lossy();
+                // Match pattern: app_YYYY-MM-DD_HH-MM-SS.log
+                name_str.starts_with("app_")
+                    && name_str.ends_with(".log")
+                    && name_str.len() == 27 // app_ (4) + YYYY-MM-DD_HH-MM-SS (19) + .log (4)
+            })
+            .collect(),
+        Err(_) => return,
+    };
+
+    // Sort by name (timestamps sort chronologically)
+    backups.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+
+    // Remove oldest if we have too many
+    let to_remove = backups.len().saturating_sub(keep_count);
+    for entry in backups.into_iter().take(to_remove) {
+        let _ = std::fs::remove_file(entry.path());
+    }
 }
 
 /// Initialize tracing for tests (only logs warnings and above).
