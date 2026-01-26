@@ -1,5 +1,9 @@
 //! Batch processing handlers for running jobs from the queue.
 
+use std::fs::{self, File};
+use std::io::{Read as IoRead, Write as IoWrite};
+use std::path::Path;
+
 use iced::Task;
 
 use vsg_core::jobs::{JobQueueEntry, JobQueueStatus};
@@ -208,6 +212,27 @@ impl App {
         self.status_text = summary.clone();
         self.append_log(&format!("\n{}", summary));
 
+        // Archive logs if enabled
+        if self.archive_logs {
+            let output_folder = {
+                let cfg = self.config.lock().unwrap();
+                cfg.settings().paths.output_folder.clone()
+            };
+            match archive_logs_for_batch(Path::new(&output_folder)) {
+                Ok(Some(archive_path)) => {
+                    self.append_log(&format!("Logs archived to: {}", archive_path.display()));
+                    tracing::info!("Logs archived to: {}", archive_path.display());
+                }
+                Ok(None) => {
+                    tracing::debug!("No log files to archive");
+                }
+                Err(e) => {
+                    self.append_log(&format!("Failed to archive logs: {}", e));
+                    tracing::warn!("Failed to archive logs: {}", e);
+                }
+            }
+        }
+
         // Clean up layouts (like Qt's cleanup_all after batch)
         {
             let lm = self.layout_manager.lock().unwrap();
@@ -224,4 +249,67 @@ impl App {
 
         Task::none()
     }
+}
+
+/// Archive all .log files in the output directory to a timestamped zip file.
+///
+/// Returns the path to the created archive, or None if there were no log files.
+fn archive_logs_for_batch(output_dir: &Path) -> Result<Option<std::path::PathBuf>, String> {
+    // Collect all .log files in the output directory
+    let log_files: Vec<_> = fs::read_dir(output_dir)
+        .map_err(|e| format!("Failed to read output directory: {}", e))?
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| {
+            entry.path().extension().map_or(false, |ext| ext == "log")
+        })
+        .collect();
+
+    if log_files.is_empty() {
+        return Ok(None);
+    }
+
+    // Create archive filename with timestamp
+    let timestamp = chrono::Local::now().format("%Y-%m-%d_%H-%M-%S");
+    let archive_name = format!("logs_{}.zip", timestamp);
+    let archive_path = output_dir.join(&archive_name);
+
+    // Create zip archive
+    let file = File::create(&archive_path)
+        .map_err(|e| format!("Failed to create archive file: {}", e))?;
+    let mut zip = zip::ZipWriter::new(file);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .unix_permissions(0o644);
+
+    for entry in &log_files {
+        let path = entry.path();
+        let file_name = path.file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| "Invalid log filename".to_string())?;
+
+        // Read file contents
+        let mut file = File::open(&path)
+            .map_err(|e| format!("Failed to open log file {}: {}", file_name, e))?;
+        let mut contents = Vec::new();
+        file.read_to_end(&mut contents)
+            .map_err(|e| format!("Failed to read log file {}: {}", file_name, e))?;
+
+        // Add to archive
+        zip.start_file(file_name, options)
+            .map_err(|e| format!("Failed to add {} to archive: {}", file_name, e))?;
+        zip.write_all(&contents)
+            .map_err(|e| format!("Failed to write {} to archive: {}", file_name, e))?;
+    }
+
+    zip.finish()
+        .map_err(|e| format!("Failed to finalize archive: {}", e))?;
+
+    // Delete the original log files after successful archiving
+    for entry in &log_files {
+        if let Err(e) = fs::remove_file(entry.path()) {
+            tracing::warn!("Failed to delete log file {}: {}", entry.path().display(), e);
+        }
+    }
+
+    Ok(Some(archive_path))
 }

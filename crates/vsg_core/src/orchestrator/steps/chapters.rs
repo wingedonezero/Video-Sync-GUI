@@ -202,11 +202,17 @@ impl PipelineStep for ChaptersStep {
                     ));
 
                     // Snap chapters to keyframes with threshold enforcement
+                    // snap_starts_only=true means DON'T snap ends, so snap_ends = !snap_starts_only
+                    let snap_ends = !ctx.settings.chapters.snap_starts_only;
+                    if snap_ends {
+                        ctx.logger.info("Also snapping chapter end times");
+                    }
                     let stats = snap_chapters_with_threshold(
                         &mut chapter_data,
                         &keyframes,
                         snap_mode,
                         Some(threshold_ms),
+                        snap_ends,
                     );
 
                     snapped = stats.moved > 0 || stats.already_aligned > 0;

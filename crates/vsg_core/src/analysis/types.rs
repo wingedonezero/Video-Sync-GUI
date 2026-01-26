@@ -83,6 +83,17 @@ impl AudioChunk {
     pub fn is_empty(&self) -> bool {
         self.samples.is_empty()
     }
+
+    /// Create a new AudioChunk with filtered/modified samples.
+    /// Preserves metadata (sample_rate, start_time, duration).
+    pub fn with_filtered_samples(self, samples: Vec<f64>) -> Self {
+        Self {
+            samples,
+            sample_rate: self.sample_rate,
+            start_time_secs: self.start_time_secs,
+            duration_secs: self.duration_secs,
+        }
+    }
 }
 
 /// Result of correlating two audio chunks (internal calculation result).

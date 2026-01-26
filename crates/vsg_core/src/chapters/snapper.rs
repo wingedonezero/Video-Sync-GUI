@@ -30,7 +30,7 @@ pub enum SnapMode {
 /// Note: This function snaps all chapters regardless of distance.
 /// Use `snap_chapters_with_threshold` to enforce a maximum snap distance.
 pub fn snap_chapters(data: &mut ChapterData, keyframes: &KeyframeInfo, mode: SnapMode) {
-    snap_chapters_with_threshold(data, keyframes, mode, None);
+    snap_chapters_with_threshold(data, keyframes, mode, None, false);
 }
 
 /// Snap chapter start times to keyframes with optional threshold enforcement.
@@ -41,6 +41,7 @@ pub fn snap_chapters(data: &mut ChapterData, keyframes: &KeyframeInfo, mode: Sna
 /// * `mode` - How to snap to keyframes
 /// * `threshold_ms` - Maximum distance (in ms) to snap. Chapters farther away are skipped.
 ///                    Pass `None` to snap all chapters regardless of distance.
+/// * `snap_ends` - If true, also snap chapter end times to keyframes.
 ///
 /// # Returns
 /// Statistics about the snapping operation.
@@ -49,6 +50,7 @@ pub fn snap_chapters_with_threshold(
     keyframes: &KeyframeInfo,
     mode: SnapMode,
     threshold_ms: Option<i64>,
+    snap_ends: bool,
 ) -> SnapStats {
     let threshold_ns = threshold_ms.map(|ms| ms * 1_000_000);
 
@@ -139,6 +141,33 @@ pub fn snap_chapters_with_threshold(
                     abs_shift_ns / 1_000_000,
                     threshold_ms.unwrap_or(0)
                 );
+            }
+        }
+    }
+
+    // Snap end times if requested
+    if snap_ends {
+        for chapter in data.iter_mut() {
+            if let Some(end_ns) = chapter.end_ns {
+                let snapped_end = match mode {
+                    SnapMode::Nearest => keyframes.nearest(end_ns),
+                    SnapMode::Previous => keyframes.previous(end_ns),
+                    SnapMode::Next => keyframes.next(end_ns),
+                };
+
+                if let Some(new_end) = snapped_end {
+                    let shift_ns = (new_end as i64 - end_ns as i64).abs();
+                    if threshold_ns.is_none() || shift_ns <= threshold_ns.unwrap() {
+                        if new_end != end_ns {
+                            tracing::trace!(
+                                "Chapter end snapped: {} -> {}",
+                                format_timestamp_for_log(end_ns),
+                                format_timestamp_for_log(new_end)
+                            );
+                            chapter.end_ns = Some(new_end);
+                        }
+                    }
+                }
             }
         }
     }
