@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use iced::event::{self, Event};
+use iced::keyboard;
 use iced::widget::{self, text};
 use iced::window;
 use iced::{Element, Size, Subscription, Task, Theme};
@@ -145,6 +146,9 @@ pub enum Message {
     // File Drop
     FileDropped(window::Id, PathBuf),
 
+    // Keyboard
+    KeyboardModifiersChanged(keyboard::Modifiers),
+
     // Internal
     Noop,
     Tick,  // For time-based operations like double-click detection
@@ -247,6 +251,10 @@ pub struct App {
     pub has_clipboard: bool,
     pub is_processing: bool,
     pub job_queue_status: String,
+
+    // Keyboard modifier state (tracked via subscription)
+    pub ctrl_pressed: bool,
+    pub shift_pressed: bool,
 
     // Batch Processing State (jobs from queue running in main)
     pub processing_jobs: Vec<JobQueueEntry>,
@@ -554,6 +562,9 @@ impl App {
                     is_processing: false,
                     job_queue_status: String::new(),
 
+                    ctrl_pressed: false,
+                    shift_pressed: false,
+
                     processing_jobs: Vec::new(),
                     current_job_index: 0,
                     total_jobs: 0,
@@ -621,6 +632,9 @@ impl App {
                 match event {
                     Event::Window(window::Event::FileDropped(path)) => {
                         Some(Message::FileDropped(id, path))
+                    }
+                    Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
+                        Some(Message::KeyboardModifiersChanged(modifiers))
                     }
                     _ => None,
                 }
@@ -919,11 +933,47 @@ impl App {
 
             // Job Queue click handling
             Message::JobRowClicked(idx) => {
-                if self.handle_job_row_clicked(idx) {
-                    // It was a double-click - open manual selection
-                    self.open_manual_selection_window(idx)
-                } else {
+                // Check for keyboard modifiers and delegate to appropriate handler
+                if self.ctrl_pressed {
+                    // Ctrl+click: toggle selection
+                    if self.selected_job_indices.contains(&idx) {
+                        self.selected_job_indices.retain(|&i| i != idx);
+                    } else {
+                        self.selected_job_indices.push(idx);
+                    }
+                    self.last_clicked_job_idx = Some(idx);
+                    self.last_click_time = None; // Reset double-click tracking
                     Task::none()
+                } else if self.shift_pressed {
+                    // Shift+click: range selection from last clicked to this one
+                    if let Some(anchor) = self.last_clicked_job_idx {
+                        let (start, end) = if anchor <= idx {
+                            (anchor, idx)
+                        } else {
+                            (idx, anchor)
+                        };
+                        // Add all in range to selection
+                        for i in start..=end {
+                            if !self.selected_job_indices.contains(&i) {
+                                self.selected_job_indices.push(i);
+                            }
+                        }
+                    } else {
+                        // No anchor, just select this one
+                        self.selected_job_indices.clear();
+                        self.selected_job_indices.push(idx);
+                        self.last_clicked_job_idx = Some(idx);
+                    }
+                    self.last_click_time = None; // Reset double-click tracking
+                    Task::none()
+                } else {
+                    // Normal click - use existing double-click detection logic
+                    if self.handle_job_row_clicked(idx) {
+                        // It was a double-click - open manual selection
+                        self.open_manual_selection_window(idx)
+                    } else {
+                        Task::none()
+                    }
                 }
             }
             Message::JobRowCtrlClicked(idx) => {
@@ -960,6 +1010,12 @@ impl App {
             // File drop handling
             Message::FileDropped(window_id, path) => {
                 self.handle_file_dropped(window_id, path);
+                Task::none()
+            }
+
+            Message::KeyboardModifiersChanged(modifiers) => {
+                self.ctrl_pressed = modifiers.control();
+                self.shift_pressed = modifiers.shift();
                 Task::none()
             }
 
