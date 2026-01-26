@@ -41,3 +41,9 @@ percent-encoding = "2.3.2"
 
 # Unique IDs
 uuid = { version = "1.20.0", features = ["v4"] }
+
+# Zip support for log archiving
+zip = "7.2.0"
+
+# Timestamp formatting for log archives
+chrono = "0.4"

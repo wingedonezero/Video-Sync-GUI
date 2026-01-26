@@ -12,10 +12,11 @@ use std::sync::Arc;
 
 use crate::config::AnalysisSettings;
 use crate::logging::JobLogger;
-use crate::models::DelaySelectionMode;
+use crate::models::{DelaySelectionMode, FilteringMethod};
 
 use super::delay_selection::{get_selector, SelectorConfig};
 use super::ffmpeg::{extract_full_audio, get_duration, DEFAULT_ANALYSIS_SAMPLE_RATE};
+use super::filtering::{apply_filter, FilterConfig, FilterType};
 use super::methods::{create_from_enum, selected_methods, CorrelationMethod as CorrelationMethodTrait, Scc};
 use super::peak_fit::find_and_fit_peak;
 use super::tracks::{find_track_by_language, get_audio_tracks};
@@ -64,6 +65,12 @@ pub struct Analyzer {
     multi_corr_gcc_scot: bool,
     /// [Multi-Correlation] Use Whitened method.
     multi_corr_whitened: bool,
+    /// Audio filtering method to apply before correlation.
+    filtering_method: FilteringMethod,
+    /// Low cutoff frequency for filtering (Hz).
+    filter_low_cutoff_hz: f64,
+    /// High cutoff frequency for filtering (Hz).
+    filter_high_cutoff_hz: f64,
 }
 
 impl Analyzer {
@@ -89,6 +96,9 @@ impl Analyzer {
             multi_corr_gcc_phat: true,
             multi_corr_gcc_scot: true,
             multi_corr_whitened: true,
+            filtering_method: FilteringMethod::None,
+            filter_low_cutoff_hz: 300.0,
+            filter_high_cutoff_hz: 3400.0,
         }
     }
 
@@ -114,6 +124,9 @@ impl Analyzer {
             multi_corr_gcc_phat: settings.multi_corr_gcc_phat,
             multi_corr_gcc_scot: settings.multi_corr_gcc_scot,
             multi_corr_whitened: settings.multi_corr_whitened,
+            filtering_method: settings.filtering_method,
+            filter_low_cutoff_hz: settings.filter_low_cutoff_hz,
+            filter_high_cutoff_hz: settings.filter_high_cutoff_hz,
         }
     }
 
@@ -231,6 +244,16 @@ impl Analyzer {
             "Audio decoded. Analyzing {} chunks...",
             chunk_positions.len()
         ));
+
+        // Log filtering if enabled
+        if self.filtering_method != FilteringMethod::None {
+            self.log(&format!(
+                "Audio filtering: {} (low={:.0}Hz, high={:.0}Hz)",
+                self.filtering_method,
+                self.filter_low_cutoff_hz,
+                self.filter_high_cutoff_hz
+            ));
+        }
 
         // Analyze each chunk from the in-memory audio data
         let mut chunk_results = Vec::with_capacity(chunk_positions.len());
@@ -485,6 +508,30 @@ impl Analyzer {
                 ))
             })?;
 
+        // Apply filtering if enabled
+        let (ref_chunk, other_chunk) = if self.filtering_method != FilteringMethod::None {
+            let filter_config = FilterConfig {
+                filter_type: match self.filtering_method {
+                    FilteringMethod::None => FilterType::None,
+                    FilteringMethod::LowPass => FilterType::LowPass,
+                    FilteringMethod::BandPass => FilterType::BandPass,
+                    FilteringMethod::HighPass => FilterType::HighPass,
+                },
+                sample_rate: self.sample_rate,
+                low_cutoff_hz: self.filter_low_cutoff_hz,
+                high_cutoff_hz: self.filter_high_cutoff_hz,
+                order: 5,
+            };
+            let ref_filtered = apply_filter(&ref_chunk.samples, &filter_config);
+            let other_filtered = apply_filter(&other_chunk.samples, &filter_config);
+            (
+                ref_chunk.with_filtered_samples(ref_filtered),
+                other_chunk.with_filtered_samples(other_filtered),
+            )
+        } else {
+            (ref_chunk, other_chunk)
+        };
+
         let correlation_result = if self.use_peak_fit {
             let raw = method.raw_correlation(&ref_chunk, &other_chunk)?;
             find_and_fit_peak(&raw, self.sample_rate)
@@ -638,6 +685,30 @@ impl Analyzer {
                     other_audio.duration()
                 ))
             })?;
+
+        // Apply filtering if enabled
+        let (ref_chunk, other_chunk) = if self.filtering_method != FilteringMethod::None {
+            let filter_config = FilterConfig {
+                filter_type: match self.filtering_method {
+                    FilteringMethod::None => FilterType::None,
+                    FilteringMethod::LowPass => FilterType::LowPass,
+                    FilteringMethod::BandPass => FilterType::BandPass,
+                    FilteringMethod::HighPass => FilterType::HighPass,
+                },
+                sample_rate: self.sample_rate,
+                low_cutoff_hz: self.filter_low_cutoff_hz,
+                high_cutoff_hz: self.filter_high_cutoff_hz,
+                order: 5,
+            };
+            let ref_filtered = apply_filter(&ref_chunk.samples, &filter_config);
+            let other_filtered = apply_filter(&other_chunk.samples, &filter_config);
+            (
+                ref_chunk.with_filtered_samples(ref_filtered),
+                other_chunk.with_filtered_samples(other_filtered),
+            )
+        } else {
+            (ref_chunk, other_chunk)
+        };
 
         // Correlate
         let correlation_result = if self.use_peak_fit {
