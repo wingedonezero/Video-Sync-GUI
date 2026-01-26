@@ -20,6 +20,7 @@ _MODULE_MAP = {
     'CorrelationFrameSnapSync': ('correlation_frame_snap', 'CorrelationFrameSnapSync'),
     'SubtitleAnchoredFrameSnapSync': ('subtitle_anchored_frame_snap', 'SubtitleAnchoredFrameSnapSync'),
     'CorrelationGuidedFrameAnchorSync': ('correlation_guided_frame_anchor', 'CorrelationGuidedFrameAnchorSync'),
+    'VideoVerifiedSync': ('video_verified', 'VideoVerifiedSync'),
 }
 
 _SUBMODULES = [
@@ -29,6 +30,7 @@ _SUBMODULES = [
     'correlation_frame_snap',
     'subtitle_anchored_frame_snap',
     'correlation_guided_frame_anchor',
+    'video_verified',
 ]
 
 # Cache for loaded modules
@@ -62,4 +64,5 @@ __all__ = [
     'CorrelationFrameSnapSync',
     'SubtitleAnchoredFrameSnapSync',
     'CorrelationGuidedFrameAnchorSync',
+    'VideoVerifiedSync',
 ]

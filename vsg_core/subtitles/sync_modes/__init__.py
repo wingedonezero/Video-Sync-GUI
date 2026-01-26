@@ -107,6 +107,7 @@ def _ensure_plugins_loaded():
             'vsg_core.subtitles.sync_mode_plugins.correlation_frame_snap',
             'vsg_core.subtitles.sync_mode_plugins.subtitle_anchored_frame_snap',
             'vsg_core.subtitles.sync_mode_plugins.correlation_guided_frame_anchor',
+            'vsg_core.subtitles.sync_mode_plugins.video_verified',
         ]
         for module_name in plugins_to_load:
             importlib.import_module(module_name)
