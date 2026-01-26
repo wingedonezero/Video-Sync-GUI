@@ -7,5 +7,6 @@ mod browse;
 mod helpers;
 mod job_queue;
 mod manual_selection;
+mod processing;
 mod settings;
 mod window;
