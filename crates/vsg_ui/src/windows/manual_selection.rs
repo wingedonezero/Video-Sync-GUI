@@ -2,11 +2,13 @@
 //!
 //! Dialog for manually selecting and arranging tracks for a job's output.
 //! Left pane shows available tracks from sources, right pane shows final output.
+//! Final output list supports drag-and-drop reordering.
 
 use iced::widget::{button, checkbox, column, container, row, scrollable, text, Space};
 use iced::{Alignment, Background, Border, Color, Element, Length, Theme};
 
-use crate::app::{App, Message};
+use crate::app::{App, FinalTrackState, Message};
+use crate::widgets::reorderable_list;
 
 /// Build the manual selection window view.
 pub fn view(app: &App) -> Element<'_, Message> {
@@ -27,7 +29,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
 
     // Info message
     let info_text: Element<'_, Message> = if app.manual_selection_info.is_empty() {
-        text("Click tracks to add them to the final output. Use ↑/↓ to reorder.").size(13).into()
+        text("Click tracks to add them to the final output. Drag to reorder.").size(13).into()
     } else {
         text(&app.manual_selection_info).size(13).into()
     };
@@ -180,130 +182,15 @@ pub fn view(app: &App) -> Element<'_, Message> {
     .height(Length::Fill);
 
     // =========================================================================
-    // RIGHT PANE: Final output + attachments
+    // RIGHT PANE: Final output + attachments (with drag-and-drop reordering)
     // =========================================================================
-    let final_tracks: Vec<Element<'_, Message>> = app
-        .final_tracks
-        .iter()
-        .enumerate()
-        .map(|(idx, track)| {
-            let icon = match track.track_type.as_str() {
-                "video" => "🎬",
-                "audio" => "🔊",
-                "subtitles" => "💬",
-                _ => "📄",
-            };
-
-            let track_count = app.final_tracks.len();
-            let can_move_up = idx > 0;
-            let can_move_down = idx < track_count.saturating_sub(1);
-
-            // Generate badges for this track
-            let badges = track.badges();
-
-            // Line 1: index + icon + summary + badges + source tag
-            let mut line1_elements: Vec<Element<'_, Message>> = vec![
-                text(format!("{}.", idx + 1)).width(24).into(),
-                text(icon).width(20).into(),
-                text(&track.summary).width(Length::Fill).size(13).into(),
-            ];
-
-            // Add badges (if any)
-            if !badges.is_empty() {
-                line1_elements.push(
-                    container(text(badges).size(10).color(Color::from_rgb(0.7, 0.85, 1.0)))
-                        .padding([2, 6])
-                        .style(|_theme: &Theme| container::Style {
-                            background: Some(Background::Color(Color::from_rgb(0.2, 0.3, 0.4))),
-                            border: Border {
-                                radius: 3.0.into(),
-                                ..Default::default()
-                            },
-                            ..Default::default()
-                        })
-                        .into()
-                );
-            }
-
-            // Add source tag
-            line1_elements.push(
-                container(text(&track.source_key).size(10))
-                    .padding([2, 6])
-                    .style(|_theme: &Theme| container::Style {
-                        background: Some(Background::Color(Color::from_rgb(0.25, 0.25, 0.25))),
-                        border: Border {
-                            radius: 3.0.into(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    })
-                    .into()
-            );
-
-            let line1 = row(line1_elements).spacing(4).align_y(Alignment::Center);
-
-            // Line 2: controls (D/F checkboxes, move, settings, delete)
-            let move_up_btn = if can_move_up {
-                button("↑").on_press(Message::FinalTrackMoved(idx, idx - 1)).width(28)
-            } else {
-                button("↑").width(28)
-            };
-
-            let move_down_btn = if can_move_down {
-                button("↓").on_press(Message::FinalTrackMoved(idx, idx + 1)).width(28)
-            } else {
-                button("↓").width(28)
-            };
-
-            let line2 = row![
-                Space::new().width(44), // align with icon column
-                checkbox(track.is_default)
-                    .label("Default")
-                    .on_toggle(move |v| Message::FinalTrackDefaultChanged(idx, v)),
-                checkbox(track.is_forced_display)
-                    .label("Forced")
-                    .on_toggle(move |v| Message::FinalTrackForcedChanged(idx, v)),
-                Space::new().width(Length::Fill),
-                move_up_btn,
-                move_down_btn,
-                button("⚙").on_press(Message::FinalTrackSettingsClicked(idx)).width(28),
-                button("✕").on_press(Message::FinalTrackRemoved(idx)).width(28),
-            ]
-            .spacing(4)
-            .align_y(Alignment::Center);
-
-            container(
-                column![line1, line2].spacing(4)
-            )
-            .padding([8, 8])
-            .width(Length::Fill)
-            .style(|_theme: &Theme| container::Style {
-                background: Some(Background::Color(Color::from_rgb(0.12, 0.12, 0.12))),
-                border: Border {
-                    radius: 4.0.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            })
-            .into()
-        })
-        .collect();
-
-    let final_list: Element<'_, Message> = if final_tracks.is_empty() {
-        container(
-            column![
-                text("No tracks added yet").size(14),
-                Space::new().height(4),
-                text("Click tracks on the left to add them here.").size(12).color(Color::from_rgb(0.6, 0.6, 0.6)),
-            ]
-            .align_x(Alignment::Center)
-        )
-        .padding(30)
-        .width(Length::Fill)
-        .center_x(Length::Fill)
-        .into()
-    } else {
-        scrollable(column(final_tracks).spacing(4).width(Length::Fill))
+    let final_list: Element<'_, Message> = {
+        let reorderable = reorderable_list::view(
+            &app.final_tracks,
+            &app.drag_state,
+            render_final_track_row,
+        );
+        scrollable(reorderable)
             .height(Length::Fill)
             .into()
     };
@@ -373,4 +260,90 @@ pub fn view(app: &App) -> Element<'_, Message> {
         .width(Length::Fill)
         .height(Length::Fill)
         .into()
+}
+
+/// Render a single final track row for the reorderable list.
+///
+/// # Arguments
+/// * `track` - The track state to render
+/// * `idx` - The index in the list
+/// * `is_dragging` - Whether this row is currently being dragged
+/// * `is_drop_target` - Whether this row is the current drop target
+fn render_final_track_row<'a>(
+    track: &'a FinalTrackState,
+    idx: usize,
+    _is_dragging: bool,
+    _is_drop_target: bool,
+) -> Element<'a, Message> {
+    let icon = match track.track_type.as_str() {
+        "video" => "🎬",
+        "audio" => "🔊",
+        "subtitles" => "💬",
+        _ => "📄",
+    };
+
+    // Generate badges for this track
+    let badges = track.badges();
+
+    // Line 1: index + icon + summary + badges + source tag
+    let mut line1_elements: Vec<Element<'_, Message>> = vec![
+        text(format!("{}.", idx + 1)).width(24).into(),
+        text(icon).width(20).into(),
+        text(&track.summary).width(Length::Fill).size(13).into(),
+    ];
+
+    // Add badges (if any)
+    if !badges.is_empty() {
+        line1_elements.push(
+            container(text(badges).size(10).color(Color::from_rgb(0.7, 0.85, 1.0)))
+                .padding([2, 6])
+                .style(|_theme: &Theme| container::Style {
+                    background: Some(Background::Color(Color::from_rgb(0.2, 0.3, 0.4))),
+                    border: Border {
+                        radius: 3.0.into(),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+                .into(),
+        );
+    }
+
+    // Add source tag
+    line1_elements.push(
+        container(text(&track.source_key).size(10))
+            .padding([2, 6])
+            .style(|_theme: &Theme| container::Style {
+                background: Some(Background::Color(Color::from_rgb(0.25, 0.25, 0.25))),
+                border: Border {
+                    radius: 3.0.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            })
+            .into(),
+    );
+
+    let line1 = row(line1_elements).spacing(4).align_y(Alignment::Center);
+
+    // Line 2: controls (D/F checkboxes, drag handle hint, settings, delete)
+    // Note: Up/down buttons removed - use drag-and-drop to reorder
+    let line2 = row![
+        Space::new().width(44), // align with icon column
+        checkbox(track.is_default)
+            .label("Default")
+            .on_toggle(move |v| Message::FinalTrackDefaultChanged(idx, v)),
+        checkbox(track.is_forced_display)
+            .label("Forced")
+            .on_toggle(move |v| Message::FinalTrackForcedChanged(idx, v)),
+        Space::new().width(Length::Fill),
+        text("☰").size(16).color(Color::from_rgb(0.5, 0.5, 0.5)), // Drag handle hint
+        Space::new().width(8),
+        button("⚙").on_press(Message::FinalTrackSettingsClicked(idx)).width(28),
+        button("✕").on_press(Message::FinalTrackRemoved(idx)).width(28),
+    ]
+    .spacing(4)
+    .align_y(Alignment::Center);
+
+    column![line1, line2].spacing(4).into()
 }
