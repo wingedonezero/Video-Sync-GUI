@@ -101,9 +101,15 @@ pub fn extract_chapters_to_string(input_path: &Path) -> ChapterResult<Option<Str
         });
     }
 
-    let chapter_xml = String::from_utf8_lossy(&output.stdout).to_string();
+    let mut chapter_xml = String::from_utf8_lossy(&output.stdout).to_string();
     if chapter_xml.trim().is_empty() {
         return Ok(None);
+    }
+
+    // Strip UTF-8 BOM if present (can cause XML parsing issues)
+    if chapter_xml.starts_with('\u{feff}') {
+        chapter_xml = chapter_xml[3..].to_string(); // UTF-8 BOM is 3 bytes
+        tracing::debug!("Stripped UTF-8 BOM from chapter XML");
     }
 
     Ok(Some(chapter_xml))

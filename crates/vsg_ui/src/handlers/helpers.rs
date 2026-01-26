@@ -337,6 +337,9 @@ pub async fn run_job_pipeline(
                 })
                 .collect();
             job_spec.manual_layout = Some(manual_layout);
+
+            // Pass attachment sources from layout to job spec
+            job_spec.attachment_sources = layout.attachment_sources.clone();
         }
 
         let timestamp = std::time::SystemTime::now()

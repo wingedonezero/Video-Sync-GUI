@@ -6,6 +6,7 @@
 //! - **Parsing** (`parser`): Parse and serialize Matroska chapter XML format
 //! - **Shifting** (`shifter`): Apply time offsets to chapter timestamps
 //! - **Snapping** (`snapper`): Align chapters to video keyframes
+//! - **Processing** (`processor`): Deduplication, normalization, and renaming
 //!
 //! # Architecture
 //!
@@ -47,6 +48,7 @@
 
 mod extractor;
 mod parser;
+mod processor;
 mod shifter;
 mod snapper;
 pub mod types;
@@ -73,5 +75,11 @@ pub use shifter::{
 // Re-export snapping functions
 pub use snapper::{
     calculate_snap_stats, extract_keyframes, extract_keyframes_limited, snap_chapters,
-    snap_chapters_copy, SnapMode, SnapStats,
+    snap_chapters_copy, snap_chapters_with_threshold, SnapDetail, SnapMode, SnapStats,
+};
+
+// Re-export processing functions
+pub use processor::{
+    deduplicate_chapters, normalize_chapter_ends, process_chapters, rename_chapters,
+    DuplicateInfo, NormalizedEndInfo, ProcessingStats, RenamedInfo,
 };

@@ -16,6 +16,10 @@ pub struct JobSpec {
     /// Optional manual track layout override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub manual_layout: Option<Vec<HashMap<String, serde_json::Value>>>,
+    /// Sources to extract attachments from (e.g., ["Source 1", "Source 2"]).
+    /// If empty, defaults to Source 1 only.
+    #[serde(default)]
+    pub attachment_sources: Vec<String>,
 }
 
 impl JobSpec {
@@ -24,6 +28,7 @@ impl JobSpec {
         Self {
             sources,
             manual_layout: None,
+            attachment_sources: Vec::new(),
         }
     }
 
@@ -37,14 +42,25 @@ impl JobSpec {
 }
 
 /// Calculated sync delays between sources.
+///
+/// # Delay Storage
+///
+/// Delays are stored in two forms:
+/// - `raw_source_delays_ms` / `source_delays_ms`: Final delays WITH global_shift applied
+/// - `pre_shift_delays_ms`: Original delays WITHOUT global_shift (for debugging/logging)
+///
+/// The `raw_source_delays_ms` values are what get applied to tracks in mkvmerge.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Delays {
-    /// Rounded delays per source in milliseconds.
+    /// Rounded delays per source in milliseconds (WITH global_shift applied).
     #[serde(default)]
     pub source_delays_ms: HashMap<String, i64>,
-    /// Raw (unrounded) delays per source for precision.
+    /// Raw (unrounded) delays per source for precision (WITH global_shift applied).
     #[serde(default)]
     pub raw_source_delays_ms: HashMap<String, f64>,
+    /// Original delays BEFORE global shift (for logging/debugging).
+    #[serde(default)]
+    pub pre_shift_delays_ms: HashMap<String, f64>,
     /// Global shift applied to all tracks (rounded).
     #[serde(default)]
     pub global_shift_ms: i64,
@@ -59,11 +75,23 @@ impl Delays {
         Self::default()
     }
 
-    /// Set delay for a source.
+    /// Set delay for a source (stores the raw delay BEFORE any global shift).
     pub fn set_delay(&mut self, source: impl Into<String>, raw_ms: f64) {
         let source = source.into();
+        // Store in both pre-shift and current (will be shifted later)
+        self.pre_shift_delays_ms.insert(source.clone(), raw_ms);
         self.raw_source_delays_ms.insert(source.clone(), raw_ms);
         self.source_delays_ms.insert(source, raw_ms.round() as i64);
+    }
+
+    /// Get the final delay for a source (with global shift applied).
+    pub fn get_final_delay(&self, source: &str) -> Option<f64> {
+        self.raw_source_delays_ms.get(source).copied()
+    }
+
+    /// Get the pre-shift delay for a source (without global shift).
+    pub fn get_pre_shift_delay(&self, source: &str) -> Option<f64> {
+        self.pre_shift_delays_ms.get(source).copied()
     }
 }
 
@@ -93,6 +121,35 @@ pub struct PlanItem {
     /// Custom track name override.
     #[serde(default)]
     pub custom_name: String,
+
+    // === Processing flags ===
+    /// Track has been adjusted by stepping correction.
+    #[serde(default)]
+    pub stepping_adjusted: bool,
+    /// Track has been adjusted by frame-level sync.
+    #[serde(default)]
+    pub frame_adjusted: bool,
+
+    // === Preservation/correction flags ===
+    /// Track was preserved from a previous run (not re-processed).
+    #[serde(default)]
+    pub is_preserved: bool,
+    /// Track was corrected from another source.
+    #[serde(default)]
+    pub is_corrected: bool,
+    /// Source used for correction (if is_corrected is true).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub correction_source: Option<String>,
+
+    // === Video-specific options ===
+    /// Original aspect ratio to preserve (e.g., "16:9", "109:60").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aspect_ratio: Option<String>,
+
+    // === User modifications ===
+    /// Path to user-modified file (replaces extracted_path when set).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_modified_path: Option<PathBuf>,
 }
 
 impl PlanItem {
@@ -107,6 +164,13 @@ impl PlanItem {
             container_delay_ms_raw: 0.0,
             custom_lang: String::new(),
             custom_name: String::new(),
+            stepping_adjusted: false,
+            frame_adjusted: false,
+            is_preserved: false,
+            is_corrected: false,
+            correction_source: None,
+            aspect_ratio: None,
+            user_modified_path: None,
         }
     }
 

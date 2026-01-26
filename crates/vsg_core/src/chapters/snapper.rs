@@ -26,20 +26,62 @@ pub enum SnapMode {
 /// * `data` - The chapter data to modify (in place)
 /// * `keyframes` - Keyframe information from the video
 /// * `mode` - How to snap to keyframes
+///
+/// Note: This function snaps all chapters regardless of distance.
+/// Use `snap_chapters_with_threshold` to enforce a maximum snap distance.
 pub fn snap_chapters(data: &mut ChapterData, keyframes: &KeyframeInfo, mode: SnapMode) {
+    snap_chapters_with_threshold(data, keyframes, mode, None);
+}
+
+/// Snap chapter start times to keyframes with optional threshold enforcement.
+///
+/// # Arguments
+/// * `data` - The chapter data to modify (in place)
+/// * `keyframes` - Keyframe information from the video
+/// * `mode` - How to snap to keyframes
+/// * `threshold_ms` - Maximum distance (in ms) to snap. Chapters farther away are skipped.
+///                    Pass `None` to snap all chapters regardless of distance.
+///
+/// # Returns
+/// Statistics about the snapping operation.
+pub fn snap_chapters_with_threshold(
+    data: &mut ChapterData,
+    keyframes: &KeyframeInfo,
+    mode: SnapMode,
+    threshold_ms: Option<i64>,
+) -> SnapStats {
+    let threshold_ns = threshold_ms.map(|ms| ms * 1_000_000);
+
     if keyframes.timestamps_ns.is_empty() {
         tracing::warn!("No keyframes available for snapping");
-        return;
+        return SnapStats {
+            chapter_count: data.len(),
+            already_aligned: 0,
+            moved: 0,
+            skipped: data.len(),
+            max_shift_ms: 0,
+            avg_shift_ms: 0.0,
+            details: Vec::new(),
+        };
     }
 
     tracing::debug!(
-        "Snapping {} chapters to keyframes (mode: {:?})",
+        "Snapping {} chapters to keyframes (mode: {:?}, threshold: {:?}ms)",
         data.len(),
-        mode
+        mode,
+        threshold_ms
     );
+
+    let mut already_aligned = 0;
+    let mut moved = 0;
+    let mut skipped = 0;
+    let mut total_shift_ns: i64 = 0;
+    let mut max_shift_ns: i64 = 0;
+    let mut details = Vec::new();
 
     for chapter in data.iter_mut() {
         let original = chapter.start_ns;
+        let name = chapter.display_name().unwrap_or("unnamed").to_string();
         let snapped = match mode {
             SnapMode::Nearest => keyframes.nearest(original),
             SnapMode::Previous => keyframes.previous(original),
@@ -47,21 +89,90 @@ pub fn snap_chapters(data: &mut ChapterData, keyframes: &KeyframeInfo, mode: Sna
         };
 
         if let Some(new_start) = snapped {
-            if new_start != original {
+            let shift_ns = new_start as i64 - original as i64;
+            let abs_shift_ns = shift_ns.abs();
+
+            if new_start == original {
+                // Already on keyframe
+                already_aligned += 1;
+                details.push(SnapDetail::AlreadyAligned {
+                    name,
+                    timestamp_ns: original,
+                });
+                tracing::trace!(
+                    "Chapter '{}' ({}) - already on keyframe",
+                    chapter.display_name().unwrap_or("unnamed"),
+                    format_timestamp_for_log(original)
+                );
+            } else if threshold_ns.is_none() || abs_shift_ns <= threshold_ns.unwrap() {
+                // Within threshold (or no threshold), snap it
+                details.push(SnapDetail::Snapped {
+                    name,
+                    original_ns: original,
+                    new_ns: new_start,
+                    shift_ns,
+                });
                 tracing::trace!(
                     "Chapter '{}': {} -> {} ({:+}ms)",
                     chapter.display_name().unwrap_or("unnamed"),
-                    original,
-                    new_start,
-                    (new_start as i64 - original as i64) / 1_000_000
+                    format_timestamp_for_log(original),
+                    format_timestamp_for_log(new_start),
+                    shift_ns / 1_000_000
                 );
                 chapter.start_ns = new_start;
+                moved += 1;
+                total_shift_ns += abs_shift_ns;
+                max_shift_ns = max_shift_ns.max(abs_shift_ns);
+            } else {
+                // Exceeds threshold, skip
+                skipped += 1;
+                details.push(SnapDetail::Skipped {
+                    name,
+                    timestamp_ns: original,
+                    would_shift_ns: shift_ns,
+                    threshold_ns: threshold_ns.unwrap(),
+                });
+                tracing::trace!(
+                    "Chapter '{}' ({}) - skipped ({}ms exceeds threshold of {}ms)",
+                    chapter.display_name().unwrap_or("unnamed"),
+                    format_timestamp_for_log(original),
+                    abs_shift_ns / 1_000_000,
+                    threshold_ms.unwrap_or(0)
+                );
             }
         }
     }
 
     // Re-sort after snapping (order might change with aggressive snapping)
     data.sort_by_time();
+
+    let avg_shift_ms = if moved > 0 {
+        (total_shift_ns as f64 / moved as f64) / 1_000_000.0
+    } else {
+        0.0
+    };
+
+    SnapStats {
+        chapter_count: data.len(),
+        already_aligned,
+        moved,
+        skipped,
+        max_shift_ms: max_shift_ns / 1_000_000,
+        avg_shift_ms,
+        details,
+    }
+}
+
+/// Format timestamp for logging (HH:MM:SS.mmm)
+fn format_timestamp_for_log(ns: u64) -> String {
+    let total_ms = ns / 1_000_000;
+    let ms = total_ms % 1000;
+    let total_secs = total_ms / 1000;
+    let secs = total_secs % 60;
+    let total_mins = total_secs / 60;
+    let mins = total_mins % 60;
+    let hours = total_mins / 60;
+    format!("{:02}:{:02}:{:02}.{:03}", hours, mins, secs, ms)
 }
 
 /// Create a new ChapterData with snapped timestamps.
@@ -155,6 +266,67 @@ pub fn extract_keyframes_limited(
     Ok(info)
 }
 
+/// Detail about what happened to a single chapter during snapping.
+#[derive(Debug, Clone)]
+pub enum SnapDetail {
+    /// Chapter was already on a keyframe.
+    AlreadyAligned {
+        name: String,
+        timestamp_ns: u64,
+    },
+    /// Chapter was snapped to a keyframe.
+    Snapped {
+        name: String,
+        original_ns: u64,
+        new_ns: u64,
+        shift_ns: i64,
+    },
+    /// Chapter was skipped (exceeded threshold).
+    Skipped {
+        name: String,
+        timestamp_ns: u64,
+        would_shift_ns: i64,
+        threshold_ns: i64,
+    },
+}
+
+impl SnapDetail {
+    /// Format timestamp for logging (HH:MM:SS.mmm.µµµ.nnn for full precision).
+    pub fn format_timestamp_full(ns: u64) -> String {
+        let total_ns = ns;
+        let nanos = total_ns % 1000;
+        let total_us = total_ns / 1000;
+        let micros = total_us % 1000;
+        let total_ms = total_us / 1000;
+        let millis = total_ms % 1000;
+        let total_secs = total_ms / 1000;
+        let secs = total_secs % 60;
+        let total_mins = total_secs / 60;
+        let mins = total_mins % 60;
+        let hours = total_mins / 60;
+        format!("{:02}:{:02}:{:02}.{:03}.{:03}.{:03}", hours, mins, secs, millis, micros, nanos)
+    }
+
+    /// Format the shift amount for logging.
+    pub fn format_shift(shift_ns: i64) -> String {
+        let sign = if shift_ns >= 0 { "+" } else { "" };
+        let abs_ns = shift_ns.unsigned_abs();
+
+        if abs_ns >= 1_000_000 {
+            // Milliseconds
+            let ms = abs_ns as f64 / 1_000_000.0;
+            format!("{}{}ms", sign, ms)
+        } else if abs_ns >= 1_000 {
+            // Microseconds
+            let us = abs_ns as f64 / 1_000.0;
+            format!("{}{}µs", sign, us)
+        } else {
+            // Nanoseconds
+            format!("{}{}ns", sign, abs_ns)
+        }
+    }
+}
+
 /// Calculate statistics about chapter-keyframe alignment.
 #[derive(Debug, Clone)]
 pub struct SnapStats {
@@ -164,25 +336,41 @@ pub struct SnapStats {
     pub already_aligned: usize,
     /// Number of chapters that were moved.
     pub moved: usize,
+    /// Number of chapters skipped (exceeded threshold).
+    pub skipped: usize,
     /// Maximum shift applied (in milliseconds).
     pub max_shift_ms: i64,
     /// Average shift applied (in milliseconds).
     pub avg_shift_ms: f64,
+    /// Detailed info about each chapter's snap status.
+    pub details: Vec<SnapDetail>,
 }
 
 /// Calculate snapping statistics without modifying the chapters.
+///
+/// # Arguments
+/// * `data` - The chapter data to analyze
+/// * `keyframes` - Keyframe information from the video
+/// * `mode` - How to snap to keyframes
+/// * `threshold_ms` - Maximum distance (in ms) to consider a valid snap.
+///                    Pass `None` to count all snaps regardless of distance.
 pub fn calculate_snap_stats(
     data: &ChapterData,
     keyframes: &KeyframeInfo,
     mode: SnapMode,
+    threshold_ms: Option<i64>,
 ) -> SnapStats {
+    let threshold_ns = threshold_ms.map(|ms| ms * 1_000_000);
     let mut already_aligned = 0;
     let mut moved = 0;
+    let mut skipped = 0;
     let mut total_shift_ns: i64 = 0;
     let mut max_shift_ns: i64 = 0;
+    let mut details = Vec::new();
 
     for chapter in data.iter() {
         let original = chapter.start_ns;
+        let name = chapter.display_name().unwrap_or("unnamed").to_string();
         let snapped = match mode {
             SnapMode::Nearest => keyframes.nearest(original),
             SnapMode::Previous => keyframes.previous(original),
@@ -190,13 +378,32 @@ pub fn calculate_snap_stats(
         };
 
         if let Some(new_start) = snapped {
-            let shift = new_start as i64 - original as i64;
-            if shift == 0 {
+            let shift_ns = new_start as i64 - original as i64;
+            let abs_shift_ns = shift_ns.abs();
+            if new_start == original {
                 already_aligned += 1;
-            } else {
+                details.push(SnapDetail::AlreadyAligned {
+                    name,
+                    timestamp_ns: original,
+                });
+            } else if threshold_ns.is_none() || abs_shift_ns <= threshold_ns.unwrap() {
                 moved += 1;
-                total_shift_ns += shift.abs();
-                max_shift_ns = max_shift_ns.max(shift.abs());
+                total_shift_ns += abs_shift_ns;
+                max_shift_ns = max_shift_ns.max(abs_shift_ns);
+                details.push(SnapDetail::Snapped {
+                    name,
+                    original_ns: original,
+                    new_ns: new_start,
+                    shift_ns,
+                });
+            } else {
+                skipped += 1;
+                details.push(SnapDetail::Skipped {
+                    name,
+                    timestamp_ns: original,
+                    would_shift_ns: shift_ns,
+                    threshold_ns: threshold_ns.unwrap(),
+                });
             }
         }
     }
@@ -211,8 +418,10 @@ pub fn calculate_snap_stats(
         chapter_count: data.len(),
         already_aligned,
         moved,
+        skipped,
         max_shift_ms: max_shift_ns / 1_000_000,
         avg_shift_ms,
+        details,
     }
 }
 
@@ -286,11 +495,25 @@ mod tests {
     fn snap_stats() {
         let data = create_test_chapters();
         let keyframes = create_test_keyframes();
-        let stats = calculate_snap_stats(&data, &keyframes, SnapMode::Nearest);
+        let stats = calculate_snap_stats(&data, &keyframes, SnapMode::Nearest, None);
 
         assert_eq!(stats.chapter_count, 4);
         assert_eq!(stats.already_aligned, 2); // 0s and 4s
         assert_eq!(stats.moved, 2); // 2.5s and 7.9s
+        assert_eq!(stats.skipped, 0); // No threshold
+    }
+
+    #[test]
+    fn snap_stats_with_threshold() {
+        let data = create_test_chapters();
+        let keyframes = create_test_keyframes();
+        // 250ms threshold - 2.5s->2s is 500ms so it should be skipped
+        let stats = calculate_snap_stats(&data, &keyframes, SnapMode::Nearest, Some(250));
+
+        assert_eq!(stats.chapter_count, 4);
+        assert_eq!(stats.already_aligned, 2); // 0s and 4s
+        assert_eq!(stats.moved, 1); // Only 7.9s->8s (100ms)
+        assert_eq!(stats.skipped, 1); // 2.5s->2s exceeds threshold
     }
 
     #[test]
