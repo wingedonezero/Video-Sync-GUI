@@ -77,6 +77,7 @@ class AppConfig:
             'subtitle_sync_mode': 'time-based',
             'subtitle_target_fps': 0.0,
             'time_based_use_raw_values': False,  # Use pysubs instead of mkvmerge --sync
+            'time_based_bypass_subtitle_data': True,  # Skip SubtitleData load/save for time-based (matches old behavior)
 
             # --- Unified Frame Matching Settings (shared by all frame-based sync modes) ---
             'frame_hash_algorithm': 'dhash',  # Hash algorithm: 'dhash', 'phash', 'average_hash', 'whash'
