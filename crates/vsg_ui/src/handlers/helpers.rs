@@ -6,7 +6,8 @@ use std::process::Command as StdCommand;
 use vsg_core::config::Settings;
 use vsg_core::logging::{JobLogger, LogConfig};
 use vsg_core::models::JobSpec;
-use vsg_core::orchestrator::{AnalyzeStep, Context, JobState, Pipeline};
+use vsg_core::jobs::ManualLayout;
+use vsg_core::orchestrator::{AnalyzeStep, Context, JobState, Pipeline, create_standard_pipeline};
 
 /// Track info from probing.
 pub struct TrackInfo {
@@ -287,6 +288,114 @@ pub async fn run_analyze_only(
                 Ok((delay2, delay3))
             }
             Err(e) => Err(format!("Pipeline failed: {}", e)),
+        }
+    })
+    .await
+    .map_err(|e| format!("Task panicked: {}", e))?
+}
+
+/// Run a full job pipeline (async wrapper).
+///
+/// This runs the complete pipeline: Analyze -> Extract -> Attachments -> Chapters ->
+/// Subtitles -> AudioCorrection -> Mux
+pub async fn run_job_pipeline(
+    job_name: String,
+    sources: std::collections::HashMap<String, PathBuf>,
+    layout: Option<ManualLayout>,
+    settings: Settings,
+) -> Result<PathBuf, String> {
+    tokio::task::spawn_blocking(move || {
+        // Build job spec
+        let mut job_spec = JobSpec::new(sources);
+
+        // Convert layout to manual_layout format (Vec<HashMap<String, serde_json::Value>>)
+        if let Some(layout) = layout {
+            let manual_layout: Vec<std::collections::HashMap<String, serde_json::Value>> = layout
+                .final_tracks
+                .iter()
+                .map(|track| {
+                    let mut map = std::collections::HashMap::new();
+                    map.insert("id".to_string(), serde_json::json!(track.track_id));
+                    map.insert("source".to_string(), serde_json::json!(track.source_key));
+                    map.insert(
+                        "type".to_string(),
+                        serde_json::json!(match track.track_type {
+                            vsg_core::models::TrackType::Video => "video",
+                            vsg_core::models::TrackType::Audio => "audio",
+                            vsg_core::models::TrackType::Subtitles => "subtitles",
+                        }),
+                    );
+                    map.insert("is_default".to_string(), serde_json::json!(track.config.is_default));
+                    map.insert("is_forced_display".to_string(), serde_json::json!(track.config.is_forced_display));
+                    if let Some(ref lang) = track.config.custom_lang {
+                        map.insert("custom_lang".to_string(), serde_json::json!(lang));
+                    }
+                    if let Some(ref name) = track.config.custom_name {
+                        map.insert("custom_name".to_string(), serde_json::json!(name));
+                    }
+                    map
+                })
+                .collect();
+            job_spec.manual_layout = Some(manual_layout);
+        }
+
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        let work_dir =
+            PathBuf::from(&settings.paths.temp_root).join(format!("job_{}_{}", job_name, timestamp));
+        let output_dir = PathBuf::from(&settings.paths.output_folder);
+
+        // Create work directory
+        if let Err(e) = std::fs::create_dir_all(&work_dir) {
+            return Err(format!("Failed to create work directory: {}", e));
+        }
+
+        let log_config = LogConfig {
+            compact: settings.logging.compact,
+            progress_step: settings.logging.progress_step,
+            error_tail: settings.logging.error_tail as usize,
+            ..LogConfig::default()
+        };
+
+        let logger = match JobLogger::new(&job_name, &output_dir, log_config, None) {
+            Ok(l) => std::sync::Arc::new(l),
+            Err(e) => return Err(format!("Failed to create logger: {}", e)),
+        };
+
+        let ctx = Context::new(
+            job_spec,
+            settings,
+            &job_name,
+            work_dir.clone(),
+            output_dir.clone(),
+            logger.clone(),
+        );
+
+        let mut state = JobState::new(&job_name);
+
+        // Create and run the standard pipeline
+        let pipeline = create_standard_pipeline();
+
+        match pipeline.run(&ctx, &mut state) {
+            Ok(_result) => {
+                // Get output path from mux step
+                if let Some(ref mux) = state.mux {
+                    // Clean up work directory
+                    if let Err(e) = std::fs::remove_dir_all(&work_dir) {
+                        tracing::warn!("Failed to clean up work directory: {}", e);
+                    }
+                    Ok(mux.output_path.clone())
+                } else {
+                    Err("Mux step did not produce output".to_string())
+                }
+            }
+            Err(e) => {
+                // Keep work dir for debugging on failure
+                Err(format!("Pipeline failed: {}", e))
+            }
         }
     })
     .await

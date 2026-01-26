@@ -5,6 +5,7 @@ use iced::Task;
 use vsg_core::jobs::{JobQueueEntry, JobQueueStatus};
 
 use crate::app::{App, Message};
+use super::helpers::run_job_pipeline;
 
 impl App {
     /// Handle StartBatchProcessing - receive jobs from queue and begin processing.
@@ -33,10 +34,14 @@ impl App {
             return Task::done(Message::BatchCompleted);
         }
 
+        // Clone all data we need from the job before any mutable operations
         let job = &self.processing_jobs[self.current_job_index];
         let job_name = job.name.clone();
         let job_idx = self.current_job_index;
         let layout_id = job.layout_id.clone();
+        let sources = job.sources.clone();
+        // Drop the reference to job
+        drop(job);
 
         tracing::info!(
             "Processing job {} of {}: {} (layout_id: {})",
@@ -84,8 +89,8 @@ impl App {
             }
         };
 
-        // Log what we would do (placeholder until orchestrator exists)
-        if let Some(layout) = &layout {
+        // Log job info
+        if let Some(ref layout) = layout {
             self.append_log(&format!(
                 "Job {} of {}: {} ({} tracks configured)",
                 job_idx + 1,
@@ -102,17 +107,30 @@ impl App {
             ));
         }
 
-        // TODO: Actually run the job through the orchestrator/pipeline
-        // For now, we'll just mark it as complete after a placeholder log
-        self.append_log(&format!("  -> Would process job: {}", job_name));
-        self.append_log("  -> (Orchestrator not yet implemented)");
+        // Get settings
+        let settings = {
+            let cfg = self.config.lock().unwrap();
+            cfg.settings().clone()
+        };
 
-        // Simulate job completion - later this will be async with real processing
-        Task::done(Message::JobCompleted {
-            job_idx,
-            success: true,
-            error: None,
-        })
+        self.append_log(&format!("  -> Running pipeline for: {}", job_name));
+
+        // Run the job pipeline asynchronously
+        Task::perform(
+            async move { run_job_pipeline(job_name, sources, layout, settings).await },
+            move |result| match result {
+                Ok(output_path) => Message::JobCompleted {
+                    job_idx,
+                    success: true,
+                    error: Some(format!("Output: {}", output_path.display())),
+                },
+                Err(e) => Message::JobCompleted {
+                    job_idx,
+                    success: false,
+                    error: Some(e),
+                },
+            },
+        )
     }
 
     /// Handle JobCompleted - a single job finished, move to next.

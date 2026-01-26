@@ -45,8 +45,32 @@ mod types;
 pub use errors::{PipelineError, PipelineResult, StepError, StepResult};
 pub use pipeline::{CancelHandle, Pipeline, PipelineRunResult};
 pub use step::PipelineStep;
-pub use steps::{AnalyzeStep, ExtractStep, MuxStep};
+pub use steps::{
+    AnalyzeStep, AttachmentsStep, AudioCorrectionStep, ChaptersStep, ExtractStep, MuxStep,
+    SubtitlesStep,
+};
 pub use types::{
     AnalysisOutput, ChaptersOutput, Context, CorrectionOutput, ExtractOutput, JobState, MuxOutput,
     ProgressCallback, StepOutcome, SubtitlesOutput,
 };
+
+/// Create a standard pipeline with all steps in the correct order.
+///
+/// The standard pipeline executes these steps:
+/// 1. Analyze - correlate audio to calculate sync delays
+/// 2. Extract - extract selected tracks from sources
+/// 3. Attachments - extract fonts/attachments
+/// 4. Chapters - extract and shift chapters
+/// 5. Subtitles - process subtitle tracks (stub)
+/// 6. AudioCorrection - apply audio timing adjustments (stub)
+/// 7. Mux - merge everything with mkvmerge
+pub fn create_standard_pipeline() -> Pipeline {
+    Pipeline::new()
+        .with_step(AnalyzeStep::new())
+        .with_step(ExtractStep::new())
+        .with_step(AttachmentsStep::new())
+        .with_step(ChaptersStep::new())
+        .with_step(SubtitlesStep::new())
+        .with_step(AudioCorrectionStep::new())
+        .with_step(MuxStep::new())
+}
