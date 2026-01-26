@@ -1322,8 +1322,22 @@ class VideoReader:
     2. pyffms2 (fast - indexed seeking, but re-indexes each time)
     3. OpenCV (medium - keeps file open, but seeks from keyframes)
     4. FFmpeg (slow - spawns process per frame)
+
+    Supports automatic deinterlacing for interlaced content with configurable methods:
+    - 'auto': Auto-detect and deinterlace only if interlaced
+    - 'none': Never deinterlace (raw frames)
+    - 'yadif': YADIF deinterlacer (good quality, moderate speed)
+    - 'yadifmod': YADIFmod (better edge handling than YADIF)
+    - 'bob': Bob deinterlacer (fast, doubles framerate)
+    - 'w3fdif': W3FDIF (BBC's deinterlacer, high quality)
+    - 'bwdif': BWDIF (motion adaptive, good quality)
     """
-    def __init__(self, video_path: str, runner, temp_dir: Path = None, **kwargs):
+
+    # Available deinterlace methods
+    DEINTERLACE_METHODS = ['auto', 'none', 'yadif', 'yadifmod', 'bob', 'w3fdif', 'bwdif']
+
+    def __init__(self, video_path: str, runner, temp_dir: Path = None,
+                 deinterlace: str = 'auto', config: dict = None, **kwargs):
         self.video_path = video_path
         self.runner = runner
         self.vs_clip = None  # VapourSynth clip
@@ -1334,6 +1348,14 @@ class VideoReader:
         self.use_opencv = False
         self.fps = None
         self.temp_dir = temp_dir
+        self.deinterlace_method = deinterlace
+        self.config = config or {}
+        self.is_interlaced = False
+        self.field_order = 'progressive'
+        self.deinterlace_applied = False
+
+        # Detect video properties for interlacing info
+        self._detect_interlacing()
 
         # Try VapourSynth first (fastest - persistent index caching)
         if self._try_vapoursynth():
@@ -1387,6 +1409,126 @@ class VideoReader:
         except ImportError:
             runner._log_message(f"[FrameUtils] WARNING: opencv not installed, using slower ffmpeg fallback")
             runner._log_message(f"[FrameUtils] Install opencv for better performance: pip install opencv-python")
+
+    def _detect_interlacing(self):
+        """Detect if video is interlaced using ffprobe."""
+        try:
+            props = detect_video_properties(self.video_path, self.runner)
+            self.is_interlaced = props.get('interlaced', False)
+            self.field_order = props.get('field_order', 'progressive')
+
+            if self.is_interlaced:
+                self.runner._log_message(
+                    f"[FrameUtils] Interlaced content detected: {self.field_order.upper()}"
+                )
+        except Exception as e:
+            self.runner._log_message(f"[FrameUtils] Could not detect interlacing: {e}")
+            self.is_interlaced = False
+            self.field_order = 'progressive'
+
+    def _should_deinterlace(self) -> bool:
+        """Determine if deinterlacing should be applied."""
+        if self.deinterlace_method == 'none':
+            return False
+        if self.deinterlace_method == 'auto':
+            return self.is_interlaced
+        # Explicit method selected - always deinterlace
+        return True
+
+    def _get_deinterlace_method(self) -> str:
+        """Get the actual deinterlace method to use."""
+        if self.deinterlace_method == 'auto':
+            # Default to yadif for auto mode
+            return self.config.get('frame_deinterlace_method', 'yadif')
+        return self.deinterlace_method
+
+    def _apply_deinterlace_filter(self, clip, core):
+        """
+        Apply deinterlace filter to VapourSynth clip.
+
+        Args:
+            clip: VapourSynth clip
+            core: VapourSynth core
+
+        Returns:
+            Deinterlaced clip
+        """
+        method = self._get_deinterlace_method()
+        tff = self.field_order == 'tff'  # True = Top Field First
+
+        self.runner._log_message(
+            f"[FrameUtils] Applying deinterlace: {method} (field order: {'TFF' if tff else 'BFF'})"
+        )
+
+        try:
+            if method == 'yadif':
+                # YADIF - Yet Another DeInterlacing Filter
+                # Mode 0 = output one frame per frame (not bob)
+                # Order: 1 = TFF, 0 = BFF
+                if hasattr(core, 'yadifmod'):
+                    # Prefer yadifmod if available (better edge handling)
+                    clip = core.yadifmod.Yadifmod(clip, order=1 if tff else 0, mode=0)
+                elif hasattr(core, 'yadif'):
+                    clip = core.yadif.Yadif(clip, order=1 if tff else 0, mode=0)
+                else:
+                    # Fallback to znedi3-based yadif alternative
+                    self.runner._log_message("[FrameUtils] YADIF plugin not found, using std.SeparateFields + DoubleWeave")
+                    clip = self._deinterlace_fallback(clip, core, tff)
+
+            elif method == 'yadifmod':
+                # YADIFmod - improved edge handling
+                if hasattr(core, 'yadifmod'):
+                    clip = core.yadifmod.Yadifmod(clip, order=1 if tff else 0, mode=0)
+                else:
+                    self.runner._log_message("[FrameUtils] YADIFmod not available, falling back to YADIF")
+                    return self._apply_deinterlace_filter_method(clip, core, 'yadif', tff)
+
+            elif method == 'bob':
+                # Bob - doubles framerate by outputting each field as frame
+                # Simple and fast, good for frame matching
+                clip = core.std.SeparateFields(clip, tff=tff)
+                clip = core.resize.Spline36(clip, height=clip.height * 2)
+
+            elif method == 'w3fdif':
+                # W3FDIF - BBC's deinterlacer
+                if hasattr(core, 'w3fdif'):
+                    clip = core.w3fdif.W3FDIF(clip, order=1 if tff else 0, mode=1)
+                else:
+                    self.runner._log_message("[FrameUtils] W3FDIF not available, falling back to YADIF")
+                    return self._apply_deinterlace_filter_method(clip, core, 'yadif', tff)
+
+            elif method == 'bwdif':
+                # BWDIF - motion adaptive deinterlacer
+                if hasattr(core, 'bwdif'):
+                    clip = core.bwdif.Bwdif(clip, field=1 if tff else 0)
+                else:
+                    self.runner._log_message("[FrameUtils] BWDIF not available, falling back to YADIF")
+                    return self._apply_deinterlace_filter_method(clip, core, 'yadif', tff)
+
+            else:
+                self.runner._log_message(f"[FrameUtils] Unknown deinterlace method: {method}, using YADIF")
+                return self._apply_deinterlace_filter_method(clip, core, 'yadif', tff)
+
+            self.deinterlace_applied = True
+            self.runner._log_message(f"[FrameUtils] Deinterlace filter applied successfully")
+            return clip
+
+        except Exception as e:
+            self.runner._log_message(f"[FrameUtils] Deinterlace failed: {e}, using raw frames")
+            return clip
+
+    def _apply_deinterlace_filter_method(self, clip, core, method: str, tff: bool):
+        """Helper to apply a specific deinterlace method."""
+        self.deinterlace_method = method
+        return self._apply_deinterlace_filter(clip, core)
+
+    def _deinterlace_fallback(self, clip, core, tff: bool):
+        """Fallback deinterlacing using standard VapourSynth functions."""
+        # Separate fields, then weave back
+        clip = core.std.SeparateFields(clip, tff=tff)
+        clip = core.std.DoubleWeave(clip, tff=tff)
+        clip = core.std.SelectEvery(clip, 2, 0)
+        return clip
 
     def _get_index_cache_path(self, video_path: str, temp_dir: Path) -> Path:
         """
@@ -1482,6 +1624,10 @@ class VideoReader:
                 cachefile=str(index_path)
             )
 
+            # Apply deinterlacing if needed
+            if self._should_deinterlace():
+                clip = self._apply_deinterlace_filter(clip, core)
+
             # Keep clip in original format (usually YUV)
             # We'll extract only luma (Y) plane for hashing - more reliable than RGB
             self.vs_clip = clip
@@ -1490,7 +1636,13 @@ class VideoReader:
             self.fps = self.vs_clip.fps_num / self.vs_clip.fps_den
             self.use_vapoursynth = True
 
-            self.runner._log_message(f"[FrameUtils] VapourSynth ready! Using persistent index cache (FPS: {self.fps:.3f})")
+            deinterlace_status = ""
+            if self.deinterlace_applied:
+                deinterlace_status = f", deinterlaced with {self._get_deinterlace_method()}"
+            elif self.is_interlaced and self.deinterlace_method == 'none':
+                deinterlace_status = ", interlaced (deinterlace disabled)"
+
+            self.runner._log_message(f"[FrameUtils] VapourSynth ready! Using persistent index cache (FPS: {self.fps:.3f}{deinterlace_status})")
             self.runner._log_message(f"[FrameUtils] Index will be shared across all workers (no re-indexing!)")
 
             return True
@@ -1859,3 +2011,145 @@ def compute_hamming_distance(hash1, hash2) -> int:
     """
     # ImageHash objects support subtraction to get Hamming distance
     return hash1 - hash2
+
+
+def compute_ssim(frame1: 'Image.Image', frame2: 'Image.Image') -> float:
+    """
+    Compute Structural Similarity Index (SSIM) between two frames.
+
+    SSIM compares structural patterns and is more accurate than perceptual
+    hashing for detecting subtle differences.
+
+    Args:
+        frame1: First PIL Image object
+        frame2: Second PIL Image object
+
+    Returns:
+        SSIM value from 0.0 to 1.0. Higher = more similar.
+        1.0 = identical, >0.95 = very similar, <0.8 = noticeably different
+    """
+    try:
+        import numpy as np
+
+        # Convert to grayscale numpy arrays
+        arr1 = np.array(frame1.convert('L'))
+        arr2 = np.array(frame2.convert('L'))
+
+        # Resize to match if needed
+        if arr1.shape != arr2.shape:
+            from PIL import Image as PILImage
+            # Resize frame2 to match frame1
+            frame2_resized = frame2.resize(frame1.size, PILImage.Resampling.LANCZOS)
+            arr2 = np.array(frame2_resized.convert('L'))
+
+        # Try scikit-image SSIM first (most accurate)
+        try:
+            from skimage.metrics import structural_similarity
+            ssim_value = structural_similarity(arr1, arr2, data_range=255)
+            return float(ssim_value)
+        except ImportError:
+            pass
+
+        # Fallback: simplified SSIM calculation
+        # Using the formula: SSIM = (2*μ1*μ2 + C1)(2*σ12 + C2) / ((μ1² + μ2² + C1)(σ1² + σ2² + C2))
+        C1 = (0.01 * 255) ** 2
+        C2 = (0.03 * 255) ** 2
+
+        mu1 = arr1.mean()
+        mu2 = arr2.mean()
+        sigma1_sq = arr1.var()
+        sigma2_sq = arr2.var()
+        sigma12 = ((arr1 - mu1) * (arr2 - mu2)).mean()
+
+        ssim = ((2 * mu1 * mu2 + C1) * (2 * sigma12 + C2)) / \
+               ((mu1 ** 2 + mu2 ** 2 + C1) * (sigma1_sq + sigma2_sq + C2))
+
+        return float(ssim)
+
+    except Exception:
+        return 0.0
+
+
+def compute_mse(frame1: 'Image.Image', frame2: 'Image.Image') -> float:
+    """
+    Compute Mean Squared Error between two frames.
+
+    Lower MSE = more similar. 0 = identical.
+
+    Args:
+        frame1: First PIL Image object
+        frame2: Second PIL Image object
+
+    Returns:
+        MSE value. Lower = more similar.
+    """
+    try:
+        import numpy as np
+
+        arr1 = np.array(frame1.convert('L'), dtype=np.float64)
+        arr2 = np.array(frame2.convert('L'), dtype=np.float64)
+
+        # Resize to match if needed
+        if arr1.shape != arr2.shape:
+            from PIL import Image as PILImage
+            frame2_resized = frame2.resize(frame1.size, PILImage.Resampling.LANCZOS)
+            arr2 = np.array(frame2_resized.convert('L'), dtype=np.float64)
+
+        mse = np.mean((arr1 - arr2) ** 2)
+        return float(mse)
+
+    except Exception:
+        return float('inf')
+
+
+def compare_frames(
+    frame1: 'Image.Image',
+    frame2: 'Image.Image',
+    method: str = 'hash',
+    hash_algorithm: str = 'dhash',
+    hash_size: int = 8
+) -> tuple:
+    """
+    Compare two frames using the specified method.
+
+    Args:
+        frame1: First PIL Image object
+        frame2: Second PIL Image object
+        method: Comparison method ('hash', 'ssim', 'mse')
+        hash_algorithm: Hash algorithm when method='hash'
+        hash_size: Hash size when method='hash'
+
+    Returns:
+        Tuple of (distance, is_match):
+        - distance: Similarity metric (interpretation depends on method)
+        - is_match: Boolean indicating if frames are considered matching
+
+    Distance interpretation:
+    - hash: Hamming distance (0=identical, <5=match, >10=different)
+    - ssim: 1.0 - SSIM (0=identical, <0.05=match, >0.2=different)
+    - mse: Normalized MSE (0=identical, <100=match, >500=different)
+    """
+    if method == 'ssim':
+        ssim = compute_ssim(frame1, frame2)
+        # Convert to distance (0 = identical, higher = more different)
+        distance = (1.0 - ssim) * 100  # Scale to ~0-100 range
+        is_match = ssim > 0.90  # 90% similarity threshold
+        return (distance, is_match)
+
+    elif method == 'mse':
+        mse = compute_mse(frame1, frame2)
+        # Normalize to ~0-100 range (assuming 8-bit images)
+        distance = min(mse / 100, 100)  # Cap at 100
+        is_match = mse < 500  # Empirical threshold
+        return (distance, is_match)
+
+    else:  # 'hash' (default)
+        hash1 = compute_frame_hash(frame1, hash_size, hash_algorithm)
+        hash2 = compute_frame_hash(frame2, hash_size, hash_algorithm)
+
+        if hash1 is None or hash2 is None:
+            return (999, False)
+
+        distance = compute_hamming_distance(hash1, hash2)
+        is_match = distance <= 5  # Default threshold
+        return (distance, is_match)
