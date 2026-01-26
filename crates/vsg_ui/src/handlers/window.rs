@@ -140,14 +140,17 @@ impl App {
             }
         };
 
-        // Populate source groups
+        // Populate source groups (must happen before loading layout)
         self.populate_source_groups(&sources);
         self.manual_selection_job_idx = Some(job_idx);
         self.final_tracks.clear();
         self.attachment_sources.clear();
 
-        // Default to Source 1 for attachments
-        self.attachment_sources.insert("Source 1".to_string(), true);
+        // Try to load existing layout from disk
+        // If no layout exists, default to Source 1 for attachments
+        if !self.load_existing_layout(&sources) {
+            self.attachment_sources.insert("Source 1".to_string(), true);
+        }
 
         let settings = window::Settings {
             size: Size::new(1200.0, 800.0),

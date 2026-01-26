@@ -13,8 +13,8 @@ mod layout;
 
 pub use types::{
     JobQueueEntry, JobQueueStatus, ManualLayout, FinalTrackEntry,
-    TrackConfig, SourceCorrelationSettings,
+    TrackConfig, SourceCorrelationSettings, SavedLayoutData,
 };
 pub use queue::JobQueue;
 pub use discovery::discover_jobs;
-pub use layout::LayoutManager;
+pub use layout::{LayoutManager, generate_layout_id};

@@ -8,6 +8,28 @@ use std::path::{Path, PathBuf};
 
 use super::types::{ManualLayout, SavedLayoutData};
 
+/// Generate a deterministic job ID from source file paths.
+/// Uses MD5 hash of sorted source filenames (matches Python implementation).
+pub fn generate_layout_id(sources: &HashMap<String, PathBuf>) -> String {
+    use std::collections::BTreeMap;
+
+    // Sort sources by key and build the hash input string
+    let sorted: BTreeMap<_, _> = sources.iter().collect();
+    let source_string: String = sorted
+        .iter()
+        .filter_map(|(key, path)| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|name| format!("{}:{}", key, name))
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+
+    // MD5 hash, take first 16 hex chars (matches Python)
+    let digest = md5::compute(source_string.as_bytes());
+    format!("{:x}", digest)[..16].to_string()
+}
+
 /// Manager for job layouts.
 #[derive(Debug)]
 pub struct LayoutManager {
