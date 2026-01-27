@@ -258,11 +258,14 @@ def calculate_video_verified_offset(
             'sub_frame_precision': False,
         }
 
-    # Now calculate sub-frame precise offset using actual PTS values
-    # Use the match details from best candidate to get actual frame indices
+    # Calculate offset in milliseconds
+    # By default uses frame-based (frame_offset * frame_duration)
+    # Optionally can use PTS for VFR content (enable via config)
+    use_pts = config.get('video_verified_use_pts_precision', False)
     sub_frame_offset_ms = _calculate_subframe_offset_static(
         best_frame_offset, best_result.get('match_details', []),
-        checkpoint_times, source_reader, target_reader, fps, frame_duration_ms, log
+        checkpoint_times, source_reader, target_reader, fps, frame_duration_ms, log,
+        use_pts_precision=use_pts
     )
 
     # Close readers
@@ -277,7 +280,8 @@ def calculate_video_verified_offset(
 
     log(f"[VideoVerified] ───────────────────────────────────────")
     log(f"[VideoVerified] Audio correlation: {pure_correlation_ms:+.3f}ms")
-    log(f"[VideoVerified] Video-verified offset: {sub_frame_offset_ms:+.3f}ms (sub-frame precise)")
+    precision_mode = "PTS-based" if use_pts else "frame-based"
+    log(f"[VideoVerified] Video-verified offset: {sub_frame_offset_ms:+.3f}ms ({precision_mode})")
     log(f"[VideoVerified] + Global shift: {global_shift_ms:+.3f}ms")
     log(f"[VideoVerified] = Final offset: {final_offset_ms:+.3f}ms")
 
@@ -296,7 +300,7 @@ def calculate_video_verified_offset(
         'final_offset_ms': final_offset_ms,
         'candidates': candidate_results,
         'checkpoints': len(checkpoint_times),
-        'sub_frame_precision': True,
+        'use_pts_precision': use_pts,
     }
 
 
@@ -673,28 +677,24 @@ def _calculate_subframe_offset_static(
     target_reader,
     fps: float,
     frame_duration_ms: float,
-    log
+    log,
+    use_pts_precision: bool = False,
 ) -> float:
     """
-    Calculate sub-frame precise offset using actual PTS values of matched frames.
+    Calculate the final offset in milliseconds.
 
-    Once we know which frames match (source frame N <-> target frame M),
-    we use their actual presentation timestamps to get millisecond precision.
+    By default, uses simple frame-based calculation:
+        offset_ms = frame_offset * frame_duration_ms
 
-    For example:
-    - Source frame 1000 has PTS = 41708.125ms
-    - Target frame 1024 has PTS = 42709.458ms
-    - True offset = 42709.458 - 41708.125 = 1001.333ms
+    This is reliable when sequence verification confirms the frame offset is correct
+    (10/10 frames matching means we KNOW the offset). Container PTS differences
+    can introduce noise from muxing quirks, so frame-based is preferred.
 
-    This is more accurate than frame_offset * frame_duration which assumes
-    perfect CFR and doesn't account for VFR content or container timing.
-
-    IMPORTANT: We prioritize sequence-verified matches over single-frame matches.
-    Sequence-verified matches are more reliable because they've been confirmed
-    with multiple consecutive frames.
+    Optionally, can use PTS-based calculation for VFR content or when sub-frame
+    precision is needed. Enable with use_pts_precision=True.
 
     Args:
-        frame_offset: Best frame offset found
+        frame_offset: Best frame offset found (in frames)
         match_details: List of matched frame pairs from quality measurement
         checkpoint_times: Original checkpoint times
         source_reader: VideoReader for source
@@ -702,10 +702,22 @@ def _calculate_subframe_offset_static(
         fps: Video FPS
         frame_duration_ms: Frame duration in ms
         log: Logging function
+        use_pts_precision: If True, use PTS for sub-frame precision (default False)
 
     Returns:
-        Sub-frame precise offset in milliseconds
+        Offset in milliseconds
     """
+    # Default: simple frame-based calculation
+    frame_based_offset = frame_offset * frame_duration_ms
+
+    if not use_pts_precision:
+        # Just use frame-based - simple and reliable
+        log(f"[VideoVerified] Frame-based offset: {frame_offset:+d} frames = {frame_based_offset:+.3f}ms")
+        return frame_based_offset
+
+    # PTS precision mode - use actual container timestamps
+    log(f"[VideoVerified] Using PTS precision mode")
+
     # Prioritize sequence-verified matches (most reliable)
     sequence_verified_matches = [m for m in match_details if m.get('sequence_verified', False)]
 
@@ -720,9 +732,8 @@ def _calculate_subframe_offset_static(
 
     if not good_matches:
         # No good matches - fall back to frame-based calculation
-        fallback_ms = frame_offset * frame_duration_ms
-        log(f"[VideoVerified] No good matches for sub-frame precision, using frame-based: {fallback_ms:+.3f}ms")
-        return fallback_ms
+        log(f"[VideoVerified] No good matches for PTS, using frame-based: {frame_based_offset:+.3f}ms")
+        return frame_based_offset
 
     # Calculate offset from each matched pair using PTS
     pts_offsets = []
@@ -750,9 +761,8 @@ def _calculate_subframe_offset_static(
 
     if not pts_offsets:
         # PTS lookup failed - fall back to frame-based
-        fallback_ms = frame_offset * frame_duration_ms
-        log(f"[VideoVerified] PTS lookup failed, using frame-based: {fallback_ms:+.3f}ms")
-        return fallback_ms
+        log(f"[VideoVerified] PTS lookup failed, using frame-based: {frame_based_offset:+.3f}ms")
+        return frame_based_offset
 
     # Use median offset (robust to outliers)
     pts_offsets.sort()
@@ -762,7 +772,7 @@ def _calculate_subframe_offset_static(
     else:
         sub_frame_offset = pts_offsets[median_idx]
 
-    log(f"[VideoVerified] Sub-frame offset from {len(pts_offsets)} PTS pairs: {sub_frame_offset:+.3f}ms")
+    log(f"[VideoVerified] PTS-based offset from {len(pts_offsets)} pairs: {sub_frame_offset:+.3f}ms")
 
     return sub_frame_offset
 
