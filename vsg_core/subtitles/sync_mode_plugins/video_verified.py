@@ -218,10 +218,18 @@ def calculate_video_verified_offset(
     # If best score is 0 or no checkpoints matched, frame matching failed
     if best_result['quality'] <= 0 or best_result['matched_checkpoints'] == 0:
         log(f"[VideoVerified] ⚠ Frame matching failed - no frames matched at any offset")
+        log(f"[VideoVerified] Avg distance was {best_result['avg_distance']:.1f}, threshold is {hash_threshold}")
+
+        # Check if this might be fixable with higher threshold
+        if best_result['avg_distance'] < 40:
+            log(f"[VideoVerified] TIP: Try increasing 'frame_hash_threshold' to {int(best_result['avg_distance']) + 5}")
+            log(f"[VideoVerified]      (Settings → Video-Verified → Hash Threshold)")
+
         log(f"[VideoVerified] This could mean:")
         log(f"[VideoVerified]   - Videos have different encodes/color grading")
+        log(f"[VideoVerified]   - Different telecine/pulldown patterns (common for DVD)")
         log(f"[VideoVerified]   - One video has hardcoded subs/watermarks")
-        log(f"[VideoVerified]   - Deinterlacing differences")
+        log(f"[VideoVerified]   - Deinterlacing producing different results")
         log(f"[VideoVerified] Falling back to audio correlation: {pure_correlation_ms:+.3f}ms")
 
         # Close readers before returning
