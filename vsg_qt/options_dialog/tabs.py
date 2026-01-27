@@ -1646,10 +1646,36 @@ class SubtitleSyncTab(QWidget):
             "• 5: Wide search (more thorough)"
         )
 
+        self.widgets['video_verified_sequence_length'] = QSpinBox()
+        self.widgets['video_verified_sequence_length'].setRange(5, 30)
+        self.widgets['video_verified_sequence_length'].setValue(10)
+        self.widgets['video_verified_sequence_length'].setToolTip(
+            "Number of consecutive frames to verify at each checkpoint:\n\n"
+            "After finding a candidate offset, verify that N consecutive frames\n"
+            "all match. This prevents false positives from single-frame matches.\n\n"
+            "• 5: Fast, less strict\n"
+            "• 10 (Default): Good balance of speed and accuracy\n"
+            "• 20+: Very strict verification"
+        )
+
+        self.widgets['video_verified_use_pts_precision'] = QCheckBox()
+        self.widgets['video_verified_use_pts_precision'].setChecked(False)
+        self.widgets['video_verified_use_pts_precision'].setToolTip(
+            "Use PTS (Presentation Timestamps) for sub-frame precision:\n\n"
+            "OFF (Default): Use frame-based offset (frame_offset × frame_duration)\n"
+            "  - Simple and reliable when frames match perfectly\n"
+            "  - Avoids container timing noise from muxing quirks\n\n"
+            "ON: Use actual PTS timestamps from container\n"
+            "  - May help with VFR (variable frame rate) content\n"
+            "  - Can introduce noise from container start time differences"
+        )
+
         specific_layout.addRow("Zero-Check Threshold:", self.widgets['video_verified_zero_check_frames'])
         specific_layout.addRow("Quality Margin:", self.widgets['video_verified_min_quality_advantage'])
         specific_layout.addRow("Checkpoints:", self.widgets['video_verified_num_checkpoints'])
         specific_layout.addRow("Search Range:", self.widgets['video_verified_search_range_frames'])
+        specific_layout.addRow("Sequence Length:", self.widgets['video_verified_sequence_length'])
+        specific_layout.addRow("Use PTS Precision:", self.widgets['video_verified_use_pts_precision'])
 
         main_layout.addWidget(specific_group)
         main_layout.addStretch(1)
@@ -1709,6 +1735,8 @@ class SubtitleSyncTab(QWidget):
         self.widgets['video_verified_min_quality_advantage'].setEnabled(is_video_verified)
         self.widgets['video_verified_num_checkpoints'].setEnabled(is_video_verified)
         self.widgets['video_verified_search_range_frames'].setEnabled(is_video_verified)
+        self.widgets['video_verified_sequence_length'].setEnabled(is_video_verified)
+        self.widgets['video_verified_use_pts_precision'].setEnabled(is_video_verified)
 
 class ChaptersTab(QWidget):
     def __init__(self):

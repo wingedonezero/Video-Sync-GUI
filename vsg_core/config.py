@@ -123,6 +123,8 @@ class AppConfig:
             'video_verified_min_quality_advantage': 0.1,  # Quality margin needed to prefer non-zero offset
             'video_verified_num_checkpoints': 5,  # Number of checkpoint times for frame matching
             'video_verified_search_range_frames': 3,  # Frame range to search around candidates
+            'video_verified_sequence_length': 10,  # Number of consecutive frames to verify at each checkpoint
+            'video_verified_use_pts_precision': False,  # Use PTS for sub-frame precision (vs frame-based)
 
             # --- Timing Fix Settings ---
             'timing_fix_enabled': False,
