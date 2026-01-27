@@ -351,7 +351,7 @@ def _measure_candidate_quality_static(
         target_frame_idx = int(target_time_ms / frame_duration_ms)
 
         try:
-            source_frame = source_reader.get_frame(source_frame_idx)
+            source_frame = source_reader.get_frame_at_index(source_frame_idx)
             if source_frame is None:
                 continue
 
@@ -364,7 +364,7 @@ def _measure_candidate_quality_static(
                 if search_idx < 0:
                     continue
 
-                target_frame = target_reader.get_frame(search_idx)
+                target_frame = target_reader.get_frame_at_index(search_idx)
                 if target_frame is None:
                     continue
 
