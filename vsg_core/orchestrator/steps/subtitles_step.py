@@ -879,10 +879,12 @@ class SubtitlesStep:
         Only runs in video-verified mode.
         """
         from vsg_core.subtitles.sync_mode_plugins.video_verified import calculate_video_verified_offset
+        from pathlib import Path
 
         runner._log_message("[VideoVerified] ═══════════════════════════════════════════════════════")
-        runner._log_message("[VideoVerified] Pre-computing frame-corrected delays per source...")
+        runner._log_message("[VideoVerified] Video-to-Video Frame Alignment")
         runner._log_message("[VideoVerified] ═══════════════════════════════════════════════════════")
+        runner._log_message(f"[VideoVerified] Reference: Source 1 ({Path(source1_file).name})")
 
         # Find unique sources that have subtitle tracks
         sources_with_subs = set()
@@ -894,10 +896,10 @@ class SubtitlesStep:
                     sources_with_subs.add(source_key)
 
         if not sources_with_subs:
-            runner._log_message("[VideoVerified] No non-Source 1 subtitle tracks found, skipping pre-processing")
+            runner._log_message("[VideoVerified] No subtitle tracks from other sources, skipping")
             return
 
-        runner._log_message(f"[VideoVerified] Sources with subtitle tracks: {sorted(sources_with_subs)}")
+        runner._log_message(f"[VideoVerified] Aligning: {', '.join(sorted(sources_with_subs))} → Source 1")
 
         # Process each source
         for source_key in sorted(sources_with_subs):
@@ -906,7 +908,7 @@ class SubtitlesStep:
                 runner._log_message(f"[VideoVerified] WARNING: No video file for {source_key}, skipping")
                 continue
 
-            runner._log_message(f"\n[VideoVerified] Processing {source_key}...")
+            runner._log_message(f"\n[VideoVerified] ─── {source_key} vs Source 1 ───")
 
             # Get delays for this source
             total_delay_ms = 0.0
@@ -937,12 +939,6 @@ class SubtitlesStep:
                     if source_key in ctx.delays.raw_source_delays_ms:
                         ctx.delays.raw_source_delays_ms[source_key] = corrected_delay_ms
 
-                    # Report the change
-                    if abs(corrected_delay_ms - original_delay) > 1:
-                        runner._log_message(f"[VideoVerified] {source_key}: delay corrected {original_delay:+.1f}ms → {corrected_delay_ms:+.1f}ms")
-                    else:
-                        runner._log_message(f"[VideoVerified] {source_key}: delay unchanged at {corrected_delay_ms:+.1f}ms")
-
                     # Store that we've processed this source
                     if not hasattr(ctx, 'video_verified_sources'):
                         ctx.video_verified_sources = {}
@@ -951,15 +947,20 @@ class SubtitlesStep:
                         'corrected_delay_ms': corrected_delay_ms,
                         'details': details,
                     }
+
+                    # Report the result
+                    if abs(corrected_delay_ms - original_delay) > 1:
+                        runner._log_message(f"[VideoVerified] ✓ {source_key} → Source 1: {original_delay:+.1f}ms corrected to {corrected_delay_ms:+.1f}ms")
+                    else:
+                        runner._log_message(f"[VideoVerified] ✓ {source_key} → Source 1: {corrected_delay_ms:+.1f}ms (no frame correction needed)")
                 else:
-                    runner._log_message(f"[VideoVerified] {source_key}: frame matching returned None, keeping original delay")
+                    runner._log_message(f"[VideoVerified] ✗ {source_key}: frame matching failed, using audio correlation")
 
             except Exception as e:
-                runner._log_message(f"[VideoVerified] ERROR processing {source_key}: {e}")
-                runner._log_message(f"[VideoVerified] Keeping original delay for {source_key}")
+                runner._log_message(f"[VideoVerified] ✗ {source_key}: ERROR - {e}")
 
         runner._log_message("\n[VideoVerified] ═══════════════════════════════════════════════════════")
-        runner._log_message("[VideoVerified] Pre-processing complete - all subtitle tracks will use corrected delays")
+        runner._log_message("[VideoVerified] Frame alignment complete")
         runner._log_message("[VideoVerified] ═══════════════════════════════════════════════════════\n")
 
     def _apply_video_verified_for_bitmap(
