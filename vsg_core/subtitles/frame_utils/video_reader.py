@@ -539,6 +539,92 @@ class VideoReader:
         else:
             return self._get_frame_ffmpeg(time_ms)
 
+    def get_frame_pts(self, frame_num: int) -> Optional[float]:
+        """
+        Get the Presentation Time Stamp (PTS) of a frame in milliseconds.
+
+        For VFR (variable frame rate) content, this returns the actual container
+        timestamp. For CFR content, it calculates from frame index × frame duration.
+
+        This is essential for sub-frame accurate timing - once we identify which
+        frames match between source and target, we use their actual PTS values
+        to calculate the precise offset.
+
+        Args:
+            frame_num: Frame index (0-based)
+
+        Returns:
+            PTS in milliseconds, or None if unavailable
+        """
+        if self.use_vapoursynth and self.vs_clip:
+            return self._get_pts_vapoursynth(frame_num)
+        elif self.use_ffms2 and self.source:
+            return self._get_pts_ffms2(frame_num)
+        elif self.fps:
+            # Fallback: calculate from frame index (CFR assumption)
+            return (frame_num * 1000.0) / self.fps
+        return None
+
+    def _get_pts_vapoursynth(self, frame_num: int) -> Optional[float]:
+        """Get PTS using VapourSynth frame properties."""
+        try:
+            # Clamp to valid range
+            frame_num = max(0, min(frame_num, len(self.vs_clip) - 1))
+
+            # Get frame to access properties
+            frame = self.vs_clip.get_frame(frame_num)
+
+            # Try VFR timestamp first (_AbsoluteTime in seconds)
+            props = frame.props
+            if '_AbsoluteTime' in props:
+                return props['_AbsoluteTime'] * 1000.0
+
+            # Fall back to CFR calculation
+            fps_num = self.vs_clip.fps_num
+            fps_den = self.vs_clip.fps_den
+            return (frame_num * fps_den * 1000.0) / fps_num
+
+        except Exception as e:
+            self.runner._log_message(f"[FrameUtils] Error getting VapourSynth PTS: {e}")
+            # Fallback to CFR calculation
+            if self.fps:
+                return (frame_num * 1000.0) / self.fps
+            return None
+
+    def _get_pts_ffms2(self, frame_num: int) -> Optional[float]:
+        """Get PTS using FFMS2 track info."""
+        try:
+            # Clamp to valid range
+            frame_num = max(0, min(frame_num, self.source.properties.NumFrames - 1))
+
+            # FFMS2 provides frame info with PTS
+            # Get track for timestamp information
+            track = self.source.track
+            frame_info = track.frame_info_list[frame_num]
+
+            # PTS is in track timebase units, convert to milliseconds
+            # frame_info.pts is in track.time_base units
+            time_base = track.time_base
+            pts_seconds = frame_info.pts * time_base.numerator / time_base.denominator
+            return pts_seconds * 1000.0
+
+        except Exception as e:
+            self.runner._log_message(f"[FrameUtils] Error getting FFMS2 PTS: {e}")
+            # Fallback to CFR calculation
+            if self.fps:
+                return (frame_num * 1000.0) / self.fps
+            return None
+
+    def get_frame_count(self) -> int:
+        """Get total frame count of the video."""
+        if self.use_vapoursynth and self.vs_clip:
+            return len(self.vs_clip)
+        elif self.use_ffms2 and self.source:
+            return self.source.properties.NumFrames
+        elif self.use_opencv and self.cap:
+            return int(self.cap.get(self.cv2.CAP_PROP_FRAME_COUNT))
+        return 0
+
     def get_frame_at_index(self, frame_num: int) -> Optional['Image.Image']:
         """
         Extract frame by frame number directly (avoids time-to-frame conversion precision issues).
