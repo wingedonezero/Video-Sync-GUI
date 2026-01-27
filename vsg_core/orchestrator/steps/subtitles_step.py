@@ -197,6 +197,24 @@ class SubtitlesStep:
                 continue  # Skip to next track - file is already in item.extracted_path
 
             # ================================================================
+            # Check if we should use pysubs2 for generated tracks
+            # ================================================================
+            use_pysubs2_for_generated = ctx.settings_dict.get('generated_use_pysubs2', False)
+
+            if item.is_generated and use_pysubs2_for_generated and item.extracted_path:
+                ext = item.extracted_path.suffix.lower()
+                if ext in ['.ass', '.ssa']:
+                    try:
+                        self._process_generated_track_pysubs2(
+                            item, ctx, runner, source1_file, subtitle_sync_mode
+                        )
+                        continue  # Skip normal SubtitleData processing
+                    except Exception as e:
+                        runner._log_message(f"[pysubs2] ERROR processing generated track {item.track.id}: {e}")
+                        runner._log_message(f"[pysubs2] Falling back to SubtitleData processing")
+                        # Fall through to normal processing
+
+            # ================================================================
             # Unified SubtitleData Processing
             # ================================================================
             if ocr_subtitle_data is not None:
@@ -1024,6 +1042,82 @@ class SubtitlesStep:
             pass
 
         return None
+
+    def _process_generated_track_pysubs2(
+        self,
+        item,
+        ctx: 'Context',
+        runner: 'CommandRunner',
+        source1_file: Optional[Path],
+        subtitle_sync_mode: str
+    ) -> None:
+        """
+        Process a generated track using pysubs2 instead of SubtitleData.
+
+        This is an alternative processing path for generated tracks that uses
+        pysubs2 for loading, filtering, and saving. Useful for debugging if
+        SubtitleData is suspected of causing issues.
+
+        Args:
+            item: PlanItem for the generated track
+            ctx: Context with settings and delays
+            runner: CommandRunner for logging
+            source1_file: Path to Source 1 video (for sync reference)
+            subtitle_sync_mode: Current sync mode
+        """
+        from vsg_core.subtitles.operations.pysubs2_filter import process_generated_track_pysubs2
+
+        runner._log_message(f"[pysubs2] === Processing Generated Track with pysubs2 ===")
+        runner._log_message(f"[pysubs2] Track {item.track.id} from {item.track.source}")
+        runner._log_message(f"[pysubs2] Input: {item.extracted_path.name}")
+
+        # Get the delay to apply
+        source_key = item.sync_to if item.track.source == 'External' else item.track.source
+        total_delay_ms = 0.0
+
+        # Check for video-verified pre-computed delay
+        if subtitle_sync_mode == 'video-verified' and hasattr(ctx, 'video_verified_sources'):
+            if source_key in ctx.video_verified_sources:
+                cached = ctx.video_verified_sources[source_key]
+                total_delay_ms = cached['corrected_delay_ms']
+                runner._log_message(f"[pysubs2] Using video-verified delay: {total_delay_ms:+.3f}ms")
+            elif source_key == 'Source 1':
+                # Source 1 is reference, delay is just global shift
+                if ctx.delays:
+                    total_delay_ms = ctx.delays.raw_global_shift_ms
+                runner._log_message(f"[pysubs2] Source 1 reference, delay: {total_delay_ms:+.3f}ms")
+            else:
+                # Fallback to raw delay
+                if ctx.delays and source_key in ctx.delays.raw_source_delays_ms:
+                    total_delay_ms = ctx.delays.raw_source_delays_ms[source_key]
+                runner._log_message(f"[pysubs2] Using correlation delay: {total_delay_ms:+.3f}ms")
+        elif ctx.delays:
+            # Non-video-verified mode - use correlation delay
+            if source_key in ctx.delays.raw_source_delays_ms:
+                total_delay_ms = ctx.delays.raw_source_delays_ms[source_key]
+            runner._log_message(f"[pysubs2] Using delay: {total_delay_ms:+.3f}ms")
+
+        # Determine output path
+        output_path = item.extracted_path.with_suffix('.ass')
+
+        # Process with pysubs2
+        result = process_generated_track_pysubs2(
+            input_path=item.extracted_path,
+            output_path=output_path,
+            filter_styles=item.generated_filter_styles or [],
+            filter_mode=item.generated_filter_mode or 'exclude',
+            delay_ms=total_delay_ms,
+            runner=runner
+        )
+
+        if result['success']:
+            item.extracted_path = output_path
+            # Set frame_adjusted if delay was applied
+            if abs(total_delay_ms) > 0.001:
+                item.frame_adjusted = True
+            runner._log_message(f"[pysubs2] Success - {result.get('filtered_count', 0)} events in output")
+        else:
+            raise RuntimeError(f"pysubs2 processing failed: {result.get('error', 'Unknown error')}")
 
     def _run_video_verified_per_source(
         self,

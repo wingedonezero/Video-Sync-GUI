@@ -1799,6 +1799,29 @@ class SubtitleSyncTab(QWidget):
         interlaced_layout.addRow("Fallback to Audio:", self.widgets['interlaced_fallback_to_audio'])
 
         main_layout.addWidget(interlaced_group)
+
+        # --- Generated Tracks Settings Group ---
+        generated_group = QGroupBox("Generated Tracks Settings")
+        generated_layout = QFormLayout(generated_group)
+
+        self.widgets['generated_use_pysubs2'] = QCheckBox()
+        self.widgets['generated_use_pysubs2'].setChecked(False)
+        self.widgets['generated_use_pysubs2'].setToolTip(
+            "Use pysubs2 library for processing generated tracks:\n\n"
+            "When enabled, generated tracks (style-filtered tracks) will use\n"
+            "pysubs2 instead of the built-in SubtitleData system for:\n"
+            "  - Loading the source subtitle file\n"
+            "  - Filtering events by style\n"
+            "  - Applying sync delays\n"
+            "  - Saving the output file\n\n"
+            "This is useful for debugging if you suspect SubtitleData\n"
+            "is causing timing or style issues with generated tracks.\n\n"
+            "Requires pysubs2 to be installed: pip install pysubs2"
+        )
+
+        generated_layout.addRow("Use pysubs2 for Generated:", self.widgets['generated_use_pysubs2'])
+
+        main_layout.addWidget(generated_group)
         main_layout.addStretch(1)
 
         # Connect signals

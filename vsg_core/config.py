@@ -140,6 +140,9 @@ class AppConfig:
             'interlaced_force_mode': 'auto',  # 'auto', 'interlaced', 'telecine', 'progressive'
             'interlaced_comparison_method': 'ssim',  # Comparison method for interlaced: 'hash', 'ssim', 'mse'
 
+            # --- Generated Track Settings ---
+            'generated_use_pysubs2': False,  # Use pysubs2 instead of SubtitleData for generated tracks
+
             # --- Timing Fix Settings ---
             'timing_fix_enabled': False,
             'timing_fix_overlaps': True,
