@@ -1678,6 +1678,137 @@ class SubtitleSyncTab(QWidget):
         specific_layout.addRow("Use PTS Precision:", self.widgets['video_verified_use_pts_precision'])
 
         main_layout.addWidget(specific_group)
+
+        # --- Interlaced/Telecine Settings Group ---
+        interlaced_group = QGroupBox("Interlaced/Telecine Content Settings")
+        interlaced_layout = QFormLayout(interlaced_group)
+
+        self.widgets['interlaced_handling_enabled'] = QCheckBox()
+        self.widgets['interlaced_handling_enabled'].setChecked(False)
+        self.widgets['interlaced_handling_enabled'].setToolTip(
+            "Enable special handling for interlaced/telecine content:\n\n"
+            "When enabled, uses separate settings optimized for:\n"
+            "• DVD content (480i/576i)\n"
+            "• Telecine anime (3:2 pulldown)\n"
+            "• Interlaced broadcast recordings\n\n"
+            "These settings won't affect progressive HD content."
+        )
+        self.widgets['interlaced_handling_enabled'].stateChanged.connect(self._update_interlaced_visibility)
+
+        self.widgets['interlaced_force_mode'] = QComboBox()
+        self.widgets['interlaced_force_mode'].addItems(['auto', 'interlaced', 'telecine', 'progressive'])
+        self.widgets['interlaced_force_mode'].setToolTip(
+            "Detection mode for content type:\n\n"
+            "• auto: Detect from video properties (recommended)\n"
+            "• interlaced: Force interlaced handling\n"
+            "• telecine: Force telecine/IVTC handling\n"
+            "• progressive: Force progressive (disable special handling)"
+        )
+
+        self.widgets['interlaced_hash_algorithm'] = QComboBox()
+        self.widgets['interlaced_hash_algorithm'].addItems(['ahash', 'phash', 'dhash', 'whash'])
+        self.widgets['interlaced_hash_algorithm'].setCurrentText('ahash')
+        self.widgets['interlaced_hash_algorithm'].setToolTip(
+            "Hash algorithm for interlaced content:\n\n"
+            "• ahash: Average hash - most tolerant, good for interlaced\n"
+            "• phash: Perceptual hash - DCT-based, moderate tolerance\n"
+            "• dhash: Difference hash - edge-based, less tolerant\n"
+            "• whash: Wavelet hash - good for similar content"
+        )
+
+        self.widgets['interlaced_hash_size'] = QSpinBox()
+        self.widgets['interlaced_hash_size'].setRange(4, 16)
+        self.widgets['interlaced_hash_size'].setValue(8)
+        self.widgets['interlaced_hash_size'].setToolTip("Hash size for interlaced content (8 recommended)")
+
+        self.widgets['interlaced_hash_threshold'] = QSpinBox()
+        self.widgets['interlaced_hash_threshold'].setRange(5, 50)
+        self.widgets['interlaced_hash_threshold'].setValue(25)
+        self.widgets['interlaced_hash_threshold'].setToolTip(
+            "Hash distance threshold for interlaced content:\n\n"
+            "Higher values allow more difference between frames.\n"
+            "Interlaced content needs higher threshold due to:\n"
+            "• Deinterlacing artifacts\n"
+            "• Field blending differences\n"
+            "• Different encode settings\n\n"
+            "• 15-20: Strict matching\n"
+            "• 25 (Default): Balanced\n"
+            "• 30-40: Tolerant matching"
+        )
+
+        self.widgets['interlaced_sequence_length'] = QSpinBox()
+        self.widgets['interlaced_sequence_length'].setRange(3, 20)
+        self.widgets['interlaced_sequence_length'].setValue(5)
+        self.widgets['interlaced_sequence_length'].setToolTip(
+            "Sequence verification length for interlaced content:\n\n"
+            "Shorter than progressive since frames may not align perfectly.\n"
+            "• 3-5: Recommended for interlaced/telecine\n"
+            "• 5 (Default): Balanced"
+        )
+
+        self.widgets['interlaced_num_checkpoints'] = QSpinBox()
+        self.widgets['interlaced_num_checkpoints'].setRange(3, 10)
+        self.widgets['interlaced_num_checkpoints'].setValue(5)
+        self.widgets['interlaced_num_checkpoints'].setToolTip("Number of checkpoint times for interlaced content")
+
+        self.widgets['interlaced_search_range_frames'] = QSpinBox()
+        self.widgets['interlaced_search_range_frames'].setRange(3, 15)
+        self.widgets['interlaced_search_range_frames'].setValue(5)
+        self.widgets['interlaced_search_range_frames'].setToolTip(
+            "Frame search range for interlaced content:\n\n"
+            "Wider range helps with telecine phase differences.\n"
+            "• 5 (Default): Standard for interlaced\n"
+            "• 10+: For difficult telecine content"
+        )
+
+        self.widgets['interlaced_deinterlace_method'] = QComboBox()
+        self.widgets['interlaced_deinterlace_method'].addItems(['bwdif', 'yadif', 'yadifmod', 'bob', 'w3fdif'])
+        self.widgets['interlaced_deinterlace_method'].setCurrentText('bwdif')
+        self.widgets['interlaced_deinterlace_method'].setToolTip(
+            "Deinterlacing method for frame extraction:\n\n"
+            "• bwdif: High quality, good motion handling (recommended)\n"
+            "• yadif: Fast, good quality\n"
+            "• yadifmod: Enhanced yadif with edge detection\n"
+            "• bob: Simple field doubling (fast but lower quality)\n"
+            "• w3fdif: Weston 3-field deinterlacing"
+        )
+
+        self.widgets['interlaced_use_ivtc'] = QCheckBox()
+        self.widgets['interlaced_use_ivtc'].setChecked(False)
+        self.widgets['interlaced_use_ivtc'].setToolTip(
+            "Use Inverse Telecine (IVTC) for telecine content:\n\n"
+            "Restores original 24fps from 30fps telecined video.\n"
+            "Requires VapourSynth VIVTC plugin.\n\n"
+            "Enable for:\n"
+            "• Anime DVDs with 3:2 pulldown\n"
+            "• Film content on NTSC DVDs\n\n"
+            "Disable for:\n"
+            "• True 30fps interlaced content\n"
+            "• PAL content (25fps)"
+        )
+
+        self.widgets['interlaced_fallback_to_audio'] = QCheckBox()
+        self.widgets['interlaced_fallback_to_audio'].setChecked(True)
+        self.widgets['interlaced_fallback_to_audio'].setToolTip(
+            "Fall back to audio correlation if frame matching fails:\n\n"
+            "When enabled, uses audio correlation result if no\n"
+            "frame sequences can be matched. Recommended ON.\n\n"
+            "When disabled, will report failure if frames don't match."
+        )
+
+        interlaced_layout.addRow("Enable Interlaced Handling:", self.widgets['interlaced_handling_enabled'])
+        interlaced_layout.addRow("Detection Mode:", self.widgets['interlaced_force_mode'])
+        interlaced_layout.addRow("Hash Algorithm:", self.widgets['interlaced_hash_algorithm'])
+        interlaced_layout.addRow("Hash Size:", self.widgets['interlaced_hash_size'])
+        interlaced_layout.addRow("Hash Threshold:", self.widgets['interlaced_hash_threshold'])
+        interlaced_layout.addRow("Sequence Length:", self.widgets['interlaced_sequence_length'])
+        interlaced_layout.addRow("Checkpoints:", self.widgets['interlaced_num_checkpoints'])
+        interlaced_layout.addRow("Search Range:", self.widgets['interlaced_search_range_frames'])
+        interlaced_layout.addRow("Deinterlace Method:", self.widgets['interlaced_deinterlace_method'])
+        interlaced_layout.addRow("Use IVTC:", self.widgets['interlaced_use_ivtc'])
+        interlaced_layout.addRow("Fallback to Audio:", self.widgets['interlaced_fallback_to_audio'])
+
+        main_layout.addWidget(interlaced_group)
         main_layout.addStretch(1)
 
         # Connect signals
@@ -1737,6 +1868,32 @@ class SubtitleSyncTab(QWidget):
         self.widgets['video_verified_search_range_frames'].setEnabled(is_video_verified)
         self.widgets['video_verified_sequence_length'].setEnabled(is_video_verified)
         self.widgets['video_verified_use_pts_precision'].setEnabled(is_video_verified)
+
+        # Interlaced settings - enabled when video-verified mode AND interlaced handling enabled
+        self.widgets['interlaced_handling_enabled'].setEnabled(is_video_verified)
+        self._update_interlaced_visibility()
+
+    def _update_interlaced_visibility(self):
+        """Enable/disable interlaced settings based on checkbox state."""
+        is_video_verified = self.widgets['subtitle_sync_mode'].currentText() == 'video-verified'
+        interlaced_enabled = self.widgets['interlaced_handling_enabled'].isChecked() and is_video_verified
+
+        interlaced_widgets = [
+            'interlaced_force_mode',
+            'interlaced_hash_algorithm',
+            'interlaced_hash_size',
+            'interlaced_hash_threshold',
+            'interlaced_sequence_length',
+            'interlaced_num_checkpoints',
+            'interlaced_search_range_frames',
+            'interlaced_deinterlace_method',
+            'interlaced_use_ivtc',
+            'interlaced_fallback_to_audio',
+        ]
+
+        for key in interlaced_widgets:
+            if key in self.widgets:
+                self.widgets[key].setEnabled(interlaced_enabled)
 
 class ChaptersTab(QWidget):
     def __init__(self):
