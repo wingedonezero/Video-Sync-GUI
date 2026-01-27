@@ -105,6 +105,9 @@ def detect_video_properties(video_path: str, runner) -> Dict[str, Any]:
         'interlaced': False,
         'field_order': 'progressive',
         'scan_type': 'progressive',
+        'content_type': 'progressive',  # 'progressive', 'interlaced', 'telecine', 'unknown'
+        'is_sd': False,  # True if SD content (height <= 576)
+        'is_dvd': False,  # True if likely DVD content
         'duration_ms': 0.0,
         'frame_count': 0,
         'width': 1920,
@@ -203,21 +206,52 @@ def detect_video_properties(video_path: str, runner) -> Dict[str, Any]:
             # Estimate frame count from duration
             props['frame_count'] = int(props['duration_ms'] * props['fps'] / 1000.0)
 
+        # Detect SD content and DVD characteristics
+        height = props['height']
+        props['is_sd'] = height <= 576  # 480i, 480p, 576i, 576p
+
+        # DVD detection heuristics
+        # NTSC DVD: 720x480 or 704x480
+        # PAL DVD: 720x576 or 704x576
+        is_ntsc_dvd = height in (480, 486) and props['width'] in (720, 704, 640)
+        is_pal_dvd = height in (576, 578) and props['width'] in (720, 704)
+        props['is_dvd'] = is_ntsc_dvd or is_pal_dvd
+
+        # Determine content_type based on multiple factors
+        # This helps decide which settings to use
+        if props['interlaced']:
+            # Check for telecine characteristics
+            # NTSC telecine: 29.97fps interlaced from 24fps film
+            if abs(props['fps'] - 29.97) < 0.1 and is_ntsc_dvd:
+                # Likely telecine - NTSC DVD with 29.97i that was probably 24fps film
+                props['content_type'] = 'telecine'
+            else:
+                props['content_type'] = 'interlaced'
+        elif abs(props['fps'] - 29.97) < 0.1 and props['is_sd']:
+            # 29.97p SD content - could be soft telecine or native
+            props['content_type'] = 'unknown'  # Need further analysis
+        else:
+            props['content_type'] = 'progressive'
+
         # Log detected properties
         runner._log_message(f"[VideoProps] FPS: {props['fps']:.3f} ({props['fps_fraction'][0]}/{props['fps_fraction'][1]})")
         runner._log_message(f"[VideoProps] Resolution: {props['width']}x{props['height']}")
         runner._log_message(f"[VideoProps] Scan type: {props['scan_type']}, Field order: {props['field_order']}")
         runner._log_message(f"[VideoProps] Duration: {props['duration_ms']:.0f}ms, Frames: {props['frame_count']}")
 
-        # Additional telecine detection for NTSC content
-        # 29.97fps with film content often indicates telecine
-        if abs(props['fps'] - 29.97) < 0.01:
-            # Could be true 29.97, interlaced TV, or telecined film
-            # We'll note this for potential special handling
-            if props['interlaced']:
-                runner._log_message(f"[VideoProps] NOTE: 29.97i content - may be interlaced TV or hard telecine")
-            else:
-                runner._log_message(f"[VideoProps] NOTE: 29.97p content - may be soft telecine or native 30p")
+        # Log content type detection
+        if props['is_dvd']:
+            runner._log_message(f"[VideoProps] Content type: {props['content_type']} (DVD detected)")
+        elif props['is_sd']:
+            runner._log_message(f"[VideoProps] Content type: {props['content_type']} (SD content)")
+        else:
+            runner._log_message(f"[VideoProps] Content type: {props['content_type']}")
+
+        # Additional notes for specific content types
+        if props['content_type'] == 'telecine':
+            runner._log_message(f"[VideoProps] NOTE: Telecine detected - IVTC may improve frame matching")
+        elif props['content_type'] == 'interlaced':
+            runner._log_message(f"[VideoProps] NOTE: Interlaced content - deinterlacing required for frame matching")
 
         return props
 
