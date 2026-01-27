@@ -102,8 +102,37 @@ def calculate_video_verified_offset(
     log(f"[VideoVerified] Global shift: {global_shift_ms:+.3f}ms")
     log(f"[VideoVerified] Pure correlation (audio): {pure_correlation_ms:+.3f}ms")
 
+    # Detect video properties for both videos
+    source_props = detect_video_properties(source_video, runner)
+    target_props = detect_video_properties(target_video, runner)
+
+    # Determine if we should use interlaced handling
+    interlaced_handling_enabled = config.get('interlaced_handling_enabled', False)
+    force_mode = config.get('interlaced_force_mode', 'auto')
+
+    # Check if either video is interlaced/telecine
+    source_needs_interlaced = source_props.get('content_type') in ('interlaced', 'telecine')
+    target_needs_interlaced = target_props.get('content_type') in ('interlaced', 'telecine')
+    either_interlaced = source_needs_interlaced or target_needs_interlaced
+
+    # Determine if we should use interlaced settings
+    use_interlaced_settings = False
+    if force_mode == 'progressive':
+        use_interlaced_settings = False
+    elif force_mode in ('interlaced', 'telecine'):
+        use_interlaced_settings = True
+    elif force_mode == 'auto' and interlaced_handling_enabled and either_interlaced:
+        use_interlaced_settings = True
+
+    if use_interlaced_settings:
+        log(f"[VideoVerified] Using INTERLACED settings")
+        if source_needs_interlaced:
+            log(f"[VideoVerified]   Source: {source_props.get('content_type')} ({source_props.get('width')}x{source_props.get('height')})")
+        if target_needs_interlaced:
+            log(f"[VideoVerified]   Target: {target_props.get('content_type')} ({target_props.get('width')}x{target_props.get('height')})")
+
     # Detect FPS
-    fps = detect_video_fps(source_video, runner)
+    fps = source_props.get('fps', 23.976)
     if not fps:
         fps = 23.976
         log(f"[VideoVerified] FPS detection failed, using default: {fps}")
@@ -111,16 +140,28 @@ def calculate_video_verified_offset(
     frame_duration_ms = 1000.0 / fps
     log(f"[VideoVerified] FPS: {fps:.3f} (frame: {frame_duration_ms:.3f}ms)")
 
-    # Get config parameters
-    num_checkpoints = config.get('video_verified_num_checkpoints', 5)
-    search_range_frames = config.get('video_verified_search_range_frames', 3)
-    hash_algorithm = config.get('frame_hash_algorithm', 'dhash')
-    hash_size = int(config.get('frame_hash_size', 8))
-    hash_threshold = int(config.get('frame_hash_threshold', 5))
-    window_radius = int(config.get('frame_window_radius', 5))
-    comparison_method = config.get('frame_comparison_method', 'hash')
+    # Get config parameters - use interlaced settings if appropriate
+    if use_interlaced_settings:
+        num_checkpoints = config.get('interlaced_num_checkpoints', 5)
+        search_range_frames = config.get('interlaced_search_range_frames', 5)
+        hash_algorithm = config.get('interlaced_hash_algorithm', 'ahash')
+        hash_size = int(config.get('interlaced_hash_size', 8))
+        hash_threshold = int(config.get('interlaced_hash_threshold', 25))
+        window_radius = int(config.get('frame_window_radius', 5))
+        comparison_method = config.get('frame_comparison_method', 'hash')
+        interlaced_fallback_to_audio = config.get('interlaced_fallback_to_audio', True)
+    else:
+        num_checkpoints = config.get('video_verified_num_checkpoints', 5)
+        search_range_frames = config.get('video_verified_search_range_frames', 3)
+        hash_algorithm = config.get('frame_hash_algorithm', 'dhash')
+        hash_size = int(config.get('frame_hash_size', 8))
+        hash_threshold = int(config.get('frame_hash_threshold', 5))
+        window_radius = int(config.get('frame_window_radius', 5))
+        comparison_method = config.get('frame_comparison_method', 'hash')
+        interlaced_fallback_to_audio = True  # Default behavior
 
     log(f"[VideoVerified] Checkpoints: {num_checkpoints}, Search: ±{search_range_frames} frames")
+    log(f"[VideoVerified] Hash: {hash_algorithm} size={hash_size} threshold={hash_threshold}")
     log(f"[VideoVerified] Comparison method: {comparison_method}")
 
     # Try to import frame utilities
@@ -160,7 +201,13 @@ def calculate_video_verified_offset(
 
     # Open video readers with deinterlace support
     try:
-        deinterlace_mode = config.get('frame_deinterlace_mode', 'auto')
+        # Use interlaced deinterlace method if enabled
+        if use_interlaced_settings:
+            deinterlace_mode = config.get('interlaced_deinterlace_method', 'bwdif')
+            log(f"[VideoVerified] Using deinterlace method: {deinterlace_mode}")
+        else:
+            deinterlace_mode = config.get('frame_deinterlace_mode', 'auto')
+
         source_reader = VideoReader(
             source_video, runner, temp_dir=temp_dir,
             deinterlace=deinterlace_mode, config=config
@@ -186,7 +233,12 @@ def calculate_video_verified_offset(
 
     # Test each candidate frame offset
     candidate_results = []
-    sequence_length = config.get('video_verified_sequence_length', 10)
+
+    # Get sequence length based on content type
+    if use_interlaced_settings:
+        sequence_length = config.get('interlaced_sequence_length', 5)
+    else:
+        sequence_length = config.get('video_verified_sequence_length', 10)
 
     log(f"[VideoVerified] Sequence verification: {sequence_length} consecutive frames must match")
 
@@ -213,8 +265,8 @@ def calculate_video_verified_offset(
             f"score={quality['score']:.2f}, seq_verified={seq_verified}/{len(checkpoint_times)}, "
             f"avg_dist={quality['avg_distance']:.1f}")
 
-    # Select best candidate - prefer sequence_verified count, then score
-    best_result = max(candidate_results, key=lambda r: (r['sequence_verified'], r['quality']))
+    # Select best candidate - prefer sequence_verified count, then score, then lowest avg_distance
+    best_result = max(candidate_results, key=lambda r: (r['sequence_verified'], r['quality'], -r['avg_distance']))
     best_frame_offset = best_result['frame_offset']
 
     log(f"[VideoVerified] ───────────────────────────────────────")
@@ -301,6 +353,9 @@ def calculate_video_verified_offset(
         'candidates': candidate_results,
         'checkpoints': len(checkpoint_times),
         'use_pts_precision': use_pts,
+        'use_interlaced_settings': use_interlaced_settings,
+        'source_content_type': source_props.get('content_type', 'unknown'),
+        'target_content_type': target_props.get('content_type', 'unknown'),
     }
 
 

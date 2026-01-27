@@ -126,6 +126,21 @@ class AppConfig:
             'video_verified_sequence_length': 10,  # Number of consecutive frames to verify at each checkpoint
             'video_verified_use_pts_precision': False,  # Use PTS for sub-frame precision (vs frame-based)
 
+            # --- Interlaced/Telecine Content Settings ---
+            # Separate settings for interlaced/telecine content which needs different handling
+            # These are used when interlaced or telecine content is detected
+            'interlaced_handling_enabled': False,  # Enable special handling for interlaced/telecine
+            'interlaced_hash_algorithm': 'ahash',  # More tolerant hash algorithm for interlaced
+            'interlaced_hash_size': 8,  # Hash size for interlaced content
+            'interlaced_hash_threshold': 25,  # Higher threshold for interlaced (deinterlace artifacts)
+            'interlaced_sequence_length': 5,  # Shorter sequence (frames may not align perfectly)
+            'interlaced_num_checkpoints': 5,  # Number of checkpoints
+            'interlaced_search_range_frames': 5,  # Wider search range for interlaced
+            'interlaced_deinterlace_method': 'bwdif',  # Deinterlace method (yadif, bwdif, etc.)
+            'interlaced_use_ivtc': False,  # Use inverse telecine for telecine content
+            'interlaced_fallback_to_audio': True,  # Fall back to audio correlation if no match
+            'interlaced_force_mode': 'auto',  # 'auto', 'interlaced', 'telecine', 'progressive'
+
             # --- Timing Fix Settings ---
             'timing_fix_enabled': False,
             'timing_fix_overlaps': True,
