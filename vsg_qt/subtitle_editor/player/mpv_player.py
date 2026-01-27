@@ -1,32 +1,38 @@
 # vsg_qt/subtitle_editor/player/mpv_player.py
 # -*- coding: utf-8 -*-
 """
-MPV-based video player for subtitle editor.
+MPV-based video player for subtitle editor using OpenGL rendering.
 
-Uses MPV for video playback and subtitle rendering (libass built-in).
+Uses MPV's render API to draw directly into a Qt OpenGL widget.
+This approach is more reliable than window ID embedding.
 """
 import locale
-from pathlib import Path
+from ctypes import c_void_p, cast, c_char_p
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QFrame
+from PySide6.QtCore import Qt, Signal, QTimer, Slot
+from PySide6.QtGui import QOpenGLContext
+from PySide6.QtOpenGLWidgets import QOpenGLWidget
+from PySide6.QtWidgets import QWidget, QVBoxLayout
 
 import mpv
 
 
-class MpvWidget(QWidget):
+def get_process_address(ctx, name):
+    """Get OpenGL proc address for MPV."""
+    glctx = QOpenGLContext.currentContext()
+    if glctx is None:
+        return 0
+    # name is bytes, need to decode for Qt
+    return int(glctx.getProcAddress(name.decode('utf-8')))
+
+
+class MpvOpenGLWidget(QOpenGLWidget):
     """
-    Qt widget that embeds an MPV player.
+    OpenGL widget that renders MPV output.
 
-    Uses native window embedding - the video frame widget must be
-    realized (shown) before MPV can attach to it.
-
-    Signals:
-        time_changed: Emitted with current time in milliseconds
-        duration_changed: Emitted with duration in seconds
-        fps_detected: Emitted when FPS is detected
-        playback_finished: Emitted when video ends
+    Uses MPV's render context API to draw video frames
+    directly into Qt's OpenGL framebuffer.
     """
 
     time_changed = Signal(int)  # ms
@@ -37,59 +43,108 @@ class MpvWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self._player: Optional[mpv.MPV] = None
+        # Fix locale for MPV
+        locale.setlocale(locale.LC_NUMERIC, 'C')
+
+        self._mpv: Optional[mpv.MPV] = None
+        self._mpv_gl = None
         self._duration_sec: float = 0
         self._fps: float = 23.976
         self._is_paused: bool = True
         self._subtitle_path: Optional[str] = None
         self._fonts_dir: Optional[str] = None
 
-        # Pending load request (stored until widget is shown)
+        # Pending load
         self._pending_video: Optional[str] = None
         self._pending_subtitle: Optional[str] = None
         self._pending_fonts_dir: Optional[str] = None
-        self._widget_shown: bool = False
 
-        # Timer for polling time position
+        # Time polling timer
         self._poll_timer = QTimer(self)
         self._poll_timer.timeout.connect(self._poll_time_position)
-        self._poll_timer.setInterval(50)  # 50ms = 20 updates/sec
+        self._poll_timer.setInterval(50)
 
-        self._setup_ui()
+        self.setMinimumSize(320, 180)
 
-    def _setup_ui(self):
-        """Set up the widget UI."""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        # Create MPV instance
+        self._create_mpv()
 
-        # Container frame for MPV - MUST have native window attributes
-        self._video_frame = QFrame()
-        self._video_frame.setStyleSheet("background-color: black;")
-        self._video_frame.setMinimumSize(320, 180)
+    def _create_mpv(self):
+        """Create the MPV player instance."""
+        self._mpv = mpv.MPV(
+            # Seeking
+            hr_seek='yes',
+            hr_seek_framedrop='no',
+            # Subtitles
+            sub_auto='no',
+            sub_ass='yes',
+            # Playback
+            pause=True,
+            keep_open='yes',
+            # Disable OSD
+            osd_level=0,
+            # Input
+            input_default_bindings=False,
+            input_vo_keyboard=False,
+            # Logging
+            log_handler=print,
+            loglevel='warn'
+        )
 
-        # Critical: Tell Qt to create a native window for embedding
-        self._video_frame.setAttribute(Qt.WA_DontCreateNativeAncestors)
-        self._video_frame.setAttribute(Qt.WA_NativeWindow)
+        # Register property observers
+        @self._mpv.property_observer('duration')
+        def on_duration(name, value):
+            if value is not None:
+                self._duration_sec = value
+                self.duration_changed.emit(value)
 
-        layout.addWidget(self._video_frame)
+        @self._mpv.property_observer('container-fps')
+        def on_fps(name, value):
+            if value is not None and value > 0:
+                self._fps = value
+                self.fps_detected.emit(value)
 
-    def showEvent(self, event):
-        """Handle widget show - now safe to create MPV player."""
-        super().showEvent(event)
+        @self._mpv.property_observer('eof-reached')
+        def on_eof(name, value):
+            if value:
+                self.playback_finished.emit()
 
-        if not self._widget_shown:
-            self._widget_shown = True
-            print("[MPV] Widget shown, creating player...")
+        @self._mpv.property_observer('pause')
+        def on_pause(name, value):
+            self._is_paused = value
 
-            # Use single-shot timer to ensure window is fully realized
-            QTimer.singleShot(100, self._on_widget_ready)
+        print("[MPV] Player instance created")
 
-    def _on_widget_ready(self):
-        """Called when widget is ready for MPV embedding."""
-        if self._player is None:
-            self._create_player()
+    def initializeGL(self):
+        """Initialize OpenGL context for MPV rendering."""
+        print("[MPV] Initializing OpenGL context...")
 
-        # Process any pending load request
+        # Create the OpenGL render context
+        # MPV needs a callback to get OpenGL proc addresses
+        def get_proc_addr_wrapper(ctx, name):
+            return get_process_address(ctx, name)
+
+        # Store reference to prevent garbage collection
+        self._proc_addr_func = mpv.OpenGlCbGetProcAddrFn(get_proc_addr_wrapper)
+
+        # Initialize MPV OpenGL
+        self._mpv_gl = mpv.MpvRenderContext(
+            self._mpv,
+            'opengl',
+            opengl_init_params={'get_proc_address': self._proc_addr_func}
+        )
+
+        # Set update callback - called when new frame is ready
+        self._mpv_gl.update_cb = self._on_mpv_update
+
+        print("[MPV] OpenGL context initialized")
+
+        # Process pending load
+        if self._pending_video:
+            QTimer.singleShot(100, self._do_pending_load)
+
+    def _do_pending_load(self):
+        """Load pending video after GL init."""
         if self._pending_video:
             self._do_load_video(
                 self._pending_video,
@@ -100,76 +155,46 @@ class MpvWidget(QWidget):
             self._pending_subtitle = None
             self._pending_fonts_dir = None
 
-    def _create_player(self):
-        """Create and configure the MPV player instance."""
-        # Fix locale for MPV (required on some systems)
-        locale.setlocale(locale.LC_NUMERIC, 'C')
+    def paintGL(self):
+        """Render MPV frame to OpenGL framebuffer."""
+        if self._mpv_gl is None:
+            return
 
-        # Get window ID for embedding - widget must be shown first
-        wid = int(self._video_frame.winId())
-        print(f"[MPV] Creating player with wid={wid}")
+        # Get widget size with HiDPI scaling
+        ratio = self.devicePixelRatio()
+        w = int(self.width() * ratio)
+        h = int(self.height() * ratio)
 
-        # Create MPV instance with embedding
-        self._player = mpv.MPV(
-            wid=wid,
-            # Video output
-            vo='x11',  # Use X11 for Linux - more reliable embedding
-            # Seeking settings for accuracy
-            hr_seek='yes',
-            hr_seek_framedrop='no',
-            # Subtitle settings
-            sub_auto='no',  # We'll add subtitles manually
-            sub_ass='yes',
-            # Keep video paused on load
-            pause=True,
-            keep_open='yes',
-            # Disable OSD
-            osd_level=0,
-            # Input
-            input_default_bindings=False,
-            input_vo_keyboard=False,
-            # Log level
-            log_handler=print,
-            loglevel='warn'
+        # Render to default framebuffer
+        fbo = self.defaultFramebufferObject()
+        self._mpv_gl.render(
+            flip_y=True,
+            opengl_fbo={'w': w, 'h': h, 'fbo': fbo}
         )
 
-        print("[MPV] Player created successfully")
+    def _on_mpv_update(self, ctx=None):
+        """Called by MPV when a new frame is ready."""
+        # Schedule repaint on Qt thread
+        QTimer.singleShot(0, self._maybe_update)
 
-        # Register property observers
-        @self._player.property_observer('duration')
-        def on_duration(name, value):
-            if value is not None:
-                self._duration_sec = value
-                self.duration_changed.emit(value)
-
-        @self._player.property_observer('container-fps')
-        def on_fps(name, value):
-            if value is not None and value > 0:
-                self._fps = value
-                self.fps_detected.emit(value)
-
-        @self._player.property_observer('eof-reached')
-        def on_eof(name, value):
-            if value:
-                self.playback_finished.emit()
-
-        @self._player.property_observer('pause')
-        def on_pause(name, value):
-            self._is_paused = value
+    @Slot()
+    def _maybe_update(self):
+        """Update the widget (thread-safe)."""
+        if self.window().isMinimized():
+            # Minimized - render directly
+            self.makeCurrent()
+            self.paintGL()
+            self.context().swapBuffers(self.context().surface())
+            self.doneCurrent()
+        else:
+            self.update()
 
     def load_video(self, video_path: str, subtitle_path: Optional[str] = None,
                    fonts_dir: Optional[str] = None):
-        """
-        Load a video file with optional subtitle overlay.
-
-        Args:
-            video_path: Path to video file
-            subtitle_path: Optional path to subtitle file
-            fonts_dir: Optional path to fonts directory for ASS rendering
-        """
-        # If widget not shown yet, store request for later
-        if not self._widget_shown or self._player is None:
-            print(f"[MPV] Storing pending load: {video_path}")
+        """Load a video file."""
+        # If GL not initialized yet, store for later
+        if self._mpv_gl is None:
+            print(f"[MPV] GL not ready, storing pending load: {video_path}")
             self._pending_video = video_path
             self._pending_subtitle = subtitle_path
             self._pending_fonts_dir = fonts_dir
@@ -179,7 +204,7 @@ class MpvWidget(QWidget):
 
     def _do_load_video(self, video_path: str, subtitle_path: Optional[str],
                        fonts_dir: Optional[str]):
-        """Actually load the video (called when player is ready)."""
+        """Actually load the video."""
         self._subtitle_path = subtitle_path
         self._fonts_dir = fonts_dir
 
@@ -189,138 +214,120 @@ class MpvWidget(QWidget):
         if fonts_dir:
             print(f"[MPV] Fonts dir: {fonts_dir}")
 
-        # Set fonts directory for ASS rendering
+        # Set fonts directory
         if fonts_dir:
             try:
-                self._player['sub-fonts-dir'] = fonts_dir
+                self._mpv['sub-fonts-dir'] = fonts_dir
             except Exception as e:
-                print(f"[MPV] Warning: Could not set fonts dir: {e}")
+                print(f"[MPV] Warning setting fonts dir: {e}")
 
-        # Load video file
-        self._player.loadfile(video_path)
+        # Load video
+        self._mpv.loadfile(video_path)
 
-        # Register file-loaded callback
-        @self._player.event_callback('file-loaded')
-        def on_file_loaded(event):
+        # File loaded callback
+        @self._mpv.event_callback('file-loaded')
+        def on_loaded(event):
             print("[MPV] File loaded")
-            # Add subtitle if provided
             if subtitle_path:
                 try:
-                    self._player.sub_add(subtitle_path)
-                    print(f"[MPV] Subtitle added: {subtitle_path}")
+                    self._mpv.sub_add(subtitle_path)
+                    print(f"[MPV] Subtitle added")
                 except Exception as e:
                     print(f"[MPV] Error adding subtitle: {e}")
 
-            # Seek to start
-            self._player.seek(0, 'absolute')
-            # Start time polling
+            self._mpv.seek(0, 'absolute')
             self._poll_timer.start()
 
     def play(self):
         """Start playback."""
-        if self._player:
-            self._player.pause = False
+        if self._mpv:
+            self._mpv.pause = False
 
     def pause(self):
         """Pause playback."""
-        if self._player:
-            self._player.pause = True
+        if self._mpv:
+            self._mpv.pause = True
 
     def toggle_pause(self):
-        """Toggle between play and pause."""
-        if self._player:
-            self._player.pause = not self._player.pause
+        """Toggle play/pause."""
+        if self._mpv:
+            self._mpv.pause = not self._mpv.pause
 
     def seek(self, time_ms: int):
-        """
-        Seek to a specific time.
-
-        Args:
-            time_ms: Target time in milliseconds
-        """
-        if self._player:
-            time_sec = time_ms / 1000.0
-            self._player.seek(time_sec, 'absolute', 'exact')
+        """Seek to time in milliseconds."""
+        if self._mpv:
+            self._mpv.seek(time_ms / 1000.0, 'absolute', 'exact')
 
     def seek_frame(self, frame_num: int):
-        """
-        Seek to a specific frame.
-
-        Args:
-            frame_num: Target frame number
-        """
-        if self._player and self._fps > 0:
-            time_sec = frame_num / self._fps
-            self._player.seek(time_sec, 'absolute', 'exact')
+        """Seek to frame number."""
+        if self._mpv and self._fps > 0:
+            self._mpv.seek(frame_num / self._fps, 'absolute', 'exact')
 
     def reload_subtitles(self, subtitle_path: Optional[str] = None):
-        """
-        Reload the subtitle track.
-
-        Args:
-            subtitle_path: Optional new path to subtitle file
-        """
-        if not self._player:
+        """Reload subtitles."""
+        if not self._mpv:
             return
 
         if subtitle_path:
             self._subtitle_path = subtitle_path
 
-        # Remove existing external subtitle tracks
+        # Remove external subs
         try:
-            track_list = self._player.track_list
-            for track in track_list:
+            for track in self._mpv.track_list:
                 if track.get('type') == 'sub' and track.get('external'):
-                    track_id = track.get('id')
-                    if track_id:
-                        self._player.sub_remove(track_id)
-        except Exception as e:
-            print(f"[MPV] Error removing subtitles: {e}")
+                    self._mpv.sub_remove(track.get('id'))
+        except Exception:
+            pass
 
         # Add new subtitle
         if self._subtitle_path:
             try:
-                self._player.sub_add(self._subtitle_path)
-                print(f"[MPV] Reloaded subtitle: {self._subtitle_path}")
+                self._mpv.sub_add(self._subtitle_path)
+                print(f"[MPV] Reloaded subtitle")
             except Exception as e:
-                print(f"[MPV] Error adding subtitle: {e}")
+                print(f"[MPV] Error reloading subtitle: {e}")
 
     def _poll_time_position(self):
-        """Poll current time position and emit signal."""
-        if self._player:
+        """Poll current playback time."""
+        if self._mpv:
             try:
-                time_pos = self._player.time_pos
-                if time_pos is not None:
-                    self.time_changed.emit(int(time_pos * 1000))
+                pos = self._mpv.time_pos
+                if pos is not None:
+                    self.time_changed.emit(int(pos * 1000))
             except Exception:
                 pass
 
     @property
     def is_paused(self) -> bool:
-        """Check if playback is paused."""
         return self._is_paused
 
     @property
     def fps(self) -> float:
-        """Get video FPS."""
         return self._fps
 
     @property
     def duration_ms(self) -> int:
-        """Get duration in milliseconds."""
         return int(self._duration_sec * 1000)
 
+    def shutdown(self):
+        """Shutdown render context."""
+        if self._mpv_gl:
+            self._mpv_gl.free()
+            self._mpv_gl = None
+
     def stop(self):
-        """Stop playback and release resources."""
+        """Stop and cleanup."""
         self._poll_timer.stop()
-        if self._player:
-            try:
-                self._player.terminate()
-            except Exception:
-                pass
-            self._player = None
+        self.shutdown()
+        if self._mpv:
+            self._mpv.terminate()
+            self._mpv = None
 
     def closeEvent(self, event):
-        """Handle widget close."""
+        """Handle close."""
         self.stop()
         super().closeEvent(event)
+
+
+# Alias for compatibility
+MpvWidget = MpvOpenGLWidget
