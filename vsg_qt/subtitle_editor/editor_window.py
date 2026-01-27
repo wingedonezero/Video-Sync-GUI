@@ -104,16 +104,16 @@ class SubtitleEditorWindow(QDialog):
         # Top section: Video | Tabs
         top_widget = QSplitter(Qt.Horizontal)
 
-        # Video panel (40%)
+        # Video panel (50%)
         self._video_panel = VideoPanel()
         top_widget.addWidget(self._video_panel)
 
-        # Tab panel (60%)
+        # Tab panel (50%)
         self._tab_panel = TabPanel()
         top_widget.addWidget(self._tab_panel)
 
-        # Set initial sizes (40/60 split)
-        top_widget.setSizes([400, 600])
+        # Set initial sizes (50/50 split)
+        top_widget.setSizes([500, 500])
 
         self._main_splitter.addWidget(top_widget)
 

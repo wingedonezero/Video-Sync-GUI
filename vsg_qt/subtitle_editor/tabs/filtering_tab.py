@@ -135,9 +135,17 @@ class FilteringTab(BaseTab):
             cb.deleteLater()
         self._style_checkboxes.clear()
 
-        # Add checkbox for each style
+        # Count lines per style
+        style_counts = {}
+        for event in self._state.events:
+            if not event.is_comment:
+                style_counts[event.style] = style_counts.get(event.style, 0) + 1
+
+        # Add checkbox for each style with line count
         for style_name in self._state.style_names:
-            cb = QCheckBox(style_name)
+            count = style_counts.get(style_name, 0)
+            cb = QCheckBox(f"{style_name} ({count} lines)")
+            cb.setProperty('style_name', style_name)  # Store actual name
             cb.toggled.connect(self._on_style_toggled)
             self._styles_list_layout.addWidget(cb)
             self._style_checkboxes[style_name] = cb
