@@ -186,38 +186,46 @@ def calculate_video_verified_offset(
 
     # Test each candidate frame offset
     candidate_results = []
+    sequence_length = config.get('video_verified_sequence_length', 10)
+
+    log(f"[VideoVerified] Sequence verification: {sequence_length} consecutive frames must match")
 
     for frame_offset in candidates_frames:
         quality = _measure_frame_offset_quality_static(
             frame_offset, checkpoint_times, source_reader, target_reader,
             fps, frame_duration_ms, window_radius, hash_algorithm, hash_size,
-            hash_threshold, comparison_method, log
+            hash_threshold, comparison_method, log,
+            sequence_verify_length=sequence_length
         )
         # Convert frame offset to approximate ms for logging
         approx_ms = frame_offset * frame_duration_ms
+        seq_verified = quality.get('sequence_verified', 0)
         candidate_results.append({
             'frame_offset': frame_offset,
             'approx_ms': approx_ms,
             'quality': quality['score'],
             'matched_checkpoints': quality['matched'],
+            'sequence_verified': seq_verified,
             'avg_distance': quality['avg_distance'],
             'match_details': quality.get('match_details', []),
         })
         log(f"[VideoVerified]   Frame {frame_offset:+d} (~{approx_ms:+.1f}ms): "
-            f"score={quality['score']:.2f}, matched={quality['matched']}/{len(checkpoint_times)}, "
+            f"score={quality['score']:.2f}, seq_verified={seq_verified}/{len(checkpoint_times)}, "
             f"avg_dist={quality['avg_distance']:.1f}")
 
-    # Select best candidate
-    best_result = max(candidate_results, key=lambda r: r['quality'])
+    # Select best candidate - prefer sequence_verified count, then score
+    best_result = max(candidate_results, key=lambda r: (r['sequence_verified'], r['quality']))
     best_frame_offset = best_result['frame_offset']
 
     log(f"[VideoVerified] ───────────────────────────────────────")
-    log(f"[VideoVerified] Best frame offset: {best_frame_offset:+d} frames (score={best_result['quality']:.2f})")
+    log(f"[VideoVerified] Best frame offset: {best_frame_offset:+d} frames "
+        f"(seq_verified={best_result['sequence_verified']}/{len(checkpoint_times)}, score={best_result['quality']:.2f})")
 
     # Check if frame matching actually worked
-    # If best score is 0 or no checkpoints matched, frame matching failed
-    if best_result['quality'] <= 0 or best_result['matched_checkpoints'] == 0:
-        log(f"[VideoVerified] ⚠ Frame matching failed - no frames matched at any offset")
+    # Require at least one sequence-verified checkpoint for reliable results
+    if best_result['sequence_verified'] == 0:
+        log(f"[VideoVerified] ⚠ Sequence verification failed - no consecutive frame sequences matched")
+        log(f"[VideoVerified] Required: {sequence_length} consecutive frames to match at 70%+ threshold")
         log(f"[VideoVerified] Avg distance was {best_result['avg_distance']:.1f}, threshold is {hash_threshold}")
 
         # Check if this might be fixable with higher threshold
@@ -451,6 +459,77 @@ def _measure_candidate_quality_static(
     }
 
 
+def _verify_frame_sequence_static(
+    source_start_idx: int,
+    target_start_idx: int,
+    sequence_length: int,
+    source_reader,
+    target_reader,
+    hash_algorithm: str,
+    hash_size: int,
+    hash_threshold: int,
+) -> Tuple[int, float, List[int]]:
+    """
+    Verify that a sequence of consecutive frames match between source and target.
+
+    This is the key to accurate offset detection - if the offset is correct,
+    then source[N], source[N+1], source[N+2], ... should match
+    target[N+offset], target[N+offset+1], target[N+offset+2], ...
+
+    NO window search is used here - frames must match at exact positions.
+    This prevents false positives from window compensation.
+
+    Args:
+        source_start_idx: Starting frame index in source
+        target_start_idx: Starting frame index in target (= source_start + offset)
+        sequence_length: Number of consecutive frames to verify
+        source_reader: VideoReader for source
+        target_reader: VideoReader for target
+        hash_algorithm: Hash algorithm to use
+        hash_size: Hash size
+        hash_threshold: Maximum distance for a match
+
+    Returns:
+        Tuple of (matched_count, avg_distance, distances_list)
+    """
+    from ..frame_utils import compute_frame_hash, compute_hamming_distance
+
+    matched = 0
+    distances = []
+
+    for i in range(sequence_length):
+        source_idx = source_start_idx + i
+        target_idx = target_start_idx + i
+
+        if target_idx < 0:
+            continue
+
+        try:
+            source_frame = source_reader.get_frame_at_index(source_idx)
+            target_frame = target_reader.get_frame_at_index(target_idx)
+
+            if source_frame is None or target_frame is None:
+                continue
+
+            source_hash = compute_frame_hash(source_frame, hash_size, hash_algorithm)
+            target_hash = compute_frame_hash(target_frame, hash_size, hash_algorithm)
+
+            if source_hash is None or target_hash is None:
+                continue
+
+            distance = compute_hamming_distance(source_hash, target_hash)
+            distances.append(distance)
+
+            if distance <= hash_threshold:
+                matched += 1
+
+        except Exception:
+            continue
+
+    avg_dist = sum(distances) / len(distances) if distances else float('inf')
+    return matched, avg_dist, distances
+
+
 def _measure_frame_offset_quality_static(
     frame_offset: int,
     checkpoint_times: List[float],
@@ -463,40 +542,52 @@ def _measure_frame_offset_quality_static(
     hash_size: int,
     hash_threshold: int,
     comparison_method: str,
-    log
+    log,
+    sequence_verify_length: int = 10,
 ) -> Dict[str, Any]:
     """
-    Measure quality of a candidate frame offset.
+    Measure quality of a candidate frame offset using sequence verification.
 
-    Tests if source frame N matches target frame N+offset at multiple checkpoints.
-    Also returns match_details for sub-frame precision calculation.
+    Algorithm:
+    1. At each checkpoint, test if source frame N matches target frame N+offset
+    2. If initial frame matches, verify with SEQUENCE of consecutive frames
+    3. Sequence verification uses NO window - frames must match at exact positions
+    4. This prevents false positives where window search compensates for wrong offset
+
+    The sequence verification is key: if offset is correct, then frames
+    N, N+1, N+2, ... in source should match N+offset, N+offset+1, N+offset+2, ...
+    in target. If offset is wrong, the sequence will fail even if single frames
+    happen to match due to similar content.
 
     Args:
         frame_offset: Integer frame offset to test (target_frame = source_frame + offset)
         checkpoint_times: List of times in the source video to check
+        sequence_verify_length: Number of consecutive frames to verify (default 10)
         ... (other args same as before)
 
     Returns:
-        Dict with score, matched count, avg_distance, and match_details
+        Dict with score, matched count, avg_distance, sequence_verified count, and match_details
     """
     from ..frame_utils import compute_frame_hash, compute_hamming_distance
 
     total_score = 0.0
     matched_count = 0
+    sequence_verified_count = 0
     distances = []
-    match_details = []  # Track matched frame pairs for sub-frame calculation
+    match_details = []
 
     for checkpoint_ms in checkpoint_times:
         # Source frame at checkpoint time
         source_frame_idx = int(checkpoint_ms / frame_duration_ms)
 
-        # Target frame with this offset
+        # Target frame with this offset (STRICT - no window for initial test)
         target_frame_idx = source_frame_idx + frame_offset
 
         if target_frame_idx < 0:
             continue
 
         try:
+            # First, check if the single frame matches (strict, no window)
             source_frame = source_reader.get_frame_at_index(source_frame_idx)
             if source_frame is None:
                 continue
@@ -505,47 +596,59 @@ def _measure_frame_offset_quality_static(
             if source_hash is None:
                 continue
 
-            # Search window around expected target frame to handle slight variations
-            best_distance = float('inf')
-            best_target_idx = target_frame_idx
+            target_frame = target_reader.get_frame_at_index(target_frame_idx)
+            if target_frame is None:
+                continue
 
-            for delta in range(-window_radius, window_radius + 1):
-                search_idx = target_frame_idx + delta
-                if search_idx < 0:
-                    continue
+            target_hash = compute_frame_hash(target_frame, hash_size, hash_algorithm)
+            if target_hash is None:
+                continue
 
-                target_frame = target_reader.get_frame_at_index(search_idx)
-                if target_frame is None:
-                    continue
+            initial_distance = compute_hamming_distance(source_hash, target_hash)
+            distances.append(initial_distance)
 
-                target_hash = compute_frame_hash(target_frame, hash_size, hash_algorithm)
-                if target_hash is None:
-                    continue
+            # Check if initial frame matches
+            initial_match = initial_distance <= hash_threshold
 
-                distance = compute_hamming_distance(source_hash, target_hash)
+            # Now verify with sequence of consecutive frames
+            seq_matched, seq_avg_dist, seq_distances = _verify_frame_sequence_static(
+                source_frame_idx, target_frame_idx, sequence_verify_length,
+                source_reader, target_reader,
+                hash_algorithm, hash_size, hash_threshold
+            )
 
-                if distance < best_distance:
-                    best_distance = distance
-                    best_target_idx = search_idx
+            # Sequence is verified if majority of frames match
+            # Require at least 70% of sequence to match
+            min_sequence_matches = int(sequence_verify_length * 0.7)
+            sequence_verified = seq_matched >= min_sequence_matches
 
-            if best_distance < float('inf'):
-                distances.append(best_distance)
+            # Record match details
+            match_details.append({
+                'source_frame': source_frame_idx,
+                'target_frame': target_frame_idx,
+                'distance': initial_distance,
+                'is_match': initial_match,
+                'sequence_matched': seq_matched,
+                'sequence_length': sequence_verify_length,
+                'sequence_verified': sequence_verified,
+                'sequence_avg_dist': seq_avg_dist,
+            })
 
-                # Record match details for sub-frame calculation
-                match_details.append({
-                    'source_frame': source_frame_idx,
-                    'target_frame': best_target_idx,
-                    'distance': best_distance,
-                    'is_match': best_distance <= hash_threshold,
-                })
-
-                if best_distance <= hash_threshold:
-                    matched_count += 1
-                    # Score inversely proportional to distance
-                    total_score += 1.0 - (best_distance / (hash_threshold * 2))
-                else:
-                    # Partial score for near-matches
-                    total_score += max(0, 0.5 - (best_distance / (hash_threshold * 4)))
+            if sequence_verified:
+                sequence_verified_count += 1
+                matched_count += 1
+                # High score for sequence-verified matches
+                # Score based on how many frames in sequence matched
+                seq_ratio = seq_matched / sequence_verify_length
+                total_score += 2.0 * seq_ratio  # Up to 2.0 for perfect sequence
+            elif initial_match:
+                # Initial frame matched but sequence didn't verify
+                # Give partial score but much lower than verified
+                matched_count += 1
+                total_score += 0.3
+            else:
+                # No match at all
+                total_score += max(0, 0.1 - (initial_distance / (hash_threshold * 4)))
 
         except Exception as e:
             log(f"[VideoVerified] Checkpoint error: {e}")
@@ -556,6 +659,7 @@ def _measure_frame_offset_quality_static(
     return {
         'score': total_score,
         'matched': matched_count,
+        'sequence_verified': sequence_verified_count,
         'avg_distance': avg_distance,
         'match_details': match_details,
     }
@@ -585,6 +689,10 @@ def _calculate_subframe_offset_static(
     This is more accurate than frame_offset * frame_duration which assumes
     perfect CFR and doesn't account for VFR content or container timing.
 
+    IMPORTANT: We prioritize sequence-verified matches over single-frame matches.
+    Sequence-verified matches are more reliable because they've been confirmed
+    with multiple consecutive frames.
+
     Args:
         frame_offset: Best frame offset found
         match_details: List of matched frame pairs from quality measurement
@@ -598,8 +706,17 @@ def _calculate_subframe_offset_static(
     Returns:
         Sub-frame precise offset in milliseconds
     """
-    # Filter to only good matches
-    good_matches = [m for m in match_details if m.get('is_match', False)]
+    # Prioritize sequence-verified matches (most reliable)
+    sequence_verified_matches = [m for m in match_details if m.get('sequence_verified', False)]
+
+    # Fall back to single-frame matches if no sequence-verified
+    if sequence_verified_matches:
+        good_matches = sequence_verified_matches
+        log(f"[VideoVerified] Using {len(good_matches)} sequence-verified checkpoints for PTS calculation")
+    else:
+        good_matches = [m for m in match_details if m.get('is_match', False)]
+        if good_matches:
+            log(f"[VideoVerified] No sequence-verified matches, using {len(good_matches)} single-frame matches")
 
     if not good_matches:
         # No good matches - fall back to frame-based calculation
@@ -613,6 +730,9 @@ def _calculate_subframe_offset_static(
     for match in good_matches:
         source_idx = match['source_frame']
         target_idx = match['target_frame']
+        seq_info = ""
+        if match.get('sequence_verified'):
+            seq_info = f" [seq:{match.get('sequence_matched', '?')}/{match.get('sequence_length', '?')}]"
 
         try:
             source_pts = source_reader.get_frame_pts(source_idx)
@@ -622,7 +742,7 @@ def _calculate_subframe_offset_static(
                 offset = target_pts - source_pts
                 pts_offsets.append(offset)
                 log(f"[VideoVerified]   Frame {source_idx}→{target_idx}: "
-                    f"PTS {source_pts:.3f}ms→{target_pts:.3f}ms = {offset:+.3f}ms")
+                    f"PTS {source_pts:.3f}ms→{target_pts:.3f}ms = {offset:+.3f}ms{seq_info}")
 
         except Exception as e:
             log(f"[VideoVerified] PTS lookup error: {e}")
