@@ -341,9 +341,11 @@ class SubtitlesStep:
         if item.is_generated and item.generated_filter_styles:
             runner._log_message(f"[SubtitleData] Applying style filter for generated track...")
 
-            # DIAGNOSTIC: Log timing BEFORE style filtering
+            # DIAGNOSTIC: Log timing and styles BEFORE style filtering
             if subtitle_data.events:
-                runner._log_message(f"[DIAG-FILTER] BEFORE style filter - first 3 events:")
+                runner._log_message(f"[DIAG-FILTER] BEFORE style filter - {len(subtitle_data.events)} events, {len(subtitle_data.styles)} styles")
+                runner._log_message(f"[DIAG-FILTER] Style definitions: {list(subtitle_data.styles.keys())}")
+                runner._log_message(f"[DIAG-FILTER] First 3 events:")
                 for i, event in enumerate(subtitle_data.events[:3]):
                     runner._log_message(f"[DIAG-FILTER]   Event {i}: start={event.start_ms}ms end={event.end_ms}ms style='{event.style}'")
 
@@ -355,9 +357,11 @@ class SubtitlesStep:
             if result.success:
                 runner._log_message(f"[SubtitleData] Style filter: {result.summary}")
 
-                # DIAGNOSTIC: Log timing AFTER style filtering
+                # DIAGNOSTIC: Log timing and styles AFTER style filtering
                 if subtitle_data.events:
-                    runner._log_message(f"[DIAG-FILTER] AFTER style filter - first 3 remaining events:")
+                    runner._log_message(f"[DIAG-FILTER] AFTER style filter - {len(subtitle_data.events)} events, {len(subtitle_data.styles)} styles")
+                    runner._log_message(f"[DIAG-FILTER] Style definitions (unchanged): {list(subtitle_data.styles.keys())}")
+                    runner._log_message(f"[DIAG-FILTER] First 3 remaining events:")
                     for i, event in enumerate(subtitle_data.events[:3]):
                         runner._log_message(f"[DIAG-FILTER]   Event {i}: start={event.start_ms}ms end={event.end_ms}ms style='{event.style}'")
 
