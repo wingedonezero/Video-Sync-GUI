@@ -15,6 +15,7 @@ from typing import Optional
 from PySide6.QtCore import QThread, Signal, Slot
 from PySide6.QtGui import QImage
 
+import numpy as np
 import vapoursynth as vs
 
 
@@ -53,6 +54,7 @@ class PlayerThread(QThread):
         self._core: Optional[vs.Core] = None
         self._base_clip: Optional[vs.VideoNode] = None  # Video without subs
         self._clip: Optional[vs.VideoNode] = None       # Video with subs
+        self._rgb_clip: Optional[vs.VideoNode] = None   # Cached RGB output
 
         # Video properties
         self._fps: float = 23.976
@@ -125,6 +127,18 @@ class PlayerThread(QThread):
         if self._base_clip is None:
             return
 
+        # Check if subtitle file exists
+        sub_path = Path(self.subtitle_path)
+        if not sub_path.exists():
+            print(f"[VS Player] WARNING: Subtitle file not found: {self.subtitle_path}")
+            self._clip = self._base_clip
+            self._build_rgb_clip()
+            return
+
+        print(f"[VS Player] Applying subtitles from: {self.subtitle_path}")
+        if self.fonts_dir:
+            print(f"[VS Player] Using fonts directory: {self.fonts_dir}")
+
         try:
             if self.fonts_dir:
                 self._clip = self._core.sub.AssFile(
@@ -137,10 +151,32 @@ class PlayerThread(QThread):
                     self._base_clip,
                     self.subtitle_path
                 )
+            print(f"[VS Player] Subtitles applied successfully")
         except Exception as e:
             print(f"[VS Player] Failed to apply subtitles: {e}")
             # Fallback to video without subtitles
             self._clip = self._base_clip
+
+        # Build cached RGB output clip
+        self._build_rgb_clip()
+
+    def _build_rgb_clip(self):
+        """Build the cached RGB output clip from the current clip."""
+        if self._clip is None:
+            return
+
+        try:
+            # Convert to RGB24 for QImage output
+            # Use matrix_in_s='709' for HD content (most common)
+            self._rgb_clip = self._core.resize.Bicubic(
+                self._clip,
+                format=vs.RGB24,
+                matrix_in_s='709'
+            )
+            print(f"[VS Player] RGB clip built: {self._rgb_clip.width}x{self._rgb_clip.height}")
+        except Exception as e:
+            print(f"[VS Player] Failed to build RGB clip: {e}")
+            self._rgb_clip = None
 
     def _frame_to_ms(self, frame: int) -> int:
         """Convert frame number to milliseconds."""
@@ -160,46 +196,38 @@ class PlayerThread(QThread):
         Returns:
             QImage of the frame, or None on error
         """
-        if self._clip is None or frame_num < 0 or frame_num >= self._frame_count:
+        if self._rgb_clip is None or frame_num < 0 or frame_num >= self._frame_count:
             return None
 
         try:
-            # Get frame from VapourSynth
-            frame = self._clip.get_frame(frame_num)
+            # Get frame from cached RGB clip
+            frame = self._rgb_clip.get_frame(frame_num)
 
-            # Convert to RGB24 if needed
-            if frame.format.name != 'RGB24':
-                rgb_clip = self._core.resize.Bicubic(
-                    self._clip, format=vs.RGB24, matrix_in_s='709'
-                )
-                frame = rgb_clip.get_frame(frame_num)
-
-            # Extract raw data
-            # VapourSynth RGB24 has planes R, G, B
-            r_plane = bytes(frame[0])
-            g_plane = bytes(frame[1])
-            b_plane = bytes(frame[2])
-
-            # Interleave RGB data
             width = frame.width
             height = frame.height
-            rgb_data = bytearray(width * height * 3)
 
-            for i in range(width * height):
-                rgb_data[i * 3] = r_plane[i]
-                rgb_data[i * 3 + 1] = g_plane[i]
-                rgb_data[i * 3 + 2] = b_plane[i]
+            # Extract planes as numpy arrays (much faster than Python loops)
+            r_plane = np.asarray(frame[0])
+            g_plane = np.asarray(frame[1])
+            b_plane = np.asarray(frame[2])
 
-            # Create QImage
+            # Stack and interleave RGB planes
+            # Result shape: (height, width, 3)
+            rgb_array = np.stack([r_plane, g_plane, b_plane], axis=-1)
+
+            # Ensure contiguous array for QImage
+            rgb_array = np.ascontiguousarray(rgb_array)
+
+            # Create QImage from numpy array
             qimage = QImage(
-                bytes(rgb_data),
+                rgb_array.data,
                 width,
                 height,
                 width * 3,
                 QImage.Format_RGB888
             )
 
-            # Make a copy since the data buffer will be invalidated
+            # Make a copy since the numpy array will be invalidated
             return qimage.copy()
 
         except Exception as e:
@@ -209,7 +237,11 @@ class PlayerThread(QThread):
     def run(self):
         """Main thread loop."""
         try:
+            print(f"[VS Player] Loading video: {self.video_path}")
+            print(f"[VS Player] Index dir: {self.index_dir}")
             self._load_video()
+
+            print(f"[VS Player] Video loaded: {self._width}x{self._height} @ {self._fps:.3f} fps, {self._frame_count} frames")
 
             # Emit video info
             self.fps_detected.emit(self._fps)
@@ -218,11 +250,16 @@ class PlayerThread(QThread):
             # Render first frame
             qimage = self._get_frame_as_qimage(0)
             if qimage:
+                print(f"[VS Player] First frame rendered: {qimage.width()}x{qimage.height()}")
                 self.new_frame.emit(qimage, 0.0)
                 self.time_changed.emit(0)
+            else:
+                print(f"[VS Player] WARNING: Failed to render first frame!")
 
         except Exception as e:
             print(f"[VS Player] FATAL: Could not load video: {e}")
+            import traceback
+            traceback.print_exc()
             self._is_running = False
             return
 
@@ -248,6 +285,7 @@ class PlayerThread(QThread):
 
                 # Handle subtitle reload
                 if should_reload:
+                    print(f"[VS Player] Reloading subtitles...")
                     self._apply_subtitles()
                     force_render = True
 
@@ -301,6 +339,7 @@ class PlayerThread(QThread):
     def _cleanup_resources(self):
         """Release VapourSynth resources (but keep index files)."""
         # Release clips
+        self._rgb_clip = None
         self._clip = None
         self._base_clip = None
         self._core = None
