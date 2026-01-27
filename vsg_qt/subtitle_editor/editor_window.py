@@ -184,9 +184,15 @@ class SubtitleEditorWindow(QDialog):
         # Start video player with preview subtitle
         preview_path = self._state.preview_path
         if preview_path:
+            # Get index directory for VapourSynth caching
+            from vsg_core.config import AppConfig
+            config = AppConfig()
+            index_dir = config.get_vs_index_for_video(str(self._video_path))
+
             self._video_panel.start_player(
                 str(self._video_path),
                 str(preview_path),
+                str(index_dir),
                 str(self._fonts_dir) if self._fonts_dir else None
             )
 

@@ -706,6 +706,62 @@ class AppConfig:
                 pass
         return count
 
+    def get_vs_index_dir(self) -> Path:
+        """
+        Returns the path to the vapoursynth index directory.
+
+        VapourSynth indexes are stored here for reuse across editor sessions.
+        Indexes persist until job completion or manual cleanup.
+        """
+        index_dir = Path(self.get('temp_root')) / 'vs_indexes'
+        index_dir.mkdir(parents=True, exist_ok=True)
+        return index_dir
+
+    def get_vs_index_for_video(self, video_path: str) -> Path:
+        """
+        Get a unique index directory for a specific video file.
+
+        Uses a hash of the video path to create a unique folder.
+
+        Args:
+            video_path: Path to the video file
+
+        Returns:
+            Path to the index directory for this video
+        """
+        import hashlib
+        video_hash = hashlib.md5(video_path.encode()).hexdigest()[:16]
+        index_dir = self.get_vs_index_dir() / video_hash
+        index_dir.mkdir(parents=True, exist_ok=True)
+        return index_dir
+
+    def cleanup_vs_indexes(self) -> int:
+        """
+        Clean up all VapourSynth index directories.
+
+        Called at job completion to free disk space.
+
+        Returns:
+            Number of directories removed
+        """
+        import shutil
+        index_dir = self.get_vs_index_dir()
+        if not index_dir.exists():
+            return 0
+
+        count = 0
+        for item in index_dir.iterdir():
+            try:
+                if item.is_dir():
+                    shutil.rmtree(item)
+                    count += 1
+                elif item.is_file():
+                    item.unlink()
+                    count += 1
+            except OSError:
+                pass
+        return count
+
     def get_ocr_config_dir(self) -> Path:
         """Returns the path to the .config/ocr directory for OCR configuration files."""
         return self.get_config_dir() / 'ocr'
