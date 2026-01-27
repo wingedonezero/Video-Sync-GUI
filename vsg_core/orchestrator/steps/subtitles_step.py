@@ -214,8 +214,14 @@ class SubtitlesStep:
                         runner._log_message(f"[Subtitles] ERROR processing track {item.track.id}: {e}")
                         raise
                 else:
-                    # Bitmap subtitles - can't process with unified flow
-                    runner._log_message(f"[Subtitles] Track {item.track.id}: format {ext} not supported for unified processing")
+                    # Bitmap subtitles (VobSub, PGS) - can't process with unified flow
+                    # but CAN use video-verified mode for frame-corrected delays
+                    if subtitle_sync_mode == 'video-verified':
+                        self._apply_video_verified_for_bitmap(
+                            item, ctx, runner, source1_file
+                        )
+                    else:
+                        runner._log_message(f"[Subtitles] Track {item.track.id}: Bitmap format {ext} - using mkvmerge --sync for delay")
 
         # Set context flag if any track used raw delay fallback
         if _any_no_scene_fallback:
@@ -846,3 +852,83 @@ class SubtitlesStep:
             pass
 
         return None
+
+    def _apply_video_verified_for_bitmap(
+        self,
+        item,
+        ctx: 'Context',
+        runner: 'CommandRunner',
+        source1_file: Optional[Path]
+    ) -> None:
+        """
+        Apply video-verified frame matching for bitmap subtitles (VobSub, PGS).
+
+        Since bitmap subtitles can't be loaded into SubtitleData, we use the
+        video-verified logic to calculate the correct delay, then store it
+        so mkvmerge can apply it via --sync.
+
+        This provides frame-accurate sync for image-based subtitle formats
+        without requiring OCR.
+        """
+        from vsg_core.subtitles.sync_mode_plugins.video_verified import calculate_video_verified_offset
+
+        ext = item.extracted_path.suffix.lower() if item.extracted_path else 'unknown'
+        runner._log_message(f"[VideoVerified] Processing bitmap subtitle track {item.track.id} ({ext})")
+
+        # Get source video for this track
+        source_key = item.sync_to if item.track.source == 'External' else item.track.source
+        source_video = ctx.sources.get(source_key)
+        target_video = source1_file
+
+        if not source_video or not target_video:
+            runner._log_message(f"[VideoVerified] Missing videos for track {item.track.id}, using correlation delay")
+            return
+
+        # Get delays
+        total_delay_ms = 0.0
+        global_shift_ms = 0.0
+        if ctx.delays:
+            if source_key in ctx.delays.raw_source_delays_ms:
+                total_delay_ms = ctx.delays.raw_source_delays_ms[source_key]
+            global_shift_ms = ctx.delays.raw_global_shift_ms
+
+        runner._log_message(f"[VideoVerified] Bitmap sub: Correlation delay = {total_delay_ms:+.3f}ms")
+
+        try:
+            # Calculate frame-corrected delay using video matching
+            corrected_delay_ms, details = calculate_video_verified_offset(
+                source_video=str(source_video),
+                target_video=str(target_video),
+                total_delay_ms=total_delay_ms,
+                global_shift_ms=global_shift_ms,
+                config=ctx.settings_dict,
+                runner=runner,
+                temp_dir=ctx.temp_dir,
+            )
+
+            if corrected_delay_ms is not None:
+                # Store the corrected delay for mkvmerge
+                # Update the delay in the context so options_builder uses it
+                if ctx.delays and source_key in ctx.delays.source_delays_ms:
+                    old_delay = ctx.delays.source_delays_ms[source_key]
+                    ctx.delays.source_delays_ms[source_key] = round(corrected_delay_ms)
+
+                    # Also update raw delays for consistency
+                    if source_key in ctx.delays.raw_source_delays_ms:
+                        ctx.delays.raw_source_delays_ms[source_key] = corrected_delay_ms
+
+                    runner._log_message(f"[VideoVerified] Bitmap sub delay updated: {old_delay}ms → {round(corrected_delay_ms)}ms")
+
+                    # Mark that we applied video-verified correction
+                    item.video_verified_bitmap = True
+                    item.video_verified_details = details
+
+                    if abs(corrected_delay_ms - total_delay_ms) > 1:
+                        runner._log_message(f"[VideoVerified] ⚠ Frame correction changed delay by {corrected_delay_ms - total_delay_ms:+.1f}ms")
+            else:
+                runner._log_message(f"[VideoVerified] Frame matching returned None, using correlation delay")
+                runner._log_message(f"[VideoVerified] Reason: {details.get('reason', 'unknown')}")
+
+        except Exception as e:
+            runner._log_message(f"[VideoVerified] ERROR during frame matching: {e}")
+            runner._log_message(f"[VideoVerified] Falling back to correlation delay for track {item.track.id}")
