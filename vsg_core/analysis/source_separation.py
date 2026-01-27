@@ -517,9 +517,9 @@ def get_installed_models_json_path(model_dir: Optional[str] = None) -> Path:
     if model_dir:
         return Path(model_dir) / 'installed_models.json'
 
-    # Default to project .audio_separator_models directory
+    # Default to project .config/audio_separator_models directory
     project_root = Path(__file__).resolve().parent.parent.parent
-    default_dir = project_root / '.audio_separator_models'
+    default_dir = project_root / '.config' / 'audio_separator_models'
     return default_dir / 'installed_models.json'
 
 
