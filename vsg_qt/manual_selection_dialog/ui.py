@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 from .logic import ManualLogic
 from .widgets import SourceList, FinalList
 from vsg_qt.track_widget import TrackWidget
-from vsg_qt.style_editor_dialog import StyleEditorDialog
+from vsg_qt.subtitle_editor import SubtitleEditorWindow
 from vsg_core.extraction.tracks import extract_tracks
 from vsg_core.extraction.attachments import extract_attachments
 from vsg_core.subtitles.convert import convert_srt_to_ass
@@ -873,8 +873,9 @@ class ManualSelectionDialog(QDialog):
 
         # Pass existing font replacements if any
         existing_font_replacements = track_data.get('font_replacements')
-        editor = StyleEditorDialog(
-            ref_video_path, editable_sub_path,
+        editor = SubtitleEditorWindow(
+            subtitle_path=editable_sub_path,
+            video_path=ref_video_path,
             fonts_dir=fonts_dir,
             existing_font_replacements=existing_font_replacements,
             parent=self
@@ -888,6 +889,10 @@ class ManualSelectionDialog(QDialog):
             elif 'font_replacements' in widget.track_data:
                 # Clear if no replacements (user removed them)
                 del widget.track_data['font_replacements']
+            # Store filter config if filtering tab was used
+            filter_config = editor.get_filter_config()
+            if filter_config:
+                widget.track_data['filter_config'] = filter_config
             self.edited_widget = widget
             widget.logic.refresh_badges()
             widget.logic.refresh_summary()
