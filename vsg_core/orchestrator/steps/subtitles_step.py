@@ -410,6 +410,9 @@ class SubtitlesStep:
         if should_apply_sync:
             # DIAGNOSTIC: Log timing BEFORE sync
             if subtitle_data.events and item.is_generated:
+                runner._log_message(f"[DIAG-SYNC] Generated track sync debug:")
+                runner._log_message(f"[DIAG-SYNC]   item.track.source = '{item.track.source}'")
+                runner._log_message(f"[DIAG-SYNC]   item.sync_to = '{item.sync_to}'")
                 runner._log_message(f"[DIAG-SYNC] BEFORE sync - first 3 events:")
                 for i, event in enumerate(subtitle_data.events[:3]):
                     runner._log_message(f"[DIAG-SYNC]   Event {i}: start={event.start_ms}ms end={event.end_ms}ms")
@@ -600,6 +603,20 @@ class SubtitlesStep:
         source_video = ctx.sources.get(source_key)
         target_video = source1_file
 
+        # DIAGNOSTIC: Log source_key resolution for generated tracks
+        if item.is_generated:
+            runner._log_message(f"[Sync] Generated track source_key resolution:")
+            runner._log_message(f"[Sync]   item.track.source = '{item.track.source}'")
+            runner._log_message(f"[Sync]   item.sync_to = '{item.sync_to}'")
+            runner._log_message(f"[Sync]   Resolved source_key = '{source_key}'")
+            if hasattr(ctx, 'video_verified_sources'):
+                runner._log_message(f"[Sync]   video_verified_sources keys: {list(ctx.video_verified_sources.keys())}")
+                if source_key in ctx.video_verified_sources:
+                    cached = ctx.video_verified_sources[source_key]
+                    runner._log_message(f"[Sync]   Found cached delay: {cached['corrected_delay_ms']:+.3f}ms")
+                else:
+                    runner._log_message(f"[Sync]   WARNING: source_key NOT in video_verified_sources!")
+
         # Get delays
         total_delay_ms = 0.0
         global_shift_ms = 0.0
@@ -618,7 +635,7 @@ class SubtitlesStep:
                 runner._log_message(f"[Sync] WARNING: Could not detect FPS: {e}")
 
         runner._log_message(f"[Sync] Mode: {sync_mode}")
-        runner._log_message(f"[Sync] Delay: {total_delay_ms:+.3f}ms (global: {global_shift_ms:+.3f}ms)")
+        runner._log_message(f"[Sync] Source: {source_key}, Delay: {total_delay_ms:+.3f}ms (global: {global_shift_ms:+.3f}ms)")
 
         # Check if video-verified was already computed for this source
         # If so, use the pre-computed delay and apply it directly (skip re-running frame matching)
