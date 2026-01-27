@@ -527,6 +527,7 @@ def _verify_frame_sequence_static(
     hash_algorithm: str,
     hash_size: int,
     hash_threshold: int,
+    comparison_method: str = 'hash',
 ) -> Tuple[int, float, List[int]]:
     """
     Verify that a sequence of consecutive frames match between source and target.
@@ -547,11 +548,12 @@ def _verify_frame_sequence_static(
         hash_algorithm: Hash algorithm to use
         hash_size: Hash size
         hash_threshold: Maximum distance for a match
+        comparison_method: 'hash', 'ssim', or 'mse'
 
     Returns:
         Tuple of (matched_count, avg_distance, distances_list)
     """
-    from ..frame_utils import compute_frame_hash, compute_hamming_distance
+    from ..frame_utils import compute_frame_hash, compute_hamming_distance, compare_frames
 
     matched = 0
     distances = []
@@ -570,17 +572,30 @@ def _verify_frame_sequence_static(
             if source_frame is None or target_frame is None:
                 continue
 
-            source_hash = compute_frame_hash(source_frame, hash_size, hash_algorithm)
-            target_hash = compute_frame_hash(target_frame, hash_size, hash_algorithm)
+            if comparison_method in ('ssim', 'mse'):
+                # Use compare_frames for SSIM/MSE comparison
+                distance, is_match = compare_frames(
+                    source_frame, target_frame,
+                    method=comparison_method,
+                    hash_algorithm=hash_algorithm,
+                    hash_size=hash_size
+                )
+                distances.append(distance)
+                if is_match:
+                    matched += 1
+            else:
+                # Default: use perceptual hash comparison
+                source_hash = compute_frame_hash(source_frame, hash_size, hash_algorithm)
+                target_hash = compute_frame_hash(target_frame, hash_size, hash_algorithm)
 
-            if source_hash is None or target_hash is None:
-                continue
+                if source_hash is None or target_hash is None:
+                    continue
 
-            distance = compute_hamming_distance(source_hash, target_hash)
-            distances.append(distance)
+                distance = compute_hamming_distance(source_hash, target_hash)
+                distances.append(distance)
 
-            if distance <= hash_threshold:
-                matched += 1
+                if distance <= hash_threshold:
+                    matched += 1
 
         except Exception:
             continue
@@ -627,7 +642,7 @@ def _measure_frame_offset_quality_static(
     Returns:
         Dict with score, matched count, avg_distance, sequence_verified count, and match_details
     """
-    from ..frame_utils import compute_frame_hash, compute_hamming_distance
+    from ..frame_utils import compute_frame_hash, compute_hamming_distance, compare_frames
 
     total_score = 0.0
     matched_count = 0
@@ -651,29 +666,39 @@ def _measure_frame_offset_quality_static(
             if source_frame is None:
                 continue
 
-            source_hash = compute_frame_hash(source_frame, hash_size, hash_algorithm)
-            if source_hash is None:
-                continue
-
             target_frame = target_reader.get_frame_at_index(target_frame_idx)
             if target_frame is None:
                 continue
 
-            target_hash = compute_frame_hash(target_frame, hash_size, hash_algorithm)
-            if target_hash is None:
-                continue
+            if comparison_method in ('ssim', 'mse'):
+                # Use compare_frames for SSIM/MSE comparison
+                initial_distance, initial_match = compare_frames(
+                    source_frame, target_frame,
+                    method=comparison_method,
+                    hash_algorithm=hash_algorithm,
+                    hash_size=hash_size
+                )
+            else:
+                # Default: use perceptual hash comparison
+                source_hash = compute_frame_hash(source_frame, hash_size, hash_algorithm)
+                if source_hash is None:
+                    continue
 
-            initial_distance = compute_hamming_distance(source_hash, target_hash)
+                target_hash = compute_frame_hash(target_frame, hash_size, hash_algorithm)
+                if target_hash is None:
+                    continue
+
+                initial_distance = compute_hamming_distance(source_hash, target_hash)
+                initial_match = initial_distance <= hash_threshold
+
             distances.append(initial_distance)
-
-            # Check if initial frame matches
-            initial_match = initial_distance <= hash_threshold
 
             # Now verify with sequence of consecutive frames
             seq_matched, seq_avg_dist, seq_distances = _verify_frame_sequence_static(
                 source_frame_idx, target_frame_idx, sequence_verify_length,
                 source_reader, target_reader,
-                hash_algorithm, hash_size, hash_threshold
+                hash_algorithm, hash_size, hash_threshold,
+                comparison_method=comparison_method
             )
 
             # Sequence is verified if majority of frames match
