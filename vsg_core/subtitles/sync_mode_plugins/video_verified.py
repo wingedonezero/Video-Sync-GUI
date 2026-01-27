@@ -148,7 +148,7 @@ def calculate_video_verified_offset(
         hash_size = int(config.get('interlaced_hash_size', 8))
         hash_threshold = int(config.get('interlaced_hash_threshold', 25))
         window_radius = int(config.get('frame_window_radius', 5))
-        comparison_method = config.get('frame_comparison_method', 'hash')
+        comparison_method = config.get('interlaced_comparison_method', 'ssim')
         interlaced_fallback_to_audio = config.get('interlaced_fallback_to_audio', True)
     else:
         num_checkpoints = config.get('video_verified_num_checkpoints', 5)
@@ -201,12 +201,13 @@ def calculate_video_verified_offset(
 
     # Open video readers with deinterlace support
     try:
-        # Use interlaced deinterlace method if enabled
+        # Use interlaced deinterlace method if enabled, otherwise auto-detect
         if use_interlaced_settings:
             deinterlace_mode = config.get('interlaced_deinterlace_method', 'bwdif')
             log(f"[VideoVerified] Using deinterlace method: {deinterlace_mode}")
         else:
-            deinterlace_mode = config.get('frame_deinterlace_mode', 'auto')
+            # Progressive content: auto-detect if deinterlacing is needed
+            deinterlace_mode = 'auto'
 
         source_reader = VideoReader(
             source_video, runner, temp_dir=temp_dir,

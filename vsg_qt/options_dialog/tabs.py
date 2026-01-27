@@ -1401,28 +1401,6 @@ class SubtitleSyncTab(QWidget):
             "• Unchecked: Use ffprobe/ffmpeg fallback (slower but no dependencies)"
         )
 
-        self.widgets['frame_deinterlace_mode'] = QComboBox()
-        self.widgets['frame_deinterlace_mode'].addItems(['auto', 'none', 'yadif', 'bob', 'bwdif'])
-        self.widgets['frame_deinterlace_mode'].setToolTip(
-            "Deinterlacing mode for interlaced video sources:\n\n"
-            "• auto (Default): Detect interlaced content and deinterlace automatically\n"
-            "• none: Never deinterlace (use raw interlaced frames)\n"
-            "• yadif: YADIF deinterlacer (good quality, moderate speed)\n"
-            "• bob: Bob deinterlacer (fast, doubles framerate)\n"
-            "• bwdif: BWDIF - motion adaptive (best quality, requires plugin)\n\n"
-            "When comparing progressive to interlaced sources, 'auto' will\n"
-            "deinterlace only the interlaced source for accurate matching."
-        )
-
-        self.widgets['frame_deinterlace_method'] = QComboBox()
-        self.widgets['frame_deinterlace_method'].addItems(['yadif', 'bob', 'bwdif'])
-        self.widgets['frame_deinterlace_method'].setToolTip(
-            "Default deinterlace method when mode is 'auto':\n\n"
-            "• yadif (Default): Best balance of quality and speed\n"
-            "• bob: Fastest, but may have artifacts on motion\n"
-            "• bwdif: Best quality with motion adaptation (requires plugin)"
-        )
-
         self.widgets['frame_comparison_method'] = QComboBox()
         self.widgets['frame_comparison_method'].addItems(['hash', 'ssim', 'mse'])
         self.widgets['frame_comparison_method'].setToolTip(
@@ -1441,8 +1419,6 @@ class SubtitleSyncTab(QWidget):
         frame_layout.addRow("Search Range:", self.widgets['frame_search_range_ms'])
         frame_layout.addRow("Tolerance:", self.widgets['frame_agreement_tolerance_ms'])
         frame_layout.addRow("", self.widgets['frame_use_vapoursynth'])
-        frame_layout.addRow("Deinterlace:", self.widgets['frame_deinterlace_mode'])
-        frame_layout.addRow("Deinterlace Method:", self.widgets['frame_deinterlace_method'])
         frame_layout.addRow("Comparison Method:", self.widgets['frame_comparison_method'])
         main_layout.addWidget(frame_group)
 
@@ -1796,6 +1772,19 @@ class SubtitleSyncTab(QWidget):
             "When disabled, will report failure if frames don't match."
         )
 
+        self.widgets['interlaced_comparison_method'] = QComboBox()
+        self.widgets['interlaced_comparison_method'].addItems(['hash', 'ssim', 'mse'])
+        self.widgets['interlaced_comparison_method'].setCurrentText('ssim')
+        self.widgets['interlaced_comparison_method'].setToolTip(
+            "Frame comparison method for interlaced content:\n\n"
+            "• hash: Perceptual hashing - fast, but may struggle with interlaced artifacts\n"
+            "• ssim (Default): Structural Similarity - better for interlaced/DVD content\n"
+            "  More tolerant of deinterlacing artifacts and field differences\n"
+            "• mse: Mean Squared Error - fast, works well for similar encodes\n\n"
+            "SSIM is recommended for interlaced content as it handles\n"
+            "deinterlacing artifacts better than perceptual hashing."
+        )
+
         interlaced_layout.addRow("Enable Interlaced Handling:", self.widgets['interlaced_handling_enabled'])
         interlaced_layout.addRow("Detection Mode:", self.widgets['interlaced_force_mode'])
         interlaced_layout.addRow("Hash Algorithm:", self.widgets['interlaced_hash_algorithm'])
@@ -1805,6 +1794,7 @@ class SubtitleSyncTab(QWidget):
         interlaced_layout.addRow("Checkpoints:", self.widgets['interlaced_num_checkpoints'])
         interlaced_layout.addRow("Search Range:", self.widgets['interlaced_search_range_frames'])
         interlaced_layout.addRow("Deinterlace Method:", self.widgets['interlaced_deinterlace_method'])
+        interlaced_layout.addRow("Comparison Method:", self.widgets['interlaced_comparison_method'])
         interlaced_layout.addRow("Use IVTC:", self.widgets['interlaced_use_ivtc'])
         interlaced_layout.addRow("Fallback to Audio:", self.widgets['interlaced_fallback_to_audio'])
 

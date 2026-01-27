@@ -87,8 +87,6 @@ class AppConfig:
             'frame_search_range_ms': 2000,  # Search ±N ms around expected position
             'frame_agreement_tolerance_ms': 100,  # Checkpoints must agree within ±N ms
             'frame_use_vapoursynth': True,  # Use VapourSynth for frame extraction (faster with cache)
-            'frame_deinterlace_mode': 'auto',  # Deinterlace mode: 'auto', 'none', or specific method
-            'frame_deinterlace_method': 'yadif',  # Method for auto mode: 'yadif', 'bob', 'bwdif'
             'frame_comparison_method': 'hash',  # Comparison method: 'hash', 'ssim', 'mse'
 
             # --- Unified Rounding Settings ---
@@ -140,6 +138,7 @@ class AppConfig:
             'interlaced_use_ivtc': False,  # Use inverse telecine for telecine content
             'interlaced_fallback_to_audio': True,  # Fall back to audio correlation if no match
             'interlaced_force_mode': 'auto',  # 'auto', 'interlaced', 'telecine', 'progressive'
+            'interlaced_comparison_method': 'ssim',  # Comparison method for interlaced: 'hash', 'ssim', 'mse'
 
             # --- Timing Fix Settings ---
             'timing_fix_enabled': False,

@@ -307,8 +307,8 @@ class VideoReader:
     def _get_deinterlace_method(self) -> str:
         """Get the actual deinterlace method to use."""
         if self.deinterlace_method == 'auto':
-            # Default to yadif for auto mode
-            return self.config.get('frame_deinterlace_method', 'yadif')
+            # Use interlaced deinterlace method setting, default to bwdif
+            return self.config.get('interlaced_deinterlace_method', 'bwdif')
         return self.deinterlace_method
 
     def _apply_deinterlace_filter(self, clip, core):
