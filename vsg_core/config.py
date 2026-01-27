@@ -88,7 +88,7 @@ class AppConfig:
             'frame_agreement_tolerance_ms': 100,  # Checkpoints must agree within ±N ms
             'frame_use_vapoursynth': True,  # Use VapourSynth for frame extraction (faster with cache)
             'frame_deinterlace_mode': 'auto',  # Deinterlace mode: 'auto', 'none', or specific method
-            'frame_deinterlace_method': 'yadif',  # Method for auto mode: 'yadif', 'bob', 'w3fdif', 'bwdif'
+            'frame_deinterlace_method': 'yadif',  # Method for auto mode: 'yadif', 'bob', 'bwdif'
             'frame_comparison_method': 'hash',  # Comparison method: 'hash', 'ssim', 'mse'
 
             # --- Unified Rounding Settings ---
