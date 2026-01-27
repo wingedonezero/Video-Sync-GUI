@@ -809,9 +809,15 @@ class ManualSelectionDialog(QDialog):
 
     def _launch_style_editor(self, widget: TrackWidget):
         track_data = widget.track_data
-        ref_video_path = self.track_info.get('Source 1', [{}])[0].get('original_path')
+
+        # Use the track's source video for preview (not always Source 1)
+        source_key = track_data.get('source', 'Source 1')
+        if source_key == 'External':
+            # External subtitles use Source 1 for preview
+            source_key = 'Source 1'
+        ref_video_path = self.track_info.get(source_key, [{}])[0].get('original_path')
         if not ref_video_path:
-            QMessageBox.warning(self, "Error", "Reference video path is missing.")
+            QMessageBox.warning(self, "Error", f"Reference video path is missing for {source_key}.")
             return
 
         # Check if this is an OCR track (image-based subtitle with OCR enabled)
