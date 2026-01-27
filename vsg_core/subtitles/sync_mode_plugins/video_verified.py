@@ -265,8 +265,8 @@ def calculate_video_verified_offset(
             f"score={quality['score']:.2f}, seq_verified={seq_verified}/{len(checkpoint_times)}, "
             f"avg_dist={quality['avg_distance']:.1f}")
 
-    # Select best candidate - prefer sequence_verified count, then score
-    best_result = max(candidate_results, key=lambda r: (r['sequence_verified'], r['quality']))
+    # Select best candidate - prefer sequence_verified count, then score, then lowest avg_distance
+    best_result = max(candidate_results, key=lambda r: (r['sequence_verified'], r['quality'], -r['avg_distance']))
     best_frame_offset = best_result['frame_offset']
 
     log(f"[VideoVerified] ───────────────────────────────────────")
