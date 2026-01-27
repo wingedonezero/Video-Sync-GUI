@@ -142,6 +142,7 @@ class AppConfig:
 
             # --- Generated Track Settings ---
             'generated_use_pysubs2': False,  # Use pysubs2 instead of SubtitleData for generated tracks
+            'generated_raw_copy_debug': False,  # DEBUG: Skip ALL processing, just copy file (no filtering, no delay)
 
             # --- Timing Fix Settings ---
             'timing_fix_enabled': False,

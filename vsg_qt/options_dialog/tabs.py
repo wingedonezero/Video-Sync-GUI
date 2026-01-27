@@ -1821,6 +1821,22 @@ class SubtitleSyncTab(QWidget):
 
         generated_layout.addRow("Use pysubs2 for Generated:", self.widgets['generated_use_pysubs2'])
 
+        self.widgets['generated_raw_copy_debug'] = QCheckBox()
+        self.widgets['generated_raw_copy_debug'].setChecked(False)
+        self.widgets['generated_raw_copy_debug'].setToolTip(
+            "DEBUG: Skip ALL processing for generated tracks:\n\n"
+            "When enabled, generated tracks will NOT be processed at all.\n"
+            "The source file will be used as-is with NO modifications:\n"
+            "  - No style filtering\n"
+            "  - No delay/timing adjustments\n"
+            "  - No format conversion\n\n"
+            "Use this to isolate if the processing pipeline is causing\n"
+            "the timing/display issues with generated tracks.\n\n"
+            "If this option fixes the issue, the problem is in processing.\n"
+            "If the issue persists, it's in file copy/muxing/container."
+        )
+        generated_layout.addRow("DEBUG - Raw Copy (no processing):", self.widgets['generated_raw_copy_debug'])
+
         main_layout.addWidget(generated_group)
         main_layout.addStretch(1)
 

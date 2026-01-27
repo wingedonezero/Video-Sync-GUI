@@ -197,6 +197,18 @@ class SubtitlesStep:
                 continue  # Skip to next track - file is already in item.extracted_path
 
             # ================================================================
+            # Check if we should skip ALL processing for generated tracks (debug)
+            # ================================================================
+            raw_copy_debug = ctx.settings_dict.get('generated_raw_copy_debug', False)
+
+            if item.is_generated and raw_copy_debug:
+                runner._log_message(f"[DEBUG] Generated track {item.track.id}: RAW COPY MODE - skipping ALL processing")
+                runner._log_message(f"[DEBUG]   File will be muxed as-is: {item.extracted_path.name}")
+                runner._log_message(f"[DEBUG]   No style filtering, no delay adjustment, no processing")
+                # Don't set frame_adjusted - let mkvmerge apply delay via --sync
+                continue  # Skip to next track
+
+            # ================================================================
             # Check if we should use pysubs2 for generated tracks
             # ================================================================
             use_pysubs2_for_generated = ctx.settings_dict.get('generated_use_pysubs2', False)
