@@ -1400,27 +1400,25 @@ class SubtitleSyncTab(QWidget):
         )
 
         self.widgets['frame_deinterlace_mode'] = QComboBox()
-        self.widgets['frame_deinterlace_mode'].addItems(['auto', 'none', 'yadif', 'bob', 'w3fdif', 'bwdif'])
+        self.widgets['frame_deinterlace_mode'].addItems(['auto', 'none', 'yadif', 'bob', 'bwdif'])
         self.widgets['frame_deinterlace_mode'].setToolTip(
             "Deinterlacing mode for interlaced video sources:\n\n"
             "• auto (Default): Detect interlaced content and deinterlace automatically\n"
             "• none: Never deinterlace (use raw interlaced frames)\n"
             "• yadif: YADIF deinterlacer (good quality, moderate speed)\n"
             "• bob: Bob deinterlacer (fast, doubles framerate)\n"
-            "• w3fdif: W3FDIF - BBC's deinterlacer (high quality)\n"
-            "• bwdif: BWDIF - motion adaptive (good quality)\n\n"
+            "• bwdif: BWDIF - motion adaptive (best quality, requires plugin)\n\n"
             "When comparing progressive to interlaced sources, 'auto' will\n"
             "deinterlace only the interlaced source for accurate matching."
         )
 
         self.widgets['frame_deinterlace_method'] = QComboBox()
-        self.widgets['frame_deinterlace_method'].addItems(['yadif', 'bob', 'w3fdif', 'bwdif'])
+        self.widgets['frame_deinterlace_method'].addItems(['yadif', 'bob', 'bwdif'])
         self.widgets['frame_deinterlace_method'].setToolTip(
             "Default deinterlace method when mode is 'auto':\n\n"
             "• yadif (Default): Best balance of quality and speed\n"
             "• bob: Fastest, but may have artifacts on motion\n"
-            "• w3fdif: Highest quality, slower (requires plugin)\n"
-            "• bwdif: Good quality with motion adaptation (requires plugin)"
+            "• bwdif: Best quality with motion adaptation (requires plugin)"
         )
 
         self.widgets['frame_comparison_method'] = QComboBox()

@@ -198,12 +198,11 @@ class VideoReader:
     - 'yadif': YADIF deinterlacer (good quality, moderate speed)
     - 'yadifmod': YADIFmod (better edge handling than YADIF)
     - 'bob': Bob deinterlacer (fast, doubles framerate)
-    - 'w3fdif': W3FDIF (BBC's deinterlacer, high quality)
-    - 'bwdif': BWDIF (motion adaptive, good quality)
+    - 'bwdif': BWDIF (motion adaptive, best quality)
     """
 
     # Available deinterlace methods
-    DEINTERLACE_METHODS = ['auto', 'none', 'yadif', 'yadifmod', 'bob', 'w3fdif', 'bwdif']
+    DEINTERLACE_METHODS = ['auto', 'none', 'yadif', 'yadifmod', 'bob', 'bwdif']
 
     def __init__(self, video_path: str, runner, temp_dir: Path = None,
                  deinterlace: str = 'auto', config: dict = None, **kwargs):
@@ -358,14 +357,6 @@ class VideoReader:
                 # Simple and fast, good for frame matching
                 clip = core.std.SeparateFields(clip, tff=tff)
                 clip = core.resize.Spline36(clip, height=clip.height * 2)
-
-            elif method == 'w3fdif':
-                # W3FDIF - BBC's deinterlacer
-                if hasattr(core, 'w3fdif'):
-                    clip = core.w3fdif.W3FDIF(clip, order=1 if tff else 0, mode=1)
-                else:
-                    self.runner._log_message("[FrameUtils] W3FDIF not available, falling back to YADIF")
-                    return self._apply_deinterlace_filter_method(clip, core, 'yadif', tff)
 
             elif method == 'bwdif':
                 # BWDIF - motion adaptive deinterlacer
