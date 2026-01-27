@@ -4,7 +4,7 @@
 Video panel widget for subtitle editor.
 
 Contains:
-- MPV-based video display with libass subtitle rendering
+- MPV-based video display with OpenGL rendering
 - Playback controls (play/pause, seek slider)
 - Time display
 """
@@ -28,7 +28,8 @@ class VideoPanel(QWidget):
     """
     Video panel with MPV-based playback and controls.
 
-    Uses MPV for video display and subtitle rendering (libass built-in).
+    Uses MPV with OpenGL rendering for reliable video display
+    and libass for subtitle rendering.
 
     Signals:
         seek_requested: Emitted when user requests seek via slider
@@ -53,7 +54,7 @@ class VideoPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
 
-        # MPV video widget
+        # MPV OpenGL video widget - renders directly
         self._mpv_widget = MpvWidget()
         layout.addWidget(self._mpv_widget, 1)
 
@@ -101,7 +102,7 @@ class VideoPanel(QWidget):
         Args:
             video_path: Path to video file
             subtitle_path: Path to subtitle file for overlay
-            index_dir: Directory for VapourSynth index cache (kept for compatibility)
+            index_dir: Directory for index cache (not used with MPV)
             fonts_dir: Optional path to fonts directory
         """
         print(f"[VideoPanel] Starting MPV player")
