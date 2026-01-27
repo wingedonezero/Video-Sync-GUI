@@ -129,6 +129,16 @@ class SubtitlesStep:
         # Cache for scene detection results per source
         _scene_detection_cache = {}
 
+        # ================================================================
+        # Video-Verified Pre-Processing (once per source)
+        # ================================================================
+        # If video-verified mode is enabled, run frame matching once per
+        # unique source and update ctx.delays. This ensures all subtitle
+        # tracks (text, bitmap, OCR'd, preserved) use the corrected delay.
+        subtitle_sync_mode = ctx.settings_dict.get('subtitle_sync_mode', 'time-based')
+        if subtitle_sync_mode == 'video-verified' and source1_file:
+            self._run_video_verified_per_source(ctx, runner, source1_file)
+
         for item in ctx.extracted_items:
             if item.track.type != TrackType.SUBTITLES:
                 continue
@@ -853,6 +863,106 @@ class SubtitlesStep:
 
         return None
 
+    def _run_video_verified_per_source(
+        self,
+        ctx: 'Context',
+        runner: 'CommandRunner',
+        source1_file: Path
+    ) -> None:
+        """
+        Run video-verified frame matching once per unique source.
+
+        This pre-computes the frame-corrected delays for all sources that have
+        subtitle tracks, updating ctx.delays so that ALL subtitle tracks from
+        each source (text, bitmap, OCR'd, preserved) use the corrected delay.
+
+        Only runs in video-verified mode.
+        """
+        from vsg_core.subtitles.sync_mode_plugins.video_verified import calculate_video_verified_offset
+        from pathlib import Path
+
+        runner._log_message("[VideoVerified] ═══════════════════════════════════════════════════════")
+        runner._log_message("[VideoVerified] Video-to-Video Frame Alignment")
+        runner._log_message("[VideoVerified] ═══════════════════════════════════════════════════════")
+        runner._log_message(f"[VideoVerified] Reference: Source 1 ({Path(source1_file).name})")
+
+        # Find unique sources that have subtitle tracks
+        sources_with_subs = set()
+        for item in ctx.extracted_items:
+            if item.track.type == TrackType.SUBTITLES:
+                source_key = item.sync_to if item.track.source == 'External' else item.track.source
+                # Skip Source 1 - it's the reference, delay is always 0 + global_shift
+                if source_key != 'Source 1':
+                    sources_with_subs.add(source_key)
+
+        if not sources_with_subs:
+            runner._log_message("[VideoVerified] No subtitle tracks from other sources, skipping")
+            return
+
+        runner._log_message(f"[VideoVerified] Aligning: {', '.join(sorted(sources_with_subs))} → Source 1")
+
+        # Process each source
+        for source_key in sorted(sources_with_subs):
+            source_video = ctx.sources.get(source_key)
+            if not source_video:
+                runner._log_message(f"[VideoVerified] WARNING: No video file for {source_key}, skipping")
+                continue
+
+            runner._log_message(f"\n[VideoVerified] ─── {source_key} vs Source 1 ───")
+
+            # Get delays for this source
+            total_delay_ms = 0.0
+            global_shift_ms = 0.0
+            if ctx.delays:
+                if source_key in ctx.delays.raw_source_delays_ms:
+                    total_delay_ms = ctx.delays.raw_source_delays_ms[source_key]
+                global_shift_ms = ctx.delays.raw_global_shift_ms
+
+            original_delay = total_delay_ms
+
+            try:
+                # Calculate frame-corrected delay
+                corrected_delay_ms, details = calculate_video_verified_offset(
+                    source_video=str(source_video),
+                    target_video=str(source1_file),
+                    total_delay_ms=total_delay_ms,
+                    global_shift_ms=global_shift_ms,
+                    config=ctx.settings_dict,
+                    runner=runner,
+                    temp_dir=ctx.temp_dir,
+                )
+
+                if corrected_delay_ms is not None and ctx.delays:
+                    # Update both raw and rounded delays
+                    if source_key in ctx.delays.source_delays_ms:
+                        ctx.delays.source_delays_ms[source_key] = round(corrected_delay_ms)
+                    if source_key in ctx.delays.raw_source_delays_ms:
+                        ctx.delays.raw_source_delays_ms[source_key] = corrected_delay_ms
+
+                    # Store that we've processed this source
+                    if not hasattr(ctx, 'video_verified_sources'):
+                        ctx.video_verified_sources = {}
+                    ctx.video_verified_sources[source_key] = {
+                        'original_delay_ms': original_delay,
+                        'corrected_delay_ms': corrected_delay_ms,
+                        'details': details,
+                    }
+
+                    # Report the result
+                    if abs(corrected_delay_ms - original_delay) > 1:
+                        runner._log_message(f"[VideoVerified] ✓ {source_key} → Source 1: {original_delay:+.1f}ms corrected to {corrected_delay_ms:+.1f}ms")
+                    else:
+                        runner._log_message(f"[VideoVerified] ✓ {source_key} → Source 1: {corrected_delay_ms:+.1f}ms (no frame correction needed)")
+                else:
+                    runner._log_message(f"[VideoVerified] ✗ {source_key}: frame matching failed, using audio correlation")
+
+            except Exception as e:
+                runner._log_message(f"[VideoVerified] ✗ {source_key}: ERROR - {e}")
+
+        runner._log_message("\n[VideoVerified] ═══════════════════════════════════════════════════════")
+        runner._log_message("[VideoVerified] Frame alignment complete")
+        runner._log_message("[VideoVerified] ═══════════════════════════════════════════════════════\n")
+
     def _apply_video_verified_for_bitmap(
         self,
         item,
@@ -863,6 +973,10 @@ class SubtitlesStep:
         """
         Apply video-verified frame matching for bitmap subtitles (VobSub, PGS).
 
+        NOTE: This method is now mostly a fallback. The main video-verified
+        processing happens in _run_video_verified_per_source() which runs
+        once per source at the start of the subtitles step.
+
         Since bitmap subtitles can't be loaded into SubtitleData, we use the
         video-verified logic to calculate the correct delay, then store it
         so mkvmerge can apply it via --sync.
@@ -870,13 +984,24 @@ class SubtitlesStep:
         This provides frame-accurate sync for image-based subtitle formats
         without requiring OCR.
         """
+        ext = item.extracted_path.suffix.lower() if item.extracted_path else 'unknown'
+        source_key = item.sync_to if item.track.source == 'External' else item.track.source
+
+        # Check if this source was already processed in the per-source pre-processing step
+        if hasattr(ctx, 'video_verified_sources') and source_key in ctx.video_verified_sources:
+            cached = ctx.video_verified_sources[source_key]
+            runner._log_message(f"[VideoVerified] Bitmap track {item.track.id} ({ext}): using pre-computed delay for {source_key}")
+            runner._log_message(f"[VideoVerified]   Delay: {cached['corrected_delay_ms']:+.1f}ms (was {cached['original_delay_ms']:+.1f}ms)")
+            item.video_verified_bitmap = True
+            item.video_verified_details = cached['details']
+            return
+
+        # Fallback: run frame matching for this track if not pre-processed
+        # This shouldn't normally happen, but provides a safety net
         from vsg_core.subtitles.sync_mode_plugins.video_verified import calculate_video_verified_offset
 
-        ext = item.extracted_path.suffix.lower() if item.extracted_path else 'unknown'
-        runner._log_message(f"[VideoVerified] Processing bitmap subtitle track {item.track.id} ({ext})")
+        runner._log_message(f"[VideoVerified] Processing bitmap subtitle track {item.track.id} ({ext}) (fallback mode)")
 
-        # Get source video for this track
-        source_key = item.sync_to if item.track.source == 'External' else item.track.source
         source_video = ctx.sources.get(source_key)
         target_video = source1_file
 
