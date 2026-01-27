@@ -341,6 +341,30 @@ class SubtitlesStep:
         if item.is_generated and item.generated_filter_styles:
             runner._log_message(f"[SubtitleData] Applying style filter for generated track...")
 
+            # DIAGNOSTIC: Show raw file content to verify copy is correct
+            runner._log_message(f"[DIAG-GEN] === GENERATED TRACK FILE CHECK ===")
+            runner._log_message(f"[DIAG-GEN] Source file: {item.extracted_path}")
+            try:
+                with open(item.extracted_path, 'r', encoding='utf-8-sig') as f:
+                    lines = f.readlines()
+                runner._log_message(f"[DIAG-GEN] File has {len(lines)} lines")
+                # Show [Events] section header and first few dialogues
+                in_events = False
+                event_count = 0
+                for i, line in enumerate(lines):
+                    if '[Events]' in line:
+                        in_events = True
+                        runner._log_message(f"[DIAG-GEN] Line {i}: {line.strip()}")
+                    elif in_events and line.strip().startswith(('Format:', 'Dialogue:', 'Comment:')):
+                        runner._log_message(f"[DIAG-GEN] Line {i}: {line.strip()[:120]}{'...' if len(line.strip()) > 120 else ''}")
+                        if line.strip().startswith(('Dialogue:', 'Comment:')):
+                            event_count += 1
+                            if event_count >= 5:
+                                runner._log_message(f"[DIAG-GEN] ... (showing first 5 events only)")
+                                break
+            except Exception as e:
+                runner._log_message(f"[DIAG-GEN] Error reading file: {e}")
+
             # DIAGNOSTIC: Log timing and styles BEFORE style filtering
             if subtitle_data.events:
                 runner._log_message(f"[DIAG-FILTER] BEFORE style filter - {len(subtitle_data.events)} events, {len(subtitle_data.styles)} styles")
@@ -527,6 +551,29 @@ class SubtitlesStep:
             subtitle_data.save(output_path, rounding=rounding_mode)
             item.extracted_path = output_path
             runner._log_message(f"[SubtitleData] Saved successfully ({len(subtitle_data.events)} events)")
+
+            # DIAGNOSTIC: For generated tracks, show output file content
+            if item.is_generated:
+                runner._log_message(f"[DIAG-GEN] === GENERATED TRACK OUTPUT CHECK ===")
+                try:
+                    with open(output_path, 'r', encoding='utf-8-sig') as f:
+                        out_lines = f.readlines()
+                    runner._log_message(f"[DIAG-GEN] Output file has {len(out_lines)} lines")
+                    in_events = False
+                    event_count = 0
+                    for i, line in enumerate(out_lines):
+                        if '[Events]' in line:
+                            in_events = True
+                            runner._log_message(f"[DIAG-GEN] OUT Line {i}: {line.strip()}")
+                        elif in_events and line.strip().startswith(('Format:', 'Dialogue:', 'Comment:')):
+                            runner._log_message(f"[DIAG-GEN] OUT Line {i}: {line.strip()[:120]}{'...' if len(line.strip()) > 120 else ''}")
+                            if line.strip().startswith(('Dialogue:', 'Comment:')):
+                                event_count += 1
+                                if event_count >= 5:
+                                    runner._log_message(f"[DIAG-GEN] ... (showing first 5 events only)")
+                                    break
+                except Exception as e:
+                    runner._log_message(f"[DIAG-GEN] Error reading output file: {e}")
 
             # DIAGNOSTIC: Read back saved file timestamps to verify
             if output_path.suffix.lower() in ('.ass', '.ssa'):
