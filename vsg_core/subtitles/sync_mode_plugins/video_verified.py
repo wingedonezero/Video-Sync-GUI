@@ -355,7 +355,9 @@ def _measure_candidate_quality_static(
             if source_frame is None:
                 continue
 
-            source_hash = compute_frame_hash(source_frame, hash_algorithm, hash_size)
+            source_hash = compute_frame_hash(source_frame, hash_size, hash_algorithm)
+            if source_hash is None:
+                continue
 
             # Search window around expected target frame
             best_distance = float('inf')
@@ -368,7 +370,10 @@ def _measure_candidate_quality_static(
                 if target_frame is None:
                     continue
 
-                target_hash = compute_frame_hash(target_frame, hash_algorithm, hash_size)
+                target_hash = compute_frame_hash(target_frame, hash_size, hash_algorithm)
+                if target_hash is None:
+                    continue
+
                 distance = compute_hamming_distance(source_hash, target_hash)
 
                 if distance < best_distance:
