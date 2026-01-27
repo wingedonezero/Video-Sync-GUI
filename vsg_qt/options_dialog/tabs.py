@@ -1345,14 +1345,16 @@ class SubtitleSyncTab(QWidget):
         )
 
         self.widgets['frame_hash_threshold'] = QSpinBox()
-        self.widgets['frame_hash_threshold'].setRange(0, 30)
+        self.widgets['frame_hash_threshold'].setRange(0, 50)
         self.widgets['frame_hash_threshold'].setValue(5)
         self.widgets['frame_hash_threshold'].setToolTip(
             "Max hamming distance for frame match:\n\n"
             "• 0-3: Strict (near-perfect match required)\n"
             "• 5 (Default): Balanced (minor compression differences OK)\n"
             "• 10-15: Tolerant (heavy re-encoding OK)\n"
-            "• 20+: Very loose (may match wrong frames)"
+            "• 20-30: Loose (different encodes, streaming vs BD)\n"
+            "• 30-50: Very loose (DVD, interlaced, different regions)\n\n"
+            "If frame matching fails, check the log for suggested value."
         )
 
         self.widgets['frame_window_radius'] = QSpinBox()
