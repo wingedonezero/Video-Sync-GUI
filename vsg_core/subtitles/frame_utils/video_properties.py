@@ -114,11 +114,14 @@ def detect_video_properties(video_path: str, runner) -> Dict[str, Any]:
 
     try:
         # Use ffprobe to get comprehensive stream info
+        # Note: We query both stream AND format for duration since MKV often
+        # only has duration at format level, not stream level
         cmd = [
             'ffprobe',
             '-v', 'quiet',
             '-select_streams', 'v:0',
             '-show_entries', 'stream=r_frame_rate,avg_frame_rate,field_order,nb_frames,duration,codec_name,width,height',
+            '-show_entries', 'format=duration',
             '-show_entries', 'stream_side_data=',
             '-of', 'json',
             str(video_path)
@@ -181,10 +184,16 @@ def detect_video_properties(video_path: str, runner) -> Dict[str, Any]:
             # Unknown - might need deeper analysis
             props['field_order'] = 'unknown'
 
-        # Parse duration
+        # Parse duration - try stream first, then format (MKV often only has format duration)
         duration_str = stream.get('duration')
-        if duration_str:
+        if duration_str and duration_str != 'N/A':
             props['duration_ms'] = float(duration_str) * 1000.0
+        else:
+            # Try format-level duration (common for MKV files)
+            format_info = data.get('format', {})
+            format_duration = format_info.get('duration')
+            if format_duration and format_duration != 'N/A':
+                props['duration_ms'] = float(format_duration) * 1000.0
 
         # Parse frame count (if available)
         nb_frames = stream.get('nb_frames')
