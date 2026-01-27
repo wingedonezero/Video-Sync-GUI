@@ -4,20 +4,19 @@
 Fonts tab for subtitle editor.
 
 Provides font management functionality with visual font preview dropdown.
+Uses FontScanner from vsg_core for proper font scanning.
 """
 from __future__ import annotations
 
 from pathlib import Path
-import shutil
 from typing import TYPE_CHECKING, Optional, Dict, Any, List
 
 from PySide6.QtCore import Qt, Signal, QSize
-from PySide6.QtGui import QFont, QFontDatabase, QFontMetrics
+from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
     QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView,
-    QPushButton, QComboBox, QStyledItemDelegate, QStyle,
-    QStyleOptionViewItem, QApplication
+    QPushButton, QComboBox, QStyledItemDelegate, QStyle
 )
 
 from .base_tab import BaseTab
@@ -31,17 +30,15 @@ class FontPreviewDelegate(QStyledItemDelegate):
     Delegate that renders each font name in its own typeface.
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, loaded_fonts: Dict[str, str], parent=None):
         super().__init__(parent)
-        self._preview_text = "AaBbCc 123"
+        self._loaded_fonts = loaded_fonts  # file_path -> qt_family_name
 
     def paint(self, painter, option, index):
         """Paint the item with font preview."""
-        # Get the font name from the item
         font_name = index.data(Qt.DisplayRole)
         font_path = index.data(Qt.UserRole)
 
-        # Save painter state
         painter.save()
 
         # Draw selection background if selected
@@ -51,27 +48,18 @@ class FontPreviewDelegate(QStyledItemDelegate):
         else:
             painter.setPen(option.palette.text().color())
 
-        # Set up the font
-        if font_path:
-            # Try to use the actual font file
-            font_id = QFontDatabase.addApplicationFont(font_path)
-            if font_id >= 0:
-                families = QFontDatabase.applicationFontFamilies(font_id)
-                if families:
-                    font = QFont(families[0], 11)
-                else:
-                    font = QFont(font_name, 11)
-            else:
-                font = QFont(font_name, 11)
+        # Set up the font for preview
+        if font_path and font_path in self._loaded_fonts:
+            qt_family = self._loaded_fonts[font_path]
+            font = QFont(qt_family, 11)
         else:
             font = QFont(font_name, 11)
 
         painter.setFont(font)
 
-        # Draw the font name and preview
+        # Draw the font name
         text_rect = option.rect.adjusted(4, 2, -4, -2)
-        display_text = f"{font_name}"
-        painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter, display_text)
+        painter.drawText(text_rect, Qt.AlignLeft | Qt.AlignVCenter, font_name)
 
         painter.restore()
 
@@ -86,12 +74,13 @@ class FontPreviewComboBox(QComboBox):
     Each font is rendered in its own typeface.
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, loaded_fonts: Dict[str, str], parent=None):
         super().__init__(parent)
-        self.setItemDelegate(FontPreviewDelegate(self))
+        self._loaded_fonts = loaded_fonts
+        self._delegate = FontPreviewDelegate(loaded_fonts, self)
+        self.setItemDelegate(self._delegate)
         self.setMinimumWidth(200)
-        # Make dropdown wider to show previews
-        self.view().setMinimumWidth(250)
+        self.view().setMinimumWidth(300)
 
     def add_font(self, font_name: str, font_path: Optional[str] = None):
         """Add a font to the dropdown."""
@@ -106,21 +95,22 @@ class FontsTab(BaseTab):
 
     Features:
     - Visual font preview dropdown for selecting replacement fonts
-    - Loads fonts from the extracted fonts directory
+    - Loads fonts from app config fonts directory (recursive)
     - Shows original font name alongside replacement selection
     """
 
     TAB_NAME = "Fonts"
 
-    # Signal emitted when fonts are changed
     fonts_changed = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._fonts_dir: Optional[Path] = None
         self._replacements: Dict[str, Dict[str, Any]] = {}
-        self._available_fonts: List[Dict[str, str]] = []  # [{name, path}, ...]
+        self._available_fonts: List[Any] = []  # List of FontInfo objects
         self._font_combos: Dict[str, FontPreviewComboBox] = {}
+        self._loaded_fonts: Dict[str, str] = {}  # file_path -> qt_family_name
+        self._scanner = None
 
         self._build_ui()
 
@@ -135,6 +125,11 @@ class FontsTab(BaseTab):
         )
         desc.setWordWrap(True)
         layout.addWidget(desc)
+
+        # Fonts folder label
+        self._folder_label = QLabel("Fonts folder: (not set)")
+        self._folder_label.setStyleSheet("color: #888;")
+        layout.addWidget(self._folder_label)
 
         # Fonts table
         fonts_group = QGroupBox("Font Replacements")
@@ -187,7 +182,17 @@ class FontsTab(BaseTab):
 
     def set_fonts_dir(self, fonts_dir: Optional[Path]):
         """Set the fonts directory for preview."""
-        self._fonts_dir = Path(fonts_dir) if fonts_dir else None
+        if fonts_dir:
+            self._fonts_dir = Path(fonts_dir)
+        else:
+            # Use default from AppConfig
+            from vsg_core.config import AppConfig
+            config = AppConfig()
+            self._fonts_dir = config.get_fonts_dir()
+
+        if self._fonts_dir:
+            self._folder_label.setText(f"Fonts folder: {self._fonts_dir}")
+
         self._scan_available_fonts()
 
     def set_replacements(self, replacements: Dict[str, Dict[str, Any]]):
@@ -196,34 +201,33 @@ class FontsTab(BaseTab):
         self._populate_fonts()
 
     def _scan_available_fonts(self):
-        """Scan the fonts directory for available fonts."""
+        """Scan fonts directory using FontScanner."""
+        from vsg_core.font_manager import FontScanner
+
         self._available_fonts = []
+        self._loaded_fonts.clear()
 
-        if self._fonts_dir and self._fonts_dir.exists():
-            for ext in ['*.ttf', '*.otf', '*.TTF', '*.OTF']:
-                for font_path in self._fonts_dir.glob(ext):
-                    # Get font family name from the database
-                    font_id = QFontDatabase.addApplicationFont(str(font_path))
-                    if font_id >= 0:
-                        families = QFontDatabase.applicationFontFamilies(font_id)
-                        if families:
-                            font_name = families[0]
-                        else:
-                            font_name = font_path.stem
-                    else:
-                        font_name = font_path.stem
+        if not self._fonts_dir:
+            return
 
-                    self._available_fonts.append({
-                        'name': font_name,
-                        'path': str(font_path),
-                        'filename': font_path.name
-                    })
+        # Create scanner and scan recursively
+        self._scanner = FontScanner(self._fonts_dir)
+        self._available_fonts = self._scanner.scan(include_subdirs=True)
 
-        # Sort by name
-        self._available_fonts.sort(key=lambda f: f['name'].lower())
+        # Load fonts into Qt for preview rendering
+        for font_info in self._available_fonts:
+            file_path_str = str(font_info.file_path)
+            if file_path_str not in self._loaded_fonts:
+                font_id = QFontDatabase.addApplicationFont(file_path_str)
+                if font_id >= 0:
+                    families = QFontDatabase.applicationFontFamilies(font_id)
+                    if families:
+                        self._loaded_fonts[file_path_str] = families[0]
 
     def _scan_and_populate(self):
         """Rescan fonts and repopulate."""
+        if self._scanner:
+            self._scanner.clear_cache()
         self._scan_available_fonts()
         self._populate_fonts()
 
@@ -264,7 +268,7 @@ class FontsTab(BaseTab):
             self._fonts_table.setItem(row, 2, font_item)
 
             # Replacement dropdown with font preview
-            combo = FontPreviewComboBox()
+            combo = FontPreviewComboBox(self._loaded_fonts)
             combo.setProperty('style_name', style_name)
             combo.setProperty('original_font', original_font)
 
@@ -272,17 +276,22 @@ class FontsTab(BaseTab):
             combo.addItem("(none)")
             combo.setItemData(0, None, Qt.UserRole)
 
-            # Add available fonts
-            for font_info in self._available_fonts:
-                combo.add_font(font_info['name'], font_info['path'])
+            # Add available fonts from the fonts directory
+            for font_info in sorted(self._available_fonts, key=lambda f: f.family_name.lower()):
+                display_name = font_info.family_name
+                if font_info.subfamily and font_info.subfamily.lower() != 'regular':
+                    display_name += f" ({font_info.subfamily})"
+                combo.add_font(display_name, str(font_info.file_path))
 
             # Set current selection if replacement exists
             replacement = self._replacements.get(style_name, {})
             new_font = replacement.get('new_font_name', '')
             if new_font:
-                idx = combo.findText(new_font)
-                if idx >= 0:
-                    combo.setCurrentIndex(idx)
+                # Find matching font in dropdown
+                for i in range(1, combo.count()):
+                    if combo.itemText(i).startswith(new_font):
+                        combo.setCurrentIndex(i)
+                        break
                 else:
                     # Font not in list, add it
                     combo.addItem(new_font)
@@ -311,10 +320,13 @@ class FontsTab(BaseTab):
             if style_name in self._replacements:
                 del self._replacements[style_name]
         else:
+            # Extract font family name (remove subfamily if present)
+            font_name = selected_text.split(' (')[0] if ' (' in selected_text else selected_text
+
             # Set replacement
             self._replacements[style_name] = {
                 'original_font': original_font,
-                'new_font_name': selected_text,
+                'new_font_name': font_name,
                 'font_file_path': selected_path
             }
 

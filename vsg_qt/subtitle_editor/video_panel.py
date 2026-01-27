@@ -120,13 +120,15 @@ class VideoPanel(QWidget):
         """Set the editor state."""
         self._state = state
 
-    def start_player(self, video_path: str, subtitle_path: str, fonts_dir: Optional[str] = None):
+    def start_player(self, video_path: str, subtitle_path: str,
+                     index_dir: str, fonts_dir: Optional[str] = None):
         """
         Start the video player.
 
         Args:
             video_path: Path to video file
             subtitle_path: Path to subtitle file for overlay
+            index_dir: Directory for VapourSynth index cache
             fonts_dir: Optional path to fonts directory
         """
         # Stop existing player if any
@@ -135,7 +137,7 @@ class VideoPanel(QWidget):
         self._player = PlayerThread(
             video_path=video_path,
             subtitle_path=subtitle_path,
-            widget_win_id=self._video_widget.winId(),
+            index_dir=index_dir,
             fonts_dir=fonts_dir,
             parent=self
         )
