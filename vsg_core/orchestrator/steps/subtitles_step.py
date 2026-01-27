@@ -340,6 +340,13 @@ class SubtitlesStep:
         # ================================================================
         if item.is_generated and item.generated_filter_styles:
             runner._log_message(f"[SubtitleData] Applying style filter for generated track...")
+
+            # DIAGNOSTIC: Log timing BEFORE style filtering
+            if subtitle_data.events:
+                runner._log_message(f"[DIAG-FILTER] BEFORE style filter - first 3 events:")
+                for i, event in enumerate(subtitle_data.events[:3]):
+                    runner._log_message(f"[DIAG-FILTER]   Event {i}: start={event.start_ms}ms end={event.end_ms}ms style='{event.style}'")
+
             result = subtitle_data.filter_by_styles(
                 styles=item.generated_filter_styles,
                 mode=item.generated_filter_mode or 'exclude',
@@ -347,6 +354,13 @@ class SubtitlesStep:
             )
             if result.success:
                 runner._log_message(f"[SubtitleData] Style filter: {result.summary}")
+
+                # DIAGNOSTIC: Log timing AFTER style filtering
+                if subtitle_data.events:
+                    runner._log_message(f"[DIAG-FILTER] AFTER style filter - first 3 remaining events:")
+                    for i, event in enumerate(subtitle_data.events[:3]):
+                        runner._log_message(f"[DIAG-FILTER]   Event {i}: start={event.start_ms}ms end={event.end_ms}ms style='{event.style}'")
+
                 # Check for missing styles (validation already happened, just warn)
                 if result.details and result.details.get('styles_missing'):
                     runner._log_message(
@@ -390,6 +404,12 @@ class SubtitlesStep:
             runner._log_message(f"[SubtitleData] Skipping {subtitle_sync_mode} - stepping already applied")
 
         if should_apply_sync:
+            # DIAGNOSTIC: Log timing BEFORE sync
+            if subtitle_data.events and item.is_generated:
+                runner._log_message(f"[DIAG-SYNC] BEFORE sync - first 3 events:")
+                for i, event in enumerate(subtitle_data.events[:3]):
+                    runner._log_message(f"[DIAG-SYNC]   Event {i}: start={event.start_ms}ms end={event.end_ms}ms")
+
             sync_result = self._apply_sync_unified(
                 item, subtitle_data, ctx, runner, source1_file, subtitle_sync_mode, scene_cache
             )
@@ -403,6 +423,12 @@ class SubtitlesStep:
                     item.frame_adjusted = True
                 if hasattr(sync_result, 'details'):
                     item.framelocked_stats = sync_result.details
+
+            # DIAGNOSTIC: Log timing AFTER sync
+            if subtitle_data.events and item.is_generated:
+                runner._log_message(f"[DIAG-SYNC] AFTER sync - first 3 events:")
+                for i, event in enumerate(subtitle_data.events[:3]):
+                    runner._log_message(f"[DIAG-SYNC]   Event {i}: start={event.start_ms}ms end={event.end_ms}ms")
 
         # ================================================================
         # STEP 4: Apply SRT to ASS Conversion (if needed)
