@@ -79,11 +79,23 @@ class MkvmergeOptionsBuilder:
             # DIAGNOSTIC: Log the delay calculation for subtitle tracks
             if tr.type == TrackType.SUBTITLES:
                 raw_delay = plan.delays.source_delays_ms.get(sync_key, 0) if plan.delays else 0
-                print(f"[MUX DEBUG] Subtitle track {tr.id} ({tr.source}):")
+                is_generated = getattr(item, 'is_generated', False)
+                print(f"[MUX DEBUG] Subtitle track {tr.id} ({tr.source}){' [GENERATED]' if is_generated else ''}:")
                 print(f"[MUX DEBUG]   sync_key={sync_key}, raw_delay={raw_delay}ms")
                 print(f"[MUX DEBUG]   stepping_adjusted={stepping_adj}, frame_adjusted={frame_adj}")
                 print(f"[MUX DEBUG]   final_delay_to_mkvmerge={delay_ms}ms")
                 print(f"[MUX DEBUG]   reason={reason}")
+                print(f"[MUX DEBUG]   file={item.extracted_path}")
+
+                # Log file hash for comparison
+                if item.extracted_path and item.extracted_path.exists():
+                    import hashlib
+                    h = hashlib.md5()
+                    with open(item.extracted_path, 'rb') as f:
+                        h.update(f.read())
+                    file_hash = h.hexdigest()
+                    file_size = item.extracted_path.stat().st_size
+                    print(f"[MUX DEBUG]   file_size={file_size}, md5={file_hash}")
 
             # === AUDIT: Record mux track delay ===
             if audit:

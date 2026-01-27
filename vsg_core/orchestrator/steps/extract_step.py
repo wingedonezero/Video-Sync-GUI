@@ -310,6 +310,24 @@ class ExtractStep:
                 runner._log_message(f"  ✓ Copied source to: {generated_path.name}")
                 runner._log_message(f"  Style filtering will be applied in subtitles step")
 
+                # DIAGNOSTIC: Verify copy is byte-identical
+                import hashlib
+                def file_hash(path):
+                    h = hashlib.md5()
+                    with open(path, 'rb') as f:
+                        h.update(f.read())
+                    return h.hexdigest()
+
+                src_size = source_path.stat().st_size
+                dst_size = generated_path.stat().st_size
+                src_hash = file_hash(source_path)
+                dst_hash = file_hash(generated_path)
+
+                runner._log_message(f"  [DIAG] Source: {src_size} bytes, MD5: {src_hash}")
+                runner._log_message(f"  [DIAG] Copy:   {dst_size} bytes, MD5: {dst_hash}")
+                if src_hash != dst_hash:
+                    runner._log_message(f"  [DIAG] WARNING: Files differ after copy!")
+
             except Exception as e:
                 runner._log_message(f"[ERROR] Failed to prepare generated track: {e}")
                 import traceback
