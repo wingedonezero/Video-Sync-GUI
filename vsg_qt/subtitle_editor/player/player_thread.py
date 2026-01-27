@@ -137,10 +137,42 @@ class PlayerThread(QThread):
 
                 if should_seek:
                     try:
-                        seek_pts = int(self._seek_request_ms / 1000 / self._video_stream.time_base)
+                        target_ms = self._seek_request_ms
+                        # Seek to keyframe before target
+                        seek_pts = int(target_ms / 1000 / self._video_stream.time_base)
                         self._container.seek(seek_pts, stream=self._video_stream, backward=True)
                         frame_generator = self._container.decode(self._video_stream)
                         self._setup_graph()
+
+                        # Frame-accurate seek: decode frames until we reach target
+                        target_frame = None
+                        for frame in frame_generator:
+                            frame_ms = int(frame.pts * frame.time_base * 1000)
+                            # Keep decoding until we pass or hit the target
+                            if frame_ms >= target_ms:
+                                target_frame = frame
+                                break
+                            # Store as candidate in case we overshoot
+                            target_frame = frame
+
+                        # Render the target frame with subtitles
+                        if target_frame:
+                            timestamp_sec = target_frame.pts * target_frame.time_base
+                            self._current_time_ms = int(timestamp_sec * 1000)
+
+                            self._graph.push(target_frame)
+                            filtered_frame = self._graph.pull()
+                            pillow_img = filtered_frame.to_image()
+                            rgb_img = pillow_img.convert('RGB')
+                            q_image = QImage(rgb_img.tobytes(), rgb_img.width, rgb_img.height,
+                                            QImage.Format_RGB888)
+
+                            self.new_frame.emit(q_image, timestamp_sec)
+                            self.time_changed.emit(self._current_time_ms)
+
+                        # Reset frame generator for continued playback
+                        frame_generator = self._container.decode(self._video_stream)
+
                     except Exception as e:
                         print(f"Error during seek: {e}")
                     finally:

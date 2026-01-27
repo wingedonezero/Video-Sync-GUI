@@ -173,7 +173,8 @@ class SubtitleEditorWindow(QDialog):
 
         # Initialize fonts tab with existing replacements
         fonts_tab = self._tab_panel.get_fonts_tab()
-        if fonts_tab and self._fonts_dir:
+        if fonts_tab:
+            # Always set fonts_dir (even if None) to trigger font scanning
             fonts_tab.set_fonts_dir(self._fonts_dir)
             fonts_tab.set_replacements(self._existing_replacements)
 

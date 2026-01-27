@@ -196,11 +196,13 @@ class FontsTab(BaseTab):
         self._populate_fonts()
 
     def _scan_available_fonts(self):
-        """Scan the fonts directory for available fonts."""
+        """Scan both extracted fonts directory and system fonts."""
         self._available_fonts = []
+        seen_names = set()
 
+        # First, add fonts from the extracted fonts directory (these take priority)
         if self._fonts_dir and self._fonts_dir.exists():
-            for ext in ['*.ttf', '*.otf', '*.TTF', '*.OTF']:
+            for ext in ['*.ttf', '*.otf', '*.TTF', '*.OTF', '*.woff', '*.woff2']:
                 for font_path in self._fonts_dir.glob(ext):
                     # Get font family name from the database
                     font_id = QFontDatabase.addApplicationFont(str(font_path))
@@ -213,11 +215,25 @@ class FontsTab(BaseTab):
                     else:
                         font_name = font_path.stem
 
-                    self._available_fonts.append({
-                        'name': font_name,
-                        'path': str(font_path),
-                        'filename': font_path.name
-                    })
+                    if font_name not in seen_names:
+                        self._available_fonts.append({
+                            'name': font_name,
+                            'path': str(font_path),
+                            'filename': font_path.name,
+                            'source': 'extracted'
+                        })
+                        seen_names.add(font_name)
+
+        # Then add all system fonts
+        for family in QFontDatabase.families():
+            if family not in seen_names:
+                self._available_fonts.append({
+                    'name': family,
+                    'path': None,  # System font, no file path
+                    'filename': None,
+                    'source': 'system'
+                })
+                seen_names.add(family)
 
         # Sort by name
         self._available_fonts.sort(key=lambda f: f['name'].lower())
