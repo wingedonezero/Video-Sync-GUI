@@ -40,7 +40,7 @@ class AppConfig:
             'last_ter_path': '',
             'output_folder': str(self.script_dir / 'sync_output'),
             'temp_root': str(self.script_dir / 'temp_work'),
-            'logs_folder': str(self.script_dir / 'logs'),
+            'logs_folder': str(self.script_dir / '.config' / 'logs'),
             'videodiff_path': '',
 
             # --- OCR Settings ---
@@ -136,7 +136,7 @@ class AppConfig:
             # --- Flexible Analysis Settings ---
             'source_separation_mode': 'none',  # 'none', 'instrumental', 'vocals'
             'source_separation_model': 'default',  # Model filename or 'default'
-            'source_separation_model_dir': str(self.script_dir / 'audio_separator_models'),
+            'source_separation_model_dir': str(self.script_dir / '.config' / 'audio_separator_models'),
             'source_separation_device': 'auto',  # Device for source separation: 'auto', 'cpu', 'cuda', 'rocm', 'mps'
             'source_separation_timeout': 900,  # Timeout in seconds for source separation (0 = no timeout, default 900s = 15 min)
             'filtering_method': 'Dialogue Band-Pass Filter',
@@ -648,18 +648,18 @@ class AppConfig:
         return self.script_dir / '.config'
 
     def get_fonts_dir(self) -> Path:
-        """Returns the path to the .fonts directory for user font files."""
-        return self.script_dir / '.fonts'
+        """Returns the path to the .config/fonts directory for user font files."""
+        return self.script_dir / '.config' / 'fonts'
 
     def get_style_editor_temp_dir(self) -> Path:
         """
-        Returns the path to the style_editor_temp directory for preview files.
+        Returns the path to the style_editor temp directory for preview files.
 
-        This is a persistent temp directory that gets cleaned up at job start,
+        This is inside the normal temp_work directory and gets cleaned up at job start,
         not when the style editor closes. This allows debugging of temp files
         and keeps all job-related temp files in one place.
         """
-        temp_dir = self.script_dir / 'style_editor_temp'
+        temp_dir = Path(self.get('temp_root')) / 'style_editor'
         temp_dir.mkdir(parents=True, exist_ok=True)
         return temp_dir
 
@@ -673,7 +673,7 @@ class AppConfig:
             Number of files removed
         """
         import shutil
-        temp_dir = self.script_dir / 'style_editor_temp'
+        temp_dir = Path(self.get('temp_root')) / 'style_editor'
         if not temp_dir.exists():
             return 0
 

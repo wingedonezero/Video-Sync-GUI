@@ -180,7 +180,7 @@ venv_pip() {
 
 get_audio_separator_model_dir() {
     local settings_file="$PROJECT_DIR/settings.json"
-    local default_dir="$PROJECT_DIR/audio_separator_models"
+    local default_dir="$PROJECT_DIR/.config/audio_separator_models"
 
     if [ -f "$settings_file" ]; then
         local configured_dir
