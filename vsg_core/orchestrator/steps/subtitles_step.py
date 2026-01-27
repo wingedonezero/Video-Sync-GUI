@@ -589,7 +589,41 @@ class SubtitlesStep:
 
         runner._log_message(f"[Sync] Mode: {sync_mode}")
         runner._log_message(f"[Sync] Delay: {total_delay_ms:+.3f}ms (global: {global_shift_ms:+.3f}ms)")
-        runner._log_message(f"[Sync] DEBUG: source_key={source_key}, stepping_adjusted={getattr(item, 'stepping_adjusted', False)}, frame_adjusted={getattr(item, 'frame_adjusted', False)}")
+
+        # Check if video-verified was already computed for this source
+        # If so, use the pre-computed delay and apply it directly (skip re-running frame matching)
+        if sync_mode == 'video-verified' and hasattr(ctx, 'video_verified_sources') and source_key in ctx.video_verified_sources:
+            cached = ctx.video_verified_sources[source_key]
+            runner._log_message(f"[Sync] Using pre-computed video-verified delay for {source_key}")
+            runner._log_message(f"[Sync]   Delay: {cached['corrected_delay_ms']:+.1f}ms")
+
+            # Apply the delay directly to subtitle events (like time-based mode)
+            from vsg_core.subtitles.data import OperationResult, SyncEventData
+            events_synced = 0
+            for event in subtitle_data.events:
+                if event.is_comment:
+                    continue
+                original_start = event.start_ms
+                original_end = event.end_ms
+                event.start_ms += cached['corrected_delay_ms']
+                event.end_ms += cached['corrected_delay_ms']
+                event.sync = SyncEventData(
+                    original_start_ms=original_start,
+                    original_end_ms=original_end,
+                    start_adjustment_ms=cached['corrected_delay_ms'],
+                    end_adjustment_ms=cached['corrected_delay_ms'],
+                    snapped_to_frame=False,
+                )
+                events_synced += 1
+
+            runner._log_message(f"[Sync] Applied {cached['corrected_delay_ms']:+.1f}ms to {events_synced} events")
+            item.frame_adjusted = True
+            return OperationResult(
+                success=True,
+                operation='sync',
+                events_affected=events_synced,
+                summary=f"Video-verified (pre-computed): {cached['corrected_delay_ms']:+.1f}ms applied to {events_synced} events"
+            )
 
         # Try to use new plugin system
         plugin = get_sync_plugin(sync_mode)
