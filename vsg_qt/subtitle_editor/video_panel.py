@@ -4,7 +4,7 @@
 Video panel widget for subtitle editor.
 
 Contains:
-- Video display area
+- MPV-based video display with libass subtitle rendering
 - Playback controls (play/pause, seek slider)
 - Time display
 """
@@ -13,56 +13,22 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QImage, QPixmap, QPainter, QColor
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSlider, QLabel
 )
 
 from .utils import ms_to_ass_time
-from .player import PlayerThread
+from .player.mpv_player import MpvWidget
 
 if TYPE_CHECKING:
     from .state import EditorState
 
 
-class VideoWidget(QWidget):
-    """Widget that displays video frames, scaling to fit."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._pixmap: Optional[QPixmap] = None
-        self.setMinimumSize(320, 180)
-
-    def set_pixmap(self, pixmap: QPixmap):
-        """Set the pixmap to display."""
-        self._pixmap = pixmap
-        self.update()
-
-    def paintEvent(self, event):
-        """Paint the video frame scaled to fit."""
-        super().paintEvent(event)
-        if self._pixmap is None:
-            return
-
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.SmoothPixmapTransform)
-
-        # Scale pixmap to fit widget while maintaining aspect ratio
-        scaled = self._pixmap.scaled(
-            self.size(),
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation
-        )
-
-        # Center the scaled pixmap
-        x = (self.width() - scaled.width()) // 2
-        y = (self.height() - scaled.height()) // 2
-        painter.drawPixmap(x, y, scaled)
-
-
 class VideoPanel(QWidget):
     """
-    Video panel with playback controls.
+    Video panel with MPV-based playback and controls.
+
+    Uses MPV for video display and subtitle rendering (libass built-in).
 
     Signals:
         seek_requested: Emitted when user requests seek via slider
@@ -75,11 +41,11 @@ class VideoPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._state: Optional['EditorState'] = None
-        self._player: Optional[PlayerThread] = None
         self._duration_ms: int = 0
         self._is_seeking: bool = False
 
         self._setup_ui()
+        self._connect_signals()
 
     def _setup_ui(self):
         """Set up the video panel UI."""
@@ -87,9 +53,9 @@ class VideoPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
 
-        # Video display
-        self._video_widget = VideoWidget()
-        layout.addWidget(self._video_widget, 1)
+        # MPV video widget
+        self._mpv_widget = MpvWidget()
+        layout.addWidget(self._mpv_widget, 1)
 
         # Playback controls
         controls_layout = QHBoxLayout()
@@ -116,6 +82,13 @@ class VideoPanel(QWidget):
 
         layout.addLayout(controls_layout)
 
+    def _connect_signals(self):
+        """Connect MPV widget signals."""
+        self._mpv_widget.duration_changed.connect(self._on_duration_changed)
+        self._mpv_widget.time_changed.connect(self._on_time_changed)
+        self._mpv_widget.fps_detected.connect(self._on_fps_detected)
+        self._mpv_widget.playback_finished.connect(self._on_playback_finished)
+
     def set_state(self, state: 'EditorState'):
         """Set the editor state."""
         self._state = state
@@ -128,34 +101,24 @@ class VideoPanel(QWidget):
         Args:
             video_path: Path to video file
             subtitle_path: Path to subtitle file for overlay
-            index_dir: Directory for VapourSynth index cache
+            index_dir: Directory for VapourSynth index cache (kept for compatibility)
             fonts_dir: Optional path to fonts directory
         """
-        # Stop existing player if any
-        self.stop_player()
+        print(f"[VideoPanel] Starting MPV player")
+        print(f"[VideoPanel] Video: {video_path}")
+        print(f"[VideoPanel] Subtitle: {subtitle_path}")
+        if fonts_dir:
+            print(f"[VideoPanel] Fonts dir: {fonts_dir}")
 
-        self._player = PlayerThread(
+        self._mpv_widget.load_video(
             video_path=video_path,
             subtitle_path=subtitle_path,
-            index_dir=index_dir,
-            fonts_dir=fonts_dir,
-            parent=self
+            fonts_dir=fonts_dir
         )
-
-        # Connect signals
-        self._player.new_frame.connect(self._on_new_frame)
-        self._player.duration_changed.connect(self._on_duration_changed)
-        self._player.time_changed.connect(self._on_time_changed)
-        self._player.fps_detected.connect(self._on_fps_detected)
-
-        # Start player (starts paused)
-        self._player.start()
 
     def stop_player(self):
         """Stop and clean up the player."""
-        if self._player:
-            self._player.stop()
-            self._player = None
+        self._mpv_widget.stop()
 
     def seek_to(self, time_ms: int):
         """
@@ -164,8 +127,7 @@ class VideoPanel(QWidget):
         Args:
             time_ms: Target time in milliseconds
         """
-        if self._player:
-            self._player.seek(time_ms)
+        self._mpv_widget.seek(time_ms)
 
     def reload_subtitles(self, subtitle_path: Optional[str] = None):
         """
@@ -174,19 +136,14 @@ class VideoPanel(QWidget):
         Args:
             subtitle_path: Optional new path to subtitle file
         """
-        if self._player:
-            self._player.reload_subtitle_track(subtitle_path)
-
-    def _on_new_frame(self, image: QImage, timestamp: float):
-        """Handle new video frame."""
-        pixmap = QPixmap.fromImage(image)
-        self._video_widget.set_pixmap(pixmap)
+        self._mpv_widget.reload_subtitles(subtitle_path)
 
     def _on_duration_changed(self, duration_sec: float):
         """Handle duration change."""
         self._duration_ms = int(duration_sec * 1000)
         self._seek_slider.setRange(0, self._duration_ms)
         self._update_time_display(0)
+        print(f"[VideoPanel] Duration: {duration_sec:.2f}s")
 
     def _on_time_changed(self, time_ms: int):
         """Handle playback time change."""
@@ -196,8 +153,13 @@ class VideoPanel(QWidget):
 
     def _on_fps_detected(self, fps: float):
         """Handle FPS detection."""
+        print(f"[VideoPanel] FPS detected: {fps:.3f}")
         if self._state:
             self._state.set_video_fps(fps)
+
+    def _on_playback_finished(self):
+        """Handle end of playback."""
+        self._play_btn.setText("Play")
 
     def _update_time_display(self, current_ms: int):
         """Update the time display label."""
@@ -207,11 +169,10 @@ class VideoPanel(QWidget):
 
     def _on_play_clicked(self):
         """Handle play/pause button click."""
-        if self._player:
-            self._player.toggle_pause()
-            is_paused = self._player.is_paused
-            self._play_btn.setText("Play" if is_paused else "Pause")
-            self.playback_toggled.emit()
+        self._mpv_widget.toggle_pause()
+        is_paused = self._mpv_widget.is_paused
+        self._play_btn.setText("Play" if is_paused else "Pause")
+        self.playback_toggled.emit()
 
     def _on_slider_pressed(self):
         """Handle slider press (start seeking)."""
@@ -220,14 +181,13 @@ class VideoPanel(QWidget):
     def _on_slider_released(self):
         """Handle slider release (complete seek)."""
         self._is_seeking = False
-        if self._player:
-            self._player.seek(self._seek_slider.value())
+        self._mpv_widget.seek(self._seek_slider.value())
 
     def _on_slider_moved(self, value: int):
         """Handle slider movement during drag."""
         self._update_time_display(value)
 
     @property
-    def video_widget(self) -> VideoWidget:
-        """Get the video widget for embedding."""
-        return self._video_widget
+    def mpv_widget(self) -> MpvWidget:
+        """Get the MPV widget for direct access."""
+        return self._mpv_widget
