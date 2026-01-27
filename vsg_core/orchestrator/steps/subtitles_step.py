@@ -625,6 +625,40 @@ class SubtitlesStep:
                 summary=f"Video-verified (pre-computed): {cached['corrected_delay_ms']:+.1f}ms applied to {events_synced} events"
             )
 
+        # For video-verified mode: Source 1 is the reference - no frame matching needed
+        # (Source 1 would compare against itself which produces incorrect results)
+        # Just apply the delay directly (which is just global_shift for Source 1)
+        if sync_mode == 'video-verified' and source_key == 'Source 1':
+            from vsg_core.subtitles.data import OperationResult, SyncEventData
+            runner._log_message(f"[Sync] Source 1 is reference - applying delay directly without frame matching")
+
+            events_synced = 0
+            for event in subtitle_data.events:
+                if event.is_comment:
+                    continue
+                original_start = event.start_ms
+                original_end = event.end_ms
+                event.start_ms += total_delay_ms
+                event.end_ms += total_delay_ms
+                event.sync = SyncEventData(
+                    original_start_ms=original_start,
+                    original_end_ms=original_end,
+                    start_adjustment_ms=total_delay_ms,
+                    end_adjustment_ms=total_delay_ms,
+                    snapped_to_frame=False,
+                )
+                events_synced += 1
+
+            runner._log_message(f"[Sync] Applied {total_delay_ms:+.1f}ms to {events_synced} events (reference)")
+            if events_synced > 0 and abs(total_delay_ms) > 0.001:
+                item.frame_adjusted = True
+            return OperationResult(
+                success=True,
+                operation='sync',
+                events_affected=events_synced,
+                summary=f"Video-verified (Source 1 reference): {total_delay_ms:+.1f}ms applied to {events_synced} events"
+            )
+
         # Try to use new plugin system
         plugin = get_sync_plugin(sync_mode)
 
