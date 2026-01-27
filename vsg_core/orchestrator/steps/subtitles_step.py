@@ -982,11 +982,11 @@ class SubtitlesStep:
                         'details': details,
                     }
 
-                    # Report the result
+                    # Report the result with precise values
                     if abs(corrected_delay_ms - original_delay) > 1:
-                        runner._log_message(f"[VideoVerified] ✓ {source_key} → Source 1: {original_delay:+.1f}ms corrected to {corrected_delay_ms:+.1f}ms")
+                        runner._log_message(f"[VideoVerified] ✓ {source_key} → Source 1: {original_delay:+.3f}ms → {corrected_delay_ms:+.3f}ms applied")
                     else:
-                        runner._log_message(f"[VideoVerified] ✓ {source_key} → Source 1: {corrected_delay_ms:+.1f}ms (no frame correction needed)")
+                        runner._log_message(f"[VideoVerified] ✓ {source_key} → Source 1: {corrected_delay_ms:+.3f}ms (no frame correction needed)")
                 else:
                     runner._log_message(f"[VideoVerified] ✗ {source_key}: frame matching failed, using audio correlation")
 
