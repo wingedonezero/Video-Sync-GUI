@@ -213,11 +213,20 @@ class FontsTab(BaseTab):
 
         print(f"[FontsTab] Scanning fonts from: {self._fonts_dir}")
 
+        # Debug: list all files in directory
+        all_files = list(self._fonts_dir.rglob('*'))
+        font_files = [f for f in all_files if f.is_file() and f.suffix.lower() in {'.ttf', '.otf', '.ttc', '.woff', '.woff2'}]
+        print(f"[FontsTab] Direct rglob found {len(font_files)} font files")
+        for f in font_files[:5]:
+            print(f"[FontsTab]   - {f.name}")
+        if len(font_files) > 5:
+            print(f"[FontsTab]   ... and {len(font_files) - 5} more")
+
         # Create scanner and scan recursively
         self._scanner = FontScanner(self._fonts_dir)
         self._available_fonts = self._scanner.scan(include_subdirs=True)
 
-        print(f"[FontsTab] Found {len(self._available_fonts)} fonts")
+        print(f"[FontsTab] FontScanner found {len(self._available_fonts)} fonts")
 
         # Load fonts into Qt for preview rendering
         for font_info in self._available_fonts:
@@ -248,10 +257,15 @@ class FontsTab(BaseTab):
         self._fonts_table.setRowCount(0)
         self._font_combos.clear()
 
-        # Get unique fonts from styles
+        # Get unique fonts from styles - use ORIGINAL values, not current modified values
         fonts_by_style = {}
         for style_name, style in self._state.styles.items():
-            font = getattr(style, 'fontname', None)
+            # Try to get original fontname from state's original values
+            original_values = getattr(self._state, '_original_style_values', {})
+            if style_name in original_values:
+                font = original_values[style_name].get('fontname')
+            else:
+                font = getattr(style, 'fontname', None)
             if font:
                 fonts_by_style[style_name] = font
 
@@ -302,6 +316,7 @@ class FontsTab(BaseTab):
                     combo.addItem(new_font)
                     combo.setCurrentIndex(combo.count() - 1)
 
+            # Connect signal AFTER setting initial value to avoid spurious signals
             combo.currentIndexChanged.connect(
                 lambda idx, sn=style_name, of=original_font: self._on_font_selected(sn, of)
             )
@@ -358,9 +373,11 @@ class FontsTab(BaseTab):
 
     def on_activated(self):
         """Called when tab becomes active."""
-        # Rescan fonts in case directory changed
-        self._scan_available_fonts()
-        self._populate_fonts()
+        # Only rescan if we haven't scanned yet or fonts list is empty
+        # This prevents unnecessary repopulation which can cause issues
+        if not self._available_fonts:
+            self._scan_available_fonts()
+            self._populate_fonts()
 
     def get_result(self) -> dict:
         """Get font replacements as result."""
