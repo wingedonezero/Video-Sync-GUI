@@ -152,6 +152,7 @@ class SubtitleEditorWindow(QDialog):
         # Events table -> video seek and tab notification
         self._events_table.event_selected.connect(self._on_event_selected)
         self._events_table.event_double_clicked.connect(self._on_event_double_clicked)
+        self._events_table.preview_updated.connect(self._reload_video_subtitles)
 
         # Tab panel filter preview
         filtering_tab = self._tab_panel.get_filtering_tab()
@@ -273,6 +274,9 @@ class SubtitleEditorWindow(QDialog):
 
     def accept(self):
         """Save changes and close."""
+        # Ensure the player thread is stopped before the dialog is destroyed.
+        self._video_panel.stop_player()
+
         # Cache results before cleanup
         self._cached_style_patch = self._state.generate_style_patch()
 
@@ -291,6 +295,8 @@ class SubtitleEditorWindow(QDialog):
 
     def reject(self):
         """Cancel and close without saving."""
+        # Ensure the player thread is stopped before the dialog is destroyed.
+        self._video_panel.stop_player()
         super().reject()
 
     def closeEvent(self, event):

@@ -250,7 +250,9 @@ class FilteringTab(BaseTab):
         return {
             'filter_mode': self._state.filter_mode,
             'filter_styles': list(self._state.filter_styles),
-            'kept_indices': list(self._state.get_filtered_event_indices())
+            'kept_indices': list(self._state.get_filtered_event_indices()),
+            'forced_include': list(self._state.forced_include_indices),
+            'forced_exclude': list(self._state.forced_exclude_indices)
         }
 
     def get_filter_config(self) -> dict:

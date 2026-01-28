@@ -71,6 +71,8 @@ def realize_plan_from_manual_layout(
                 generated_source_path=sel.get('generated_source_path'),
                 generated_filter_mode=sel.get('generated_filter_mode', 'exclude'),
                 generated_filter_styles=sel.get('generated_filter_styles', []),
+                generated_filter_forced_include=sel.get('generated_filter_forced_include', []),
+                generated_filter_forced_exclude=sel.get('generated_filter_forced_exclude', []),
                 generated_original_style_list=sel.get('generated_original_style_list', []),
                 generated_verify_only_lines_removed=bool(sel.get('generated_verify_only_lines_removed', True)),
                 skip_frame_validation=bool(sel.get('skip_frame_validation', False))

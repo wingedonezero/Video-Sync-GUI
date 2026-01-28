@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Any, Dict, Tuple, TYPE_CHECKING
+from typing import Any, Dict, Tuple, TYPE_CHECKING, Optional, List
 
 if TYPE_CHECKING:
     from ..data import SubtitleData, OperationResult, OperationRecord
@@ -559,6 +559,8 @@ def apply_style_filter(
     data: 'SubtitleData',
     styles: list,
     mode: str = 'exclude',
+    forced_include: Optional[List[int]] = None,
+    forced_exclude: Optional[List[int]] = None,
     runner=None
 ) -> 'OperationResult':
     """
@@ -579,7 +581,10 @@ def apply_style_filter(
         if runner:
             runner._log_message(msg)
 
-    if not styles:
+    forced_include_set = set(forced_include or [])
+    forced_exclude_set = set(forced_exclude or [])
+
+    if not styles and not forced_include_set and not forced_exclude_set:
         return OperationResult(
             success=True,
             operation='style_filter',
@@ -596,13 +601,26 @@ def apply_style_filter(
             found_styles.add(event.style)
 
     # Filter events
+    original_events = list(data.events)
     if mode == 'include':
-        # Keep only events with styles in the list
-        data.events = [e for e in data.events if e.style in styles_set]
+        # Keep only events with styles in the list or forced includes.
+        filtered_events = []
+        for idx, event in enumerate(original_events):
+            if idx in forced_exclude_set:
+                continue
+            if idx in forced_include_set or event.style in styles_set:
+                filtered_events.append(event)
+        data.events = filtered_events
         mode_desc = 'included'
     else:  # mode == 'exclude'
-        # Remove events with styles in the list
-        data.events = [e for e in data.events if e.style not in styles_set]
+        # Remove events with styles in the list unless forced to include.
+        filtered_events = []
+        for idx, event in enumerate(original_events):
+            if idx in forced_exclude_set:
+                continue
+            if idx in forced_include_set or event.style not in styles_set:
+                filtered_events.append(event)
+        data.events = filtered_events
         mode_desc = 'excluded'
 
     filtered_count = len(data.events)
@@ -624,6 +642,8 @@ def apply_style_filter(
         parameters={
             'styles': list(styles),
             'mode': mode,
+            'forced_include': sorted(forced_include_set),
+            'forced_exclude': sorted(forced_exclude_set),
         },
         events_affected=removed_count,
         summary=f"{mode_desc.capitalize()} styles: {', '.join(sorted(found_styles)) or 'none'}, "

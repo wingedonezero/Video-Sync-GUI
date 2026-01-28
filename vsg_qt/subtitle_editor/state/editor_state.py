@@ -120,7 +120,7 @@ class EditorState(QObject):
                 self._video_path = Path(video_path)
 
             # If we have existing patches, mark as modified
-            if self._style_patch or self._filter_styles:
+            if self._style_patch or self._filter_styles or self._forced_include_indices or self._forced_exclude_indices:
                 self._is_modified = True
                 self.modified_changed.emit(True)
             else:
@@ -249,6 +249,53 @@ class EditorState(QObject):
         """Get the set of styles to filter."""
         return self._filter_styles.copy()
 
+    @property
+    def forced_include_indices(self) -> Set[int]:
+        """Get the forced-include indices."""
+        return self._forced_include_indices.copy()
+
+    @property
+    def forced_exclude_indices(self) -> Set[int]:
+        """Get the forced-exclude indices."""
+        return self._forced_exclude_indices.copy()
+
+    def force_include_event(self, index: int):
+        """Force an event to be included regardless of filter style."""
+        if index < 0 or index >= len(self.events):
+            return
+        if index in self._forced_exclude_indices:
+            self._forced_exclude_indices.discard(index)
+        if index not in self._forced_include_indices:
+            self._forced_include_indices.add(index)
+            self.filter_changed.emit()
+            self.mark_modified()
+
+    def force_exclude_event(self, index: int):
+        """Force an event to be excluded regardless of filter style."""
+        if index < 0 or index >= len(self.events):
+            return
+        if index in self._forced_include_indices:
+            self._forced_include_indices.discard(index)
+        if index not in self._forced_exclude_indices:
+            self._forced_exclude_indices.add(index)
+            self.filter_changed.emit()
+            self.mark_modified()
+
+    def clear_forced_event(self, index: int):
+        """Clear any forced include/exclude overrides for an event."""
+        if index < 0 or index >= len(self.events):
+            return
+        removed = False
+        if index in self._forced_include_indices:
+            self._forced_include_indices.discard(index)
+            removed = True
+        if index in self._forced_exclude_indices:
+            self._forced_exclude_indices.discard(index)
+            removed = True
+        if removed:
+            self.filter_changed.emit()
+            self.mark_modified()
+
     def set_filter_styles(self, styles: Set[str]):
         """Set the styles to filter."""
         self._filter_styles = set(styles)
@@ -314,6 +361,22 @@ class EditorState(QObject):
                 overlapping.append(i)
 
         return overlapping
+
+    def update_event_style(self, index: int, style_name: str):
+        """Update the style for a specific event."""
+        if not self._subtitle_data:
+            return
+        if index < 0 or index >= len(self._subtitle_data.events):
+            return
+        if style_name not in self.styles:
+            return
+        event = self._subtitle_data.events[index]
+        if event.style == style_name:
+            return
+        event.style = style_name
+        self.event_changed.emit(index)
+        self.filter_changed.emit()
+        self.mark_modified()
 
     # --- Style Patch ---
 

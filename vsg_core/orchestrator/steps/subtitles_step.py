@@ -338,11 +338,18 @@ class SubtitlesStep:
         # ================================================================
         # STEP 1b: Apply Style Filtering (for generated tracks)
         # ================================================================
-        if item.is_generated and item.generated_filter_styles:
-            runner._log_message(f"[SubtitleData] Applying style filter for generated track...")
+        if item.is_generated and (item.generated_filter_styles or item.generated_filter_forced_include or item.generated_filter_forced_exclude):
+            forced_includes = len(item.generated_filter_forced_include)
+            forced_excludes = len(item.generated_filter_forced_exclude)
+            runner._log_message(
+                f"[SubtitleData] Applying style filter for generated track "
+                f"(forced keep: {forced_includes}, forced remove: {forced_excludes})..."
+            )
             result = subtitle_data.filter_by_styles(
                 styles=item.generated_filter_styles,
                 mode=item.generated_filter_mode or 'exclude',
+                forced_include=item.generated_filter_forced_include,
+                forced_exclude=item.generated_filter_forced_exclude,
                 runner=runner
             )
             if result.success:

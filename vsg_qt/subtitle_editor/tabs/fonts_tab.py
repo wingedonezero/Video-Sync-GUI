@@ -202,7 +202,6 @@ class FontsTab(BaseTab):
 
     def set_fonts_dir(self, fonts_dir: Optional[Path]):
         """Set the fonts directory for preview."""
-        import tempfile
         from vsg_core.config import AppConfig
         config = AppConfig()
 
@@ -212,7 +211,7 @@ class FontsTab(BaseTab):
         else:
             # Create a temp fonts directory if none provided
             # This ensures we have somewhere to copy replacement fonts
-            self._attached_fonts_dir = Path(tempfile.gettempdir()) / "vsg_replacement_fonts"
+            self._attached_fonts_dir = config.get_style_editor_temp_dir() / "vsg_replacement_fonts"
             self._attached_fonts_dir.mkdir(parents=True, exist_ok=True)
             print(f"[FontsTab] Created temp fonts dir: {self._attached_fonts_dir}")
 
