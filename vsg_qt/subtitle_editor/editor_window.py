@@ -202,10 +202,11 @@ class SubtitleEditorWindow(QDialog):
         # Start video player with preview subtitle
         preview_path = self._state.preview_path
         if preview_path:
+            print(f"[EditorWindow] Starting player with fonts_dir: {self._fonts_dir}")
             self._video_panel.start_player(
                 str(self._video_path),
                 str(preview_path),
-                str(self._fonts_dir) if self._fonts_dir else None
+                fonts_dir=str(self._fonts_dir) if self._fonts_dir else None
             )
 
     def _on_event_selected(self, event_index: int):
