@@ -99,6 +99,8 @@ class MpvWidget(QOpenGLWidget):
             # Playback
             pause=True,
             keep_open='yes',
+            # Seeking - enable high-resolution seeking for frame accuracy
+            hr_seek='yes',
             # Disable OSD
             osd_level=0,
             # Input

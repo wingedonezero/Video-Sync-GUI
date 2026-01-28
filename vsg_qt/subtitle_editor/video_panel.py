@@ -122,13 +122,21 @@ class VideoPanel(QWidget):
         self._mpv_widget.stop()
 
     def seek_to(self, time_ms: int, precise: bool = True):
-        """Seek to a specific time.
+        """Seek to a specific time with frame accuracy.
 
         Args:
             time_ms: Target time in milliseconds
-            precise: Use exact seeking (default True for subtitle editing)
+            precise: Use frame-aligned seeking (default True for subtitle editing)
         """
-        self._mpv_widget.seek(time_ms, precise=precise)
+        if precise and self._state and self._state.video_fps > 0:
+            # Frame-accurate seeking: find the frame that's displaying at this time
+            # and seek to that frame's exact start time for consistent positioning
+            fps = self._state.video_fps
+            frame = int(time_ms * fps / 1000.0)  # Frame number at this time
+            frame_time_ms = int(frame * 1000.0 / fps)  # Frame's exact start time
+            self._mpv_widget.seek(frame_time_ms, precise=True)
+        else:
+            self._mpv_widget.seek(time_ms, precise=precise)
 
     def reload_subtitles(self, subtitle_path: Optional[str] = None):
         """Reload the subtitle track."""
