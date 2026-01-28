@@ -873,8 +873,10 @@ class ManualSelectionDialog(QDialog):
         except Exception as e:
             self.log_callback(f"[WARN] Could not extract fonts: {e}")
 
-        # Pass existing font replacements if any
+        # Pass existing editor state if any (for reopening)
         existing_font_replacements = track_data.get('font_replacements')
+        existing_style_patch = track_data.get('style_patch')
+        existing_filter_config = track_data.get('filter_config')
 
         # Launch subtitle editor in subprocess to isolate MPV/OpenGL
         # This prevents state corruption in the main app
@@ -883,7 +885,9 @@ class ManualSelectionDialog(QDialog):
             subtitle_path=editable_sub_path,
             video_path=ref_video_path,
             fonts_dir=fonts_dir,
-            existing_font_replacements=existing_font_replacements
+            existing_font_replacements=existing_font_replacements,
+            existing_style_patch=existing_style_patch,
+            existing_filter_config=existing_filter_config
         )
 
     def _launch_subtitle_editor_subprocess(
@@ -892,7 +896,9 @@ class ManualSelectionDialog(QDialog):
         subtitle_path: str,
         video_path: str,
         fonts_dir: Optional[str],
-        existing_font_replacements: Optional[Dict]
+        existing_font_replacements: Optional[Dict],
+        existing_style_patch: Optional[Dict] = None,
+        existing_filter_config: Optional[Dict] = None
     ):
         """Launch subtitle editor in a subprocess to isolate MPV/OpenGL."""
         import uuid
@@ -903,12 +909,18 @@ class ManualSelectionDialog(QDialog):
         params_file = temp_dir / f"vsg_editor_params_{session_id}.json"
         result_file = temp_dir / f"vsg_editor_result_{session_id}.json"
 
-        # Write parameters
+        # Write parameters (versioned JSON format)
         params = {
+            'version': '1.0',
+            'session_id': session_id,
             'subtitle_path': subtitle_path,
             'video_path': video_path,
             'fonts_dir': fonts_dir,
-            'existing_font_replacements': existing_font_replacements
+            'existing_state': {
+                'style_patch': existing_style_patch or {},
+                'font_replacements': existing_font_replacements or {},
+                'filter_config': existing_filter_config or {}
+            }
         }
         with open(params_file, 'w') as f:
             json.dump(params, f)

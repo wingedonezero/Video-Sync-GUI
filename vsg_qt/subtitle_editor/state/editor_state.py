@@ -37,7 +37,12 @@ class EditorState(QObject):
     filter_changed = Signal()         # Filter configuration changed
     modified_changed = Signal(bool)   # Modified state changed
 
-    def __init__(self, parent=None):
+    def __init__(
+        self,
+        parent=None,
+        existing_style_patch: Optional[Dict[str, Dict[str, Any]]] = None,
+        existing_filter_config: Optional[Dict[str, Any]] = None
+    ):
         super().__init__(parent)
 
         # Core data
@@ -54,13 +59,23 @@ class EditorState(QObject):
         self._original_style_values: Dict[str, Dict[str, Any]] = {}
 
         # Filter configuration (for generated tracks)
-        self._filter_mode: str = 'exclude'  # 'include' or 'exclude'
-        self._filter_styles: Set[str] = set()
-        self._forced_include_indices: Set[int] = set()  # Manually included events
-        self._forced_exclude_indices: Set[int] = set()  # Manually excluded events
+        # Initialize from existing config if provided
+        if existing_filter_config:
+            # Support both old ('mode'/'styles') and new ('filter_mode'/'filter_styles') formats
+            self._filter_mode = existing_filter_config.get('filter_mode') or existing_filter_config.get('mode', 'exclude')
+            filter_styles = existing_filter_config.get('filter_styles') or existing_filter_config.get('styles', [])
+            self._filter_styles = set(filter_styles)
+            self._forced_include_indices = set(existing_filter_config.get('forced_include', []))
+            self._forced_exclude_indices = set(existing_filter_config.get('forced_exclude', []))
+        else:
+            self._filter_mode = 'exclude'
+            self._filter_styles = set()
+            self._forced_include_indices = set()
+            self._forced_exclude_indices = set()
 
         # Style patch data (changes to apply)
-        self._style_patch: Dict[str, Dict[str, Any]] = {}
+        # Initialize from existing patch if provided
+        self._style_patch: Dict[str, Dict[str, Any]] = dict(existing_style_patch) if existing_style_patch else {}
 
         # Font replacements
         self._font_replacements: Dict[str, str] = {}
@@ -90,23 +105,51 @@ class EditorState(QObject):
             self._preview_path = self._original_path.with_suffix('.preview' + self._original_path.suffix)
             shutil.copy(self._original_path, self._preview_path)
 
-            # Store original style values for reset
+            # Store original style values for reset (BEFORE applying existing patches)
             self._original_style_values = {}
             for style_name, style in self._subtitle_data.styles.items():
                 self._original_style_values[style_name] = style.to_dict()
+
+            # Apply any existing style patches (from previous session)
+            # This makes the editor show the previously modified values
+            if self._style_patch:
+                self._apply_existing_style_patch()
 
             # Set video path
             if video_path:
                 self._video_path = Path(video_path)
 
-            self._is_modified = False
-            self.modified_changed.emit(False)
+            # If we have existing patches, mark as modified
+            if self._style_patch or self._filter_styles:
+                self._is_modified = True
+                self.modified_changed.emit(True)
+            else:
+                self._is_modified = False
+                self.modified_changed.emit(False)
+
             self.subtitle_data_changed.emit()
             return True
 
         except Exception as e:
             print(f"[EditorState] Failed to load subtitle: {e}")
             return False
+
+    def _apply_existing_style_patch(self):
+        """Apply existing style patches to loaded subtitle data."""
+        if not self._subtitle_data or not self._style_patch:
+            return
+
+        for style_name, changes in self._style_patch.items():
+            if style_name not in self._subtitle_data.styles:
+                continue
+
+            style = self._subtitle_data.styles[style_name]
+            for attr, value in changes.items():
+                if hasattr(style, attr):
+                    try:
+                        setattr(style, attr, value)
+                    except Exception as e:
+                        print(f"[EditorState] Failed to apply {attr}={value} to {style_name}: {e}")
 
     @property
     def subtitle_data(self) -> Optional['SubtitleData']:
