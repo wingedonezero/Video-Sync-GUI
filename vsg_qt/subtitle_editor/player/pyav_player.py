@@ -4,16 +4,17 @@
 FFmpeg-based video player for subtitle editor.
 
 Architecture:
-- VapourSynth + L-SMASH/FFMS2 for frame-accurate video decoding
-- VapourSynth SubText (libass) for subtitle rendering
-- PyAV for audio decoding
-- sounddevice for audio output
+- PyAV for video decoding with FFmpeg filter graph
+- FFmpeg 'subtitles' filter for real-time libass rendering
+- PyAV for audio decoding + sounddevice for output
+- Audio as master clock for A/V sync
+- FrameIndex for precise time<->frame conversion (subtitle clicking)
 
 This provides:
-- Frame-accurate seeking (VapourSynth index)
-- True libass subtitle rendering
-- Audio playback
-- Precise time<->frame conversion via VideoTimestamps
+- Real-time subtitle rendering (like a media player)
+- Audio playback with proper A/V sync
+- Frame-accurate seeking via FrameIndex
+- Click subtitle → exact start frame
 """
 from __future__ import annotations
 
@@ -22,62 +23,98 @@ import threading
 import time
 from fractions import Fraction
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 
 import numpy as np
 from PySide6.QtCore import Qt, Signal, QTimer, Slot, QThread, QMutex, QWaitCondition
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QWidget, QLabel, QVBoxLayout
 
-if TYPE_CHECKING:
-    import vapoursynth as vs
+try:
+    import av
+    HAS_AV = True
+except ImportError:
+    HAS_AV = False
+    print("[PyAVPlayer] WARNING: PyAV not installed")
+
+
+class AudioClock:
+    """
+    Audio playback clock - acts as master clock for A/V sync.
+
+    Tracks audio position based on samples played through sounddevice.
+    """
+
+    def __init__(self, sample_rate: int = 48000):
+        self._sample_rate = sample_rate
+        self._samples_played: int = 0
+        self._base_time_ms: float = 0.0
+        self._playing = False
+        self._lock = threading.Lock()
+
+    def reset(self, time_ms: float = 0.0):
+        """Reset clock to specific time."""
+        with self._lock:
+            self._base_time_ms = time_ms
+            self._samples_played = 0
+
+    def add_samples(self, count: int):
+        """Called by audio callback when samples are played."""
+        with self._lock:
+            self._samples_played += count
+
+    @property
+    def position_ms(self) -> float:
+        """Get current playback position in milliseconds."""
+        with self._lock:
+            played_ms = self._samples_played * 1000.0 / self._sample_rate
+            return self._base_time_ms + played_ms
+
+    def set_playing(self, playing: bool):
+        """Set playing state."""
+        self._playing = playing
+
+    @property
+    def is_playing(self) -> bool:
+        return self._playing
 
 
 class AudioOutput:
     """
-    Audio playback using sounddevice.
-
-    Provides callback-based audio output with position tracking
-    for A/V sync.
+    Audio output using sounddevice with clock tracking.
     """
 
-    def __init__(self):
+    def __init__(self, clock: AudioClock):
+        self._clock = clock
         self._stream = None
-        self._audio_buffer: list = []
+        self._buffer: list = []
         self._buffer_lock = threading.Lock()
         self._playing = False
-        self._paused = False
-        self._position_samples: int = 0
-        self._sample_rate: int = 48000
-        self._channels: int = 2
+        self._sample_rate = 48000
 
-    def start(self, sample_rate: int = 48000, channels: int = 2):
+    def start(self, sample_rate: int = 48000):
         """Start audio output stream."""
         try:
             import sounddevice as sd
 
             self._sample_rate = sample_rate
-            self._channels = channels
-            self._position_samples = 0
 
             self._stream = sd.OutputStream(
                 samplerate=sample_rate,
-                channels=channels,
+                channels=2,
                 dtype='float32',
-                callback=self._audio_callback,
+                callback=self._callback,
                 blocksize=1024,
                 latency='low'
             )
             self._stream.start()
             self._playing = True
-            print(f"[AudioOutput] Started: {sample_rate}Hz, {channels}ch")
+            print(f"[AudioOutput] Started: {sample_rate}Hz stereo")
 
         except ImportError:
-            print("[AudioOutput] sounddevice not installed, no audio")
-            self._stream = None
+            print("[AudioOutput] sounddevice not installed")
         except Exception as e:
-            print(f"[AudioOutput] Failed to start: {e}")
-            self._stream = None
+            print(f"[AudioOutput] Failed: {e}")
 
     def stop(self):
         """Stop audio output."""
@@ -89,234 +126,90 @@ class AudioOutput:
             except Exception:
                 pass
             self._stream = None
-        with self._buffer_lock:
-            self._audio_buffer.clear()
-        print("[AudioOutput] Stopped")
+        self.clear()
 
-    def set_paused(self, paused: bool):
-        """Pause/unpause audio."""
-        self._paused = paused
-
-    def clear_buffer(self):
-        """Clear audio buffer (for seeking)."""
+    def clear(self):
+        """Clear audio buffer."""
         with self._buffer_lock:
-            self._audio_buffer.clear()
+            self._buffer.clear()
 
     def add_samples(self, samples: np.ndarray):
-        """Add audio samples to buffer."""
+        """Add samples to buffer."""
         with self._buffer_lock:
-            # Limit buffer size to ~500ms
-            max_samples = int(self._sample_rate * 0.5)
-            total = sum(len(s) for s in self._audio_buffer)
-            if total < max_samples:
-                self._audio_buffer.append(samples.copy())
+            # Limit buffer to ~500ms
+            total = sum(len(s) for s in self._buffer)
+            if total < self._sample_rate // 2:
+                self._buffer.append(samples.copy())
 
-    def set_position(self, time_ms: float):
-        """Set playback position (after seek)."""
-        self._position_samples = int(time_ms * self._sample_rate / 1000.0)
+    def set_paused(self, paused: bool):
+        """Pause/unpause (keeps stream open but outputs silence)."""
+        self._playing = not paused
+        self._clock.set_playing(not paused)
 
-    @property
-    def position_ms(self) -> float:
-        """Get current playback position in milliseconds."""
-        return self._position_samples * 1000.0 / self._sample_rate
-
-    @property
-    def is_active(self) -> bool:
-        return self._stream is not None
-
-    def _audio_callback(self, outdata, frames, time_info, status):
-        """Sounddevice callback - fill output buffer."""
-        if not self._playing or self._paused:
+    def _callback(self, outdata, frames, time_info, status):
+        """Sounddevice callback."""
+        if not self._playing:
             outdata.fill(0)
             return
 
         with self._buffer_lock:
-            if not self._audio_buffer:
+            if not self._buffer:
                 outdata.fill(0)
                 return
 
-            # Fill from buffer
             filled = 0
-            while filled < frames and self._audio_buffer:
-                samples = self._audio_buffer[0]
+            while filled < frames and self._buffer:
+                samples = self._buffer[0]
                 available = len(samples)
                 needed = frames - filled
 
                 if available <= needed:
                     outdata[filled:filled + available] = samples
                     filled += available
-                    self._audio_buffer.pop(0)
+                    self._buffer.pop(0)
                 else:
                     outdata[filled:frames] = samples[:needed]
-                    self._audio_buffer[0] = samples[needed:]
+                    self._buffer[0] = samples[needed:]
                     filled = frames
 
-            # Zero-fill any remaining
             if filled < frames:
                 outdata[filled:] = 0
 
-            self._position_samples += frames
+            # Update clock with samples actually played
+            self._clock.add_samples(filled)
 
 
-class AudioDecoderThread(QThread):
+class PlaybackThread(QThread):
     """
-    Separate thread for decoding audio using PyAV.
+    Video playback thread using PyAV with FFmpeg filter graph for subtitles.
 
-    Runs independently from video to allow continuous audio buffering.
-    """
-
-    audio_ready = Signal(object)  # numpy array of samples
-    audio_info = Signal(int, int)  # sample_rate, channels
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._video_path: Optional[str] = None
-        self._running = False
-        self._mutex = QMutex()
-        self._condition = QWaitCondition()
-        self._seek_time_ms: float = -1
-        self._playing = False
-
-    def load(self, video_path: str):
-        """Set video path to decode audio from."""
-        self._video_path = video_path
-
-    def set_playing(self, playing: bool):
-        """Set playback state."""
-        self._mutex.lock()
-        self._playing = playing
-        self._condition.wakeAll()
-        self._mutex.unlock()
-
-    def seek_to(self, time_ms: float):
-        """Seek audio to time."""
-        self._mutex.lock()
-        self._seek_time_ms = time_ms
-        self._condition.wakeAll()
-        self._mutex.unlock()
-
-    def stop_decoder(self):
-        """Stop the decoder."""
-        self._running = False
-        self._mutex.lock()
-        self._condition.wakeAll()
-        self._mutex.unlock()
-        self.wait(2000)
-
-    def run(self):
-        """Main audio decode loop."""
-        self._running = True
-
-        if not self._video_path:
-            return
-
-        try:
-            import av
-
-            container = av.open(self._video_path)
-
-            if not container.streams.audio:
-                print("[AudioDecoder] No audio stream found")
-                container.close()
-                return
-
-            audio_stream = container.streams.audio[0]
-            sample_rate = audio_stream.rate or 48000
-            channels = audio_stream.channels or 2
-
-            # Create resampler for consistent output
-            resampler = av.AudioResampler(
-                format='flt',
-                layout='stereo',
-                rate=48000
-            )
-
-            self.audio_info.emit(48000, 2)
-            print(f"[AudioDecoder] Audio: {sample_rate}Hz → 48000Hz, {channels}ch → stereo")
-
-            while self._running:
-                self._mutex.lock()
-                seek_ms = self._seek_time_ms
-                playing = self._playing
-                self._seek_time_ms = -1
-                self._mutex.unlock()
-
-                # Handle seek
-                if seek_ms >= 0:
-                    try:
-                        target_pts = int(seek_ms / 1000.0 / audio_stream.time_base)
-                        container.seek(target_pts, stream=audio_stream)
-                    except Exception as e:
-                        print(f"[AudioDecoder] Seek error: {e}")
-
-                # Decode audio when playing
-                if playing:
-                    try:
-                        for packet in container.demux(audio_stream):
-                            if not self._running or not self._playing:
-                                break
-
-                            for frame in packet.decode():
-                                resampled = resampler.resample(frame)
-                                for out_frame in resampled:
-                                    # Convert to numpy (samples, channels)
-                                    arr = out_frame.to_ndarray()
-                                    if arr.ndim == 1:
-                                        arr = arr.reshape(-1, 1)
-                                    if arr.shape[0] == 2:  # (channels, samples)
-                                        arr = arr.T
-                                    self.audio_ready.emit(arr)
-
-                            # Check for new seek or pause
-                            self._mutex.lock()
-                            should_break = self._seek_time_ms >= 0 or not self._playing
-                            self._mutex.unlock()
-                            if should_break:
-                                break
-
-                    except av.EOFError:
-                        pass
-                    except Exception as e:
-                        print(f"[AudioDecoder] Decode error: {e}")
-                else:
-                    # Paused - wait for signal
-                    self._mutex.lock()
-                    self._condition.wait(self._mutex, 100)
-                    self._mutex.unlock()
-
-            container.close()
-
-        except ImportError:
-            print("[AudioDecoder] PyAV not installed, no audio")
-        except Exception as e:
-            print(f"[AudioDecoder] Error: {e}")
-
-
-class VideoThread(QThread):
-    """
-    Video playback thread using VapourSynth for frame-accurate decoding
-    and libass subtitle rendering via SubText plugin.
+    Uses audio clock as master for A/V sync - video frames are displayed
+    when their PTS matches audio position, dropped if behind.
     """
 
     frame_ready = Signal(object, float, int)  # QImage, time_ms, frame_num
-    duration_ready = Signal(float)  # seconds
-    fps_ready = Signal(float, object)  # fps, fps_fraction
+    audio_ready = Signal(object)              # numpy samples
+    duration_ready = Signal(float)            # seconds
+    fps_ready = Signal(float)
     playback_finished = Signal()
     error = Signal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, audio_clock: AudioClock, parent=None):
         super().__init__(parent)
 
+        self._audio_clock = audio_clock
+
+        # Paths
         self._video_path: Optional[str] = None
         self._subtitle_path: Optional[str] = None
-        self._index_dir: Optional[Path] = None
         self._fonts_dir: Optional[str] = None
 
-        # VapourSynth objects
-        self._core: Optional['vs.Core'] = None
-        self._base_clip: Optional['vs.VideoNode'] = None
-        self._clip_with_subs: Optional['vs.VideoNode'] = None
-        self._rgb_clip: Optional['vs.VideoNode'] = None
+        # PyAV objects
+        self._container = None
+        self._video_stream = None
+        self._audio_stream = None
+        self._filter_graph = None
+        self._audio_resampler = None
 
         # Video properties
         self._fps: float = 23.976
@@ -326,7 +219,7 @@ class VideoThread(QThread):
         self._width: int = 0
         self._height: int = 0
 
-        # Playback state
+        # State
         self._running = False
         self._playing = False
         self._current_frame: int = 0
@@ -335,16 +228,14 @@ class VideoThread(QThread):
         # Thread sync
         self._mutex = QMutex()
         self._condition = QWaitCondition()
-        self._seek_frame: int = -1
+        self._seek_time_ms: float = -1
         self._reload_subs: bool = False
-        self._force_render: bool = False
 
-    def load(self, video_path: str, subtitle_path: Optional[str],
-             index_dir: Path, fonts_dir: Optional[str] = None):
+    def load(self, video_path: str, subtitle_path: Optional[str] = None,
+             fonts_dir: Optional[str] = None):
         """Set paths for loading."""
         self._video_path = video_path
         self._subtitle_path = subtitle_path
-        self._index_dir = index_dir
         self._fonts_dir = fonts_dir
 
     def set_playing(self, playing: bool):
@@ -354,11 +245,10 @@ class VideoThread(QThread):
         self._condition.wakeAll()
         self._mutex.unlock()
 
-    def seek_to_frame(self, frame_num: int):
-        """Seek to specific frame."""
+    def seek_to_ms(self, time_ms: float):
+        """Request seek to time."""
         self._mutex.lock()
-        self._seek_frame = frame_num
-        self._force_render = True
+        self._seek_time_ms = time_ms
         self._condition.wakeAll()
         self._mutex.unlock()
 
@@ -368,14 +258,6 @@ class VideoThread(QThread):
         if subtitle_path:
             self._subtitle_path = subtitle_path
         self._reload_subs = True
-        self._force_render = True
-        self._condition.wakeAll()
-        self._mutex.unlock()
-
-    def request_frame(self):
-        """Request current frame render (when paused)."""
-        self._mutex.lock()
-        self._force_render = True
         self._condition.wakeAll()
         self._mutex.unlock()
 
@@ -396,238 +278,307 @@ class VideoThread(QThread):
         return self._current_time_ms
 
     def run(self):
-        """Main video playback loop."""
+        """Main playback loop."""
         self._running = True
 
+        if not HAS_AV:
+            self.error.emit("PyAV not installed")
+            return
+
         try:
-            self._load_video()
+            self._open_container()
         except Exception as e:
-            self.error.emit(f"Failed to load video: {e}")
+            self.error.emit(f"Failed to open video: {e}")
             import traceback
             traceback.print_exc()
             return
 
         # Emit video info
-        self.fps_ready.emit(self._fps, self._fps_fraction)
+        self.fps_ready.emit(self._fps)
         self.duration_ready.emit(self._duration_ms / 1000.0)
 
-        # Render first frame
-        self._render_and_emit_frame(0)
+        # Build filter graph for subtitles
+        self._setup_filter_graph()
 
-        frame_duration = 1.0 / self._fps if self._fps > 0 else 0.04
+        # Create frame generator
+        frame_gen = self._container.decode(self._video_stream)
+
+        # Render first frame
+        self._decode_and_emit_frame(frame_gen, force=True)
 
         while self._running:
             self._mutex.lock()
             playing = self._playing
-            seek_frame = self._seek_frame
+            seek_ms = self._seek_time_ms
             reload_subs = self._reload_subs
-            force_render = self._force_render
 
-            self._seek_frame = -1
+            self._seek_time_ms = -1
             self._reload_subs = False
-            self._force_render = False
             self._mutex.unlock()
 
             # Handle subtitle reload
             if reload_subs:
-                self._apply_subtitles()
-                force_render = True
+                self._setup_filter_graph()
 
             # Handle seek
-            if seek_frame >= 0:
-                self._current_frame = max(0, min(seek_frame, self._frame_count - 1))
-                self._current_time_ms = self._frame_to_ms(self._current_frame)
-                force_render = True
+            if seek_ms >= 0:
+                try:
+                    self._do_seek(seek_ms)
+                    frame_gen = self._container.decode(self._video_stream)
+                    self._setup_filter_graph()
+                    self._decode_and_emit_frame(frame_gen, force=True)
+                except Exception as e:
+                    print(f"[Playback] Seek error: {e}")
 
-            # Render frame
-            if force_render or playing:
-                self._render_and_emit_frame(self._current_frame)
-
-                if playing:
-                    self._current_frame += 1
-                    self._current_time_ms = self._frame_to_ms(self._current_frame)
-
-                    if self._current_frame >= self._frame_count:
-                        self._current_frame = self._frame_count - 1
-                        self._playing = False
-                        self.playback_finished.emit()
-
-            # Timing
+            # Playback
             if playing:
-                time.sleep(frame_duration * 0.95)
+                try:
+                    self._decode_and_emit_frame(frame_gen, force=False)
+                    self._decode_audio()
+                except StopIteration:
+                    self._playing = False
+                    self.playback_finished.emit()
+                except av.error.EOFError:
+                    self._playing = False
+                    self.playback_finished.emit()
             else:
+                # Paused - wait for signal
                 self._mutex.lock()
-                self._condition.wait(self._mutex, 100)
+                self._condition.wait(self._mutex, 50)
                 self._mutex.unlock()
 
         self._cleanup()
 
-    def _load_video(self):
-        """Load video with VapourSynth."""
-        import vapoursynth as vs
+    def _open_container(self):
+        """Open video container."""
+        print(f"[Playback] Opening: {self._video_path}")
 
-        self._core = vs.core
+        self._container = av.open(self._video_path)
 
-        # Ensure index directory exists
-        self._index_dir.mkdir(parents=True, exist_ok=True)
+        # Video stream
+        if not self._container.streams.video:
+            raise ValueError("No video stream")
 
-        # Try L-SMASH first
-        lwi_path = self._index_dir / "lwi_index.lwi"
-        try:
-            self._base_clip = self._core.lsmas.LWLibavSource(
-                str(self._video_path),
-                cachefile=str(lwi_path)
+        self._video_stream = self._container.streams.video[0]
+        self._video_stream.thread_type = "AUTO"
+
+        # Get properties
+        self._width = self._video_stream.width
+        self._height = self._video_stream.height
+
+        if self._video_stream.average_rate:
+            self._fps = float(self._video_stream.average_rate)
+            self._fps_fraction = Fraction(
+                self._video_stream.average_rate.numerator,
+                self._video_stream.average_rate.denominator
             )
-            print(f"[VideoThread] Loaded with L-SMASH")
-        except AttributeError:
-            # Fall back to ffms2
-            ffindex_path = self._index_dir / "ffms2_index.ffindex"
-            self._base_clip = self._core.ffms2.Source(
-                source=str(self._video_path),
-                cachefile=str(ffindex_path)
+
+        # Duration and frame count
+        if self._container.duration:
+            self._duration_ms = self._container.duration / 1000.0
+        if self._video_stream.frames:
+            self._frame_count = self._video_stream.frames
+        elif self._duration_ms > 0 and self._fps > 0:
+            self._frame_count = int(self._duration_ms * self._fps / 1000.0)
+
+        print(f"[Playback] Video: {self._width}x{self._height} @ {self._fps:.3f}fps")
+        print(f"[Playback] Duration: {self._duration_ms:.0f}ms, Frames: {self._frame_count}")
+
+        # Audio stream
+        if self._container.streams.audio:
+            self._audio_stream = self._container.streams.audio[0]
+            self._audio_resampler = av.AudioResampler(
+                format='flt',
+                layout='stereo',
+                rate=48000
             )
-            print(f"[VideoThread] Loaded with ffms2")
+            print(f"[Playback] Audio: {self._audio_stream.rate}Hz")
 
-        # Extract properties
-        self._fps = float(self._base_clip.fps)
-        self._fps_fraction = Fraction(
-            self._base_clip.fps.numerator,
-            self._base_clip.fps.denominator
-        )
-        self._frame_count = len(self._base_clip)
-        self._width = self._base_clip.width
-        self._height = self._base_clip.height
-        self._duration_ms = self._frame_count / self._fps * 1000.0
-
-        print(f"[VideoThread] Video: {self._width}x{self._height} @ {self._fps:.3f}fps")
-        print(f"[VideoThread] Frames: {self._frame_count}, Duration: {self._duration_ms:.0f}ms")
-
-        # Apply subtitles
-        self._apply_subtitles()
-
-    def _apply_subtitles(self):
-        """Apply ASS subtitles using VapourSynth SubText (libass)."""
-        if self._base_clip is None:
-            return
-
-        # Check if subtitle file exists
-        if not self._subtitle_path or not Path(self._subtitle_path).exists():
-            print(f"[VideoThread] No subtitles to apply")
-            self._clip_with_subs = self._base_clip
-            self._build_rgb_clip()
-            return
-
-        # Check for SubText plugin
-        if not hasattr(self._core, 'sub'):
-            print("[VideoThread] WARNING: SubText plugin not available!")
-            print("[VideoThread] Subtitles will not be rendered")
-            self._clip_with_subs = self._base_clip
-            self._build_rgb_clip()
+    def _setup_filter_graph(self):
+        """Set up FFmpeg filter graph with subtitles filter (uses libass)."""
+        if self._video_stream is None:
             return
 
         try:
-            print(f"[VideoThread] Applying subtitles: {self._subtitle_path}")
+            self._filter_graph = av.filter.Graph()
 
-            if self._fonts_dir and Path(self._fonts_dir).exists():
-                self._clip_with_subs = self._core.sub.AssFile(
-                    self._base_clip,
-                    str(self._subtitle_path),
-                    fontdir=self._fonts_dir
-                )
+            # Input buffer
+            buffer_in = self._filter_graph.add_buffer(template=self._video_stream)
+
+            # Output buffer
+            buffer_out = self._filter_graph.add('buffersink')
+
+            # Check if we have subtitles to render
+            if self._subtitle_path and Path(self._subtitle_path).exists():
+                # Escape path for FFmpeg filter
+                escaped_path = self._escape_filter_path(self._subtitle_path)
+
+                # Build filter args
+                filter_args = f"filename='{escaped_path}'"
+
+                if self._fonts_dir and Path(self._fonts_dir).exists():
+                    escaped_fonts = self._escape_filter_path(self._fonts_dir)
+                    filter_args += f":fontsdir='{escaped_fonts}'"
+
+                print(f"[Playback] Subtitle filter: {filter_args}")
+
+                # Add subtitles filter (uses libass internally)
+                subs_filter = self._filter_graph.add('subtitles', filter_args)
+
+                # Link: input -> subtitles -> output
+                buffer_in.link_to(subs_filter)
+                subs_filter.link_to(buffer_out)
             else:
-                self._clip_with_subs = self._core.sub.AssFile(
-                    self._base_clip,
-                    str(self._subtitle_path)
-                )
+                # No subtitles - direct passthrough
+                buffer_in.link_to(buffer_out)
 
-            print("[VideoThread] Subtitles applied successfully")
+            self._filter_graph.configure()
+            print("[Playback] Filter graph configured")
 
         except Exception as e:
-            print(f"[VideoThread] Failed to apply subtitles: {e}")
-            self._clip_with_subs = self._base_clip
+            print(f"[Playback] Filter graph error: {e}")
+            # Fallback - no filter graph
+            self._filter_graph = None
 
-        self._build_rgb_clip()
+    def _escape_filter_path(self, path: str) -> str:
+        """Escape path for FFmpeg filter syntax."""
+        return (Path(path).as_posix()
+                .replace('\\', '\\\\')
+                .replace("'", "\\'")
+                .replace(':', '\\:')
+                .replace(',', '\\,'))
 
-    def _build_rgb_clip(self):
-        """Build RGB output clip."""
-        if self._clip_with_subs is None:
+    def _do_seek(self, time_ms: float):
+        """Seek to time in milliseconds."""
+        if not self._container or not self._video_stream:
+            return
+
+        # Seek to keyframe before target
+        target_pts = int(time_ms / 1000.0 / self._video_stream.time_base)
+        self._container.seek(target_pts, stream=self._video_stream, backward=True)
+
+        # Update audio clock
+        self._audio_clock.reset(time_ms)
+
+        print(f"[Playback] Seeked to {time_ms:.1f}ms")
+
+    def _decode_and_emit_frame(self, frame_gen, force: bool = False):
+        """Decode next frame, apply filter, emit if in sync."""
+        frame = next(frame_gen)
+
+        # Get frame timestamp
+        if frame.pts is not None and self._video_stream.time_base:
+            frame_time_ms = float(frame.pts * self._video_stream.time_base) * 1000.0
+        else:
+            frame_time_ms = self._current_frame * 1000.0 / self._fps
+
+        # Calculate frame number
+        frame_num = int(frame_time_ms * self._fps / 1000.0)
+
+        # A/V sync check (skip if we have audio and are behind)
+        if not force and self._audio_stream:
+            audio_pos = self._audio_clock.position_ms
+            diff = frame_time_ms - audio_pos
+
+            # If video is more than 1 frame behind audio, skip this frame
+            frame_duration_ms = 1000.0 / self._fps
+            if diff < -frame_duration_ms:
+                # Skip frame - we're behind
+                return
+
+            # If video is ahead, wait a bit
+            if diff > frame_duration_ms:
+                time.sleep(min(diff / 1000.0, 0.05))
+
+        # Apply filter graph (renders subtitles)
+        if self._filter_graph:
+            try:
+                self._filter_graph.push(frame)
+                filtered_frame = self._filter_graph.pull()
+                frame = filtered_frame
+            except Exception as e:
+                print(f"[Playback] Filter error: {e}")
+
+        # Convert to QImage
+        qimage = self._frame_to_qimage(frame)
+
+        # Update state
+        self._current_time_ms = frame_time_ms
+        self._current_frame = frame_num
+
+        # Emit
+        self.frame_ready.emit(qimage, frame_time_ms, frame_num)
+
+        # Frame timing (when not syncing to audio)
+        if not self._audio_stream:
+            time.sleep(1.0 / self._fps * 0.95)
+
+    def _decode_audio(self):
+        """Decode some audio and emit."""
+        if not self._audio_stream or not self._audio_resampler:
             return
 
         try:
-            self._rgb_clip = self._core.resize.Bicubic(
-                self._clip_with_subs,
-                format=self._core.query_video_format(vs.RGB, 8, 0, 0).id,
-                matrix_in_s='709'
-            )
-            print(f"[VideoThread] RGB clip ready")
-        except Exception as e:
-            print(f"[VideoThread] Failed to build RGB clip: {e}")
-            # Fallback - try with explicit format
-            import vapoursynth as vs
-            self._rgb_clip = self._core.resize.Bicubic(
-                self._clip_with_subs,
-                format=vs.RGB24,
-                matrix_in_s='709'
-            )
+            for packet in self._container.demux(self._audio_stream):
+                if not self._running or not self._playing:
+                    break
 
-    def _frame_to_ms(self, frame: int) -> float:
-        """Convert frame number to milliseconds."""
-        if self._fps_fraction:
-            return float(frame * 1000 * self._fps_fraction.denominator / self._fps_fraction.numerator)
-        return frame * 1000.0 / self._fps
+                for frame in packet.decode():
+                    resampled = self._audio_resampler.resample(frame)
+                    for out_frame in resampled:
+                        arr = out_frame.to_ndarray()
+                        # Ensure shape is (samples, channels)
+                        if arr.ndim == 1:
+                            arr = arr.reshape(-1, 1)
+                        if arr.shape[0] == 2 and arr.shape[1] != 2:
+                            arr = arr.T
+                        self.audio_ready.emit(arr)
 
-    def _render_and_emit_frame(self, frame_num: int):
-        """Render frame and emit signal."""
-        if self._rgb_clip is None or frame_num < 0 or frame_num >= self._frame_count:
-            return
-
-        try:
-            frame = self._rgb_clip.get_frame(frame_num)
-
-            # Extract RGB planes
-            r = np.asarray(frame[0])
-            g = np.asarray(frame[1])
-            b = np.asarray(frame[2])
-
-            # Stack to RGB array
-            rgb = np.stack([r, g, b], axis=-1)
-            rgb = np.ascontiguousarray(rgb)
-
-            # Create QImage
-            height, width = r.shape
-            qimage = QImage(
-                rgb.data,
-                width,
-                height,
-                width * 3,
-                QImage.Format_RGB888
-            )
-
-            # Copy since numpy array will be invalidated
-            qimage = qimage.copy()
-
-            time_ms = self._frame_to_ms(frame_num)
-            self.frame_ready.emit(qimage, time_ms, frame_num)
+                # Only decode one packet at a time
+                return
 
         except Exception as e:
-            print(f"[VideoThread] Error rendering frame {frame_num}: {e}")
+            print(f"[Playback] Audio decode error: {e}")
+
+    def _frame_to_qimage(self, frame) -> QImage:
+        """Convert PyAV frame to QImage."""
+        # Convert to RGB via PIL (handles format conversion)
+        pil_img = frame.to_image()
+        rgb_img = pil_img.convert('RGB')
+
+        qimage = QImage(
+            rgb_img.tobytes(),
+            rgb_img.width,
+            rgb_img.height,
+            rgb_img.width * 3,
+            QImage.Format_RGB888
+        )
+        return qimage.copy()
 
     def _cleanup(self):
-        """Release VapourSynth resources."""
-        self._rgb_clip = None
-        self._clip_with_subs = None
-        self._base_clip = None
-        self._core = None
+        """Clean up resources."""
+        self._filter_graph = None
+        self._audio_resampler = None
+
+        if self._container:
+            try:
+                self._container.close()
+            except Exception:
+                pass
+            self._container = None
+
+        self._video_stream = None
+        self._audio_stream = None
         gc.collect()
-        print("[VideoThread] Cleaned up")
+        print("[Playback] Cleaned up")
 
 
 class PyAVPlayer(QWidget):
     """
     FFmpeg-based video player widget.
 
-    Uses VapourSynth for frame-accurate video with libass subtitles,
-    and PyAV for audio decoding with sounddevice output.
+    Uses PyAV with FFmpeg filter graph for real-time libass subtitle rendering.
+    Audio acts as master clock for A/V sync.
 
     Drop-in replacement for MpvWidget.
 
@@ -636,26 +587,28 @@ class PyAVPlayer(QWidget):
         duration_changed: Duration in seconds
         fps_detected: FPS detected
         playback_finished: Video ended
-        frame_changed: Current frame number (for subtitle editor)
+        frame_changed: Current frame number
     """
 
-    time_changed = Signal(int)       # ms
-    duration_changed = Signal(float)  # seconds
+    time_changed = Signal(int)
+    duration_changed = Signal(float)
     fps_detected = Signal(float)
     playback_finished = Signal()
-    frame_changed = Signal(int)      # frame number
+    frame_changed = Signal(int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self._video_thread: Optional[VideoThread] = None
-        self._audio_thread: Optional[AudioDecoderThread] = None
+        # Audio clock (master for sync)
+        self._audio_clock = AudioClock()
+
+        # Components
+        self._playback_thread: Optional[PlaybackThread] = None
         self._audio_output: Optional[AudioOutput] = None
 
         # State
         self._duration_sec: float = 0
         self._fps: float = 23.976
-        self._fps_fraction: Optional[Fraction] = None
         self._is_paused: bool = True
         self._current_time_ms: int = 0
         self._current_frame: int = 0
@@ -664,7 +617,6 @@ class PyAVPlayer(QWidget):
         self._video_path: Optional[str] = None
         self._subtitle_path: Optional[str] = None
         self._fonts_dir: Optional[str] = None
-        self._index_dir: Optional[Path] = None
 
         # Time polling
         self._poll_timer = QTimer(self)
@@ -674,7 +626,7 @@ class PyAVPlayer(QWidget):
         self._setup_ui()
 
     def _setup_ui(self):
-        """Set up the display widget."""
+        """Set up display."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
@@ -687,61 +639,45 @@ class PyAVPlayer(QWidget):
 
     def load_video(self, video_path: str, subtitle_path: Optional[str] = None,
                    fonts_dir: Optional[str] = None, index_dir: Optional[str] = None):
-        """
-        Load a video file.
-
-        Args:
-            video_path: Path to video file
-            subtitle_path: Path to ASS subtitle file
-            fonts_dir: Directory containing fonts
-            index_dir: Directory for VapourSynth index cache
-        """
+        """Load a video file."""
         self._video_path = video_path
         self._subtitle_path = subtitle_path
         self._fonts_dir = fonts_dir
 
-        # Use provided index_dir or create one next to video
-        if index_dir:
-            self._index_dir = Path(index_dir)
-        else:
-            self._index_dir = Path(video_path).parent / ".vs_index"
-
         print(f"[PyAVPlayer] Loading: {video_path}")
         if subtitle_path:
             print(f"[PyAVPlayer] Subtitle: {subtitle_path}")
-        print(f"[PyAVPlayer] Index dir: {self._index_dir}")
 
-        # Stop existing playback
+        # Stop existing
         self.stop()
 
-        # Create and start video thread
-        self._video_thread = VideoThread(self)
-        self._video_thread.load(video_path, subtitle_path, self._index_dir, fonts_dir)
-        self._video_thread.frame_ready.connect(self._on_frame_ready)
-        self._video_thread.duration_ready.connect(self._on_duration_ready)
-        self._video_thread.fps_ready.connect(self._on_fps_ready)
-        self._video_thread.playback_finished.connect(self._on_playback_finished)
-        self._video_thread.error.connect(self._on_error)
-        self._video_thread.start()
+        # Reset audio clock
+        self._audio_clock.reset(0)
 
-        # Create and start audio thread
-        self._audio_output = AudioOutput()
-        self._audio_thread = AudioDecoderThread(self)
-        self._audio_thread.load(video_path)
-        self._audio_thread.audio_ready.connect(self._on_audio_ready)
-        self._audio_thread.audio_info.connect(self._on_audio_info)
-        self._audio_thread.start()
+        # Create audio output
+        self._audio_output = AudioOutput(self._audio_clock)
 
-        # Start time polling
+        # Create playback thread
+        self._playback_thread = PlaybackThread(self._audio_clock, self)
+        self._playback_thread.load(video_path, subtitle_path, fonts_dir)
+        self._playback_thread.frame_ready.connect(self._on_frame_ready)
+        self._playback_thread.audio_ready.connect(self._on_audio_ready)
+        self._playback_thread.duration_ready.connect(self._on_duration_ready)
+        self._playback_thread.fps_ready.connect(self._on_fps_ready)
+        self._playback_thread.playback_finished.connect(self._on_playback_finished)
+        self._playback_thread.error.connect(self._on_error)
+        self._playback_thread.start()
+
+        # Start polling
         self._poll_timer.start()
 
     @Slot(object, float, int)
     def _on_frame_ready(self, qimage: QImage, time_ms: float, frame_num: int):
-        """Handle decoded frame from video thread."""
+        """Handle frame from playback thread."""
         self._current_time_ms = int(time_ms)
         self._current_frame = frame_num
 
-        # Scale to display
+        # Scale and display
         display_size = self._display.size()
         scaled = qimage.scaled(
             display_size,
@@ -750,26 +686,31 @@ class PyAVPlayer(QWidget):
         )
         self._display.setPixmap(QPixmap.fromImage(scaled))
 
+    @Slot(object)
+    def _on_audio_ready(self, samples: np.ndarray):
+        """Handle audio from playback thread."""
+        if self._audio_output and not self._is_paused:
+            self._audio_output.add_samples(samples)
+
     @Slot(float)
     def _on_duration_ready(self, duration_sec: float):
-        """Handle duration detection."""
+        """Handle duration."""
         self._duration_sec = duration_sec
         self.duration_changed.emit(duration_sec)
 
-    @Slot(float, object)
-    def _on_fps_ready(self, fps: float, fps_fraction: Optional[Fraction]):
-        """Handle FPS detection."""
+    @Slot(float)
+    def _on_fps_ready(self, fps: float):
+        """Handle FPS."""
         self._fps = fps
-        self._fps_fraction = fps_fraction
         self.fps_detected.emit(fps)
 
         # Start audio output
         if self._audio_output:
-            self._audio_output.start(48000, 2)
+            self._audio_output.start(48000)
 
     @Slot()
     def _on_playback_finished(self):
-        """Handle end of playback."""
+        """Handle end of video."""
         self._is_paused = True
         if self._audio_output:
             self._audio_output.set_paused(True)
@@ -780,42 +721,27 @@ class PyAVPlayer(QWidget):
         """Handle error."""
         print(f"[PyAVPlayer] ERROR: {error}")
 
-    @Slot(object)
-    def _on_audio_ready(self, samples: np.ndarray):
-        """Handle decoded audio samples."""
-        if self._audio_output and not self._is_paused:
-            self._audio_output.add_samples(samples)
-
-    @Slot(int, int)
-    def _on_audio_info(self, sample_rate: int, channels: int):
-        """Handle audio info."""
-        print(f"[PyAVPlayer] Audio ready: {sample_rate}Hz, {channels}ch")
-
     def _poll_time(self):
-        """Poll and emit current time."""
+        """Emit time updates."""
         self.time_changed.emit(self._current_time_ms)
         self.frame_changed.emit(self._current_frame)
 
     def play(self):
         """Start playback."""
         self._is_paused = False
-        if self._video_thread:
-            self._video_thread.set_playing(True)
-        if self._audio_thread:
-            self._audio_thread.set_playing(True)
+        if self._playback_thread:
+            self._playback_thread.set_playing(True)
         if self._audio_output:
             self._audio_output.set_paused(False)
 
     def pause(self):
         """Pause playback."""
         self._is_paused = True
-        if self._video_thread:
-            self._video_thread.set_playing(False)
-        if self._audio_thread:
-            self._audio_thread.set_playing(False)
+        if self._playback_thread:
+            self._playback_thread.set_playing(False)
         if self._audio_output:
             self._audio_output.set_paused(True)
-            self._audio_output.clear_buffer()
+            self._audio_output.clear()
 
     def toggle_pause(self):
         """Toggle play/pause."""
@@ -825,37 +751,25 @@ class PyAVPlayer(QWidget):
             self.pause()
 
     def seek(self, time_ms: int, precise: bool = True):
-        """
-        Seek to time in milliseconds.
-
-        Converts to frame number for frame-accurate seeking.
-        """
-        if self._fps > 0:
-            frame = int(time_ms * self._fps / 1000.0)
-            self.seek_frame(frame)
+        """Seek to time in milliseconds."""
+        if self._playback_thread:
+            self._playback_thread.seek_to_ms(float(time_ms))
+        if self._audio_output:
+            self._audio_output.clear()
+        self._audio_clock.reset(float(time_ms))
 
     def seek_frame(self, frame_num: int):
-        """
-        Seek to specific frame number (frame-accurate).
-
-        This is the primary seek method - guarantees landing on exact frame.
-        """
-        if self._video_thread:
-            self._video_thread.seek_to_frame(frame_num)
-
-        # Sync audio
-        if self._audio_thread and self._fps > 0:
+        """Seek to specific frame number."""
+        if self._fps > 0:
             time_ms = frame_num * 1000.0 / self._fps
-            self._audio_thread.seek_to(time_ms)
-        if self._audio_output:
-            self._audio_output.clear_buffer()
+            self.seek(int(time_ms))
 
     def reload_subtitles(self, subtitle_path: Optional[str] = None):
         """Reload subtitles."""
         if subtitle_path:
             self._subtitle_path = subtitle_path
-        if self._video_thread:
-            self._video_thread.reload_subtitles(self._subtitle_path)
+        if self._playback_thread:
+            self._playback_thread.reload_subtitles(self._subtitle_path)
 
     @property
     def is_paused(self) -> bool:
@@ -879,23 +793,15 @@ class PyAVPlayer(QWidget):
 
         self._poll_timer.stop()
 
-        # Stop threads
-        if self._audio_thread:
-            self._audio_thread.stop_decoder()
-            self._audio_thread = None
+        if self._playback_thread:
+            self._playback_thread.stop_thread()
+            self._playback_thread = None
 
-        if self._video_thread:
-            self._video_thread.stop_thread()
-            self._video_thread = None
-
-        # Stop audio output
         if self._audio_output:
             self._audio_output.stop()
             self._audio_output = None
 
-        # Clear display
         self._display.clear()
-
         gc.collect()
         print("[PyAVPlayer] Stopped")
 
