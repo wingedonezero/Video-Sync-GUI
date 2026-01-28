@@ -3,8 +3,8 @@
 """
 MPV-based video player for subtitle editor using OpenGL rendering.
 
-Uses our custom render API bindings to draw directly into Qt's OpenGL widget.
-Works on native Wayland without XWayland.
+Uses the bundled mpv.py (python-mpv) with render API to draw directly
+into Qt's OpenGL widget. Works on native Wayland.
 """
 import locale
 from typing import Optional
@@ -13,13 +13,8 @@ from PySide6.QtCore import Qt, Signal, QTimer, Slot
 from PySide6.QtGui import QOpenGLContext
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
-import mpv
-
-from .mpv_render import (
-    MpvRenderContext,
-    MpvOpenGLInitParams,
-    OpenGlCbGetProcAddrFn
-)
+# Use our bundled mpv.py (no pip dependency)
+from . import mpv
 
 
 def get_process_address(ctx, name):
@@ -60,7 +55,7 @@ class MpvWidget(QOpenGLWidget):
         locale.setlocale(locale.LC_NUMERIC, 'C')
 
         self._mpv: Optional[mpv.MPV] = None
-        self._render_ctx: Optional[MpvRenderContext] = None
+        self._render_ctx: Optional[mpv.MpvRenderContext] = None
         self._proc_addr_fn = None  # Must keep reference to prevent GC
 
         self._duration_sec: float = 0
@@ -135,17 +130,14 @@ class MpvWidget(QOpenGLWidget):
         print("[MPV] Initializing OpenGL context...")
 
         # Create callback for getting OpenGL proc addresses
-        self._proc_addr_fn = OpenGlCbGetProcAddrFn(get_process_address)
-
-        # Create OpenGL init params
-        init_params = MpvOpenGLInitParams(get_proc_address=self._proc_addr_fn)
+        self._proc_addr_fn = mpv.MpvGlGetProcAddressFn(get_process_address)
 
         # Create render context
         try:
-            self._render_ctx = MpvRenderContext(
+            self._render_ctx = mpv.MpvRenderContext(
                 self._mpv,
                 'opengl',
-                opengl_init_params=init_params
+                opengl_init_params={'get_proc_address': self._proc_addr_fn}
             )
 
             # Set update callback
