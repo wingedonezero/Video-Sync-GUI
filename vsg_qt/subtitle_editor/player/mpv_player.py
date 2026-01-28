@@ -3,19 +3,18 @@
 """
 MPV-based video player for subtitle editor using OpenGL rendering.
 
-Uses MPV's render API to draw directly into a Qt OpenGL widget.
-This approach is more reliable than window ID embedding.
+Uses the bundled mpv.py (python-mpv) with render API to draw directly
+into Qt's OpenGL widget. Works on native Wayland.
 """
 import locale
-from ctypes import c_void_p, cast, c_char_p
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal, QTimer, Slot
 from PySide6.QtGui import QOpenGLContext
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
-from PySide6.QtWidgets import QWidget, QVBoxLayout
 
-import mpv
+# Use our bundled mpv.py (no pip dependency)
+from . import mpv
 
 
 def get_process_address(ctx, name):
@@ -23,16 +22,25 @@ def get_process_address(ctx, name):
     glctx = QOpenGLContext.currentContext()
     if glctx is None:
         return 0
-    # name is bytes, need to decode for Qt
-    return int(glctx.getProcAddress(name.decode('utf-8')))
+    # name is bytes, decode for Qt
+    if isinstance(name, bytes):
+        name = name.decode('utf-8')
+    addr = glctx.getProcAddress(name)
+    return int(addr) if addr else 0
 
 
-class MpvOpenGLWidget(QOpenGLWidget):
+class MpvWidget(QOpenGLWidget):
     """
     OpenGL widget that renders MPV output.
 
     Uses MPV's render context API to draw video frames
-    directly into Qt's OpenGL framebuffer.
+    directly into Qt's OpenGL framebuffer. Works on Wayland.
+
+    Signals:
+        time_changed: Emitted with current time in milliseconds
+        duration_changed: Emitted with duration in seconds
+        fps_detected: Emitted when FPS is detected
+        playback_finished: Emitted when video ends
     """
 
     time_changed = Signal(int)  # ms
@@ -47,7 +55,9 @@ class MpvOpenGLWidget(QOpenGLWidget):
         locale.setlocale(locale.LC_NUMERIC, 'C')
 
         self._mpv: Optional[mpv.MPV] = None
-        self._mpv_gl = None
+        self._render_ctx: Optional[mpv.MpvRenderContext] = None
+        self._proc_addr_fn = None  # Must keep reference to prevent GC
+
         self._duration_sec: float = 0
         self._fps: float = 23.976
         self._is_paused: bool = True
@@ -119,25 +129,28 @@ class MpvOpenGLWidget(QOpenGLWidget):
         """Initialize OpenGL context for MPV rendering."""
         print("[MPV] Initializing OpenGL context...")
 
-        # Create the OpenGL render context
-        # MPV needs a callback to get OpenGL proc addresses
-        def get_proc_addr_wrapper(ctx, name):
-            return get_process_address(ctx, name)
+        # Create callback for getting OpenGL proc addresses
+        self._proc_addr_fn = mpv.MpvGlGetProcAddressFn(get_process_address)
 
-        # Store reference to prevent garbage collection
-        self._proc_addr_func = mpv.OpenGlCbGetProcAddrFn(get_proc_addr_wrapper)
+        # Create render context
+        try:
+            self._render_ctx = mpv.MpvRenderContext(
+                self._mpv,
+                'opengl',
+                opengl_init_params={'get_proc_address': self._proc_addr_fn}
+            )
 
-        # Initialize MPV OpenGL
-        self._mpv_gl = mpv.MpvRenderContext(
-            self._mpv,
-            'opengl',
-            opengl_init_params={'get_proc_address': self._proc_addr_func}
-        )
+            # Set update callback
+            self._render_ctx.update_cb = self._on_mpv_update
 
-        # Set update callback - called when new frame is ready
-        self._mpv_gl.update_cb = self._on_mpv_update
+            print("[MPV] OpenGL render context initialized")
 
-        print("[MPV] OpenGL context initialized")
+        except Exception as e:
+            print(f"[MPV] Failed to create render context: {e}")
+            import traceback
+            traceback.print_exc()
+            self._render_ctx = None
+            return
 
         # Process pending load
         if self._pending_video:
@@ -157,7 +170,7 @@ class MpvOpenGLWidget(QOpenGLWidget):
 
     def paintGL(self):
         """Render MPV frame to OpenGL framebuffer."""
-        if self._mpv_gl is None:
+        if self._render_ctx is None:
             return
 
         # Get widget size with HiDPI scaling
@@ -167,12 +180,16 @@ class MpvOpenGLWidget(QOpenGLWidget):
 
         # Render to default framebuffer
         fbo = self.defaultFramebufferObject()
-        self._mpv_gl.render(
-            flip_y=True,
-            opengl_fbo={'w': w, 'h': h, 'fbo': fbo}
-        )
 
-    def _on_mpv_update(self, ctx=None):
+        try:
+            self._render_ctx.render(
+                flip_y=True,
+                opengl_fbo={'w': w, 'h': h, 'fbo': fbo}
+            )
+        except Exception as e:
+            print(f"[MPV] Render error: {e}")
+
+    def _on_mpv_update(self):
         """Called by MPV when a new frame is ready."""
         # Schedule repaint on Qt thread
         QTimer.singleShot(0, self._maybe_update)
@@ -184,7 +201,9 @@ class MpvOpenGLWidget(QOpenGLWidget):
             # Minimized - render directly
             self.makeCurrent()
             self.paintGL()
-            self.context().swapBuffers(self.context().surface())
+            ctx = self.context()
+            if ctx:
+                ctx.swapBuffers(ctx.surface())
             self.doneCurrent()
         else:
             self.update()
@@ -193,7 +212,7 @@ class MpvOpenGLWidget(QOpenGLWidget):
                    fonts_dir: Optional[str] = None):
         """Load a video file."""
         # If GL not initialized yet, store for later
-        if self._mpv_gl is None:
+        if self._render_ctx is None:
             print(f"[MPV] GL not ready, storing pending load: {video_path}")
             self._pending_video = video_path
             self._pending_subtitle = subtitle_path
@@ -309,16 +328,12 @@ class MpvOpenGLWidget(QOpenGLWidget):
     def duration_ms(self) -> int:
         return int(self._duration_sec * 1000)
 
-    def shutdown(self):
-        """Shutdown render context."""
-        if self._mpv_gl:
-            self._mpv_gl.free()
-            self._mpv_gl = None
-
     def stop(self):
         """Stop and cleanup."""
         self._poll_timer.stop()
-        self.shutdown()
+        if self._render_ctx:
+            self._render_ctx.free()
+            self._render_ctx = None
         if self._mpv:
             self._mpv.terminate()
             self._mpv = None
@@ -327,7 +342,3 @@ class MpvOpenGLWidget(QOpenGLWidget):
         """Handle close."""
         self.stop()
         super().closeEvent(event)
-
-
-# Alias for compatibility
-MpvWidget = MpvOpenGLWidget

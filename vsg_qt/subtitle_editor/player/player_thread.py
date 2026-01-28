@@ -136,10 +136,20 @@ class PlayerThread(QThread):
             return
 
         print(f"[VS Player] Applying subtitles from: {self.subtitle_path}")
+        print(f"[VS Player] Base clip format: {self._base_clip.format.name}")
         if self.fonts_dir:
             print(f"[VS Player] Using fonts directory: {self.fonts_dir}")
 
+        # Check if SubText plugin is available
+        if not hasattr(self._core, 'sub'):
+            print(f"[VS Player] WARNING: SubText plugin not available!")
+            print(f"[VS Player] Install with: pip install vapoursynth-subtext")
+            self._clip = self._base_clip
+            self._build_rgb_clip()
+            return
+
         try:
+            # SubText works best with YUV formats - use the base clip directly
             if self.fonts_dir:
                 self._clip = self._core.sub.AssFile(
                     self._base_clip,
@@ -152,8 +162,11 @@ class PlayerThread(QThread):
                     self.subtitle_path
                 )
             print(f"[VS Player] Subtitles applied successfully")
+            print(f"[VS Player] Output clip format: {self._clip.format.name}")
         except Exception as e:
             print(f"[VS Player] Failed to apply subtitles: {e}")
+            import traceback
+            traceback.print_exc()
             # Fallback to video without subtitles
             self._clip = self._base_clip
 

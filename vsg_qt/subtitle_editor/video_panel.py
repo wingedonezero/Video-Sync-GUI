@@ -28,8 +28,8 @@ class VideoPanel(QWidget):
     """
     Video panel with MPV-based playback and controls.
 
-    Uses MPV with OpenGL rendering for reliable video display
-    and libass for subtitle rendering.
+    Uses MPV with OpenGL render API for native Wayland support
+    and libass for accurate subtitle rendering.
 
     Signals:
         seek_requested: Emitted when user requests seek via slider
@@ -54,7 +54,7 @@ class VideoPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
 
-        # MPV OpenGL video widget - renders directly
+        # MPV OpenGL video widget
         self._mpv_widget = MpvWidget()
         layout.addWidget(self._mpv_widget, 1)
 
@@ -122,21 +122,11 @@ class VideoPanel(QWidget):
         self._mpv_widget.stop()
 
     def seek_to(self, time_ms: int):
-        """
-        Seek to a specific time.
-
-        Args:
-            time_ms: Target time in milliseconds
-        """
+        """Seek to a specific time."""
         self._mpv_widget.seek(time_ms)
 
     def reload_subtitles(self, subtitle_path: Optional[str] = None):
-        """
-        Reload the subtitle track.
-
-        Args:
-            subtitle_path: Optional new path to subtitle file
-        """
+        """Reload the subtitle track."""
         self._mpv_widget.reload_subtitles(subtitle_path)
 
     def _on_duration_changed(self, duration_sec: float):
