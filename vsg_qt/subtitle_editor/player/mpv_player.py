@@ -90,9 +90,9 @@ class MpvWidget(QOpenGLWidget):
         self._mpv = mpv.MPV(
             # Use libmpv render API (no separate window)
             vo='libmpv',
-            # Hardware decoding - auto-copy works well with render API
-            # (decodes on GPU, copies to CPU, then we upload to our GL context)
-            hwdec='auto-copy',
+            # Disable hardware decoding to avoid OpenGL INVALID_ENUM errors
+            # (known issue: https://github.com/mpv-player/mpv/issues/15019)
+            hwdec='no',
             # Subtitles
             sub_auto='no',
             sub_ass='yes',
