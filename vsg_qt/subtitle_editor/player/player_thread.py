@@ -1,32 +1,24 @@
 # vsg_qt/subtitle_editor/player/player_thread.py
 # -*- coding: utf-8 -*-
 """
-Video player thread for subtitle editor using VapourSynth.
+Video player thread for subtitle editor.
 
-Provides frame-accurate seeking with index caching for fast repeated access.
-Uses lsmas for video loading and libass (via AssFile) for subtitle rendering.
+Handles video decoding and subtitle overlay rendering using PyAV and libass.
+Simple and reliable implementation.
 """
 import gc
 import time
 from pathlib import Path
 from threading import Lock
-from typing import Optional
-
 from PySide6.QtCore import QThread, Signal, Slot
 from PySide6.QtGui import QImage
 
-import numpy as np
-import vapoursynth as vs
+import av
 
 
 class PlayerThread(QThread):
     """
-    Video playback thread using VapourSynth.
-
-    Features:
-    - Frame-accurate seeking (no keyframe limitations)
-    - Index caching for fast repeated access
-    - Subtitle rendering with libass
+    Video playback thread with subtitle rendering.
 
     Signals:
         new_frame: Emitted with (QImage, timestamp_seconds) for each frame
@@ -42,39 +34,29 @@ class PlayerThread(QThread):
     time_changed = Signal(int)
     fps_detected = Signal(float)
 
-    def __init__(self, video_path: str, subtitle_path: str, index_dir: str,
-                 fonts_dir: Optional[str] = None, parent=None):
+    def __init__(self, video_path: str, subtitle_path: str, widget_win_id,
+                 fonts_dir: str | None, parent=None):
         super().__init__(parent)
         self.video_path = video_path
         self.subtitle_path = subtitle_path
-        self.index_dir = Path(index_dir)
         self.fonts_dir = fonts_dir
 
-        # VapourSynth core and clips
-        self._core: Optional[vs.Core] = None
-        self._base_clip: Optional[vs.VideoNode] = None  # Video without subs
-        self._clip: Optional[vs.VideoNode] = None       # Video with subs
-        self._rgb_clip: Optional[vs.VideoNode] = None   # Cached RGB output
+        self._container = None
+        self._video_stream = None
+        self._graph = None
 
-        # Video properties
-        self._fps: float = 23.976
-        self._frame_count: int = 0
-        self._duration_ms: int = 0
-        self._width: int = 0
-        self._height: int = 0
-
-        # Playback state
         self._is_running = True
-        self._is_paused = True  # Start paused
-        self._current_frame: int = 0
-        self._current_time_ms: int = 0
+        self._is_paused = True  # Start paused by default
+        self._frame_delay = 0.0
+        self._fps = 23.976  # Default, will be updated
 
-        # Thread synchronization
         self._lock = Lock()
-        self._seek_request_frame: int = -1
-        self._seek_request_ms: int = -1
+        self._seek_request_ms = -1
         self._reload_subs_requested = False
         self._force_render_frame = False
+
+        # Current position tracking
+        self._current_time_ms = 0
 
     @property
     def fps(self) -> float:
@@ -92,272 +74,132 @@ class PlayerThread(QThread):
         with self._lock:
             return self._is_paused
 
-    def _load_video(self):
-        """Load video with VapourSynth using cached index."""
-        self._core = vs.core
+    def _setup_graph(self):
+        """Set up the filter graph for subtitle rendering."""
+        self._graph = av.filter.Graph()
+        buffer_in = self._graph.add_buffer(template=self._video_stream)
+        buffer_out = self._graph.add('buffersink')
 
-        # Index file path for lsmas
-        index_file = self.index_dir / "lwi_index.lwi"
+        escaped_path = (Path(self.subtitle_path).as_posix()
+                       .replace('\\', '\\\\')
+                       .replace("'", "\\'")
+                       .replace(':', '\\:')
+                       .replace(',', '\\,'))
 
-        # Load video with lsmas (creates/uses cached index)
-        try:
-            self._base_clip = self._core.lsmas.LWLibavSource(
-                self.video_path,
-                cachefile=str(index_file)
-            )
-        except AttributeError:
-            # Fallback to ffms2 if lsmas not available
-            self._base_clip = self._core.ffms2.Source(
-                self.video_path,
-                cachefile=str(self.index_dir / "ffms2_index")
-            )
-
-        # Get video properties
-        self._fps = float(self._base_clip.fps)
-        self._frame_count = len(self._base_clip)
-        self._width = self._base_clip.width
-        self._height = self._base_clip.height
-        self._duration_ms = int(self._frame_count / self._fps * 1000)
-
-        # Apply subtitles
-        self._apply_subtitles()
-
-    def _apply_subtitles(self):
-        """Apply ASS subtitles to the base clip using libass."""
-        if self._base_clip is None:
-            return
-
-        # Check if subtitle file exists
-        sub_path = Path(self.subtitle_path)
-        if not sub_path.exists():
-            print(f"[VS Player] WARNING: Subtitle file not found: {self.subtitle_path}")
-            self._clip = self._base_clip
-            self._build_rgb_clip()
-            return
-
-        print(f"[VS Player] Applying subtitles from: {self.subtitle_path}")
-        print(f"[VS Player] Base clip format: {self._base_clip.format.name}")
+        filter_args = f"filename='{escaped_path}'"
         if self.fonts_dir:
-            print(f"[VS Player] Using fonts directory: {self.fonts_dir}")
+            escaped_fonts_dir = (Path(self.fonts_dir).as_posix()
+                                .replace('\\', '\\\\')
+                                .replace("'", "\\'")
+                                .replace(':', '\\:')
+                                .replace(',', '\\,'))
+            filter_args += f":fontsdir='{escaped_fonts_dir}'"
 
-        # Check if SubText plugin is available
-        if not hasattr(self._core, 'sub'):
-            print(f"[VS Player] WARNING: SubText plugin not available!")
-            print(f"[VS Player] Install with: pip install vapoursynth-subtext")
-            self._clip = self._base_clip
-            self._build_rgb_clip()
-            return
-
-        try:
-            # SubText works best with YUV formats - use the base clip directly
-            if self.fonts_dir:
-                self._clip = self._core.sub.AssFile(
-                    self._base_clip,
-                    self.subtitle_path,
-                    fontdir=self.fonts_dir
-                )
-            else:
-                self._clip = self._core.sub.AssFile(
-                    self._base_clip,
-                    self.subtitle_path
-                )
-            print(f"[VS Player] Subtitles applied successfully")
-            print(f"[VS Player] Output clip format: {self._clip.format.name}")
-        except Exception as e:
-            print(f"[VS Player] Failed to apply subtitles: {e}")
-            import traceback
-            traceback.print_exc()
-            # Fallback to video without subtitles
-            self._clip = self._base_clip
-
-        # Build cached RGB output clip
-        self._build_rgb_clip()
-
-    def _build_rgb_clip(self):
-        """Build the cached RGB output clip from the current clip."""
-        if self._clip is None:
-            return
-
-        try:
-            # Convert to RGB24 for QImage output
-            # Use matrix_in_s='709' for HD content (most common)
-            self._rgb_clip = self._core.resize.Bicubic(
-                self._clip,
-                format=vs.RGB24,
-                matrix_in_s='709'
-            )
-            print(f"[VS Player] RGB clip built: {self._rgb_clip.width}x{self._rgb_clip.height}")
-        except Exception as e:
-            print(f"[VS Player] Failed to build RGB clip: {e}")
-            self._rgb_clip = None
-
-    def _frame_to_ms(self, frame: int) -> int:
-        """Convert frame number to milliseconds."""
-        return int(frame / self._fps * 1000)
-
-    def _ms_to_frame(self, ms: int) -> int:
-        """Convert milliseconds to frame number."""
-        return int(ms / 1000 * self._fps)
-
-    def _get_frame_as_qimage(self, frame_num: int) -> Optional[QImage]:
-        """
-        Get a frame as QImage.
-
-        Args:
-            frame_num: Frame number to retrieve
-
-        Returns:
-            QImage of the frame, or None on error
-        """
-        if self._rgb_clip is None or frame_num < 0 or frame_num >= self._frame_count:
-            return None
-
-        try:
-            # Get frame from cached RGB clip
-            frame = self._rgb_clip.get_frame(frame_num)
-
-            width = frame.width
-            height = frame.height
-
-            # Extract planes as numpy arrays (much faster than Python loops)
-            r_plane = np.asarray(frame[0])
-            g_plane = np.asarray(frame[1])
-            b_plane = np.asarray(frame[2])
-
-            # Stack and interleave RGB planes
-            # Result shape: (height, width, 3)
-            rgb_array = np.stack([r_plane, g_plane, b_plane], axis=-1)
-
-            # Ensure contiguous array for QImage
-            rgb_array = np.ascontiguousarray(rgb_array)
-
-            # Create QImage from numpy array
-            qimage = QImage(
-                rgb_array.data,
-                width,
-                height,
-                width * 3,
-                QImage.Format_RGB888
-            )
-
-            # Make a copy since the numpy array will be invalidated
-            return qimage.copy()
-
-        except Exception as e:
-            print(f"[VS Player] Error getting frame {frame_num}: {e}")
-            return None
+        subtitles_filter = self._graph.add(filter='subtitles', args=filter_args)
+        buffer_in.link_to(subtitles_filter)
+        subtitles_filter.link_to(buffer_out)
+        self._graph.configure()
 
     def run(self):
         """Main thread loop."""
         try:
-            print(f"[VS Player] Loading video: {self.video_path}")
-            print(f"[VS Player] Index dir: {self.index_dir}")
-            self._load_video()
+            self._container = av.open(self.video_path, 'r')
+            self._video_stream = self._container.streams.video[0]
+            self._video_stream.thread_type = "AUTO"
 
-            print(f"[VS Player] Video loaded: {self._width}x{self._height} @ {self._fps:.3f} fps, {self._frame_count} frames")
+            if self._video_stream.average_rate:
+                self._fps = float(self._video_stream.average_rate)
+                self._frame_delay = 1.0 / self._fps
+                self.fps_detected.emit(self._fps)
 
-            # Emit video info
-            self.fps_detected.emit(self._fps)
-            self.duration_changed.emit(self._duration_ms / 1000)
-
-            # Render first frame
-            qimage = self._get_frame_as_qimage(0)
-            if qimage:
-                print(f"[VS Player] First frame rendered: {qimage.width()}x{qimage.height()}")
-                self.new_frame.emit(qimage, 0.0)
-                self.time_changed.emit(0)
-            else:
-                print(f"[VS Player] WARNING: Failed to render first frame!")
+            duration_sec = float(self._container.duration or 0) / av.time_base
+            self.duration_changed.emit(duration_sec)
+            self._setup_graph()
 
         except Exception as e:
-            print(f"[VS Player] FATAL: Could not load video: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"FATAL: Could not open media or build filter graph: {e}")
             self._is_running = False
             return
 
-        frame_delay = 1.0 / self._fps if self._fps > 0 else 0.04
+        frame_generator = self._container.decode(self._video_stream)
 
         while self._is_running:
             try:
                 with self._lock:
+                    should_seek = self._seek_request_ms >= 0
                     should_reload = self._reload_subs_requested
-                    should_seek_ms = self._seek_request_ms
-                    should_seek_frame = self._seek_request_frame
                     is_paused = self._is_paused
-                    force_render = self._force_render_frame
 
-                    if should_reload:
+                if should_reload:
+                    self._setup_graph()
+                    with self._lock:
                         self._reload_subs_requested = False
-                    if should_seek_ms >= 0:
-                        self._seek_request_ms = -1
-                    if should_seek_frame >= 0:
-                        self._seek_request_frame = -1
+                        self._force_render_frame = True
+
+                if should_seek:
+                    try:
+                        seek_pts = int(self._seek_request_ms / 1000 / self._video_stream.time_base)
+                        self._container.seek(seek_pts, stream=self._video_stream, backward=True)
+                        frame_generator = self._container.decode(self._video_stream)
+                        self._setup_graph()
+                    except Exception as e:
+                        print(f"Error during seek: {e}")
+                    finally:
+                        with self._lock:
+                            self._seek_request_ms = -1
+
+                with self._lock:
+                    force_render = self._force_render_frame
                     if force_render:
                         self._force_render_frame = False
 
-                # Handle subtitle reload
-                if should_reload:
-                    print(f"[VS Player] Reloading subtitles...")
-                    self._apply_subtitles()
-                    force_render = True
+                if is_paused and not should_seek and not force_render:
+                    time.sleep(0.05)
+                    continue
 
-                # Handle seek by milliseconds
-                if should_seek_ms >= 0:
-                    target_frame = self._ms_to_frame(should_seek_ms)
-                    target_frame = max(0, min(target_frame, self._frame_count - 1))
-                    self._current_frame = target_frame
-                    self._current_time_ms = self._frame_to_ms(target_frame)
-                    force_render = True
+                frame = next(frame_generator)
+                timestamp_sec = frame.pts * frame.time_base
+                self._current_time_ms = int(timestamp_sec * 1000)
 
-                # Handle seek by frame number
-                if should_seek_frame >= 0:
-                    target_frame = max(0, min(should_seek_frame, self._frame_count - 1))
-                    self._current_frame = target_frame
-                    self._current_time_ms = self._frame_to_ms(target_frame)
-                    force_render = True
+                self._graph.push(frame)
+                filtered_frame = self._graph.pull()
+                pillow_img = filtered_frame.to_image()
+                rgb_img = pillow_img.convert('RGB')
+                q_image = QImage(rgb_img.tobytes(), rgb_img.width, rgb_img.height,
+                                QImage.Format_RGB888)
 
-                # Render frame if needed
-                if force_render or not is_paused:
-                    qimage = self._get_frame_as_qimage(self._current_frame)
-                    if qimage:
-                        timestamp_sec = self._current_time_ms / 1000
-                        self.new_frame.emit(qimage, timestamp_sec)
-                        self.time_changed.emit(self._current_time_ms)
+                self.new_frame.emit(q_image, timestamp_sec)
+                self.time_changed.emit(self._current_time_ms)
 
-                    # Advance frame if playing
-                    if not is_paused:
-                        self._current_frame += 1
-                        self._current_time_ms = self._frame_to_ms(self._current_frame)
+            except (StopIteration, av.error.EOFError):
+                self.playback_finished.emit()
+                break
+            except av.error.EAGAIN:
+                time.sleep(0.005)
+                continue
 
-                        # Check for end of video
-                        if self._current_frame >= self._frame_count:
-                            self._current_frame = self._frame_count - 1
-                            self.playback_finished.emit()
-                            with self._lock:
-                                self._is_paused = True
-
-                # Sleep to maintain frame rate
-                if is_paused and not force_render:
-                    time.sleep(0.05)  # Sleep longer when paused
-                else:
-                    time.sleep(frame_delay)
-
-            except Exception as e:
-                print(f"[VS Player] Error in main loop: {e}")
-                time.sleep(0.1)
+            delay = self._frame_delay
+            time.sleep(delay if delay > 0.001 else 0.001)
 
         self._cleanup_resources()
 
     def _cleanup_resources(self):
-        """Release VapourSynth resources (but keep index files)."""
-        # Release clips
-        self._rgb_clip = None
-        self._clip = None
-        self._base_clip = None
-        self._core = None
+        """Explicitly free PyAV resources to prevent memory leaks."""
+        if self._graph is not None:
+            try:
+                del self._graph
+            except Exception:
+                pass
+            self._graph = None
 
-        # Force garbage collection
+        if self._container is not None:
+            try:
+                self._container.close()
+            except Exception:
+                pass
+            self._container = None
+
+        self._video_stream = None
         gc.collect()
 
     @Slot()
@@ -379,27 +221,20 @@ class PlayerThread(QThread):
 
     def seek(self, time_ms: int):
         """
-        Seek to a specific time (frame-accurate).
+        Seek to a specific time.
+
+        Works both when playing and when paused.
 
         Args:
             time_ms: Target time in milliseconds
         """
         with self._lock:
             self._seek_request_ms = time_ms
-            self._force_render_frame = True
+            # Force a frame render after seeking while paused
+            if self._is_paused:
+                self._force_render_frame = True
 
-    def seek_frame(self, frame_num: int):
-        """
-        Seek to a specific frame.
-
-        Args:
-            frame_num: Target frame number
-        """
-        with self._lock:
-            self._seek_request_frame = frame_num
-            self._force_render_frame = True
-
-    def reload_subtitle_track(self, subtitle_path: Optional[str] = None):
+    def reload_subtitle_track(self, subtitle_path: str | None = None):
         """
         Reload the subtitle track.
 
@@ -409,15 +244,5 @@ class PlayerThread(QThread):
         with self._lock:
             if subtitle_path:
                 self.subtitle_path = subtitle_path
-            self._reload_subs_requested = True
-            self._force_render_frame = True
-
-    @property
-    def frame_count(self) -> int:
-        """Get total frame count."""
-        return self._frame_count
-
-    @property
-    def duration_ms(self) -> int:
-        """Get total duration in milliseconds."""
-        return self._duration_ms
+            if self._graph:
+                self._reload_subs_requested = True
