@@ -86,7 +86,9 @@ class FontInfo:
 class FontScanner:
     """Scans directories for font files."""
 
-    FONT_EXTENSIONS = {'.ttf', '.otf', '.ttc', '.woff', '.woff2'}
+    # Include both lowercase and uppercase extensions
+    FONT_EXTENSIONS = {'.ttf', '.otf', '.ttc', '.woff', '.woff2',
+                       '.TTF', '.OTF', '.TTC', '.WOFF', '.WOFF2'}
 
     def __init__(self, fonts_dir: Path):
         self.fonts_dir = Path(fonts_dir)
@@ -108,14 +110,21 @@ class FontScanner:
         fonts = []
         pattern = '**/*' if include_subdirs else '*'
 
+        # Collect all font files
+        seen_paths = set()
         for ext in self.FONT_EXTENSIONS:
             for font_path in self.fonts_dir.glob(f"{pattern}{ext}"):
                 if font_path.is_file():
+                    # Normalize path to avoid duplicates from case variations
+                    path_key = str(font_path.resolve())
+                    if path_key in seen_paths:
+                        continue
+                    seen_paths.add(path_key)
+
                     # Use cache if available
-                    cache_key = str(font_path)
-                    if cache_key not in self._font_cache:
-                        self._font_cache[cache_key] = FontInfo(font_path)
-                    fonts.append(self._font_cache[cache_key])
+                    if path_key not in self._font_cache:
+                        self._font_cache[path_key] = FontInfo(font_path)
+                    fonts.append(self._font_cache[path_key])
 
         return fonts
 

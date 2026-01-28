@@ -186,8 +186,8 @@ class PlayerThread(QThread):
                             self.new_frame.emit(q_image, target_timestamp_sec)
                             self.time_changed.emit(self._current_time_ms)
 
-                        # Create fresh generator from current position for continued playback
-                        frame_generator = self._container.decode(self._video_stream)
+                        # Don't create new generator - frame_generator is already positioned
+                        # right after the target frame for continued playback
 
                     except Exception as e:
                         print(f"Error during seek: {e}")
