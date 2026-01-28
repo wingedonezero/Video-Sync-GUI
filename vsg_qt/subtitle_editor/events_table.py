@@ -26,7 +26,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QBrush
 from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView,
-    QWidget, QVBoxLayout
+    QWidget, QVBoxLayout, QMenu, QInputDialog
 )
 
 from .utils import ms_to_ass_time, calculate_cps, cps_color, cps_tooltip
@@ -46,6 +46,7 @@ class EventsTable(QWidget):
 
     event_selected = Signal(int)
     event_double_clicked = Signal(int)
+    preview_updated = Signal()
 
     # Column indices
     COL_NUM = 0
@@ -108,6 +109,8 @@ class EventsTable(QWidget):
         # Connect signals
         self._table.itemSelectionChanged.connect(self._on_selection_changed)
         self._table.itemDoubleClicked.connect(self._on_double_click)
+        self._table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self._table.customContextMenuRequested.connect(self._show_context_menu)
 
         layout.addWidget(self._table)
 
@@ -218,6 +221,66 @@ class EventsTable(QWidget):
         if item:
             self.event_double_clicked.emit(item.row())
 
+    def _show_context_menu(self, pos):
+        """Show context menu for row actions."""
+        if not self._state:
+            return
+
+        row = self._table.indexAt(pos).row()
+        if row < 0:
+            return
+
+        self._table.selectRow(row)
+
+        menu = QMenu(self)
+        force_include = menu.addAction("Force include (keep)")
+        force_exclude = menu.addAction("Force exclude (remove)")
+        clear_override = menu.addAction("Clear filter override")
+        menu.addSeparator()
+        change_style = menu.addAction("Change style...")
+
+        action = menu.exec_(self._table.mapToGlobal(pos))
+        if action == force_include:
+            self._state.force_include_event(row)
+            self._update_filter_highlights()
+        elif action == force_exclude:
+            self._state.force_exclude_event(row)
+            self._update_filter_highlights()
+        elif action == clear_override:
+            self._state.clear_forced_event(row)
+            self._update_filter_highlights()
+        elif action == change_style:
+            self._change_event_style(row)
+
+    def _change_event_style(self, row: int):
+        """Prompt for a style change for the selected event."""
+        if not self._state:
+            return
+
+        events = self._state.events
+        if row < 0 or row >= len(events):
+            return
+
+        style_names = self._state.style_names
+        if not style_names:
+            return
+
+        current_style = events[row].style
+        current_index = style_names.index(current_style) if current_style in style_names else 0
+        new_style, ok = QInputDialog.getItem(
+            self,
+            "Change Style",
+            "Select a new style:",
+            style_names,
+            current_index,
+            False
+        )
+        if ok and new_style:
+            self._state.update_event_style(row, new_style)
+            self._state.save_preview()
+            self._state.subtitle_data_changed.emit()
+            self.preview_updated.emit()
+
     def _update_overlap_highlights(self, selected_row: int):
         """
         Highlight events that overlap with the selected event.
@@ -254,6 +317,9 @@ class EventsTable(QWidget):
             else:
                 self._clear_row_background(row)
 
+        for row in self._highlighted_indices:
+            self._set_row_background(row, self.COLOR_OVERLAP)
+
     def set_filter_preview_mode(self, enabled: bool):
         """
         Enable/disable filter preview mode.
@@ -285,14 +351,22 @@ class EventsTable(QWidget):
 
     def _clear_highlights(self):
         """Clear all row highlights."""
-        for row in self._highlighted_indices:
-            # Don't clear CPS column (it has its own coloring)
-            for col in range(self._table.columnCount()):
-                if col == self.COL_CPS:
-                    continue
-                item = self._table.item(row, col)
-                if item:
-                    item.setBackground(QBrush())
+        if self._filter_preview_mode and self._state:
+            kept_indices = self._state.get_filtered_event_indices()
+            for row in self._highlighted_indices:
+                if row not in kept_indices:
+                    self._set_row_background(row, self.COLOR_FILTERED_OUT)
+                else:
+                    self._clear_row_background(row)
+        else:
+            for row in self._highlighted_indices:
+                # Don't clear CPS column (it has its own coloring)
+                for col in range(self._table.columnCount()):
+                    if col == self.COL_CPS:
+                        continue
+                    item = self._table.item(row, col)
+                    if item:
+                        item.setBackground(QBrush())
 
         self._highlighted_indices.clear()
 

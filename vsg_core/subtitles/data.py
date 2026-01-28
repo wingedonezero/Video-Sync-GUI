@@ -1101,6 +1101,8 @@ class SubtitleData:
         self,
         styles: List[str],
         mode: str = 'exclude',
+        forced_include: Optional[List[int]] = None,
+        forced_exclude: Optional[List[int]] = None,
         runner=None
     ) -> 'OperationResult':
         """
@@ -1117,7 +1119,14 @@ class SubtitleData:
             - styles_found, styles_missing
         """
         from .operations.style_ops import apply_style_filter
-        return apply_style_filter(self, styles, mode, runner)
+        return apply_style_filter(
+            self,
+            styles,
+            mode,
+            forced_include=forced_include,
+            forced_exclude=forced_exclude,
+            runner=runner
+        )
 
     # =========================================================================
     # Utility Methods

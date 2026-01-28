@@ -2,9 +2,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 import shutil
-import subprocess
 import sys
-import tempfile
 import time
 import re
 import json
@@ -20,7 +18,7 @@ from PySide6.QtWidgets import (
 from .logic import ManualLogic
 from .widgets import SourceList, FinalList
 from vsg_qt.track_widget import TrackWidget
-# Note: SubtitleEditorWindow import kept for type hints but we launch via subprocess
+from vsg_qt.subtitle_editor import SubtitleEditorWindow
 from vsg_core.extraction.tracks import extract_tracks
 from vsg_core.extraction.attachments import extract_attachments
 from vsg_core.subtitles.convert import convert_srt_to_ass
@@ -329,7 +327,8 @@ class ManualSelectionDialog(QDialog):
         tool_paths = {t: shutil.which(t) for t in ['mkvmerge', 'mkvextract', 'ffmpeg']}
 
         try:
-            temp_dir = Path(tempfile.gettempdir()) / f"vsg_style_edit_{Path(source_file).stem}_{track_id}_{int(time.time())}"
+            temp_root = self.config.get_style_editor_temp_dir()
+            temp_dir = temp_root / f"vsg_style_edit_{Path(source_file).stem}_{track_id}_{int(time.time())}"
             temp_dir.mkdir(parents=True, exist_ok=True)
 
             if track_data.get('source') == 'External':
@@ -439,7 +438,8 @@ class ManualSelectionDialog(QDialog):
 
         try:
             # Create temp directory for extraction
-            temp_dir = Path(tempfile.gettempdir()) / f"vsg_ocr_preview_{Path(source_file).stem}_{track_id}_{int(time.time())}"
+            temp_root = self.config.get_style_editor_temp_dir()
+            temp_dir = temp_root / f"vsg_ocr_preview_{Path(source_file).stem}_{track_id}_{int(time.time())}"
             temp_dir.mkdir(parents=True, exist_ok=True)
 
             if track_data.get('source') == 'External':
@@ -737,7 +737,8 @@ class ManualSelectionDialog(QDialog):
         fonts_dir = None
         try:
             source_file = track_data.get('original_path')
-            font_temp_dir = Path(tempfile.gettempdir()) / f"vsg_fonts_{Path(source_file).stem}"
+            temp_root = self.config.get_style_editor_temp_dir()
+            font_temp_dir = temp_root / f"vsg_fonts_{Path(source_file).stem}"
             font_temp_dir.mkdir(parents=True, exist_ok=True)
             extracted_fonts = extract_attachments(source_file, font_temp_dir, runner, tool_paths, 'font')
             if extracted_fonts:
@@ -756,11 +757,12 @@ class ManualSelectionDialog(QDialog):
             existing_filter_config = {
                 'filter_mode': track_data.get('generated_filter_mode', 'exclude'),
                 'filter_styles': track_data.get('generated_filter_styles', []),
+                'forced_include': track_data.get('generated_filter_forced_include', []),
+                'forced_exclude': track_data.get('generated_filter_forced_exclude', []),
             }
 
-        # Launch subtitle editor in subprocess to isolate MPV/OpenGL
-        # This prevents state corruption in the main app
-        self._launch_subtitle_editor_subprocess(
+        # Launch subtitle editor in-process to preserve layout/subdata integration.
+        self._launch_subtitle_editor_dialog(
             widget=widget,
             subtitle_path=editable_sub_path,
             video_path=ref_video_path,
@@ -770,7 +772,7 @@ class ManualSelectionDialog(QDialog):
             existing_filter_config=existing_filter_config
         )
 
-    def _launch_subtitle_editor_subprocess(
+    def _launch_subtitle_editor_dialog(
         self,
         widget: TrackWidget,
         subtitle_path: str,
@@ -780,87 +782,49 @@ class ManualSelectionDialog(QDialog):
         existing_style_patch: Optional[Dict] = None,
         existing_filter_config: Optional[Dict] = None
     ):
-        """Launch subtitle editor in a subprocess to isolate MPV/OpenGL."""
-        import uuid
-
-        # Create temp files for IPC
-        temp_dir = Path(tempfile.gettempdir())
-        session_id = uuid.uuid4().hex[:8]
-        params_file = temp_dir / f"vsg_editor_params_{session_id}.json"
-        result_file = temp_dir / f"vsg_editor_result_{session_id}.json"
-
-        # Write parameters (versioned JSON format)
-        params = {
-            'version': '1.0',
-            'session_id': session_id,
-            'subtitle_path': subtitle_path,
-            'video_path': video_path,
-            'fonts_dir': fonts_dir,
-            'existing_state': {
-                'style_patch': existing_style_patch or {},
-                'font_replacements': existing_font_replacements or {},
-                'filter_config': existing_filter_config or {}
-            }
-        }
-        with open(params_file, 'w') as f:
-            json.dump(params, f)
-
-        # Launch subprocess
+        """Launch subtitle editor as an in-process dialog."""
         self.log_callback("[INFO] Launching subtitle editor...")
         try:
-            # Run the subprocess and wait for it to complete
-            result = subprocess.run(
-                [sys.executable, '-m', 'vsg_qt.subtitle_editor.subprocess_launcher',
-                 str(params_file), str(result_file)],
-                cwd=str(Path(__file__).parent.parent.parent)  # Project root
+            editor = SubtitleEditorWindow(
+                subtitle_path=subtitle_path,
+                video_path=video_path,
+                fonts_dir=fonts_dir,
+                existing_font_replacements=existing_font_replacements,
+                existing_style_patch=existing_style_patch,
+                existing_filter_config=existing_filter_config,
+                parent=self
             )
+            if editor.exec() == QDialog.Accepted:
+                style_patch = editor.get_style_patch()
+                font_replacements = editor.get_font_replacements()
+                filter_config = editor.get_filter_config()
 
-            # Read results if subprocess succeeded
-            if result_file.exists():
-                with open(result_file, 'r') as f:
-                    editor_result = json.load(f)
+                widget.track_data['style_patch'] = style_patch
+                if font_replacements:
+                    widget.track_data['font_replacements'] = font_replacements
+                elif 'font_replacements' in widget.track_data:
+                    del widget.track_data['font_replacements']
+                if filter_config:
+                    widget.track_data['filter_config'] = filter_config
+                    # For generated tracks, also update generated_* fields for job execution
+                    if widget.track_data.get('is_generated'):
+                        widget.track_data['generated_filter_mode'] = filter_config.get('filter_mode', 'exclude')
+                        widget.track_data['generated_filter_styles'] = filter_config.get('filter_styles', [])
+                        widget.track_data['generated_filter_forced_include'] = filter_config.get('forced_include', [])
+                        widget.track_data['generated_filter_forced_exclude'] = filter_config.get('forced_exclude', [])
+                        # Clear the needs_configuration flag
+                        widget.track_data.pop('generated_needs_configuration', None)
 
-                if editor_result.get('accepted'):
-                    style_patch = editor_result.get('style_patch', {})
-                    font_replacements = editor_result.get('font_replacements', {})
-                    filter_config = editor_result.get('filter_config', {})
-
-                    widget.track_data['style_patch'] = style_patch
-                    if font_replacements:
-                        widget.track_data['font_replacements'] = font_replacements
-                    elif 'font_replacements' in widget.track_data:
-                        del widget.track_data['font_replacements']
-                    if filter_config:
-                        widget.track_data['filter_config'] = filter_config
-                        # For generated tracks, also update generated_* fields for job execution
-                        if widget.track_data.get('is_generated'):
-                            widget.track_data['generated_filter_mode'] = filter_config.get('filter_mode', 'exclude')
-                            widget.track_data['generated_filter_styles'] = filter_config.get('filter_styles', [])
-                            # Clear the needs_configuration flag
-                            widget.track_data.pop('generated_needs_configuration', None)
-
-                    self.edited_widget = widget
-                    widget.logic.refresh_badges()
-                    widget.logic.refresh_summary()
-                    self.log_callback("[INFO] Subtitle editor changes saved.")
-                else:
-                    self.log_callback("[INFO] Subtitle editor cancelled.")
+                self.edited_widget = widget
+                widget.logic.refresh_badges()
+                widget.logic.refresh_summary()
+                self.log_callback("[INFO] Subtitle editor changes saved.")
             else:
-                self.log_callback("[WARN] Subtitle editor did not return results.")
+                self.log_callback("[INFO] Subtitle editor cancelled.")
 
         except Exception as e:
             self.log_callback(f"[ERROR] Failed to run subtitle editor: {e}")
             QMessageBox.critical(self, "Error", f"Failed to launch subtitle editor:\n{e}")
-
-        finally:
-            # Cleanup temp files
-            try:
-                if params_file.exists():
-                    params_file.unlink()
-                if result_file.exists():
-                    result_file.unlink()
-            except Exception:
-                pass
 
     def _prepare_ocr_preview_with_progress(self, widget: TrackWidget) -> Optional[Tuple[str, str]]:
         """
