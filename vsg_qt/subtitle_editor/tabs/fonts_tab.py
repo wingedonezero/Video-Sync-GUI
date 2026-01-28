@@ -357,61 +357,31 @@ class FontsTab(BaseTab):
 
         combo = self._font_combos.get(style_name)
         if not combo:
-            print(f"[FontsTab] ERROR: No combo found for style '{style_name}'")
             return
 
         selected_text = combo.currentText()
         selected_path = combo.currentData(Qt.UserRole)
 
-        print(f"[FontsTab] Font selected for '{style_name}': text='{selected_text}', path={selected_path}")
-
         if selected_text == "(none)" or not selected_text:
             # Remove replacement - restore original
             if style_name in self._replacements:
                 del self._replacements[style_name]
-            print(f"[FontsTab] Cleared replacement for '{style_name}'")
         else:
-            # Get font family name that libass/fontconfig expects
-            # Look up the font in our scanned fonts to get its proper family name
-            font_name = None
-            if selected_path:
-                # Find the FontInfo for this path to get the correct family name
-                for font_info in self._available_fonts:
-                    if str(font_info.file_path) == selected_path:
-                        font_name = font_info.family_name
-                        print(f"[FontsTab] Found FontInfo: family_name='{font_name}'")
-                        break
-                else:
-                    print(f"[FontsTab] WARNING: FontInfo not found for path: {selected_path}")
-                    print(f"[FontsTab]   Available paths: {[str(f.file_path) for f in self._available_fonts[:5]]}...")
-
-            if not font_name:
-                # Fallback to display text (minus subfamily in parentheses)
-                font_name = selected_text.split(' (')[0] if ' (' in selected_text else selected_text
-                print(f"[FontsTab] Using fallback font_name: '{font_name}'")
+            # Use filename stem as font name - this is what the old working code did
+            # and it works reliably with fontconfig's font matching
+            font_path = Path(selected_path) if selected_path else None
+            font_name = font_path.stem if font_path else selected_text.split(' (')[0]
 
             # Copy font to attached fonts directory so libass can access it
-            if selected_path and hasattr(self, '_attached_fonts_dir') and self._attached_fonts_dir:
-                src_path = Path(selected_path)
-                if src_path.exists():
-                    # Check if font is already in attached fonts dir
-                    try:
-                        src_resolved = src_path.resolve()
-                        attached_resolved = self._attached_fonts_dir.resolve()
-                        if not str(src_resolved).startswith(str(attached_resolved)):
-                            # Font is from user directory, copy to attached dir
-                            dst_path = self._attached_fonts_dir / src_path.name
-                            if not dst_path.exists():
-                                shutil.copy2(src_path, dst_path)
-                                print(f"[FontsTab] Copied font to attached dir: {dst_path.name}")
-                            else:
-                                print(f"[FontsTab] Font already exists in attached dir: {dst_path.name}")
-                        else:
-                            print(f"[FontsTab] Font already in attached dir, no copy needed")
-                    except Exception as e:
-                        print(f"[FontsTab] Warning: Could not copy font: {e}")
-            else:
-                print(f"[FontsTab] No copy: selected_path={selected_path}, attached_dir={getattr(self, '_attached_fonts_dir', None)}")
+            # Use simple approach from old working code - always copy to where libass looks
+            fonts_dir = getattr(self, '_attached_fonts_dir', None) or self._fonts_dir
+            if font_path and fonts_dir:
+                try:
+                    dst = fonts_dir / font_path.name
+                    if not dst.exists():
+                        shutil.copy2(font_path, dst)
+                except Exception:
+                    pass  # Ignore copy errors, font may already be there
 
             # Set replacement
             self._replacements[style_name] = {
@@ -419,7 +389,6 @@ class FontsTab(BaseTab):
                 'new_font_name': font_name,
                 'font_file_path': selected_path
             }
-            print(f"[FontsTab] Set replacement: style='{style_name}', font='{font_name}'")
 
         # Update state
         if self._state:
