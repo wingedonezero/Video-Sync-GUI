@@ -237,9 +237,11 @@ class SubtitleEditorWindow(QDialog):
         """Apply font replacements to the preview subtitle."""
         fonts_tab = self._tab_panel.get_fonts_tab()
         if not fonts_tab or not self._state.subtitle_data:
+            print("[EditorWindow] _apply_font_replacements: No fonts_tab or subtitle_data")
             return
 
         replacements = fonts_tab.get_replacements()
+        print(f"[EditorWindow] Applying {len(replacements)} font replacements")
 
         # For each style, either apply replacement or restore original
         for style_name, style in self._state.styles.items():
@@ -247,7 +249,9 @@ class SubtitleEditorWindow(QDialog):
                 # Apply replacement
                 new_font = replacements[style_name].get('new_font_name')
                 if new_font and hasattr(style, 'fontname'):
+                    old_font = style.fontname
                     style.fontname = new_font
+                    print(f"[EditorWindow] Style '{style_name}': '{old_font}' -> '{new_font}'")
             else:
                 # Restore original font from snapshot
                 original_values = self._state._original_style_values.get(style_name, {})
@@ -258,10 +262,12 @@ class SubtitleEditorWindow(QDialog):
         # Mark modified and save preview
         self._state.mark_modified()
         self._state.save_preview()
+        print(f"[EditorWindow] Saved preview to: {self._state.preview_path}")
 
     def _reload_video_subtitles(self, style_name: str = None):
         """Reload video subtitles after changes."""
         if self._state.preview_path:
+            print(f"[EditorWindow] Reloading subtitles from: {self._state.preview_path}")
             self._video_panel.reload_subtitles(str(self._state.preview_path))
 
     def accept(self):

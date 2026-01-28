@@ -139,6 +139,9 @@ class PlayerThread(QThread):
                     with self._lock:
                         self._reload_subs_requested = False
 
+                    print(f"[PlayerThread] Reloading subtitle: {self.subtitle_path}")
+                    print(f"[PlayerThread] fonts_dir: {self.fonts_dir}")
+
                     try:
                         # Rebuild the subtitle filter graph with updated subtitle file
                         self._setup_graph()
