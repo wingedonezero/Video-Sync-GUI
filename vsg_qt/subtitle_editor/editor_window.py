@@ -49,6 +49,8 @@ class SubtitleEditorWindow(QDialog):
         video_path: Path to video for preview (uses subtitle's source if available)
         fonts_dir: Optional directory containing fonts for preview
         existing_font_replacements: Optional dict of existing font replacements
+        existing_style_patch: Optional dict of existing style changes
+        existing_filter_config: Optional dict of existing filter configuration
         parent: Parent widget
     """
 
@@ -58,6 +60,8 @@ class SubtitleEditorWindow(QDialog):
         video_path: str,
         fonts_dir: Optional[str] = None,
         existing_font_replacements: Optional[Dict] = None,
+        existing_style_patch: Optional[Dict] = None,
+        existing_filter_config: Optional[Dict] = None,
         parent=None
     ):
         super().__init__(parent)
@@ -66,9 +70,15 @@ class SubtitleEditorWindow(QDialog):
         self._video_path = Path(video_path)
         self._fonts_dir = Path(fonts_dir) if fonts_dir else None
         self._existing_replacements = existing_font_replacements or {}
+        self._existing_style_patch = existing_style_patch or {}
+        self._existing_filter_config = existing_filter_config or {}
 
-        # Initialize state
-        self._state = EditorState(self)
+        # Initialize state with existing values
+        self._state = EditorState(
+            parent=self,
+            existing_style_patch=self._existing_style_patch,
+            existing_filter_config=self._existing_filter_config
+        )
 
         # Cached results (populated on accept)
         self._cached_style_patch: Dict[str, Dict[str, Any]] = {}

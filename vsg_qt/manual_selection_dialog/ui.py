@@ -618,14 +618,15 @@ class ManualSelectionDialog(QDialog):
 
     def _create_generated_track(self, source_track: dict):
         """
-        Create a generated track by filtering styles from a source subtitle track.
+        Create a generated track from a source subtitle track.
+
+        The track is created with is_generated=True but needs to be configured
+        using the Style Editor's Filtering tab to select which styles to
+        include/exclude.
 
         Args:
             source_track: The source track dictionary to filter from
         """
-        from vsg_qt.generated_track_dialog import GeneratedTrackDialog
-
-        # Extract the subtitle track first so we can read its styles
         source_file = source_track.get('original_path')
         track_id = source_track.get('id')
         is_external = source_track.get('source') == 'External'
@@ -634,180 +635,52 @@ class ManualSelectionDialog(QDialog):
             QMessageBox.warning(self, "Error", "Missing track information.")
             return
 
-        runner = CommandRunner(self.config.settings, self.log_callback)
-        tool_paths = {t: shutil.which(t) for t in ['mkvmerge', 'mkvextract', 'ffmpeg']}
-
-        try:
-            # Extract subtitle to temp location
-            temp_dir = Path(tempfile.gettempdir()) / f"vsg_gen_track_{Path(source_file).stem}_{track_id}_{int(time.time())}"
-            temp_dir.mkdir(parents=True, exist_ok=True)
-
-            if is_external:
-                temp_sub_path = temp_dir / Path(source_file).name
-                shutil.copy2(source_file, temp_sub_path)
-            else:
-                extracted = extract_tracks(source_file, temp_dir, runner, tool_paths, 'temp', specific_tracks=[track_id])
-                if not extracted:
-                    QMessageBox.warning(self, "Error", f"Failed to extract subtitle track {track_id}")
-                    return
-                temp_sub_path = Path(extracted[0]['path'])
-
-            # Convert SRT to ASS if needed
-            if temp_sub_path.suffix.lower() == '.srt':
-                temp_sub_path = Path(convert_srt_to_ass(str(temp_sub_path), runner, tool_paths))
-
-            # Create a modified source_track with the extracted path for the dialog
-            source_track_for_dialog = dict(source_track)
-            source_track_for_dialog['original_path'] = str(temp_sub_path)
-
-            # Open the style selection dialog with the extracted subtitle
-            dialog = GeneratedTrackDialog(source_track_for_dialog, parent=self)
-            if not dialog.exec():
-                # Clean up temp file
-                shutil.rmtree(temp_dir, ignore_errors=True)
-                return  # User cancelled
-
-            filter_config = dialog.get_filter_config()
-            if not filter_config:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-                return
-
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to extract subtitle for style analysis:\n{str(e)}")
-            self.log_callback(f"[ERROR] Exception extracting subtitle: {e}")
-            import traceback
-            self.log_callback(traceback.format_exc())
-            return
-        finally:
-            # Clean up temp extraction
-            if 'temp_dir' in locals():
-                shutil.rmtree(temp_dir, ignore_errors=True)
-
         # Create a new track dictionary based on the source track
         generated_track = dict(source_track)
 
-        # Mark it as generated and store filter configuration
+        # Mark it as generated (filter configuration will be set via Style Editor)
         generated_track['is_generated'] = True
         generated_track['generated_source_track_id'] = source_track.get('id')
         generated_track['generated_source_path'] = source_track.get('original_path')
-        generated_track['generated_filter_mode'] = filter_config['mode']
-        generated_track['generated_filter_styles'] = filter_config['styles']
-        generated_track['generated_original_style_list'] = filter_config.get('original_style_list', [])  # Complete style list for validation
+        generated_track['generated_needs_configuration'] = True  # Flag to show warning
         generated_track['generated_verify_only_lines_removed'] = True
         # Use global config setting for skip_frame_validation
         generated_track['skip_frame_validation'] = self.config.settings.get('duration_align_skip_validation_generated_tracks', True)
 
-        # Update the track name (keep original description - the 🔗 Generated badge shows it's generated)
-        generated_track['name'] = filter_config['name']
-        generated_track['custom_name'] = filter_config['name']
-
         # Add the generated track to the FinalList
         self.final_list.add_track_widget(generated_track)
 
-        # Show confirmation
-        name_display = f"'{filter_config['name']}' " if filter_config['name'] else ""
-        self.info_label.setText(f"✅ Generated track {name_display}created successfully.")
+        # Show info message about configuration
+        QMessageBox.information(
+            self,
+            "Generated Track Created",
+            "A generated track has been created.\n\n"
+            "To configure which subtitle styles to include or exclude, "
+            "click the 'Style Editor...' button on the track.\n\n"
+            "Use the 'Filtering' tab in the Style Editor to select styles."
+        )
+
+        self.info_label.setText("✅ Generated track created. Use Style Editor to configure filtering.")
         self.info_label.setVisible(True)
 
     def _edit_generated_track(self, widget: TrackWidget, item):
         """
-        Edit an existing generated track's filter configuration.
+        Edit an existing generated track's configuration.
+
+        Opens the Style Editor which has a Filtering tab for configuring
+        which styles to include/exclude.
 
         Args:
             widget: The track widget to edit
             item: The list item containing the widget
         """
-        from vsg_qt.generated_track_dialog import GeneratedTrackDialog
-
         track_data = widget.track_data
         if not track_data.get('is_generated'):
             QMessageBox.warning(self, "Error", "This is not a generated track.")
             return
 
-        # Get current configuration from track_data
-        existing_config = {
-            'mode': track_data.get('generated_filter_mode', 'exclude'),
-            'styles': track_data.get('generated_filter_styles', []),
-            'name': track_data.get('custom_name', track_data.get('name', ''))
-        }
-
-        # Get the source track information
-        source_track_id = track_data.get('generated_source_track_id')
-        source_path = track_data.get('generated_source_path')
-        source_key = track_data.get('source')
-
-        if not source_path or source_track_id is None:
-            QMessageBox.warning(self, "Error", "Missing source track information.")
-            return
-
-        # Extract the source subtitle so we can read its current styles
-        runner = CommandRunner(self.config.settings, self.log_callback)
-        tool_paths = {t: shutil.which(t) for t in ['mkvmerge', 'mkvextract', 'ffmpeg']}
-
-        try:
-            # Extract subtitle to temp location
-            temp_dir = Path(tempfile.gettempdir()) / f"vsg_gen_edit_{Path(source_path).stem}_{source_track_id}_{int(time.time())}"
-            temp_dir.mkdir(parents=True, exist_ok=True)
-
-            extracted = extract_tracks(source_path, temp_dir, runner, tool_paths, 'temp', specific_tracks=[source_track_id])
-            if not extracted:
-                QMessageBox.warning(self, "Error", f"Failed to extract source subtitle track {source_track_id}")
-                return
-            temp_sub_path = Path(extracted[0]['path'])
-
-            # Convert SRT to ASS if needed
-            if temp_sub_path.suffix.lower() == '.srt':
-                temp_sub_path = Path(convert_srt_to_ass(str(temp_sub_path), runner, tool_paths))
-
-            # Create a source_track dict for the dialog
-            source_track_for_dialog = {
-                'source': source_key,
-                'id': source_track_id,
-                'description': f"Source Track {source_track_id}",
-                'original_path': str(temp_sub_path)
-            }
-
-            # Open the dialog with existing configuration
-            dialog = GeneratedTrackDialog(source_track_for_dialog, existing_config=existing_config, parent=self)
-            if not dialog.exec():
-                # Clean up temp file
-                shutil.rmtree(temp_dir, ignore_errors=True)
-                return  # User cancelled
-
-            filter_config = dialog.get_filter_config()
-            if not filter_config:
-                shutil.rmtree(temp_dir, ignore_errors=True)
-                return
-
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to extract subtitle for editing:\n{str(e)}")
-            self.log_callback(f"[ERROR] Exception extracting subtitle: {e}")
-            import traceback
-            self.log_callback(traceback.format_exc())
-            return
-        finally:
-            # Clean up temp extraction
-            if 'temp_dir' in locals():
-                shutil.rmtree(temp_dir, ignore_errors=True)
-
-        # Update the track_data with new configuration
-        track_data['generated_filter_mode'] = filter_config['mode']
-        track_data['generated_filter_styles'] = filter_config['styles']
-        track_data['generated_original_style_list'] = filter_config.get('original_style_list', [])
-        # Use global config setting for skip_frame_validation
-        track_data['skip_frame_validation'] = self.config.settings.get('duration_align_skip_validation_generated_tracks', True)
-        track_data['name'] = filter_config['name']
-        track_data['custom_name'] = filter_config['name']
-
-        # Refresh the widget to show updated configuration
-        if hasattr(widget, 'logic'):
-            widget.logic.refresh_badges()
-            widget.logic.refresh_summary()
-
-        # Show confirmation
-        name_display = f"'{filter_config['name']}' " if filter_config['name'] else ""
-        self.info_label.setText(f"✅ Generated track {name_display}updated successfully.")
-        self.info_label.setVisible(True)
+        # Open the Style Editor - it has a Filtering tab for generated tracks
+        self._launch_style_editor(widget)
 
     def _launch_style_editor(self, widget: TrackWidget):
         track_data = widget.track_data
@@ -873,8 +746,17 @@ class ManualSelectionDialog(QDialog):
         except Exception as e:
             self.log_callback(f"[WARN] Could not extract fonts: {e}")
 
-        # Pass existing font replacements if any
+        # Pass existing editor state if any (for reopening)
         existing_font_replacements = track_data.get('font_replacements')
+        existing_style_patch = track_data.get('style_patch')
+        existing_filter_config = track_data.get('filter_config')
+
+        # For generated tracks, also check generated_* fields
+        if track_data.get('is_generated') and not existing_filter_config:
+            existing_filter_config = {
+                'filter_mode': track_data.get('generated_filter_mode', 'exclude'),
+                'filter_styles': track_data.get('generated_filter_styles', []),
+            }
 
         # Launch subtitle editor in subprocess to isolate MPV/OpenGL
         # This prevents state corruption in the main app
@@ -883,7 +765,9 @@ class ManualSelectionDialog(QDialog):
             subtitle_path=editable_sub_path,
             video_path=ref_video_path,
             fonts_dir=fonts_dir,
-            existing_font_replacements=existing_font_replacements
+            existing_font_replacements=existing_font_replacements,
+            existing_style_patch=existing_style_patch,
+            existing_filter_config=existing_filter_config
         )
 
     def _launch_subtitle_editor_subprocess(
@@ -892,7 +776,9 @@ class ManualSelectionDialog(QDialog):
         subtitle_path: str,
         video_path: str,
         fonts_dir: Optional[str],
-        existing_font_replacements: Optional[Dict]
+        existing_font_replacements: Optional[Dict],
+        existing_style_patch: Optional[Dict] = None,
+        existing_filter_config: Optional[Dict] = None
     ):
         """Launch subtitle editor in a subprocess to isolate MPV/OpenGL."""
         import uuid
@@ -903,12 +789,18 @@ class ManualSelectionDialog(QDialog):
         params_file = temp_dir / f"vsg_editor_params_{session_id}.json"
         result_file = temp_dir / f"vsg_editor_result_{session_id}.json"
 
-        # Write parameters
+        # Write parameters (versioned JSON format)
         params = {
+            'version': '1.0',
+            'session_id': session_id,
             'subtitle_path': subtitle_path,
             'video_path': video_path,
             'fonts_dir': fonts_dir,
-            'existing_font_replacements': existing_font_replacements
+            'existing_state': {
+                'style_patch': existing_style_patch or {},
+                'font_replacements': existing_font_replacements or {},
+                'filter_config': existing_filter_config or {}
+            }
         }
         with open(params_file, 'w') as f:
             json.dump(params, f)
@@ -940,6 +832,12 @@ class ManualSelectionDialog(QDialog):
                         del widget.track_data['font_replacements']
                     if filter_config:
                         widget.track_data['filter_config'] = filter_config
+                        # For generated tracks, also update generated_* fields for job execution
+                        if widget.track_data.get('is_generated'):
+                            widget.track_data['generated_filter_mode'] = filter_config.get('filter_mode', 'exclude')
+                            widget.track_data['generated_filter_styles'] = filter_config.get('filter_styles', [])
+                            # Clear the needs_configuration flag
+                            widget.track_data.pop('generated_needs_configuration', None)
 
                     self.edited_widget = widget
                     widget.logic.refresh_badges()

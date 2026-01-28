@@ -151,7 +151,11 @@ class TrackWidgetLogic:
 
         # NEW: Add generated track badge first (most important)
         if self.track_data.get('is_generated', False):
-            badges.append("🔗 Generated")
+            # Check if filtering is configured
+            if self.track_data.get('generated_needs_configuration') or not self.track_data.get('generated_filter_styles'):
+                badges.append("🔗 Generated ⚠️ Needs Config")
+            else:
+                badges.append("🔗 Generated")
 
         # NEW: Add correlation settings badge for audio tracks from Source 2/3
         track_source = self.track_data.get('source', '')

@@ -22,7 +22,9 @@ Usage:
         subtitle_path="/path/to/file.ass",
         video_path="/path/to/video.mkv",
         fonts_dir="/path/to/fonts",
-        existing_font_replacements={},
+        existing_font_replacements={},  # For reopening: previous font replacements
+        existing_style_patch={},        # For reopening: previous style changes
+        existing_filter_config={},      # For reopening: previous filter config
         parent=self
     )
 
