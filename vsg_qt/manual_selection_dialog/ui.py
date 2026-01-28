@@ -880,17 +880,22 @@ class ManualSelectionDialog(QDialog):
             existing_font_replacements=existing_font_replacements,
             parent=self
         )
-        if editor.exec():
-            widget.track_data['style_patch'] = editor.get_style_patch()
+        result = editor.exec()
+        # Get results before cleanup
+        style_patch = editor.get_style_patch() if result else None
+        font_replacements = editor.get_font_replacements() if result else None
+        filter_config = editor.get_filter_config() if result else None
+        # Ensure editor is fully cleaned up (MPV, OpenGL context, etc.)
+        editor.deleteLater()
+        if result:
+            widget.track_data['style_patch'] = style_patch
             # Store font replacements if any were configured
-            font_replacements = editor.get_font_replacements()
             if font_replacements:
                 widget.track_data['font_replacements'] = font_replacements
             elif 'font_replacements' in widget.track_data:
                 # Clear if no replacements (user removed them)
                 del widget.track_data['font_replacements']
             # Store filter config if filtering tab was used
-            filter_config = editor.get_filter_config()
             if filter_config:
                 widget.track_data['filter_config'] = filter_config
             self.edited_widget = widget
