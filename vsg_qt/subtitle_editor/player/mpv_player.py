@@ -71,6 +71,9 @@ class MpvWidget(QOpenGLWidget):
         self._pending_subtitle: Optional[str] = None
         self._pending_fonts_dir: Optional[str] = None
 
+        # Flag to prevent flooding Qt event queue with updates
+        self._update_pending: bool = False
+
         # Time polling timer
         self._poll_timer = QTimer(self)
         self._poll_timer.timeout.connect(self._poll_time_position)
@@ -89,8 +92,9 @@ class MpvWidget(QOpenGLWidget):
         self._mpv = mpv.MPV(
             # Use libmpv render API (no separate window)
             vo='libmpv',
-            # Use VAAPI for hardware decoding (no CUDA)
-            hwdec='vaapi',
+            # Hardware decoding - auto-copy works well with render API
+            # (decodes on GPU, copies to CPU, then we upload to our GL context)
+            hwdec='auto-copy',
             # Subtitles
             sub_auto='no',
             sub_ass='yes',
@@ -188,32 +192,27 @@ class MpvWidget(QOpenGLWidget):
         fbo = self.defaultFramebufferObject()
 
         try:
-            # GL_RGBA8 = 0x8058
             self._render_ctx.render(
                 flip_y=True,
-                opengl_fbo={'w': w, 'h': h, 'fbo': fbo, 'internal_format': 0x8058}
+                opengl_fbo={'w': w, 'h': h, 'fbo': fbo}
             )
         except Exception as e:
             print(f"[MPV] Render error: {e}")
 
     def _on_mpv_update(self):
         """Called by MPV when a new frame is ready."""
-        # Schedule repaint on Qt thread
-        QTimer.singleShot(0, self._maybe_update)
+        # Prevent flooding Qt event queue - only schedule one update at a time
+        if not self._update_pending:
+            self._update_pending = True
+            QTimer.singleShot(0, self._do_update)
 
     @Slot()
-    def _maybe_update(self):
-        """Update the widget (thread-safe)."""
-        if self.window().isMinimized():
-            # Minimized - render directly
-            self.makeCurrent()
-            self.paintGL()
-            ctx = self.context()
-            if ctx:
-                ctx.swapBuffers(ctx.surface())
-            self.doneCurrent()
-        else:
-            self.update()
+    def _do_update(self):
+        """Perform the actual widget update (runs on Qt thread)."""
+        self._update_pending = False
+        if not self.isVisible():
+            return
+        self.update()
 
     def load_video(self, video_path: str, subtitle_path: Optional[str] = None,
                    fonts_dir: Optional[str] = None):
@@ -342,6 +341,12 @@ class MpvWidget(QOpenGLWidget):
 
     @property
     def is_paused(self) -> bool:
+        """Get current pause state directly from MPV."""
+        if self._mpv:
+            try:
+                return self._mpv.pause
+            except Exception:
+                pass
         return self._is_paused
 
     @property
