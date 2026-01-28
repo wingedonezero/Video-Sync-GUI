@@ -7,6 +7,7 @@ Uses the bundled mpv.py (python-mpv) with render API to draw directly
 into Qt's OpenGL widget. Works on native Wayland.
 """
 import locale
+import threading
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal, QTimer, Slot, QMetaObject, Q_ARG, Qt as QtConst
@@ -301,11 +302,17 @@ class MpvWidget(QOpenGLWidget):
         if self._mpv:
             mode = 'exact' if precise else 'keyframes'
             self._mpv.seek(time_ms / 1000.0, 'absolute', mode)
+            # Force frame refresh after seek (especially important when paused)
+            if self._is_paused:
+                # Schedule a repaint after seek completes
+                QTimer.singleShot(50, self.update)
 
     def seek_frame(self, frame_num: int):
         """Seek to frame number (precise)."""
         if self._mpv and self._fps > 0:
             self._mpv.seek(frame_num / self._fps, 'absolute', 'exact')
+            if self._is_paused:
+                QTimer.singleShot(50, self.update)
 
     def reload_subtitles(self, subtitle_path: Optional[str] = None):
         """Reload subtitles."""
@@ -389,13 +396,23 @@ class MpvWidget(QOpenGLWidget):
                 print(f"[MPV] Error freeing render context: {e}")
             self._render_ctx = None
 
-        # Terminate MPV
+        # Terminate MPV in a thread with timeout to prevent blocking
         if self._mpv:
-            try:
-                self._mpv.terminate()
-            except Exception as e:
-                print(f"[MPV] Error terminating: {e}")
-            self._mpv = None
+            mpv_instance = self._mpv
+            self._mpv = None  # Clear reference immediately
+
+            def terminate_mpv():
+                try:
+                    mpv_instance.terminate()
+                except Exception as e:
+                    print(f"[MPV] Error terminating: {e}")
+
+            # Run terminate in thread with 2 second timeout
+            t = threading.Thread(target=terminate_mpv, daemon=True)
+            t.start()
+            t.join(timeout=2.0)
+            if t.is_alive():
+                print("[MPV] Terminate timed out, abandoning")
 
         print("[MPV] Stopped")
 

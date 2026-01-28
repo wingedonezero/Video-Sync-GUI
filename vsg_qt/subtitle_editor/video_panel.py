@@ -121,9 +121,14 @@ class VideoPanel(QWidget):
         """Stop and clean up the player."""
         self._mpv_widget.stop()
 
-    def seek_to(self, time_ms: int):
-        """Seek to a specific time."""
-        self._mpv_widget.seek(time_ms)
+    def seek_to(self, time_ms: int, precise: bool = True):
+        """Seek to a specific time.
+
+        Args:
+            time_ms: Target time in milliseconds
+            precise: Use exact seeking (default True for subtitle editing)
+        """
+        self._mpv_widget.seek(time_ms, precise=precise)
 
     def reload_subtitles(self, subtitle_path: Optional[str] = None):
         """Reload the subtitle track."""
