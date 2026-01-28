@@ -254,6 +254,9 @@ class EventsTable(QWidget):
             else:
                 self._clear_row_background(row)
 
+        for row in self._highlighted_indices:
+            self._set_row_background(row, self.COLOR_OVERLAP)
+
     def set_filter_preview_mode(self, enabled: bool):
         """
         Enable/disable filter preview mode.
@@ -285,14 +288,22 @@ class EventsTable(QWidget):
 
     def _clear_highlights(self):
         """Clear all row highlights."""
-        for row in self._highlighted_indices:
-            # Don't clear CPS column (it has its own coloring)
-            for col in range(self._table.columnCount()):
-                if col == self.COL_CPS:
-                    continue
-                item = self._table.item(row, col)
-                if item:
-                    item.setBackground(QBrush())
+        if self._filter_preview_mode and self._state:
+            kept_indices = self._state.get_filtered_event_indices()
+            for row in self._highlighted_indices:
+                if row not in kept_indices:
+                    self._set_row_background(row, self.COLOR_FILTERED_OUT)
+                else:
+                    self._clear_row_background(row)
+        else:
+            for row in self._highlighted_indices:
+                # Don't clear CPS column (it has its own coloring)
+                for col in range(self._table.columnCount()):
+                    if col == self.COL_CPS:
+                        continue
+                    item = self._table.item(row, col)
+                    if item:
+                        item.setBackground(QBrush())
 
         self._highlighted_indices.clear()
 

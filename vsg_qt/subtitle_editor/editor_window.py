@@ -273,6 +273,9 @@ class SubtitleEditorWindow(QDialog):
 
     def accept(self):
         """Save changes and close."""
+        # Ensure the player thread is stopped before the dialog is destroyed.
+        self._video_panel.stop_player()
+
         # Cache results before cleanup
         self._cached_style_patch = self._state.generate_style_patch()
 
@@ -291,6 +294,8 @@ class SubtitleEditorWindow(QDialog):
 
     def reject(self):
         """Cancel and close without saving."""
+        # Ensure the player thread is stopped before the dialog is destroyed.
+        self._video_panel.stop_player()
         super().reject()
 
     def closeEvent(self, event):
