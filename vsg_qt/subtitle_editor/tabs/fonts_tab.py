@@ -156,12 +156,16 @@ class FontsTab(BaseTab):
 
         # Buttons
         btn_layout = QHBoxLayout()
+        self._apply_btn = QPushButton("Apply Replacements")
+        self._apply_btn.setToolTip("Apply selected font replacements")
+        self._apply_btn.clicked.connect(self._apply_replacements)
         self._refresh_btn = QPushButton("Refresh Fonts")
         self._refresh_btn.setToolTip("Rescan fonts directory")
         self._refresh_btn.clicked.connect(self._scan_and_populate)
         self._clear_all_btn = QPushButton("Clear All")
         self._clear_all_btn.setToolTip("Reset all fonts to original")
         self._clear_all_btn.clicked.connect(self._clear_all_replacements)
+        btn_layout.addWidget(self._apply_btn)
         btn_layout.addWidget(self._refresh_btn)
         btn_layout.addWidget(self._clear_all_btn)
         btn_layout.addStretch()
@@ -171,7 +175,7 @@ class FontsTab(BaseTab):
 
         # Info section
         info_label = QLabel(
-            "<i>Tip: The dropdown shows available fonts with a preview. "
+            "<i>Tip: Select fonts from the dropdowns, then click 'Apply Replacements' to apply them. "
             "Select '(none)' to keep the original font.</i>"
         )
         info_label.setWordWrap(True)
@@ -314,56 +318,50 @@ class FontsTab(BaseTab):
                     combo.addItem(new_font)
                     combo.setCurrentIndex(combo.count() - 1)
 
-            # Connect signal AFTER setting initial value to avoid spurious signals
-            combo.currentIndexChanged.connect(
-                lambda idx, sn=style_name, of=original_font: self._on_font_selected(sn, of)
-            )
-
+            # No auto-apply on selection - user must click "Apply Replacements" button
             self._fonts_table.setCellWidget(row, 3, combo)
             self._font_combos[style_name] = combo
 
         self._fonts_table.resizeRowsToContents()
 
-    def _on_font_selected(self, style_name: str, original_font: str):
-        """Handle font selection change."""
+    def _apply_replacements(self):
+        """Apply all selected font replacements - triggered by Apply button."""
         import shutil
 
-        combo = self._font_combos.get(style_name)
-        if not combo:
-            return
+        fonts_dir = getattr(self, '_attached_fonts_dir', None) or self._fonts_dir
+        self._replacements.clear()
 
-        selected_text = combo.currentText()
-        selected_path = combo.currentData(Qt.UserRole)
+        # Go through all combos and apply their selections
+        for style_name, combo in self._font_combos.items():
+            original_font = combo.property('original_font')
+            selected_text = combo.currentText()
+            selected_path = combo.currentData(Qt.UserRole)
 
-        if selected_text == "(none)" or not selected_text:
-            # Remove replacement - restore original
-            if style_name in self._replacements:
-                del self._replacements[style_name]
-        else:
-            # Use filename stem as font name - this is what the old working code did
-            # and it works reliably with fontconfig's font matching
+            if selected_text == "(none)" or not selected_text:
+                # No replacement for this style
+                continue
+
+            # Use filename stem as font name (like old working code)
             font_path = Path(selected_path) if selected_path else None
             font_name = font_path.stem if font_path else selected_text.split(' (')[0]
 
-            # Copy font to attached fonts directory so libass can access it
-            # Use simple approach from old working code - always copy to where libass looks
-            fonts_dir = getattr(self, '_attached_fonts_dir', None) or self._fonts_dir
+            # Copy font to fonts directory so libass can access it
             if font_path and fonts_dir:
                 try:
                     dst = fonts_dir / font_path.name
                     if not dst.exists():
                         shutil.copy2(font_path, dst)
-                except Exception:
-                    pass  # Ignore copy errors, font may already be there
+                except Exception as e:
+                    print(f"[FontsTab] Could not copy font: {e}")
 
-            # Set replacement
+            # Store replacement
             self._replacements[style_name] = {
                 'original_font': original_font,
                 'new_font_name': font_name,
                 'font_file_path': selected_path
             }
 
-        # Update state
+        # Update state and emit signal
         if self._state:
             self._state.set_font_replacements(self._replacements)
 
