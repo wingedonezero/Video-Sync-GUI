@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 import shutil
+import subprocess
+import sys
 import tempfile
 import time
 import re
@@ -18,7 +20,7 @@ from PySide6.QtWidgets import (
 from .logic import ManualLogic
 from .widgets import SourceList, FinalList
 from vsg_qt.track_widget import TrackWidget
-from vsg_qt.subtitle_editor import SubtitleEditorWindow
+# Note: SubtitleEditorWindow import kept for type hints but we launch via subprocess
 from vsg_core.extraction.tracks import extract_tracks
 from vsg_core.extraction.attachments import extract_attachments
 from vsg_core.subtitles.convert import convert_srt_to_ass
@@ -873,49 +875,94 @@ class ManualSelectionDialog(QDialog):
 
         # Pass existing font replacements if any
         existing_font_replacements = track_data.get('font_replacements')
-        editor = SubtitleEditorWindow(
+
+        # Launch subtitle editor in subprocess to isolate MPV/OpenGL
+        # This prevents state corruption in the main app
+        self._launch_subtitle_editor_subprocess(
+            widget=widget,
             subtitle_path=editable_sub_path,
             video_path=ref_video_path,
             fonts_dir=fonts_dir,
-            existing_font_replacements=existing_font_replacements,
-            parent=self
+            existing_font_replacements=existing_font_replacements
         )
 
-        # Use open() instead of exec() to avoid nested event loop
-        # (nested event loops cause issues with MPV's OpenGL render thread)
-        def on_editor_finished(result):
-            """Handle editor close - runs when user clicks OK/Cancel."""
-            if result == QDialog.Accepted:
-                # Get results before cleanup
-                style_patch = editor.get_style_patch()
-                font_replacements = editor.get_font_replacements()
-                filter_config = editor.get_filter_config()
+    def _launch_subtitle_editor_subprocess(
+        self,
+        widget: TrackWidget,
+        subtitle_path: str,
+        video_path: str,
+        fonts_dir: Optional[str],
+        existing_font_replacements: Optional[Dict]
+    ):
+        """Launch subtitle editor in a subprocess to isolate MPV/OpenGL."""
+        import uuid
 
-                widget.track_data['style_patch'] = style_patch
-                # Store font replacements if any were configured
-                if font_replacements:
-                    widget.track_data['font_replacements'] = font_replacements
-                elif 'font_replacements' in widget.track_data:
-                    # Clear if no replacements (user removed them)
-                    del widget.track_data['font_replacements']
-                # Store filter config if filtering tab was used
-                if filter_config:
-                    widget.track_data['filter_config'] = filter_config
-                self.edited_widget = widget
-                widget.logic.refresh_badges()
-                widget.logic.refresh_summary()
+        # Create temp files for IPC
+        temp_dir = Path(tempfile.gettempdir())
+        session_id = uuid.uuid4().hex[:8]
+        params_file = temp_dir / f"vsg_editor_params_{session_id}.json"
+        result_file = temp_dir / f"vsg_editor_result_{session_id}.json"
 
-            # Aggressively clean up after MPV - process pending events
-            # to clear any queued QMetaObject.invokeMethod calls
-            from PySide6.QtWidgets import QApplication
-            import gc
-            QApplication.processEvents()
-            gc.collect()
-            QApplication.processEvents()
+        # Write parameters
+        params = {
+            'subtitle_path': subtitle_path,
+            'video_path': video_path,
+            'fonts_dir': fonts_dir,
+            'existing_font_replacements': existing_font_replacements
+        }
+        with open(params_file, 'w') as f:
+            json.dump(params, f)
 
-        editor.finished.connect(on_editor_finished)
-        editor.setModal(True)  # Block interaction with parent while open
-        editor.open()  # Non-blocking, no nested event loop
+        # Launch subprocess
+        self.log_callback("[INFO] Launching subtitle editor...")
+        try:
+            # Run the subprocess and wait for it to complete
+            result = subprocess.run(
+                [sys.executable, '-m', 'vsg_qt.subtitle_editor.subprocess_launcher',
+                 str(params_file), str(result_file)],
+                cwd=str(Path(__file__).parent.parent.parent)  # Project root
+            )
+
+            # Read results if subprocess succeeded
+            if result_file.exists():
+                with open(result_file, 'r') as f:
+                    editor_result = json.load(f)
+
+                if editor_result.get('accepted'):
+                    style_patch = editor_result.get('style_patch', {})
+                    font_replacements = editor_result.get('font_replacements', {})
+                    filter_config = editor_result.get('filter_config', {})
+
+                    widget.track_data['style_patch'] = style_patch
+                    if font_replacements:
+                        widget.track_data['font_replacements'] = font_replacements
+                    elif 'font_replacements' in widget.track_data:
+                        del widget.track_data['font_replacements']
+                    if filter_config:
+                        widget.track_data['filter_config'] = filter_config
+
+                    self.edited_widget = widget
+                    widget.logic.refresh_badges()
+                    widget.logic.refresh_summary()
+                    self.log_callback("[INFO] Subtitle editor changes saved.")
+                else:
+                    self.log_callback("[INFO] Subtitle editor cancelled.")
+            else:
+                self.log_callback("[WARN] Subtitle editor did not return results.")
+
+        except Exception as e:
+            self.log_callback(f"[ERROR] Failed to run subtitle editor: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to launch subtitle editor:\n{e}")
+
+        finally:
+            # Cleanup temp files
+            try:
+                if params_file.exists():
+                    params_file.unlink()
+                if result_file.exists():
+                    result_file.unlink()
+            except Exception:
+                pass
 
     def _prepare_ocr_preview_with_progress(self, widget: TrackWidget) -> Optional[Tuple[str, str]]:
         """
