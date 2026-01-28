@@ -69,6 +69,22 @@ class StylesTab(BaseTab):
 
         layout.addLayout(selector_layout)
 
+        # Tools row (Resample, Strip Tags)
+        tools_layout = QHBoxLayout()
+
+        self._resample_btn = QPushButton("Resample...")
+        self._resample_btn.setToolTip("Rescale subtitle to different resolution")
+        self._resample_btn.clicked.connect(self._open_resample_dialog)
+        tools_layout.addWidget(self._resample_btn)
+
+        self._strip_tags_btn = QPushButton("Strip Tags")
+        self._strip_tags_btn.setToolTip("Remove inline style tags from selected lines")
+        self._strip_tags_btn.clicked.connect(self._strip_tags_from_selected)
+        tools_layout.addWidget(self._strip_tags_btn)
+
+        tools_layout.addStretch()
+        layout.addLayout(tools_layout)
+
         # Tag warning label
         self._tag_warning = QLabel()
         self._tag_warning.setStyleSheet("color: #E0A800; font-weight: bold;")
@@ -411,14 +427,102 @@ class StylesTab(BaseTab):
         if style_name and style_name != self._style_selector.currentText():
             self._style_selector.setCurrentText(style_name)
 
-        # Check for override tags
+        # Check for override tags and update warning with strip option
         if self._tag_pattern.search(event.text):
             self._tag_warning.setText(
-                "Note: This line contains override tags. Style edits may not be visible."
+                "⚠️ This line contains inline style tags. Style edits may not be visible. "
+                "Click 'Strip Tags' to remove them."
             )
             self._tag_warning.setVisible(True)
         else:
             self._tag_warning.setVisible(False)
+
+    def _open_resample_dialog(self):
+        """Open the resample dialog to rescale subtitle resolution."""
+        if not self._state or not self._state.subtitle_data:
+            return
+
+        from vsg_qt.resample_dialog import ResampleDialog
+
+        # Get current resolution from subtitle
+        info = self._state.subtitle_data.info
+        current_x = int(info.get('PlayResX', 0) or 0)
+        current_y = int(info.get('PlayResY', 0) or 0)
+
+        # Get video path for "From Video" button
+        video_path = str(self._state.video_path) if self._state.video_path else ""
+
+        dialog = ResampleDialog(current_x, current_y, video_path, self)
+        if dialog.exec():
+            new_x, new_y = dialog.get_resolution()
+
+            # Apply rescale (Aegisub-style: scales all style values)
+            self._state.subtitle_data.apply_rescale((new_x, new_y))
+
+            # Mark as modified and save preview
+            self._state.mark_modified()
+            self._state.save_preview()
+
+            # Refresh UI to show new style values
+            self._populate_styles()
+
+            # Notify video panel to reload subtitle
+            self._state.subtitle_data_changed.emit()
+
+    def _strip_tags_from_selected(self):
+        """Strip inline style tags from selected lines."""
+        if not self._state or not self._state.subtitle_data:
+            return
+
+        selected_indices = self._state.selected_indices
+        if not selected_indices:
+            self._tag_warning.setText("No lines selected. Select lines in the Events table first.")
+            self._tag_warning.setVisible(True)
+            return
+
+        # Pattern for style override tags (colors, font, size, border, shadow, bold, etc.)
+        style_tags_pattern = re.compile(r'\\(c|1c|2c|3c|4c|fn|fs|bord|shad|b|i|u|s|an|pos|move|fad|fade|org|clip|frx|fry|frz|fax|fay|fscx|fscy|fsp|fe|q|r|t|p)[^\\}]*')
+
+        modified_count = 0
+        events = self._state.events
+
+        for idx in selected_indices:
+            if idx < 0 or idx >= len(events):
+                continue
+
+            event = events[idx]
+            original_text = event.text
+
+            # Check if line has tags
+            if not self._tag_pattern.search(original_text):
+                continue
+
+            # Remove style tags
+            cleaned_text = style_tags_pattern.sub('', original_text)
+            # Remove empty tag blocks {}
+            cleaned_text = cleaned_text.replace('{}', '')
+
+            if cleaned_text != original_text:
+                event.text = cleaned_text
+                modified_count += 1
+                self._state.event_changed.emit(idx)
+
+        if modified_count > 0:
+            # Mark as modified and save preview
+            self._state.mark_modified()
+            self._state.save_preview()
+
+            # Update tag warning
+            self._tag_warning.setText(f"✓ Stripped tags from {modified_count} line(s).")
+            self._tag_warning.setStyleSheet("color: #00AA00; font-weight: bold;")
+            self._tag_warning.setVisible(True)
+
+            # Notify subtitle data changed for video reload
+            self._state.subtitle_data_changed.emit()
+        else:
+            self._tag_warning.setText("No lines with style tags in selection.")
+            self._tag_warning.setStyleSheet("color: #E0A800; font-weight: bold;")
+            self._tag_warning.setVisible(True)
 
     def get_result(self) -> dict:
         """Get style patch as result."""
