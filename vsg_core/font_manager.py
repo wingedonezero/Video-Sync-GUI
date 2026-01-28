@@ -6,6 +6,7 @@ Font Manager
 Handles font scanning, parsing, and replacement tracking for subtitle files.
 """
 import shutil
+import subprocess
 from pathlib import Path
 from typing import List, Dict, Optional, Set, Any
 import re
@@ -15,6 +16,22 @@ try:
     FONTTOOLS_AVAILABLE = True
 except ImportError:
     FONTTOOLS_AVAILABLE = False
+
+
+def _get_fontconfig_family(font_path: Path) -> Optional[str]:
+    """Get font family name using fontconfig's fc-query (what libass uses)."""
+    try:
+        result = subprocess.run(
+            ['fc-query', '-f', '%{family}', str(font_path)],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            # fc-query may return multiple names separated by comma, take first
+            family = result.stdout.strip().split(',')[0].strip()
+            return family
+    except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
+        pass
+    return None
 
 
 class FontInfo:
@@ -35,10 +52,17 @@ class FontInfo:
     def _parse_font(self):
         """Parse font file to extract metadata."""
         if not FONTTOOLS_AVAILABLE:
-            # Fallback: use filename
-            self.family_name = self.file_path.stem
-            self.full_name = self.file_path.stem
-            self.is_valid = True
+            # Use fontconfig to get the family name (this is what libass uses)
+            fc_family = _get_fontconfig_family(self.file_path)
+            if fc_family:
+                self.family_name = fc_family
+                self.full_name = fc_family
+                self.is_valid = True
+            else:
+                # Final fallback: use filename stem
+                self.family_name = self.file_path.stem
+                self.full_name = self.file_path.stem
+                self.is_valid = True
             return
 
         try:

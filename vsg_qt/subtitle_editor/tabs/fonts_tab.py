@@ -367,12 +367,18 @@ class FontsTab(BaseTab):
             if style_name in self._replacements:
                 del self._replacements[style_name]
         else:
-            # Use filename stem as font name - this is what libass expects
-            # The old working code used font_path.stem, not the internal family name
+            # Get font family name that libass/fontconfig expects
+            # Look up the font in our scanned fonts to get its proper family name
+            font_name = None
             if selected_path:
-                font_name = Path(selected_path).stem
-            else:
-                # Fallback to display text if no path
+                # Find the FontInfo for this path to get the correct family name
+                for font_info in self._available_fonts:
+                    if str(font_info.file_path) == selected_path:
+                        font_name = font_info.family_name
+                        break
+
+            if not font_name:
+                # Fallback to display text (minus subfamily in parentheses)
                 font_name = selected_text.split(' (')[0] if ' (' in selected_text else selected_text
 
             # Copy font to attached fonts directory so libass can access it
