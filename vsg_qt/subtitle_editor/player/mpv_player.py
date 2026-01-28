@@ -7,6 +7,7 @@ Uses the bundled mpv.py (python-mpv) with render API to draw directly
 into Qt's OpenGL widget. Works on native Wayland.
 """
 import locale
+import threading
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal, QTimer, Slot, QMetaObject, Q_ARG, Qt as QtConst
@@ -395,13 +396,23 @@ class MpvWidget(QOpenGLWidget):
                 print(f"[MPV] Error freeing render context: {e}")
             self._render_ctx = None
 
-        # Terminate MPV
+        # Terminate MPV in a thread with timeout to prevent blocking
         if self._mpv:
-            try:
-                self._mpv.terminate()
-            except Exception as e:
-                print(f"[MPV] Error terminating: {e}")
-            self._mpv = None
+            mpv_instance = self._mpv
+            self._mpv = None  # Clear reference immediately
+
+            def terminate_mpv():
+                try:
+                    mpv_instance.terminate()
+                except Exception as e:
+                    print(f"[MPV] Error terminating: {e}")
+
+            # Run terminate in thread with 2 second timeout
+            t = threading.Thread(target=terminate_mpv, daemon=True)
+            t.start()
+            t.join(timeout=2.0)
+            if t.is_alive():
+                print("[MPV] Terminate timed out, abandoning")
 
         print("[MPV] Stopped")
 
