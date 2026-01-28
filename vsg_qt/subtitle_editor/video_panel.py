@@ -132,20 +132,13 @@ class VideoPanel(QWidget):
         self._frame_index = None
 
     def seek_to(self, time_ms: int, precise: bool = True):
-        """Seek to a specific time, ensuring subtitle is visible.
-
-        Adds one frame offset to ensure MPV lands on a frame where
-        the subtitle will render (frame PTS >= subtitle start).
+        """Seek to a specific time.
 
         Args:
             time_ms: Target time in milliseconds
             precise: Use exact seeking (default True for subtitle editing)
         """
-        # Add one frame duration (~42ms at 24fps) to ensure we land on
-        # the frame AFTER the subtitle starts. This guarantees the frame's
-        # PTS >= subtitle start time, so libass will render it.
-        offset_ms = 42  # ~one frame at 23.976fps
-        self._mpv_widget.seek(time_ms + offset_ms, precise=precise)
+        self._mpv_widget.seek(time_ms, precise=precise)
 
     def reload_subtitles(self, subtitle_path: Optional[str] = None):
         """Reload the subtitle track."""

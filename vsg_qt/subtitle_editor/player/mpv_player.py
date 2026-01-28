@@ -304,10 +304,19 @@ class MpvWidget(QOpenGLWidget):
         if self._mpv:
             mode = 'exact' if precise else 'keyframes'
             self._mpv.seek(time_ms / 1000.0, 'absolute', mode)
-            # Force frame refresh after seek (especially important when paused)
+            # Force subtitle sync and frame refresh after seek
             if self._is_paused:
-                # Schedule a repaint after seek completes
-                QTimer.singleShot(50, self.update)
+                QTimer.singleShot(50, self._sync_subtitle_after_seek)
+
+    def _sync_subtitle_after_seek(self):
+        """Sync subtitle and refresh frame after seek."""
+        if self._mpv:
+            try:
+                # sub-seek 0 resyncs subtitle to current position
+                self._mpv.command('sub-seek', 0)
+            except Exception:
+                pass
+            self.update()
 
     def seek_frame(self, frame_num: int):
         """Seek to frame number (precise)."""
