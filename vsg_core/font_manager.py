@@ -86,9 +86,8 @@ class FontInfo:
 class FontScanner:
     """Scans directories for font files."""
 
-    # Include both lowercase and uppercase extensions
-    FONT_EXTENSIONS = {'.ttf', '.otf', '.ttc', '.woff', '.woff2',
-                       '.TTF', '.OTF', '.TTC', '.WOFF', '.WOFF2'}
+    # Valid font extensions (lowercase for comparison)
+    FONT_EXTENSIONS = {'.ttf', '.otf', '.ttc', '.woff', '.woff2'}
 
     def __init__(self, fonts_dir: Path):
         self.fonts_dir = Path(fonts_dir)
@@ -108,23 +107,32 @@ class FontScanner:
             return []
 
         fonts = []
-        pattern = '**/*' if include_subdirs else '*'
-
-        # Collect all font files
         seen_paths = set()
-        for ext in self.FONT_EXTENSIONS:
-            for font_path in self.fonts_dir.glob(f"{pattern}{ext}"):
-                if font_path.is_file():
-                    # Normalize path to avoid duplicates from case variations
-                    path_key = str(font_path.resolve())
-                    if path_key in seen_paths:
-                        continue
-                    seen_paths.add(path_key)
 
-                    # Use cache if available
-                    if path_key not in self._font_cache:
-                        self._font_cache[path_key] = FontInfo(font_path)
-                    fonts.append(self._font_cache[path_key])
+        # Use rglob or glob based on subdirs setting, then filter by extension
+        if include_subdirs:
+            all_files = self.fonts_dir.rglob('*')
+        else:
+            all_files = self.fonts_dir.glob('*')
+
+        for font_path in all_files:
+            if not font_path.is_file():
+                continue
+
+            # Case-insensitive extension check
+            if font_path.suffix.lower() not in self.FONT_EXTENSIONS:
+                continue
+
+            # Normalize path to avoid duplicates
+            path_key = str(font_path.resolve())
+            if path_key in seen_paths:
+                continue
+            seen_paths.add(path_key)
+
+            # Use cache if available
+            if path_key not in self._font_cache:
+                self._font_cache[path_key] = FontInfo(font_path)
+            fonts.append(self._font_cache[path_key])
 
         return fonts
 

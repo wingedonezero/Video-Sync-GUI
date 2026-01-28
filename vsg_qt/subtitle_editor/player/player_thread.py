@@ -58,6 +58,10 @@ class PlayerThread(QThread):
         # Current position tracking
         self._current_time_ms = 0
 
+        # Cache for in-place subtitle reload (stores last raw frame before filter)
+        self._cached_raw_frame = None
+        self._cached_frame_timestamp = 0.0
+
     @property
     def fps(self) -> float:
         """Get the detected FPS."""
@@ -131,14 +135,31 @@ class PlayerThread(QThread):
                     is_paused = self._is_paused
 
                 if should_reload:
-                    # When reloading subtitles, we need to re-seek to current position
-                    # so the subtitle filter has proper context
-                    current_pos = self._current_time_ms
+                    # In-place reload: rebuild filter graph and re-render cached frame
                     with self._lock:
                         self._reload_subs_requested = False
-                        self._seek_request_ms = current_pos
-                        should_seek = True  # Trigger seek logic below
-                    continue  # Re-loop to process the seek
+
+                    try:
+                        # Rebuild the subtitle filter graph with updated subtitle file
+                        self._setup_graph()
+
+                        # Re-render the cached frame through the new filter
+                        if self._cached_raw_frame is not None:
+                            self._graph.push(self._cached_raw_frame)
+                            filtered_frame = self._graph.pull()
+                            pillow_img = filtered_frame.to_image()
+                            rgb_img = pillow_img.convert('RGB')
+                            q_image = QImage(rgb_img.tobytes(), rgb_img.width, rgb_img.height,
+                                            QImage.Format_RGB888)
+
+                            self.new_frame.emit(q_image, self._cached_frame_timestamp)
+                            self.time_changed.emit(self._current_time_ms)
+                    except Exception as e:
+                        print(f"Error during subtitle reload: {e}")
+                        import traceback
+                        traceback.print_exc()
+
+                    continue
 
                 if should_seek:
                     target_ms = self._seek_request_ms
@@ -156,6 +177,7 @@ class PlayerThread(QThread):
                         # Frame duration in ms
                         frame_duration_ms = 1000.0 / self._fps if self._fps > 0 else 41.7
                         target_frame = None
+                        target_raw_frame = None
                         target_timestamp_sec = 0.0
 
                         for frame in frame_generator:
@@ -172,10 +194,14 @@ class PlayerThread(QThread):
                             # A frame "contains" a time if: frame_start <= time < frame_start + duration
                             if frame_time_ms + frame_duration_ms > target_ms:
                                 target_frame = filtered_frame
+                                target_raw_frame = frame
                                 target_timestamp_sec = timestamp_sec
                                 break
 
                         if target_frame:
+                            # Cache raw frame for in-place subtitle reload
+                            self._cached_raw_frame = target_raw_frame
+                            self._cached_frame_timestamp = target_timestamp_sec
                             # Render the target frame
                             pillow_img = target_frame.to_image()
                             rgb_img = pillow_img.convert('RGB')
@@ -211,6 +237,10 @@ class PlayerThread(QThread):
                 timestamp_sec = float(frame.pts * frame.time_base)
                 self._current_time_ms = int(timestamp_sec * 1000)
 
+                # Cache raw frame for in-place subtitle reload
+                self._cached_raw_frame = frame
+                self._cached_frame_timestamp = timestamp_sec
+
                 self._graph.push(frame)
                 filtered_frame = self._graph.pull()
                 pillow_img = filtered_frame.to_image()
@@ -235,6 +265,9 @@ class PlayerThread(QThread):
 
     def _cleanup_resources(self):
         """Explicitly free PyAV resources to prevent memory leaks."""
+        # Clear cached frame
+        self._cached_raw_frame = None
+
         if self._graph is not None:
             try:
                 del self._graph
