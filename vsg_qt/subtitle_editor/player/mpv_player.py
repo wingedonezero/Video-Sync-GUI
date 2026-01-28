@@ -82,6 +82,8 @@ class MpvWidget(QOpenGLWidget):
     def _create_mpv(self):
         """Create the MPV player instance."""
         self._mpv = mpv.MPV(
+            # Use libmpv render API (no separate window)
+            vo='libmpv',
             # Seeking
             hr_seek='yes',
             hr_seek_framedrop='no',
