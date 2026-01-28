@@ -74,6 +74,9 @@ class FontPreviewComboBox(QComboBox):
     Each font is rendered in its own typeface.
     """
 
+    # Custom role for storing font data
+    FontDataRole = Qt.UserRole + 1
+
     def __init__(self, loaded_fonts: Dict[str, str], parent=None):
         super().__init__(parent)
         self._loaded_fonts = loaded_fonts
@@ -82,11 +85,24 @@ class FontPreviewComboBox(QComboBox):
         self.setMinimumWidth(200)
         self.view().setMinimumWidth(300)
 
-    def add_font(self, font_name: str, font_path: Optional[str] = None):
-        """Add a font to the dropdown."""
+    def add_font(self, font_name: str, font_path: Optional[str] = None,
+                 family_name: Optional[str] = None):
+        """Add a font to the dropdown.
+
+        Args:
+            font_name: Display name for the dropdown
+            font_path: Path to the font file
+            family_name: Internal font family name (what libass uses)
+        """
         self.addItem(font_name)
         index = self.count() - 1
+        # Store path in UserRole for backward compatibility with delegate
         self.setItemData(index, font_path, Qt.UserRole)
+        # Store full font data including family_name
+        self.setItemData(index, {
+            'path': font_path,
+            'family_name': family_name or font_name.split(' (')[0]
+        }, self.FontDataRole)
 
 
 class FontsTab(BaseTab):
@@ -186,11 +202,19 @@ class FontsTab(BaseTab):
 
     def set_fonts_dir(self, fonts_dir: Optional[Path]):
         """Set the fonts directory for preview."""
+        import tempfile
         from vsg_core.config import AppConfig
         config = AppConfig()
 
         # Store attached fonts dir (from subtitle) - this is where libass looks
-        self._attached_fonts_dir = Path(fonts_dir) if fonts_dir else None
+        if fonts_dir:
+            self._attached_fonts_dir = Path(fonts_dir)
+        else:
+            # Create a temp fonts directory if none provided
+            # This ensures we have somewhere to copy replacement fonts
+            self._attached_fonts_dir = Path(tempfile.gettempdir()) / "vsg_replacement_fonts"
+            self._attached_fonts_dir.mkdir(parents=True, exist_ok=True)
+            print(f"[FontsTab] Created temp fonts dir: {self._attached_fonts_dir}")
 
         # User's fonts dir - this is what we scan for the dropdown
         self._user_fonts_dir = config.get_fonts_dir()
@@ -302,7 +326,8 @@ class FontsTab(BaseTab):
                 display_name = font_info.family_name
                 if font_info.subfamily and font_info.subfamily.lower() != 'regular':
                     display_name += f" ({font_info.subfamily})"
-                combo.add_font(display_name, str(font_info.file_path))
+                # Pass family_name so libass can find the font
+                combo.add_font(display_name, str(font_info.file_path), font_info.family_name)
 
             # Set current selection if replacement exists
             replacement = self._replacements.get(style_name, {})
@@ -341,18 +366,28 @@ class FontsTab(BaseTab):
                 # No replacement for this style
                 continue
 
-            # Use filename stem as font name (like old working code)
+            # Get font data including family_name (what libass actually uses)
+            font_data = combo.currentData(FontPreviewComboBox.FontDataRole)
+            if font_data and isinstance(font_data, dict):
+                font_name = font_data.get('family_name', selected_text.split(' (')[0])
+            else:
+                # Fallback for items without FontDataRole
+                font_name = selected_text.split(' (')[0]
+
             font_path = Path(selected_path) if selected_path else None
-            font_name = font_path.stem if font_path else selected_text.split(' (')[0]
 
             # Copy font to fonts directory so libass can access it
             if font_path and fonts_dir:
                 try:
+                    fonts_dir.mkdir(parents=True, exist_ok=True)
                     dst = fonts_dir / font_path.name
                     if not dst.exists():
                         shutil.copy2(font_path, dst)
+                        print(f"[FontsTab] Copied font to: {dst}")
                 except Exception as e:
                     print(f"[FontsTab] Could not copy font: {e}")
+
+            print(f"[FontsTab] Replacement: style='{style_name}' font='{font_name}' path='{selected_path}'")
 
             # Store replacement
             self._replacements[style_name] = {
@@ -397,3 +432,11 @@ class FontsTab(BaseTab):
     def get_replacements(self) -> Dict[str, Dict[str, Any]]:
         """Get the current font replacements."""
         return self._replacements.copy()
+
+    def get_fonts_dir(self) -> Optional[Path]:
+        """Get the fonts directory where replacement fonts are copied.
+
+        This returns the directory that should be passed to libass for
+        font lookup. It may be a temp directory if none was originally provided.
+        """
+        return self._attached_fonts_dir
