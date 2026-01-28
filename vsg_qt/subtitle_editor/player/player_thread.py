@@ -137,28 +137,74 @@ class PlayerThread(QThread):
                         self._force_render_frame = True
 
                 if should_seek:
+                    target_ms = self._seek_request_ms
+                    with self._lock:
+                        self._seek_request_ms = -1
+
                     try:
-                        seek_pts = int(self._seek_request_ms / 1000 / self._video_stream.time_base)
+                        # Seek to keyframe before target
+                        seek_pts = int(target_ms / 1000 / self._video_stream.time_base)
                         self._container.seek(seek_pts, stream=self._video_stream, backward=True)
                         frame_generator = self._container.decode(self._video_stream)
                         self._setup_graph()
+
+                        # Decode forward until we reach the frame containing target time
+                        # Frame duration in ms
+                        frame_duration_ms = 1000.0 / self._fps if self._fps > 0 else 41.7
+                        target_frame = None
+                        target_timestamp_sec = 0.0
+
+                        for frame in frame_generator:
+                            if frame.pts is None:
+                                continue
+                            timestamp_sec = float(frame.pts * frame.time_base)
+                            frame_time_ms = timestamp_sec * 1000
+
+                            # Push through subtitle filter to keep it in sync
+                            self._graph.push(frame)
+                            filtered_frame = self._graph.pull()
+
+                            # Check if this frame contains or is past target time
+                            # A frame "contains" a time if: frame_start <= time < frame_start + duration
+                            if frame_time_ms + frame_duration_ms > target_ms:
+                                target_frame = filtered_frame
+                                target_timestamp_sec = timestamp_sec
+                                break
+
+                        if target_frame:
+                            # Render the target frame
+                            pillow_img = target_frame.to_image()
+                            rgb_img = pillow_img.convert('RGB')
+                            q_image = QImage(rgb_img.tobytes(), rgb_img.width, rgb_img.height,
+                                            QImage.Format_RGB888)
+
+                            self._current_time_ms = int(target_timestamp_sec * 1000)
+                            self.new_frame.emit(q_image, target_timestamp_sec)
+                            self.time_changed.emit(self._current_time_ms)
+
+                        # Create fresh generator from current position for continued playback
+                        frame_generator = self._container.decode(self._video_stream)
+
                     except Exception as e:
                         print(f"Error during seek: {e}")
-                    finally:
-                        with self._lock:
-                            self._seek_request_ms = -1
+                        import traceback
+                        traceback.print_exc()
+
+                    continue  # Skip normal frame processing after seek
 
                 with self._lock:
                     force_render = self._force_render_frame
                     if force_render:
                         self._force_render_frame = False
 
-                if is_paused and not should_seek and not force_render:
+                if is_paused and not force_render:
                     time.sleep(0.05)
                     continue
 
                 frame = next(frame_generator)
-                timestamp_sec = frame.pts * frame.time_base
+                if frame.pts is None:
+                    continue
+                timestamp_sec = float(frame.pts * frame.time_base)
                 self._current_time_ms = int(timestamp_sec * 1000)
 
                 self._graph.push(frame)
