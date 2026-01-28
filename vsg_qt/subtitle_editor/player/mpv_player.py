@@ -9,7 +9,7 @@ into Qt's OpenGL widget. Works on native Wayland.
 import locale
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal, QTimer, Slot
+from PySide6.QtCore import Qt, Signal, QTimer, Slot, QMetaObject, Q_ARG, Qt as QtConst
 from PySide6.QtGui import QOpenGLContext
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
@@ -70,9 +70,6 @@ class MpvWidget(QOpenGLWidget):
         self._pending_video: Optional[str] = None
         self._pending_subtitle: Optional[str] = None
         self._pending_fonts_dir: Optional[str] = None
-
-        # Flag to prevent flooding Qt event queue with updates
-        self._update_pending: bool = False
 
         # Time polling timer
         self._poll_timer = QTimer(self)
@@ -200,19 +197,24 @@ class MpvWidget(QOpenGLWidget):
             print(f"[MPV] Render error: {e}")
 
     def _on_mpv_update(self):
-        """Called by MPV when a new frame is ready."""
-        # Prevent flooding Qt event queue - only schedule one update at a time
-        if not self._update_pending:
-            self._update_pending = True
-            QTimer.singleShot(0, self._do_update)
+        """Called by MPV when a new frame is ready (runs on MPV thread)."""
+        # Use QMetaObject.invokeMethod for thread-safe Qt slot invocation
+        # This is the proper way to call a slot from a foreign thread
+        QMetaObject.invokeMethod(self, '_do_update', QtConst.QueuedConnection)
 
     @Slot()
     def _do_update(self):
-        """Perform the actual widget update (runs on Qt thread)."""
-        self._update_pending = False
-        if not self.isVisible():
-            return
-        self.update()
+        """Perform the actual widget update (runs on Qt main thread)."""
+        if self.window().isMinimized():
+            # Minimized - render directly to keep MPV happy
+            self.makeCurrent()
+            self.paintGL()
+            ctx = self.context()
+            if ctx:
+                ctx.swapBuffers(ctx.surface())
+            self.doneCurrent()
+        else:
+            self.update()
 
     def load_video(self, video_path: str, subtitle_path: Optional[str] = None,
                    fonts_dir: Optional[str] = None):
@@ -361,6 +363,21 @@ class MpvWidget(QOpenGLWidget):
         """Stop and cleanup."""
         print("[MPV] Stopping...")
         self._poll_timer.stop()
+
+        # Stop playback first
+        if self._mpv:
+            try:
+                self._mpv.pause = True
+                self._mpv.command('stop')
+            except Exception:
+                pass
+
+        # Clear update callback before freeing render context
+        if self._render_ctx:
+            try:
+                self._render_ctx.update_cb = None
+            except Exception:
+                pass
 
         # Free render context (needs GL context current)
         if self._render_ctx:
