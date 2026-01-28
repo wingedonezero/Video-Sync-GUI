@@ -235,7 +235,27 @@ class StylesTab(BaseTab):
             return
 
         style = self._state.styles[style_name]
-        attrs = style.to_dict()
+
+        # Convert style to UI-friendly dict (ASS -> Qt format)
+        from vsg_core.subtitles.style_engine import ass_color_to_qt
+
+        attrs = {
+            "fontname": style.fontname,
+            "fontsize": style.fontsize,
+            "primarycolor": ass_color_to_qt(style.primary_color),
+            "secondarycolor": ass_color_to_qt(style.secondary_color),
+            "outlinecolor": ass_color_to_qt(style.outline_color),
+            "backcolor": ass_color_to_qt(style.back_color),
+            "bold": style.bold != 0,  # Convert -1/0 to bool
+            "italic": style.italic != 0,
+            "underline": style.underline != 0,
+            "strikeout": style.strike_out != 0,
+            "outline": style.outline,
+            "shadow": style.shadow,
+            "marginl": style.margin_l,
+            "marginr": style.margin_r,
+            "marginv": style.margin_v,
+        }
 
         # Store snapshot for reset
         if style_name not in self._edit_snapshots:
@@ -248,7 +268,7 @@ class StylesTab(BaseTab):
         self._style_widgets['fontname'].setText(attrs.get('fontname', ''))
         self._style_widgets['fontsize'].setValue(attrs.get('fontsize', 0))
 
-        # Colors
+        # Colors (now in Qt format)
         self._set_color_button(self._style_widgets['primarycolor'],
                                attrs.get('primarycolor', '#FFFFFFFF'))
         self._set_color_button(self._style_widgets['secondarycolor'],
@@ -258,11 +278,11 @@ class StylesTab(BaseTab):
         self._set_color_button(self._style_widgets['backcolor'],
                                attrs.get('backcolor', '#FF000000'))
 
-        # Text style
-        self._style_widgets['bold'].setChecked(bool(attrs.get('bold', False)))
-        self._style_widgets['italic'].setChecked(bool(attrs.get('italic', False)))
-        self._style_widgets['underline'].setChecked(bool(attrs.get('underline', False)))
-        self._style_widgets['strikeout'].setChecked(bool(attrs.get('strikeout', False)))
+        # Text style (now bool)
+        self._style_widgets['bold'].setChecked(attrs.get('bold', False))
+        self._style_widgets['italic'].setChecked(attrs.get('italic', False))
+        self._style_widgets['underline'].setChecked(attrs.get('underline', False))
+        self._style_widgets['strikeout'].setChecked(attrs.get('strikeout', False))
 
         # Border
         self._style_widgets['outline'].setValue(attrs.get('outline', 0))
@@ -296,15 +316,39 @@ class StylesTab(BaseTab):
         if not self._current_style_name or not self._state:
             return
 
-        # Get current values from UI
+        # Get current values from UI (in Qt format)
         attrs = self._get_ui_attrs()
 
-        # Update state
+        # Update style using proper conversion
+        # UI uses 'primarycolor' with Qt format, style uses 'primary_color' with ASS format
+        from vsg_core.subtitles.style_engine import qt_color_to_ass
+
         style = self._state.styles.get(self._current_style_name)
         if style:
-            for key, value in attrs.items():
-                if hasattr(style, key):
-                    setattr(style, key, value)
+            # Font
+            style.fontname = attrs['fontname']
+            style.fontsize = float(attrs['fontsize'])
+
+            # Colors (convert Qt #AARRGGBB to ASS &HAABBGGRR)
+            style.primary_color = qt_color_to_ass(attrs['primarycolor'])
+            style.secondary_color = qt_color_to_ass(attrs['secondarycolor'])
+            style.outline_color = qt_color_to_ass(attrs['outlinecolor'])
+            style.back_color = qt_color_to_ass(attrs['backcolor'])
+
+            # Text style (ASS uses -1 for enabled, 0 for disabled)
+            style.bold = -1 if attrs['bold'] else 0
+            style.italic = -1 if attrs['italic'] else 0
+            style.underline = -1 if attrs['underline'] else 0
+            style.strike_out = -1 if attrs['strikeout'] else 0
+
+            # Border
+            style.outline = float(attrs['outline'])
+            style.shadow = float(attrs['shadow'])
+
+            # Margins
+            style.margin_l = int(attrs['marginl'])
+            style.margin_r = int(attrs['marginr'])
+            style.margin_v = int(attrs['marginv'])
 
             # Mark modified and save preview
             self._state.mark_modified()
