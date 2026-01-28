@@ -18,20 +18,35 @@ except ImportError:
     FONTTOOLS_AVAILABLE = False
 
 
-def _get_fontconfig_family(font_path: Path) -> Optional[str]:
-    """Get font family name using fontconfig's fc-query (what libass uses)."""
+def _get_fontconfig_info(font_path: Path) -> Dict[str, str]:
+    """Get font info using fontconfig's fc-query (what libass uses).
+
+    Returns dict with 'family', 'fullname', 'style' keys.
+    """
+    result = {'family': '', 'fullname': '', 'style': ''}
     try:
-        result = subprocess.run(
-            ['fc-query', '-f', '%{family}', str(font_path)],
+        # Get family, fullname, and style in one call
+        proc = subprocess.run(
+            ['fc-query', '-f', '%{family}\\n%{fullname}\\n%{style}', str(font_path)],
             capture_output=True, text=True, timeout=5
         )
-        if result.returncode == 0 and result.stdout.strip():
-            # fc-query may return multiple names separated by comma, take first
-            family = result.stdout.strip().split(',')[0].strip()
-            return family
+        if proc.returncode == 0 and proc.stdout.strip():
+            lines = proc.stdout.strip().split('\n')
+            if len(lines) >= 1:
+                result['family'] = lines[0].split(',')[0].strip()
+            if len(lines) >= 2:
+                result['fullname'] = lines[1].split(',')[0].strip()
+            if len(lines) >= 3:
+                result['style'] = lines[2].split(',')[0].strip()
     except (subprocess.TimeoutExpired, FileNotFoundError, Exception):
         pass
-    return None
+    return result
+
+
+def _get_fontconfig_family(font_path: Path) -> Optional[str]:
+    """Get font family name using fontconfig's fc-query (what libass uses)."""
+    info = _get_fontconfig_info(font_path)
+    return info['family'] if info['family'] else None
 
 
 class FontInfo:
@@ -52,11 +67,13 @@ class FontInfo:
     def _parse_font(self):
         """Parse font file to extract metadata."""
         if not FONTTOOLS_AVAILABLE:
-            # Use fontconfig to get the family name (this is what libass uses)
-            fc_family = _get_fontconfig_family(self.file_path)
-            if fc_family:
-                self.family_name = fc_family
-                self.full_name = fc_family
+            # Use fontconfig to get font info (this is what libass uses)
+            fc_info = _get_fontconfig_info(self.file_path)
+            if fc_info['family']:
+                self.family_name = fc_info['family']
+                # Use fullname if available, otherwise fall back to family
+                self.full_name = fc_info['fullname'] if fc_info['fullname'] else fc_info['family']
+                self.subfamily = fc_info['style'] if fc_info['style'] else ''
                 self.is_valid = True
             else:
                 # Final fallback: use filename stem
