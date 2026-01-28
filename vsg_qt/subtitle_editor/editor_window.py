@@ -92,6 +92,9 @@ class SubtitleEditorWindow(QDialog):
             Qt.WindowMinimizeButtonHint
         )
 
+        # Ensure proper cleanup when closed
+        self.setAttribute(Qt.WA_DeleteOnClose)
+
     def _build_ui(self):
         """Build the main UI layout."""
         main_layout = QVBoxLayout(self)
