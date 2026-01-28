@@ -10,6 +10,7 @@ Contains:
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
 from PySide6.QtCore import Qt, Signal
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from .utils import ms_to_ass_time
 from .player.mpv_player import MpvWidget
+from .player.frame_index import FrameIndex
 
 if TYPE_CHECKING:
     from .state import EditorState
@@ -44,6 +46,7 @@ class VideoPanel(QWidget):
         self._state: Optional['EditorState'] = None
         self._duration_ms: int = 0
         self._is_seeking: bool = False
+        self._frame_index: Optional[FrameIndex] = None
 
         self._setup_ui()
         self._connect_signals()
@@ -102,14 +105,20 @@ class VideoPanel(QWidget):
         Args:
             video_path: Path to video file
             subtitle_path: Path to subtitle file for overlay
-            index_dir: Directory for index cache (not used with MPV)
+            index_dir: Directory for VS index cache (used for frame-accurate seeking)
             fonts_dir: Optional path to fonts directory
         """
         print(f"[VideoPanel] Starting MPV player")
         print(f"[VideoPanel] Video: {video_path}")
         print(f"[VideoPanel] Subtitle: {subtitle_path}")
+        print(f"[VideoPanel] Index dir: {index_dir}")
         if fonts_dir:
             print(f"[VideoPanel] Fonts dir: {fonts_dir}")
+
+        # Load VS frame index for accurate frame-based seeking
+        self._frame_index = FrameIndex(video_path, Path(index_dir))
+        if self._frame_index.is_loaded:
+            print(f"[VideoPanel] Frame index loaded: {self._frame_index.frame_count} frames @ {self._frame_index.fps:.3f} fps")
 
         self._mpv_widget.load_video(
             video_path=video_path,
@@ -120,22 +129,24 @@ class VideoPanel(QWidget):
     def stop_player(self):
         """Stop and clean up the player."""
         self._mpv_widget.stop()
+        self._frame_index = None
 
     def seek_to(self, time_ms: int, precise: bool = True):
         """Seek to a specific time with frame accuracy.
 
+        Uses VapourSynth index for accurate frame lookup, then seeks
+        MPV to that exact frame number.
+
         Args:
             time_ms: Target time in milliseconds
-            precise: Use frame-aligned seeking (default True for subtitle editing)
+            precise: Use frame-based seeking (default True for subtitle editing)
         """
-        if precise and self._state and self._state.video_fps > 0:
-            # Frame-accurate seeking: find the frame that's displaying at this time
-            # and seek to that frame's exact start time for consistent positioning
-            fps = self._state.video_fps
-            frame = int(time_ms * fps / 1000.0)  # Frame number at this time
-            frame_time_ms = int(frame * 1000.0 / fps)  # Frame's exact start time
-            self._mpv_widget.seek(frame_time_ms, precise=True)
+        if precise and self._frame_index and self._frame_index.is_loaded:
+            # Use VS index for frame-accurate seeking
+            frame = self._frame_index.ms_to_frame(time_ms)
+            self._mpv_widget.seek_frame(frame)
         else:
+            # Fallback to time-based seeking
             self._mpv_widget.seek(time_ms, precise=precise)
 
     def reload_subtitles(self, subtitle_path: Optional[str] = None):
