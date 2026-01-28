@@ -341,9 +341,20 @@ class FontsTab(BaseTab):
                 # No replacement for this style
                 continue
 
-            # Use filename stem as font name (like old working code)
             font_path = Path(selected_path) if selected_path else None
-            font_name = font_path.stem if font_path else selected_text.split(' (')[0]
+
+            # Get the actual font family name from FontInfo (what libass/fontconfig expects)
+            # NOT the filename - fontconfig indexes by internal font name, not filename!
+            font_name = None
+            if selected_path:
+                for font_info in self._available_fonts:
+                    if str(font_info.file_path) == selected_path:
+                        font_name = font_info.family_name
+                        break
+
+            # Fallback to display text if FontInfo not found
+            if not font_name:
+                font_name = selected_text.split(' (')[0] if ' (' in selected_text else selected_text
 
             # Copy font to fonts directory so libass can access it
             if font_path and fonts_dir:
