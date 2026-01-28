@@ -323,11 +323,19 @@ class FontsTab(BaseTab):
 
             # Add available fonts from the fonts directory
             for font_info in sorted(self._available_fonts, key=lambda f: f.family_name.lower()):
-                display_name = font_info.family_name
-                if font_info.subfamily and font_info.subfamily.lower() != 'regular':
-                    display_name += f" ({font_info.subfamily})"
-                # Pass family_name so libass can find the font
-                combo.add_font(display_name, str(font_info.file_path), font_info.family_name)
+                # Use full_name to distinguish variants (e.g., "Vesta Pro Bold" vs "Vesta Pro Bold Italic")
+                # Fall back to family_name + subfamily if full_name not available
+                if font_info.full_name and font_info.full_name != font_info.family_name:
+                    display_name = font_info.full_name
+                    font_name_for_libass = font_info.full_name
+                else:
+                    display_name = font_info.family_name
+                    if font_info.subfamily and font_info.subfamily.lower() != 'regular':
+                        display_name += f" ({font_info.subfamily})"
+                    font_name_for_libass = font_info.family_name
+
+                # Pass full_name so libass can find the specific font variant
+                combo.add_font(display_name, str(font_info.file_path), font_name_for_libass)
 
             # Set current selection if replacement exists
             replacement = self._replacements.get(style_name, {})
