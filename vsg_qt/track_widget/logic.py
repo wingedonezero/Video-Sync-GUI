@@ -227,7 +227,9 @@ class TrackWidgetLogic:
             "size_multiplier": size_mult_value,
             "style_patch": self.track_data.get('style_patch'),
             "font_replacements": self.track_data.get('font_replacements'),  # Font Manager replacements
-            "user_modified_path": self.track_data.get('user_modified_path'),
+            # NOTE: user_modified_path is intentionally NOT saved to layouts
+            # It's a session-only temp file path for the style editor preview
+            # Job execution uses fresh extraction + style_patch instead
             "sync_to": self.v.sync_to_combo.currentData() if (is_subs and self.v.sync_to_combo.isVisible()) else None,
             "custom_lang": self.track_data.get('custom_lang', ''),  # NEW: Include custom language
             "custom_name": self.track_data.get('custom_name', ''),  # NEW: Include custom name

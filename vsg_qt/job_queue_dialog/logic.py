@@ -605,6 +605,12 @@ class JobQueueLogic:
             # but user_modified_path is episode-specific and must not be copied
             new_track.pop('user_modified_path', None)
 
+            # CRITICAL: Clear file-specific event indices - these are line numbers from
+            # the source file's subtitle which would be meaningless for a different file.
+            # Only style names (generated_filter_styles) are transferable between files.
+            new_track.pop('generated_filter_forced_include', None)
+            new_track.pop('generated_filter_forced_exclude', None)
+
             new_layout.append(new_track)
         return new_layout
 
