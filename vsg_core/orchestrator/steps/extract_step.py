@@ -214,7 +214,8 @@ class ExtractStep:
 
             plan_item.style_patch = sel.get('style_patch')
             plan_item.font_replacements = sel.get('font_replacements')  # Font Manager replacements
-            plan_item.user_modified_path = sel.get('user_modified_path')
+            # NOTE: user_modified_path is NOT used - it's a session-only editor temp file
+            # Job execution uses fresh extraction + style_patch via SubtitleData
             plan_item.sync_to = sel.get('sync_to')
             plan_item.correction_source = sel.get('correction_source')
             plan_item.custom_lang = sel.get('custom_lang', '')  # Preserve custom language

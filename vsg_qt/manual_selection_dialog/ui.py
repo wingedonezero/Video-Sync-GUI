@@ -799,7 +799,13 @@ class ManualSelectionDialog(QDialog):
                 font_replacements = editor.get_font_replacements()
                 filter_config = editor.get_filter_config()
 
-                widget.track_data['style_patch'] = style_patch
+                # Only store style_patch if non-empty, delete it if empty
+                # An empty style_patch {} is falsy, which causes issues in subtitles_step
+                if style_patch:
+                    widget.track_data['style_patch'] = style_patch
+                elif 'style_patch' in widget.track_data:
+                    del widget.track_data['style_patch']
+
                 if font_replacements:
                     widget.track_data['font_replacements'] = font_replacements
                 elif 'font_replacements' in widget.track_data:

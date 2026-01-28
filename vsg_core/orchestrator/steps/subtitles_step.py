@@ -143,12 +143,9 @@ class SubtitlesStep:
             if item.track.type != TrackType.SUBTITLES:
                 continue
 
-            # Handle manually edited files
-            if item.user_modified_path and not item.style_patch:
-                runner._log_message(f"[Subtitles] Using manually edited file for track {item.track.id}.")
-                shutil.copy(item.user_modified_path, item.extracted_path)
-            elif item.user_modified_path and item.style_patch:
-                runner._log_message(f"[Subtitles] Ignoring temp preview file for track {item.track.id} (will apply style patch after conversion).")
+            # NOTE: user_modified_path is NOT used during job execution
+            # Style editor temp files are only for preview during editing
+            # Job execution uses fresh extraction + style_patch via SubtitleData
 
             # ================================================================
             # OCR Processing (if needed)
