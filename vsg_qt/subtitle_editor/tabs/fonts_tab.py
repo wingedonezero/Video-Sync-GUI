@@ -353,6 +353,8 @@ class FontsTab(BaseTab):
 
     def _on_font_selected(self, style_name: str, original_font: str):
         """Handle font selection change."""
+        import shutil
+
         combo = self._font_combos.get(style_name)
         if not combo:
             return
@@ -367,6 +369,23 @@ class FontsTab(BaseTab):
         else:
             # Extract font family name (remove subfamily if present)
             font_name = selected_text.split(' (')[0] if ' (' in selected_text else selected_text
+
+            # Copy font to attached fonts directory so libass can access it
+            if selected_path and hasattr(self, '_attached_fonts_dir') and self._attached_fonts_dir:
+                src_path = Path(selected_path)
+                if src_path.exists():
+                    # Check if font is already in attached fonts dir
+                    try:
+                        src_resolved = src_path.resolve()
+                        attached_resolved = self._attached_fonts_dir.resolve()
+                        if not str(src_resolved).startswith(str(attached_resolved)):
+                            # Font is from user directory, copy to attached dir
+                            dst_path = self._attached_fonts_dir / src_path.name
+                            if not dst_path.exists():
+                                shutil.copy2(src_path, dst_path)
+                                print(f"[FontsTab] Copied font to attached dir: {dst_path.name}")
+                    except Exception as e:
+                        print(f"[FontsTab] Warning: Could not copy font: {e}")
 
             # Set replacement
             self._replacements[style_name] = {
