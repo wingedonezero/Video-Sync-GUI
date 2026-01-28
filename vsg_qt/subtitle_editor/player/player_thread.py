@@ -131,10 +131,14 @@ class PlayerThread(QThread):
                     is_paused = self._is_paused
 
                 if should_reload:
-                    self._setup_graph()
+                    # When reloading subtitles, we need to re-seek to current position
+                    # so the subtitle filter has proper context
+                    current_pos = self._current_time_ms
                     with self._lock:
                         self._reload_subs_requested = False
-                        self._force_render_frame = True
+                        self._seek_request_ms = current_pos
+                        should_seek = True  # Trigger seek logic below
+                    continue  # Re-loop to process the seek
 
                 if should_seek:
                     target_ms = self._seek_request_ms
