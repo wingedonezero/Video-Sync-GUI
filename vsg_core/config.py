@@ -73,6 +73,9 @@ class AppConfig:
             'ocr_debug_output': False,  # Save debug output by issue type (unknown words, fixes, low confidence)
             'ocr_run_in_subprocess': True,  # Run OCR in a subprocess to release memory
 
+            # --- Fonts Directory ---
+            'fonts_directory': '',  # User-specified fonts directory (empty = use default .config/fonts)
+
             # --- Subtitle Sync Settings ---
             'subtitle_sync_mode': 'time-based',
             'subtitle_target_fps': 0.0,
@@ -664,7 +667,14 @@ class AppConfig:
         return self.script_dir / '.config'
 
     def get_fonts_dir(self) -> Path:
-        """Returns the path to the .config/fonts directory for user font files."""
+        """
+        Returns the path to the fonts directory for user font files.
+
+        Uses fonts_directory setting if set, otherwise falls back to .config/fonts.
+        """
+        custom_dir = self.get('fonts_directory')
+        if custom_dir and Path(custom_dir).exists():
+            return Path(custom_dir)
         return self.script_dir / '.config' / 'fonts'
 
     def get_style_editor_temp_dir(self) -> Path:
