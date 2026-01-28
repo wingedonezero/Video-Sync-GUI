@@ -880,28 +880,34 @@ class ManualSelectionDialog(QDialog):
             existing_font_replacements=existing_font_replacements,
             parent=self
         )
-        result = editor.exec()
-        # Get results before WA_DeleteOnClose destroys the editor
-        style_patch = editor.get_style_patch() if result else None
-        font_replacements = editor.get_font_replacements() if result else None
-        filter_config = editor.get_filter_config() if result else None
-        # Process pending events to complete cleanup (WA_DeleteOnClose handles deletion)
-        from PySide6.QtWidgets import QApplication
-        QApplication.processEvents()
-        if result:
-            widget.track_data['style_patch'] = style_patch
-            # Store font replacements if any were configured
-            if font_replacements:
-                widget.track_data['font_replacements'] = font_replacements
-            elif 'font_replacements' in widget.track_data:
-                # Clear if no replacements (user removed them)
-                del widget.track_data['font_replacements']
-            # Store filter config if filtering tab was used
-            if filter_config:
-                widget.track_data['filter_config'] = filter_config
-            self.edited_widget = widget
-            widget.logic.refresh_badges()
-            widget.logic.refresh_summary()
+
+        # Use open() instead of exec() to avoid nested event loop
+        # (nested event loops cause issues with MPV's OpenGL render thread)
+        def on_editor_finished(result):
+            """Handle editor close - runs when user clicks OK/Cancel."""
+            if result == QDialog.Accepted:
+                # Get results before cleanup
+                style_patch = editor.get_style_patch()
+                font_replacements = editor.get_font_replacements()
+                filter_config = editor.get_filter_config()
+
+                widget.track_data['style_patch'] = style_patch
+                # Store font replacements if any were configured
+                if font_replacements:
+                    widget.track_data['font_replacements'] = font_replacements
+                elif 'font_replacements' in widget.track_data:
+                    # Clear if no replacements (user removed them)
+                    del widget.track_data['font_replacements']
+                # Store filter config if filtering tab was used
+                if filter_config:
+                    widget.track_data['filter_config'] = filter_config
+                self.edited_widget = widget
+                widget.logic.refresh_badges()
+                widget.logic.refresh_summary()
+
+        editor.finished.connect(on_editor_finished)
+        editor.setModal(True)  # Block interaction with parent while open
+        editor.open()  # Non-blocking, no nested event loop
 
     def _prepare_ocr_preview_with_progress(self, widget: TrackWidget) -> Optional[Tuple[str, str]]:
         """
