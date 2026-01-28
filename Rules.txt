@@ -4,3 +4,4 @@
 4. **Latest Lib Versions** - Use latest stable, discuss issues first
 5. **Rewrite for Quality** - Same features, better architecture, no single points of failure
 6. Dont read Rust.tar.gz this was a experiment
+7. Make sure to note code as necissary for readability and understanding.
