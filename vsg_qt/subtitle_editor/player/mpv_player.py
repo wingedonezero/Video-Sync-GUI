@@ -84,9 +84,10 @@ class MpvWidget(QOpenGLWidget):
         self._mpv = mpv.MPV(
             # Use libmpv render API (no separate window)
             vo='libmpv',
-            # Seeking
+            # Hardware decoding for performance
+            hwdec='auto-safe',
+            # Seeking - use keyframes for faster seeking, exact when paused
             hr_seek='yes',
-            hr_seek_framedrop='no',
             # Subtitles
             sub_auto='no',
             sub_ass='yes',
@@ -184,9 +185,10 @@ class MpvWidget(QOpenGLWidget):
         fbo = self.defaultFramebufferObject()
 
         try:
+            # GL_RGBA8 = 0x8058
             self._render_ctx.render(
                 flip_y=True,
-                opengl_fbo={'w': w, 'h': h, 'fbo': fbo}
+                opengl_fbo={'w': w, 'h': h, 'fbo': fbo, 'internal_format': 0x8058}
             )
         except Exception as e:
             print(f"[MPV] Render error: {e}")
@@ -257,7 +259,15 @@ class MpvWidget(QOpenGLWidget):
                     print(f"[MPV] Error adding subtitle: {e}")
 
             self._mpv.seek(0, 'absolute')
+            # Start timer on Qt thread (callbacks run on MPV thread)
+            QTimer.singleShot(0, self._start_polling)
+
+    @Slot()
+    def _start_polling(self):
+        """Start the time polling timer (must be called from Qt thread)."""
+        if not self._poll_timer.isActive():
             self._poll_timer.start()
+            print("[MPV] Time polling started")
 
     def play(self):
         """Start playback."""
