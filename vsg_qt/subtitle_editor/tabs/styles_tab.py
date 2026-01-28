@@ -280,10 +280,16 @@ class StylesTab(BaseTab):
         """Set color button background from hex color."""
         color = QColor(hex_color)
         button.setStyleSheet(f"background-color: {color.name()};")
+        # Store the color as a property so we can read it back
+        button.setProperty('hex_color', hex_color)
 
     def _get_color_from_button(self, button: QPushButton) -> str:
-        """Get hex color from button palette."""
-        return button.palette().button().color().name(QColor.HexArgb)
+        """Get hex color from button property."""
+        stored = button.property('hex_color')
+        if stored:
+            return stored
+        # Fallback - shouldn't happen if set_color_button was called
+        return '#FFFFFFFF'
 
     def _update_style(self):
         """Update style from UI values."""
@@ -337,7 +343,9 @@ class StylesTab(BaseTab):
     def _pick_color(self, color_key: str):
         """Open color picker for a color attribute."""
         button = self._style_widgets[color_key]
-        initial = button.palette().button().color()
+        # Get initial color from stored property
+        stored_hex = button.property('hex_color') or '#FFFFFFFF'
+        initial = QColor(stored_hex)
 
         color = QColorDialog.getColor(initial, self, "Select Color",
                                        QColorDialog.ShowAlphaChannel)

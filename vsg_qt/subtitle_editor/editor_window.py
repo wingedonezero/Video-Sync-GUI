@@ -235,18 +235,23 @@ class SubtitleEditorWindow(QDialog):
             return
 
         replacements = fonts_tab.get_replacements()
-        if not replacements:
-            return
 
-        # Apply to subtitle data styles
-        for style_name, repl_data in replacements.items():
-            if style_name in self._state.styles:
-                style = self._state.styles[style_name]
-                new_font = repl_data.get('new_font_name')
+        # For each style, either apply replacement or restore original
+        for style_name, style in self._state.styles.items():
+            if style_name in replacements:
+                # Apply replacement
+                new_font = replacements[style_name].get('new_font_name')
                 if new_font and hasattr(style, 'fontname'):
                     style.fontname = new_font
+            else:
+                # Restore original font from snapshot
+                original_values = self._state._original_style_values.get(style_name, {})
+                original_font = original_values.get('fontname')
+                if original_font and hasattr(style, 'fontname'):
+                    style.fontname = original_font
 
-        # Save preview
+        # Mark modified and save preview
+        self._state.mark_modified()
         self._state.save_preview()
 
     def _reload_video_subtitles(self, style_name: str = None):

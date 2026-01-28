@@ -207,12 +207,17 @@ class FontsTab(BaseTab):
         self._available_fonts = []
         self._loaded_fonts.clear()
 
-        if not self._fonts_dir:
+        if not self._fonts_dir or not self._fonts_dir.exists():
+            print(f"[FontsTab] Fonts directory not found: {self._fonts_dir}")
             return
+
+        print(f"[FontsTab] Scanning fonts from: {self._fonts_dir}")
 
         # Create scanner and scan recursively
         self._scanner = FontScanner(self._fonts_dir)
         self._available_fonts = self._scanner.scan(include_subdirs=True)
+
+        print(f"[FontsTab] Found {len(self._available_fonts)} fonts")
 
         # Load fonts into Qt for preview rendering
         for font_info in self._available_fonts:
@@ -316,7 +321,7 @@ class FontsTab(BaseTab):
         selected_path = combo.currentData(Qt.UserRole)
 
         if selected_text == "(none)" or not selected_text:
-            # Remove replacement
+            # Remove replacement - restore original
             if style_name in self._replacements:
                 del self._replacements[style_name]
         else:
