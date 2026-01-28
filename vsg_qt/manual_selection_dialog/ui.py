@@ -905,6 +905,14 @@ class ManualSelectionDialog(QDialog):
                 widget.logic.refresh_badges()
                 widget.logic.refresh_summary()
 
+            # Aggressively clean up after MPV - process pending events
+            # to clear any queued QMetaObject.invokeMethod calls
+            from PySide6.QtWidgets import QApplication
+            import gc
+            QApplication.processEvents()
+            gc.collect()
+            QApplication.processEvents()
+
         editor.finished.connect(on_editor_finished)
         editor.setModal(True)  # Block interaction with parent while open
         editor.open()  # Non-blocking, no nested event loop
