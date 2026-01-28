@@ -881,12 +881,13 @@ class ManualSelectionDialog(QDialog):
             parent=self
         )
         result = editor.exec()
-        # Get results before cleanup
+        # Get results before WA_DeleteOnClose destroys the editor
         style_patch = editor.get_style_patch() if result else None
         font_replacements = editor.get_font_replacements() if result else None
         filter_config = editor.get_filter_config() if result else None
-        # Ensure editor is fully cleaned up (MPV, OpenGL context, etc.)
-        editor.deleteLater()
+        # Process pending events to complete cleanup (WA_DeleteOnClose handles deletion)
+        from PySide6.QtWidgets import QApplication
+        QApplication.processEvents()
         if result:
             widget.track_data['style_patch'] = style_patch
             # Store font replacements if any were configured
