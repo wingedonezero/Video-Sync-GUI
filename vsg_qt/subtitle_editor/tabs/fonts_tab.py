@@ -182,16 +182,27 @@ class FontsTab(BaseTab):
 
     def set_fonts_dir(self, fonts_dir: Optional[Path]):
         """Set the fonts directory for preview."""
-        if fonts_dir:
-            self._fonts_dir = Path(fonts_dir)
-        else:
-            # Use default from AppConfig
-            from vsg_core.config import AppConfig
-            config = AppConfig()
-            self._fonts_dir = config.get_fonts_dir()
+        from vsg_core.config import AppConfig
+        config = AppConfig()
 
-        if self._fonts_dir:
-            self._folder_label.setText(f"Fonts folder: {self._fonts_dir}")
+        # Store both the attached fonts dir (from subtitle) and user's fonts dir
+        self._attached_fonts_dir = Path(fonts_dir) if fonts_dir else None
+        self._user_fonts_dir = config.get_fonts_dir()
+
+        # For display, show both if different
+        dirs = []
+        if self._attached_fonts_dir and self._attached_fonts_dir.exists():
+            dirs.append(f"Attached: {self._attached_fonts_dir}")
+        if self._user_fonts_dir and self._user_fonts_dir.exists():
+            dirs.append(f"User: {self._user_fonts_dir}")
+
+        if dirs:
+            self._folder_label.setText("Fonts: " + " | ".join(dirs))
+        else:
+            self._folder_label.setText("Fonts folder: (not set)")
+
+        # Set primary for backward compatibility
+        self._fonts_dir = self._user_fonts_dir or self._attached_fonts_dir
 
         self._scan_available_fonts()
 
@@ -201,32 +212,46 @@ class FontsTab(BaseTab):
         self._populate_fonts()
 
     def _scan_available_fonts(self):
-        """Scan fonts directory using FontScanner."""
+        """Scan fonts directories using FontScanner."""
         from vsg_core.font_manager import FontScanner
 
         self._available_fonts = []
         self._loaded_fonts.clear()
 
-        if not self._fonts_dir or not self._fonts_dir.exists():
-            print(f"[FontsTab] Fonts directory not found: {self._fonts_dir}")
+        # Scan both user fonts dir and attached fonts dir
+        dirs_to_scan = []
+        if hasattr(self, '_user_fonts_dir') and self._user_fonts_dir and self._user_fonts_dir.exists():
+            dirs_to_scan.append(('User', self._user_fonts_dir))
+        if hasattr(self, '_attached_fonts_dir') and self._attached_fonts_dir and self._attached_fonts_dir.exists():
+            dirs_to_scan.append(('Attached', self._attached_fonts_dir))
+
+        # Fallback to single _fonts_dir for backward compatibility
+        if not dirs_to_scan and self._fonts_dir and self._fonts_dir.exists():
+            dirs_to_scan.append(('Fonts', self._fonts_dir))
+
+        if not dirs_to_scan:
+            print(f"[FontsTab] No fonts directories found")
             return
 
-        print(f"[FontsTab] Scanning fonts from: {self._fonts_dir}")
+        seen_paths = set()
+        all_fonts = []
 
-        # Debug: list all files in directory
-        all_files = list(self._fonts_dir.rglob('*'))
-        font_files = [f for f in all_files if f.is_file() and f.suffix.lower() in {'.ttf', '.otf', '.ttc', '.woff', '.woff2'}]
-        print(f"[FontsTab] Direct rglob found {len(font_files)} font files")
-        for f in font_files[:5]:
-            print(f"[FontsTab]   - {f.name}")
-        if len(font_files) > 5:
-            print(f"[FontsTab]   ... and {len(font_files) - 5} more")
+        for label, fonts_dir in dirs_to_scan:
+            print(f"[FontsTab] Scanning {label} fonts from: {fonts_dir}")
 
-        # Create scanner and scan recursively
-        self._scanner = FontScanner(self._fonts_dir)
-        self._available_fonts = self._scanner.scan(include_subdirs=True)
+            scanner = FontScanner(fonts_dir)
+            fonts = scanner.scan(include_subdirs=True)
+            print(f"[FontsTab]   Found {len(fonts)} fonts in {label}")
 
-        print(f"[FontsTab] FontScanner found {len(self._available_fonts)} fonts")
+            # Add fonts, avoiding duplicates by path
+            for font in fonts:
+                path_key = str(font.file_path.resolve())
+                if path_key not in seen_paths:
+                    seen_paths.add(path_key)
+                    all_fonts.append(font)
+
+        self._available_fonts = all_fonts
+        print(f"[FontsTab] Total unique fonts: {len(self._available_fonts)}")
 
         # Load fonts into Qt for preview rendering
         for font_info in self._available_fonts:
