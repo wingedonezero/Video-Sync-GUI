@@ -185,24 +185,20 @@ class FontsTab(BaseTab):
         from vsg_core.config import AppConfig
         config = AppConfig()
 
-        # Store both the attached fonts dir (from subtitle) and user's fonts dir
+        # Store attached fonts dir (from subtitle) - this is where libass looks
         self._attached_fonts_dir = Path(fonts_dir) if fonts_dir else None
+
+        # User's fonts dir - this is what we scan for the dropdown
         self._user_fonts_dir = config.get_fonts_dir()
 
-        # For display, show both if different
-        dirs = []
-        if self._attached_fonts_dir and self._attached_fonts_dir.exists():
-            dirs.append(f"Attached: {self._attached_fonts_dir}")
-        if self._user_fonts_dir and self._user_fonts_dir.exists():
-            dirs.append(f"User: {self._user_fonts_dir}")
+        # For backward compatibility
+        self._fonts_dir = self._attached_fonts_dir
 
-        if dirs:
-            self._folder_label.setText("Fonts: " + " | ".join(dirs))
+        # Show user fonts folder in label
+        if self._user_fonts_dir and self._user_fonts_dir.exists():
+            self._folder_label.setText(f"Fonts folder: {self._user_fonts_dir}")
         else:
             self._folder_label.setText("Fonts folder: (not set)")
-
-        # Set primary for backward compatibility
-        self._fonts_dir = self._user_fonts_dir or self._attached_fonts_dir
 
         self._scan_available_fonts()
 
@@ -212,46 +208,23 @@ class FontsTab(BaseTab):
         self._populate_fonts()
 
     def _scan_available_fonts(self):
-        """Scan fonts directories using FontScanner."""
+        """Scan fonts directory using FontScanner - only user fonts, not attached."""
         from vsg_core.font_manager import FontScanner
 
         self._available_fonts = []
         self._loaded_fonts.clear()
 
-        # Scan both user fonts dir and attached fonts dir
-        dirs_to_scan = []
-        if hasattr(self, '_user_fonts_dir') and self._user_fonts_dir and self._user_fonts_dir.exists():
-            dirs_to_scan.append(('User', self._user_fonts_dir))
-        if hasattr(self, '_attached_fonts_dir') and self._attached_fonts_dir and self._attached_fonts_dir.exists():
-            dirs_to_scan.append(('Attached', self._attached_fonts_dir))
-
-        # Fallback to single _fonts_dir for backward compatibility
-        if not dirs_to_scan and self._fonts_dir and self._fonts_dir.exists():
-            dirs_to_scan.append(('Fonts', self._fonts_dir))
-
-        if not dirs_to_scan:
-            print(f"[FontsTab] No fonts directories found")
+        # Only scan user's fonts directory (not attached fonts from subtitle)
+        # This matches the old working behavior
+        if not hasattr(self, '_user_fonts_dir') or not self._user_fonts_dir or not self._user_fonts_dir.exists():
+            print(f"[FontsTab] No user fonts directory found")
             return
 
-        seen_paths = set()
-        all_fonts = []
+        print(f"[FontsTab] Scanning fonts from: {self._user_fonts_dir}")
 
-        for label, fonts_dir in dirs_to_scan:
-            print(f"[FontsTab] Scanning {label} fonts from: {fonts_dir}")
-
-            scanner = FontScanner(fonts_dir)
-            fonts = scanner.scan(include_subdirs=True)
-            print(f"[FontsTab]   Found {len(fonts)} fonts in {label}")
-
-            # Add fonts, avoiding duplicates by path
-            for font in fonts:
-                path_key = str(font.file_path.resolve())
-                if path_key not in seen_paths:
-                    seen_paths.add(path_key)
-                    all_fonts.append(font)
-
-        self._available_fonts = all_fonts
-        print(f"[FontsTab] Total unique fonts: {len(self._available_fonts)}")
+        scanner = FontScanner(self._user_fonts_dir)
+        self._available_fonts = scanner.scan(include_subdirs=True)
+        print(f"[FontsTab] Found {len(self._available_fonts)} fonts")
 
         # Load fonts into Qt for preview rendering
         for font_info in self._available_fonts:
