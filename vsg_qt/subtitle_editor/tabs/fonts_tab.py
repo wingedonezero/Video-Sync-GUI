@@ -367,8 +367,13 @@ class FontsTab(BaseTab):
             if style_name in self._replacements:
                 del self._replacements[style_name]
         else:
-            # Extract font family name (remove subfamily if present)
-            font_name = selected_text.split(' (')[0] if ' (' in selected_text else selected_text
+            # Use filename stem as font name - this is what libass expects
+            # The old working code used font_path.stem, not the internal family name
+            if selected_path:
+                font_name = Path(selected_path).stem
+            else:
+                # Fallback to display text if no path
+                font_name = selected_text.split(' (')[0] if ' (' in selected_text else selected_text
 
             # Copy font to attached fonts directory so libass can access it
             if selected_path and hasattr(self, '_attached_fonts_dir') and self._attached_fonts_dir:
