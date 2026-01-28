@@ -47,6 +47,8 @@ class MpvWidget(QOpenGLWidget):
     duration_changed = Signal(float)  # seconds
     fps_detected = Signal(float)
     playback_finished = Signal()
+    # Internal signal for cross-thread file-loaded notification
+    _file_loaded_signal = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -74,6 +76,9 @@ class MpvWidget(QOpenGLWidget):
         self._poll_timer.timeout.connect(self._poll_time_position)
         self._poll_timer.setInterval(50)
 
+        # Connect file-loaded signal (for cross-thread notification)
+        self._file_loaded_signal.connect(self._on_file_loaded_main_thread)
+
         self.setMinimumSize(320, 180)
 
         # Create MPV instance
@@ -84,10 +89,8 @@ class MpvWidget(QOpenGLWidget):
         self._mpv = mpv.MPV(
             # Use libmpv render API (no separate window)
             vo='libmpv',
-            # Hardware decoding for performance
-            hwdec='auto-safe',
-            # Seeking - use keyframes for faster seeking, exact when paused
-            hr_seek='yes',
+            # Use VAAPI for hardware decoding (no CUDA)
+            hwdec='vaapi',
             # Subtitles
             sub_auto='no',
             sub_ass='yes',
@@ -247,24 +250,27 @@ class MpvWidget(QOpenGLWidget):
         # Load video
         self._mpv.loadfile(video_path)
 
-        # File loaded callback
+        # File loaded callback - emit signal to handle on main thread
         @self._mpv.event_callback('file-loaded')
         def on_loaded(event):
-            print("[MPV] File loaded")
-            if subtitle_path:
-                try:
-                    self._mpv.sub_add(subtitle_path)
-                    print(f"[MPV] Subtitle added")
-                except Exception as e:
-                    print(f"[MPV] Error adding subtitle: {e}")
-
-            self._mpv.seek(0, 'absolute')
-            # Start timer on Qt thread (callbacks run on MPV thread)
-            QTimer.singleShot(0, self._start_polling)
+            print("[MPV] File loaded (callback)")
+            # Emit signal to handle remaining setup on Qt main thread
+            self._file_loaded_signal.emit()
 
     @Slot()
-    def _start_polling(self):
-        """Start the time polling timer (must be called from Qt thread)."""
+    def _on_file_loaded_main_thread(self):
+        """Handle file loaded on Qt main thread."""
+        print("[MPV] Processing file loaded on main thread")
+
+        # Add subtitle if pending
+        if self._subtitle_path:
+            try:
+                self._mpv.sub_add(self._subtitle_path)
+                print(f"[MPV] Subtitle added")
+            except Exception as e:
+                print(f"[MPV] Error adding subtitle: {e}")
+
+        # Start time polling
         if not self._poll_timer.isActive():
             self._poll_timer.start()
             print("[MPV] Time polling started")
@@ -284,13 +290,19 @@ class MpvWidget(QOpenGLWidget):
         if self._mpv:
             self._mpv.pause = not self._mpv.pause
 
-    def seek(self, time_ms: int):
-        """Seek to time in milliseconds."""
+    def seek(self, time_ms: int, precise: bool = False):
+        """Seek to time in milliseconds.
+
+        Args:
+            time_ms: Target time in milliseconds
+            precise: If True, use exact seeking (slower). If False, use keyframe seeking (faster).
+        """
         if self._mpv:
-            self._mpv.seek(time_ms / 1000.0, 'absolute', 'exact')
+            mode = 'exact' if precise else 'keyframes'
+            self._mpv.seek(time_ms / 1000.0, 'absolute', mode)
 
     def seek_frame(self, frame_num: int):
-        """Seek to frame number."""
+        """Seek to frame number (precise)."""
         if self._mpv and self._fps > 0:
             self._mpv.seek(frame_num / self._fps, 'absolute', 'exact')
 
@@ -342,13 +354,28 @@ class MpvWidget(QOpenGLWidget):
 
     def stop(self):
         """Stop and cleanup."""
+        print("[MPV] Stopping...")
         self._poll_timer.stop()
+
+        # Free render context (needs GL context current)
         if self._render_ctx:
-            self._render_ctx.free()
+            try:
+                self.makeCurrent()
+                self._render_ctx.free()
+                self.doneCurrent()
+            except Exception as e:
+                print(f"[MPV] Error freeing render context: {e}")
             self._render_ctx = None
+
+        # Terminate MPV
         if self._mpv:
-            self._mpv.terminate()
+            try:
+                self._mpv.terminate()
+            except Exception as e:
+                print(f"[MPV] Error terminating: {e}")
             self._mpv = None
+
+        print("[MPV] Stopped")
 
     def closeEvent(self, event):
         """Handle close."""
