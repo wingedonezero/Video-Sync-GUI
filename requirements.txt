@@ -40,7 +40,8 @@ lxml
 
 # Video/Audio Processing
 av
-mpv  # python-mpv for embedded video playback with libass subtitles
+# Note: mpv.py is bundled in vsg_qt/subtitle_editor/player/
+# Requires libmpv system library (apt install libmpv-dev or similar)
 
 # Image Processing
 Pillow
