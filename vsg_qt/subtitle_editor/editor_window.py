@@ -66,6 +66,9 @@ class SubtitleEditorWindow(QDialog):
     ):
         super().__init__(parent)
 
+        # Clean up old temp files from previous sessions (>1 hour old)
+        self._cleanup_old_temp_files()
+
         self._subtitle_path = Path(subtitle_path)
         self._video_path = Path(video_path)
         self._fonts_dir = Path(fonts_dir) if fonts_dir else None
@@ -280,6 +283,18 @@ class SubtitleEditorWindow(QDialog):
         if self._state.preview_path:
             print(f"[EditorWindow] Reloading subtitles from: {self._state.preview_path}")
             self._video_panel.reload_subtitles(str(self._state.preview_path))
+
+    def _cleanup_old_temp_files(self):
+        """Clean up old temp files from previous editor sessions."""
+        try:
+            from vsg_core.config import AppConfig
+            config = AppConfig()
+            cleaned = config.cleanup_old_style_editor_temp(max_age_hours=1.0)
+            if cleaned > 0:
+                print(f"[SubtitleEditor] Cleaned up {cleaned} old temp item(s)")
+        except Exception as e:
+            # Don't let cleanup errors prevent editor from opening
+            print(f"[SubtitleEditor] Temp cleanup warning: {e}")
 
     def accept(self):
         """Save changes and close."""
