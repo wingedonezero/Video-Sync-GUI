@@ -640,12 +640,8 @@ class ManualSelectionDialog(QDialog):
 
         # Mark it as generated (filter configuration will be set via Style Editor)
         generated_track['is_generated'] = True
-        generated_track['generated_source_track_id'] = source_track.get('id')
-        generated_track['generated_source_path'] = source_track.get('original_path')
-        generated_track['generated_needs_configuration'] = True  # Flag to show warning
-        generated_track['generated_verify_only_lines_removed'] = True
-        # Use global config setting for skip_frame_validation
-        generated_track['skip_frame_validation'] = self.config.settings.get('duration_align_skip_validation_generated_tracks', True)
+        generated_track['source_track_id'] = source_track.get('id')
+        generated_track['needs_configuration'] = True  # Flag to show warning badge
 
         # Add the generated track to the FinalList
         self.final_list.add_track_widget(generated_track)
@@ -752,15 +748,6 @@ class ManualSelectionDialog(QDialog):
         existing_style_patch = track_data.get('style_patch')
         existing_filter_config = track_data.get('filter_config')
 
-        # For generated tracks, also check generated_* fields
-        if track_data.get('is_generated') and not existing_filter_config:
-            existing_filter_config = {
-                'filter_mode': track_data.get('generated_filter_mode', 'exclude'),
-                'filter_styles': track_data.get('generated_filter_styles', []),
-                'forced_include': track_data.get('generated_filter_forced_include', []),
-                'forced_exclude': track_data.get('generated_filter_forced_exclude', []),
-            }
-
         # Launch subtitle editor in-process to preserve layout/subdata integration.
         self._launch_subtitle_editor_dialog(
             widget=widget,
@@ -812,14 +799,9 @@ class ManualSelectionDialog(QDialog):
                     del widget.track_data['font_replacements']
                 if filter_config:
                     widget.track_data['filter_config'] = filter_config
-                    # For generated tracks, also update generated_* fields for job execution
+                    # Clear the needs_configuration flag for generated tracks
                     if widget.track_data.get('is_generated'):
-                        widget.track_data['generated_filter_mode'] = filter_config.get('filter_mode', 'exclude')
-                        widget.track_data['generated_filter_styles'] = filter_config.get('filter_styles', [])
-                        widget.track_data['generated_filter_forced_include'] = filter_config.get('forced_include', [])
-                        widget.track_data['generated_filter_forced_exclude'] = filter_config.get('forced_exclude', [])
-                        # Clear the needs_configuration flag
-                        widget.track_data.pop('generated_needs_configuration', None)
+                        widget.track_data.pop('needs_configuration', None)
 
                 self.edited_widget = widget
                 widget.logic.refresh_badges()

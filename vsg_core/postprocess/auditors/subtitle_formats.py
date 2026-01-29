@@ -64,8 +64,9 @@ class SubtitleFormatsAuditor(BaseAuditor):
 
                 # Show source and track ID for ALL missing tracks
                 if plan_item.is_generated:
-                    self.log(f"          Source: {plan_item.track.source} Track {plan_item.generated_source_track_id}")
-                    self.log(f"          Filter: {plan_item.generated_filter_mode} {plan_item.generated_filter_styles}")
+                    filter_cfg = plan_item.filter_config or {}
+                    self.log(f"          Source: {plan_item.track.source} Track {plan_item.source_track_id}")
+                    self.log(f"          Filter: {filter_cfg.get('filter_mode', 'exclude')} {filter_cfg.get('filter_styles', [])}")
                 else:
                     # For normal tracks, show source and track ID
                     self.log(f"          Source: {plan_item.track.source} Track {plan_item.track.id}")
