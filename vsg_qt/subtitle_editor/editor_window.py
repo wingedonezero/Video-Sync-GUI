@@ -160,6 +160,9 @@ class SubtitleEditorWindow(QDialog):
             filtering_tab.filter_preview_requested.connect(
                 self._events_table.set_filter_preview_mode
             )
+            filtering_tab.flag_effects_requested.connect(
+                self._events_table.set_flag_effects_mode
+            )
 
         # Fonts tab changes
         fonts_tab = self._tab_panel.get_fonts_tab()

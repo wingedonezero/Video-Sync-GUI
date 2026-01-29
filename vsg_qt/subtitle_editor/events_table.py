@@ -20,6 +20,7 @@ Features:
 """
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Optional, List, Set
 
 from PySide6.QtCore import Qt, Signal
@@ -28,6 +29,23 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView,
     QWidget, QVBoxLayout, QMenu, QInputDialog
 )
+
+# Regex patterns for detecting effect/positioning tags that suggest non-dialogue content
+# These are override tags typically used for signs, karaoke, and effects
+EFFECT_TAG_PATTERNS = [
+    r'\\pos\s*\(',       # Positioning
+    r'\\move\s*\(',      # Movement animation
+    r'\\org\s*\(',       # Transform origin
+    r'\\k[fo]?\d',       # Karaoke timing (\k, \kf, \ko)
+    r'\\an[1-9]',        # Alignment (non-default positioning)
+    r'\\fad\s*\(',       # Fade in/out
+    r'\\fade\s*\(',      # Advanced fade
+    r'\\t\s*\(',         # Animation/transform
+    r'\\clip\s*\(',      # Clipping (often used for signs)
+    r'\\iclip\s*\(',     # Inverse clipping
+    r'\\p[1-9]',         # Drawing mode (vector graphics)
+]
+EFFECT_TAG_REGEX = re.compile('|'.join(EFFECT_TAG_PATTERNS), re.IGNORECASE)
 
 from .utils import ms_to_ass_time, calculate_cps, cps_color, cps_tooltip
 
@@ -68,6 +86,7 @@ class EventsTable(QWidget):
         self._state: Optional['EditorState'] = None
         self._highlighted_indices: Set[int] = set()
         self._filter_preview_mode: bool = False
+        self._flag_effects_mode: bool = False
 
         self._setup_ui()
 
@@ -149,8 +168,21 @@ class EventsTable(QWidget):
             event: SubtitleEvent instance
         """
         # Row number (1-indexed for display)
-        num_item = QTableWidgetItem(str(row + 1))
+        # Add ⚠️ warning if this is an excluded line with effect tags
+        row_text = str(row + 1)
+        if self._flag_effects_mode and self._state:
+            kept_indices = self._state.get_filtered_event_indices()
+            if row not in kept_indices and self._has_effect_tags(event.text):
+                row_text = f"⚠️ {row + 1}"
+
+        num_item = QTableWidgetItem(row_text)
         num_item.setTextAlignment(Qt.AlignCenter)
+        if "⚠️" in row_text:
+            num_item.setToolTip(
+                "This excluded line has positioning/effect tags.\n"
+                "It may be a sign or karaoke incorrectly styled.\n"
+                "Right-click to force include if needed."
+            )
         self._table.setItem(row, self.COL_NUM, num_item)
 
         # Layer
@@ -334,6 +366,36 @@ class EventsTable(QWidget):
             self._update_filter_highlights()
         else:
             self._clear_highlights()
+        # Refresh to update warning flags
+        self.refresh()
+
+    def set_flag_effects_mode(self, enabled: bool):
+        """
+        Enable/disable effect flagging mode.
+
+        When enabled, excluded lines with effect/positioning tags
+        show a ⚠️ warning in the row number column.
+
+        Args:
+            enabled: Whether to enable effect flagging
+        """
+        self._flag_effects_mode = enabled
+        self.refresh()
+
+    def _has_effect_tags(self, text: str) -> bool:
+        """
+        Check if text contains effect/positioning override tags.
+
+        These tags suggest the line is a sign, karaoke, or effect
+        rather than normal dialogue.
+
+        Args:
+            text: The event text to check
+
+        Returns:
+            True if effect tags are found
+        """
+        return bool(EFFECT_TAG_REGEX.search(text))
 
     def _set_row_background(self, row: int, color: QColor):
         """Set background color for all cells in a row."""
