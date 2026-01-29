@@ -611,6 +611,14 @@ class JobQueueLogic:
             new_track.pop('generated_filter_forced_include', None)
             new_track.pop('generated_filter_forced_exclude', None)
 
+            # CRITICAL: Also clear file-specific indices inside filter_config
+            # kept_indices, forced_include, forced_exclude are event indices from the source file
+            # They must be recalculated for each target file based on filter_styles
+            if 'filter_config' in new_track:
+                new_track['filter_config'].pop('kept_indices', None)
+                new_track['filter_config'].pop('forced_include', None)
+                new_track['filter_config'].pop('forced_exclude', None)
+
             new_layout.append(new_track)
         return new_layout
 
