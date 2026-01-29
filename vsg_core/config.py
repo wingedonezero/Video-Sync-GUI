@@ -716,6 +716,49 @@ class AppConfig:
                 pass
         return count
 
+    def cleanup_old_style_editor_temp(self, max_age_hours: float = 1.0) -> int:
+        """
+        Clean up old files in the style editor temp directory.
+
+        Only removes files/directories older than max_age_hours. This is safe
+        to call when opening the style editor as it won't affect the current
+        session's files or any recently created files.
+
+        Args:
+            max_age_hours: Maximum age in hours before cleanup (default 1 hour)
+
+        Returns:
+            Number of items removed
+        """
+        import shutil
+        import time
+
+        temp_dir = Path(self.get('temp_root')) / 'style_editor'
+        if not temp_dir.exists():
+            return 0
+
+        max_age_seconds = max_age_hours * 3600
+        current_time = time.time()
+        count = 0
+
+        for item in temp_dir.iterdir():
+            try:
+                # Get modification time of the item
+                mtime = item.stat().st_mtime
+                age_seconds = current_time - mtime
+
+                if age_seconds > max_age_seconds:
+                    if item.is_file():
+                        item.unlink()
+                        count += 1
+                    elif item.is_dir():
+                        shutil.rmtree(item)
+                        count += 1
+            except OSError:
+                pass
+
+        return count
+
     def get_vs_index_dir(self) -> Path:
         """
         Returns the path to the vapoursynth index directory.
