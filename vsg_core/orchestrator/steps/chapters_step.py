@@ -33,11 +33,12 @@ class ChaptersStep:
 
         # CRITICAL: Chapters must be shifted by the global shift amount
         # This keeps them in sync when we had to shift all audio tracks to eliminate negative delays
-        shift_ms = ctx.delays.global_shift_ms if ctx.delays else 0
+        # Use raw (unrounded) shift to preserve sub-millisecond precision from original chapters
+        shift_ms = ctx.delays.raw_global_shift_ms if ctx.delays else 0.0
 
         if shift_ms != 0:
-            runner._log_message(f"[Chapters] Applying global shift of +{shift_ms}ms to chapter timestamps")
-            runner._log_message(f"[Chapters] This keeps chapters in sync with the shifted audio tracks")
+            runner._log_message(f"[Chapters] Applying global shift of +{shift_ms:.3f}ms to chapter timestamps")
+            runner._log_message(f"[Chapters] This keeps chapters in sync with the shifted video track")
         else:
             runner._log_message("[Chapters] No global shift needed for chapters")
 
