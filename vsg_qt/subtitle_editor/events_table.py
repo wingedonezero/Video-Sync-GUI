@@ -378,15 +378,40 @@ class EventsTable(QWidget):
             enabled: Whether to enable effect flagging
         """
         self._flag_effects_mode = enabled
-        if enabled and self._state:
-            # Cache kept indices before refresh so _populate_row can use it
-            self._cached_kept_indices = self._state.get_filtered_event_indices()
-        else:
-            self._cached_kept_indices = None
-        self.refresh()
-        # Re-apply highlights after refresh (refresh overwrites backgrounds)
-        if self._filter_preview_mode:
-            self._update_filter_highlights()
+        self._update_effect_flags()
+
+    def _update_effect_flags(self):
+        """Update effect warning flags on row numbers (fast, no refresh)."""
+        if not self._state:
+            return
+
+        events = self._state.events
+        kept_indices = self._state.get_filtered_event_indices() if self._flag_effects_mode else set()
+
+        for row in range(self._table.rowCount()):
+            if row >= len(events):
+                break
+
+            num_item = self._table.item(row, self.COL_NUM)
+            if not num_item:
+                continue
+
+            # Determine if this row should have a warning
+            if self._flag_effects_mode and row not in kept_indices and self._has_effect_tags(events[row].text):
+                row_text = f"⚠️ {row + 1}"
+                tooltip = (
+                    "This excluded line has positioning/effect tags.\n"
+                    "It may be a sign or karaoke incorrectly styled.\n"
+                    "Right-click to force include if needed."
+                )
+            else:
+                row_text = str(row + 1)
+                tooltip = ""
+
+            # Only update if changed
+            if num_item.text() != row_text:
+                num_item.setText(row_text)
+                num_item.setToolTip(tooltip)
 
     def _has_effect_tags(self, text: str) -> bool:
         """
