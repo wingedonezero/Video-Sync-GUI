@@ -34,6 +34,7 @@ class FilteringTab(BaseTab):
 
     # Signal emitted when filter config changes
     filter_preview_requested = Signal(bool)
+    flag_effects_requested = Signal(bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -100,13 +101,20 @@ class FilteringTab(BaseTab):
         # Preview toggle
         preview_frame = QFrame()
         preview_frame.setFrameShape(QFrame.StyledPanel)
-        preview_layout = QHBoxLayout(preview_frame)
+        preview_layout = QVBoxLayout(preview_frame)
 
         self._preview_check = QCheckBox("Preview filter in events table")
         self._preview_check.setToolTip("Dim events that would be filtered out")
         self._preview_check.toggled.connect(self._on_preview_toggled)
         preview_layout.addWidget(self._preview_check)
-        preview_layout.addStretch()
+
+        self._flag_effects_check = QCheckBox("Flag excluded lines with effects")
+        self._flag_effects_check.setToolTip(
+            "Show ⚠️ on excluded lines that have positioning, karaoke, or other effect tags.\n"
+            "These may be signs/songs incorrectly styled as dialogue."
+        )
+        self._flag_effects_check.toggled.connect(self._on_flag_effects_toggled)
+        preview_layout.addWidget(self._flag_effects_check)
 
         layout.addWidget(preview_frame)
 
@@ -204,6 +212,10 @@ class FilteringTab(BaseTab):
     def _on_preview_toggled(self, checked: bool):
         """Handle preview checkbox toggle."""
         self.filter_preview_requested.emit(checked)
+
+    def _on_flag_effects_toggled(self, checked: bool):
+        """Handle flag effects checkbox toggle."""
+        self.flag_effects_requested.emit(checked)
 
     def _update_stats(self):
         """Update statistics label."""
