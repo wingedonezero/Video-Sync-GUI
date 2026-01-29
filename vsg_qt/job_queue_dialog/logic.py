@@ -126,9 +126,9 @@ class JobQueueLogic:
                 continue
 
             # Get the source track details
-            source_id = track.get('generated_source_track_id')
+            source_id = track.get('source_track_id')
             source_key = track.get('source')
-            original_style_list = track.get('generated_original_style_list', [])
+            original_style_list = track.get('original_style_list', [])
             track_name = track.get('custom_name') or track.get('name', 'Unknown')
 
             if not original_style_list:
@@ -169,7 +169,8 @@ class JobQueueLogic:
 
                     # ADDITIONAL CHECK: Validate that the filter styles actually exist
                     # This catches cases where style names changed (e.g., "Default" -> "Dialogue")
-                    filter_styles = track.get('generated_filter_styles', [])
+                    filter_cfg = track.get('filter_config') or {}
+                    filter_styles = filter_cfg.get('filter_styles', [])
                     if filter_styles:
                         missing_filter_styles = [s for s in filter_styles if s not in available_style_set]
                         if missing_filter_styles:
@@ -190,7 +191,7 @@ class JobQueueLogic:
                         # This is SAFE because missing styles can't include unwanted dialogue
                         if missing_styles and not extra_styles:
                             # Update the baseline to match current file (remove missing styles)
-                            track['generated_original_style_list'] = sorted(available_styles.keys())
+                            track['original_style_list'] = sorted(available_styles.keys())
                             layout_modified = True
                             # Don't add to issues - this is safe and auto-fixed
 
@@ -594,26 +595,13 @@ class JobQueueLogic:
             source_key = new_track.get('source')
             if source_key in target_sources:
                 new_track['original_path'] = target_sources[source_key]
-                # CRITICAL FIX: Also update generated_source_path for generated tracks
-                # This ensures the Edit dialog extracts from the correct source file
-                if new_track.get('is_generated'):
-                    new_track['generated_source_path'] = target_sources[source_key]
 
-            # CRITICAL: Clear user_modified_path - it points to source episode's temp file
-            # which contains episode-specific line edits (stripped tags, etc.)
-            # The style_patch and font_replacements are safe to copy (style-level changes)
-            # but user_modified_path is episode-specific and must not be copied
+            # Clear session-specific temp file path
             new_track.pop('user_modified_path', None)
 
-            # CRITICAL: Clear file-specific event indices - these are line numbers from
-            # the source file's subtitle which would be meaningless for a different file.
-            # Only style names (generated_filter_styles) are transferable between files.
-            new_track.pop('generated_filter_forced_include', None)
-            new_track.pop('generated_filter_forced_exclude', None)
-
-            # CRITICAL: Also clear file-specific indices inside filter_config
-            # kept_indices, forced_include, forced_exclude are event indices from the source file
-            # They must be recalculated for each target file based on filter_styles
+            # Clear file-specific event indices inside filter_config
+            # forced_include/forced_exclude are event indices from the source file
+            # They must be recalculated for each target file (only style-based filter transfers)
             if 'filter_config' in new_track:
                 new_track['filter_config'].pop('kept_indices', None)
                 new_track['filter_config'].pop('forced_include', None)

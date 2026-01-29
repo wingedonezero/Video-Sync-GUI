@@ -64,13 +64,13 @@ class TrackWidgetLogic:
         # Show indicator if language was customized
         lang_indicator = f" → {custom_lang}" if custom_lang and custom_lang != original_lang else ""
 
-        # NEW: Show generated track information
+        # Show generated track information
         is_generated = self.track_data.get('is_generated', False)
         if is_generated:
             gen_source = self.track_data.get('source', 'Unknown')
-            gen_track_id = self.track_data.get('generated_source_track_id', 'N/A')
-            gen_mode = self.track_data.get('generated_filter_mode', 'exclude')
-            gen_styles = self.track_data.get('generated_filter_styles', [])
+            gen_track_id = self.track_data.get('source_track_id', 'N/A')
+            filter_cfg = self.track_data.get('filter_config') or {}
+            gen_styles = filter_cfg.get('filter_styles', [])
             styles_str = ', '.join(gen_styles[:3])  # Show first 3 styles
             if len(gen_styles) > 3:
                 styles_str += f", +{len(gen_styles) - 3} more"
@@ -102,8 +102,9 @@ class TrackWidgetLogic:
 
         # Show generated track filter info
         if is_generated:
-            gen_mode = self.track_data.get('generated_filter_mode', 'exclude')
-            gen_styles = self.track_data.get('generated_filter_styles', [])
+            filter_cfg = self.track_data.get('filter_config') or {}
+            gen_mode = filter_cfg.get('filter_mode', 'exclude')
+            gen_styles = filter_cfg.get('filter_styles', [])
             styles_str = ', '.join(gen_styles[:3])  # Show first 3 styles
             if len(gen_styles) > 3:
                 styles_str += f", +{len(gen_styles) - 3} more"
@@ -149,10 +150,11 @@ class TrackWidgetLogic:
         """Updates the badge label based on the current settings."""
         badges = []
 
-        # NEW: Add generated track badge first (most important)
+        # Add generated track badge first (most important)
         if self.track_data.get('is_generated', False):
             # Check if filtering is configured
-            if self.track_data.get('generated_needs_configuration') or not self.track_data.get('generated_filter_styles'):
+            filter_cfg = self.track_data.get('filter_config') or {}
+            if self.track_data.get('needs_configuration') or not filter_cfg.get('filter_styles'):
                 badges.append("🔗 Generated ⚠️ Needs Config")
             else:
                 badges.append("🔗 Generated")
@@ -234,16 +236,13 @@ class TrackWidgetLogic:
             "custom_lang": self.track_data.get('custom_lang', ''),  # NEW: Include custom language
             "custom_name": self.track_data.get('custom_name', ''),  # NEW: Include custom name
 
-            # NEW: Include generated track fields
+            # Generated track fields (clean structure)
             "is_generated": self.track_data.get('is_generated', False),
-            "generated_source_track_id": self.track_data.get('generated_source_track_id'),
-            "generated_source_path": self.track_data.get('generated_source_path'),
-            "generated_filter_mode": self.track_data.get('generated_filter_mode', 'exclude'),
-            "generated_filter_styles": self.track_data.get('generated_filter_styles', []),
-            "generated_original_style_list": self.track_data.get('generated_original_style_list', []),
-            "generated_verify_only_lines_removed": self.track_data.get('generated_verify_only_lines_removed', True),
+            "source_track_id": self.track_data.get('source_track_id'),
+            "filter_config": self.track_data.get('filter_config'),
+            "original_style_list": self.track_data.get('original_style_list', []),
 
-            # NEW: Include sync exclusion fields
+            # Sync exclusion fields
             "sync_exclusion_styles": self.track_data.get('sync_exclusion_styles', []),
             "sync_exclusion_mode": self.track_data.get('sync_exclusion_mode', 'exclude'),
             "sync_exclusion_original_style_list": self.track_data.get('sync_exclusion_original_style_list', []),

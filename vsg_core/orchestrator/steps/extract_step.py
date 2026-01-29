@@ -221,16 +221,11 @@ class ExtractStep:
             plan_item.custom_lang = sel.get('custom_lang', '')  # Preserve custom language
             plan_item.custom_name = sel.get('custom_name', '')  # Preserve custom name
 
-            # NEW: Handle generated track fields
+            # Generated track fields
             plan_item.is_generated = bool(sel.get('is_generated', False))
-            plan_item.generated_source_track_id = sel.get('generated_source_track_id')
-            plan_item.generated_source_path = sel.get('generated_source_path')
-            plan_item.generated_filter_mode = sel.get('generated_filter_mode', 'exclude')
-            plan_item.generated_filter_styles = sel.get('generated_filter_styles', [])
-            plan_item.generated_filter_forced_include = sel.get('generated_filter_forced_include', [])
-            plan_item.generated_filter_forced_exclude = sel.get('generated_filter_forced_exclude', [])
-            plan_item.generated_original_style_list = sel.get('generated_original_style_list', [])
-            plan_item.generated_verify_only_lines_removed = bool(sel.get('generated_verify_only_lines_removed', True))
+            plan_item.source_track_id = sel.get('source_track_id')
+            plan_item.filter_config = sel.get('filter_config')
+            plan_item.original_style_list = sel.get('original_style_list', [])
 
             items.append(plan_item)
 
@@ -267,7 +262,7 @@ class ExtractStep:
             if not item.is_generated:
                 continue
 
-            runner._log_message(f"[Generated Track] Preparing track from {item.track.source} Track {item.generated_source_track_id}...")
+            runner._log_message(f"[Generated Track] Preparing track from {item.track.source} Track {item.source_track_id}...")
 
             # Find the SOURCE track's ORIGINAL extracted path
             # We want the original extraction, NOT any user edits
@@ -275,7 +270,7 @@ class ExtractStep:
             source_item = None
             for potential_source in items:
                 if (potential_source.track.source == item.track.source and
-                    potential_source.track.id == item.generated_source_track_id and
+                    potential_source.track.id == item.source_track_id and
                     not potential_source.is_generated):
                     source_item = potential_source
                     break

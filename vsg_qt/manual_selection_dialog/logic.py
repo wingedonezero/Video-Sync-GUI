@@ -37,7 +37,7 @@ class ManualLogic:
             if prev_item.get('is_generated'):
                 # Generated tracks use their settings from the saved layout
                 # Just verify the source track they reference actually exists
-                source_track_id = prev_item.get('generated_source_track_id')
+                source_track_id = prev_item.get('source_track_id')
                 if source_track_id is not None:
                     # Find the source track in track_info to validate it exists
                     source_exists = any(

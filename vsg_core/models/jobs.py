@@ -44,15 +44,9 @@ class PlanItem:
 
     # Generated track fields (for tracks created by filtering styles from another track)
     is_generated: bool = False  # Marks this as a generated track
-    generated_source_track_id: Optional[int] = None  # ID of the source track this was generated from
-    generated_source_path: Optional[str] = None  # Path to source subtitle file
-    generated_filter_mode: str = 'exclude'  # 'include' or 'exclude' styles
-    generated_filter_styles: List[str] = field(default_factory=list)  # Style names to include/exclude
-    generated_filter_forced_include: List[int] = field(default_factory=list)  # Event indices to always keep
-    generated_filter_forced_exclude: List[int] = field(default_factory=list)  # Event indices to always remove
-    generated_original_style_list: List[str] = field(default_factory=list)  # Complete style list from original source (for validation)
-    generated_verify_only_lines_removed: bool = True  # Verify only event lines removed, nothing else changed
-    skip_frame_validation: bool = False  # Skip duration-align frame validation (for generated tracks)
+    source_track_id: Optional[int] = None  # ID of the source track this was generated from
+    filter_config: Optional[Dict[str, Any]] = None  # Filter settings: mode, styles, forced_include, forced_exclude
+    original_style_list: List[str] = field(default_factory=list)  # Complete style list from original source (for validation)
 
     # Sync exclusion fields (for excluding styles from frame matching in anchor mode)
     sync_exclusion_styles: List[str] = field(default_factory=list)  # Style names to exclude/include from frame sync

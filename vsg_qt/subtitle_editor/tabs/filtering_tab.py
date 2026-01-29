@@ -294,10 +294,11 @@ class FilteringTab(BaseTab):
         if not self._state:
             return {}
 
+        # Only save the configuration, not derived data
+        # kept_indices is calculated at runtime by SubtitleData from filter_mode + filter_styles
         return {
             'filter_mode': self._state.filter_mode,
             'filter_styles': list(self._state.filter_styles),
-            'kept_indices': list(self._state.get_filtered_event_indices()),
             'forced_include': list(self._state.forced_include_indices),
             'forced_exclude': list(self._state.forced_exclude_indices)
         }
