@@ -31,13 +31,14 @@ class ChaptersStep:
             ctx.chapters_xml = None
             return ctx
 
-        # CRITICAL: Chapters must be shifted by the global shift amount
-        # This keeps them in sync when we had to shift all audio tracks to eliminate negative delays
+        # CRITICAL: Chapters must be shifted by the SAME amount as video container delay
+        # Video delay is rounded to integer ms by mkvmerge, so chapters must match exactly
+        # to land on the correct keyframes in the final container
         shift_ms = ctx.delays.global_shift_ms if ctx.delays else 0
 
         if shift_ms != 0:
             runner._log_message(f"[Chapters] Applying global shift of +{shift_ms}ms to chapter timestamps")
-            runner._log_message(f"[Chapters] This keeps chapters in sync with the shifted audio tracks")
+            runner._log_message(f"[Chapters] This matches the video container delay for correct keyframe alignment")
         else:
             runner._log_message("[Chapters] No global shift needed for chapters")
 
