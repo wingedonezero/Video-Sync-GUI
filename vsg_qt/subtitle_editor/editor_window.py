@@ -163,6 +163,12 @@ class SubtitleEditorWindow(QDialog):
             filtering_tab.flag_effects_requested.connect(
                 self._events_table.set_flag_effects_mode
             )
+            filtering_tab.jump_to_next_flagged.connect(
+                self._events_table.jump_to_next_flagged
+            )
+            self._events_table.flagged_count_changed.connect(
+                filtering_tab.update_flagged_count
+            )
 
         # Fonts tab changes
         fonts_tab = self._tab_panel.get_fonts_tab()

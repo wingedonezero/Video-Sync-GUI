@@ -35,6 +35,7 @@ class FilteringTab(BaseTab):
     # Signal emitted when filter config changes
     filter_preview_requested = Signal(bool)
     flag_effects_requested = Signal(bool)
+    jump_to_next_flagged = Signal()  # Request jump to next flagged line
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -108,13 +109,31 @@ class FilteringTab(BaseTab):
         self._preview_check.toggled.connect(self._on_preview_toggled)
         preview_layout.addWidget(self._preview_check)
 
+        # Flag effects row with checkbox, count, and next button
+        flag_layout = QHBoxLayout()
+        flag_layout.setContentsMargins(0, 0, 0, 0)
+
         self._flag_effects_check = QCheckBox("Flag excluded lines with effects")
         self._flag_effects_check.setToolTip(
             "Show ⚠️ on excluded lines that have positioning, karaoke, or other effect tags.\n"
             "These may be signs/songs incorrectly styled as dialogue."
         )
         self._flag_effects_check.toggled.connect(self._on_flag_effects_toggled)
-        preview_layout.addWidget(self._flag_effects_check)
+        flag_layout.addWidget(self._flag_effects_check)
+
+        self._flagged_count_label = QLabel("")
+        self._flagged_count_label.setStyleSheet("color: #ff9900; font-weight: bold;")
+        flag_layout.addWidget(self._flagged_count_label)
+
+        self._next_flagged_btn = QPushButton("Next ▶")
+        self._next_flagged_btn.setFixedWidth(60)
+        self._next_flagged_btn.setToolTip("Jump to next flagged line")
+        self._next_flagged_btn.clicked.connect(self._on_next_flagged_clicked)
+        self._next_flagged_btn.setEnabled(False)
+        flag_layout.addWidget(self._next_flagged_btn)
+
+        flag_layout.addStretch()
+        preview_layout.addLayout(flag_layout)
 
         layout.addWidget(preview_frame)
 
@@ -216,6 +235,22 @@ class FilteringTab(BaseTab):
     def _on_flag_effects_toggled(self, checked: bool):
         """Handle flag effects checkbox toggle."""
         self.flag_effects_requested.emit(checked)
+        if not checked:
+            self._flagged_count_label.setText("")
+            self._next_flagged_btn.setEnabled(False)
+
+    def _on_next_flagged_clicked(self):
+        """Handle next flagged button click."""
+        self.jump_to_next_flagged.emit()
+
+    def update_flagged_count(self, count: int):
+        """Update the flagged count display."""
+        if count > 0:
+            self._flagged_count_label.setText(f"({count} found)")
+            self._next_flagged_btn.setEnabled(True)
+        else:
+            self._flagged_count_label.setText("")
+            self._next_flagged_btn.setEnabled(False)
 
     def _update_stats(self):
         """Update statistics label."""

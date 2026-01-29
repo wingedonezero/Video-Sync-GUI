@@ -65,6 +65,7 @@ class EventsTable(QWidget):
     event_selected = Signal(int)
     event_double_clicked = Signal(int)
     preview_updated = Signal()
+    flagged_count_changed = Signal(int)  # Emitted when effect flag count changes
 
     # Column indices
     COL_NUM = 0
@@ -88,6 +89,7 @@ class EventsTable(QWidget):
         self._filter_preview_mode: bool = False
         self._flag_effects_mode: bool = False
         self._cached_kept_indices: Optional[Set[int]] = None  # Cache to avoid O(N²)
+        self._flagged_effect_indices: List[int] = []  # Cached list of flagged row indices
 
         self._setup_ui()
 
@@ -383,10 +385,15 @@ class EventsTable(QWidget):
     def _update_effect_flags(self):
         """Update effect warning flags on row numbers (fast, no refresh)."""
         if not self._state:
+            self._flagged_effect_indices = []
+            self.flagged_count_changed.emit(0)
             return
 
         events = self._state.events
         kept_indices = self._state.get_filtered_event_indices() if self._flag_effects_mode else set()
+
+        # Build list of flagged indices
+        new_flagged = []
 
         for row in range(self._table.rowCount()):
             if row >= len(events):
@@ -397,7 +404,12 @@ class EventsTable(QWidget):
                 continue
 
             # Determine if this row should have a warning
-            if self._flag_effects_mode and row not in kept_indices and self._has_effect_tags(events[row].text):
+            is_flagged = (self._flag_effects_mode and
+                          row not in kept_indices and
+                          self._has_effect_tags(events[row].text))
+
+            if is_flagged:
+                new_flagged.append(row)
                 row_text = f"⚠️ {row + 1}"
                 tooltip = (
                     "This excluded line has positioning/effect tags.\n"
@@ -412,6 +424,11 @@ class EventsTable(QWidget):
             if num_item.text() != row_text:
                 num_item.setText(row_text)
                 num_item.setToolTip(tooltip)
+
+        # Update cached list and emit if changed
+        if new_flagged != self._flagged_effect_indices:
+            self._flagged_effect_indices = new_flagged
+            self.flagged_count_changed.emit(len(new_flagged))
 
     def _has_effect_tags(self, text: str) -> bool:
         """
@@ -489,3 +506,29 @@ class EventsTable(QWidget):
     def get_selected_rows(self) -> List[int]:
         """Get all selected row indices."""
         return [idx.row() for idx in self._table.selectionModel().selectedRows()]
+
+    def jump_to_next_flagged(self) -> bool:
+        """
+        Jump to the next flagged effect row, looping if needed.
+
+        Returns:
+            True if jumped to a row, False if no flagged rows
+        """
+        if not self._flagged_effect_indices:
+            return False
+
+        current_row = self.get_selected_row()
+
+        # Find next flagged row after current
+        for row in self._flagged_effect_indices:
+            if row > current_row:
+                self.select_row(row)
+                return True
+
+        # Loop to first flagged row
+        self.select_row(self._flagged_effect_indices[0])
+        return True
+
+    def get_flagged_count(self) -> int:
+        """Get the current count of flagged effect lines."""
+        return len(self._flagged_effect_indices)
