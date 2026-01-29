@@ -188,7 +188,7 @@ def _create_chapter_display(atom: ET.Element, chapter_name: str, language: str, 
     lang_elem.text = language
     ietf_elem.text = ietf_language
 
-def process_chapters(ref_mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: dict, config: dict, shift_ms: float) -> Optional[str]:
+def process_chapters(ref_mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: dict, config: dict, shift_ms: int) -> Optional[str]:
     xml_content = runner.run(['mkvextract', str(ref_mkv), 'chapters', '-'], tool_paths)
     if not xml_content or not xml_content.strip():
         runner._log_message('No chapters found in reference file.')
@@ -214,10 +214,11 @@ def process_chapters(ref_mkv: str, temp_dir: Path, runner: CommandRunner, tool_p
             else:
                 runner._log_message('[Chapters] Snap skipped: could not load keyframes.')
 
-        # Now shift all timestamps to container time (using raw precision)
-        shift_ns = int(round(shift_ms * 1_000_000))
+        # Now shift all timestamps to container time
+        # Must match video container delay exactly (integer ms) for correct keyframe alignment
+        shift_ns = shift_ms * 1_000_000
         if shift_ns != 0:
-            runner._log_message(f'[Chapters] Shifting all timestamps by +{shift_ms:.3f}ms ({shift_ns}ns).')
+            runner._log_message(f'[Chapters] Shifting all timestamps by +{shift_ms}ms.')
             for tag_name in ['ChapterTimeStart', 'ChapterTimeEnd']:
                 for node in root.xpath(f'//{prefix}{tag_name}', namespaces=nsmap):
                     if node is not None and node.text:
