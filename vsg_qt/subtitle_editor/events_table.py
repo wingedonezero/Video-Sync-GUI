@@ -87,6 +87,7 @@ class EventsTable(QWidget):
         self._highlighted_indices: Set[int] = set()
         self._filter_preview_mode: bool = False
         self._flag_effects_mode: bool = False
+        self._cached_kept_indices: Optional[Set[int]] = None  # Cache to avoid O(N²)
 
         self._setup_ui()
 
@@ -170,9 +171,8 @@ class EventsTable(QWidget):
         # Row number (1-indexed for display)
         # Add ⚠️ warning if this is an excluded line with effect tags
         row_text = str(row + 1)
-        if self._flag_effects_mode and self._state:
-            kept_indices = self._state.get_filtered_event_indices()
-            if row not in kept_indices and self._has_effect_tags(event.text):
+        if self._flag_effects_mode and self._cached_kept_indices is not None:
+            if row not in self._cached_kept_indices and self._has_effect_tags(event.text):
                 row_text = f"⚠️ {row + 1}"
 
         num_item = QTableWidgetItem(row_text)
@@ -336,11 +336,17 @@ class EventsTable(QWidget):
 
     def _update_filter_highlights(self):
         """Update highlights based on filter preview."""
-        if not self._filter_preview_mode or not self._state:
+        if not self._state:
+            self._cached_kept_indices = None
             return
 
-        # Get events that would be kept
-        kept_indices = self._state.get_filtered_event_indices()
+        # Cache kept indices for use by _populate_row (avoids O(N²))
+        self._cached_kept_indices = self._state.get_filtered_event_indices()
+
+        if not self._filter_preview_mode:
+            return
+
+        kept_indices = self._cached_kept_indices
 
         # Dim events that would be filtered out
         for row in range(self._table.rowCount()):
@@ -362,12 +368,14 @@ class EventsTable(QWidget):
             enabled: Whether to enable filter preview
         """
         self._filter_preview_mode = enabled
-        if enabled:
-            self._update_filter_highlights()
-        else:
+        # Update cache and apply highlights
+        self._update_filter_highlights()
+        if not enabled:
             self._clear_highlights()
-        # Refresh to update warning flags
-        self.refresh()
+        # Only refresh if flag effects mode needs to update warning icons
+        if self._flag_effects_mode:
+            self.refresh()
+            self._update_filter_highlights()  # Re-apply highlights after refresh
 
     def set_flag_effects_mode(self, enabled: bool):
         """
@@ -380,7 +388,12 @@ class EventsTable(QWidget):
             enabled: Whether to enable effect flagging
         """
         self._flag_effects_mode = enabled
+        # Update cache before refresh so _populate_row can use it
+        self._update_filter_highlights()
         self.refresh()
+        # Re-apply highlights after refresh (refresh overwrites backgrounds)
+        if self._filter_preview_mode:
+            self._update_filter_highlights()
 
     def _has_effect_tags(self, text: str) -> bool:
         """
