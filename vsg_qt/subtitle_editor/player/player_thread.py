@@ -255,8 +255,11 @@ class PlayerThread(QThread):
                 self.time_changed.emit(self._current_time_ms)
 
             except (StopIteration, av.error.EOFError):
+                # Video reached end - pause and stay in loop to allow seeking back
+                with self._lock:
+                    self._is_paused = True
                 self.playback_finished.emit()
-                break
+                continue
             except av.error.EAGAIN:
                 time.sleep(0.005)
                 continue
