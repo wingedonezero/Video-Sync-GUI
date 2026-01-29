@@ -336,17 +336,11 @@ class EventsTable(QWidget):
 
     def _update_filter_highlights(self):
         """Update highlights based on filter preview."""
-        if not self._state:
-            self._cached_kept_indices = None
+        if not self._filter_preview_mode or not self._state:
             return
 
-        # Cache kept indices for use by _populate_row (avoids O(N²))
-        self._cached_kept_indices = self._state.get_filtered_event_indices()
-
-        if not self._filter_preview_mode:
-            return
-
-        kept_indices = self._cached_kept_indices
+        # Get events that would be kept
+        kept_indices = self._state.get_filtered_event_indices()
 
         # Dim events that would be filtered out
         for row in range(self._table.rowCount()):
@@ -368,14 +362,10 @@ class EventsTable(QWidget):
             enabled: Whether to enable filter preview
         """
         self._filter_preview_mode = enabled
-        # Update cache and apply highlights
-        self._update_filter_highlights()
-        if not enabled:
+        if enabled:
+            self._update_filter_highlights()
+        else:
             self._clear_highlights()
-        # Only refresh if flag effects mode needs to update warning icons
-        if self._flag_effects_mode:
-            self.refresh()
-            self._update_filter_highlights()  # Re-apply highlights after refresh
 
     def set_flag_effects_mode(self, enabled: bool):
         """
@@ -388,8 +378,11 @@ class EventsTable(QWidget):
             enabled: Whether to enable effect flagging
         """
         self._flag_effects_mode = enabled
-        # Update cache before refresh so _populate_row can use it
-        self._update_filter_highlights()
+        if enabled and self._state:
+            # Cache kept indices before refresh so _populate_row can use it
+            self._cached_kept_indices = self._state.get_filtered_event_indices()
+        else:
+            self._cached_kept_indices = None
         self.refresh()
         # Re-apply highlights after refresh (refresh overwrites backgrounds)
         if self._filter_preview_mode:
