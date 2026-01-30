@@ -408,6 +408,27 @@ class SubtitlesStep:
                 # cause options_builder to return delay=0, preventing any sync.
                 if sync_result.events_affected > 0:
                     item.frame_adjusted = True
+
+                    # Check for negative timestamps that will be clamped to 0 when written
+                    # (ASS/SRT formats cannot represent negative times)
+                    negative_events = [e for e in subtitle_data.events
+                                       if e.start_ms < 0 and not e.is_comment]
+                    if negative_events:
+                        delay_applied = sync_result.details.get('final_offset_ms', 0) if sync_result.details else 0
+                        min_time = min(e.start_ms for e in negative_events)
+                        max_time = max(e.start_ms for e in negative_events)
+                        runner._log_message(
+                            f"[Sync] Warning: {len(negative_events)} event(s) have negative timestamps "
+                            f"({min_time:.0f}ms to {max_time:.0f}ms), will be clamped to 0ms"
+                        )
+                        # Store for auditor reporting
+                        item.clamping_info = {
+                            'events_clamped': len(negative_events),
+                            'delay_ms': delay_applied,
+                            'min_time_ms': min_time,
+                            'max_time_ms': max_time,
+                        }
+
                 if hasattr(sync_result, 'details'):
                     item.framelocked_stats = sync_result.details
 
@@ -625,6 +646,24 @@ class SubtitlesStep:
 
             runner._log_message(f"[Sync] Applied {cached['corrected_delay_ms']:+.1f}ms to {events_synced} events")
             item.frame_adjusted = True
+
+            # Check for negative timestamps that will be clamped to 0 when written
+            negative_events = [e for e in subtitle_data.events
+                               if e.start_ms < 0 and not e.is_comment]
+            if negative_events:
+                min_time = min(e.start_ms for e in negative_events)
+                max_time = max(e.start_ms for e in negative_events)
+                runner._log_message(
+                    f"[Sync] Warning: {len(negative_events)} event(s) have negative timestamps "
+                    f"({min_time:.0f}ms to {max_time:.0f}ms), will be clamped to 0ms"
+                )
+                item.clamping_info = {
+                    'events_clamped': len(negative_events),
+                    'delay_ms': cached['corrected_delay_ms'],
+                    'min_time_ms': min_time,
+                    'max_time_ms': max_time,
+                }
+
             return OperationResult(
                 success=True,
                 operation='sync',
@@ -659,6 +698,24 @@ class SubtitlesStep:
             runner._log_message(f"[Sync] Applied {total_delay_ms:+.1f}ms to {events_synced} events (reference)")
             if events_synced > 0 and abs(total_delay_ms) > 0.001:
                 item.frame_adjusted = True
+
+                # Check for negative timestamps that will be clamped to 0 when written
+                negative_events = [e for e in subtitle_data.events
+                                   if e.start_ms < 0 and not e.is_comment]
+                if negative_events:
+                    min_time = min(e.start_ms for e in negative_events)
+                    max_time = max(e.start_ms for e in negative_events)
+                    runner._log_message(
+                        f"[Sync] Warning: {len(negative_events)} event(s) have negative timestamps "
+                        f"({min_time:.0f}ms to {max_time:.0f}ms), will be clamped to 0ms"
+                    )
+                    item.clamping_info = {
+                        'events_clamped': len(negative_events),
+                        'delay_ms': total_delay_ms,
+                        'min_time_ms': min_time,
+                        'max_time_ms': max_time,
+                    }
+
             return OperationResult(
                 success=True,
                 operation='sync',
