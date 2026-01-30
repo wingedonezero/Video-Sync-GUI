@@ -30,9 +30,20 @@
 ## 5) Code style and tooling (Python)
 - Python code MUST be:
   - formatted with **Black** (line length 88),
-  - linted with **Ruff** (including import sorting).
+  - linted with **Ruff** (including import sorting),
+  - type-checked with **Pyright** (basic mode).
 - Do not hand-format or bikeshed formatting; rely on Black/Ruff outputs.
-- Follow the repository’s `pyproject.toml` settings.
+- Follow the repository's `pyproject.toml` settings.
+- Commands:
+  - `black .` - format code
+  - `ruff check --fix .` - lint and auto-fix
+  - `pyright` - type check (shows errors, manual fix)
+  - `pre-commit run -a` - run all checks
+- Pre-commit hooks are configured; install with `pre-commit install`.
+- Current policy (gradual strictness):
+  - Black: must pass (blocks commits)
+  - Ruff: warnings shown but don't block (F841/F401 allowed for now)
+  - Pyright: manual stage (run explicitly, doesn't block yet)
 
 ## 6) Gradual formatting policy (avoid giant diffs)
 - Do NOT run mass reformat/lint across the entire repo unless explicitly requested.
@@ -43,6 +54,8 @@
 
 ## 7) Type hints and readability
 - Add type hints for all public functions and any non-trivial internal functions you modify/create.
+- Pyright catches None-handling bugs (like Rust's Option type) - fix these when you see them.
+- When adding type hints, run `pyright <file>` to verify correctness.
 - Prefer small functions, clear naming, and predictable structure.
 - Add comments/docstrings when intent is not obvious (explain WHY more than WHAT).
 
