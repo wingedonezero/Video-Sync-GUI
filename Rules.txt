@@ -74,7 +74,65 @@
 ## 10) Explicit ignore
 - Do not read or use `Rust.tar.gz` (experiment; ignore completely).
 
-## 11) Output requirements
+---
+
+## 11) Architecture: Where Code Belongs
+
+### 11.1) The Three Layers
+
+```
+ORCHESTRATOR (vsg_core/orchestrator/pipeline.py)
+    → Initializes Context, runs steps in sequence, validates
+
+STEPS (vsg_core/orchestrator/steps/*.py)
+    → Micro-orchestrators: coordinate, log, control flow, update Context
+    → NO business logic
+
+MODULES (vsg_core/analysis/, correction/, subtitles/, etc.)
+    → ALL business logic as pure functions
+    → Dataclasses for typed returns
+    → No direct Context access
+```
+
+**Reference:** `analysis_step.py` is the gold standard - study it before modifying steps.
+
+### 11.2) Steps vs Modules
+
+| Put in STEP | Put in MODULE |
+|-------------|---------------|
+| Calling module functions | Algorithms, calculations |
+| `runner._log_message(...)` | Complex conditionals |
+| Loops over sources | Data transformations |
+| Context reads/writes | Anything needing unit tests |
+
+### 11.3) Module Function Pattern
+
+```python
+@dataclass
+class ResultType:
+    value: int
+    raw_value: float
+
+def do_thing(
+    data: InputType,
+    config: dict[str, Any],
+    log: Callable[[str], None] | None = None,
+) -> ResultType:
+    # Pure function: data in → typed result out
+    # Optional log callback, NO Context parameter
+```
+
+### 11.4) Models: Where Dataclasses Go
+
+- **Shared types** → `vsg_core/models/` (check here first before creating new ones)
+- **Domain-specific** → keep in module, re-export via `__init__.py`
+- **Avoid duplicates** - search existing models before creating
+
+**Imports:** Import from module's `__init__.py` (e.g., `from vsg_core.analysis import FinalDelay`), not internal files.
+
+---
+
+## 12) Output requirements
 - When producing code changes:
   - summarize what changed and why,
   - note any behavior changes,
