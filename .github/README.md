@@ -1,9 +1,9 @@
 # Video/Audio Sync & Merge — PySide6 Edition
 
-A focused desktop tool to **analyze A/V timing** and perform a **lossless MKV remux** with predictable, auditable behavior.  
+A focused desktop tool to **analyze A/V timing** and perform a **lossless MKV remux** with predictable, auditable behavior.
 The app discovers delays, applies a **positive‑only global shift** (so no content gets trimmed), handles chapters and subtitles, and writes a mkvmerge options file you can inspect and replay.
 
-> **Scope of this README**  
+> **Scope of this README**
 > This document describes the *baseline* application — the exact code you shared (before any experimental “expert/advanced repair” features). It is intentionally exhaustive so a new contributor can understand end‑to‑end behavior and implementation details.
 
 ---
@@ -189,13 +189,13 @@ The z‑score step behaves like a simple pre‑whitening/normalization, reducing
 
 ##### Windowing considerations
 
-- 15s windows capture multiple transients; longer windows (20–30s) increase robustness at the cost of time.  
+- 15s windows capture multiple transients; longer windows (20–30s) increase robustness at the cost of time.
 - If matches are weak, increase duration or adjust language selection.
 
 #### Aggregating results across windows
 
-1. Drop windows with `match_pct <= min_match_pct` (default **5.0**).  
-2. Compute the **mode** (most frequent) delay among remaining windows.  
+1. Drop windows with `match_pct <= min_match_pct` (default **5.0**).
+2. Compute the **mode** (most frequent) delay among remaining windows.
 3. From the modal group, pick the window with **max match %**. That tuple `(delay_ms, match%)` is the **determined** delay.
 
 This favors **consistency** over any single window’s outlier result.
@@ -271,7 +271,7 @@ A prioritized list of rules (Settings → Merge Plan) defines what to include. E
 
 **Default logic**
 
-- The **first video** is implicitly default.  
+- The **first video** is implicitly default.
 - Exactly one **audio** and one **subtitles** track can be marked default via flags.
 
 **Per‑track mkvmerge arguments** (generated in order):
@@ -304,17 +304,17 @@ All subsequent stages (extraction, chapters, merge) are identical to the rule‑
 
 ## Subtitles
 
-- **SRT → ASS** (optional): via ffmpeg; if output exists, we replace the path.  
-- **Rescale PlayRes** (ASS/SSA only): probe reference video width/height via ffprobe and rewrite `PlayResX/PlayResY` if they differ.  
+- **SRT → ASS** (optional): via ffmpeg; if output exists, we replace the path.
+- **Rescale PlayRes** (ASS/SSA only): probe reference video width/height via ffprobe and rewrite `PlayResX/PlayResY` if they differ.
 - **Font size multiplier** (ASS/SSA only): parse `Style:` lines and multiply the font size value, keeping other fields intact. Safe parsing avoids corrupting the file.
 
 ---
 
 ## Chapters
 
-- **Rename** (optional): clear `ChapterDisplay` and write “Chapter NN”.  
-- **Shift timestamps**: add `global_shift` (ms → ns) to both `ChapterTimeStart` and `ChapterTimeEnd`.  
-- **Snap to keyframes** (optional): probe keyframes via ffprobe and, for starts (and optionally ends), move within `snap_threshold_ms` according to mode (`previous` or `nearest`).  
+- **Rename** (optional): clear `ChapterDisplay` and write “Chapter NN”.
+- **Shift timestamps**: add `global_shift` (ms → ns) to both `ChapterTimeStart` and `ChapterTimeEnd`.
+- **Snap to keyframes** (optional): probe keyframes via ffprobe and, for starts (and optionally ends), move within `snap_threshold_ms` according to mode (`previous` or `nearest`).
 - **Normalize ends**: ensure each chapter has a valid end; cap ends to next chapter’s start; guarantee strictly increasing intervals.
 
 All chapter edits are written to a temporary XML file and passed to mkvmerge via `--chapters`.
@@ -358,7 +358,7 @@ Each job creates a unique temp dir: `temp_root/job_<ref-stem>_<epoch>/` with:
 - `wav_*`: short analysis windows for audio correlation
 - `att_*`: attachments from TER if present
 
-**Output:** `<output_folder>/<ReferenceFileName>.mkv` (same filename as Reference)  
+**Output:** `<output_folder>/<ReferenceFileName>.mkv` (same filename as Reference)
 **Run log:** `<output_folder>/<ReferenceFileName>.log`
 
 Compact logging shows *throttled* progress and prints the tail of stderr on error for signal‑to‑noise.
@@ -461,19 +461,19 @@ python main.py
 
 ## Troubleshooting
 
-- **Tool not found** — make sure `mkvmerge`, `mkvextract`, `ffmpeg`, `ffprobe` are installed and on `PATH`.  
-- **XCorr unstable/low confidence** — increase `scan_chunk_duration` and/or `scan_chunk_count`; ensure language selection targets comparable mixes (JPN vs JPN, ENG vs ENG).  
-- **Defaults/forced flags not what you expected** — In **Merge Plan**, check rule ordering and flags; in **Manual** mode, adjust the final list toggles.  
-- **Chapters misaligned** — Verify `global_shift` in logs equals the shift applied to chapter XML; if snapping is on, try increasing `snap_threshold_ms` or switch `snap_mode`.  
-- **mkvmerge failure** — Open `opts.json`, replay via terminal, and examine stderr; the app also prints the error tail.  
+- **Tool not found** — make sure `mkvmerge`, `mkvextract`, `ffmpeg`, `ffprobe` are installed and on `PATH`.
+- **XCorr unstable/low confidence** — increase `scan_chunk_duration` and/or `scan_chunk_count`; ensure language selection targets comparable mixes (JPN vs JPN, ENG vs ENG).
+- **Defaults/forced flags not what you expected** — In **Merge Plan**, check rule ordering and flags; in **Manual** mode, adjust the final list toggles.
+- **Chapters misaligned** — Verify `global_shift` in logs equals the shift applied to chapter XML; if snapping is on, try increasing `snap_threshold_ms` or switch `snap_mode`.
+- **mkvmerge failure** — Open `opts.json`, replay via terminal, and examine stderr; the app also prints the error tail.
 
 ---
 
 ## Developer Notes
 
-- **Demux strategy**: `mkvextract` for general tracks; for `A_MS/ACM` we first try stream copy with ffmpeg, else decode to PCM using a bit‑depth‑aware codec (`pcm_s16le`, `pcm_s24le`, `pcm_s32le`, `pcm_f64le`).  
-- **Language selection** (analysis only) is independent from merge inclusion rules.  
-- **Track ordering** is fully deterministic: we append inputs in the exact GUI/plan order and then emit a matching `--track-order`.  
+- **Demux strategy**: `mkvextract` for general tracks; for `A_MS/ACM` we first try stream copy with ffmpeg, else decode to PCM using a bit‑depth‑aware codec (`pcm_s16le`, `pcm_s24le`, `pcm_s32le`, `pcm_f64le`).
+- **Language selection** (analysis only) is independent from merge inclusion rules.
+- **Track ordering** is fully deterministic: we append inputs in the exact GUI/plan order and then emit a matching `--track-order`.
 - **Logging style** balances signal/noise; compact mode prints progress and only a tail of verbose output on success/failure.
 
 ---
@@ -490,16 +490,16 @@ python main.py
 
 ## Performance Notes
 
-- XCorr windowing is the main cost. Defaults (`10 × 15s`) trade speed vs. robustness.  
-- SSD churn is minimized by deleting temp job directories on success.  
+- XCorr windowing is the main cost. Defaults (`10 × 15s`) trade speed vs. robustness.
+- SSD churn is minimized by deleting temp job directories on success.
 - For faster previews, reduce `scan_chunk_count` and/or `scan_chunk_duration` — then confirm with a second run if needed.
 
 ---
 
 ## Known Limitations
 
-- Baseline engine uses a **single global delay** per Secondary/Tertiary. It does not splice or model time‑varying drift (that would be an “advanced repair” feature outside this README’s scope).  
-- XCorr can be confused by long uniform ambiences; tuning the window schedule usually fixes it.  
+- Baseline engine uses a **single global delay** per Secondary/Tertiary. It does not splice or model time‑varying drift (that would be an “advanced repair” feature outside this README’s scope).
+- XCorr can be confused by long uniform ambiences; tuning the window schedule usually fixes it.
 - VideoDiff requires a separate binary and is subject to its error metric semantics.
 
 ---
@@ -591,5 +591,5 @@ Special case: `A_MS/ACM` → attempt stream copy; if refused, decode to PCM with
 
 ---
 
-**License**  
+**License**
 This project wraps external tools; respect their licenses. The GUI/engine code is released under the project’s chosen license (add a LICENSE file if needed).

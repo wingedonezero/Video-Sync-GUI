@@ -1,5 +1,4 @@
 # vsg_qt/report_dialogs/report_viewer.py
-# -*- coding: utf-8 -*-
 """
 Report viewer dialog for displaying detailed batch results.
 
@@ -8,15 +7,25 @@ and sync delays. Selecting a job shows detailed information in a panel below.
 """
 
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Any
 
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTableWidget, QTableWidgetItem, QHeaderView, QSplitter,
-    QTextEdit, QFrame, QWidget, QAbstractItemView
-)
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtGui import QColor, QFont
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QPushButton,
+    QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 from vsg_core.reporting import ReportWriter
 
@@ -41,8 +50,8 @@ class ReportViewer(QDialog):
         """
         super().__init__(parent)
         self.report_path = report_path
-        self.report_data: Dict[str, Any] = {}
-        self.current_job: Optional[Dict[str, Any]] = None
+        self.report_data: dict[str, Any] = {}
+        self.current_job: dict[str, Any] | None = None
 
         self._load_report()
         self._setup_ui()
@@ -52,10 +61,7 @@ class ReportViewer(QDialog):
         try:
             self.report_data = ReportWriter.load(self.report_path)
         except Exception as e:
-            self.report_data = {
-                "error": str(e),
-                "jobs": []
-            }
+            self.report_data = {"error": str(e), "jobs": []}
 
     def _setup_ui(self):
         """Set up the dialog UI."""
@@ -142,9 +148,9 @@ class ReportViewer(QDialog):
         """Create the jobs table."""
         table = QTableWidget()
         table.setColumnCount(7)
-        table.setHorizontalHeaderLabels([
-            "#", "Name", "Status", "Issues", "Stepping", "Stability", "Delays"
-        ])
+        table.setHorizontalHeaderLabels(
+            ["#", "Name", "Status", "Issues", "Stepping", "Stability", "Delays"]
+        )
 
         # Configure table
         table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -268,7 +274,7 @@ class ReportViewer(QDialog):
             self.current_job = jobs[row]
             self._update_details(self.current_job)
 
-    def _update_details(self, job: Optional[Dict[str, Any]]):
+    def _update_details(self, job: dict[str, Any] | None):
         """Update the details panel with job info."""
         if not job:
             self.details_title.setText("Select a job to view details")
@@ -327,13 +333,19 @@ class ReportViewer(QDialog):
             lines.append("<b>Stepping Correction:</b>")
 
             if applied_to:
-                lines.append(f"  <span style='color: #28a745;'>Applied to:</span> {', '.join(applied_to)}")
+                lines.append(
+                    f"  <span style='color: #28a745;'>Applied to:</span> {', '.join(applied_to)}"
+                )
 
             if detected_disabled:
-                lines.append(f"  <span style='color: #ffc107;'>Detected (disabled):</span> {', '.join(detected_disabled)}")
+                lines.append(
+                    f"  <span style='color: #ffc107;'>Detected (disabled):</span> {', '.join(detected_disabled)}"
+                )
 
             if detected_separated:
-                lines.append(f"  <span style='color: #fd7e14;'>Detected (separated):</span> {', '.join(detected_separated)}")
+                lines.append(
+                    f"  <span style='color: #fd7e14;'>Detected (separated):</span> {', '.join(detected_separated)}"
+                )
 
             if quality_issues:
                 lines.append("")
@@ -342,7 +354,9 @@ class ReportViewer(QDialog):
                     severity = issue.get("severity", "info")
                     message = issue.get("message", "")
                     if severity == "high":
-                        lines.append(f"  <span style='color: #dc3545;'>! {message}</span>")
+                        lines.append(
+                            f"  <span style='color: #dc3545;'>! {message}</span>"
+                        )
                     else:
                         lines.append(f"  - {message}")
         else:
@@ -355,17 +369,23 @@ class ReportViewer(QDialog):
         if sync_stability:
             lines.append("<b>Sync Stability (Correlation Variance):</b>")
             for stability in sync_stability:
-                source = stability.get('source', 'Unknown')
-                variance_detected = stability.get('variance_detected', False)
-                max_variance = stability.get('max_variance_ms', 0)
-                std_dev = stability.get('std_dev_ms', 0)
-                outliers = stability.get('outliers', [])
+                source = stability.get("source", "Unknown")
+                variance_detected = stability.get("variance_detected", False)
+                max_variance = stability.get("max_variance_ms", 0)
+                std_dev = stability.get("std_dev_ms", 0)
+                outliers = stability.get("outliers", [])
 
                 if variance_detected:
-                    lines.append(f"  <span style='color: #fd7e14;'>{source}: Variance detected</span>")
-                    lines.append(f"    Max variance: {max_variance:.3f}ms, Std dev: {std_dev:.3f}ms")
+                    lines.append(
+                        f"  <span style='color: #fd7e14;'>{source}: Variance detected</span>"
+                    )
+                    lines.append(
+                        f"    Max variance: {max_variance:.3f}ms, Std dev: {std_dev:.3f}ms"
+                    )
                     if outliers:
-                        outlier_strs = [f"{o.get('delay_ms', 0):.1f}ms" for o in outliers[:5]]
+                        outlier_strs = [
+                            f"{o.get('delay_ms', 0):.1f}ms" for o in outliers[:5]
+                        ]
                         lines.append(f"    Outliers: {', '.join(outlier_strs)}")
                 else:
                     lines.append(f"  {source}: OK")

@@ -1,12 +1,12 @@
 # vsg_core/pipeline_components/sync_planner.py
-# -*- coding: utf-8 -*-
 """
 Sync planner component.
 
 Wraps the Orchestrator to provide a cleaner interface for sync planning.
 """
 
-from typing import Dict, List, Optional, Callable, Any
+from collections.abc import Callable
+from typing import Any
 
 from ..orchestrator.pipeline import Orchestrator
 
@@ -17,15 +17,15 @@ class SyncPlanner:
     @staticmethod
     def plan_sync(
         config: dict,
-        tool_paths: Dict[str, str],
+        tool_paths: dict[str, str],
         log_callback: Callable[[str], None],
         progress_callback: Callable[[float], None],
-        sources: Dict[str, str],
+        sources: dict[str, str],
         and_merge: bool,
         output_dir: str,
-        manual_layout: List[Dict],
-        attachment_sources: List[str],
-        source_settings: Optional[Dict[str, Dict[str, Any]]] = None
+        manual_layout: list[dict],
+        attachment_sources: list[str],
+        source_settings: dict[str, dict[str, Any]] | None = None,
     ) -> Any:
         """
         Plans the sync operation by analyzing sources and preparing merge tokens.
@@ -64,5 +64,5 @@ class SyncPlanner:
             output_dir=output_dir,
             manual_layout=manual_layout,
             attachment_sources=attachment_sources,
-            source_settings=source_settings or {}
+            source_settings=source_settings or {},
         )

@@ -1,5 +1,4 @@
 # vsg_core/audit/trail.py
-# -*- coding: utf-8 -*-
 """
 Pipeline audit trail for debugging timing issues.
 
@@ -13,6 +12,7 @@ Design principles:
 4. Human-readable - formatted JSON with meaningful key names
 5. Complete - captures raw values before any rounding
 """
+
 from __future__ import annotations
 
 import json
@@ -21,15 +21,17 @@ import shutil
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 
 class NumpyJSONEncoder(json.JSONEncoder):
     """JSON encoder that handles numpy types and Path objects."""
+
     def default(self, obj):
         # Try numpy types
         try:
             import numpy as np
+
             if isinstance(obj, np.integer):
                 return int(obj)
             if isinstance(obj, np.floating):
@@ -64,7 +66,7 @@ class AuditTrail:
     VERSION = "1.0"
     FILENAME = "pipeline_audit_trail.json"
 
-    def __init__(self, temp_dir: Union[Path, str], job_name: str):
+    def __init__(self, temp_dir: Path | str, job_name: str):
         """
         Initialize audit trail.
 
@@ -77,13 +79,13 @@ class AuditTrail:
         self.file_path = self.temp_dir / self.FILENAME
 
         # Initialize structure
-        self._data: Dict[str, Any] = {
+        self._data: dict[str, Any] = {
             "_metadata": {
                 "version": self.VERSION,
                 "created_at": datetime.now().isoformat(),
                 "job_name": job_name,
                 "temp_dir": str(temp_dir),
-                "output_file": None
+                "output_file": None,
             },
             "sources": {},
             "analysis": {
@@ -91,18 +93,13 @@ class AuditTrail:
                 "container_delays": {},
                 "delay_calculations": {},
                 "global_shift": {},
-                "final_delays": {}
+                "final_delays": {},
             },
-            "extraction": {
-                "tracks": []
-            },
+            "extraction": {"tracks": []},
             "stepping": {},
             "subtitle_processing": {},
-            "mux": {
-                "track_delays": [],
-                "tokens": []
-            },
-            "events": []
+            "mux": {"track_delays": [], "tokens": []},
+            "events": [],
         }
 
         # Write initial file
@@ -121,7 +118,7 @@ class AuditTrail:
         Raises:
             ValueError: If path is invalid or would overwrite a non-dict with a dict path
         """
-        parts = path.split('.')
+        parts = path.split(".")
         target = self._data
 
         # Navigate to parent, creating intermediate dicts as needed
@@ -137,7 +134,11 @@ class AuditTrail:
 
         # Set the value
         final_key = parts[-1]
-        if merge and isinstance(target.get(final_key), dict) and isinstance(value, dict):
+        if (
+            merge
+            and isinstance(target.get(final_key), dict)
+            and isinstance(value, dict)
+        ):
             target[final_key].update(value)
         else:
             target[final_key] = value
@@ -155,7 +156,7 @@ class AuditTrail:
             path: Dot-separated path to a list
             value: Value to append
         """
-        parts = path.split('.')
+        parts = path.split(".")
         target = self._data
 
         # Navigate to parent, creating intermediate dicts as needed
@@ -175,7 +176,9 @@ class AuditTrail:
         target[final_key].append(value)
         self._write()
 
-    def append_event(self, event_type: str, message: str, data: Optional[Dict] = None) -> None:
+    def append_event(
+        self, event_type: str, message: str, data: dict | None = None
+    ) -> None:
         """
         Append a timestamped event to the events log.
 
@@ -187,7 +190,7 @@ class AuditTrail:
         event = {
             "timestamp": datetime.now().isoformat(),
             "type": event_type,
-            "message": message
+            "message": message,
         }
         if data:
             event["data"] = data
@@ -207,7 +210,7 @@ class AuditTrail:
         source_data = {
             "file_path": str(file_path),
             "recorded_at": datetime.now().isoformat(),
-            **kwargs
+            **kwargs,
         }
         self.record(f"sources.{source_key}", source_data, merge=True)
 
@@ -219,7 +222,7 @@ class AuditTrail:
         delay_ms: int,
         raw_delay_ms: float,
         match_pct: float,
-        accepted: bool
+        accepted: bool,
     ) -> None:
         """
         Record a single correlation chunk result.
@@ -239,7 +242,7 @@ class AuditTrail:
             "delay_ms": delay_ms,
             "raw_delay_ms": round(raw_delay_ms, 6),
             "match_pct": round(match_pct, 4),
-            "accepted": accepted
+            "accepted": accepted,
         }
         self.append(f"analysis.correlations.{source_key}.chunks", chunk_data)
 
@@ -253,27 +256,30 @@ class AuditTrail:
         final_rounded_ms: int,
         selection_method: str,
         accepted_chunks: int,
-        total_chunks: int
+        total_chunks: int,
     ) -> None:
         """
         Record the delay calculation chain for a source.
 
         This captures the full calculation: correlation -> container adjustment -> final
         """
-        self.record(f"analysis.delay_calculations.{source_key}", {
-            "correlation": {
-                "raw_ms": round(correlation_raw_ms, 6),
-                "rounded_ms": correlation_rounded_ms,
-                "selection_method": selection_method,
-                "accepted_chunks": accepted_chunks,
-                "total_chunks": total_chunks
+        self.record(
+            f"analysis.delay_calculations.{source_key}",
+            {
+                "correlation": {
+                    "raw_ms": round(correlation_raw_ms, 6),
+                    "rounded_ms": correlation_rounded_ms,
+                    "selection_method": selection_method,
+                    "accepted_chunks": accepted_chunks,
+                    "total_chunks": total_chunks,
+                },
+                "container_delay_ms": round(container_delay_ms, 6),
+                "before_global_shift": {
+                    "raw_ms": round(final_raw_ms, 6),
+                    "rounded_ms": final_rounded_ms,
+                },
             },
-            "container_delay_ms": round(container_delay_ms, 6),
-            "before_global_shift": {
-                "raw_ms": round(final_raw_ms, 6),
-                "rounded_ms": final_rounded_ms
-            }
-        })
+        )
 
     def record_global_shift(
         self,
@@ -281,45 +287,47 @@ class AuditTrail:
         most_negative_rounded_ms: int,
         shift_raw_ms: float,
         shift_rounded_ms: int,
-        sync_mode: str
+        sync_mode: str,
     ) -> None:
         """
         Record global shift calculation.
         """
-        self.record("analysis.global_shift", {
-            "sync_mode": sync_mode,
-            "most_negative_delay": {
-                "raw_ms": round(most_negative_raw_ms, 6),
-                "rounded_ms": most_negative_rounded_ms
+        self.record(
+            "analysis.global_shift",
+            {
+                "sync_mode": sync_mode,
+                "most_negative_delay": {
+                    "raw_ms": round(most_negative_raw_ms, 6),
+                    "rounded_ms": most_negative_rounded_ms,
+                },
+                "calculated_shift": {
+                    "raw_ms": round(shift_raw_ms, 6),
+                    "rounded_ms": shift_rounded_ms,
+                },
             },
-            "calculated_shift": {
-                "raw_ms": round(shift_raw_ms, 6),
-                "rounded_ms": shift_rounded_ms
-            }
-        })
+        )
 
     def record_final_delay(
         self,
         source_key: str,
         raw_ms: float,
         rounded_ms: int,
-        includes_global_shift: bool
+        includes_global_shift: bool,
     ) -> None:
         """
         Record final delay for a source (after global shift applied).
         """
-        self.record(f"analysis.final_delays.{source_key}", {
-            "raw_ms": round(raw_ms, 6),
-            "rounded_ms": rounded_ms,
-            "includes_global_shift": includes_global_shift
-        })
+        self.record(
+            f"analysis.final_delays.{source_key}",
+            {
+                "raw_ms": round(raw_ms, 6),
+                "rounded_ms": rounded_ms,
+                "includes_global_shift": includes_global_shift,
+            },
+        )
 
     def record_subtitle_track(
-        self,
-        track_key: str,
-        source: str,
-        track_id: int,
-        **kwargs
+        self, track_key: str, source: str, track_id: int, **kwargs
     ) -> None:
         """
         Record or update subtitle track processing data.
@@ -356,18 +364,21 @@ class AuditTrail:
         first_event_start_ms: float,
         last_event_end_ms: float,
         style_count: int,
-        source_path: str
+        source_path: str,
     ) -> None:
         """
         Record parsed subtitle info.
         """
-        self.record(f"subtitle_processing.{track_key}.parsed", {
-            "source_path": str(source_path),
-            "event_count": event_count,
-            "first_event_start_ms": round(first_event_start_ms, 3),
-            "last_event_end_ms": round(last_event_end_ms, 3),
-            "style_count": style_count
-        })
+        self.record(
+            f"subtitle_processing.{track_key}.parsed",
+            {
+                "source_path": str(source_path),
+                "event_count": event_count,
+                "first_event_start_ms": round(first_event_start_ms, 3),
+                "last_event_end_ms": round(last_event_end_ms, 3),
+                "style_count": style_count,
+            },
+        )
 
     def record_subtitle_sync(
         self,
@@ -382,28 +393,34 @@ class AuditTrail:
         stepping_adjusted_before: bool,
         stepping_adjusted_after: bool,
         frame_adjusted_before: bool,
-        frame_adjusted_after: bool
+        frame_adjusted_after: bool,
     ) -> None:
         """
         Record subtitle sync operation details.
         """
-        self.record(f"subtitle_processing.{track_key}.sync", {
-            "sync_mode": sync_mode,
-            "delay_from_context": {
-                "source_key": source_key,
-                "raw_ms": round(delay_from_context_raw_ms, 6),
-                "rounded_ms": delay_from_context_rounded_ms,
-                "global_shift_raw_ms": round(global_shift_raw_ms, 6)
+        self.record(
+            f"subtitle_processing.{track_key}.sync",
+            {
+                "sync_mode": sync_mode,
+                "delay_from_context": {
+                    "source_key": source_key,
+                    "raw_ms": round(delay_from_context_raw_ms, 6),
+                    "rounded_ms": delay_from_context_rounded_ms,
+                    "global_shift_raw_ms": round(global_shift_raw_ms, 6),
+                },
+                "plugin": {"name": plugin_name, "events_modified": events_modified},
+                "flags": {
+                    "stepping_adjusted": {
+                        "before": stepping_adjusted_before,
+                        "after": stepping_adjusted_after,
+                    },
+                    "frame_adjusted": {
+                        "before": frame_adjusted_before,
+                        "after": frame_adjusted_after,
+                    },
+                },
             },
-            "plugin": {
-                "name": plugin_name,
-                "events_modified": events_modified
-            },
-            "flags": {
-                "stepping_adjusted": {"before": stepping_adjusted_before, "after": stepping_adjusted_after},
-                "frame_adjusted": {"before": frame_adjusted_before, "after": frame_adjusted_after}
-            }
-        })
+        )
 
     def record_mux_track_delay(
         self,
@@ -413,10 +430,10 @@ class AuditTrail:
         track_id: int,
         final_delay_ms: int,
         reason: str,
-        raw_delay_available_ms: Optional[float] = None,
+        raw_delay_available_ms: float | None = None,
         stepping_adjusted: bool = False,
         frame_adjusted: bool = False,
-        sync_key: Optional[str] = None
+        sync_key: str | None = None,
     ) -> None:
         """
         Record the final delay calculation for a track in mux.
@@ -431,24 +448,27 @@ class AuditTrail:
             "sync_key": sync_key,
             "flags": {
                 "stepping_adjusted": stepping_adjusted,
-                "frame_adjusted": frame_adjusted
-            }
+                "frame_adjusted": frame_adjusted,
+            },
         }
         if raw_delay_available_ms is not None:
             entry["raw_delay_available_ms"] = round(raw_delay_available_ms, 6)
 
         self.append("mux.track_delays", entry)
 
-    def record_mux_tokens(self, tokens: List[str]) -> None:
+    def record_mux_tokens(self, tokens: list[str]) -> None:
         """
         Record the final mkvmerge tokens.
         """
         self.record("mux.tokens", tokens)
-        self.record("mux.command_preview", " ".join(tokens[:20]) + ("..." if len(tokens) > 20 else ""))
+        self.record(
+            "mux.command_preview",
+            " ".join(tokens[:20]) + ("..." if len(tokens) > 20 else ""),
+        )
 
-    def _get_nested(self, path: str) -> Optional[Any]:
+    def _get_nested(self, path: str) -> Any | None:
         """Get value at nested path, or None if not found."""
-        parts = path.split('.')
+        parts = path.split(".")
         target = self._data
         for part in parts:
             if not isinstance(target, dict) or part not in target:
@@ -467,19 +487,13 @@ class AuditTrail:
 
         # Create temp file in same directory (ensures same filesystem for rename)
         fd, temp_path = tempfile.mkstemp(
-            suffix='.tmp',
-            prefix='audit_',
-            dir=self.temp_dir
+            suffix=".tmp", prefix="audit_", dir=self.temp_dir
         )
 
         try:
-            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(
-                    self._data,
-                    f,
-                    indent=2,
-                    ensure_ascii=False,
-                    cls=NumpyJSONEncoder
+                    self._data, f, indent=2, ensure_ascii=False, cls=NumpyJSONEncoder
                 )
 
             # Atomic rename
@@ -496,7 +510,7 @@ class AuditTrail:
         """Return path to the audit trail file."""
         return self.file_path
 
-    def finalize(self, output_file: Optional[str] = None, success: bool = True) -> None:
+    def finalize(self, output_file: str | None = None, success: bool = True) -> None:
         """
         Finalize the audit trail.
 
@@ -510,6 +524,6 @@ class AuditTrail:
             self._data["_metadata"]["output_file"] = str(output_file)
         self._write()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return copy of the audit data."""
         return dict(self._data)

@@ -1,17 +1,24 @@
 # vsg_qt/favorites_dialog/ui.py
-# -*- coding: utf-8 -*-
 """
 Favorites Manager Dialog
 
 A dialog for managing saved favorite colors - view, edit names, delete.
 """
-from typing import Optional, Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
-    QPushButton, QLabel, QLineEdit, QMessageBox, QColorDialog, QWidget
+    QColorDialog,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
 
 from vsg_core.favorite_colors import FavoriteColorsManager
@@ -24,19 +31,23 @@ class ColorSwatchWidget(QWidget):
         super().__init__(parent)
         self.setFixedSize(size, size)
         self._hex_color = hex_color
-        self.setStyleSheet(f"""
+        self.setStyleSheet(
+            f"""
             background-color: {QColor(hex_color).name()};
             border: 1px solid #666;
             border-radius: 2px;
-        """)
+        """
+        )
 
     def set_color(self, hex_color: str):
         self._hex_color = hex_color
-        self.setStyleSheet(f"""
+        self.setStyleSheet(
+            f"""
             background-color: {QColor(hex_color).name()};
             border: 1px solid #666;
             border-radius: 2px;
-        """)
+        """
+        )
 
 
 class FavoritesManagerDialog(QDialog):
@@ -111,7 +122,7 @@ class FavoritesManagerDialog(QDialog):
         layout.addLayout(button_layout)
 
         # Track currently selected favorite
-        self._current_favorite_id: Optional[str] = None
+        self._current_favorite_id: str | None = None
         self._current_hex: str = "#FFFFFFFF"
 
     def _connect_signals(self):
@@ -130,18 +141,18 @@ class FavoritesManagerDialog(QDialog):
 
         for fav in favorites:
             item = QListWidgetItem()
-            item.setData(Qt.UserRole, fav['id'])
+            item.setData(Qt.UserRole, fav["id"])
 
             # Create display text with color preview indicator
-            hex_display = fav['hex']
+            hex_display = fav["hex"]
             if len(hex_display) == 9:  # #AARRGGBB format
-                hex_display = '#' + hex_display[3:]  # Show as #RRGGBB for display
+                hex_display = "#" + hex_display[3:]  # Show as #RRGGBB for display
 
             display_text = f"{fav['name']}  ({hex_display})"
             item.setText(display_text)
 
             # Set background color hint
-            color = QColor(fav['hex'])
+            color = QColor(fav["hex"])
             # Use a subtle background tint
             color.setAlpha(60)
             item.setBackground(color)
@@ -156,7 +167,9 @@ class FavoritesManagerDialog(QDialog):
             self.save_edit_btn.setEnabled(False)
             self.delete_btn.setEnabled(False)
 
-    def _on_selection_changed(self, current: QListWidgetItem, previous: QListWidgetItem):
+    def _on_selection_changed(
+        self, current: QListWidgetItem, previous: QListWidgetItem
+    ):
         """Handle selection change in the favorites list."""
         if current is None:
             self._current_favorite_id = None
@@ -169,14 +182,14 @@ class FavoritesManagerDialog(QDialog):
 
         if favorite:
             self._current_favorite_id = favorite_id
-            self._current_hex = favorite['hex']
+            self._current_hex = favorite["hex"]
 
             # Update edit section
             self.name_edit.blockSignals(True)
-            self.name_edit.setText(favorite['name'])
+            self.name_edit.setText(favorite["name"])
             self.name_edit.blockSignals(False)
 
-            self.color_swatch.set_color(favorite['hex'])
+            self.color_swatch.set_color(favorite["hex"])
             self.delete_btn.setEnabled(True)
             self.save_edit_btn.setEnabled(False)
 
@@ -208,9 +221,7 @@ class FavoritesManagerDialog(QDialog):
             new_name = "Unnamed Color"
 
         self.favorites_manager.update(
-            self._current_favorite_id,
-            name=new_name,
-            hex_color=self._current_hex
+            self._current_favorite_id, name=new_name, hex_color=self._current_hex
         )
 
         self.save_edit_btn.setEnabled(False)
@@ -255,7 +266,7 @@ class FavoritesManagerDialog(QDialog):
             "Delete Favorite",
             f"Delete '{favorite['name']}'?",
             QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
+            QMessageBox.No,
         )
 
         if reply == QMessageBox.Yes:

@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/engine.py
-# -*- coding: utf-8 -*-
 """
 Tesseract OCR Engine Wrapper
 
@@ -13,14 +12,13 @@ Uses pytesseract as the interface to Tesseract 5.x
 """
 
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import List, Optional, Tuple
+
 import numpy as np
-import re
 
 try:
     import pytesseract
     from pytesseract import Output
+
     PYTESSERACT_AVAILABLE = True
 except ImportError:
     PYTESSERACT_AVAILABLE = False
@@ -29,11 +27,12 @@ except ImportError:
 @dataclass
 class OCRConfig:
     """Configuration for OCR engine."""
-    language: str = 'eng'
+
+    language: str = "eng"
     psm: int = 6  # Block mode - works better for DVD subtitles than line mode
     oem: int = 3  # Default - use LSTM if available
-    char_whitelist: str = ''  # Characters to allow (empty = all)
-    char_blacklist: str = '|'  # Exclude pipe which is often misread
+    char_whitelist: str = ""  # Characters to allow (empty = all)
+    char_blacklist: str = "|"  # Exclude pipe which is often misread
 
     # Confidence thresholds
     min_confidence: float = 0.0  # Minimum confidence to accept (0-100)
@@ -47,9 +46,10 @@ class OCRConfig:
 @dataclass
 class OCRLineResult:
     """Result for a single OCR line."""
+
     text: str
     confidence: float  # 0-100 scale
-    word_confidences: List[Tuple[str, float]] = field(default_factory=list)
+    word_confidences: list[tuple[str, float]] = field(default_factory=list)
     psm_used: int = 7
     was_retry: bool = False
 
@@ -57,12 +57,13 @@ class OCRLineResult:
 @dataclass
 class OCRResult:
     """Complete OCR result for a subtitle image."""
+
     text: str  # Full recognized text
-    lines: List[OCRLineResult] = field(default_factory=list)
+    lines: list[OCRLineResult] = field(default_factory=list)
     average_confidence: float = 0.0
     min_confidence: float = 0.0
     low_confidence: bool = False
-    error: Optional[str] = None
+    error: str | None = None
 
     @property
     def success(self) -> bool:
@@ -77,11 +78,10 @@ class OCREngine:
     Provides line-by-line OCR with detailed confidence information.
     """
 
-    def __init__(self, config: Optional[OCRConfig] = None):
+    def __init__(self, config: OCRConfig | None = None):
         if not PYTESSERACT_AVAILABLE:
             raise ImportError(
-                "pytesseract is not installed. "
-                "Install with: pip install pytesseract"
+                "pytesseract is not installed. " "Install with: pip install pytesseract"
             )
 
         self.config = config or OCRConfig()
@@ -98,7 +98,7 @@ class OCREngine:
                 "Install Tesseract: apt install tesseract-ocr tesseract-ocr-eng"
             )
 
-    def _build_config(self, psm: Optional[int] = None) -> str:
+    def _build_config(self, psm: int | None = None) -> str:
         """
         Build Tesseract configuration string.
 
@@ -112,26 +112,26 @@ class OCREngine:
 
         # Page segmentation mode
         mode = psm if psm is not None else self.config.psm
-        config_parts.append(f'--psm {mode}')
+        config_parts.append(f"--psm {mode}")
 
         # OCR Engine mode
-        config_parts.append(f'--oem {self.config.oem}')
+        config_parts.append(f"--oem {self.config.oem}")
 
         # Character restrictions
         if self.config.char_whitelist:
             config_parts.append(
-                f'-c tessedit_char_whitelist={self.config.char_whitelist}'
+                f"-c tessedit_char_whitelist={self.config.char_whitelist}"
             )
         if self.config.char_blacklist:
             config_parts.append(
-                f'-c tessedit_char_blacklist={self.config.char_blacklist}'
+                f"-c tessedit_char_blacklist={self.config.char_blacklist}"
             )
 
         # Additional Tesseract settings for subtitle OCR
         # These help with the outlined/anti-aliased fonts common in DVD subtitles
-        config_parts.append('-c preserve_interword_spaces=1')
+        config_parts.append("-c preserve_interword_spaces=1")
 
-        return ' '.join(config_parts)
+        return " ".join(config_parts)
 
     def ocr_image(self, image: np.ndarray) -> OCRResult:
         """
@@ -143,16 +143,13 @@ class OCREngine:
         Returns:
             OCRResult with recognized text and confidence
         """
-        result = OCRResult(text='')
+        result = OCRResult(text="")
 
         try:
             # Get detailed OCR data with confidence
             config = self._build_config()
             data = pytesseract.image_to_data(
-                image,
-                lang=self.config.language,
-                config=config,
-                output_type=Output.DICT
+                image, lang=self.config.language, config=config, output_type=Output.DICT
             )
 
             # Process results
@@ -164,7 +161,9 @@ class OCREngine:
 
             # Calculate confidence stats
             if lines:
-                confidences = [line.confidence for line in lines if line.confidence >= 0]
+                confidences = [
+                    line.confidence for line in lines if line.confidence >= 0
+                ]
                 if confidences:
                     result.average_confidence = sum(confidences) / len(confidences)
                     result.min_confidence = min(confidences)
@@ -173,10 +172,11 @@ class OCREngine:
                     )
 
             # Multi-pass retry if configured and confidence is low
-            if (self.config.enable_multi_pass and
-                result.low_confidence and
-                self.config.fallback_psm != self.config.psm):
-
+            if (
+                self.config.enable_multi_pass
+                and result.low_confidence
+                and self.config.fallback_psm != self.config.psm
+            ):
                 retry_result = self._retry_with_fallback(image)
                 if retry_result.average_confidence > result.average_confidence:
                     result = retry_result
@@ -186,26 +186,22 @@ class OCREngine:
 
         return result
 
-    def _process_ocr_data(
-        self,
-        data: dict,
-        psm_used: int
-    ) -> List[OCRLineResult]:
+    def _process_ocr_data(self, data: dict, psm_used: int) -> list[OCRLineResult]:
         """
         Process Tesseract output data into structured results.
 
         Tesseract returns data at word level with block/line/word hierarchy.
         """
-        lines: List[OCRLineResult] = []
-        current_line: Optional[OCRLineResult] = None
+        lines: list[OCRLineResult] = []
+        current_line: OCRLineResult | None = None
         current_line_num = -1
 
-        n_boxes = len(data['text'])
+        n_boxes = len(data["text"])
 
         for i in range(n_boxes):
-            text = data['text'][i].strip()
-            conf = float(data['conf'][i])
-            line_num = data['line_num'][i]
+            text = data["text"][i].strip()
+            conf = float(data["conf"][i])
+            line_num = data["line_num"][i]
 
             # Skip empty entries
             if not text:
@@ -216,17 +212,14 @@ class OCREngine:
                 if current_line is not None:
                     lines.append(current_line)
                 current_line = OCRLineResult(
-                    text='',
-                    confidence=0.0,
-                    word_confidences=[],
-                    psm_used=psm_used
+                    text="", confidence=0.0, word_confidences=[], psm_used=psm_used
                 )
                 current_line_num = line_num
 
             # Add word to current line
             if current_line is not None:
                 if current_line.text:
-                    current_line.text += ' '
+                    current_line.text += " "
                 current_line.text += text
                 if conf >= 0:  # -1 means no confidence available
                     current_line.word_confidences.append((text, conf))
@@ -244,9 +237,9 @@ class OCREngine:
 
         return lines
 
-    def _build_text_from_lines(self, lines: List[OCRLineResult]) -> str:
+    def _build_text_from_lines(self, lines: list[OCRLineResult]) -> str:
         """Build full text from line results."""
-        return '\n'.join(line.text for line in lines if line.text.strip())
+        return "\n".join(line.text for line in lines if line.text.strip())
 
     def _retry_with_fallback(self, image: np.ndarray) -> OCRResult:
         """
@@ -254,15 +247,12 @@ class OCREngine:
 
         Used when initial OCR has low confidence.
         """
-        result = OCRResult(text='')
+        result = OCRResult(text="")
 
         try:
             config = self._build_config(psm=self.config.fallback_psm)
             data = pytesseract.image_to_data(
-                image,
-                lang=self.config.language,
-                config=config,
-                output_type=Output.DICT
+                image, lang=self.config.language, config=config, output_type=Output.DICT
             )
 
             lines = self._process_ocr_data(data, self.config.fallback_psm)
@@ -275,7 +265,9 @@ class OCREngine:
             result.text = self._build_text_from_lines(lines)
 
             if lines:
-                confidences = [line.confidence for line in lines if line.confidence >= 0]
+                confidences = [
+                    line.confidence for line in lines if line.confidence >= 0
+                ]
                 if confidences:
                     result.average_confidence = sum(confidences) / len(confidences)
                     result.min_confidence = min(confidences)
@@ -289,9 +281,7 @@ class OCREngine:
         return result
 
     def ocr_lines_separately(
-        self,
-        image: np.ndarray,
-        line_images: Optional[List[np.ndarray]] = None
+        self, image: np.ndarray, line_images: list[np.ndarray] | None = None
     ) -> OCRResult:
         """
         OCR each line separately for better accuracy.
@@ -330,7 +320,9 @@ class OCREngine:
         )
 
         if all_lines:
-            confidences = [line.confidence for line in all_lines if line.confidence >= 0]
+            confidences = [
+                line.confidence for line in all_lines if line.confidence >= 0
+            ]
             if confidences:
                 result.average_confidence = sum(confidences) / len(confidences)
                 result.min_confidence = min(confidences)
@@ -347,16 +339,13 @@ class OCREngine:
         PSM 7 is optimized for single lines and gives much better results
         than block modes for subtitle lines.
         """
-        result = OCRResult(text='')
+        result = OCRResult(text="")
 
         try:
             # Use PSM 7 specifically for single lines
             config = self._build_config(psm=7)
             data = pytesseract.image_to_data(
-                image,
-                lang=self.config.language,
-                config=config,
-                output_type=Output.DICT
+                image, lang=self.config.language, config=config, output_type=Output.DICT
             )
 
             lines = self._process_ocr_data(data, 7)
@@ -364,7 +353,9 @@ class OCREngine:
             result.text = self._build_text_from_lines(lines)
 
             if lines:
-                confidences = [line.confidence for line in lines if line.confidence >= 0]
+                confidences = [
+                    line.confidence for line in lines if line.confidence >= 0
+                ]
                 if confidences:
                     result.average_confidence = sum(confidences) / len(confidences)
                     result.min_confidence = min(confidences)
@@ -374,7 +365,7 @@ class OCREngine:
 
         return result
 
-    def _split_into_lines(self, image: np.ndarray) -> List[np.ndarray]:
+    def _split_into_lines(self, image: np.ndarray) -> list[np.ndarray]:
         """
         Split a multi-line subtitle image into separate line images.
 
@@ -433,7 +424,7 @@ class OCREngine:
         return lines
 
 
-def get_available_languages() -> List[str]:
+def get_available_languages() -> list[str]:
     """
     Get list of available Tesseract languages.
 
@@ -447,7 +438,7 @@ def get_available_languages() -> List[str]:
         langs = pytesseract.get_languages()
         return langs
     except Exception:
-        return ['eng']  # Assume at least English is available
+        return ["eng"]  # Assume at least English is available
 
 
 def create_ocr_engine(settings_dict: dict) -> OCREngine:
@@ -461,25 +452,27 @@ def create_ocr_engine(settings_dict: dict) -> OCREngine:
         Configured OCREngine
     """
     # Get configured language or auto-detect
-    language = settings_dict.get('ocr_language', 'eng')
+    language = settings_dict.get("ocr_language", "eng")
 
     # If language is 'auto', try to use eng+jpn for anime subtitles
-    if language == 'auto':
+    if language == "auto":
         available = get_available_languages()
-        if 'jpn' in available and 'eng' in available:
-            language = 'eng+jpn'
-        elif 'eng' in available:
-            language = 'eng'
+        if "jpn" in available and "eng" in available:
+            language = "eng+jpn"
+        elif "eng" in available:
+            language = "eng"
         else:
-            language = available[0] if available else 'eng'
+            language = available[0] if available else "eng"
 
     config = OCRConfig(
         language=language,
-        psm=settings_dict.get('ocr_psm', 7),
-        char_whitelist=settings_dict.get('ocr_char_whitelist', ''),
-        char_blacklist=settings_dict.get('ocr_char_blacklist', '|'),
-        low_confidence_threshold=settings_dict.get('ocr_low_confidence_threshold', 60.0),
-        enable_multi_pass=settings_dict.get('ocr_multi_pass', True),
+        psm=settings_dict.get("ocr_psm", 7),
+        char_whitelist=settings_dict.get("ocr_char_whitelist", ""),
+        char_blacklist=settings_dict.get("ocr_char_blacklist", "|"),
+        low_confidence_threshold=settings_dict.get(
+            "ocr_low_confidence_threshold", 60.0
+        ),
+        enable_multi_pass=settings_dict.get("ocr_multi_pass", True),
     )
 
     return OCREngine(config)
@@ -488,6 +481,7 @@ def create_ocr_engine(settings_dict: dict) -> OCREngine:
 # =============================================================================
 # New Backend-based Engine Factory
 # =============================================================================
+
 
 def create_ocr_engine_v2(settings_dict: dict):
     """
@@ -504,8 +498,8 @@ def create_ocr_engine_v2(settings_dict: dict):
     from .backends import create_backend, get_available_backends
 
     # Get backend preference
-    backend_name = settings_dict.get('ocr_engine', 'tesseract')
-    language = settings_dict.get('ocr_language', 'eng')
+    backend_name = settings_dict.get("ocr_engine", "tesseract")
+    language = settings_dict.get("ocr_language", "eng")
 
     # Check if requested backend is available
     available = get_available_backends()
@@ -513,18 +507,23 @@ def create_ocr_engine_v2(settings_dict: dict):
         # Fall back to first available
         if available:
             import logging
+
             logging.getLogger(__name__).warning(
                 f"OCR backend '{backend_name}' not available. "
                 f"Falling back to '{available[0]}'"
             )
             backend_name = available[0]
         else:
-            raise RuntimeError("No OCR backends available. Install pytesseract or easyocr.")
+            raise RuntimeError(
+                "No OCR backends available. Install pytesseract or easyocr."
+            )
 
     # Create backend with language
-    char_blacklist = settings_dict.get('ocr_char_blacklist', '|')
+    char_blacklist = settings_dict.get("ocr_char_blacklist", "|")
 
-    if backend_name == 'tesseract':
-        return create_backend(backend_name, language=language, char_blacklist=char_blacklist)
+    if backend_name == "tesseract":
+        return create_backend(
+            backend_name, language=language, char_blacklist=char_blacklist
+        )
     else:
         return create_backend(backend_name, language=language)

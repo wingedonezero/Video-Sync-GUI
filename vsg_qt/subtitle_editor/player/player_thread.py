@@ -1,19 +1,19 @@
 # vsg_qt/subtitle_editor/player/player_thread.py
-# -*- coding: utf-8 -*-
 """
 Video player thread for subtitle editor.
 
 Handles video decoding and subtitle overlay rendering using PyAV and libass.
 Simple and reliable implementation.
 """
+
 import gc
 import time
 from pathlib import Path
 from threading import Lock
-from PySide6.QtCore import QThread, Signal, Slot
-from PySide6.QtGui import QImage
 
 import av
+from PySide6.QtCore import QThread, Signal, Slot
+from PySide6.QtGui import QImage
 
 
 class PlayerThread(QThread):
@@ -34,8 +34,14 @@ class PlayerThread(QThread):
     time_changed = Signal(int)
     fps_detected = Signal(float)
 
-    def __init__(self, video_path: str, subtitle_path: str, widget_win_id,
-                 fonts_dir: str | None, parent=None):
+    def __init__(
+        self,
+        video_path: str,
+        subtitle_path: str,
+        widget_win_id,
+        fonts_dir: str | None,
+        parent=None,
+    ):
         super().__init__(parent)
         self.video_path = video_path
         self.subtitle_path = subtitle_path
@@ -82,24 +88,30 @@ class PlayerThread(QThread):
         """Set up the filter graph for subtitle rendering."""
         self._graph = av.filter.Graph()
         buffer_in = self._graph.add_buffer(template=self._video_stream)
-        buffer_out = self._graph.add('buffersink')
+        buffer_out = self._graph.add("buffersink")
 
-        escaped_path = (Path(self.subtitle_path).as_posix()
-                       .replace('\\', '\\\\')
-                       .replace("'", "\\'")
-                       .replace(':', '\\:')
-                       .replace(',', '\\,'))
+        escaped_path = (
+            Path(self.subtitle_path)
+            .as_posix()
+            .replace("\\", "\\\\")
+            .replace("'", "\\'")
+            .replace(":", "\\:")
+            .replace(",", "\\,")
+        )
 
         filter_args = f"filename='{escaped_path}'"
         if self.fonts_dir:
-            escaped_fonts_dir = (Path(self.fonts_dir).as_posix()
-                                .replace('\\', '\\\\')
-                                .replace("'", "\\'")
-                                .replace(':', '\\:')
-                                .replace(',', '\\,'))
+            escaped_fonts_dir = (
+                Path(self.fonts_dir)
+                .as_posix()
+                .replace("\\", "\\\\")
+                .replace("'", "\\'")
+                .replace(":", "\\:")
+                .replace(",", "\\,")
+            )
             filter_args += f":fontsdir='{escaped_fonts_dir}'"
 
-        subtitles_filter = self._graph.add(filter='subtitles', args=filter_args)
+        subtitles_filter = self._graph.add(filter="subtitles", args=filter_args)
         buffer_in.link_to(subtitles_filter)
         subtitles_filter.link_to(buffer_out)
         self._graph.configure()
@@ -107,7 +119,7 @@ class PlayerThread(QThread):
     def run(self):
         """Main thread loop."""
         try:
-            self._container = av.open(self.video_path, 'r')
+            self._container = av.open(self.video_path, "r")
             self._video_stream = self._container.streams.video[0]
             self._video_stream.thread_type = "AUTO"
 
@@ -151,15 +163,20 @@ class PlayerThread(QThread):
                             self._graph.push(self._cached_raw_frame)
                             filtered_frame = self._graph.pull()
                             pillow_img = filtered_frame.to_image()
-                            rgb_img = pillow_img.convert('RGB')
-                            q_image = QImage(rgb_img.tobytes(), rgb_img.width, rgb_img.height,
-                                            QImage.Format_RGB888)
+                            rgb_img = pillow_img.convert("RGB")
+                            q_image = QImage(
+                                rgb_img.tobytes(),
+                                rgb_img.width,
+                                rgb_img.height,
+                                QImage.Format_RGB888,
+                            )
 
                             self.new_frame.emit(q_image, self._cached_frame_timestamp)
                             self.time_changed.emit(self._current_time_ms)
                     except Exception as e:
                         print(f"Error during subtitle reload: {e}")
                         import traceback
+
                         traceback.print_exc()
 
                     continue
@@ -172,13 +189,17 @@ class PlayerThread(QThread):
                     try:
                         # Seek to keyframe before target
                         seek_pts = int(target_ms / 1000 / self._video_stream.time_base)
-                        self._container.seek(seek_pts, stream=self._video_stream, backward=True)
+                        self._container.seek(
+                            seek_pts, stream=self._video_stream, backward=True
+                        )
                         frame_generator = self._container.decode(self._video_stream)
                         self._setup_graph()
 
                         # Decode forward until we reach the frame containing target time
                         # Frame duration in ms
-                        frame_duration_ms = 1000.0 / self._fps if self._fps > 0 else 41.7
+                        frame_duration_ms = (
+                            1000.0 / self._fps if self._fps > 0 else 41.7
+                        )
                         target_frame = None
                         target_raw_frame = None
                         target_timestamp_sec = 0.0
@@ -207,9 +228,13 @@ class PlayerThread(QThread):
                             self._cached_frame_timestamp = target_timestamp_sec
                             # Render the target frame
                             pillow_img = target_frame.to_image()
-                            rgb_img = pillow_img.convert('RGB')
-                            q_image = QImage(rgb_img.tobytes(), rgb_img.width, rgb_img.height,
-                                            QImage.Format_RGB888)
+                            rgb_img = pillow_img.convert("RGB")
+                            q_image = QImage(
+                                rgb_img.tobytes(),
+                                rgb_img.width,
+                                rgb_img.height,
+                                QImage.Format_RGB888,
+                            )
 
                             self._current_time_ms = int(target_timestamp_sec * 1000)
                             self.new_frame.emit(q_image, target_timestamp_sec)
@@ -221,6 +246,7 @@ class PlayerThread(QThread):
                     except Exception as e:
                         print(f"Error during seek: {e}")
                         import traceback
+
                         traceback.print_exc()
 
                     continue  # Skip normal frame processing after seek
@@ -247,9 +273,13 @@ class PlayerThread(QThread):
                 self._graph.push(frame)
                 filtered_frame = self._graph.pull()
                 pillow_img = filtered_frame.to_image()
-                rgb_img = pillow_img.convert('RGB')
-                q_image = QImage(rgb_img.tobytes(), rgb_img.width, rgb_img.height,
-                                QImage.Format_RGB888)
+                rgb_img = pillow_img.convert("RGB")
+                q_image = QImage(
+                    rgb_img.tobytes(),
+                    rgb_img.width,
+                    rgb_img.height,
+                    QImage.Format_RGB888,
+                )
 
                 self.new_frame.emit(q_image, timestamp_sec)
                 self.time_changed.emit(self._current_time_ms)
@@ -265,7 +295,7 @@ class PlayerThread(QThread):
                 continue
 
             delay = self._frame_delay
-            time.sleep(delay if delay > 0.001 else 0.001)
+            time.sleep(max(0.001, delay))
 
         self._cleanup_resources()
 

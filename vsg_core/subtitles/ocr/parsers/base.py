@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/parsers/base.py
-# -*- coding: utf-8 -*-
 """
 Base classes and dataclasses for subtitle image parsing.
 
@@ -10,7 +9,8 @@ Provides common interfaces and data structures used by all subtitle parsers
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Optional
+
 import numpy as np
 
 
@@ -33,6 +33,7 @@ class SubtitleImage:
         is_forced: Whether this is a forced subtitle
         palette: Color palette if applicable (for indexed color images)
     """
+
     index: int
     start_ms: int
     end_ms: int
@@ -44,7 +45,7 @@ class SubtitleImage:
     frame_width: int = 720  # Default DVD resolution
     frame_height: int = 480
     is_forced: bool = False
-    palette: Optional[List[Tuple[int, int, int, int]]] = None
+    palette: list[tuple[int, int, int, int]] | None = None
 
     def __post_init__(self):
         """Set width/height from image if not provided."""
@@ -140,10 +141,11 @@ class ParseResult:
         errors: Any errors encountered during parsing
         warnings: Any warnings generated during parsing
     """
-    subtitles: List[SubtitleImage] = field(default_factory=list)
+
+    subtitles: list[SubtitleImage] = field(default_factory=list)
     format_info: dict = field(default_factory=dict)
-    errors: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def success(self) -> bool:
@@ -166,7 +168,7 @@ class SubtitleImageParser(ABC):
     """
 
     @abstractmethod
-    def parse(self, file_path: Path, work_dir: Optional[Path] = None) -> ParseResult:
+    def parse(self, file_path: Path, work_dir: Path | None = None) -> ParseResult:
         """
         Parse a subtitle file and extract images.
 
@@ -193,7 +195,7 @@ class SubtitleImageParser(ABC):
         pass
 
     @staticmethod
-    def detect_parser(file_path: Path) -> Optional['SubtitleImageParser']:
+    def detect_parser(file_path: Path) -> Optional["SubtitleImageParser"]:
         """
         Detect the appropriate parser for a file based on extension.
 
@@ -204,11 +206,12 @@ class SubtitleImageParser(ABC):
             Appropriate parser instance, or None if no parser matches
         """
         from .vobsub import VobSubParser
+
         # Future: from .pgs import PGSParser
 
         suffix = file_path.suffix.lower()
 
-        if suffix in ('.idx', '.sub'):
+        if suffix in (".idx", ".sub"):
             return VobSubParser()
         # Future: elif suffix == '.sup':
         #     return PGSParser()

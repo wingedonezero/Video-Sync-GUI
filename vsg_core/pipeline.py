@@ -1,5 +1,4 @@
 # vsg_core/pipeline.py
-# -*- coding: utf-8 -*-
 """
 Job pipeline orchestrator.
 
@@ -8,17 +7,18 @@ maintainability and testability.
 """
 
 import shutil
+from collections.abc import Callable
 from pathlib import Path
-from typing import List, Dict, Any, Callable, Optional
+from typing import Any
 
 from .io.runner import CommandRunner
 from .pipeline_components import (
-    ToolValidator,
     LogManager,
     OutputWriter,
+    ResultAuditor,
     SyncExecutor,
     SyncPlanner,
-    ResultAuditor,
+    ToolValidator,
 )
 
 
@@ -34,7 +34,7 @@ class JobPipeline:
         self,
         config: dict,
         log_callback: Callable[[str], None],
-        progress_callback: Callable[[float], None]
+        progress_callback: Callable[[float], None],
     ):
         """
         Initializes the job pipeline.
@@ -51,13 +51,13 @@ class JobPipeline:
 
     def run_job(
         self,
-        sources: Dict[str, str],
+        sources: dict[str, str],
         and_merge: bool,
         output_dir_str: str,
-        manual_layout: Optional[List[Dict]] = None,
-        attachment_sources: Optional[List[str]] = None,
-        source_settings: Optional[Dict[str, Dict[str, Any]]] = None
-    ) -> Dict[str, Any]:
+        manual_layout: list[dict] | None = None,
+        attachment_sources: list[str] | None = None,
+        source_settings: dict[str, dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         """
         Runs a complete sync job.
 
@@ -102,27 +102,27 @@ class JobPipeline:
         try:
             self.tool_paths = ToolValidator.validate_tools()
         except FileNotFoundError as e:
-            log_to_all(f'[ERROR] {e}')
+            log_to_all(f"[ERROR] {e}")
             return {
-                'status': 'Failed',
-                'error': str(e),
-                'name': Path(source1_file).name
+                "status": "Failed",
+                "error": str(e),
+                "name": Path(source1_file).name,
             }
 
-        log_to_all(f'=== Starting Job: {Path(source1_file).name} ===')
+        log_to_all(f"=== Starting Job: {Path(source1_file).name} ===")
         self.progress(0.0)
 
         # --- 4. Validate Merge Requirements ---
         if and_merge and manual_layout is None:
-            err_msg = 'Manual layout required for merge.'
-            log_to_all(f'[ERROR] {err_msg}')
+            err_msg = "Manual layout required for merge."
+            log_to_all(f"[ERROR] {err_msg}")
             return {
-                'status': 'Failed',
-                'error': err_msg,
-                'name': Path(source1_file).name
+                "status": "Failed",
+                "error": err_msg,
+                "name": Path(source1_file).name,
             }
 
-        ctx_temp_dir: Optional[Path] = None
+        ctx_temp_dir: Path | None = None
 
         try:
             # --- 5. Plan Sync ---
@@ -136,37 +136,45 @@ class JobPipeline:
                 output_dir=str(output_dir),
                 manual_layout=manual_layout or [],
                 attachment_sources=attachment_sources or [],
-                source_settings=source_settings or {}
+                source_settings=source_settings or {},
             )
-            ctx_temp_dir = getattr(ctx, 'temp_dir', None)
+            ctx_temp_dir = getattr(ctx, "temp_dir", None)
 
             # --- 6. Return Early if Analysis Only ---
             if not and_merge:
-                log_to_all('--- Analysis Complete (No Merge) ---')
+                log_to_all("--- Analysis Complete (No Merge) ---")
                 self.progress(1.0)
                 return {
-                    'status': 'Analyzed',
-                    'delays': ctx.delays.source_delays_ms if ctx.delays else {},
-                    'name': Path(source1_file).name,
-                    'issues': 0,
-                    'stepping_sources': getattr(ctx, 'stepping_sources', []),
-                    'stepping_detected_disabled': getattr(ctx, 'stepping_detected_disabled', []),
-                    'stepping_detected_separated': getattr(ctx, 'stepping_detected_separated', []),
-                    'stepping_quality_issues': [],
-                    'sync_stability_issues': getattr(ctx, 'sync_stability_issues', [])
+                    "status": "Analyzed",
+                    "delays": ctx.delays.source_delays_ms if ctx.delays else {},
+                    "name": Path(source1_file).name,
+                    "issues": 0,
+                    "stepping_sources": getattr(ctx, "stepping_sources", []),
+                    "stepping_detected_disabled": getattr(
+                        ctx, "stepping_detected_disabled", []
+                    ),
+                    "stepping_detected_separated": getattr(
+                        ctx, "stepping_detected_separated", []
+                    ),
+                    "stepping_quality_issues": [],
+                    "sync_stability_issues": getattr(ctx, "sync_stability_issues", []),
                 }
 
             # --- 7. Validate Merge Tokens ---
             if not ctx.tokens:
-                raise RuntimeError('Internal error: mkvmerge tokens were not generated.')
+                raise RuntimeError(
+                    "Internal error: mkvmerge tokens were not generated."
+                )
 
             # --- 8. Prepare Output Paths ---
-            final_output_path = OutputWriter.prepare_output_path(output_dir, Path(source1_file).name)
+            final_output_path = OutputWriter.prepare_output_path(
+                output_dir, Path(source1_file).name
+            )
             mkvmerge_output_path = ctx.temp_dir / f"temp_{final_output_path.name}"
 
             # --- 9. Add Output Flag to Tokens ---
             ctx.tokens.insert(0, str(mkvmerge_output_path))
-            ctx.tokens.insert(0, '--output')
+            ctx.tokens.insert(0, "--output")
 
             # --- 10. Write mkvmerge Options ---
             opts_path = OutputWriter.write_mkvmerge_options(
@@ -176,7 +184,7 @@ class JobPipeline:
             # --- 11. Execute Merge ---
             merge_ok = SyncExecutor.execute_merge(opts_path, self.tool_paths, runner)
             if not merge_ok:
-                raise RuntimeError('mkvmerge execution failed.')
+                raise RuntimeError("mkvmerge execution failed.")
 
             # --- 12. Finalize Output ---
             SyncExecutor.finalize_output(
@@ -184,10 +192,10 @@ class JobPipeline:
                 final_output_path,
                 self.config,
                 self.tool_paths,
-                runner
+                runner,
             )
 
-            log_to_all(f'[SUCCESS] Output file created: {final_output_path}')
+            log_to_all(f"[SUCCESS] Output file created: {final_output_path}")
 
             # --- 13. Audit Output ---
             issues = ResultAuditor.audit_output(
@@ -197,30 +205,34 @@ class JobPipeline:
             # --- 14. Success ---
             self.progress(1.0)
             return {
-                'status': 'Merged',
-                'output': str(final_output_path),
-                'delays': ctx.delays.source_delays_ms if ctx.delays else {},
-                'name': Path(source1_file).name,
-                'issues': issues,
-                'stepping_sources': getattr(ctx, 'stepping_sources', []),
-                'stepping_detected_disabled': getattr(ctx, 'stepping_detected_disabled', []),
-                'stepping_detected_separated': getattr(ctx, 'stepping_detected_separated', []),
-                'stepping_quality_issues': getattr(ctx, 'stepping_quality_issues', []),
-                'sync_stability_issues': getattr(ctx, 'sync_stability_issues', [])
+                "status": "Merged",
+                "output": str(final_output_path),
+                "delays": ctx.delays.source_delays_ms if ctx.delays else {},
+                "name": Path(source1_file).name,
+                "issues": issues,
+                "stepping_sources": getattr(ctx, "stepping_sources", []),
+                "stepping_detected_disabled": getattr(
+                    ctx, "stepping_detected_disabled", []
+                ),
+                "stepping_detected_separated": getattr(
+                    ctx, "stepping_detected_separated", []
+                ),
+                "stepping_quality_issues": getattr(ctx, "stepping_quality_issues", []),
+                "sync_stability_issues": getattr(ctx, "sync_stability_issues", []),
             }
 
         except Exception as e:
-            log_to_all(f'[FATAL ERROR] Job failed: {e}')
+            log_to_all(f"[FATAL ERROR] Job failed: {e}")
             return {
-                'status': 'Failed',
-                'error': str(e),
-                'name': Path(source1_file).name,
-                'issues': 0,
-                'stepping_sources': [],
-                'stepping_detected_disabled': [],
-                'stepping_detected_separated': [],
-                'stepping_quality_issues': [],
-                'sync_stability_issues': []
+                "status": "Failed",
+                "error": str(e),
+                "name": Path(source1_file).name,
+                "issues": 0,
+                "stepping_sources": [],
+                "stepping_detected_disabled": [],
+                "stepping_detected_separated": [],
+                "stepping_quality_issues": [],
+                "sync_stability_issues": [],
             }
 
         finally:
@@ -231,9 +243,10 @@ class JobPipeline:
             # Clear VFR cache after each job to release VideoTimestamps instances
             try:
                 from vsg_core.subtitles.frame_utils import clear_vfr_cache
+
                 clear_vfr_cache()
             except ImportError:
                 pass  # Module might not be loaded
 
-            log_to_all('=== Job Finished ===')
+            log_to_all("=== Job Finished ===")
             LogManager.cleanup_log(logger, handler)

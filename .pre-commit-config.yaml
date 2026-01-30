@@ -1,0 +1,88 @@
+# Pre-commit hooks for Video Sync GUI
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+#
+# This runs automatically on every commit, like `cargo check` in Rust.
+# If any check fails, the commit is blocked until you fix it.
+
+default_language_version:
+  python: python3.13
+
+repos:
+  # ==========================================================================
+  # Code Formatting (like rustfmt)
+  # ==========================================================================
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+        name: black (format)
+        description: Format Python code with Black
+
+  # ==========================================================================
+  # Linting (like clippy)
+  # ==========================================================================
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        name: ruff (lint)
+        # --fix: auto-fix safe issues
+        # --exit-zero: don't fail on unfixed warnings (F841/F401)
+        # Remove --exit-zero once all warnings are fixed for strict mode
+        args: [--fix, --exit-zero]
+        description: Lint Python code with Ruff (warnings shown but don't block)
+
+  # ==========================================================================
+  # Type Checking (like Rust's type system)
+  # ==========================================================================
+  # NOTE: Pyright is in "manual" stage - runs with `pre-commit run pyright`
+  # but not on every commit. Once type errors are fixed, change to default stage.
+  #
+  # To run manually: pre-commit run pyright --all-files
+  # To enable on every commit: remove "stages: [manual]" line
+  - repo: local
+    hooks:
+      - id: pyright
+        name: pyright (type check)
+        entry: pyright
+        language: system
+        types: [python]
+        pass_filenames: false  # Check whole project for consistency
+        stages: [manual]       # Only run when explicitly requested (for now)
+        description: Static type checking with Pyright
+
+  # ==========================================================================
+  # Basic file checks
+  # ==========================================================================
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        name: trailing whitespace
+      - id: end-of-file-fixer
+        name: end of file fixer
+      - id: check-yaml
+        name: check yaml
+      - id: check-toml
+        name: check toml
+      - id: check-added-large-files
+        name: check large files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+        name: check merge conflict
+      - id: debug-statements
+        name: check debug statements (pdb, breakpoint)
+
+# ==========================================================================
+# CI Configuration
+# ==========================================================================
+# For CI, run: pre-commit run --all-files
+# This ensures all files are checked, not just staged ones.
+ci:
+  autofix_commit_msg: |
+    [pre-commit.ci] auto fixes from hooks
+  autofix_prs: true
+  autoupdate_commit_msg: '[pre-commit.ci] pre-commit autoupdate'
+  autoupdate_schedule: weekly
+  skip: [pyright]  # pyright needs local install, skip in CI auto-fixes

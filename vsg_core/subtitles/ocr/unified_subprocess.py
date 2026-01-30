@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/unified_subprocess.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import argparse
@@ -8,7 +7,6 @@ import sys
 from pathlib import Path
 
 from . import run_ocr_unified
-
 
 JSON_PREFIX = "__VSG_UNIFIED_OCR_JSON__ "
 
@@ -20,13 +18,25 @@ class _SubprocessRunner:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run unified OCR in a subprocess.")
-    parser.add_argument("--subtitle-path", required=True, help="Path to subtitle (.idx/.sub/.sup)")
+    parser.add_argument(
+        "--subtitle-path", required=True, help="Path to subtitle (.idx/.sub/.sup)"
+    )
     parser.add_argument("--lang", required=True, help="OCR language code (e.g., eng)")
-    parser.add_argument("--config-json", required=True, help="Path to OCR settings JSON file")
-    parser.add_argument("--output-json", required=True, help="Path to output SubtitleData JSON file")
-    parser.add_argument("--work-dir", required=True, help="Working directory for OCR temp files")
-    parser.add_argument("--logs-dir", required=True, help="Directory for OCR logs/reports")
-    parser.add_argument("--track-id", required=True, type=int, help="Track ID for OCR output")
+    parser.add_argument(
+        "--config-json", required=True, help="Path to OCR settings JSON file"
+    )
+    parser.add_argument(
+        "--output-json", required=True, help="Path to output SubtitleData JSON file"
+    )
+    parser.add_argument(
+        "--work-dir", required=True, help="Working directory for OCR temp files"
+    )
+    parser.add_argument(
+        "--logs-dir", required=True, help="Directory for OCR logs/reports"
+    )
+    parser.add_argument(
+        "--track-id", required=True, type=int, help="Track ID for OCR output"
+    )
     args = parser.parse_args()
 
     config_path = Path(args.config_json)
@@ -35,7 +45,7 @@ def main() -> int:
     logs_dir = Path(args.logs_dir)
 
     try:
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             config = json.load(f)
     except Exception as exc:
         payload = {"success": False, "error": f"Failed to load config JSON: {exc}"}
@@ -69,7 +79,10 @@ def main() -> int:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         subtitle_data.save_json(output_path)
     except Exception as exc:
-        payload = {"success": False, "error": f"Failed to save SubtitleData JSON: {exc}"}
+        payload = {
+            "success": False,
+            "error": f"Failed to save SubtitleData JSON: {exc}",
+        }
         print(f"{JSON_PREFIX}{json.dumps(payload)}", flush=True)
         return 1
 

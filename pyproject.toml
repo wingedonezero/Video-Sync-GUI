@@ -1,0 +1,274 @@
+# Video Sync GUI - Python Code Quality Configuration
+# This file configures Black (formatter), Ruff (linter), and Pyright (type checker)
+#
+# Commands:
+#   black .              - Format code
+#   ruff check .         - Lint code
+#   ruff check --fix .   - Lint and auto-fix
+#   pyright              - Type check
+#   pre-commit run -a    - Run all checks (after setup)
+#
+# Install dev tools:
+#   pip install black ruff pyright pre-commit
+
+[project]
+name = "video-sync-gui"
+requires-python = ">=3.13"
+
+# =============================================================================
+# Black Configuration
+# =============================================================================
+[tool.black]
+line-length = 88
+target-version = ["py313"]
+# Exclude generated files, caches, and virtual environments
+extend-exclude = '''
+/(
+    \.git
+    | \.venv
+    | venv
+    | __pycache__
+    | \.eggs
+    | build
+    | dist
+)/
+'''
+
+# =============================================================================
+# Ruff Configuration
+# =============================================================================
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+# Exclude common directories that shouldn't be linted
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".eggs",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+# Enable rule sets that catch real issues - "Rust-like" strictness
+# See: https://docs.astral.sh/ruff/rules/
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes (undefined names, unused imports, etc.)
+    "W",      # pycodestyle warnings
+    "I",      # isort (import sorting)
+    "B",      # flake8-bugbear (likely bugs and design problems)
+    "UP",     # pyupgrade (modern Python syntax)
+    "C4",     # flake8-comprehensions (better list/dict/set comprehensions)
+    "SIM",    # flake8-simplify (code simplification suggestions)
+    "RUF",    # Ruff-specific rules
+    "PIE",    # flake8-pie (misc lints)
+    "PLC",    # pylint convention
+    "PLE",    # pylint errors
+    "PLW",    # pylint warnings
+    "PERF",   # perflint (performance anti-patterns)
+    "FURB",   # refurb (modern Python idioms)
+    "LOG",    # flake8-logging (logging best practices)
+    "G",      # flake8-logging-format
+    "TRY",    # tryceratops (exception handling)
+    "FLY",    # flynt (f-string conversion)
+    "ICN",    # flake8-import-conventions
+    "RET",    # flake8-return (return statement issues)
+    "RSE",    # flake8-raise (raise statement issues)
+    "TC",     # flake8-type-checking (TYPE_CHECKING imports)
+    "PTH",    # flake8-use-pathlib (use pathlib over os.path)
+]
+
+ignore = [
+    # Rules that conflict with Black formatting
+    "E501",   # Line too long - Black handles this
+
+    # Rules that are too pedantic for existing code (can enable for new code later)
+    "E722",   # Do not use bare except - used intentionally in cleanup code
+    "E731",   # Do not assign a lambda expression - lambdas fine for simple cases
+    "E741",   # Ambiguous variable name (l, I, O) - context makes them clear
+    "B007",   # Loop control variable not used - underscore prefix handles this
+    "B008",   # Do not perform function call in argument defaults - sometimes intentional
+    "B027",   # Empty method in abstract class - valid for optional override hooks
+    "B028",   # No explicit stacklevel in warnings.warn - too pedantic
+    "B904",   # raise ... from err - enable later when refactoring
+    "B905",   # zip() without explicit strict= - enable later
+    "SIM102", # Nested if statements - sometimes clearer
+    "SIM105", # Use contextlib.suppress - try/except pass often clearer
+    "SIM108", # Use ternary operator - can reduce readability
+    "SIM117", # Use single with statement - multiple with often clearer
+    "SIM118", # Use key in dict instead of dict.keys() - minor
+    "UP015",  # Unnecessary open mode parameters - explicit is fine
+    "UP038",  # Use X | Y in isinstance - existing code uses tuple style
+
+    # Type hint related - pyright handles these better
+    "RUF013", # PEP 484 prohibits implicit Optional - pyright catches this
+
+    # Ambiguous characters - too noisy for i18n
+    "RUF001", # String contains ambiguous character
+    "RUF002", # Docstring contains ambiguous character
+    "RUF003", # Comment contains ambiguous character
+    "RUF046", # Unnecessary int() - int(round(x)) is intentional for clarity
+
+    # New stricter rules - temporarily ignored for existing code
+    # TODO: Enable these gradually as code is refactored
+    "PLC0415",# Import outside top-level - lazy imports are intentional for performance
+    "PLW1510",# subprocess.run without check= - sometimes intentional
+    "TRY003", # Avoid specifying long messages outside exception class - too strict
+    "TRY300", # Consider moving to else block - style preference
+    "TRY301", # Abstract raise to inner function - style preference
+    "TRY400", # Use logging.exception instead of logging.error - preference
+    "TRY401", # Redundant exception in logging.exception - preference
+    "PIE790", # Unnecessary pass - sometimes used for clarity
+    "PIE810", # Call startswith/endswith once - existing code style
+    "PERF402",# Use list.copy() instead of list() - minor
+    "PERF102",# Use dict.keys/values/items() - minor
+    "SIM103", # Return condition directly - sometimes less clear
+    "SIM115", # Use context manager for open() - sometimes intentional
+    "FURB188",# Use removesuffix/prefix - Python 3.9+ only patterns
+    "RUF012", # Mutable class attributes - common pattern
+    "RUF022", # __all__ not sorted - not important
+    "PLW2901",# Redefining loop variable - common pattern
+    "PLW0603",# Using global statement - sometimes necessary
+    "PERF401",# Use list comprehension - sometimes readability matters more
+    "PTH123", # Use Path.open() instead of open() - gradual migration
+    "PTH118", # Use Path.joinpath() - gradual migration
+    "PTH119", # Use Path.is_file() - gradual migration
+    "PTH120", # Use Path.is_dir() - gradual migration
+    "PTH122", # Use Path.splitext() - gradual migration
+    "PTH100", # Use Path.resolve() - gradual migration
+    "PTH103", # Use Path.mkdir() - gradual migration
+    "PTH107", # Use Path.unlink() - gradual migration
+    "PTH110", # Use Path.stat() - gradual migration
+    "PTH111", # Use Path.expanduser() - gradual migration
+    "PTH112", # Use Path.iterdir() - gradual migration
+    "PTH113", # Use Path.exists() - gradual migration
+    "PTH116", # Use Path.stat().st_mtime - gradual migration
+    "PTH202", # Use Path.replace() - gradual migration
+    "RET504", # Unnecessary variable before return - sometimes clearer
+    "RET505", # Unnecessary else after return - sometimes clearer
+    "RET506", # Unnecessary else after raise - sometimes clearer
+    "G004",   # Logging f-string - f-strings are fine in modern Python
+    "TC001", # Move import into TYPE_CHECKING - gradual migration
+    "TC002", # Move import into TYPE_CHECKING - gradual migration
+    "TC003", # Move import into TYPE_CHECKING - gradual migration
+    "TC005",  # Found empty type-checking block - cleanup later
+    "PTH108", # Use Path.unlink(missing_ok=True) - gradual migration
+    "RUF005", # Consider unpacking instead of concatenation - style
+    "UP035",  # Import from collections.abc - gradual migration
+    "RET507", # Unnecessary else after continue - sometimes clearer
+]
+
+# Allow autofix for all enabled rules (when `--fix` is passed)
+fixable = ["ALL"]
+unfixable = []
+
+# Allow unused variables when underscore-prefixed
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.lint.isort]
+# Configure import sorting to match project conventions
+known-first-party = ["vsg_core", "vsg_qt"]
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+combine-as-imports = true
+force-single-line = false
+# Note: lines-after-imports removed to avoid conflict with Black
+
+[tool.ruff.lint.per-file-ignores]
+# Test files can have additional allowances
+"tests/**/*.py" = [
+    "B011",   # Do not assert False
+    "E712",   # Equality comparisons to True/False - explicit in tests is fine
+    "F401",   # Unused imports (test fixtures)
+    "F811",   # Redefinition of unused name (test fixtures)
+    "F841",   # Unused local variables in tests - sometimes intentional
+]
+# __init__.py files often have unused imports for re-exporting
+"**/__init__.py" = [
+    "F401",   # Unused imports are expected in __init__.py
+    "F403",   # star imports
+]
+# Files that intentionally have imports after setup code
+"main.py" = ["E402"]
+"vsg_qt/subtitle_editor/events_table.py" = ["E402"]
+"vsg_qt/subtitle_editor/subprocess_launcher.py" = ["F841"]
+# Files using forward references in type hints (work at runtime with __future__ annotations)
+"vsg_core/subtitles/frame_utils/frame_hashing.py" = ["F821"]
+"vsg_core/subtitles/frame_utils/validation.py" = ["F821", "E722"]
+"vsg_core/subtitles/frame_utils/video_reader.py" = ["F821"]
+"vsg_qt/job_queue_dialog/logic.py" = ["F821"]
+"vsg_qt/job_queue_dialog/ui.py" = ["F821"]
+"vsg_qt/main_window/controller.py" = ["F821"]
+"vsg_qt/manual_selection_dialog/logic.py" = ["F821"]
+"vsg_qt/manual_selection_dialog/ui.py" = ["F821"]
+"vsg_qt/manual_selection_dialog/widgets.py" = ["F821"]
+
+# =============================================================================
+# Pyright - Static Type Checker (Rust-like type safety)
+# =============================================================================
+# Pyright provides compile-time type checking like Rust's type system.
+# Start with "basic" mode, gradually increase to "strict" as code is typed.
+#
+# Modes (in order of strictness):
+#   off      - No type checking
+#   basic    - Catches obvious errors (recommended starting point)
+#   standard - More thorough checking
+#   strict   - Full Rust-like strictness (goal)
+#
+[tool.pyright]
+pythonVersion = "3.13"
+pythonPlatform = "Linux"
+
+# Start with basic mode - catches real bugs without requiring full typing
+typeCheckingMode = "basic"
+
+# Include project packages
+include = ["vsg_core", "vsg_qt", "main.py", "tests"]
+
+# Exclude generated/vendored code
+exclude = [
+    "**/__pycache__",
+    ".venv",
+    "venv",
+    "build",
+    "dist",
+]
+
+# Report settings - what to show
+# Note: PySide6/Qt not installed in dev environment, only at runtime
+reportMissingImports = "none"           # Disabled - Qt not in dev environment
+reportMissingTypeStubs = false          # Don't require stubs for all libraries
+reportUnusedImport = "none"             # Ruff handles this better
+reportUnusedVariable = "none"           # Ruff handles this better
+reportDuplicateImport = "warning"
+reportMissingModuleSource = "none"      # Disabled - Qt modules
+
+# Type inference settings
+reportUnnecessaryTypeIgnoreComment = "warning"
+reportPrivateUsage = "warning"
+reportConstantRedefinition = "warning"
+reportIncompatibleMethodOverride = "error"
+reportIncompatibleVariableOverride = "error"
+reportOverlappingOverload = "error"
+
+# Catch common bugs (like Rust)
+reportOptionalSubscript = "error"       # x[0] when x might be None
+reportOptionalMemberAccess = "error"    # x.foo when x might be None
+reportOptionalCall = "error"            # x() when x might be None
+reportOptionalIterable = "error"        # for i in x when x might be None
+reportOptionalContextManager = "error"  # with x when x might be None
+reportUnnecessaryIsInstance = "warning"
+reportUnnecessaryCast = "warning"
+reportAssertAlwaysTrue = "warning"
+
+# These are too strict for existing code, enable gradually
+reportUnknownParameterType = "none"     # Enable later for strict mode
+reportUnknownArgumentType = "none"      # Enable later for strict mode
+reportUnknownLambdaType = "none"        # Enable later for strict mode
+reportUnknownVariableType = "none"      # Enable later for strict mode
+reportUnknownMemberType = "none"        # Enable later for strict mode
+reportMissingParameterType = "none"     # Enable later for strict mode
+reportMissingTypeArgument = "none"      # Enable later for strict mode

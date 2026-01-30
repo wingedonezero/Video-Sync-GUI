@@ -1,5 +1,4 @@
 # vsg_core/subtitles/sync_mode_plugins/video_verified.py
-# -*- coding: utf-8 -*-
 """
 Video-Verified sync plugin for SubtitleData.
 
@@ -26,17 +25,17 @@ This module also exports `calculate_video_verified_offset()` which can be used
 independently to get the frame-corrected delay for any subtitle format,
 including bitmap subtitles (VobSub, PGS) that can't be loaded into SubtitleData.
 """
+
 from __future__ import annotations
 
-import math
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..sync_modes import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
-    from ..data import SubtitleData, OperationResult, OperationRecord, SyncEventData
+    from ..data import OperationResult, SubtitleData
 
 
 def calculate_video_verified_offset(
@@ -44,11 +43,11 @@ def calculate_video_verified_offset(
     target_video: str,
     total_delay_ms: float,
     global_shift_ms: float,
-    config: Optional[Dict] = None,
+    config: dict | None = None,
     runner=None,
-    temp_dir: Optional[Path] = None,
-    video_duration_ms: Optional[float] = None,
-) -> Tuple[Optional[float], Dict[str, Any]]:
+    temp_dir: Path | None = None,
+    video_duration_ms: float | None = None,
+) -> tuple[float | None, dict[str, Any]]:
     """
     Calculate the video-verified offset using frame matching with sub-frame precision.
 
@@ -80,7 +79,7 @@ def calculate_video_verified_offset(
         - details_dict: Contains 'reason', 'audio_correlation_ms', 'video_offset_ms',
           'candidates', etc.
     """
-    from ..frame_utils import detect_video_fps, detect_video_properties
+    from ..frame_utils import detect_video_properties
 
     config = config or {}
 
@@ -88,10 +87,13 @@ def calculate_video_verified_offset(
         if runner:
             runner._log_message(msg)
 
-    log(f"[VideoVerified] === Frame Matching for Delay Correction ===")
+    log("[VideoVerified] === Frame Matching for Delay Correction ===")
 
     if not source_video or not target_video:
-        return None, {'reason': 'missing-videos', 'error': 'Both source and target videos required'}
+        return None, {
+            "reason": "missing-videos",
+            "error": "Both source and target videos required",
+        }
 
     # Calculate pure correlation (correlation only, without global shift)
     pure_correlation_ms = total_delay_ms - global_shift_ms
@@ -107,32 +109,42 @@ def calculate_video_verified_offset(
     target_props = detect_video_properties(target_video, runner)
 
     # Determine if we should use interlaced handling
-    interlaced_handling_enabled = config.get('interlaced_handling_enabled', False)
-    force_mode = config.get('interlaced_force_mode', 'auto')
+    interlaced_handling_enabled = config.get("interlaced_handling_enabled", False)
+    force_mode = config.get("interlaced_force_mode", "auto")
 
     # Check if either video is interlaced/telecine
-    source_needs_interlaced = source_props.get('content_type') in ('interlaced', 'telecine')
-    target_needs_interlaced = target_props.get('content_type') in ('interlaced', 'telecine')
+    source_needs_interlaced = source_props.get("content_type") in (
+        "interlaced",
+        "telecine",
+    )
+    target_needs_interlaced = target_props.get("content_type") in (
+        "interlaced",
+        "telecine",
+    )
     either_interlaced = source_needs_interlaced or target_needs_interlaced
 
     # Determine if we should use interlaced settings
     use_interlaced_settings = False
-    if force_mode == 'progressive':
+    if force_mode == "progressive":
         use_interlaced_settings = False
-    elif force_mode in ('interlaced', 'telecine'):
-        use_interlaced_settings = True
-    elif force_mode == 'auto' and interlaced_handling_enabled and either_interlaced:
+    elif force_mode in ("interlaced", "telecine") or (
+        force_mode == "auto" and interlaced_handling_enabled and either_interlaced
+    ):
         use_interlaced_settings = True
 
     if use_interlaced_settings:
-        log(f"[VideoVerified] Using INTERLACED settings")
+        log("[VideoVerified] Using INTERLACED settings")
         if source_needs_interlaced:
-            log(f"[VideoVerified]   Source: {source_props.get('content_type')} ({source_props.get('width')}x{source_props.get('height')})")
+            log(
+                f"[VideoVerified]   Source: {source_props.get('content_type')} ({source_props.get('width')}x{source_props.get('height')})"
+            )
         if target_needs_interlaced:
-            log(f"[VideoVerified]   Target: {target_props.get('content_type')} ({target_props.get('width')}x{target_props.get('height')})")
+            log(
+                f"[VideoVerified]   Target: {target_props.get('content_type')} ({target_props.get('width')}x{target_props.get('height')})"
+            )
 
     # Detect FPS
-    fps = source_props.get('fps', 23.976)
+    fps = source_props.get("fps", 23.976)
     if not fps:
         fps = 23.976
         log(f"[VideoVerified] FPS detection failed, using default: {fps}")
@@ -142,40 +154,48 @@ def calculate_video_verified_offset(
 
     # Get config parameters - use interlaced settings if appropriate
     if use_interlaced_settings:
-        num_checkpoints = config.get('interlaced_num_checkpoints', 5)
-        search_range_frames = config.get('interlaced_search_range_frames', 5)
-        hash_algorithm = config.get('interlaced_hash_algorithm', 'ahash')
-        hash_size = int(config.get('interlaced_hash_size', 8))
-        hash_threshold = int(config.get('interlaced_hash_threshold', 25))
-        window_radius = int(config.get('frame_window_radius', 5))
-        comparison_method = config.get('interlaced_comparison_method', 'ssim')
-        interlaced_fallback_to_audio = config.get('interlaced_fallback_to_audio', True)
+        num_checkpoints = config.get("interlaced_num_checkpoints", 5)
+        search_range_frames = config.get("interlaced_search_range_frames", 5)
+        hash_algorithm = config.get("interlaced_hash_algorithm", "ahash")
+        hash_size = int(config.get("interlaced_hash_size", 8))
+        hash_threshold = int(config.get("interlaced_hash_threshold", 25))
+        window_radius = int(config.get("frame_window_radius", 5))
+        comparison_method = config.get("interlaced_comparison_method", "ssim")
+        interlaced_fallback_to_audio = config.get("interlaced_fallback_to_audio", True)
     else:
-        num_checkpoints = config.get('video_verified_num_checkpoints', 5)
-        search_range_frames = config.get('video_verified_search_range_frames', 3)
-        hash_algorithm = config.get('frame_hash_algorithm', 'dhash')
-        hash_size = int(config.get('frame_hash_size', 8))
-        hash_threshold = int(config.get('frame_hash_threshold', 5))
-        window_radius = int(config.get('frame_window_radius', 5))
-        comparison_method = config.get('frame_comparison_method', 'hash')
+        num_checkpoints = config.get("video_verified_num_checkpoints", 5)
+        search_range_frames = config.get("video_verified_search_range_frames", 3)
+        hash_algorithm = config.get("frame_hash_algorithm", "dhash")
+        hash_size = int(config.get("frame_hash_size", 8))
+        hash_threshold = int(config.get("frame_hash_threshold", 5))
+        window_radius = int(config.get("frame_window_radius", 5))
+        comparison_method = config.get("frame_comparison_method", "hash")
         interlaced_fallback_to_audio = True  # Default behavior
 
-    log(f"[VideoVerified] Checkpoints: {num_checkpoints}, Search: ±{search_range_frames} frames")
-    log(f"[VideoVerified] Hash: {hash_algorithm} size={hash_size} threshold={hash_threshold}")
+    log(
+        f"[VideoVerified] Checkpoints: {num_checkpoints}, Search: ±{search_range_frames} frames"
+    )
+    log(
+        f"[VideoVerified] Hash: {hash_algorithm} size={hash_size} threshold={hash_threshold}"
+    )
     log(f"[VideoVerified] Comparison method: {comparison_method}")
 
     # Try to import frame utilities
     try:
-        from ..frame_utils import VideoReader, compute_frame_hash, compute_hamming_distance
+        from ..frame_utils import (
+            VideoReader,
+            compute_frame_hash,
+            compute_hamming_distance,
+        )
     except ImportError as e:
         log(f"[VideoVerified] Frame utilities unavailable: {e}")
-        log(f"[VideoVerified] Falling back to correlation")
+        log("[VideoVerified] Falling back to correlation")
         return total_delay_ms, {
-            'reason': 'fallback-no-frame-utils',
-            'audio_correlation_ms': pure_correlation_ms,
-            'video_offset_ms': pure_correlation_ms,
-            'final_offset_ms': total_delay_ms,
-            'error': str(e),
+            "reason": "fallback-no-frame-utils",
+            "audio_correlation_ms": pure_correlation_ms,
+            "video_offset_ms": pure_correlation_ms,
+            "final_offset_ms": total_delay_ms,
+            "error": str(e),
         }
 
     # Get video duration for checkpoint selection
@@ -183,12 +203,14 @@ def calculate_video_verified_offset(
     if not source_duration or source_duration <= 0:
         try:
             props = detect_video_properties(source_video, runner)
-            source_duration = props.get('duration_ms', 0)
+            source_duration = props.get("duration_ms", 0)
             if source_duration <= 0:
                 raise ValueError("Could not detect video duration")
         except Exception:
             source_duration = 1200000  # Default 20 minutes
-            log(f"[VideoVerified] Could not detect duration, using default: {source_duration/1000:.1f}s")
+            log(
+                f"[VideoVerified] Could not detect duration, using default: {source_duration/1000:.1f}s"
+            )
 
     log(f"[VideoVerified] Source duration: ~{source_duration/1000:.1f}s")
 
@@ -197,101 +219,141 @@ def calculate_video_verified_offset(
     candidates_frames = _generate_frame_candidates_static(
         correlation_frames, search_range_frames
     )
-    log(f"[VideoVerified] Testing frame offsets: {candidates_frames} (around {correlation_frames:+.1f} frames)")
+    log(
+        f"[VideoVerified] Testing frame offsets: {candidates_frames} (around {correlation_frames:+.1f} frames)"
+    )
 
     # Open video readers with deinterlace support
     try:
         # Use interlaced deinterlace method if enabled, otherwise auto-detect
         if use_interlaced_settings:
-            deinterlace_mode = config.get('interlaced_deinterlace_method', 'bwdif')
+            deinterlace_mode = config.get("interlaced_deinterlace_method", "bwdif")
             log(f"[VideoVerified] Using deinterlace method: {deinterlace_mode}")
         else:
             # Progressive content: auto-detect if deinterlacing is needed
-            deinterlace_mode = 'auto'
+            deinterlace_mode = "auto"
 
         source_reader = VideoReader(
-            source_video, runner, temp_dir=temp_dir,
-            deinterlace=deinterlace_mode, config=config
+            source_video,
+            runner,
+            temp_dir=temp_dir,
+            deinterlace=deinterlace_mode,
+            config=config,
         )
         target_reader = VideoReader(
-            target_video, runner, temp_dir=temp_dir,
-            deinterlace=deinterlace_mode, config=config
+            target_video,
+            runner,
+            temp_dir=temp_dir,
+            deinterlace=deinterlace_mode,
+            config=config,
         )
     except Exception as e:
         log(f"[VideoVerified] Failed to open videos: {e}")
-        log(f"[VideoVerified] Falling back to correlation")
+        log("[VideoVerified] Falling back to correlation")
         return total_delay_ms, {
-            'reason': 'fallback-video-open-failed',
-            'audio_correlation_ms': pure_correlation_ms,
-            'video_offset_ms': pure_correlation_ms,
-            'final_offset_ms': total_delay_ms,
-            'error': str(e),
+            "reason": "fallback-video-open-failed",
+            "audio_correlation_ms": pure_correlation_ms,
+            "video_offset_ms": pure_correlation_ms,
+            "final_offset_ms": total_delay_ms,
+            "error": str(e),
         }
 
     # Select checkpoint times (distributed across video)
     checkpoint_times = _select_checkpoint_times_static(source_duration, num_checkpoints)
-    log(f"[VideoVerified] Checkpoint times: {[f'{t/1000:.1f}s' for t in checkpoint_times]}")
+    log(
+        f"[VideoVerified] Checkpoint times: {[f'{t/1000:.1f}s' for t in checkpoint_times]}"
+    )
 
     # Test each candidate frame offset
     candidate_results = []
 
     # Get sequence length based on content type
     if use_interlaced_settings:
-        sequence_length = config.get('interlaced_sequence_length', 5)
+        sequence_length = config.get("interlaced_sequence_length", 5)
     else:
-        sequence_length = config.get('video_verified_sequence_length', 10)
+        sequence_length = config.get("video_verified_sequence_length", 10)
 
-    log(f"[VideoVerified] Sequence verification: {sequence_length} consecutive frames must match")
+    log(
+        f"[VideoVerified] Sequence verification: {sequence_length} consecutive frames must match"
+    )
 
     for frame_offset in candidates_frames:
         quality = _measure_frame_offset_quality_static(
-            frame_offset, checkpoint_times, source_reader, target_reader,
-            fps, frame_duration_ms, window_radius, hash_algorithm, hash_size,
-            hash_threshold, comparison_method, log,
-            sequence_verify_length=sequence_length
+            frame_offset,
+            checkpoint_times,
+            source_reader,
+            target_reader,
+            fps,
+            frame_duration_ms,
+            window_radius,
+            hash_algorithm,
+            hash_size,
+            hash_threshold,
+            comparison_method,
+            log,
+            sequence_verify_length=sequence_length,
         )
         # Convert frame offset to approximate ms for logging
         approx_ms = frame_offset * frame_duration_ms
-        seq_verified = quality.get('sequence_verified', 0)
-        candidate_results.append({
-            'frame_offset': frame_offset,
-            'approx_ms': approx_ms,
-            'quality': quality['score'],
-            'matched_checkpoints': quality['matched'],
-            'sequence_verified': seq_verified,
-            'avg_distance': quality['avg_distance'],
-            'match_details': quality.get('match_details', []),
-        })
-        log(f"[VideoVerified]   Frame {frame_offset:+d} (~{approx_ms:+.1f}ms): "
+        seq_verified = quality.get("sequence_verified", 0)
+        candidate_results.append(
+            {
+                "frame_offset": frame_offset,
+                "approx_ms": approx_ms,
+                "quality": quality["score"],
+                "matched_checkpoints": quality["matched"],
+                "sequence_verified": seq_verified,
+                "avg_distance": quality["avg_distance"],
+                "match_details": quality.get("match_details", []),
+            }
+        )
+        log(
+            f"[VideoVerified]   Frame {frame_offset:+d} (~{approx_ms:+.1f}ms): "
             f"score={quality['score']:.2f}, seq_verified={seq_verified}/{len(checkpoint_times)}, "
-            f"avg_dist={quality['avg_distance']:.1f}")
+            f"avg_dist={quality['avg_distance']:.1f}"
+        )
 
     # Select best candidate - prefer sequence_verified count, then score, then lowest avg_distance
-    best_result = max(candidate_results, key=lambda r: (r['sequence_verified'], r['quality'], -r['avg_distance']))
-    best_frame_offset = best_result['frame_offset']
+    best_result = max(
+        candidate_results,
+        key=lambda r: (r["sequence_verified"], r["quality"], -r["avg_distance"]),
+    )
+    best_frame_offset = best_result["frame_offset"]
 
-    log(f"[VideoVerified] ───────────────────────────────────────")
-    log(f"[VideoVerified] Best frame offset: {best_frame_offset:+d} frames "
-        f"(seq_verified={best_result['sequence_verified']}/{len(checkpoint_times)}, score={best_result['quality']:.2f})")
+    log("[VideoVerified] ───────────────────────────────────────")
+    log(
+        f"[VideoVerified] Best frame offset: {best_frame_offset:+d} frames "
+        f"(seq_verified={best_result['sequence_verified']}/{len(checkpoint_times)}, score={best_result['quality']:.2f})"
+    )
 
     # Check if frame matching actually worked
     # Require at least one sequence-verified checkpoint for reliable results
-    if best_result['sequence_verified'] == 0:
-        log(f"[VideoVerified] ⚠ Sequence verification failed - no consecutive frame sequences matched")
-        log(f"[VideoVerified] Required: {sequence_length} consecutive frames to match at 70%+ threshold")
-        log(f"[VideoVerified] Avg distance was {best_result['avg_distance']:.1f}, threshold is {hash_threshold}")
+    if best_result["sequence_verified"] == 0:
+        log(
+            "[VideoVerified] ⚠ Sequence verification failed - no consecutive frame sequences matched"
+        )
+        log(
+            f"[VideoVerified] Required: {sequence_length} consecutive frames to match at 70%+ threshold"
+        )
+        log(
+            f"[VideoVerified] Avg distance was {best_result['avg_distance']:.1f}, threshold is {hash_threshold}"
+        )
 
         # Check if this might be fixable with higher threshold
-        if best_result['avg_distance'] < 40:
-            log(f"[VideoVerified] TIP: Try increasing 'frame_hash_threshold' to {int(best_result['avg_distance']) + 5}")
-            log(f"[VideoVerified]      (Settings → Video-Verified → Hash Threshold)")
+        if best_result["avg_distance"] < 40:
+            log(
+                f"[VideoVerified] TIP: Try increasing 'frame_hash_threshold' to {int(best_result['avg_distance']) + 5}"
+            )
+            log("[VideoVerified]      (Settings → Video-Verified → Hash Threshold)")
 
-        log(f"[VideoVerified] This could mean:")
-        log(f"[VideoVerified]   - Videos have different encodes/color grading")
-        log(f"[VideoVerified]   - Different telecine/pulldown patterns (common for DVD)")
-        log(f"[VideoVerified]   - One video has hardcoded subs/watermarks")
-        log(f"[VideoVerified]   - Deinterlacing producing different results")
-        log(f"[VideoVerified] Falling back to audio correlation: {pure_correlation_ms:+.3f}ms")
+        log("[VideoVerified] This could mean:")
+        log("[VideoVerified]   - Videos have different encodes/color grading")
+        log("[VideoVerified]   - Different telecine/pulldown patterns (common for DVD)")
+        log("[VideoVerified]   - One video has hardcoded subs/watermarks")
+        log("[VideoVerified]   - Deinterlacing producing different results")
+        log(
+            f"[VideoVerified] Falling back to audio correlation: {pure_correlation_ms:+.3f}ms"
+        )
 
         # Close readers before returning
         try:
@@ -302,23 +364,29 @@ def calculate_video_verified_offset(
 
         # Return audio correlation as the offset
         return total_delay_ms, {
-            'reason': 'fallback-no-frame-matches',
-            'audio_correlation_ms': pure_correlation_ms,
-            'video_offset_ms': pure_correlation_ms,
-            'final_offset_ms': total_delay_ms,
-            'candidates': candidate_results,
-            'checkpoints': len(checkpoint_times),
-            'sub_frame_precision': False,
+            "reason": "fallback-no-frame-matches",
+            "audio_correlation_ms": pure_correlation_ms,
+            "video_offset_ms": pure_correlation_ms,
+            "final_offset_ms": total_delay_ms,
+            "candidates": candidate_results,
+            "checkpoints": len(checkpoint_times),
+            "sub_frame_precision": False,
         }
 
     # Calculate offset in milliseconds
     # By default uses frame-based (frame_offset * frame_duration)
     # Optionally can use PTS for VFR content (enable via config)
-    use_pts = config.get('video_verified_use_pts_precision', False)
+    use_pts = config.get("video_verified_use_pts_precision", False)
     sub_frame_offset_ms = _calculate_subframe_offset_static(
-        best_frame_offset, best_result.get('match_details', []),
-        checkpoint_times, source_reader, target_reader, fps, frame_duration_ms, log,
-        use_pts_precision=use_pts
+        best_frame_offset,
+        best_result.get("match_details", []),
+        checkpoint_times,
+        source_reader,
+        target_reader,
+        fps,
+        frame_duration_ms,
+        log,
+        use_pts_precision=use_pts,
     )
 
     # Close readers
@@ -331,39 +399,42 @@ def calculate_video_verified_offset(
     # Calculate final offset with global shift
     final_offset_ms = sub_frame_offset_ms + global_shift_ms
 
-    log(f"[VideoVerified] ───────────────────────────────────────")
+    log("[VideoVerified] ───────────────────────────────────────")
     log(f"[VideoVerified] Audio correlation: {pure_correlation_ms:+.3f}ms")
     precision_mode = "PTS-based" if use_pts else "frame-based"
-    log(f"[VideoVerified] Video-verified offset: {sub_frame_offset_ms:+.3f}ms ({precision_mode})")
+    log(
+        f"[VideoVerified] Video-verified offset: {sub_frame_offset_ms:+.3f}ms ({precision_mode})"
+    )
     log(f"[VideoVerified] + Global shift: {global_shift_ms:+.3f}ms")
     log(f"[VideoVerified] = Final offset: {final_offset_ms:+.3f}ms")
 
     if abs(sub_frame_offset_ms - pure_correlation_ms) > frame_duration_ms / 2:
-        log(f"[VideoVerified] ⚠ VIDEO OFFSET DIFFERS FROM AUDIO CORRELATION")
-        log(f"[VideoVerified] Audio said {pure_correlation_ms:+.1f}ms, "
-            f"video shows {sub_frame_offset_ms:+.1f}ms")
+        log("[VideoVerified] ⚠ VIDEO OFFSET DIFFERS FROM AUDIO CORRELATION")
+        log(
+            f"[VideoVerified] Audio said {pure_correlation_ms:+.1f}ms, "
+            f"video shows {sub_frame_offset_ms:+.1f}ms"
+        )
 
-    log(f"[VideoVerified] ───────────────────────────────────────")
+    log("[VideoVerified] ───────────────────────────────────────")
 
     return final_offset_ms, {
-        'reason': 'frame-matched',
-        'audio_correlation_ms': pure_correlation_ms,
-        'video_offset_ms': sub_frame_offset_ms,
-        'frame_offset': best_frame_offset,
-        'final_offset_ms': final_offset_ms,
-        'candidates': candidate_results,
-        'checkpoints': len(checkpoint_times),
-        'use_pts_precision': use_pts,
-        'use_interlaced_settings': use_interlaced_settings,
-        'source_content_type': source_props.get('content_type', 'unknown'),
-        'target_content_type': target_props.get('content_type', 'unknown'),
+        "reason": "frame-matched",
+        "audio_correlation_ms": pure_correlation_ms,
+        "video_offset_ms": sub_frame_offset_ms,
+        "frame_offset": best_frame_offset,
+        "final_offset_ms": final_offset_ms,
+        "candidates": candidate_results,
+        "checkpoints": len(checkpoint_times),
+        "use_pts_precision": use_pts,
+        "use_interlaced_settings": use_interlaced_settings,
+        "source_content_type": source_props.get("content_type", "unknown"),
+        "target_content_type": target_props.get("content_type", "unknown"),
     }
 
 
 def _generate_frame_candidates_static(
-    correlation_frames: float,
-    search_range_frames: int
-) -> List[int]:
+    correlation_frames: float, search_range_frames: int
+) -> list[int]:
     """
     Generate candidate frame offsets to test, centered on the correlation value.
 
@@ -393,10 +464,8 @@ def _generate_frame_candidates_static(
 
 
 def _generate_candidates_static(
-    correlation_ms: float,
-    frame_duration_ms: float,
-    search_range_frames: int
-) -> List[float]:
+    correlation_ms: float, frame_duration_ms: float, search_range_frames: int
+) -> list[float]:
     """Generate candidate offsets to test (static version) - DEPRECATED, use _generate_frame_candidates_static."""
     candidates = set()
 
@@ -421,9 +490,8 @@ def _generate_candidates_static(
 
 
 def _select_checkpoint_times_static(
-    duration_ms: float,
-    num_checkpoints: int
-) -> List[float]:
+    duration_ms: float, num_checkpoints: int
+) -> list[float]:
     """Select checkpoint times distributed across the video (static version)."""
     checkpoints = []
 
@@ -439,7 +507,7 @@ def _select_checkpoint_times_static(
 
 def _measure_candidate_quality_static(
     offset_ms: float,
-    checkpoint_times: List[float],
+    checkpoint_times: list[float],
     source_reader,
     target_reader,
     fps: float,
@@ -449,8 +517,8 @@ def _measure_candidate_quality_static(
     hash_size: int,
     hash_threshold: int,
     comparison_method: str,
-    log
-) -> Dict[str, Any]:
+    log,
+) -> dict[str, Any]:
     """Measure quality of a candidate offset (static version)."""
     from ..frame_utils import compute_frame_hash, compute_hamming_distance
 
@@ -476,7 +544,7 @@ def _measure_candidate_quality_static(
                 continue
 
             # Search window around expected target frame
-            best_distance = float('inf')
+            best_distance = float("inf")
             for delta in range(-window_radius, window_radius + 1):
                 search_idx = target_frame_idx + delta
                 if search_idx < 0:
@@ -486,7 +554,9 @@ def _measure_candidate_quality_static(
                 if target_frame is None:
                     continue
 
-                target_hash = compute_frame_hash(target_frame, hash_size, hash_algorithm)
+                target_hash = compute_frame_hash(
+                    target_frame, hash_size, hash_algorithm
+                )
                 if target_hash is None:
                     continue
 
@@ -495,7 +565,7 @@ def _measure_candidate_quality_static(
                 if distance < best_distance:
                     best_distance = distance
 
-            if best_distance < float('inf'):
+            if best_distance < float("inf"):
                 distances.append(best_distance)
 
                 if best_distance <= hash_threshold:
@@ -510,12 +580,12 @@ def _measure_candidate_quality_static(
             log(f"[VideoVerified] Checkpoint error: {e}")
             continue
 
-    avg_distance = sum(distances) / len(distances) if distances else float('inf')
+    avg_distance = sum(distances) / len(distances) if distances else float("inf")
 
     return {
-        'score': total_score,
-        'matched': matched_count,
-        'avg_distance': avg_distance,
+        "score": total_score,
+        "matched": matched_count,
+        "avg_distance": avg_distance,
     }
 
 
@@ -528,8 +598,8 @@ def _verify_frame_sequence_static(
     hash_algorithm: str,
     hash_size: int,
     hash_threshold: int,
-    comparison_method: str = 'hash',
-) -> Tuple[int, float, List[int]]:
+    comparison_method: str = "hash",
+) -> tuple[int, float, list[int]]:
     """
     Verify that a sequence of consecutive frames match between source and target.
 
@@ -554,7 +624,11 @@ def _verify_frame_sequence_static(
     Returns:
         Tuple of (matched_count, avg_distance, distances_list)
     """
-    from ..frame_utils import compute_frame_hash, compute_hamming_distance, compare_frames
+    from ..frame_utils import (
+        compare_frames,
+        compute_frame_hash,
+        compute_hamming_distance,
+    )
 
     matched = 0
     distances = []
@@ -573,21 +647,26 @@ def _verify_frame_sequence_static(
             if source_frame is None or target_frame is None:
                 continue
 
-            if comparison_method in ('ssim', 'mse'):
+            if comparison_method in ("ssim", "mse"):
                 # Use compare_frames for SSIM/MSE comparison
                 distance, is_match = compare_frames(
-                    source_frame, target_frame,
+                    source_frame,
+                    target_frame,
                     method=comparison_method,
                     hash_algorithm=hash_algorithm,
-                    hash_size=hash_size
+                    hash_size=hash_size,
                 )
                 distances.append(distance)
                 if is_match:
                     matched += 1
             else:
                 # Default: use perceptual hash comparison
-                source_hash = compute_frame_hash(source_frame, hash_size, hash_algorithm)
-                target_hash = compute_frame_hash(target_frame, hash_size, hash_algorithm)
+                source_hash = compute_frame_hash(
+                    source_frame, hash_size, hash_algorithm
+                )
+                target_hash = compute_frame_hash(
+                    target_frame, hash_size, hash_algorithm
+                )
 
                 if source_hash is None or target_hash is None:
                     continue
@@ -601,13 +680,13 @@ def _verify_frame_sequence_static(
         except Exception:
             continue
 
-    avg_dist = sum(distances) / len(distances) if distances else float('inf')
+    avg_dist = sum(distances) / len(distances) if distances else float("inf")
     return matched, avg_dist, distances
 
 
 def _measure_frame_offset_quality_static(
     frame_offset: int,
-    checkpoint_times: List[float],
+    checkpoint_times: list[float],
     source_reader,
     target_reader,
     fps: float,
@@ -619,7 +698,7 @@ def _measure_frame_offset_quality_static(
     comparison_method: str,
     log,
     sequence_verify_length: int = 10,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Measure quality of a candidate frame offset using sequence verification.
 
@@ -643,7 +722,11 @@ def _measure_frame_offset_quality_static(
     Returns:
         Dict with score, matched count, avg_distance, sequence_verified count, and match_details
     """
-    from ..frame_utils import compute_frame_hash, compute_hamming_distance, compare_frames
+    from ..frame_utils import (
+        compare_frames,
+        compute_frame_hash,
+        compute_hamming_distance,
+    )
 
     total_score = 0.0
     matched_count = 0
@@ -671,21 +754,26 @@ def _measure_frame_offset_quality_static(
             if target_frame is None:
                 continue
 
-            if comparison_method in ('ssim', 'mse'):
+            if comparison_method in ("ssim", "mse"):
                 # Use compare_frames for SSIM/MSE comparison
                 initial_distance, initial_match = compare_frames(
-                    source_frame, target_frame,
+                    source_frame,
+                    target_frame,
                     method=comparison_method,
                     hash_algorithm=hash_algorithm,
-                    hash_size=hash_size
+                    hash_size=hash_size,
                 )
             else:
                 # Default: use perceptual hash comparison
-                source_hash = compute_frame_hash(source_frame, hash_size, hash_algorithm)
+                source_hash = compute_frame_hash(
+                    source_frame, hash_size, hash_algorithm
+                )
                 if source_hash is None:
                     continue
 
-                target_hash = compute_frame_hash(target_frame, hash_size, hash_algorithm)
+                target_hash = compute_frame_hash(
+                    target_frame, hash_size, hash_algorithm
+                )
                 if target_hash is None:
                     continue
 
@@ -696,10 +784,15 @@ def _measure_frame_offset_quality_static(
 
             # Now verify with sequence of consecutive frames
             seq_matched, seq_avg_dist, seq_distances = _verify_frame_sequence_static(
-                source_frame_idx, target_frame_idx, sequence_verify_length,
-                source_reader, target_reader,
-                hash_algorithm, hash_size, hash_threshold,
-                comparison_method=comparison_method
+                source_frame_idx,
+                target_frame_idx,
+                sequence_verify_length,
+                source_reader,
+                target_reader,
+                hash_algorithm,
+                hash_size,
+                hash_threshold,
+                comparison_method=comparison_method,
             )
 
             # Sequence is verified if majority of frames match
@@ -708,16 +801,18 @@ def _measure_frame_offset_quality_static(
             sequence_verified = seq_matched >= min_sequence_matches
 
             # Record match details
-            match_details.append({
-                'source_frame': source_frame_idx,
-                'target_frame': target_frame_idx,
-                'distance': initial_distance,
-                'is_match': initial_match,
-                'sequence_matched': seq_matched,
-                'sequence_length': sequence_verify_length,
-                'sequence_verified': sequence_verified,
-                'sequence_avg_dist': seq_avg_dist,
-            })
+            match_details.append(
+                {
+                    "source_frame": source_frame_idx,
+                    "target_frame": target_frame_idx,
+                    "distance": initial_distance,
+                    "is_match": initial_match,
+                    "sequence_matched": seq_matched,
+                    "sequence_length": sequence_verify_length,
+                    "sequence_verified": sequence_verified,
+                    "sequence_avg_dist": seq_avg_dist,
+                }
+            )
 
             if sequence_verified:
                 sequence_verified_count += 1
@@ -739,21 +834,21 @@ def _measure_frame_offset_quality_static(
             log(f"[VideoVerified] Checkpoint error: {e}")
             continue
 
-    avg_distance = sum(distances) / len(distances) if distances else float('inf')
+    avg_distance = sum(distances) / len(distances) if distances else float("inf")
 
     return {
-        'score': total_score,
-        'matched': matched_count,
-        'sequence_verified': sequence_verified_count,
-        'avg_distance': avg_distance,
-        'match_details': match_details,
+        "score": total_score,
+        "matched": matched_count,
+        "sequence_verified": sequence_verified_count,
+        "avg_distance": avg_distance,
+        "match_details": match_details,
     }
 
 
 def _calculate_subframe_offset_static(
     frame_offset: int,
-    match_details: List[Dict],
-    checkpoint_times: List[float],
+    match_details: list[dict],
+    checkpoint_times: list[float],
     source_reader,
     target_reader,
     fps: float,
@@ -793,37 +888,47 @@ def _calculate_subframe_offset_static(
 
     if not use_pts_precision:
         # Just use frame-based - simple and reliable
-        log(f"[VideoVerified] Frame-based offset: {frame_offset:+d} frames = {frame_based_offset:+.3f}ms")
+        log(
+            f"[VideoVerified] Frame-based offset: {frame_offset:+d} frames = {frame_based_offset:+.3f}ms"
+        )
         return frame_based_offset
 
     # PTS precision mode - use actual container timestamps
-    log(f"[VideoVerified] Using PTS precision mode")
+    log("[VideoVerified] Using PTS precision mode")
 
     # Prioritize sequence-verified matches (most reliable)
-    sequence_verified_matches = [m for m in match_details if m.get('sequence_verified', False)]
+    sequence_verified_matches = [
+        m for m in match_details if m.get("sequence_verified", False)
+    ]
 
     # Fall back to single-frame matches if no sequence-verified
     if sequence_verified_matches:
         good_matches = sequence_verified_matches
-        log(f"[VideoVerified] Using {len(good_matches)} sequence-verified checkpoints for PTS calculation")
+        log(
+            f"[VideoVerified] Using {len(good_matches)} sequence-verified checkpoints for PTS calculation"
+        )
     else:
-        good_matches = [m for m in match_details if m.get('is_match', False)]
+        good_matches = [m for m in match_details if m.get("is_match", False)]
         if good_matches:
-            log(f"[VideoVerified] No sequence-verified matches, using {len(good_matches)} single-frame matches")
+            log(
+                f"[VideoVerified] No sequence-verified matches, using {len(good_matches)} single-frame matches"
+            )
 
     if not good_matches:
         # No good matches - fall back to frame-based calculation
-        log(f"[VideoVerified] No good matches for PTS, using frame-based: {frame_based_offset:+.3f}ms")
+        log(
+            f"[VideoVerified] No good matches for PTS, using frame-based: {frame_based_offset:+.3f}ms"
+        )
         return frame_based_offset
 
     # Calculate offset from each matched pair using PTS
     pts_offsets = []
 
     for match in good_matches:
-        source_idx = match['source_frame']
-        target_idx = match['target_frame']
+        source_idx = match["source_frame"]
+        target_idx = match["target_frame"]
         seq_info = ""
-        if match.get('sequence_verified'):
+        if match.get("sequence_verified"):
             seq_info = f" [seq:{match.get('sequence_matched', '?')}/{match.get('sequence_length', '?')}]"
 
         try:
@@ -833,8 +938,10 @@ def _calculate_subframe_offset_static(
             if source_pts is not None and target_pts is not None:
                 offset = target_pts - source_pts
                 pts_offsets.append(offset)
-                log(f"[VideoVerified]   Frame {source_idx}→{target_idx}: "
-                    f"PTS {source_pts:.3f}ms→{target_pts:.3f}ms = {offset:+.3f}ms{seq_info}")
+                log(
+                    f"[VideoVerified]   Frame {source_idx}→{target_idx}: "
+                    f"PTS {source_pts:.3f}ms→{target_pts:.3f}ms = {offset:+.3f}ms{seq_info}"
+                )
 
         except Exception as e:
             log(f"[VideoVerified] PTS lookup error: {e}")
@@ -842,7 +949,9 @@ def _calculate_subframe_offset_static(
 
     if not pts_offsets:
         # PTS lookup failed - fall back to frame-based
-        log(f"[VideoVerified] PTS lookup failed, using frame-based: {frame_based_offset:+.3f}ms")
+        log(
+            f"[VideoVerified] PTS lookup failed, using frame-based: {frame_based_offset:+.3f}ms"
+        )
         return frame_based_offset
 
     # Use median offset (robust to outliers)
@@ -853,7 +962,9 @@ def _calculate_subframe_offset_static(
     else:
         sub_frame_offset = pts_offsets[median_idx]
 
-    log(f"[VideoVerified] PTS-based offset from {len(pts_offsets)} pairs: {sub_frame_offset:+.3f}ms")
+    log(
+        f"[VideoVerified] PTS-based offset from {len(pts_offsets)} pairs: {sub_frame_offset:+.3f}ms"
+    )
 
     return sub_frame_offset
 
@@ -875,22 +986,22 @@ class VideoVerifiedSync(SyncPlugin):
     - Robust median calculation from multiple checkpoints
     """
 
-    name = 'video-verified'
-    description = 'Audio correlation verified against video frame matching with sub-frame precision'
+    name = "video-verified"
+    description = "Audio correlation verified against video frame matching with sub-frame precision"
 
     def apply(
         self,
-        subtitle_data: 'SubtitleData',
+        subtitle_data: SubtitleData,
         total_delay_ms: float,
         global_shift_ms: float,
-        target_fps: Optional[float] = None,
-        source_video: Optional[str] = None,
-        target_video: Optional[str] = None,
+        target_fps: float | None = None,
+        source_video: str | None = None,
+        target_video: str | None = None,
         runner=None,
-        config: Optional[dict] = None,
-        temp_dir: Optional[Path] = None,
-        **kwargs
-    ) -> 'OperationResult':
+        config: dict | None = None,
+        temp_dir: Path | None = None,
+        **kwargs,
+    ) -> OperationResult:
         """
         Apply video-verified sync to subtitle data.
 
@@ -924,14 +1035,14 @@ class VideoVerifiedSync(SyncPlugin):
             if runner:
                 runner._log_message(msg)
 
-        log(f"[VideoVerified] === Video-Verified Sync Mode ===")
+        log("[VideoVerified] === Video-Verified Sync Mode ===")
         log(f"[VideoVerified] Events: {len(subtitle_data.events)}")
 
         if not source_video or not target_video:
             return OperationResult(
                 success=False,
-                operation='sync',
-                error='Both source and target videos required for video-verified mode'
+                operation="sync",
+                error="Both source and target videos required for video-verified mode",
             )
 
         # Calculate pure correlation for reference
@@ -957,36 +1068,44 @@ class VideoVerifiedSync(SyncPlugin):
         if final_offset_ms is None:
             # Fallback to correlation on error
             final_offset_ms = total_delay_ms
-            details['reason'] = details.get('reason', 'fallback-error')
+            details["reason"] = details.get("reason", "fallback-error")
 
         # Apply the calculated offset
-        video_offset_ms = details.get('video_offset_ms', pure_correlation_ms)
-        selection_reason = details.get('reason', 'unknown')
+        video_offset_ms = details.get("video_offset_ms", pure_correlation_ms)
+        selection_reason = details.get("reason", "unknown")
 
         return self._apply_offset(
-            subtitle_data, final_offset_ms, global_shift_ms, pure_correlation_ms,
-            video_offset_ms, selection_reason, details, runner
+            subtitle_data,
+            final_offset_ms,
+            global_shift_ms,
+            pure_correlation_ms,
+            video_offset_ms,
+            selection_reason,
+            details,
+            runner,
         )
 
     def _apply_offset(
         self,
-        subtitle_data: 'SubtitleData',
+        subtitle_data: SubtitleData,
         final_offset_ms: float,
         global_shift_ms: float,
         audio_correlation_ms: float,
         video_offset_ms: float,
         selection_reason: str,
-        details: Dict,
-        runner
-    ) -> 'OperationResult':
+        details: dict,
+        runner,
+    ) -> OperationResult:
         """Apply the calculated offset to all events."""
-        from ..data import OperationResult, OperationRecord, SyncEventData
+        from ..data import OperationRecord, OperationResult, SyncEventData
 
         def log(msg: str):
             if runner:
                 runner._log_message(msg)
 
-        log(f"[VideoVerified] Applying {final_offset_ms:+.3f}ms to {len(subtitle_data.events)} events")
+        log(
+            f"[VideoVerified] Applying {final_offset_ms:+.3f}ms to {len(subtitle_data.events)} events"
+        )
 
         events_synced = 0
 
@@ -1012,41 +1131,43 @@ class VideoVerifiedSync(SyncPlugin):
 
         # Build summary
         if abs(video_offset_ms - audio_correlation_ms) > 1.0:
-            summary = (f"VideoVerified: {events_synced} events, {final_offset_ms:+.1f}ms "
-                      f"(audio={audio_correlation_ms:+.0f}→video={video_offset_ms:+.0f})")
+            summary = (
+                f"VideoVerified: {events_synced} events, {final_offset_ms:+.1f}ms "
+                f"(audio={audio_correlation_ms:+.0f}→video={video_offset_ms:+.0f})"
+            )
         else:
             summary = f"VideoVerified: {events_synced} events, {final_offset_ms:+.1f}ms"
 
         # Record operation
         record = OperationRecord(
-            operation='sync',
+            operation="sync",
             timestamp=datetime.now(),
             parameters={
-                'mode': self.name,
-                'final_offset_ms': final_offset_ms,
-                'global_shift_ms': global_shift_ms,
-                'audio_correlation_ms': audio_correlation_ms,
-                'video_offset_ms': video_offset_ms,
-                'selection_reason': selection_reason,
+                "mode": self.name,
+                "final_offset_ms": final_offset_ms,
+                "global_shift_ms": global_shift_ms,
+                "audio_correlation_ms": audio_correlation_ms,
+                "video_offset_ms": video_offset_ms,
+                "selection_reason": selection_reason,
             },
             events_affected=events_synced,
-            summary=summary
+            summary=summary,
         )
         subtitle_data.operations.append(record)
 
         log(f"[VideoVerified] Sync complete: {events_synced} events")
-        log(f"[VideoVerified] ===================================")
+        log("[VideoVerified] ===================================")
 
         return OperationResult(
             success=True,
-            operation='sync',
+            operation="sync",
             events_affected=events_synced,
             summary=summary,
             details={
-                'audio_correlation_ms': audio_correlation_ms,
-                'video_offset_ms': video_offset_ms,
-                'final_offset_ms': final_offset_ms,
-                'selection_reason': selection_reason,
+                "audio_correlation_ms": audio_correlation_ms,
+                "video_offset_ms": video_offset_ms,
+                "final_offset_ms": final_offset_ms,
+                "selection_reason": selection_reason,
                 **details,
-            }
+            },
         )
