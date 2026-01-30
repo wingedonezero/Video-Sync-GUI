@@ -9,8 +9,7 @@ from vsg_core.analysis.drift_detection import diagnose_audio_issue
 from vsg_core.analysis.sync_stability import analyze_sync_stability
 from vsg_core.extraction.tracks import get_stream_info, get_stream_info_with_delays
 from vsg_core.io.runner import CommandRunner
-from vsg_core.models.jobs import Delays
-from vsg_core.orchestrator.steps.context import Context
+from vsg_core.models import Context, Delays
 
 
 def _format_track_details(track: dict[str, Any], index: int) -> str:

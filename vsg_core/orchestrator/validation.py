@@ -6,8 +6,7 @@ Ensures each step completed successfully before proceeding.
 
 from pathlib import Path
 
-from vsg_core.models.enums import TrackType
-from vsg_core.orchestrator.steps.context import Context
+from vsg_core.models import Context, TrackType
 
 
 class PipelineValidationError(Exception):

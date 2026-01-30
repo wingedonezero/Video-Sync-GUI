@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from vsg_core.chapters.process import process_chapters
 from vsg_core.io.runner import CommandRunner
-from vsg_core.orchestrator.steps.context import Context
+from vsg_core.models import Context
 
 
 class ChaptersStep:

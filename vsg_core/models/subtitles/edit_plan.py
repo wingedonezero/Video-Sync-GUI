@@ -1,15 +1,18 @@
-# vsg_core/subtitles/edit_plan.py
+# vsg_core/models/subtitles/edit_plan.py
 """
-Non-destructive subtitle edit plan system.
+Non-destructive subtitle edit plan models.
 
-The editor creates an EditPlan describing changes to make.
-The plan is saved to JSON and applied at job execution time.
+This module contains the dataclasses for the edit plan system:
+- EventGroup: Enum for predefined event groups
+- EventEdit: Planned edit for a single subtitle event
+- StyleEdit: Planned edit for a subtitle style
+- NewEventSpec: Specification for a new event
+- NewStyleSpec: Specification for a new style
+- GroupDefinition: Definition of a custom event group
+- SubtitleEditPlan: The main edit plan container
+- ApplyResult: Result of applying an edit plan
 
-This allows:
-- Preview in editor without modifying original data
-- Same workflow for ASS, SRT, and OCR sources
-- Video sync (click line → seek) works via start_ms/end_ms
-- Future PyonFX integration for effects
+Previously in vsg_core/subtitles/edit_plan.py.
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .data import SubtitleData
+    from vsg_core.subtitles.data import SubtitleData
 
 
 class EventGroup(str, Enum):
@@ -99,7 +102,7 @@ class EventEdit:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
-        result = {"event_index": self.event_index}
+        result: dict[str, Any] = {"event_index": self.event_index}
         if self.new_text is not None:
             result["new_text"] = self.new_text
         if self.new_style is not None:
@@ -216,7 +219,7 @@ class StyleEdit:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
-        result = {"style_name": self.style_name}
+        result: dict[str, Any] = {"style_name": self.style_name}
         for attr in [
             "new_fontname",
             "new_fontsize",
@@ -421,6 +424,49 @@ class GroupDefinition:
 
 
 @dataclass
+class ApplyResult:
+    """Result of applying an edit plan."""
+
+    success: bool = False
+    events_deleted: int = 0
+    events_modified: int = 0
+    events_added: int = 0
+    styles_deleted: int = 0
+    styles_modified: int = 0
+    styles_added: int = 0
+    global_offset_applied: bool = False
+    error: str | None = None
+
+    @property
+    def total_changes(self) -> int:
+        """Total number of changes made."""
+        return (
+            self.events_deleted
+            + self.events_modified
+            + self.events_added
+            + self.styles_deleted
+            + self.styles_modified
+            + self.styles_added
+            + (1 if self.global_offset_applied else 0)
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary."""
+        return {
+            "success": self.success,
+            "events_deleted": self.events_deleted,
+            "events_modified": self.events_modified,
+            "events_added": self.events_added,
+            "styles_deleted": self.styles_deleted,
+            "styles_modified": self.styles_modified,
+            "styles_added": self.styles_added,
+            "global_offset_applied": self.global_offset_applied,
+            "total_changes": self.total_changes,
+            "error": self.error,
+        }
+
+
+@dataclass
 class SubtitleEditPlan:
     """
     Non-destructive edit plan for subtitle modifications.
@@ -575,7 +621,7 @@ class SubtitleEditPlan:
             edit.group = group_name
             self.set_event_edit(edit)
 
-    def apply(self, data: SubtitleData, runner=None) -> ApplyResult:
+    def apply(self, data: SubtitleData, runner: Any = None) -> ApplyResult:
         """
         Apply this edit plan to SubtitleData.
 
@@ -586,11 +632,12 @@ class SubtitleEditPlan:
         Returns:
             ApplyResult with statistics
         """
-        from .data import SubtitleEvent, SubtitleStyle
+        # Import here to avoid circular imports
+        from vsg_core.models import SubtitleEvent, SubtitleStyle
 
         result = ApplyResult()
 
-        def log(msg: str):
+        def log(msg: str) -> None:
             if runner:
                 runner._log_message(f"[EditPlan] {msg}")
 
@@ -700,7 +747,7 @@ class SubtitleEditPlan:
 
         # 5. Apply event edits
         # Build index map for remaining events
-        index_to_event = {}
+        index_to_event: dict[int, Any] = {}
         for i, event in enumerate(data.events):
             idx = event.original_index if event.original_index is not None else i
             index_to_event[idx] = event
@@ -826,49 +873,6 @@ class SubtitleEditPlan:
     def load(cls, path: Path | str) -> SubtitleEditPlan:
         """Load edit plan from JSON file."""
         path = Path(path)
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
         return cls.from_dict(data)
-
-
-@dataclass
-class ApplyResult:
-    """Result of applying an edit plan."""
-
-    success: bool = False
-    events_deleted: int = 0
-    events_modified: int = 0
-    events_added: int = 0
-    styles_deleted: int = 0
-    styles_modified: int = 0
-    styles_added: int = 0
-    global_offset_applied: bool = False
-    error: str | None = None
-
-    @property
-    def total_changes(self) -> int:
-        """Total number of changes made."""
-        return (
-            self.events_deleted
-            + self.events_modified
-            + self.events_added
-            + self.styles_deleted
-            + self.styles_modified
-            + self.styles_added
-            + (1 if self.global_offset_applied else 0)
-        )
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary."""
-        return {
-            "success": self.success,
-            "events_deleted": self.events_deleted,
-            "events_modified": self.events_modified,
-            "events_added": self.events_added,
-            "styles_deleted": self.styles_deleted,
-            "styles_modified": self.styles_modified,
-            "styles_added": self.styles_added,
-            "global_offset_applied": self.global_offset_applied,
-            "total_changes": self.total_changes,
-            "error": self.error,
-        }

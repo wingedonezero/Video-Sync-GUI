@@ -6,7 +6,7 @@ from pathlib import Path
 
 from vsg_core.extraction.attachments import extract_attachments
 from vsg_core.io.runner import CommandRunner
-from vsg_core.orchestrator.steps.context import Context
+from vsg_core.models import Context
 
 
 class AttachmentsStep:

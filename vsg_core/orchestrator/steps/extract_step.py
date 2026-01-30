@@ -7,10 +7,7 @@ from typing import Any
 
 from vsg_core.extraction.tracks import extract_tracks, get_stream_info_with_delays
 from vsg_core.io.runner import CommandRunner
-from vsg_core.models.enums import TrackType
-from vsg_core.models.jobs import PlanItem
-from vsg_core.models.media import StreamProps, Track
-from vsg_core.orchestrator.steps.context import Context
+from vsg_core.models import Context, PlanItem, StreamProps, Track, TrackType
 
 
 class ExtractStep:

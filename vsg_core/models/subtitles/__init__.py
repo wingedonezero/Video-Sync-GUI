@@ -5,7 +5,7 @@ Centralized subtitle model definitions.
 This package contains all subtitle-related data models:
 - core.py: Subtitle events, styles, metadata (SubtitleData components)
 - ocr.py: OCR result models (OCRResult, OCRLineResult, OCRConfig)
-- edit_plan.py: Non-destructive edit plan models (future)
+- edit_plan.py: Non-destructive edit plan models
 
 Import models from here for a clean API:
     from vsg_core.models.subtitles import SubtitleEvent, SubtitleStyle, OCRResult
@@ -26,6 +26,16 @@ from .core import (
     format_number,
     parse_ass_time,
 )
+from .edit_plan import (
+    ApplyResult,
+    EventEdit,
+    EventGroup,
+    GroupDefinition,
+    NewEventSpec,
+    NewStyleSpec,
+    StyleEdit,
+    SubtitleEditPlan,
+)
 from .ocr import OCRConfig, OCRLineResult, OCRResult
 
 __all__ = [
@@ -44,6 +54,15 @@ __all__ = [
     "OCRConfig",
     "OCRLineResult",
     "OCRResult",
+    # Edit plan models
+    "EventGroup",
+    "EventEdit",
+    "StyleEdit",
+    "NewEventSpec",
+    "NewStyleSpec",
+    "GroupDefinition",
+    "SubtitleEditPlan",
+    "ApplyResult",
     # Timing helpers
     "parse_ass_time",
     "format_ass_time",
