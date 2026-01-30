@@ -31,19 +31,23 @@ class ColorSwatchWidget(QWidget):
         super().__init__(parent)
         self.setFixedSize(size, size)
         self._hex_color = hex_color
-        self.setStyleSheet(f"""
+        self.setStyleSheet(
+            f"""
             background-color: {QColor(hex_color).name()};
             border: 1px solid #666;
             border-radius: 2px;
-        """)
+        """
+        )
 
     def set_color(self, hex_color: str):
         self._hex_color = hex_color
-        self.setStyleSheet(f"""
+        self.setStyleSheet(
+            f"""
             background-color: {QColor(hex_color).name()};
             border: 1px solid #666;
             border-radius: 2px;
-        """)
+        """
+        )
 
 
 class FavoritesManagerDialog(QDialog):
