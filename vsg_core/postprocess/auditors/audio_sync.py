@@ -98,50 +98,47 @@ class AudioSyncAuditor(BaseAuditor):
         # mkvmerge cuts frames, so we need to calculate what the ACTUAL delay will be
         if sync_mode == 'allow_negative' and expected_delay_ms < 0:
             # Determine codec frame size
-            frame_size_ms = None
-            if 'AC3' in codec_id.upper() or 'EAC3' in codec_id.upper():
-                # AC3/EAC3: 32ms frames (1536 samples @ 48kHz)
-                frame_size_ms = 32.0
-            elif 'DTS' in codec_id.upper():
-                # DTS: varies, typically 10-21ms, use 10.67ms for DTS Core (512 samples @ 48kHz)
-                frame_size_ms = 10.67
-            elif 'TRUEHD' in codec_id.upper() or 'MLP' in codec_id.upper():
-                # TrueHD: typically 0.83ms frames (40 samples @ 48kHz)
-                frame_size_ms = 0.83
+            frame_size_ms = self._get_codec_frame_size_ms(codec_id)
 
-            if frame_size_ms:
-                # Calculate what mkvmerge will actually do:
-                # 1. Calculate frames to cut: abs(delay) / frame_size
-                # 2. mkvmerge rounds UP (uses ceil) to be conservative
-                frames_to_cut = math.ceil(abs(expected_delay_ms) / frame_size_ms)
-                frames_cut_ms = frames_to_cut * frame_size_ms
-
-                # 3. Actual delay after cutting = original_delay + frames_cut
-                # (cutting frames makes audio start later, so it's additive)
-                calculated_actual_delay = expected_delay_ms + frames_cut_ms
-
-                self.log(f"  ⓘ '{name}' ({source}) negative delay calculation (codec: {codec_id}):")
-                self.log(f"     Requested delay: {expected_delay_ms:+.1f}ms")
-                self.log(f"     Frame size: {frame_size_ms:.2f}ms")
-                self.log(f"     Frames to cut: {frames_to_cut}")
-                self.log(f"     Frames cut: {frames_cut_ms:.1f}ms")
-                self.log(f"     Calculated actual delay: {calculated_actual_delay:+.1f}ms")
-
-                # Now compare against the calculated value, not the requested value
-                diff_ms = abs(calculated_actual_delay - actual_delay_ms)
-                tolerance_ms = 2.0  # Allow 2ms tolerance for rounding
-
-                if diff_ms <= tolerance_ms:
-                    self.log(f"  ✓ '{name}' ({source}) metadata: {actual_delay_ms:+.1f}ms (matches calculated {calculated_actual_delay:+.1f}ms)")
-                    return 0
+            if frame_size_ms is not None:
+                if frame_size_ms == 0:
+                    # Sample-accurate codecs (PCM, FLAC) - no frame cutting math needed
+                    self.log(f"  ⓘ '{name}' ({source}) is sample-accurate codec ({codec_id})")
+                    self.log(f"     No frame boundary constraints - delay should be exact")
+                    tolerance_ms = 1.0
                 else:
-                    self.log(f"[WARNING] Audio sync mismatch (metadata) for '{name}' ({source}, {lang}):")
-                    self.log(f"          Expected delay: {expected_delay_ms:+.1f}ms (requested)")
-                    self.log(f"          Calculated delay: {calculated_actual_delay:+.1f}ms (after frame cutting)")
-                    self.log(f"          Actual delay:   {actual_delay_ms:+.1f}ms")
-                    self.log(f"          Difference:     {diff_ms:.1f}ms")
-                    self.log(f"          Sync mode:      {sync_mode}")
-                    return 1
+                    # Calculate what mkvmerge will actually do:
+                    # 1. Calculate frames to cut: abs(delay) / frame_size
+                    # 2. mkvmerge rounds UP (uses ceil) to be conservative
+                    frames_to_cut = math.ceil(abs(expected_delay_ms) / frame_size_ms)
+                    frames_cut_ms = frames_to_cut * frame_size_ms
+
+                    # 3. Actual delay after cutting = original_delay + frames_cut
+                    # (cutting frames makes audio start later, so it's additive)
+                    calculated_actual_delay = expected_delay_ms + frames_cut_ms
+
+                    self.log(f"  ⓘ '{name}' ({source}) negative delay calculation (codec: {codec_id}):")
+                    self.log(f"     Requested delay: {expected_delay_ms:+.1f}ms")
+                    self.log(f"     Frame size: {frame_size_ms:.2f}ms")
+                    self.log(f"     Frames to cut: {frames_to_cut}")
+                    self.log(f"     Frames cut: {frames_cut_ms:.1f}ms")
+                    self.log(f"     Calculated actual delay: {calculated_actual_delay:+.1f}ms")
+
+                    # Now compare against the calculated value, not the requested value
+                    diff_ms = abs(calculated_actual_delay - actual_delay_ms)
+                    tolerance_ms = 2.0  # Allow 2ms tolerance for rounding
+
+                    if diff_ms <= tolerance_ms:
+                        self.log(f"  ✓ '{name}' ({source}) metadata: {actual_delay_ms:+.1f}ms (matches calculated {calculated_actual_delay:+.1f}ms)")
+                        return 0
+                    else:
+                        self.log(f"[WARNING] Audio sync mismatch (metadata) for '{name}' ({source}, {lang}):")
+                        self.log(f"          Expected delay: {expected_delay_ms:+.1f}ms (requested)")
+                        self.log(f"          Calculated delay: {calculated_actual_delay:+.1f}ms (after frame cutting)")
+                        self.log(f"          Actual delay:   {actual_delay_ms:+.1f}ms")
+                        self.log(f"          Difference:     {diff_ms:.1f}ms")
+                        self.log(f"          Sync mode:      {sync_mode}")
+                        return 1
             else:
                 # Unknown codec frame size, use generous tolerance
                 tolerance_ms = 100.0
@@ -232,37 +229,35 @@ class AudioSyncAuditor(BaseAuditor):
             # mkvmerge cuts frames, so we need to calculate what the ACTUAL delay will be
             if sync_mode == 'allow_negative' and expected_delay_ms < 0:
                 # Determine codec frame size
-                frame_size_ms = None
-                if 'AC3' in codec_id.upper() or 'EAC3' in codec_id.upper():
-                    frame_size_ms = 32.0
-                elif 'DTS' in codec_id.upper():
-                    frame_size_ms = 10.67
-                elif 'TRUEHD' in codec_id.upper() or 'MLP' in codec_id.upper():
-                    frame_size_ms = 0.83
+                frame_size_ms = self._get_codec_frame_size_ms(codec_id)
 
-                if frame_size_ms:
-                    # Calculate what mkvmerge will actually do
-                    frames_to_cut = math.ceil(abs(expected_delay_ms) / frame_size_ms)
-                    frames_cut_ms = frames_to_cut * frame_size_ms
-                    calculated_actual_delay = expected_delay_ms + frames_cut_ms
-
-                    # Compare against calculated value
-                    diff_ms = abs(calculated_actual_delay - first_pts_ms)
-                    tolerance_ms = 2.0
-
-                    if diff_ms <= tolerance_ms:
-                        self.log(f"  ✓ '{name}' ({source}) first packet: {first_pts_ms:+.1f}ms (matches calculated {calculated_actual_delay:+.1f}ms)")
-                        return 0
+                if frame_size_ms is not None:
+                    if frame_size_ms == 0:
+                        # Sample-accurate codecs (PCM, FLAC) - delay should be exact
+                        tolerance_ms = 1.0
                     else:
-                        self.log(f"[WARNING] Audio sync mismatch (packet timestamp) for '{name}' ({source}):")
-                        self.log(f"          Expected delay: {expected_delay_ms:+.1f}ms (requested)")
-                        self.log(f"          Calculated delay: {calculated_actual_delay:+.1f}ms (after frame cutting)")
-                        self.log(f"          Actual first packet at:  {first_pts_ms:+.1f}ms")
-                        self.log(f"          Difference:              {diff_ms:.1f}ms")
-                        self.log(f"          Tolerance used:          ±{tolerance_ms:.0f}ms")
-                        self.log(f"          Sync mode:               {sync_mode}")
-                        self.log(f"          → Stream data may not be properly delayed!")
-                        return 1
+                        # Calculate what mkvmerge will actually do
+                        frames_to_cut = math.ceil(abs(expected_delay_ms) / frame_size_ms)
+                        frames_cut_ms = frames_to_cut * frame_size_ms
+                        calculated_actual_delay = expected_delay_ms + frames_cut_ms
+
+                        # Compare against calculated value
+                        diff_ms = abs(calculated_actual_delay - first_pts_ms)
+                        tolerance_ms = 2.0
+
+                        if diff_ms <= tolerance_ms:
+                            self.log(f"  ✓ '{name}' ({source}) first packet: {first_pts_ms:+.1f}ms (matches calculated {calculated_actual_delay:+.1f}ms)")
+                            return 0
+                        else:
+                            self.log(f"[WARNING] Audio sync mismatch (packet timestamp) for '{name}' ({source}):")
+                            self.log(f"          Expected delay: {expected_delay_ms:+.1f}ms (requested)")
+                            self.log(f"          Calculated delay: {calculated_actual_delay:+.1f}ms (after frame cutting)")
+                            self.log(f"          Actual first packet at:  {first_pts_ms:+.1f}ms")
+                            self.log(f"          Difference:              {diff_ms:.1f}ms")
+                            self.log(f"          Tolerance used:          ±{tolerance_ms:.0f}ms")
+                            self.log(f"          Sync mode:               {sync_mode}")
+                            self.log(f"          → Stream data may not be properly delayed!")
+                            return 1
                 else:
                     # Unknown codec frame size
                     tolerance_ms = 100.0
@@ -292,3 +287,67 @@ class AudioSyncAuditor(BaseAuditor):
             self.log(f"  [INFO] Could not verify packet timestamps for track {audio_track_index} ({e})")
 
         return issues
+
+    def _get_codec_frame_size_ms(self, codec_id: str) -> Optional[float]:
+        """
+        Returns the frame size in milliseconds for a given codec, or None if unknown.
+
+        Returns 0 for sample-accurate codecs (PCM, FLAC) that have no frame boundaries.
+        This is used to calculate the expected delay after mkvmerge cuts frames for
+        negative delays in allow_negative mode.
+
+        Frame sizes are based on typical configurations at 48kHz sample rate.
+        """
+        codec_upper = codec_id.upper()
+
+        # Lossy compressed formats with fixed frame sizes
+        if 'AC3' in codec_upper or 'EAC3' in codec_upper:
+            # AC3/EAC3: 1536 samples @ 48kHz = 32ms
+            return 32.0
+
+        if 'DTS' in codec_upper:
+            # DTS Core: 512 samples @ 48kHz = 10.67ms
+            # DTS-HD uses same base frame size
+            return 10.67
+
+        if 'TRUEHD' in codec_upper or 'MLP' in codec_upper:
+            # TrueHD/MLP: 40 samples @ 48kHz = 0.83ms
+            return 0.83
+
+        if 'AAC' in codec_upper:
+            # AAC: 1024 samples @ 48kHz = 21.33ms (standard AAC)
+            # HE-AAC uses 2048 samples but we use conservative value
+            return 21.33
+
+        if 'MP3' in codec_upper or 'MPEG' in codec_upper and 'L3' in codec_upper:
+            # MP3: 1152 samples, ~24ms @ 48kHz, ~26ms @ 44.1kHz
+            # Use conservative value for 44.1kHz which is more common
+            return 26.0
+
+        if 'OPUS' in codec_upper:
+            # Opus: Default 20ms frames (can be 2.5-60ms but 20ms is standard)
+            return 20.0
+
+        if 'VORBIS' in codec_upper:
+            # Vorbis: Variable, typically 2048 samples @ 48kHz = 42.67ms
+            return 42.67
+
+        # Lossless/sample-accurate formats - return 0 to indicate no frame boundaries
+        if 'FLAC' in codec_upper:
+            # FLAC: Sample-accurate, no fixed frame boundaries for cutting
+            return 0.0
+
+        if 'PCM' in codec_upper or codec_upper.startswith('A_PCM'):
+            # PCM: Sample-accurate
+            return 0.0
+
+        if 'ALAC' in codec_upper:
+            # Apple Lossless: Sample-accurate like FLAC
+            return 0.0
+
+        if 'WAV' in codec_upper:
+            # WAV/PCM: Sample-accurate
+            return 0.0
+
+        # Unknown codec - return None so caller can use generous tolerance
+        return None
