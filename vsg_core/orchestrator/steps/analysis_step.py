@@ -1,105 +1,41 @@
 # vsg_core/orchestrator/steps/analysis_step.py
+"""
+Analysis step - micro-orchestrator for audio correlation analysis.
+
+This step coordinates the analysis workflow:
+1. Get container delays from Source 1
+2. For each secondary source:
+   - Select tracks for correlation
+   - Build source-specific config
+   - Run correlation
+   - Run diagnosis (drift/stepping detection)
+   - Select delay
+   - Apply diagnosis flags
+   - Calculate final delay with container chain
+3. Calculate global shift if needed
+"""
+
 from __future__ import annotations
 
 from collections import Counter
 from typing import Any
 
 from vsg_core.analysis.audio_corr import run_audio_correlation, run_multi_correlation
+from vsg_core.analysis.config_builder import (
+    should_use_source_separation as _should_use_source_separated_mode,
+)
 from vsg_core.analysis.delay_selection import (
     find_first_stable_segment_delay,
     select_delay,
 )
-from vsg_core.analysis.drift_detection import diagnose_audio_issue
+from vsg_core.analysis.diagnostics import diagnose_audio_issue
 from vsg_core.analysis.sync_stability import analyze_sync_stability
+from vsg_core.analysis.track_selection import (
+    format_track_details as _format_track_details,
+)
 from vsg_core.extraction.tracks import get_stream_info, get_stream_info_with_delays
 from vsg_core.io.runner import CommandRunner
 from vsg_core.models import Context, Delays
-
-
-def _format_track_details(track: dict[str, Any], index: int) -> str:
-    """
-    Format audio track details for logging.
-
-    Args:
-        track: Track dictionary from mkvmerge JSON
-        index: 0-based audio track index
-
-    Returns:
-        Formatted string like "Track 0: Japanese (jpn), FLAC 2.0, 'Commentary'"
-    """
-    props = track.get("properties", {})
-
-    # Language
-    lang = props.get("language", "und")
-
-    # Codec - extract readable name from codec_id
-    codec_id = props.get("codec_id", "unknown")
-    # Common codec_id mappings
-    codec_map = {
-        "A_FLAC": "FLAC",
-        "A_AAC": "AAC",
-        "A_AC3": "AC3",
-        "A_EAC3": "E-AC3",
-        "A_DTS": "DTS",
-        "A_TRUEHD": "TrueHD",
-        "A_OPUS": "Opus",
-        "A_VORBIS": "Vorbis",
-        "A_PCM": "PCM",
-        "A_MP3": "MP3",
-    }
-    # Try exact match first, then prefix match
-    codec_name = codec_map.get(codec_id)
-    if not codec_name:
-        for prefix, name in codec_map.items():
-            if codec_id.startswith(prefix):
-                codec_name = name
-                break
-    if not codec_name:
-        codec_name = codec_id.replace("A_", "")
-
-    # Channels
-    channels = props.get("audio_channels", 2)
-    channel_str = {1: "Mono", 2: "2.0", 6: "5.1", 8: "7.1"}.get(
-        channels, f"{channels}ch"
-    )
-
-    # Track name (if set)
-    track_name = props.get("track_name", "")
-
-    # Build the string
-    parts = [f"Track {index}: {lang}"]
-    parts.append(f"{codec_name} {channel_str}")
-    if track_name:
-        parts.append(f"'{track_name}'")
-
-    return ", ".join(parts)
-
-
-def _should_use_source_separated_mode(
-    source_key: str, config: dict, source_settings: dict[str, dict[str, Any]]
-) -> bool:
-    """
-    Check if this source should use source separation during correlation.
-
-    Uses per-source settings from the job layout. Source separation is only applied
-    when explicitly enabled for the specific source via use_source_separation flag.
-
-    Args:
-        source_key: The source being analyzed (e.g., "Source 2", "Source 3")
-        config: Configuration dictionary (for separation mode/model settings)
-        source_settings: Per-source correlation settings from job layout
-
-    Returns:
-        True if source separation should be applied to this comparison, False otherwise
-    """
-    # Check if source separation is configured at all (mode must be set)
-    separation_mode = config.get("source_separation_mode", "none")
-    if separation_mode == "none":
-        return False
-
-    # Check per-source setting - source separation must be explicitly enabled per-source
-    per_source = source_settings.get(source_key, {})
-    return per_source.get("use_source_separation", False)
 
 
 def _choose_delay(
