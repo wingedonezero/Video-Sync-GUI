@@ -76,323 +76,63 @@
 
 ---
 
-## 11) Architecture: Separation of Concerns
-
-This codebase uses a **modular pipeline architecture**. Understanding where code belongs prevents drift and keeps things maintainable.
+## 11) Architecture: Where Code Belongs
 
 ### 11.1) The Three Layers
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  ORCHESTRATOR (pipeline.py)                                 │
-│  - Initializes Context                                      │
-│  - Runs steps in sequence                                   │
-│  - Validates after each step                                │
-│  - Handles progress callbacks                               │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│  STEPS (vsg_core/orchestrator/steps/)                       │
-│  - Micro-orchestrators (coordinate, don't compute)          │
-│  - Call modules in sequence                                 │
-│  - Logging (visibility into progress)                       │
-│  - Control flow (loops, conditionals)                       │
-│  - Context updates                                          │
-│  - NO business logic!                                       │
-└─────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────┐
-│  MODULES (vsg_core/analysis/, vsg_core/correction/, etc.)   │
-│  - ALL business logic lives here                            │
-│  - Pure functions (data in → data out)                      │
-│  - Dataclasses for typed return values                      │
-│  - Testable in isolation                                    │
-│  - No direct Context mutation                               │
-└─────────────────────────────────────────────────────────────┘
+ORCHESTRATOR (vsg_core/orchestrator/pipeline.py)
+    → Initializes Context, runs steps in sequence, validates
+
+STEPS (vsg_core/orchestrator/steps/*.py)
+    → Micro-orchestrators: coordinate, log, control flow, update Context
+    → NO business logic
+
+MODULES (vsg_core/analysis/, correction/, subtitles/, etc.)
+    → ALL business logic as pure functions
+    → Dataclasses for typed returns
+    → No direct Context access
 ```
 
-### 11.2) Steps: What Belongs Here
+**Reference:** `analysis_step.py` is the gold standard - study it before modifying steps.
 
-Steps are **micro-orchestrators**. They coordinate work but don't do the work.
+### 11.2) Steps vs Modules
 
-**YES - Steps should contain:**
-- Coordination: calling module functions in the right order
-- Logging: `runner._log_message(...)` for visibility
-- Control flow: loops over sources, conditionals for modes
-- Context reads/writes: getting config, storing results
-- Thin wrappers: simple delegation to modules (see `_choose_delay()` in analysis_step.py)
+| Put in STEP | Put in MODULE |
+|-------------|---------------|
+| Calling module functions | Algorithms, calculations |
+| `runner._log_message(...)` | Complex conditionals |
+| Loops over sources | Data transformations |
+| Context reads/writes | Anything needing unit tests |
 
-**NO - Steps should NOT contain:**
-- Algorithms or calculations (move to modules)
-- Complex conditionals with business rules (extract to module functions)
-- Data transformations (pure functions in modules)
-- Anything that needs unit testing in isolation
+### 11.3) Module Function Pattern
 
-**Reference:** `vsg_core/orchestrator/steps/analysis_step.py`
-
-### 11.3) Modules: What Belongs Here
-
-Modules contain **all business logic** as pure functions.
-
-**Pattern for module functions:**
 ```python
-from dataclasses import dataclass
-from typing import Any, Callable
-
 @dataclass
-class OperationResult:
-    """Typed result - use dataclasses when returning multiple values."""
+class ResultType:
     value: int
     raw_value: float
-    method_used: str
 
-def perform_operation(
+def do_thing(
     data: InputType,
     config: dict[str, Any],
     log: Callable[[str], None] | None = None,
-) -> OperationResult:
-    """
-    Pure function with optional logging.
-
-    - Takes data + config as input
-    - Returns typed result (dataclass)
-    - Logging is optional side-effect via callback
-    - No direct Context access
-    """
-    if log:
-        log("Performing operation...")
-
-    # Business logic here
-    result = calculate_something(data, config)
-
-    return OperationResult(
-        value=round(result),
-        raw_value=result,
-        method_used="algorithm_name",
-    )
+) -> ResultType:
+    # Pure function: data in → typed result out
+    # Optional log callback, NO Context parameter
 ```
 
-**Module organization by domain:**
-- `vsg_core/analysis/` - Audio correlation, delay calculation, diagnostics
-- `vsg_core/correction/` - PAL, linear, stepping corrections
-- `vsg_core/extraction/` - Track extraction logic
-- `vsg_core/subtitles/` - Subtitle operations
-- `vsg_core/mux/` - Mux planning and execution
+### 11.4) Models: Where Dataclasses Go
 
-### 11.4) Dataclasses for Typed Returns
+- **Shared types** → `vsg_core/models/` (check here first before creating new ones)
+- **Domain-specific** → keep in module, re-export via `__init__.py`
+- **Avoid duplicates** - search existing models before creating
 
-**When a function needs to return multiple values, use a dataclass:**
-
-```python
-# BAD: Tuple returns are unclear
-def calculate_delay(...) -> tuple[int, float, str]:
-    return (100, 99.7, "mode")
-
-# GOOD: Dataclass makes meaning explicit
-@dataclass
-class DelayResult:
-    rounded_ms: int
-    raw_ms: float
-    selection_method: str
-
-def calculate_delay(...) -> DelayResult:
-    return DelayResult(
-        rounded_ms=100,
-        raw_ms=99.7,
-        selection_method="mode",
-    )
-```
-
-**Benefits:**
-- Self-documenting (field names explain what each value means)
-- Pyright can type-check field access
-- Easy to add fields without breaking callers
-- IDE autocomplete works
-
-**Examples in codebase:**
-- `FinalDelay` in delay_calculation.py
-- `SelectedTrack` in track_selection.py
-- `SteppingOverrideResult` in delay_selection.py
-- `ContainerDelayOverride` in delay_calculation.py
-
-### 11.5) Protocol Pattern for Pluggable Logic
-
-When you need multiple implementations of the same interface:
-
-```python
-from typing import Protocol
-
-class DelaySelector(Protocol):
-    """Protocol for delay selection strategies."""
-
-    def select(
-        self,
-        results: list[dict],
-        config: dict,
-        log: Callable[[str], None] | None,
-    ) -> tuple[int | None, float | None]: ...
-
-# Registry for dynamic selection
-SELECTORS: dict[str, type[DelaySelector]] = {
-    "Mode (Most Common)": ModeSelector,
-    "Average": AverageSelector,
-    # etc.
-}
-
-def get_selector(name: str) -> DelaySelector:
-    return SELECTORS[name]()
-```
-
-**Used for:**
-- Correlation algorithms (vsg_core/analysis/correlation/)
-- Delay selectors (vsg_core/analysis/delay_selection/)
-
-### 11.6) Context: The State Object
-
-`Context` is the single state object passed through all steps.
-
-**Rules:**
-- Steps read from Context to get configuration and prior results
-- Steps write to Context to store their results
-- Modules should NOT receive the full Context - pass only what they need
-- Group related fields together (see models/context.py organization)
-
-**Example - Module receives specific data, not Context:**
-```python
-# BAD: Module knows about Context
-def calculate_shift(ctx: Context) -> int:
-    return min(ctx.delays.source_delays_ms.values())
-
-# GOOD: Module receives only what it needs
-def calculate_shift(
-    source_delays: dict[str, int],
-    layout: list[dict],
-    log: Callable[[str], None] | None = None,
-) -> int:
-    return min(source_delays.values())
-```
-
-### 11.7) Re-export Pattern
-
-Organize public APIs via `__init__.py`:
-
-```python
-# vsg_core/analysis/__init__.py
-from .delay_calculation import (
-    calculate_final_delay,
-    calculate_global_shift,
-    FinalDelay,
-)
-from .track_selection import (
-    select_audio_track,
-    SelectedTrack,
-)
-
-__all__ = [
-    # delay_calculation
-    "calculate_final_delay",
-    "calculate_global_shift",
-    "FinalDelay",
-    # track_selection
-    "select_audio_track",
-    "SelectedTrack",
-]
-```
-
-This lets steps import from `vsg_core.analysis` without knowing internal file structure.
+**Imports:** Import from module's `__init__.py` (e.g., `from vsg_core.analysis import FinalDelay`), not internal files.
 
 ---
 
-## 12) Modularization Status & Roadmap
-
-This section tracks the progress of refactoring steps to follow the architecture patterns above.
-
-### 12.1) Reference Implementation (DONE)
-
-**`analysis_step.py`** - The gold standard for how steps should look:
-- ✅ All business logic extracted to `vsg_core/analysis/` modules
-- ✅ Step only coordinates, logs, and updates Context
-- ✅ Dataclasses for multi-value returns (`FinalDelay`, `SelectedTrack`, etc.)
-- ✅ Type hints throughout
-- ✅ Modules have `__init__.py` re-exports
-
-**Modules created:**
-- `vsg_core/analysis/audio_corr.py` - Correlation runner
-- `vsg_core/analysis/config_builder.py` - Source config construction
-- `vsg_core/analysis/delay_calculation.py` - Container delays, global shift
-- `vsg_core/analysis/delay_selection.py` - Mode/average/cluster selection
-- `vsg_core/analysis/diagnostics.py` - Drift/stepping detection + flags
-- `vsg_core/analysis/sync_stability.py` - Variance analysis
-- `vsg_core/analysis/track_selection.py` - Audio track selection
-
-### 12.2) Steps Needing Modularization
-
-Check these steps and extract business logic following the analysis_step pattern:
-
-| Step | Status | Notes |
-|------|--------|-------|
-| `analysis_step.py` | ✅ Done | Reference implementation |
-| `extract_step.py` | 🔶 Partial | Some logic may need extraction |
-| `audio_correction_step.py` | 🔶 Partial | Check for embedded logic |
-| `subtitles_step.py` | ❓ Check | May have subtitle logic to extract |
-| `mux_step.py` | ❓ Check | Plan building may need modules |
-| `chapters_step.py` | ❓ Check | |
-| `attachments_step.py` | ❓ Check | |
-
-### 12.3) Common Refactoring Tasks
-
-When refactoring a step:
-
-1. **Identify embedded logic** - Look for:
-   - Calculations or algorithms (not just `x + y`)
-   - Complex conditionals with business rules
-   - Data transformations
-   - Anything you'd want to unit test
-
-2. **Extract to module** - Create or add to domain module:
-   - Put in appropriate domain folder (`analysis/`, `correction/`, etc.)
-   - Make it a pure function (data in → data out)
-   - Use dataclass for multi-value returns
-   - Add optional `log` callback parameter
-
-3. **Update step** - Replace inline logic with module call:
-   - Import from module
-   - Call function with extracted parameters from Context
-   - Store result back to Context
-   - Keep logging in the step
-
-4. **Add re-exports** - Update module's `__init__.py`:
-   - Import the new function/class
-   - Add to `__all__`
-
-5. **Add types** - Run `pyright <file>` and fix issues
-
-### 12.4) Typing Checklist
-
-When adding types to a module:
-
-- [ ] Function parameters have type hints
-- [ ] Return types are explicit (not inferred)
-- [ ] Multi-value returns use dataclasses
-- [ ] Optional values use `| None` pattern
-- [ ] Collections are typed (`list[dict[str, Any]]` not just `list`)
-- [ ] Callbacks typed as `Callable[[str], None] | None`
-- [ ] Run `pyright <file>` - no errors
-
-### 12.5) Known Disconnects / TODO
-
-Track things that aren't fully wired up yet:
-
-- [ ] (Add items here as you find them)
-- [ ] Check if all `__init__.py` files have complete re-exports
-- [ ] Verify all steps import from module `__init__.py` not internal files
-- [ ] Ensure all dataclass results are used consistently
-
----
-
-## 13) Output requirements
+## 12) Output requirements
 - When producing code changes:
   - summarize what changed and why,
   - note any behavior changes,
