@@ -5,6 +5,10 @@ from collections import Counter
 from typing import Any
 
 from vsg_core.analysis.audio_corr import run_audio_correlation, run_multi_correlation
+from vsg_core.analysis.delay_selection import (
+    find_first_stable_segment_delay,
+    select_delay,
+)
 from vsg_core.analysis.drift_detection import diagnose_audio_issue
 from vsg_core.analysis.sync_stability import analyze_sync_stability
 from vsg_core.extraction.tracks import get_stream_info, get_stream_info_with_delays
@@ -27,7 +31,6 @@ def _format_track_details(track: dict[str, Any], index: int) -> str:
 
     # Language
     lang = props.get("language", "und")
-    lang_name = props.get("language_ietf", "") or props.get("track_name", "")
 
     # Codec - extract readable name from codec_id
     codec_id = props.get("codec_id", "unknown")
@@ -99,431 +102,42 @@ def _should_use_source_separated_mode(
     return per_source.get("use_source_separation", False)
 
 
-def _find_first_stable_segment_delay(
+def _choose_delay(
     results: list[dict[str, Any]],
+    config: dict[str, Any],
     runner: CommandRunner,
-    config: dict,
-    return_raw: bool = False,
-) -> int | float | None:
-    """
-    Find the delay from the first stable segment of chunks.
-
-    This function identifies consecutive accepted chunks that share the same delay value
-    and returns the delay from the first such stable group that meets stability criteria.
-
-    Args:
-        results: List of correlation results with 'delay', 'raw_delay', 'accepted', and 'start' keys
-        runner: CommandRunner for logging
-        config: Configuration dictionary with 'first_stable_min_chunks' and 'first_stable_skip_unstable'
-        return_raw: If True, return the raw (unrounded) delay value
-
-    Returns:
-        The delay value from the first stable segment, or None if no stable segment found
-    """
-    min_chunks = int(config.get("first_stable_min_chunks", 3))
-    skip_unstable = config.get("first_stable_skip_unstable", True)
-
-    accepted = [r for r in results if r.get("accepted", False)]
-    if len(accepted) < min_chunks:
-        return None
-
-    # Group consecutive chunks with the same delay (within 1ms tolerance)
-    # Track both rounded and raw delays for each segment
-    segments = []
-    current_segment = {
-        "delay": accepted[0]["delay"],
-        "raw_delays": [accepted[0].get("raw_delay", float(accepted[0]["delay"]))],
-        "count": 1,
-        "start_time": accepted[0]["start"],
-    }
-
-    for i in range(1, len(accepted)):
-        if abs(accepted[i]["delay"] - current_segment["delay"]) <= 1:
-            # Same segment continues - accumulate raw delays for averaging
-            current_segment["count"] += 1
-            current_segment["raw_delays"].append(
-                accepted[i].get("raw_delay", float(accepted[i]["delay"]))
-            )
-        else:
-            # New segment starts
-            segments.append(current_segment)
-            current_segment = {
-                "delay": accepted[i]["delay"],
-                "raw_delays": [
-                    accepted[i].get("raw_delay", float(accepted[i]["delay"]))
-                ],
-                "count": 1,
-                "start_time": accepted[i]["start"],
-            }
-
-    # Don't forget the last segment
-    segments.append(current_segment)
-
-    # Helper to get raw value from segment (average of all raw delays in segment)
-    def get_segment_raw(segment):
-        return sum(segment["raw_delays"]) / len(segment["raw_delays"])
-
-    # Find the first stable segment based on configuration
-    if skip_unstable:
-        # Skip segments that don't meet minimum chunk count
-        for segment in segments:
-            if segment["count"] >= min_chunks:
-                raw_avg = get_segment_raw(segment)
-                # CRITICAL: Round the raw average, don't use first chunk's delay!
-                # segment['delay'] is just the first chunk's rounded value, which may differ
-                # from the properly rounded average (e.g., raw avg -1001.825 should be -1002,
-                # but first chunk might have been -1001)
-                rounded_avg = round(raw_avg)
-                runner._log_message(
-                    f"[First Stable] Found stable segment: {segment['count']} chunks at {rounded_avg:+d}ms "
-                    f"(raw avg: {raw_avg:.3f}ms, starting at {segment['start_time']:.1f}s)"
-                )
-                return raw_avg if return_raw else rounded_avg
-
-        # No segment met the minimum chunk count
-        runner._log_message(
-            f"[First Stable] No segment found with minimum {min_chunks} chunks. "
-            f"Largest segment: {max((s['count'] for s in segments), default=0)} chunks"
-        )
-        return None
-    else:
-        # Use the first segment regardless of chunk count
-        if segments:
-            first_segment = segments[0]
-            raw_avg = get_segment_raw(first_segment)
-            # CRITICAL: Round the raw average, don't use first chunk's delay!
-            rounded_avg = round(raw_avg)
-            if first_segment["count"] < min_chunks:
-                runner._log_message(
-                    f"[First Stable] Warning: First segment has only {first_segment['count']} chunks "
-                    f"(minimum: {min_chunks}), but using it anyway (skip_unstable=False)"
-                )
-            runner._log_message(
-                f"[First Stable] Using first segment: {first_segment['count']} chunks at {rounded_avg:+d}ms "
-                f"(raw avg: {raw_avg:.3f}ms, starting at {first_segment['start_time']:.1f}s)"
-            )
-            return raw_avg if return_raw else rounded_avg
-
-    return None
-
-
-def _choose_final_delay(
-    results: list[dict[str, Any]], config: dict, runner: CommandRunner, role_tag: str
-) -> int | None:
+    role_tag: str,
+) -> tuple[int | None, float | None]:
     """
     Select final delay from correlation results using configured mode.
-    Returns rounded integer for mkvmerge compatibility.
+
+    This is a thin wrapper around the modular delay_selection.select_delay() function.
+
+    Args:
+        results: Correlation chunk results
+        config: Configuration with delay_selection_mode and related settings
+        runner: CommandRunner for logging
+        role_tag: Source identifier for log messages
+
+    Returns:
+        Tuple of (rounded_delay_ms, raw_delay_ms) or (None, None) if failed
     """
-    min_accepted_chunks = int(config.get("min_accepted_chunks", 3))
     delay_mode = config.get("delay_selection_mode", "Mode (Most Common)")
-
-    accepted = [r for r in results if r.get("accepted", False)]
-    if len(accepted) < min_accepted_chunks:
-        runner._log_message(
-            f"[ERROR] Analysis failed: Only {len(accepted)} chunks were accepted."
-        )
-        return None
-
-    delays = [r["delay"] for r in accepted]
-    raw_delays = [r.get("raw_delay", float(r["delay"])) for r in accepted]
-
-    if delay_mode == "First Stable":
-        # Use proper stability detection to find first stable segment
-        winner = _find_first_stable_segment_delay(
-            results, runner, config, return_raw=False
-        )
-        if winner is None:
-            # Fallback to mode if no stable segment found
-            runner._log_message(
-                "[WARNING] No stable segment found, falling back to mode."
-            )
-            counts = Counter(delays)
-            winner = counts.most_common(1)[0][0]
-            method_label = "mode (fallback)"
-        else:
-            method_label = "first stable"
-    elif delay_mode == "Average":
-        # Average the RAW float values, then round once at the end
-        raw_avg = sum(raw_delays) / len(raw_delays)
-        winner = round(raw_avg)
-        runner._log_message(
-            f"[Delay Selection] Average of {len(raw_delays)} raw values: {raw_avg:.3f}ms → rounded to {winner}ms"
-        )
-        method_label = "average"
-    elif delay_mode == "Mode (Clustered)":
-        # Find most common rounded delay, then include chunks within ±1ms tolerance
-        counts = Counter(delays)
-        mode_winner = counts.most_common(1)[0][0]
-
-        # Collect raw values from chunks within ±1ms of the mode
-        cluster_raw_values = []
-        cluster_delays = []
-        for r in accepted:
-            if abs(r["delay"] - mode_winner) <= 1:
-                cluster_raw_values.append(r.get("raw_delay", float(r["delay"])))
-                cluster_delays.append(r["delay"])
-
-        # Average the clustered raw values
-        if cluster_raw_values:
-            raw_avg = sum(cluster_raw_values) / len(cluster_raw_values)
-            winner = round(raw_avg)
-            cluster_counts = Counter(cluster_delays)
-            runner._log_message(
-                f"[Delay Selection] Mode (Clustered): most common = {mode_winner}ms, "
-                f"cluster [{mode_winner-1} to {mode_winner+1}] contains {len(cluster_raw_values)}/{len(accepted)} chunks "
-                f"(breakdown: {dict(cluster_counts)}), raw avg: {raw_avg:.3f}ms → rounded to {winner}ms"
-            )
-            method_label = "mode (clustered)"
-        else:
-            # Fallback to simple mode if clustering fails
-            winner = mode_winner
-            runner._log_message(
-                f"[Delay Selection] Mode (Clustered): fallback to simple mode = {winner}ms"
-            )
-            method_label = "mode (clustered fallback)"
-    elif delay_mode == "Mode (Early Cluster)":
-        # Find clusters using ±1ms tolerance, prioritizing early stability
-        early_window = int(config.get("early_cluster_window", 10))
-        early_threshold = int(config.get("early_cluster_threshold", 5))
-
-        # Build clusters: group delays within ±1ms of each other
-        counts = Counter(delays)
-        cluster_info = (
-            {}
-        )  # key: representative delay, value: {raw_values, early_count, first_chunk_idx}
-
-        for delay_val in counts.keys():
-            # Collect all chunks within ±1ms of this delay value
-            cluster_raw_values = []
-            early_count = 0
-            first_chunk_idx = None
-
-            for idx, r in enumerate(accepted):
-                if abs(r["delay"] - delay_val) <= 1:
-                    cluster_raw_values.append(r.get("raw_delay", float(r["delay"])))
-                    if idx < early_window:
-                        early_count += 1
-                    if first_chunk_idx is None:
-                        first_chunk_idx = idx
-
-            cluster_info[delay_val] = {
-                "raw_values": cluster_raw_values,
-                "early_count": early_count,
-                "first_chunk_idx": first_chunk_idx,
-                "total_count": len(cluster_raw_values),
-            }
-
-        # Find early stable clusters (meet threshold in early window)
-        early_stable_clusters = [
-            (delay_val, info)
-            for delay_val, info in cluster_info.items()
-            if info["early_count"] >= early_threshold
-        ]
-
-        if early_stable_clusters:
-            # Pick the cluster that appears earliest
-            early_stable_clusters.sort(key=lambda x: x[1]["first_chunk_idx"])
-            winner_delay, winner_info = early_stable_clusters[0]
-
-            # Average the raw values in this cluster
-            raw_avg = sum(winner_info["raw_values"]) / len(winner_info["raw_values"])
-            winner = round(raw_avg)
-
-            runner._log_message(
-                f"[Delay Selection] Mode (Early Cluster): found {len(early_stable_clusters)} early stable cluster(s), "
-                f"selected cluster at {winner}ms with {winner_info['early_count']}/{early_window} early chunks, "
-                f"total {winner_info['total_count']} chunks, first appears at chunk {winner_info['first_chunk_idx']+1}, "
-                f"raw avg: {raw_avg:.3f}ms → rounded to {winner}ms"
-            )
-            method_label = "mode (early cluster)"
-        else:
-            # No cluster meets early threshold - fall back to Mode (Clustered)
-            mode_winner = counts.most_common(1)[0][0]
-            cluster_raw_values = [
-                r.get("raw_delay", float(r["delay"]))
-                for r in accepted
-                if abs(r["delay"] - mode_winner) <= 1
-            ]
-
-            if cluster_raw_values:
-                raw_avg = sum(cluster_raw_values) / len(cluster_raw_values)
-                winner = round(raw_avg)
-                runner._log_message(
-                    f"[Delay Selection] Mode (Early Cluster): no cluster met early threshold ({early_threshold} in first {early_window}), "
-                    f"falling back to Mode (Clustered): {winner}ms (raw avg: {raw_avg:.3f}ms)"
-                )
-                method_label = "mode (early cluster - clustered fallback)"
-            else:
-                winner = mode_winner
-                runner._log_message(
-                    f"[Delay Selection] Mode (Early Cluster): fallback to simple mode = {winner}ms"
-                )
-                method_label = "mode (early cluster - simple fallback)"
-    else:  # Mode (Most Common) - default
-        counts = Counter(delays)
-        winner = counts.most_common(1)[0][0]
-        method_label = "mode"
-
-    runner._log_message(
-        f"{role_tag.capitalize()} delay determined: {winner:+d} ms ({method_label})."
+    rounded_ms, raw_ms = select_delay(
+        results=results,
+        mode=delay_mode,
+        config=config,
+        log=runner._log_message,
     )
-    return winner
 
-
-def _choose_final_delay_raw(
-    results: list[dict[str, Any]], config: dict, runner: CommandRunner, role_tag: str
-) -> float | None:
-    """
-    Select final delay from correlation results, returning raw float value.
-    Used for subtitle sync modes that need precision (defers rounding to final application).
-
-    For each mode:
-    - First Stable: Returns average of raw delays in the stable segment
-    - Average: Returns true average of all raw delays (no intermediate rounding)
-    - Mode: Returns raw delay from the first chunk matching the most common rounded value
-    """
-    min_accepted_chunks = int(config.get("min_accepted_chunks", 3))
-    delay_mode = config.get("delay_selection_mode", "Mode (Most Common)")
-
-    accepted = [r for r in results if r.get("accepted", False)]
-    if len(accepted) < min_accepted_chunks:
-        return None
-
-    delays = [r["delay"] for r in accepted]
-    raw_delays = [r.get("raw_delay", float(r["delay"])) for r in accepted]
-
-    if delay_mode == "First Stable":
-        # Get raw average from first stable segment
-        winner_raw = _find_first_stable_segment_delay(
-            results, runner, config, return_raw=True
-        )
-        if winner_raw is None:
-            # Fallback to mode - find raw value for most common rounded delay
-            counts = Counter(delays)
-            winner_rounded = counts.most_common(1)[0][0]
-            for r in accepted:
-                if r.get("delay") == winner_rounded:
-                    return r.get("raw_delay", float(winner_rounded))
-            return float(winner_rounded)
-        return winner_raw
-
-    elif delay_mode == "Average":
-        # True average of raw floats - NO intermediate rounding!
-        raw_avg = sum(raw_delays) / len(raw_delays)
+    if rounded_ms is not None:
+        # Format method label for logging
+        method_label = delay_mode.lower().replace("(", "").replace(")", "").strip()
         runner._log_message(
-            f"[Delay Selection Raw] True average of {len(raw_delays)} raw values: {raw_avg:.3f}ms"
+            f"{role_tag.capitalize()} delay determined: {rounded_ms:+d} ms ({method_label})."
         )
-        return raw_avg
 
-    elif delay_mode == "Mode (Clustered)":
-        # Find most common rounded delay, then include chunks within ±1ms tolerance
-        counts = Counter(delays)
-        mode_winner = counts.most_common(1)[0][0]
-
-        # Collect raw values from chunks within ±1ms of the mode
-        cluster_raw_values = [
-            r.get("raw_delay", float(r["delay"]))
-            for r in accepted
-            if abs(r["delay"] - mode_winner) <= 1
-        ]
-
-        # Average the clustered raw values
-        if cluster_raw_values:
-            raw_avg = sum(cluster_raw_values) / len(cluster_raw_values)
-            runner._log_message(
-                f"[Delay Selection Raw] Mode (Clustered): {len(cluster_raw_values)} chunks in cluster, raw avg: {raw_avg:.3f}ms"
-            )
-            return raw_avg
-        else:
-            # Fallback to simple mode
-            return float(mode_winner)
-
-    elif delay_mode == "Mode (Early Cluster)":
-        # Find clusters using ±1ms tolerance, prioritizing early stability
-        early_window = int(config.get("early_cluster_window", 10))
-        early_threshold = int(config.get("early_cluster_threshold", 5))
-
-        # Build clusters: group delays within ±1ms of each other
-        counts = Counter(delays)
-        cluster_info = (
-            {}
-        )  # key: representative delay, value: {raw_values, early_count, first_chunk_idx}
-
-        for delay_val in counts.keys():
-            # Collect all chunks within ±1ms of this delay value
-            cluster_raw_values = []
-            early_count = 0
-            first_chunk_idx = None
-
-            for idx, r in enumerate(accepted):
-                if abs(r["delay"] - delay_val) <= 1:
-                    cluster_raw_values.append(r.get("raw_delay", float(r["delay"])))
-                    if idx < early_window:
-                        early_count += 1
-                    if first_chunk_idx is None:
-                        first_chunk_idx = idx
-
-            cluster_info[delay_val] = {
-                "raw_values": cluster_raw_values,
-                "early_count": early_count,
-                "first_chunk_idx": first_chunk_idx,
-                "total_count": len(cluster_raw_values),
-            }
-
-        # Find early stable clusters (meet threshold in early window)
-        early_stable_clusters = [
-            (delay_val, info)
-            for delay_val, info in cluster_info.items()
-            if info["early_count"] >= early_threshold
-        ]
-
-        if early_stable_clusters:
-            # Pick the cluster that appears earliest
-            early_stable_clusters.sort(key=lambda x: x[1]["first_chunk_idx"])
-            winner_delay, winner_info = early_stable_clusters[0]
-
-            # Average the raw values in this cluster
-            raw_avg = sum(winner_info["raw_values"]) / len(winner_info["raw_values"])
-
-            runner._log_message(
-                f"[Delay Selection Raw] Mode (Early Cluster): selected cluster with {winner_info['early_count']}/{early_window} early chunks, "
-                f"total {winner_info['total_count']} chunks, raw avg: {raw_avg:.3f}ms"
-            )
-            return raw_avg
-        else:
-            # No cluster meets early threshold - fall back to Mode (Clustered)
-            mode_winner = counts.most_common(1)[0][0]
-            cluster_raw_values = [
-                r.get("raw_delay", float(r["delay"]))
-                for r in accepted
-                if abs(r["delay"] - mode_winner) <= 1
-            ]
-
-            if cluster_raw_values:
-                raw_avg = sum(cluster_raw_values) / len(cluster_raw_values)
-                runner._log_message(
-                    f"[Delay Selection Raw] Mode (Early Cluster): no cluster met early threshold, "
-                    f"falling back to Mode (Clustered): {len(cluster_raw_values)} chunks, raw avg: {raw_avg:.3f}ms"
-                )
-                return raw_avg
-            else:
-                runner._log_message(
-                    "[Delay Selection Raw] Mode (Early Cluster): fallback to simple mode"
-                )
-                return float(mode_winner)
-
-    else:  # Mode (Most Common) - default
-        # Average raw values from all chunks matching the most common rounded delay
-        counts = Counter(delays)
-        winner_rounded = counts.most_common(1)[0][0]
-        matching_raw_values = [
-            r.get("raw_delay", float(winner_rounded))
-            for r in accepted
-            if r.get("delay") == winner_rounded
-        ]
-        if matching_raw_values:
-            return sum(matching_raw_values) / len(matching_raw_values)
-        return float(winner_rounded)
+    return rounded_ms, raw_ms
 
 
 class AnalysisStep:
@@ -652,14 +266,12 @@ class AnalysisStep:
             ]
 
             # Log Source 1 track selection for clarity
-            source1_selected_index = None
             if ref_lang:
                 for idx, track in enumerate(audio_tracks):
                     if (
                         track.get("properties", {}).get("language", "") or ""
                     ).strip().lower() == ref_lang:
                         source1_audio_track_id = track.get("id")
-                        source1_selected_index = idx
                         runner._log_message(
                             f"[Source 1] Selected (lang={ref_lang}): {_format_track_details(track, idx)}"
                         )
@@ -667,7 +279,6 @@ class AnalysisStep:
 
             if source1_audio_track_id is None and audio_tracks:
                 source1_audio_track_id = audio_tracks[0].get("id")
-                source1_selected_index = 0
                 runner._log_message(
                     f"[Source 1] Selected (first track): {_format_track_details(audio_tracks[0], 0)}"
                 )
@@ -889,7 +500,7 @@ class AnalysisStep:
 
                 # Use the first method's results for actual processing
                 # (or the dropdown method if we want to be smarter about this)
-                first_method = list(all_method_results.keys())[0]
+                first_method = next(iter(all_method_results.keys()))
                 results = all_method_results[first_method]
                 runner._log_message(
                     f"[MULTI-CORRELATION] Using '{first_method}' results for delay calculation"
@@ -954,13 +565,11 @@ class AnalysisStep:
                             ),
                         }
                         # Get both rounded (for mkvmerge) and raw (for subtitle precision)
-                        first_segment_delay = _find_first_stable_segment_delay(
-                            results, runner, stepping_config, return_raw=False
+                        stable_result = find_first_stable_segment_delay(
+                            results, stepping_config, runner._log_message
                         )
-                        first_segment_delay_raw = _find_first_stable_segment_delay(
-                            results, runner, stepping_config, return_raw=True
-                        )
-                        if first_segment_delay is not None:
+                        if stable_result is not None:
+                            first_segment_delay, first_segment_delay_raw = stable_result
                             stepping_override_delay = first_segment_delay
                             stepping_override_delay_raw = first_segment_delay_raw
                             runner._log_message(
@@ -1043,14 +652,11 @@ class AnalysisStep:
                 )
             else:
                 # Use source_config which already has the right delay_selection_mode set
-                correlation_delay_ms = _choose_final_delay(
-                    results, source_config, runner, source_key
-                )
-                correlation_delay_raw = _choose_final_delay_raw(
+                correlation_delay_ms, correlation_delay_raw = _choose_delay(
                     results, source_config, runner, source_key
                 )
 
-                if correlation_delay_ms is None:
+                if correlation_delay_ms is None or correlation_delay_raw is None:
                     # ENHANCED ERROR MESSAGE
                     accepted_count = len(
                         [r for r in results if r.get("accepted", False)]
@@ -1384,7 +990,7 @@ class AnalysisStep:
                     f"  - {source_key}: {original_delay:+.1f}ms → {source_delays[source_key]:+.1f}ms (rounded: {original_raw_delay:+.3f}ms → {raw_source_delays[source_key]:+.3f}ms raw)"
                 )
 
-            if source1_container_delays:
+            if source1_container_delays and source1_info:
                 runner._log_message(
                     f"[Delay] Source 1 container delays (will have +{global_shift_ms}ms added during mux):"
                 )
