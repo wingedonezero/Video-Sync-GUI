@@ -59,8 +59,15 @@ from .settings import AppSettings
 
 # Subtitle models (re-export from subtitles subpackage)
 from .subtitles import (
+    # Edit plan models
+    ApplyResult,
     EmbeddedFont,
     EmbeddedGraphic,
+    EventEdit,
+    EventGroup,
+    GroupDefinition,
+    NewEventSpec,
+    NewStyleSpec,
     OCRConfig,
     OCREventData,
     OCRLineResult,
@@ -69,6 +76,8 @@ from .subtitles import (
     OperationRecord,
     OperationResult,
     SteppingEventData,
+    StyleEdit,
+    SubtitleEditPlan,
     SubtitleEvent,
     SubtitleStyle,
     SyncEventData,
@@ -118,6 +127,15 @@ __all__ = [
     "OCRConfig",
     "OCRLineResult",
     "OCRResult",
+    # Edit plan
+    "EventGroup",
+    "EventEdit",
+    "StyleEdit",
+    "NewEventSpec",
+    "NewStyleSpec",
+    "GroupDefinition",
+    "SubtitleEditPlan",
+    "ApplyResult",
     # Timing helpers
     "parse_ass_time",
     "format_ass_time",
