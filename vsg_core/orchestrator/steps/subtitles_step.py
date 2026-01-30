@@ -28,9 +28,7 @@ if TYPE_CHECKING:
     from vsg_core.subtitles.data import SubtitleData
 
 from vsg_core.io.runner import CommandRunner
-from vsg_core.models.enums import TrackType
-from vsg_core.models.media import StreamProps, Track
-from vsg_core.orchestrator.steps.context import Context
+from vsg_core.models import Context, StreamProps, Track, TrackType
 
 
 def _read_raw_ass_timestamps(
@@ -782,7 +780,7 @@ class SubtitlesStep:
             )
 
             # Apply the delay directly to subtitle events (like time-based mode)
-            from vsg_core.subtitles.data import OperationResult, SyncEventData
+            from vsg_core.models import OperationResult, SyncEventData
 
             events_synced = 0
             for event in subtitle_data.events:
@@ -816,7 +814,7 @@ class SubtitlesStep:
         # (Source 1 would compare against itself which produces incorrect results)
         # Just apply the delay directly (which is just global_shift for Source 1)
         if sync_mode == "video-verified" and source_key == "Source 1":
-            from vsg_core.subtitles.data import OperationResult, SyncEventData
+            from vsg_core.models import OperationResult, SyncEventData
 
             runner._log_message(
                 "[Sync] Source 1 is reference - applying delay directly without frame matching"
@@ -910,7 +908,7 @@ class SubtitlesStep:
 
         else:
             # All sync modes should have plugins - unknown mode
-            from vsg_core.subtitles.data import OperationResult
+            from vsg_core.models import OperationResult
 
             runner._log_message(f"[Sync] ERROR: Unknown sync mode: {sync_mode}")
             return OperationResult(

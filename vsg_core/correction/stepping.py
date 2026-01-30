@@ -21,10 +21,15 @@ from scipy.signal import correlate
 from ..analysis.audio_corr import get_audio_stream_info, run_audio_correlation
 from ..extraction.tracks import extract_tracks
 from ..io.runner import CommandRunner
-from ..models.correction import AudioSegment, CorrectionResult, CorrectionVerdict
-from ..models.enums import TrackType
-from ..models.media import StreamProps, Track
-from ..orchestrator.steps.context import Context
+from ..models import (
+    AudioSegment,
+    Context,
+    CorrectionResult,
+    CorrectionVerdict,
+    StreamProps,
+    Track,
+    TrackType,
+)
 
 
 def generate_edl_from_correlation(
