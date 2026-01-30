@@ -1,8 +1,8 @@
 # Video/Audio Sync & Merge (PySide6) — Deep Technical Documentation
 
-> **Repository root:** `wingedonezero-video-sync-gui/`  
-> **Edition:** Manual-Selection + Analysis-first pipeline, no legacy auto-merge plan  
-> **Primary targets:** Windows / Linux (macOS workable with matching toolchain)  
+> **Repository root:** `wingedonezero-video-sync-gui/`
+> **Edition:** Manual-Selection + Analysis-first pipeline, no legacy auto-merge plan
+> **Primary targets:** Windows / Linux (macOS workable with matching toolchain)
 > **License:** (fill in for your repo)
 
 This document is intentionally **exhaustive**. It explains *what each module does*, *how the pipeline flows*, the *math behind analysis*, *mkvmerge tokenization*, the *UI behaviors/guardrails*, and the *exact configuration knobs*. It is written so that another developer or another AI can fully understand and extend the system safely.
@@ -32,11 +32,11 @@ This document is intentionally **exhaustive**. It explains *what each module doe
 
 **Key design choices:**
 
-- **Manual layout is the only merge strategy.** There is no legacy “merge plan” inference. You explicitly pick the tracks and their per‑track options.  
+- **Manual layout is the only merge strategy.** There is no legacy “merge plan” inference. You explicitly pick the tracks and their per‑track options.
 - **Analysis-first**: We compute secondary/tertiary delays **before** extraction/merge. A global non‑destructive shift eliminates negative offsets.
-- **Safety guardrails**:  
-  - UI disables **SEC/TER video** from being added (REF video only).  
-  - Exactly one **Default** per type (audio / subtitles); at most one **Forced** subtitles.  
+- **Safety guardrails**:
+  - UI disables **SEC/TER video** from being added (REF video only).
+  - Exactly one **Default** per type (audio / subtitles); at most one **Forced** subtitles.
   - SRT→ASS toggle is only enabled for actual SRT inputs.
 - **Copy layout (“Auto‑apply”)**: The previous layout is auto‑applied to subsequent files **only when the track signature matches** (non‑strict or strict). No on-disk persistence—applies within the current batch session.
 
@@ -208,11 +208,11 @@ All settings are surfaced in **OptionsDialog** except historical debug toggles t
 ## 4) Job discovery (`vsg_core/job_discovery.py`)
 
 ### Modes
-- **Single-file mode**: `ref` must be a file. `sec`/`ter` may be files (optional).  
+- **Single-file mode**: `ref` must be a file. `sec`/`ter` may be files (optional).
   → One job: `{ref, sec?, ter?}`
 
-- **Batch mode**: `ref` is a directory. `sec`/`ter` must be directories or empty.  
-  → For each `*.mkv|*.mp4|*.m4v` in `ref`, we form a job only if a same‑named file exists in `sec` and/or `ter` directories.  
+- **Batch mode**: `ref` is a directory. `sec`/`ter` must be directories or empty.
+  → For each `*.mkv|*.mp4|*.m4v` in `ref`, we form a job only if a same‑named file exists in `sec` and/or `ter` directories.
   → Jobs like `{ref: ".../A.mkv", sec: ".../A.mkv", ter: ".../A.mkv"}`
 
 **Notes:** No errors if zero matches; UI reports “No Jobs Found”.
@@ -222,9 +222,9 @@ All settings are surfaced in **OptionsDialog** except historical debug toggles t
 ## 5) UI: Main window (`vsg_qt/main_window.py`)
 
 ### Key surfaces
-- **Inputs**: Reference / Secondary / Tertiary (file or directory).  
-- **Manual Selection Behavior**:  
-  - *Auto-apply this layout…* (copy previous layout)  
+- **Inputs**: Reference / Secondary / Tertiary (file or directory).
+- **Manual Selection Behavior**:
+  - *Auto-apply this layout…* (copy previous layout)
   - *Strict match (type + lang + codec)* for signatures
 - **Actions**: “Analyze Only”, “Analyze & Merge”
 - **Status/Progress**: per-job + overall
@@ -235,12 +235,12 @@ All settings are surfaced in **OptionsDialog** except historical debug toggles t
 
 We compute a **track signature** for the current file set:
 
-- **Non‑strict**: multiset of `"{SOURCE}_{TYPE}"` (e.g., `REF_video`, `SEC_audio`, `TER_subtitles`, …).  
+- **Non‑strict**: multiset of `"{SOURCE}_{TYPE}"` (e.g., `REF_video`, `SEC_audio`, `TER_subtitles`, …).
 - **Strict**: multiset of `"{SOURCE}_{TYPE}_{lang}_{codec_id}"` (lang lowercased; codec_id lowercased).
 
 If the new signature matches the previous job’s signature, we **materialize** the previous layout by *order within (source,type)*. Example:
 
-- Previous layout chose: first `REF_video`, second `SEC_audio`, first `SEC_subtitles`, …  
+- Previous layout chose: first `REF_video`, second `SEC_audio`, first `SEC_subtitles`, …
 - Current file has 1 REF video, 2 SEC audios, 2 SEC subs → we map by positional order per (source,type).
 
 > **Safety:** The previous layout is stored **in memory only**, stripped to an *abstract template* (no track IDs, no filenames): `{source, type, is_default, is_forced_display, apply_track_name, convert_to_ass, rescale, size_multiplier}`. This prevents cross‑file ID leakage.
@@ -272,7 +272,7 @@ If signatures differ, we open the **ManualSelectionDialog** (see §6).
 
 ### Guardrails enforced in UI
 
-- **No Secondary/Tertiary video**: SEC/TER video items are greyed out and not draggable/selectable. Only **REF** video can appear in output.  
+- **No Secondary/Tertiary video**: SEC/TER video items are greyed out and not draggable/selectable. Only **REF** video can appear in output.
   Rationale: avoid accidental replacement of reference video; multiple video streams are not supported in current mux logic.
 
 - **Exactly one Default per type**: If you mark a different audio/subs item as Default, any previous Default of the same type is automatically cleared.
@@ -373,7 +373,7 @@ Each job runs in a unique `temp_work/job_<stem>_<epoch>/` which is removed on su
 #### 8.1 Analysis (`_run_analysis`)
 
 - **Modes**:
-  - **Audio Correlation**: chunked cross‑correlation (see §10).  
+  - **Audio Correlation**: chunked cross‑correlation (see §10).
   - **VideoDiff**: delegate to external tool; we parse `[Result]` line with either `itsoffset:` or `ss:` and an **error metric**. `ss` values are inverted (semantics differ). We require `error` to be within `[videodiff_error_min, videodiff_error_max]`.
 
 - **Language pinning** (optional): You can request a specific language code for REF/SEC/TER analysis audio. We probe `mkvmerge -J` and choose the first audio track matching the language, or the first audio if no exact match.
@@ -392,8 +392,8 @@ global_shift = -min_delay if min_delay < 0 else 0
 This ensures no track ends up with a negative `--sync` offset.
 
 **Example**:
-- REF=0 ms, SEC = -200 ms, TER = +350 ms  
-- `min_delay = -200`, so `global_shift = +200`  
+- REF=0 ms, SEC = -200 ms, TER = +350 ms
+- `min_delay = -200`, so `global_shift = +200`
 - Effective per‑track sync (mkvmerge `--sync`):
   - REF: +200
   - SEC: -200 + 200 = 0
@@ -406,7 +406,7 @@ We also shift **chapters** by `+global_shift` (see §12) to keep chapter starts 
 Given the manual layout (with **mkvmerge track IDs** per source), we extract only those tracks. Extraction rules:
 
 - Non‑PCM **A_MS/ACM** edge-case is handled:
-  1. Attempt `ffmpeg -c:a copy` to a `.wav` container (fast path). If the decoder refuses stream copy,  
+  1. Attempt `ffmpeg -c:a copy` to a `.wav` container (fast path). If the decoder refuses stream copy,
   2. **Fallback** to PCM encode with the **best PCM depth** inferred from `audio_bits_per_sample`:
      - `>=64 → pcm_f64le`, `>=32 → pcm_s32le`, `>=24 → pcm_s24le`, else `pcm_s16le`.
 
@@ -457,8 +457,8 @@ For each plan item of type **subtitles**:
 
 We generate a JSON options file that mkvmerge reads as `@opts.json`. For **each track** in the final order:
 
-- `--language 0:<lang>`  
-- `--track-name 0:<name>` *(if “Keep Name”)*  
+- `--language 0:<lang>`
+- `--track-name 0:<name>` *(if “Keep Name”)*
 - `--sync 0:<delay_ms>` where `<delay_ms> = global_shift + (secondary_ms|tertiary_ms)` or just `global_shift` for REF
 - `--default-track-flag 0:(yes|no)` per **Default** rules (first REF video OR selected audio/subs)
 - `--forced-display-flag 0:yes` (subs only, if “Forced”)
@@ -486,18 +486,18 @@ On success we log `Output file created: <output_dir>/<ref_filename>`.
 ## 9) Subtitle style scaling details (`subtitle_utils.py`)
 
 ### 9.1 Convert SRT → ASS
-- Implemented with `ffmpeg -i in.srt out.ass`.  
+- Implemented with `ffmpeg -i in.srt out.ass`.
 - If `out.ass` fails to materialize, we keep original `.srt` and log a warning.
 
 ### 9.2 Rescale to video resolution
-- We probe REF video width/height with `ffprobe`, then rewrite `PlayResX:` and `PlayResY:` exact values within the ASS/SSA header.  
+- We probe REF video width/height with `ffprobe`, then rewrite `PlayResX:` and `PlayResY:` exact values within the ASS/SSA header.
 - If `PlayResX/Y` tags are absent, we log “no tags” and skip (we do not inject a brand-new header to avoid header corruption).
 
 ### 9.3 Font size multiplier
 We read the ASS/SSA file (`utf-8-sig` to absorb BOM if any), then **line-by-line** transform:
 
 - Lines beginning with `Style:` have CSV fields; the 3rd numeric field is **Fontsize**.
-- We multiply that value and recompose the line, preserving all other fields.  
+- We multiply that value and recompose the line, preserving all other fields.
 - This avoids brittle regexes that can corrupt styles or comments.
 
 **Edge cases**:
@@ -511,13 +511,13 @@ We read the ASS/SSA file (`utf-8-sig` to absorb BOM if any), then **line-by-line
 We compute **delay** of `target` vs `reference` using **normalized cross‑correlation** on several short chunks (default: 10 chunks × 15s).
 
 ### Steps per chunk
-1. **Extract** mono 48 kHz WAV from each source with `ffmpeg` (`-ac 1 -ar 48000`). We pick specific audio streams by language if requested; otherwise first audio.  
-2. **Load** with librosa (no resample; `sr=None`, mono already ensured).  
+1. **Extract** mono 48 kHz WAV from each source with `ffmpeg` (`-ac 1 -ar 48000`). We pick specific audio streams by language if requested; otherwise first audio.
+2. **Load** with librosa (no resample; `sr=None`, mono already ensured).
 3. **Normalize** both chunks to zero mean and unit variance:
    \[ x' = \frac{x - \mu_x}{\sigma_x + \epsilon} \]
 4. **Correlate** (scipy.signal.correlate, `mode='full'`):
    - Find `lag_samples = argmax(corr) - (len(sec) - 1)`
-   - Convert to seconds: `lag_s = lag_samples / sample_rate`  
+   - Convert to seconds: `lag_s = lag_samples / sample_rate`
    - Convert to ms: `delay_ms = round(lag_s * 1000)`
 5. **Match %**: peak correlation normalized by energy:
    \[ \text{match}(\%) = \frac{\max |corr|}{\sqrt{\sum x^2 \sum y^2} + \epsilon} \times 100 \]
@@ -548,8 +548,8 @@ We prefer **consistency across time** plus **strength** over a single high peak 
 
 ### 12.1 Shift & rename
 
-- Extract chapters XML from **REF** via `mkvextract chapters -`.  
-- Optional **rename** to “Chapter NN” by rewriting all `ChapterDisplay` nodes.  
+- Extract chapters XML from **REF** via `mkvextract chapters -`.
+- Optional **rename** to “Chapter NN” by rewriting all `ChapterDisplay` nodes.
 - **Shift** all `ChapterTimeStart` and `ChapterTimeEnd` nodes by `+global_shift` (if nonzero).
 
 ### 12.2 Snap to keyframes (optional)
@@ -564,7 +564,7 @@ We prefer **consistency across time** plus **strength** over a single high peak 
 ### 12.3 Normalize end times
 
 We ensure each chapter’s **end time** exists and:
-- ≥ start + 1 ns  
+- ≥ start + 1 ns
 - ≤ next chapter’s start (if any)
 
 This avoids overlapping/degenerate chapter ranges.
@@ -577,9 +577,9 @@ This avoids overlapping/degenerate chapter ranges.
 
 - **Resolves** the first token (`cmd[0]`) against `tool_paths` override or falls back to raw name (PATH).
 - **Streams** stdout+stderr (merged) line-by-line to the log callback.
-- **Compact mode** (default): remembers a tail buffer instead of dumping all lines.  
-  - Detects `Progress: NN%` lines and emits only on **step changes** (default every 20%).  
-  - On failure, prints last **N** lines (`log_error_tail`, default 20).  
+- **Compact mode** (default): remembers a tail buffer instead of dumping all lines.
+  - Detects `Progress: NN%` lines and emits only on **step changes** (default every 20%).
+  - On failure, prints last **N** lines (`log_error_tail`, default 20).
   - On success, can optionally print `log_tail_lines` lines of last stdout if configured.
 - **Return**: full captured stdout on return code `0`, else `None`.
 
@@ -640,29 +640,29 @@ The main window shows **Secondary Delay** and **Tertiary Delay** from the last j
 
 ### 17.1 Analyze only (find A/V delay numbers)
 
-1. Select **Reference** and **Secondary** files. (Tertiary optional.)  
-2. Click **Analyze Only**.  
-3. Read **Secondary Delay** / **Tertiary Delay** in the Results panel.  
+1. Select **Reference** and **Secondary** files. (Tertiary optional.)
+2. Click **Analyze Only**.
+3. Read **Secondary Delay** / **Tertiary Delay** in the Results panel.
 4. Use these numbers in other tools if you don’t need a merged file.
 
 ### 17.2 Single merge, hand-pick tracks
 
-1. Select **Reference** = REF.mkv; **Secondary** = SEC.mkv; **Tertiary** = TER.mkv (optional).  
-2. Click **Analyze & Merge** → Manual Selection dialog opens.  
-3. From **REF**, drag the video you want (usually the only video).  
-4. From **SEC/TER**, drag desired audio/subtitles.  
-5. For subs: open **Settings…** and set *Default/Forced/Rescale/Size* as needed; use *Convert SRT→ASS* for SRT.  
-6. Click **OK**.  
+1. Select **Reference** = REF.mkv; **Secondary** = SEC.mkv; **Tertiary** = TER.mkv (optional).
+2. Click **Analyze & Merge** → Manual Selection dialog opens.
+3. From **REF**, drag the video you want (usually the only video).
+4. From **SEC/TER**, drag desired audio/subtitles.
+5. For subs: open **Settings…** and set *Default/Forced/Rescale/Size* as needed; use *Convert SRT→ASS* for SRT.
+6. Click **OK**.
 7. Pipeline runs; result at `<output_folder>/REF.mkv`.
 
 ### 17.3 Batch with “Copy layout”
 
-1. Set **Reference** to a folder (e.g., `Show.S01/WEB`); set **Secondary/Tertiary** to parallel folders with same file names.  
-2. Check **Auto‑apply this layout** (and optionally **Strict match**).  
-3. Click **Analyze & Merge**.  
-4. For the **first file**, the Manual Selection dialog appears—build your layout; click OK.  
-5. For subsequent files with matching signature, the previous layout is **auto‑applied** silently (log will say so). For mismatches, the dialog opens again.  
-6. Outputs are in `output_folder/WEB/<filename>.mkv`.  
+1. Set **Reference** to a folder (e.g., `Show.S01/WEB`); set **Secondary/Tertiary** to parallel folders with same file names.
+2. Check **Auto‑apply this layout** (and optionally **Strict match**).
+3. Click **Analyze & Merge**.
+4. For the **first file**, the Manual Selection dialog appears—build your layout; click OK.
+5. For subsequent files with matching signature, the previous layout is **auto‑applied** silently (log will say so). For mismatches, the dialog opens again.
+6. Outputs are in `output_folder/WEB/<filename>.mkv`.
 7. When batch finishes, a zip of job logs is produced if **Archive logs** was enabled.
 
 ---
@@ -691,18 +691,18 @@ The normalizer guarantees end times won’t overlap the next start and are at le
 
 ## 19) Extending the system
 
-- **Add fourth source**: The signature and dialog would need an extra group; pipeline would need a new delay computation and delay bucket.  
-- **Per‑track filters/encoders**: Insert a processing pass between extraction and mux tokenization.  
-- **Video preview & seeking**: Non‑trivial (decode in UI thread or separate preview worker); out of scope for this edition.  
+- **Add fourth source**: The signature and dialog would need an extra group; pipeline would need a new delay computation and delay bucket.
+- **Per‑track filters/encoders**: Insert a processing pass between extraction and mux tokenization.
+- **Video preview & seeking**: Non‑trivial (decode in UI thread or separate preview worker); out of scope for this edition.
 - **Persist named layouts**: Current design intentionally keeps layout in memory only to avoid misapplies; you could add a saved template with an explicit file count hash or signature to mitigate danger.
 
 ---
 
 ## 20) Rationale & safety notes
 
-- **Global shift** preserves the original relative timing while avoiding negative `--sync` values (which can be awkward in some tool flows) and aligns chapters to the new zero.  
-- **UI guardrails** prevent accidental muxing mistakes that are hard to notice until playback.  
-- **ASS/SSA edits** are done with minimal rewriting to avoid header damage; we **never** regenerate the entire ASS header from scratch.  
+- **Global shift** preserves the original relative timing while avoiding negative `--sync` values (which can be awkward in some tool flows) and aligns chapters to the new zero.
+- **UI guardrails** prevent accidental muxing mistakes that are hard to notice until playback.
+- **ASS/SSA edits** are done with minimal rewriting to avoid header damage; we **never** regenerate the entire ASS header from scratch.
 - **Compact logging** keeps logs readable while preserving essential tails on error.
 
 ---
@@ -724,20 +724,20 @@ python main.py
 
 ## 22) Known limitations
 
-- No in-app **media preview/seek**—the focus is on analysis+merge, not manual timeline spotting.  
-- Track‑level operations only—no content‑aware subtitle fixing beyond scaling/resolution.  
+- No in-app **media preview/seek**—the focus is on analysis+merge, not manual timeline spotting.
+- Track‑level operations only—no content‑aware subtitle fixing beyond scaling/resolution.
 - Requires matching **file names** across folders for batch discovery.
 
 ---
 
 ## 23) Glossary
 
-- **REF/SEC/TER**: Reference / Secondary / Tertiary sources.  
-- **Default** (mkvmerge): Player’s preferred track of that type.  
-- **Forced (subs)**: Mark track as “forced display” flag.  
-- **PlayRes**: Logical render resolution in ASS/SSA styles.  
-- **A_MS/ACM**: Microsoft ACM containerized audio; some variants resist stream copy.  
-- **Global shift**: Non‑destructive offset applied to all tracks so no negative sync remains.  
+- **REF/SEC/TER**: Reference / Secondary / Tertiary sources.
+- **Default** (mkvmerge): Player’s preferred track of that type.
+- **Forced (subs)**: Mark track as “forced display” flag.
+- **PlayRes**: Logical render resolution in ASS/SSA styles.
+- **A_MS/ACM**: Microsoft ACM containerized audio; some variants resist stream copy.
+- **Global shift**: Non‑destructive offset applied to all tracks so no negative sync remains.
 - **Signature**: Multiset used to detect whether the previous layout can be auto‑applied to a new file.
 
 ---
@@ -795,7 +795,7 @@ python main.py
 
 ## 26) Final notes
 
-- This edition is **intentionally explicit**: the user picks tracks and options. The system then applies reproducible transforms and a transparent mux.  
+- This edition is **intentionally explicit**: the user picks tracks and options. The system then applies reproducible transforms and a transparent mux.
 - When in doubt, check the per-job `.log`. All external calls are logged with timestamps and either pretty progress or error tails.
 
 Happy syncing and muxing! 🎬

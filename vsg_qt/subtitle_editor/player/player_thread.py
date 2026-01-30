@@ -295,7 +295,7 @@ class PlayerThread(QThread):
                 continue
 
             delay = self._frame_delay
-            time.sleep(delay if delay > 0.001 else 0.001)
+            time.sleep(max(0.001, delay))
 
         self._cleanup_resources()
 

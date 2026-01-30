@@ -1,16 +1,26 @@
 # Video Sync GUI - Python Code Quality Configuration
-# This file configures Black (formatter) and Ruff (linter)
+# This file configures Black (formatter), Ruff (linter), and Pyright (type checker)
+#
+# Commands:
+#   black .              - Format code
+#   ruff check .         - Lint code
+#   ruff check --fix .   - Lint and auto-fix
+#   pyright              - Type check
+#   pre-commit run -a    - Run all checks (after setup)
+#
+# Install dev tools:
+#   pip install black ruff pyright pre-commit
 
 [project]
 name = "video-sync-gui"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 
 # =============================================================================
 # Black Configuration
 # =============================================================================
 [tool.black]
 line-length = 88
-target-version = ["py310", "py311", "py312"]
+target-version = ["py313"]
 # Exclude generated files, caches, and virtual environments
 extend-exclude = '''
 /(
@@ -29,7 +39,7 @@ extend-exclude = '''
 # =============================================================================
 [tool.ruff]
 line-length = 88
-target-version = "py310"
+target-version = "py313"
 
 # Exclude common directories that shouldn't be linted
 exclude = [
@@ -43,7 +53,7 @@ exclude = [
 ]
 
 [tool.ruff.lint]
-# Enable rule sets that catch real issues without being overly pedantic
+# Enable rule sets that catch real issues - "Rust-like" strictness
 # See: https://docs.astral.sh/ruff/rules/
 select = [
     "E",      # pycodestyle errors
@@ -55,37 +65,101 @@ select = [
     "C4",     # flake8-comprehensions (better list/dict/set comprehensions)
     "SIM",    # flake8-simplify (code simplification suggestions)
     "RUF",    # Ruff-specific rules
+    "PIE",    # flake8-pie (misc lints)
+    "PLC",    # pylint convention
+    "PLE",    # pylint errors
+    "PLW",    # pylint warnings
+    "PERF",   # perflint (performance anti-patterns)
+    "FURB",   # refurb (modern Python idioms)
+    "LOG",    # flake8-logging (logging best practices)
+    "G",      # flake8-logging-format
+    "TRY",    # tryceratops (exception handling)
+    "FLY",    # flynt (f-string conversion)
+    "ICN",    # flake8-import-conventions
+    "RET",    # flake8-return (return statement issues)
+    "RSE",    # flake8-raise (raise statement issues)
+    "TC",     # flake8-type-checking (TYPE_CHECKING imports)
+    "PTH",    # flake8-use-pathlib (use pathlib over os.path)
 ]
 
 ignore = [
     # Rules that conflict with Black formatting
     "E501",   # Line too long - Black handles this
 
-    # Rules that are too pedantic or not useful for this codebase
+    # Rules that are too pedantic for existing code (can enable for new code later)
     "E722",   # Do not use bare except - used intentionally in cleanup code
-    "E731",   # Do not assign a lambda expression, use a def - lambdas are fine for simple cases
+    "E731",   # Do not assign a lambda expression - lambdas fine for simple cases
     "E741",   # Ambiguous variable name (l, I, O) - context makes them clear
     "B007",   # Loop control variable not used - underscore prefix handles this
     "B008",   # Do not perform function call in argument defaults - sometimes intentional
     "B027",   # Empty method in abstract class - valid for optional override hooks
     "B028",   # No explicit stacklevel in warnings.warn - too pedantic
-    "B904",   # raise ... from err - good practice but noisy for existing code
-    "B905",   # zip() without explicit strict= parameter - too noisy for existing code
-    "SIM102", # Nested if statements - sometimes clearer than combined conditions
-    "SIM105", # Use contextlib.suppress - try/except pass is often clearer
+    "B904",   # raise ... from err - enable later when refactoring
+    "B905",   # zip() without explicit strict= - enable later
+    "SIM102", # Nested if statements - sometimes clearer
+    "SIM105", # Use contextlib.suppress - try/except pass often clearer
     "SIM108", # Use ternary operator - can reduce readability
-    "SIM117", # Use single with statement - multiple with is often clearer
-    "SIM118", # Use key in dict instead of key in dict.keys() - minor
+    "SIM117", # Use single with statement - multiple with often clearer
+    "SIM118", # Use key in dict instead of dict.keys() - minor
     "UP015",  # Unnecessary open mode parameters - explicit is fine
+    "UP038",  # Use X | Y in isinstance - existing code uses tuple style
 
-    # Type hint related rules - too noisy for gradual typing
-    "RUF013", # PEP 484 prohibits implicit Optional - common pattern, verbose to fix
+    # Type hint related - pyright handles these better
+    "RUF013", # PEP 484 prohibits implicit Optional - pyright catches this
 
-    # These can be enabled later if desired
-    "RUF001", # String contains ambiguous character - too noisy for i18n
+    # Ambiguous characters - too noisy for i18n
+    "RUF001", # String contains ambiguous character
     "RUF002", # Docstring contains ambiguous character
     "RUF003", # Comment contains ambiguous character
-    "RUF046", # Unnecessary int() on already int value - int(round(x)) is intentional for clarity
+    "RUF046", # Unnecessary int() - int(round(x)) is intentional for clarity
+
+    # New stricter rules - temporarily ignored for existing code
+    # TODO: Enable these gradually as code is refactored
+    "PLC0415",# Import outside top-level - lazy imports are intentional for performance
+    "PLW1510",# subprocess.run without check= - sometimes intentional
+    "TRY003", # Avoid specifying long messages outside exception class - too strict
+    "TRY300", # Consider moving to else block - style preference
+    "TRY301", # Abstract raise to inner function - style preference
+    "TRY400", # Use logging.exception instead of logging.error - preference
+    "TRY401", # Redundant exception in logging.exception - preference
+    "PIE790", # Unnecessary pass - sometimes used for clarity
+    "PIE810", # Call startswith/endswith once - existing code style
+    "PERF402",# Use list.copy() instead of list() - minor
+    "PERF102",# Use dict.keys/values/items() - minor
+    "SIM103", # Return condition directly - sometimes less clear
+    "SIM115", # Use context manager for open() - sometimes intentional
+    "FURB188",# Use removesuffix/prefix - Python 3.9+ only patterns
+    "RUF012", # Mutable class attributes - common pattern
+    "RUF022", # __all__ not sorted - not important
+    "PLW2901",# Redefining loop variable - common pattern
+    "PLW0603",# Using global statement - sometimes necessary
+    "PERF401",# Use list comprehension - sometimes readability matters more
+    "PTH123", # Use Path.open() instead of open() - gradual migration
+    "PTH118", # Use Path.joinpath() - gradual migration
+    "PTH119", # Use Path.is_file() - gradual migration
+    "PTH120", # Use Path.is_dir() - gradual migration
+    "PTH122", # Use Path.splitext() - gradual migration
+    "PTH100", # Use Path.resolve() - gradual migration
+    "PTH103", # Use Path.mkdir() - gradual migration
+    "PTH107", # Use Path.unlink() - gradual migration
+    "PTH110", # Use Path.stat() - gradual migration
+    "PTH111", # Use Path.expanduser() - gradual migration
+    "PTH112", # Use Path.iterdir() - gradual migration
+    "PTH113", # Use Path.exists() - gradual migration
+    "PTH116", # Use Path.stat().st_mtime - gradual migration
+    "PTH202", # Use Path.replace() - gradual migration
+    "RET504", # Unnecessary variable before return - sometimes clearer
+    "RET505", # Unnecessary else after return - sometimes clearer
+    "RET506", # Unnecessary else after raise - sometimes clearer
+    "G004",   # Logging f-string - f-strings are fine in modern Python
+    "TC001", # Move import into TYPE_CHECKING - gradual migration
+    "TC002", # Move import into TYPE_CHECKING - gradual migration
+    "TC003", # Move import into TYPE_CHECKING - gradual migration
+    "TC005",  # Found empty type-checking block - cleanup later
+    "PTH108", # Use Path.unlink(missing_ok=True) - gradual migration
+    "RUF005", # Consider unpacking instead of concatenation - style
+    "UP035",  # Import from collections.abc - gradual migration
+    "RET507", # Unnecessary else after continue - sometimes clearer
 ]
 
 # Allow autofix for all enabled rules (when `--fix` is passed)
@@ -133,11 +207,68 @@ force-single-line = false
 "vsg_qt/manual_selection_dialog/widgets.py" = ["F821"]
 
 # =============================================================================
-# Type Checking - Future Configuration (mypy/pyright)
+# Pyright - Static Type Checker (Rust-like type safety)
 # =============================================================================
-# Uncomment when ready to add type checking:
-# [tool.mypy]
-# python_version = "3.10"
-# warn_return_any = true
-# warn_unused_configs = true
-# ignore_missing_imports = true
+# Pyright provides compile-time type checking like Rust's type system.
+# Start with "basic" mode, gradually increase to "strict" as code is typed.
+#
+# Modes (in order of strictness):
+#   off      - No type checking
+#   basic    - Catches obvious errors (recommended starting point)
+#   standard - More thorough checking
+#   strict   - Full Rust-like strictness (goal)
+#
+[tool.pyright]
+pythonVersion = "3.13"
+pythonPlatform = "Linux"
+
+# Start with basic mode - catches real bugs without requiring full typing
+typeCheckingMode = "basic"
+
+# Include project packages
+include = ["vsg_core", "vsg_qt", "main.py", "tests"]
+
+# Exclude generated/vendored code
+exclude = [
+    "**/__pycache__",
+    ".venv",
+    "venv",
+    "build",
+    "dist",
+]
+
+# Report settings - what to show
+# Note: PySide6/Qt not installed in dev environment, only at runtime
+reportMissingImports = "none"           # Disabled - Qt not in dev environment
+reportMissingTypeStubs = false          # Don't require stubs for all libraries
+reportUnusedImport = "none"             # Ruff handles this better
+reportUnusedVariable = "none"           # Ruff handles this better
+reportDuplicateImport = "warning"
+reportMissingModuleSource = "none"      # Disabled - Qt modules
+
+# Type inference settings
+reportUnnecessaryTypeIgnoreComment = "warning"
+reportPrivateUsage = "warning"
+reportConstantRedefinition = "warning"
+reportIncompatibleMethodOverride = "error"
+reportIncompatibleVariableOverride = "error"
+reportOverlappingOverload = "error"
+
+# Catch common bugs (like Rust)
+reportOptionalSubscript = "error"       # x[0] when x might be None
+reportOptionalMemberAccess = "error"    # x.foo when x might be None
+reportOptionalCall = "error"            # x() when x might be None
+reportOptionalIterable = "error"        # for i in x when x might be None
+reportOptionalContextManager = "error"  # with x when x might be None
+reportUnnecessaryIsInstance = "warning"
+reportUnnecessaryCast = "warning"
+reportAssertAlwaysTrue = "warning"
+
+# These are too strict for existing code, enable gradually
+reportUnknownParameterType = "none"     # Enable later for strict mode
+reportUnknownArgumentType = "none"      # Enable later for strict mode
+reportUnknownLambdaType = "none"        # Enable later for strict mode
+reportUnknownVariableType = "none"      # Enable later for strict mode
+reportUnknownMemberType = "none"        # Enable later for strict mode
+reportMissingParameterType = "none"     # Enable later for strict mode
+reportMissingTypeArgument = "none"      # Enable later for strict mode

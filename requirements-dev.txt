@@ -1,0 +1,26 @@
+# Video Sync GUI - Development Dependencies
+# Install with: pip install -r requirements-dev.txt
+#
+# These tools provide Rust-like development experience:
+# - Formatting (like rustfmt)
+# - Linting (like clippy)
+# - Type checking (like Rust's type system)
+# - Pre-commit hooks (like cargo check before commit)
+
+# Code Formatting
+black>=24.10.0
+
+# Linting (fast, Rust-based)
+ruff>=0.8.0
+
+# Static Type Checking (Rust-like type safety)
+pyright>=1.1.390
+
+# Pre-commit hooks (auto-run checks on commit)
+pre-commit>=4.0.0
+
+# Type stubs for common libraries (optional, improves type checking)
+# Uncomment as needed:
+# types-Pillow
+# types-requests
+# pandas-stubs

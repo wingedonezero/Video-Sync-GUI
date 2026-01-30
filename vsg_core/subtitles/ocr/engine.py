@@ -177,7 +177,6 @@ class OCREngine:
                 and result.low_confidence
                 and self.config.fallback_psm != self.config.psm
             ):
-
                 retry_result = self._retry_with_fallback(image)
                 if retry_result.average_confidence > result.average_confidence:
                     result = retry_result

@@ -401,8 +401,9 @@ class SteppingCorrector:
         self.log(
             f"  [SteppingCorrector] Stage 2: Performing fine scan in zone {zone_start_s:.1f}s - {zone_end_s:.1f}s..."
         )
-        zone_start_sample, zone_end_sample = int(zone_start_s * sample_rate), int(
-            zone_end_s * sample_rate
+        zone_start_sample, zone_end_sample = (
+            int(zone_start_s * sample_rate),
+            int(zone_end_s * sample_rate),
         )
 
         # Configuration for iterative binary search

@@ -88,7 +88,7 @@ class FinalAuditor:
         final_mkvmerge_data = self._get_metadata(str(final_mkv_path), "mkvmerge")
         if not final_mkvmerge_data or "tracks" not in final_mkvmerge_data:
             self.log("[ERROR] Could not read metadata from final file. Aborting audit.")
-            return
+            return None
 
         final_tracks = final_mkvmerge_data.get("tracks", [])
 
