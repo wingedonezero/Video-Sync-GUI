@@ -1,13 +1,13 @@
 # vsg_qt/subtitle_editor/state/undo_manager.py
-# -*- coding: utf-8 -*-
 """
 Undo/Redo manager for the subtitle editor.
 
 Currently a stub - will be expanded in Phase 3.
 """
+
 from __future__ import annotations
 
-from typing import List, Any, Callable, Optional
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from PySide6.QtCore import QObject, Signal
@@ -16,6 +16,7 @@ from PySide6.QtCore import QObject, Signal
 @dataclass
 class UndoAction:
     """Represents a single undoable action."""
+
     description: str
     undo_func: Callable[[], None]
     redo_func: Callable[[], None]
@@ -36,8 +37,8 @@ class UndoManager(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._undo_stack: List[UndoAction] = []
-        self._redo_stack: List[UndoAction] = []
+        self._undo_stack: list[UndoAction] = []
+        self._redo_stack: list[UndoAction] = []
         self._max_stack_size = 100
 
     @property

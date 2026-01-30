@@ -1,26 +1,33 @@
 # vsg_qt/subtitle_editor/tabs/filtering_tab.py
-# -*- coding: utf-8 -*-
 """
 Filtering tab for subtitle editor.
 
 Provides style filtering configuration for generated tracks.
 This is used when creating filtered subtitle tracks (e.g., "signs only").
 """
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Set
+from typing import TYPE_CHECKING
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
-    QRadioButton, QButtonGroup, QListWidget, QListWidgetItem,
-    QPushButton, QCheckBox, QFrame
+    QButtonGroup,
+    QCheckBox,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QRadioButton,
+    QVBoxLayout,
+    QWidget,
 )
 
 from .base_tab import BaseTab
 
 if TYPE_CHECKING:
-    from ..state import EditorState
+    pass
 
 
 class FilteringTab(BaseTab):
@@ -172,7 +179,7 @@ class FilteringTab(BaseTab):
         for style_name in self._state.style_names:
             count = style_counts.get(style_name, 0)
             cb = QCheckBox(f"{style_name} ({count} lines)")
-            cb.setProperty('style_name', style_name)  # Store actual name
+            cb.setProperty("style_name", style_name)  # Store actual name
             cb.toggled.connect(self._on_style_toggled)
             self._styles_list_layout.addWidget(cb)
             self._style_checkboxes[style_name] = cb
@@ -183,7 +190,7 @@ class FilteringTab(BaseTab):
             cb.setChecked(name in current_styles)
 
         # Set mode
-        if self._state.filter_mode == 'include':
+        if self._state.filter_mode == "include":
             self._include_radio.setChecked(True)
         else:
             self._exclude_radio.setChecked(True)
@@ -195,7 +202,7 @@ class FilteringTab(BaseTab):
         if not self._state:
             return
 
-        mode = 'include' if self._include_radio.isChecked() else 'exclude'
+        mode = "include" if self._include_radio.isChecked() else "exclude"
         self._state.set_filter_mode(mode)
         self._update_stats()
 
@@ -261,7 +268,7 @@ class FilteringTab(BaseTab):
         kept = len(self._state.get_filtered_event_indices())
         removed = total - kept
 
-        mode = "included" if self._state.filter_mode == 'include' else "kept"
+        mode = "included" if self._state.filter_mode == "include" else "kept"
         self._stats_label.setText(
             f"Result: {kept} events {mode}, {removed} events removed (total: {total})"
         )
@@ -297,10 +304,10 @@ class FilteringTab(BaseTab):
         # Only save the configuration, not derived data
         # kept_indices is calculated at runtime by SubtitleData from filter_mode + filter_styles
         return {
-            'filter_mode': self._state.filter_mode,
-            'filter_styles': list(self._state.filter_styles),
-            'forced_include': list(self._state.forced_include_indices),
-            'forced_exclude': list(self._state.forced_exclude_indices)
+            "filter_mode": self._state.filter_mode,
+            "filter_styles": list(self._state.filter_styles),
+            "forced_include": list(self._state.forced_include_indices),
+            "forced_exclude": list(self._state.forced_exclude_indices),
         }
 
     def get_filter_config(self) -> dict:

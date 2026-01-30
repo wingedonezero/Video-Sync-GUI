@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/parsers/__init__.py
-# -*- coding: utf-8 -*-
 """
 Subtitle Image Parsers
 
@@ -18,7 +17,7 @@ from .base import SubtitleImage, SubtitleImageParser
 from .vobsub import VobSubParser
 
 __all__ = [
-    'SubtitleImage',
-    'SubtitleImageParser',
-    'VobSubParser',
+    "SubtitleImage",
+    "SubtitleImageParser",
+    "VobSubParser",
 ]

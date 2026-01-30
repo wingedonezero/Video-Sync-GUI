@@ -1,5 +1,4 @@
 # vsg_qt/font_manager_dialog/ui.py
-# -*- coding: utf-8 -*-
 """
 Font Manager Dialog
 
@@ -7,21 +6,34 @@ A dialog for managing font replacements in subtitle files.
 Shows fonts used in the file, available user fonts, and allows
 setting up font replacements.
 """
+
 from pathlib import Path
-from typing import Optional, Dict, List, Any, Callable
+from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QSplitter, QGroupBox,
-    QTreeWidget, QTreeWidgetItem, QPushButton, QLabel, QComboBox,
-    QMessageBox, QHeaderView, QFrame
+    QComboBox,
+    QDialog,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QSplitter,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
 )
 
-from vsg_core.font_manager import (
-    FontScanner, SubtitleFontAnalyzer, FontReplacementManager, FontInfo
-)
 from vsg_core.config import AppConfig
+from vsg_core.font_manager import (
+    FontReplacementManager,
+    FontScanner,
+    SubtitleFontAnalyzer,
+)
 
 
 class FontManagerDialog(QDialog):
@@ -37,8 +49,8 @@ class FontManagerDialog(QDialog):
     def __init__(
         self,
         subtitle_path: str,
-        current_replacements: Optional[Dict[str, Dict[str, Any]]] = None,
-        parent=None
+        current_replacements: dict[str, dict[str, Any]] | None = None,
+        parent=None,
     ):
         super().__init__(parent)
         self.subtitle_path = subtitle_path
@@ -57,9 +69,13 @@ class FontManagerDialog(QDialog):
             for style_name, repl_data in current_replacements.items():
                 self.replacement_manager.add_replacement(
                     style_name,
-                    repl_data['original_font'],
-                    repl_data['new_font_name'],
-                    Path(repl_data['font_file_path']) if repl_data.get('font_file_path') else None
+                    repl_data["original_font"],
+                    repl_data["new_font_name"],
+                    (
+                        Path(repl_data["font_file_path"])
+                        if repl_data.get("font_file_path")
+                        else None
+                    ),
                 )
 
         self._build_ui()
@@ -145,7 +161,9 @@ class FontManagerDialog(QDialog):
 
         # Current replacements list
         self.replacements_tree = QTreeWidget()
-        self.replacements_tree.setHeaderLabels(["Style", "Original Font", "Replacement Font"])
+        self.replacements_tree.setHeaderLabels(
+            ["Style", "Original Font", "Replacement Font"]
+        )
         self.replacements_tree.setAlternatingRowColors(True)
         self.replacements_tree.setMaximumHeight(150)
         replacement_layout.addWidget(self.replacements_tree)
@@ -207,12 +225,12 @@ class FontManagerDialog(QDialog):
         for style_name, font_name in sorted(self.styles_info.items()):
             item = QTreeWidgetItem([style_name, font_name])
             item.setData(0, Qt.UserRole, style_name)  # Store style name
-            item.setData(1, Qt.UserRole, font_name)   # Store original font
+            item.setData(1, Qt.UserRole, font_name)  # Store original font
             self.file_fonts_tree.addTopLevelItem(item)
 
         # Check for inline fonts
         analysis = self.analyzer.analyze()
-        inline_fonts = analysis.get('inline_fonts', [])
+        inline_fonts = analysis.get("inline_fonts", [])
 
         if inline_fonts:
             self.inline_fonts_label.setText(
@@ -223,7 +241,7 @@ class FontManagerDialog(QDialog):
         else:
             self.inline_fonts_label.setVisible(False)
 
-    def _get_styles_from_subtitle(self) -> Dict[str, str]:
+    def _get_styles_from_subtitle(self) -> dict[str, str]:
         """Get style names and their fonts from the subtitle file."""
         from vsg_core.subtitles.data import SubtitleData
 
@@ -268,11 +286,9 @@ class FontManagerDialog(QDialog):
             if len(family_fonts) == 1:
                 # Single font, show directly
                 font = family_fonts[0]
-                item = QTreeWidgetItem([
-                    font.family_name,
-                    font.subfamily or "Regular",
-                    font.filename
-                ])
+                item = QTreeWidgetItem(
+                    [font.family_name, font.subfamily or "Regular", font.filename]
+                )
                 item.setData(0, Qt.UserRole, font)
 
                 # Apply the font to display in its own typeface
@@ -285,7 +301,9 @@ class FontManagerDialog(QDialog):
                 self.user_fonts_tree.addTopLevelItem(item)
             else:
                 # Multiple fonts in family, create expandable group
-                family_item = QTreeWidgetItem([family_name, f"{len(family_fonts)} variants", ""])
+                family_item = QTreeWidgetItem(
+                    [family_name, f"{len(family_fonts)} variants", ""]
+                )
                 family_item.setData(0, Qt.UserRole, None)
 
                 # Apply font to family header using first variant
@@ -297,11 +315,9 @@ class FontManagerDialog(QDialog):
                     family_item.setFont(0, display_font)
 
                 for font in family_fonts:
-                    child = QTreeWidgetItem([
-                        "",
-                        font.subfamily or "Regular",
-                        font.filename
-                    ])
+                    child = QTreeWidgetItem(
+                        ["", font.subfamily or "Regular", font.filename]
+                    )
                     child.setData(0, Qt.UserRole, font)
 
                     # Apply font to child item
@@ -322,11 +338,9 @@ class FontManagerDialog(QDialog):
         replacements = self.replacement_manager.get_replacements()
 
         for style_name, repl_data in replacements.items():
-            item = QTreeWidgetItem([
-                style_name,
-                repl_data['original_font'],
-                repl_data['new_font_name']
-            ])
+            item = QTreeWidgetItem(
+                [style_name, repl_data["original_font"], repl_data["new_font_name"]]
+            )
             item.setData(0, Qt.UserRole, style_name)
             self.replacements_tree.addTopLevelItem(item)
 
@@ -338,7 +352,7 @@ class FontManagerDialog(QDialog):
         self.style_combo.clear()
         existing_replacements = set(self.replacement_manager.get_replacements().keys())
 
-        if hasattr(self, 'styles_info'):
+        if hasattr(self, "styles_info"):
             for style_name in sorted(self.styles_info.keys()):
                 display = style_name
                 if style_name in existing_replacements:
@@ -350,7 +364,7 @@ class FontManagerDialog(QDialog):
         fonts = self.scanner.scan()
         for font in sorted(fonts, key=lambda f: f.family_name):
             display_name = font.family_name
-            if font.subfamily and font.subfamily.lower() != 'regular':
+            if font.subfamily and font.subfamily.lower() != "regular":
                 display_name += f" ({font.subfamily})"
             self.replacement_font_combo.addItem(display_name, font)
 
@@ -387,12 +401,12 @@ class FontManagerDialog(QDialog):
 
         self.fonts_dir.mkdir(parents=True, exist_ok=True)
 
-        if sys.platform == 'win32':
-            subprocess.run(['explorer', str(self.fonts_dir)])
-        elif sys.platform == 'darwin':
-            subprocess.run(['open', str(self.fonts_dir)])
+        if sys.platform == "win32":
+            subprocess.run(["explorer", str(self.fonts_dir)])
+        elif sys.platform == "darwin":
+            subprocess.run(["open", str(self.fonts_dir)])
         else:
-            subprocess.run(['xdg-open', str(self.fonts_dir)])
+            subprocess.run(["xdg-open", str(self.fonts_dir)])
 
     def _add_replacement(self):
         """Add a font replacement for the selected style."""
@@ -410,14 +424,16 @@ class FontManagerDialog(QDialog):
         # Get the original font for this style
         original_font = self.styles_info.get(style_name)
         if not original_font:
-            QMessageBox.warning(self, "Error", "Could not determine original font for this style.")
+            QMessageBox.warning(
+                self, "Error", "Could not determine original font for this style."
+            )
             return
 
         self.replacement_manager.add_replacement(
             style_name,
             original_font,
             replacement_font.family_name,
-            replacement_font.file_path
+            replacement_font.file_path,
         )
 
         self._refresh_replacements()
@@ -441,7 +457,7 @@ class FontManagerDialog(QDialog):
                 "Clear All",
                 "Remove all font replacements?",
                 QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
+                QMessageBox.No,
             )
             if reply == QMessageBox.Yes:
                 self.replacement_manager.clear_replacements()
@@ -455,12 +471,12 @@ class FontManagerDialog(QDialog):
             QMessageBox.warning(
                 self,
                 "Validation Error",
-                "Some font files are missing:\n\n" + "\n".join(errors)
+                "Some font files are missing:\n\n" + "\n".join(errors),
             )
             return
 
         self.accept()
 
-    def get_replacements(self) -> Dict[str, Dict[str, Any]]:
+    def get_replacements(self) -> dict[str, dict[str, Any]]:
         """Get the configured font replacements."""
         return self.replacement_manager.get_replacements()

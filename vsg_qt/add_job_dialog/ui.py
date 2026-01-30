@@ -1,24 +1,37 @@
 # vsg_qt/add_job_dialog/ui.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import List, Dict
 
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QDialogButtonBox,
-    QLineEdit, QLabel, QMessageBox, QFileDialog, QScrollArea, QWidget
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
 from vsg_core.job_discovery import discover_jobs
 
+
 class SourceInputWidget(QWidget):
     """A self-contained widget for a single source input row that handles drag-and-drop."""
+
     def __init__(self, source_num: int, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
 
         layout = QHBoxLayout(self)
 
-        label_text = f"Source {source_num} (Reference):" if source_num == 1 else f"Source {source_num}:"
+        label_text = (
+            f"Source {source_num} (Reference):"
+            if source_num == 1
+            else f"Source {source_num}:"
+        )
         label = QLabel(label_text)
         self.line_edit = QLineEdit()
         browse_btn = QPushButton("Browse…")
@@ -53,17 +66,19 @@ class SourceInputWidget(QWidget):
     def text(self) -> str:
         return self.line_edit.text()
 
+
 class AddJobDialog(QDialog):
     """
     A dialog for dynamically adding sources to discover jobs.
     """
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Add Job(s) to Queue")
         self.setMinimumSize(700, 300)
 
-        self.discovered_jobs: List[Dict] = []
-        self.source_widgets: List[SourceInputWidget] = []
+        self.discovered_jobs: list[dict] = []
+        self.source_widgets: list[SourceInputWidget] = []
         self._build_ui()
 
         # Start with 2 sources by default
@@ -102,7 +117,7 @@ class AddJobDialog(QDialog):
         self.source_widgets.append(source_widget)
         self.inputs_layout.addWidget(source_widget)
 
-    def populate_sources_from_paths(self, paths: List[str]):
+    def populate_sources_from_paths(self, paths: list[str]):
         """Pre-fills the source inputs from a list of paths."""
         # Clear any default inputs
         while self.inputs_layout.count():
@@ -122,25 +137,31 @@ class AddJobDialog(QDialog):
 
     def find_and_accept(self):
         """Discover jobs from paths and accept the dialog if any are found."""
-        sources: Dict[str, str] = {}
+        sources: dict[str, str] = {}
         for i, source_widget in enumerate(self.source_widgets):
             path = source_widget.text().strip()
             if path:
                 sources[f"Source {i+1}"] = path
 
         if "Source 1" not in sources:
-            QMessageBox.warning(self, "Input Required", "Source 1 (Reference) cannot be empty.")
+            QMessageBox.warning(
+                self, "Input Required", "Source 1 (Reference) cannot be empty."
+            )
             return
 
         try:
             self.discovered_jobs = discover_jobs(sources)
             if not self.discovered_jobs:
-                QMessageBox.information(self, "No Jobs Found", "No matching jobs could be discovered from the provided paths.")
+                QMessageBox.information(
+                    self,
+                    "No Jobs Found",
+                    "No matching jobs could be discovered from the provided paths.",
+                )
                 return
 
             self.accept()
         except (ValueError, FileNotFoundError) as e:
             QMessageBox.critical(self, "Error Discovering Jobs", str(e))
 
-    def get_discovered_jobs(self) -> List[Dict]:
+    def get_discovered_jobs(self) -> list[dict]:
         return self.discovered_jobs

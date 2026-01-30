@@ -1,5 +1,4 @@
 # vsg_qt/subtitle_editor/utils/time_format.py
-# -*- coding: utf-8 -*-
 """
 Time formatting utilities for subtitle editor.
 
@@ -8,7 +7,6 @@ Handles conversion between:
 - ASS time format (H:MM:SS.cc)
 - Frame numbers (for frame-based editing)
 """
-from typing import Optional
 
 
 def ms_to_ass_time(ms: float) -> str:
@@ -46,19 +44,16 @@ def ass_time_to_ms(time_str: str) -> float:
         Time in milliseconds
     """
     try:
-        parts = time_str.strip().split(':')
+        parts = time_str.strip().split(":")
         if len(parts) == 3:
             hours = int(parts[0])
             minutes = int(parts[1])
-            seconds_cs = parts[2].split('.')
+            seconds_cs = parts[2].split(".")
             seconds = int(seconds_cs[0])
             centiseconds = int(seconds_cs[1]) if len(seconds_cs) > 1 else 0
 
             total_ms = (
-                hours * 3600000 +
-                minutes * 60000 +
-                seconds * 1000 +
-                centiseconds * 10
+                hours * 3600000 + minutes * 60000 + seconds * 1000 + centiseconds * 10
             )
             return float(total_ms)
     except (ValueError, IndexError):

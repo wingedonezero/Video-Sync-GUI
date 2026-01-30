@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/postprocess.py
-# -*- coding: utf-8 -*-
 """
 OCR Post-Processing and Text Correction
 
@@ -29,18 +28,19 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
 
-from .dictionaries import OCRDictionaries, ReplacementRule, get_dictionaries
+from .dictionaries import get_dictionaries
 from .subtitle_edit import (
-    SubtitleEditParser, SubtitleEditCorrector, SEDictionaries, SEDictionaryConfig,
-    load_se_config, save_se_config
+    SubtitleEditCorrector,
+    SubtitleEditParser,
+    load_se_config,
 )
 
 logger = logging.getLogger(__name__)
 
 try:
     import enchant
+
     ENCHANT_AVAILABLE = True
 except ImportError:
     ENCHANT_AVAILABLE = False
@@ -49,6 +49,7 @@ except ImportError:
 @dataclass
 class PostProcessConfig:
     """Configuration for post-processing."""
+
     # Master switch - disables all fixes when False
     cleanup_enabled: bool = True  # Master enable/disable for OCR cleanup
 
@@ -72,26 +73,28 @@ class PostProcessConfig:
     fix_spacing: bool = True  # Fix common spacing issues
 
     # Custom wordlist
-    custom_wordlist_path: Optional[Path] = None
+    custom_wordlist_path: Path | None = None
 
 
 @dataclass
 class ProcessResult:
     """Result of post-processing."""
+
     text: str
     original_text: str
-    unknown_words: List[str] = field(default_factory=list)
-    fixes_applied: Dict[str, int] = field(default_factory=dict)
+    unknown_words: list[str] = field(default_factory=list)
+    fixes_applied: dict[str, int] = field(default_factory=dict)
     was_modified: bool = False
 
 
 @dataclass
 class UnknownWordInfo:
     """Information about an unknown word."""
+
     word: str
     context: str  # Surrounding text
     confidence: float
-    suggestions: List[str] = field(default_factory=list)
+    suggestions: list[str] = field(default_factory=list)
 
 
 class OCRPostProcessor:
@@ -144,22 +147,43 @@ class OCRPostProcessor:
     # Confidence-gated fixes - only apply when confidence is low
     CONFIDENCE_FIXES = {
         # rn → m confusion
-        'rn': 'm',
+        "rn": "m",
         # O/0 confusion
-        '0': 'O',  # Context-dependent
+        "0": "O",  # Context-dependent
         # 1/l confusion (beyond contractions)
-        '1': 'l',  # Context-dependent
+        "1": "l",  # Context-dependent
     }
 
     # Common subtitle words to add to dictionary
     COMMON_WORDS = {
-        'okay', 'OK', 'yeah', 'gonna', 'wanna', 'gotta',
-        "ain't", "y'all", "ma'am", 'hmm', 'uh', 'um',
-        'whoa', 'wow', 'hey', 'huh', 'eh', 'ah', 'oh',
-        'bye', 'hi', 'nope', 'yep', 'nah', 'duh',
+        "okay",
+        "OK",
+        "yeah",
+        "gonna",
+        "wanna",
+        "gotta",
+        "ain't",
+        "y'all",
+        "ma'am",
+        "hmm",
+        "uh",
+        "um",
+        "whoa",
+        "wow",
+        "hey",
+        "huh",
+        "eh",
+        "ah",
+        "oh",
+        "bye",
+        "hi",
+        "nope",
+        "yep",
+        "nah",
+        "duh",
     }
 
-    def __init__(self, config: Optional[PostProcessConfig] = None):
+    def __init__(self, config: PostProcessConfig | None = None):
         self.config = config or PostProcessConfig()
         self._init_dictionaries()
         self._init_spell_checker()
@@ -183,7 +207,9 @@ class OCRPostProcessor:
         logger.debug(f"Loaded {len(self.replacement_rules)} replacement rules")
         logger.debug(f"Loaded {len(self.custom_words)} user dictionary words")
         logger.debug(f"Loaded {len(self.custom_names)} names")
-        logger.debug(f"Romaji dictionary: {romaji_stats.get('word_count', 0)} words from {romaji_stats.get('dict_path', 'N/A')}")
+        logger.debug(
+            f"Romaji dictionary: {romaji_stats.get('word_count', 0)} words from {romaji_stats.get('dict_path', 'N/A')}"
+        )
 
         # ValidationManager will be initialized after spell checker is ready
         self.validation_manager = None
@@ -201,10 +227,14 @@ class OCRPostProcessor:
                 for word in self.all_custom_words:
                     self.dictionary.add_to_session(word)
             except enchant.errors.DictNotFoundError:
-                logger.warning("[OCR] Enchant dictionary not found, spell checking disabled")
+                logger.warning(
+                    "[OCR] Enchant dictionary not found, spell checking disabled"
+                )
 
         # Initialize ValidationManager with spell checker
-        self.validation_manager = self.ocr_dicts.init_validation_manager(self.dictionary)
+        self.validation_manager = self.ocr_dicts.init_validation_manager(
+            self.dictionary
+        )
 
     def _init_patterns(self):
         """Compile regex patterns from database rules."""
@@ -228,17 +258,19 @@ class OCRPostProcessor:
             if rule.rule_type == "literal":
                 self.literal_rules.append(rule)
             elif rule.rule_type == "word":
-                pattern = re.compile(r'\b' + re.escape(rule.pattern) + r'\b')
+                pattern = re.compile(r"\b" + re.escape(rule.pattern) + r"\b")
                 self.word_boundary_patterns[rule.pattern] = (pattern, rule.replacement)
             elif rule.rule_type == "word_start":
-                pattern = re.compile(r'\b' + re.escape(rule.pattern))
+                pattern = re.compile(r"\b" + re.escape(rule.pattern))
                 self.word_start_patterns[rule.pattern] = (pattern, rule.replacement)
             elif rule.rule_type == "word_end":
-                pattern = re.compile(re.escape(rule.pattern) + r'\b')
+                pattern = re.compile(re.escape(rule.pattern) + r"\b")
                 self.word_end_patterns[rule.pattern] = (pattern, rule.replacement)
             elif rule.rule_type == "word_middle":
                 # Match pattern when not at word boundary
-                pattern = re.compile(r'(?<=[a-zA-Z])' + re.escape(rule.pattern) + r'(?=[a-zA-Z])')
+                pattern = re.compile(
+                    r"(?<=[a-zA-Z])" + re.escape(rule.pattern) + r"(?=[a-zA-Z])"
+                )
                 self.word_middle_patterns[rule.pattern] = (pattern, rule.replacement)
             elif rule.rule_type == "regex":
                 try:
@@ -248,35 +280,38 @@ class OCRPostProcessor:
                     logger.warning(f"Invalid regex pattern '{rule.pattern}': {e}")
 
         # Standalone 'l' that should be 'I' (backup, covered by WORD_BOUNDARY_FIXES)
-        self.standalone_l_pattern = re.compile(r'\bl\b')
+        self.standalone_l_pattern = re.compile(r"\bl\b")
 
         # 'l' at start of sentence (likely 'I')
-        self.sentence_start_l_pattern = re.compile(r'(^|[.!?]\s+)l\s')
+        self.sentence_start_l_pattern = re.compile(r"(^|[.!?]\s+)l\s")
 
         # rn patterns (context-aware)
         self.rn_patterns = [
-            (re.compile(r'\brn([aeiou])'), r'm\1'),  # rn before vowel
-            (re.compile(r'([aeiou])rn\b'), r'\1m'),  # rn after vowel at word end
-            (re.compile(r'\b([a-z]+)rn([a-z]+)\b'), self._fix_rn_in_word),  # rn in middle
+            (re.compile(r"\brn([aeiou])"), r"m\1"),  # rn before vowel
+            (re.compile(r"([aeiou])rn\b"), r"\1m"),  # rn after vowel at word end
+            (
+                re.compile(r"\b([a-z]+)rn([a-z]+)\b"),
+                self._fix_rn_in_word,
+            ),  # rn in middle
         ]
 
         # Trailing l/ll that might be ! or !!
-        self.trailing_exclaim_pattern = re.compile(r'\b(\w+?)l{1,2}$')
+        self.trailing_exclaim_pattern = re.compile(r"\b(\w+?)l{1,2}$")
 
         # Space before punctuation
-        self.space_before_punct = re.compile(r'\s+([!?.,;:])')
+        self.space_before_punct = re.compile(r"\s+([!?.,;:])")
 
         # Multiple spaces
-        self.multiple_spaces = re.compile(r' {2,}')
+        self.multiple_spaces = re.compile(r" {2,}")
 
         # Trailing OCR artifacts (underscore, tilde, etc. at end of text)
-        self.trailing_artifacts = re.compile(r'[_~`]+\s*$')
+        self.trailing_artifacts = re.compile(r"[_~`]+\s*$")
 
         # Leading/trailing underscores on words
-        self.word_underscores = re.compile(r'\b_+(\w+)_*\b|\b(\w+)_+\b')
+        self.word_underscores = re.compile(r"\b_+(\w+)_*\b|\b(\w+)_+\b")
 
         # II that should be ll (in words)
-        self.double_i_pattern = re.compile(r'\b(\w*)II(\w*)\b')
+        self.double_i_pattern = re.compile(r"\b(\w*)II(\w*)\b")
 
         # Garbage patterns - random capital letters with spaces
         # Matches things like "U B D N TR S A" or "L ol T T T"
@@ -285,7 +320,7 @@ class OCRPostProcessor:
         )
         # Pattern for sequences of short "words" (1-2 chars each)
         self.short_word_sequence = re.compile(
-            r'(?:\b[A-Z]{1,2}\b\s*){3,}'  # 3+ consecutive 1-2 char uppercase "words"
+            r"(?:\b[A-Z]{1,2}\b\s*){3,}"  # 3+ consecutive 1-2 char uppercase "words"
         )
 
     def _init_subtitle_edit(self):
@@ -331,7 +366,7 @@ class OCRPostProcessor:
             self.se_corrector = SubtitleEditCorrector(
                 self.se_dicts,
                 self.dictionary,
-                validation_manager=self.validation_manager
+                validation_manager=self.validation_manager,
             )
 
             logger.info(
@@ -347,10 +382,7 @@ class OCRPostProcessor:
             self.se_dicts = None
 
     def process(
-        self,
-        text: str,
-        confidence: float = 100.0,
-        timestamp: str = ""
+        self, text: str, confidence: float = 100.0, timestamp: str = ""
     ) -> ProcessResult:
         """
         Process OCR text and apply corrections.
@@ -439,10 +471,15 @@ class OCRPostProcessor:
             unknown_preview = result.unknown_words[:3]
             if len(result.unknown_words) > 3:
                 unknown_preview.append(f"+{len(result.unknown_words) - 3}")
-            parts.append(f"{len(result.unknown_words)} unknown: {', '.join(unknown_preview)}")
+            parts.append(
+                f"{len(result.unknown_words)} unknown: {', '.join(unknown_preview)}"
+            )
 
         # ValidationManager stats (if tracked)
-        if self.validation_manager and self.validation_manager._stats.total_validated > 0:
+        if (
+            self.validation_manager
+            and self.validation_manager._stats.total_validated > 0
+        ):
             stats = self.validation_manager._stats
             source_parts = [f"{count} {src}" for src, count in stats.by_source.items()]
             if source_parts:
@@ -452,11 +489,7 @@ class OCRPostProcessor:
             ts_prefix = f"[{timestamp}] " if timestamp else ""
             logger.info(f"[OCR] {ts_prefix}{'; '.join(parts)}")
 
-    def _apply_unambiguous_fixes(
-        self,
-        text: str,
-        result: ProcessResult
-    ) -> str:
+    def _apply_unambiguous_fixes(self, text: str, result: ProcessResult) -> str:
         """
         Apply fixes that are always correct.
 
@@ -467,65 +500,66 @@ class OCRPostProcessor:
             if rule.pattern in text:
                 count = text.count(rule.pattern)
                 text = text.replace(rule.pattern, rule.replacement)
-                result.fixes_applied[f'{rule.pattern}→{rule.replacement}'] += count
+                result.fixes_applied[f"{rule.pattern}→{rule.replacement}"] += count
 
         # Apply word-boundary replacements
         for pattern_str, (pattern, replacement) in self.word_boundary_patterns.items():
             matches = list(pattern.finditer(text))
             if matches:
                 text = pattern.sub(replacement, text)
-                result.fixes_applied[f'{pattern_str}→{replacement}'] += len(matches)
+                result.fixes_applied[f"{pattern_str}→{replacement}"] += len(matches)
 
         # Apply word-start replacements
         for pattern_str, (pattern, replacement) in self.word_start_patterns.items():
             matches = list(pattern.finditer(text))
             if matches:
                 text = pattern.sub(replacement, text)
-                result.fixes_applied[f'{pattern_str}→{replacement} (word start)'] += len(matches)
+                result.fixes_applied[
+                    f"{pattern_str}→{replacement} (word start)"
+                ] += len(matches)
 
         # Apply word-end replacements
         for pattern_str, (pattern, replacement) in self.word_end_patterns.items():
             matches = list(pattern.finditer(text))
             if matches:
                 text = pattern.sub(replacement, text)
-                result.fixes_applied[f'{pattern_str}→{replacement} (word end)'] += len(matches)
+                result.fixes_applied[f"{pattern_str}→{replacement} (word end)"] += len(
+                    matches
+                )
 
         # Apply regex replacements
         for pattern_str, (pattern, replacement) in self.regex_patterns.items():
             matches = list(pattern.finditer(text))
             if matches:
                 text = pattern.sub(replacement, text)
-                result.fixes_applied[f'regex:{pattern_str}'] += len(matches)
+                result.fixes_applied[f"regex:{pattern_str}"] += len(matches)
 
         # Handle 'l' at sentence start (additional context check)
         def fix_sentence_start(m):
-            return m.group(1) + 'I '
+            return m.group(1) + "I "
+
         new_text = self.sentence_start_l_pattern.sub(fix_sentence_start, text)
         if new_text != text:
-            result.fixes_applied['l→I (sentence start)'] += 1
+            result.fixes_applied["l→I (sentence start)"] += 1
             text = new_text
 
         # Handle II → ll in words (like "wiII" → "will")
         def fix_double_i(m):
             prefix, suffix = m.group(1), m.group(2)
             # Only fix if it makes a plausible word
-            potential_word = prefix + 'll' + suffix
+            potential_word = prefix + "ll" + suffix
             if self._is_likely_word(potential_word):
                 return potential_word
             return m.group(0)
 
         new_text = self.double_i_pattern.sub(fix_double_i, text)
         if new_text != text:
-            result.fixes_applied['II→ll'] += 1
+            result.fixes_applied["II→ll"] += 1
             text = new_text
 
         return text
 
-    def _apply_subtitle_edit_fixes(
-        self,
-        text: str,
-        result: ProcessResult
-    ) -> str:
+    def _apply_subtitle_edit_fixes(self, text: str, result: ProcessResult) -> str:
         """
         Apply Subtitle Edit OCR corrections.
 
@@ -539,7 +573,7 @@ class OCRPostProcessor:
 
             # Track fixes applied
             for fix in fixes:
-                result.fixes_applied[f'SE:{fix}'] += 1
+                result.fixes_applied[f"SE:{fix}"] += 1
 
             # Note: We don't collect SE unknown words here because later fixes
             # (underscore removal, etc.) may fix them. Unknown word detection
@@ -552,10 +586,7 @@ class OCRPostProcessor:
             return text
 
     def _apply_confidence_fixes(
-        self,
-        text: str,
-        confidence: float,
-        result: ProcessResult
+        self, text: str, confidence: float, result: ProcessResult
     ) -> str:
         """
         Apply fixes based on OCR confidence level.
@@ -573,10 +604,12 @@ class OCRPostProcessor:
         for rule in self.confidence_gated_rules:
             if rule.rule_type == "word_middle":
                 # Match pattern when not at word boundary
-                pattern = re.compile(r'(?<=[a-zA-Z])' + re.escape(rule.pattern) + r'(?=[a-zA-Z])')
+                pattern = re.compile(
+                    r"(?<=[a-zA-Z])" + re.escape(rule.pattern) + r"(?=[a-zA-Z])"
+                )
                 new_text = pattern.sub(rule.replacement, text)
             elif rule.rule_type == "word":
-                pattern = re.compile(r'\b' + re.escape(rule.pattern) + r'\b')
+                pattern = re.compile(r"\b" + re.escape(rule.pattern) + r"\b")
                 new_text = pattern.sub(rule.replacement, text)
             elif rule.rule_type == "literal":
                 new_text = text.replace(rule.pattern, rule.replacement)
@@ -584,7 +617,9 @@ class OCRPostProcessor:
                 continue
 
             if new_text != text:
-                result.fixes_applied[f'{rule.pattern}→{rule.replacement} (low conf)'] += 1
+                result.fixes_applied[
+                    f"{rule.pattern}→{rule.replacement} (low conf)"
+                ] += 1
                 text = new_text
 
         # Also apply the built-in rn patterns for backward compatibility
@@ -594,7 +629,7 @@ class OCRPostProcessor:
             else:
                 new_text = pattern.sub(replacement, text)
             if new_text != text:
-                result.fixes_applied['rn→m'] += 1
+                result.fixes_applied["rn→m"] += 1
                 text = new_text
 
         # Very low confidence: apply more aggressive fixes
@@ -614,17 +649,13 @@ class OCRPostProcessor:
         prefix, suffix = match.group(1), match.group(2)
 
         # Check if replacing rn with m makes a valid word
-        potential_word = prefix + 'm' + suffix
+        potential_word = prefix + "m" + suffix
 
         if self._is_likely_word(potential_word):
             return potential_word
         return full_match
 
-    def _fix_trailing_exclamation(
-        self,
-        text: str,
-        result: ProcessResult
-    ) -> str:
+    def _fix_trailing_exclamation(self, text: str, result: ProcessResult) -> str:
         """
         Fix words ending in 'l' or 'll' that should be '!' or '!!'.
 
@@ -640,32 +671,29 @@ class OCRPostProcessor:
                 continue
 
             base = match.group(1)
-            trailing = word[len(base):]
+            trailing = word[len(base) :]
 
             # Check if base without trailing l is a valid word
             # and the result looks like an exclamation
             if base and self._is_likely_word(base):
                 # Check context - is this likely an exclamation?
                 if self._is_likely_exclamation(base, words, i):
-                    if trailing == 'll':
-                        words[i] = base + '!!'
-                        result.fixes_applied['ll→!!'] += 1
+                    if trailing == "ll":
+                        words[i] = base + "!!"
+                        result.fixes_applied["ll→!!"] += 1
                         modified = True
-                    elif trailing == 'l':
-                        words[i] = base + '!'
-                        result.fixes_applied['l→!'] += 1
+                    elif trailing == "l":
+                        words[i] = base + "!"
+                        result.fixes_applied["l→!"] += 1
                         modified = True
 
         if modified:
-            text = ' '.join(words)
+            text = " ".join(words)
 
         return text
 
     def _is_likely_exclamation(
-        self,
-        word: str,
-        words: List[str],
-        position: int
+        self, word: str, words: list[str], position: int
     ) -> bool:
         """
         Determine if a word is likely meant to be an exclamation.
@@ -676,10 +704,31 @@ class OCRPostProcessor:
 
         # Common exclamation words
         exclamation_words = {
-            'yes', 'no', 'stop', 'wait', 'help', 'go', 'run',
-            'hey', 'what', 'wow', 'oh', 'ah', 'look', 'watch',
-            'hurry', 'quick', 'move', 'come', 'get', 'damn',
-            'god', 'hell', 'please', 'sorry', 'thanks',
+            "yes",
+            "no",
+            "stop",
+            "wait",
+            "help",
+            "go",
+            "run",
+            "hey",
+            "what",
+            "wow",
+            "oh",
+            "ah",
+            "look",
+            "watch",
+            "hurry",
+            "quick",
+            "move",
+            "come",
+            "get",
+            "damn",
+            "god",
+            "hell",
+            "please",
+            "sorry",
+            "thanks",
         }
 
         if word_lower in exclamation_words:
@@ -691,44 +740,41 @@ class OCRPostProcessor:
 
         return False
 
-    def _apply_normalization(
-        self,
-        text: str,
-        result: ProcessResult
-    ) -> str:
+    def _apply_normalization(self, text: str, result: ProcessResult) -> str:
         """Apply text normalization fixes."""
         # Remove trailing OCR artifacts (underscores, tildes at end of text)
-        new_text = self.trailing_artifacts.sub('', text)
+        new_text = self.trailing_artifacts.sub("", text)
         if new_text != text:
-            result.fixes_applied['trailing artifact removed'] += 1
+            result.fixes_applied["trailing artifact removed"] += 1
             text = new_text
 
         # Remove underscores attached to words (OCR noise)
         def fix_word_underscores(m):
             # Return the word without underscores
-            return m.group(1) or m.group(2) or ''
+            return m.group(1) or m.group(2) or ""
+
         new_text = self.word_underscores.sub(fix_word_underscores, text)
         if new_text != text:
-            result.fixes_applied['underscore removed'] += 1
+            result.fixes_applied["underscore removed"] += 1
             text = new_text
 
         # Normalize ellipsis
         if self.config.normalize_ellipsis:
-            if '…' in text:
-                text = text.replace('…', '...')
-                result.fixes_applied['ellipsis normalized'] += 1
+            if "…" in text:
+                text = text.replace("…", "...")
+                result.fixes_applied["ellipsis normalized"] += 1
 
         # Fix spacing before punctuation
         if self.config.fix_spacing:
-            new_text = self.space_before_punct.sub(r'\1', text)
+            new_text = self.space_before_punct.sub(r"\1", text)
             if new_text != text:
-                result.fixes_applied['spacing fixed'] += 1
+                result.fixes_applied["spacing fixed"] += 1
                 text = new_text
 
             # Fix multiple spaces
-            new_text = self.multiple_spaces.sub(' ', text)
+            new_text = self.multiple_spaces.sub(" ", text)
             if new_text != text:
-                result.fixes_applied['multiple spaces'] += 1
+                result.fixes_applied["multiple spaces"] += 1
                 text = new_text
 
         # Normalize quotes
@@ -736,17 +782,20 @@ class OCRPostProcessor:
             quote_fixes = [
                 ('"', '"'),  # Left double quote
                 ('"', '"'),  # Right double quote
-                (''', "'"),  # Left single quote
-                (''', "'"),  # Right single quote
+                (
+                    """, "'"),  # Left single quote
+                (""",
+                    "'",
+                ),  # Right single quote
             ]
             for old, new in quote_fixes:
                 if old in text:
                     text = text.replace(old, new)
-                    result.fixes_applied['quotes normalized'] += 1
+                    result.fixes_applied["quotes normalized"] += 1
 
         return text
 
-    def _find_unknown_words(self, text: str, track_stats: bool = True) -> List[str]:
+    def _find_unknown_words(self, text: str, track_stats: bool = True) -> list[str]:
         """
         Find words not in dictionary.
 
@@ -778,7 +827,9 @@ class OCRPostProcessor:
 
             # Use ValidationManager for unified checking
             if self.validation_manager:
-                result = self.validation_manager.is_known_word(word, track_stats=track_stats)
+                result = self.validation_manager.is_known_word(
+                    word, track_stats=track_stats
+                )
                 if result.is_known:
                     continue
             else:
@@ -848,9 +899,33 @@ class OCRPostProcessor:
             return True
 
         # Common short words often not in dictionary
-        common_short = {'a', 'an', 'as', 'at', 'be', 'by', 'do', 'go', 'he',
-                       'if', 'in', 'is', 'it', 'me', 'my', 'no', 'of', 'ok',
-                       'on', 'or', 'so', 'to', 'up', 'us', 'we'}
+        common_short = {
+            "a",
+            "an",
+            "as",
+            "at",
+            "be",
+            "by",
+            "do",
+            "go",
+            "he",
+            "if",
+            "in",
+            "is",
+            "it",
+            "me",
+            "my",
+            "no",
+            "of",
+            "ok",
+            "on",
+            "or",
+            "so",
+            "to",
+            "up",
+            "us",
+            "we",
+        }
         if word.lower() in common_short:
             return True
 
@@ -902,7 +977,7 @@ class OCRPostProcessor:
             uppercase_ratio = sum(1 for c in letters if c.isupper()) / len(letters)
             # If mostly uppercase and has many spaces, likely garbage
             if uppercase_ratio > 0.8:
-                space_ratio = text.count(' ') / len(text)
+                space_ratio = text.count(" ") / len(text)
                 if space_ratio > 0.3:  # More than 30% spaces
                     return True
 
@@ -912,7 +987,7 @@ class OCRPostProcessor:
         self,
         text: str,
         result: ProcessResult,
-        line_confidences: Optional[List[float]] = None
+        line_confidences: list[float] | None = None,
     ) -> str:
         """
         Remove garbage segments from multi-line text.
@@ -932,22 +1007,28 @@ class OCRPostProcessor:
             return text
 
         # Split on subtitle line breaks
-        lines = text.split('\\N')
+        lines = text.split("\\N")
 
         if len(lines) == 1:
             # Single line - check if entire thing is garbage
-            if self._is_garbage_line(text, line_confidences[0] if line_confidences else 100.0):
-                result.fixes_applied['garbage line removed'] += 1
+            if self._is_garbage_line(
+                text, line_confidences[0] if line_confidences else 100.0
+            ):
+                result.fixes_applied["garbage line removed"] += 1
                 return ""
             return text
 
         # Multi-line - check each line
         clean_lines = []
         for i, line in enumerate(lines):
-            conf = line_confidences[i] if line_confidences and i < len(line_confidences) else 100.0
+            conf = (
+                line_confidences[i]
+                if line_confidences and i < len(line_confidences)
+                else 100.0
+            )
 
             if self._is_garbage_line(line, conf):
-                result.fixes_applied['garbage line removed'] += 1
+                result.fixes_applied["garbage line removed"] += 1
                 continue
 
             # Also remove short garbage-like fragments
@@ -955,7 +1036,7 @@ class OCRPostProcessor:
             if line.strip():
                 clean_lines.append(line)
 
-        return '\\N'.join(clean_lines)
+        return "\\N".join(clean_lines)
 
     def _remove_garbage_fragments(self, text: str, result: ProcessResult) -> str:
         """
@@ -969,10 +1050,10 @@ class OCRPostProcessor:
         match = self.short_word_sequence.match(text)
         if match:
             garbage = match.group(0)
-            rest = text[len(garbage):].strip()
+            rest = text[len(garbage) :].strip()
             # Check if the rest looks like valid text
             if rest and not self._is_garbage_line(rest):
-                result.fixes_applied['garbage prefix removed'] += 1
+                result.fixes_applied["garbage prefix removed"] += 1
                 return rest
 
         return text
@@ -988,12 +1069,14 @@ def create_postprocessor(settings_dict: dict) -> OCRPostProcessor:
     Returns:
         Configured OCRPostProcessor
     """
-    custom_path = settings_dict.get('ocr_custom_wordlist_path', '')
+    custom_path = settings_dict.get("ocr_custom_wordlist_path", "")
 
     config = PostProcessConfig(
-        cleanup_enabled=settings_dict.get('ocr_cleanup_enabled', True),
-        low_confidence_threshold=settings_dict.get('ocr_low_confidence_threshold', 60.0),
-        normalize_ellipsis=settings_dict.get('ocr_cleanup_normalize_ellipsis', False),
+        cleanup_enabled=settings_dict.get("ocr_cleanup_enabled", True),
+        low_confidence_threshold=settings_dict.get(
+            "ocr_low_confidence_threshold", 60.0
+        ),
+        normalize_ellipsis=settings_dict.get("ocr_cleanup_normalize_ellipsis", False),
         custom_wordlist_path=Path(custom_path) if custom_path else None,
     )
 

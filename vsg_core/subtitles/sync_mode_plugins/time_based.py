@@ -1,20 +1,20 @@
 # vsg_core/subtitles/sync_mode_plugins/time_based.py
-# -*- coding: utf-8 -*-
 """
 Time-based sync plugin for SubtitleData.
 
 Simple delay application - applies raw delay to all events.
 Used when mkvmerge --sync is not handling the delay.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from ..sync_modes import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
-    from ..data import SubtitleData, OperationResult, OperationRecord, SyncEventData
+    from ..data import OperationResult, SubtitleData
 
 
 @register_sync_plugin
@@ -26,21 +26,21 @@ class TimeBasedSync(SyncPlugin):
     no subtitle modification is needed (handled by mkvmerge).
     """
 
-    name = 'time-based'
-    description = 'Simple delay application (or mkvmerge --sync)'
+    name = "time-based"
+    description = "Simple delay application (or mkvmerge --sync)"
 
     def apply(
         self,
-        subtitle_data: 'SubtitleData',
+        subtitle_data: SubtitleData,
         total_delay_ms: float,
         global_shift_ms: float,
-        target_fps: Optional[float] = None,
-        source_video: Optional[str] = None,
-        target_video: Optional[str] = None,
+        target_fps: float | None = None,
+        source_video: str | None = None,
+        target_video: str | None = None,
         runner=None,
-        config: Optional[dict] = None,
-        **kwargs
-    ) -> 'OperationResult':
+        config: dict | None = None,
+        **kwargs,
+    ) -> OperationResult:
         """
         Apply time-based sync.
 
@@ -49,7 +49,7 @@ class TimeBasedSync(SyncPlugin):
 
         If True, applies raw delay to subtitle events.
         """
-        from ..data import OperationResult, OperationRecord
+        from ..data import OperationRecord, OperationResult
 
         config = config or {}
 
@@ -57,36 +57,36 @@ class TimeBasedSync(SyncPlugin):
             if runner:
                 runner._log_message(msg)
 
-        use_raw_values = config.get('time_based_use_raw_values', False)
+        use_raw_values = config.get("time_based_use_raw_values", False)
 
         if not use_raw_values:
             # Default: mkvmerge --sync handles the delay
-            log(f"[TimeBased] Using mkvmerge --sync mode (no subtitle modification)")
+            log("[TimeBased] Using mkvmerge --sync mode (no subtitle modification)")
 
             record = OperationRecord(
-                operation='sync',
+                operation="sync",
                 timestamp=datetime.now(),
                 parameters={
-                    'mode': 'time-based-mkvmerge',
-                    'total_delay_ms': total_delay_ms,
+                    "mode": "time-based-mkvmerge",
+                    "total_delay_ms": total_delay_ms,
                 },
                 events_affected=0,
-                summary='Sync handled by mkvmerge --sync'
+                summary="Sync handled by mkvmerge --sync",
             )
             subtitle_data.operations.append(record)
 
             return OperationResult(
                 success=True,
-                operation='sync',
+                operation="sync",
                 events_affected=0,
-                summary='mkvmerge --sync mode (no subtitle modification)',
-                details={'method': 'mkvmerge_sync', 'delay_ms': total_delay_ms}
+                summary="mkvmerge --sync mode (no subtitle modification)",
+                details={"method": "mkvmerge_sync", "delay_ms": total_delay_ms},
             )
 
         # Raw values mode: apply delay directly
         from ..data import SyncEventData
 
-        log(f"[TimeBased] === Time-Based Sync (Raw Values) ===")
+        log("[TimeBased] === Time-Based Sync (Raw Values) ===")
         log(f"[TimeBased] Events: {len(subtitle_data.events)}")
         log(f"[TimeBased] Delay: {total_delay_ms:+.3f}ms")
 
@@ -114,14 +114,14 @@ class TimeBasedSync(SyncPlugin):
             events_synced += 1
 
         record = OperationRecord(
-            operation='sync',
+            operation="sync",
             timestamp=datetime.now(),
             parameters={
-                'mode': 'time-based-raw',
-                'total_delay_ms': total_delay_ms,
+                "mode": "time-based-raw",
+                "total_delay_ms": total_delay_ms,
             },
             events_affected=events_synced,
-            summary=f"Applied {total_delay_ms:+.1f}ms delay to {events_synced} events"
+            summary=f"Applied {total_delay_ms:+.1f}ms delay to {events_synced} events",
         )
         subtitle_data.operations.append(record)
 
@@ -129,8 +129,8 @@ class TimeBasedSync(SyncPlugin):
 
         return OperationResult(
             success=True,
-            operation='sync',
+            operation="sync",
             events_affected=events_synced,
             summary=record.summary,
-            details={'delay_ms': total_delay_ms, 'events_synced': events_synced}
+            details={"delay_ms": total_delay_ms, "events_synced": events_synced},
         )

@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/parsers/vobsub.py
-# -*- coding: utf-8 -*-
 """
 VobSub (.sub/.idx) Parser
 
@@ -26,10 +25,11 @@ import re
 import struct
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple, BinaryIO
+from typing import BinaryIO
+
 import numpy as np
 
-from .base import SubtitleImage, SubtitleImageParser, ParseResult
+from .base import ParseResult, SubtitleImage, SubtitleImageParser
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class IdxEntry:
     """Parsed entry from .idx file."""
+
     timestamp_ms: int
     file_position: int
 
@@ -44,11 +45,12 @@ class IdxEntry:
 @dataclass
 class VobSubHeader:
     """Header information from .idx file."""
+
     size_x: int = 720
     size_y: int = 480
     org_x: int = 0
     org_y: int = 0
-    palette: List[Tuple[int, int, int]] = None  # RGB tuples
+    palette: list[tuple[int, int, int]] = None  # RGB tuples
     language: str = "en"
     language_index: int = 0
 
@@ -68,13 +70,13 @@ class VobSubParser(SubtitleImageParser):
     def can_parse(self, file_path: Path) -> bool:
         """Check if file is a VobSub file."""
         suffix = file_path.suffix.lower()
-        if suffix == '.idx':
-            return file_path.with_suffix('.sub').exists()
-        elif suffix == '.sub':
-            return file_path.with_suffix('.idx').exists()
+        if suffix == ".idx":
+            return file_path.with_suffix(".sub").exists()
+        elif suffix == ".sub":
+            return file_path.with_suffix(".idx").exists()
         return False
 
-    def parse(self, file_path: Path, work_dir: Optional[Path] = None) -> ParseResult:
+    def parse(self, file_path: Path, work_dir: Path | None = None) -> ParseResult:
         """
         Parse VobSub files and extract subtitle images.
 
@@ -88,12 +90,12 @@ class VobSubParser(SubtitleImageParser):
         result = ParseResult()
 
         # Normalize to .idx path
-        if file_path.suffix.lower() == '.sub':
-            idx_path = file_path.with_suffix('.idx')
+        if file_path.suffix.lower() == ".sub":
+            idx_path = file_path.with_suffix(".idx")
             sub_path = file_path
         else:
             idx_path = file_path
-            sub_path = file_path.with_suffix('.sub')
+            sub_path = file_path.with_suffix(".sub")
 
         # Verify both files exist
         if not idx_path.exists():
@@ -107,10 +109,10 @@ class VobSubParser(SubtitleImageParser):
             # Parse .idx file for header and entries
             header, entries = self._parse_idx(idx_path)
             result.format_info = {
-                'format': 'VobSub',
-                'frame_size': (header.size_x, header.size_y),
-                'language': header.language,
-                'subtitle_count': len(entries),
+                "format": "VobSub",
+                "frame_size": (header.size_x, header.size_y),
+                "language": header.language,
+                "subtitle_count": len(entries),
             }
 
             if not entries:
@@ -118,7 +120,7 @@ class VobSubParser(SubtitleImageParser):
                 return result
 
             # Parse .sub file for actual subtitle data
-            with open(sub_path, 'rb') as sub_file:
+            with open(sub_path, "rb") as sub_file:
                 for i, entry in enumerate(entries):
                     try:
                         subtitle = self._parse_subtitle(
@@ -134,7 +136,7 @@ class VobSubParser(SubtitleImageParser):
 
         return result
 
-    def _parse_idx(self, idx_path: Path) -> Tuple[VobSubHeader, List[IdxEntry]]:
+    def _parse_idx(self, idx_path: Path) -> tuple[VobSubHeader, list[IdxEntry]]:
         """
         Parse the .idx index file.
 
@@ -142,29 +144,29 @@ class VobSubParser(SubtitleImageParser):
             Tuple of (header info, list of subtitle entries)
         """
         header = VobSubHeader()
-        entries: List[IdxEntry] = []
+        entries: list[IdxEntry] = []
 
-        with open(idx_path, 'r', encoding='utf-8', errors='replace') as f:
+        with open(idx_path, "r", encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
 
                 # Parse header fields
-                if line.startswith('size:'):
-                    match = re.match(r'size:\s*(\d+)x(\d+)', line)
+                if line.startswith("size:"):
+                    match = re.match(r"size:\s*(\d+)x(\d+)", line)
                     if match:
                         header.size_x = int(match.group(1))
                         header.size_y = int(match.group(2))
 
-                elif line.startswith('org:'):
-                    match = re.match(r'org:\s*(\d+),\s*(\d+)', line)
+                elif line.startswith("org:"):
+                    match = re.match(r"org:\s*(\d+),\s*(\d+)", line)
                     if match:
                         header.org_x = int(match.group(1))
                         header.org_y = int(match.group(2))
 
-                elif line.startswith('palette:'):
+                elif line.startswith("palette:"):
                     # Parse 16-color palette (RGB values in hex)
                     palette_str = line[8:].strip()
-                    colors = palette_str.split(',')
+                    colors = palette_str.split(",")
                     header.palette = []
                     for color in colors[:16]:
                         color = color.strip()
@@ -181,18 +183,18 @@ class VobSubParser(SubtitleImageParser):
                     while len(header.palette) < 16:
                         header.palette.append((128, 128, 128))
 
-                elif line.startswith('id:'):
+                elif line.startswith("id:"):
                     # Language ID line: id: en, index: 0
-                    match = re.match(r'id:\s*(\w+),\s*index:\s*(\d+)', line)
+                    match = re.match(r"id:\s*(\w+),\s*index:\s*(\d+)", line)
                     if match:
                         header.language = match.group(1)
                         header.language_index = int(match.group(2))
 
-                elif line.startswith('timestamp:'):
+                elif line.startswith("timestamp:"):
                     # Timestamp line: timestamp: 00:00:01:234, filepos: 000000000
                     match = re.match(
-                        r'timestamp:\s*(\d+):(\d+):(\d+):(\d+),\s*filepos:\s*([0-9a-fA-F]+)',
-                        line
+                        r"timestamp:\s*(\d+):(\d+):(\d+):(\d+),\s*filepos:\s*([0-9a-fA-F]+)",
+                        line,
                     )
                     if match:
                         hours = int(match.group(1))
@@ -202,10 +204,7 @@ class VobSubParser(SubtitleImageParser):
                         filepos = int(match.group(5), 16)
 
                         timestamp_ms = (
-                            hours * 3600000 +
-                            minutes * 60000 +
-                            seconds * 1000 +
-                            ms
+                            hours * 3600000 + minutes * 60000 + seconds * 1000 + ms
                         )
                         entries.append(IdxEntry(timestamp_ms, filepos))
 
@@ -217,8 +216,8 @@ class VobSubParser(SubtitleImageParser):
         entry: IdxEntry,
         index: int,
         header: VobSubHeader,
-        all_entries: List[IdxEntry]
-    ) -> Optional[SubtitleImage]:
+        all_entries: list[IdxEntry],
+    ) -> SubtitleImage | None:
         """
         Parse a single subtitle from the .sub file.
 
@@ -301,7 +300,7 @@ class VobSubParser(SubtitleImageParser):
                 break
 
             # Check for pack start code (0x000001BA)
-            if start_code == b'\x00\x00\x01\xBA':
+            if start_code == b"\x00\x00\x01\xba":
                 # Skip pack header (MPEG-2 pack header is variable length)
                 pack_header = f.read(10)
                 if len(pack_header) < 10:
@@ -314,14 +313,14 @@ class VobSubParser(SubtitleImageParser):
                 continue
 
             # Check for PES packet start code (0x000001XX)
-            if start_code[:3] == b'\x00\x00\x01':
+            if start_code[:3] == b"\x00\x00\x01":
                 stream_id = start_code[3]
 
                 # Read PES packet length
                 length_bytes = f.read(2)
                 if len(length_bytes) < 2:
                     break
-                packet_length = struct.unpack('>H', length_bytes)[0]
+                packet_length = struct.unpack(">H", length_bytes)[0]
                 bytes_read += 6
 
                 if packet_length == 0:
@@ -344,7 +343,7 @@ class VobSubParser(SubtitleImageParser):
                         substream_id = packet_data[payload_start]
                         if 0x20 <= substream_id <= 0x3F:
                             # Add subtitle payload (skip substream ID byte)
-                            data.extend(packet_data[payload_start + 1:])
+                            data.extend(packet_data[payload_start + 1 :])
 
                 # Check for end code
                 if stream_id == 0xB9:
@@ -356,10 +355,8 @@ class VobSubParser(SubtitleImageParser):
         return bytes(data)
 
     def _decode_subtitle_packet(
-        self,
-        data: bytes,
-        header: VobSubHeader
-    ) -> Tuple[Optional[np.ndarray], int, int, bool, int]:
+        self, data: bytes, header: VobSubHeader
+    ) -> tuple[np.ndarray | None, int, int, bool, int]:
         """
         Decode subtitle packet into bitmap image.
 
@@ -378,8 +375,8 @@ class VobSubParser(SubtitleImageParser):
 
         # First two bytes are total size (we already have the data)
         # Next two bytes are offset to control sequence
-        data_size = struct.unpack('>H', data[0:2])[0]
-        ctrl_offset = struct.unpack('>H', data[2:4])[0]
+        data_size = struct.unpack(">H", data[0:2])[0]
+        ctrl_offset = struct.unpack(">H", data[2:4])[0]
 
         if ctrl_offset >= len(data):
             return None, 0, 0, False, 0
@@ -389,8 +386,18 @@ class VobSubParser(SubtitleImageParser):
         if ctrl_result is None:
             return None, 0, 0, False, 0
 
-        (x1, y1, x2, y2, color_indices, alpha_values,
-         top_field_offset, bottom_field_offset, forced, duration_ms) = ctrl_result
+        (
+            x1,
+            y1,
+            x2,
+            y2,
+            color_indices,
+            alpha_values,
+            top_field_offset,
+            bottom_field_offset,
+            forced,
+            duration_ms,
+        ) = ctrl_result
 
         width = x2 - x1 + 1
         height = y2 - y1 + 1
@@ -400,18 +407,21 @@ class VobSubParser(SubtitleImageParser):
 
         # Decode RLE data into bitmap
         image = self._decode_rle_image(
-            data, top_field_offset, bottom_field_offset,
-            width, height, color_indices, alpha_values, header.palette
+            data,
+            top_field_offset,
+            bottom_field_offset,
+            width,
+            height,
+            color_indices,
+            alpha_values,
+            header.palette,
         )
 
         return image, x1, y1, forced, duration_ms
 
     def _parse_control_sequence(
-        self,
-        data: bytes,
-        offset: int,
-        header: VobSubHeader
-    ) -> Optional[Tuple]:
+        self, data: bytes, offset: int, header: VobSubHeader
+    ) -> tuple | None:
         """
         Parse subtitle control sequence.
 
@@ -441,14 +451,14 @@ class VobSubParser(SubtitleImageParser):
         while pos < len(data) - 3:
             # Read SP_DCSQ_STM delay field (2 bytes, big-endian)
             # This is the delay in 90KHz/1024 ticks before executing commands
-            delay_ticks = struct.unpack('>H', data[pos:pos+2])[0]
+            delay_ticks = struct.unpack(">H", data[pos : pos + 2])[0]
             pos += 2
 
             if pos + 2 > len(data):
                 break
 
             # Read next control sequence offset
-            next_ctrl = struct.unpack('>H', data[pos:pos+2])[0]
+            next_ctrl = struct.unpack(">H", data[pos : pos + 2])[0]
             pos += 2
 
             # Process commands until end
@@ -475,10 +485,10 @@ class VobSubParser(SubtitleImageParser):
                     if pos + 2 <= len(data):
                         b1, b2 = data[pos], data[pos + 1]
                         color_indices = [
-                            b2 & 0x0F,          # slot 0 (background)
-                            (b2 >> 4) & 0x0F,   # slot 1 (text/pattern)
-                            b1 & 0x0F,          # slot 2 (emphasis1/outline)
-                            (b1 >> 4) & 0x0F    # slot 3 (emphasis2/anti-alias)
+                            b2 & 0x0F,  # slot 0 (background)
+                            (b2 >> 4) & 0x0F,  # slot 1 (text/pattern)
+                            b1 & 0x0F,  # slot 2 (emphasis1/outline)
+                            (b1 >> 4) & 0x0F,  # slot 3 (emphasis2/anti-alias)
                         ]
                         pos += 2
 
@@ -487,10 +497,10 @@ class VobSubParser(SubtitleImageParser):
                     if pos + 2 <= len(data):
                         b1, b2 = data[pos], data[pos + 1]
                         alpha_values = [
-                            b2 & 0x0F,          # slot 0 alpha
-                            (b2 >> 4) & 0x0F,   # slot 1 alpha
-                            b1 & 0x0F,          # slot 2 alpha
-                            (b1 >> 4) & 0x0F    # slot 3 alpha
+                            b2 & 0x0F,  # slot 0 alpha
+                            (b2 >> 4) & 0x0F,  # slot 1 alpha
+                            b1 & 0x0F,  # slot 2 alpha
+                            (b1 >> 4) & 0x0F,  # slot 3 alpha
                         ]
                         pos += 2
 
@@ -506,8 +516,10 @@ class VobSubParser(SubtitleImageParser):
                 elif cmd == 0x06:
                     # RLE offsets (top and bottom fields)
                     if pos + 4 <= len(data):
-                        top_field_offset = struct.unpack('>H', data[pos:pos+2])[0]
-                        bottom_field_offset = struct.unpack('>H', data[pos+2:pos+4])[0]
+                        top_field_offset = struct.unpack(">H", data[pos : pos + 2])[0]
+                        bottom_field_offset = struct.unpack(
+                            ">H", data[pos + 2 : pos + 4]
+                        )[0]
                         pos += 4
 
                 elif cmd == 0xFF:
@@ -524,8 +536,18 @@ class VobSubParser(SubtitleImageParser):
             offset = next_ctrl
             pos = offset
 
-        return (x1, y1, x2, y2, color_indices, alpha_values,
-                top_field_offset, bottom_field_offset, forced, duration_ms)
+        return (
+            x1,
+            y1,
+            x2,
+            y2,
+            color_indices,
+            alpha_values,
+            top_field_offset,
+            bottom_field_offset,
+            forced,
+            duration_ms,
+        )
 
     def _decode_rle_image(
         self,
@@ -534,9 +556,9 @@ class VobSubParser(SubtitleImageParser):
         bottom_offset: int,
         width: int,
         height: int,
-        color_indices: List[int],
-        alpha_values: List[int],
-        palette: List[Tuple[int, int, int]]
+        color_indices: list[int],
+        alpha_values: list[int],
+        palette: list[tuple[int, int, int]],
     ) -> np.ndarray:
         """
         Decode RLE-encoded subtitle image.
@@ -568,9 +590,14 @@ class VobSubParser(SubtitleImageParser):
         """
         # DEBUG: Log color and alpha info for first few subtitles
         import logging
+
         logger = logging.getLogger(__name__)
-        logger.debug(f"VobSub decode: color_indices={color_indices}, alpha_values={alpha_values}")
-        palette_colors = [palette[idx] if idx < len(palette) else (0,0,0) for idx in color_indices]
+        logger.debug(
+            f"VobSub decode: color_indices={color_indices}, alpha_values={alpha_values}"
+        )
+        palette_colors = [
+            palette[idx] if idx < len(palette) else (0, 0, 0) for idx in color_indices
+        ]
         logger.debug(f"VobSub decode: palette_colors={palette_colors}")
 
         # Create grayscale image (white background)
@@ -616,7 +643,9 @@ class VobSubParser(SubtitleImageParser):
         # FALLBACK: If no positions passed luminance threshold, fall back to alpha-only
         # This handles DVDs with dark text on light background (inverted scheme)
         if not any(is_text):
-            logger.debug("VobSub decode: No bright colors found, falling back to alpha-only")
+            logger.debug(
+                "VobSub decode: No bright colors found, falling back to alpha-only"
+            )
             is_text = []
             for i, alpha in enumerate(alpha_values):
                 if i == 0:
@@ -632,10 +661,14 @@ class VobSubParser(SubtitleImageParser):
         colors = [(0 if t else 255) for t in is_text]
 
         # Decode top field (even lines: 0, 2, 4, ...)
-        self._decode_rle_field_grayscale(data, top_offset, image, 0, 2, width, height, colors)
+        self._decode_rle_field_grayscale(
+            data, top_offset, image, 0, 2, width, height, colors
+        )
 
         # Decode bottom field (odd lines: 1, 3, 5, ...)
-        self._decode_rle_field_grayscale(data, bottom_offset, image, 1, 2, width, height, colors)
+        self._decode_rle_field_grayscale(
+            data, bottom_offset, image, 1, 2, width, height, colors
+        )
 
         # Return as RGBA for compatibility with rest of pipeline
         # Convert grayscale to RGBA (white bg, black text with full opacity)
@@ -643,16 +676,13 @@ class VobSubParser(SubtitleImageParser):
         rgba[:, :, 0] = image  # R
         rgba[:, :, 1] = image  # G
         rgba[:, :, 2] = image  # B
-        rgba[:, :, 3] = 255    # Full opacity everywhere
+        rgba[:, :, 3] = 255  # Full opacity everywhere
 
         return rgba
 
     def _decode_rle(
-        self,
-        data: bytes,
-        index: int,
-        only_half: bool
-    ) -> Tuple[int, int, int, bool, bool]:
+        self, data: bytes, index: int, only_half: bool
+    ) -> tuple[int, int, int, bool, bool]:
         """
         Decode a single RLE run from the data.
 
@@ -732,7 +762,7 @@ class VobSubParser(SubtitleImageParser):
         line_step: int,
         width: int,
         height: int,
-        colors: List[Tuple[int, int, int, int]]
+        colors: list[tuple[int, int, int, int]],
     ):
         """
         Decode one RLE field (top or bottom) into the image.
@@ -809,7 +839,7 @@ class VobSubParser(SubtitleImageParser):
         line_step: int,
         width: int,
         height: int,
-        colors: List[int]
+        colors: list[int],
     ):
         """
         Decode one RLE field directly to grayscale image.

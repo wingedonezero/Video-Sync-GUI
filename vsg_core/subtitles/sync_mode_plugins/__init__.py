@@ -1,5 +1,4 @@
 # vsg_core/subtitles/sync_mode_plugins/__init__.py
-# -*- coding: utf-8 -*-
 """
 Sync mode plugin implementations.
 
@@ -10,27 +9,34 @@ Plugins are registered via decorator when imported.
 
 Note: Imports are done lazily to avoid circular imports with sync_modes.
 """
+
 import importlib
 
 # Module mapping for lazy loading
 _MODULE_MAP = {
-    'TimeBasedSync': ('time_based', 'TimeBasedSync'),
-    'TimebaseFrameLockedSync': ('timebase_frame_locked', 'TimebaseFrameLockedSync'),
-    'DurationAlignSync': ('duration_align', 'DurationAlignSync'),
-    'CorrelationFrameSnapSync': ('correlation_frame_snap', 'CorrelationFrameSnapSync'),
-    'SubtitleAnchoredFrameSnapSync': ('subtitle_anchored_frame_snap', 'SubtitleAnchoredFrameSnapSync'),
-    'CorrelationGuidedFrameAnchorSync': ('correlation_guided_frame_anchor', 'CorrelationGuidedFrameAnchorSync'),
-    'VideoVerifiedSync': ('video_verified', 'VideoVerifiedSync'),
+    "TimeBasedSync": ("time_based", "TimeBasedSync"),
+    "TimebaseFrameLockedSync": ("timebase_frame_locked", "TimebaseFrameLockedSync"),
+    "DurationAlignSync": ("duration_align", "DurationAlignSync"),
+    "CorrelationFrameSnapSync": ("correlation_frame_snap", "CorrelationFrameSnapSync"),
+    "SubtitleAnchoredFrameSnapSync": (
+        "subtitle_anchored_frame_snap",
+        "SubtitleAnchoredFrameSnapSync",
+    ),
+    "CorrelationGuidedFrameAnchorSync": (
+        "correlation_guided_frame_anchor",
+        "CorrelationGuidedFrameAnchorSync",
+    ),
+    "VideoVerifiedSync": ("video_verified", "VideoVerifiedSync"),
 }
 
 _SUBMODULES = [
-    'time_based',
-    'timebase_frame_locked',
-    'duration_align',
-    'correlation_frame_snap',
-    'subtitle_anchored_frame_snap',
-    'correlation_guided_frame_anchor',
-    'video_verified',
+    "time_based",
+    "timebase_frame_locked",
+    "duration_align",
+    "correlation_frame_snap",
+    "subtitle_anchored_frame_snap",
+    "correlation_guided_frame_anchor",
+    "video_verified",
 ]
 
 # Cache for loaded modules
@@ -42,14 +48,14 @@ def __getattr__(name):
     # Check if it's a class name
     if name in _MODULE_MAP:
         module_name, class_name = _MODULE_MAP[name]
-        full_module = f'vsg_core.subtitles.sync_mode_plugins.{module_name}'
+        full_module = f"vsg_core.subtitles.sync_mode_plugins.{module_name}"
         if full_module not in _loaded_modules:
             _loaded_modules[full_module] = importlib.import_module(full_module)
         return getattr(_loaded_modules[full_module], class_name)
 
     # Check if it's a submodule name
     if name in _SUBMODULES:
-        full_module = f'vsg_core.subtitles.sync_mode_plugins.{name}'
+        full_module = f"vsg_core.subtitles.sync_mode_plugins.{name}"
         if full_module not in _loaded_modules:
             _loaded_modules[full_module] = importlib.import_module(full_module)
         return _loaded_modules[full_module]
@@ -58,11 +64,11 @@ def __getattr__(name):
 
 
 __all__ = [
-    'TimeBasedSync',
-    'TimebaseFrameLockedSync',
-    'DurationAlignSync',
-    'CorrelationFrameSnapSync',
-    'SubtitleAnchoredFrameSnapSync',
-    'CorrelationGuidedFrameAnchorSync',
-    'VideoVerifiedSync',
+    "CorrelationFrameSnapSync",
+    "CorrelationGuidedFrameAnchorSync",
+    "DurationAlignSync",
+    "SubtitleAnchoredFrameSnapSync",
+    "TimeBasedSync",
+    "TimebaseFrameLockedSync",
+    "VideoVerifiedSync",
 ]

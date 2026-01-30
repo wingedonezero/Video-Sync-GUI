@@ -1,0 +1,143 @@
+# Video Sync GUI - Python Code Quality Configuration
+# This file configures Black (formatter) and Ruff (linter)
+
+[project]
+name = "video-sync-gui"
+requires-python = ">=3.10"
+
+# =============================================================================
+# Black Configuration
+# =============================================================================
+[tool.black]
+line-length = 88
+target-version = ["py310", "py311", "py312"]
+# Exclude generated files, caches, and virtual environments
+extend-exclude = '''
+/(
+    \.git
+    | \.venv
+    | venv
+    | __pycache__
+    | \.eggs
+    | build
+    | dist
+)/
+'''
+
+# =============================================================================
+# Ruff Configuration
+# =============================================================================
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+# Exclude common directories that shouldn't be linted
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    ".eggs",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+# Enable rule sets that catch real issues without being overly pedantic
+# See: https://docs.astral.sh/ruff/rules/
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes (undefined names, unused imports, etc.)
+    "W",      # pycodestyle warnings
+    "I",      # isort (import sorting)
+    "B",      # flake8-bugbear (likely bugs and design problems)
+    "UP",     # pyupgrade (modern Python syntax)
+    "C4",     # flake8-comprehensions (better list/dict/set comprehensions)
+    "SIM",    # flake8-simplify (code simplification suggestions)
+    "RUF",    # Ruff-specific rules
+]
+
+ignore = [
+    # Rules that conflict with Black formatting
+    "E501",   # Line too long - Black handles this
+
+    # Rules that are too pedantic or not useful for this codebase
+    "E722",   # Do not use bare except - used intentionally in cleanup code
+    "E731",   # Do not assign a lambda expression, use a def - lambdas are fine for simple cases
+    "E741",   # Ambiguous variable name (l, I, O) - context makes them clear
+    "B007",   # Loop control variable not used - underscore prefix handles this
+    "B008",   # Do not perform function call in argument defaults - sometimes intentional
+    "B027",   # Empty method in abstract class - valid for optional override hooks
+    "B028",   # No explicit stacklevel in warnings.warn - too pedantic
+    "B904",   # raise ... from err - good practice but noisy for existing code
+    "B905",   # zip() without explicit strict= parameter - too noisy for existing code
+    "SIM102", # Nested if statements - sometimes clearer than combined conditions
+    "SIM105", # Use contextlib.suppress - try/except pass is often clearer
+    "SIM108", # Use ternary operator - can reduce readability
+    "SIM117", # Use single with statement - multiple with is often clearer
+    "SIM118", # Use key in dict instead of key in dict.keys() - minor
+    "UP015",  # Unnecessary open mode parameters - explicit is fine
+
+    # Type hint related rules - too noisy for gradual typing
+    "RUF013", # PEP 484 prohibits implicit Optional - common pattern, verbose to fix
+
+    # These can be enabled later if desired
+    "RUF001", # String contains ambiguous character - too noisy for i18n
+    "RUF002", # Docstring contains ambiguous character
+    "RUF003", # Comment contains ambiguous character
+    "RUF046", # Unnecessary int() on already int value - int(round(x)) is intentional for clarity
+]
+
+# Allow autofix for all enabled rules (when `--fix` is passed)
+fixable = ["ALL"]
+unfixable = []
+
+# Allow unused variables when underscore-prefixed
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.lint.isort]
+# Configure import sorting to match project conventions
+known-first-party = ["vsg_core", "vsg_qt"]
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+combine-as-imports = true
+force-single-line = false
+# Note: lines-after-imports removed to avoid conflict with Black
+
+[tool.ruff.lint.per-file-ignores]
+# Test files can have additional allowances
+"tests/**/*.py" = [
+    "B011",   # Do not assert False
+    "E712",   # Equality comparisons to True/False - explicit in tests is fine
+    "F401",   # Unused imports (test fixtures)
+    "F811",   # Redefinition of unused name (test fixtures)
+    "F841",   # Unused local variables in tests - sometimes intentional
+]
+# __init__.py files often have unused imports for re-exporting
+"**/__init__.py" = [
+    "F401",   # Unused imports are expected in __init__.py
+    "F403",   # star imports
+]
+# Files that intentionally have imports after setup code
+"main.py" = ["E402"]
+"vsg_qt/subtitle_editor/events_table.py" = ["E402"]
+"vsg_qt/subtitle_editor/subprocess_launcher.py" = ["F841"]
+# Files using forward references in type hints (work at runtime with __future__ annotations)
+"vsg_core/subtitles/frame_utils/frame_hashing.py" = ["F821"]
+"vsg_core/subtitles/frame_utils/validation.py" = ["F821", "E722"]
+"vsg_core/subtitles/frame_utils/video_reader.py" = ["F821"]
+"vsg_qt/job_queue_dialog/logic.py" = ["F821"]
+"vsg_qt/job_queue_dialog/ui.py" = ["F821"]
+"vsg_qt/main_window/controller.py" = ["F821"]
+"vsg_qt/manual_selection_dialog/logic.py" = ["F821"]
+"vsg_qt/manual_selection_dialog/ui.py" = ["F821"]
+"vsg_qt/manual_selection_dialog/widgets.py" = ["F821"]
+
+# =============================================================================
+# Type Checking - Future Configuration (mypy/pyright)
+# =============================================================================
+# Uncomment when ready to add type checking:
+# [tool.mypy]
+# python_version = "3.10"
+# warn_return_any = true
+# warn_unused_configs = true
+# ignore_missing_imports = true

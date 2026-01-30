@@ -1,17 +1,18 @@
 # vsg_core/postprocess/auditors/subtitle_formats.py
-# -*- coding: utf-8 -*-
 import re
-from typing import Dict
 from pathlib import Path
 
 from vsg_core.models.enums import TrackType
+
 from .base import BaseAuditor
 
 
 class SubtitleFormatsAuditor(BaseAuditor):
     """Validates subtitle conversions and all processing steps."""
 
-    def run(self, final_mkv_path: Path, final_mkvmerge_data: Dict, final_ffprobe_data=None) -> int:
+    def run(
+        self, final_mkv_path: Path, final_mkvmerge_data: dict, final_ffprobe_data=None
+    ) -> int:
         """
         Comprehensive subtitle audit including:
         - Track count verification
@@ -27,14 +28,20 @@ class SubtitleFormatsAuditor(BaseAuditor):
         Returns the number of issues found.
         """
         issues = 0
-        subtitle_items = [item for item in self.ctx.extracted_items if item.track.type == TrackType.SUBTITLES]
+        subtitle_items = [
+            item
+            for item in self.ctx.extracted_items
+            if item.track.type == TrackType.SUBTITLES
+        ]
 
         if not subtitle_items:
             self.log("✅ No subtitle tracks to audit.")
             return 0
 
-        final_tracks = final_mkvmerge_data.get('tracks', [])
-        final_subtitle_tracks = [t for t in final_tracks if t.get('type') == 'subtitles']
+        final_tracks = final_mkvmerge_data.get("tracks", [])
+        final_subtitle_tracks = [
+            t for t in final_tracks if t.get("type") == "subtitles"
+        ]
 
         # NEW: Check total subtitle track count
         expected_count = len(subtitle_items)
@@ -42,34 +49,56 @@ class SubtitleFormatsAuditor(BaseAuditor):
         generated_count = sum(1 for item in subtitle_items if item.is_generated)
 
         if expected_count != actual_count:
-            self.log(f"[ERROR] Subtitle track count mismatch!")
-            gen_info = f" (including {generated_count} generated)" if generated_count > 0 else ""
+            self.log("[ERROR] Subtitle track count mismatch!")
+            gen_info = (
+                f" (including {generated_count} generated)"
+                if generated_count > 0
+                else ""
+            )
             self.log(f"        Expected: {expected_count} tracks{gen_info}")
             self.log(f"        Actual:   {actual_count} tracks in final output")
             self.log(f"        Missing:  {expected_count - actual_count} track(s)")
             issues += 1
         else:
-            gen_info = f" (including {generated_count} generated)" if generated_count > 0 else ""
+            gen_info = (
+                f" (including {generated_count} generated)"
+                if generated_count > 0
+                else ""
+            )
             self.log(f"✓ Subtitle track count verified: {actual_count}{gen_info}")
 
         final_subtitle_idx = 0
         for plan_item in subtitle_items:
             # Use custom_name if set, otherwise use track.props.name
-            track_name = plan_item.custom_name or plan_item.track.props.name or f"Track {final_subtitle_idx}"
+            track_name = (
+                plan_item.custom_name
+                or plan_item.track.props.name
+                or f"Track {final_subtitle_idx}"
+            )
 
             if final_subtitle_idx >= len(final_subtitle_tracks):
                 # Identify if missing track is generated
-                track_type = "Generated track" if plan_item.is_generated else "Subtitle track"
-                self.log(f"[WARNING] {track_type} '{track_name}' missing from final file!")
+                track_type = (
+                    "Generated track" if plan_item.is_generated else "Subtitle track"
+                )
+                self.log(
+                    f"[WARNING] {track_type} '{track_name}' missing from final file!"
+                )
 
                 # Show source and track ID for ALL missing tracks
                 if plan_item.is_generated:
                     filter_cfg = plan_item.filter_config or {}
-                    self.log(f"          Source: {plan_item.track.source} Track {plan_item.source_track_id}")
-                    self.log(f"          Filter: {filter_cfg.get('filter_mode', 'exclude')} {filter_cfg.get('filter_styles', [])}")
+                    self.log(
+                        f"          Source: {plan_item.track.source} Track {plan_item.source_track_id}"
+                    )
+                    self.log(
+                        f"          Filter: {filter_cfg.get('filter_mode', 'exclude')} {filter_cfg.get('filter_styles', [])}"
+                    )
                 else:
                     # For normal tracks, show source and track ID
-                    self.log(f"          Source: {plan_item.track.source} Track {plan_item.track.id}")
+                    self.log(
+                        f"          Source: {plan_item.track.source} Track {plan_item.track.id}"
+                    )
 
                 issues += 1
                 continue
@@ -103,10 +132,14 @@ class SubtitleFormatsAuditor(BaseAuditor):
             final_subtitle_idx += 1
 
         # Check if any subtitle tracks used raw delay fallback due to no scene matches
-        if getattr(self.ctx, 'correlation_snap_no_scenes_fallback', False):
-            self.log(f"[WARNING] One or more subtitle tracks used raw delay (no scene matches found)")
-            self.log(f"          → Frame verification was skipped, using correlation only")
-            self.log(f"          → Review logs to confirm timing is correct")
+        if getattr(self.ctx, "correlation_snap_no_scenes_fallback", False):
+            self.log(
+                "[WARNING] One or more subtitle tracks used raw delay (no scene matches found)"
+            )
+            self.log(
+                "          → Frame verification was skipped, using correlation only"
+            )
+            self.log("          → Review logs to confirm timing is correct")
             issues += 1
 
         if issues == 0:
@@ -114,25 +147,25 @@ class SubtitleFormatsAuditor(BaseAuditor):
 
         return issues
 
-    def _verify_ocr(self, final_track: Dict, track_name: str) -> int:
+    def _verify_ocr(self, final_track: dict, track_name: str) -> int:
         """Verify OCR was performed and resulted in text format."""
-        codec_id = final_track.get('properties', {}).get('codec_id', '')
-        if 'TEXT' not in codec_id.upper():
+        codec_id = final_track.get("properties", {}).get("codec_id", "")
+        if "TEXT" not in codec_id.upper():
             self.log(f"[WARNING] OCR track '{track_name}' is not in text format!")
             self.log(f"          Codec: {codec_id}")
-            self.log(f"          → OCR conversion was enabled but not applied!")
+            self.log("          → OCR conversion was enabled but not applied!")
             return 1
         else:
             self.log(f"  ✓ OCR track '{track_name}' successfully converted to text")
             return 0
 
-    def _verify_ass_conversion(self, final_track: Dict, track_name: str) -> int:
+    def _verify_ass_conversion(self, final_track: dict, track_name: str) -> int:
         """Verify subtitle was converted to ASS/SSA format."""
-        codec_id = final_track.get('properties', {}).get('codec_id', '')
-        if 'ASS' not in codec_id.upper() and 'SSA' not in codec_id.upper():
+        codec_id = final_track.get("properties", {}).get("codec_id", "")
+        if "ASS" not in codec_id.upper() and "SSA" not in codec_id.upper():
             self.log(f"[WARNING] Track '{track_name}' was not converted to ASS/SSA!")
             self.log(f"          Codec: {codec_id}")
-            self.log(f"          → ASS conversion was enabled but not applied!")
+            self.log("          → ASS conversion was enabled but not applied!")
             return 1
         else:
             self.log(f"  ✓ Track '{track_name}' successfully converted to ASS")
@@ -146,11 +179,13 @@ class SubtitleFormatsAuditor(BaseAuditor):
         issues = 0
 
         if not plan_item.extracted_path or not plan_item.extracted_path.exists():
-            self.log(f"[WARNING] Cannot verify rescaling for '{track_name}' - file not found")
+            self.log(
+                f"[WARNING] Cannot verify rescaling for '{track_name}' - file not found"
+            )
             return 1
 
         # Only check ASS/SSA files
-        if plan_item.extracted_path.suffix.lower() not in ['.ass', '.ssa']:
+        if plan_item.extracted_path.suffix.lower() not in [".ass", ".ssa"]:
             return 0
 
         try:
@@ -159,25 +194,32 @@ class SubtitleFormatsAuditor(BaseAuditor):
             if not source1_file:
                 return 0  # Can't verify without source
 
-            video_data = self._get_metadata(source1_file, 'ffprobe')
+            video_data = self._get_metadata(source1_file, "ffprobe")
             if not video_data:
                 return 0
 
-            video_stream = next((s for s in video_data.get('streams', []) if s.get('codec_type') == 'video'), None)
+            video_stream = next(
+                (
+                    s
+                    for s in video_data.get("streams", [])
+                    if s.get("codec_type") == "video"
+                ),
+                None,
+            )
             if not video_stream:
                 return 0
 
-            expected_width = video_stream.get('width')
-            expected_height = video_stream.get('height')
+            expected_width = video_stream.get("width")
+            expected_height = video_stream.get("height")
 
             if not expected_width or not expected_height:
                 return 0
 
             # Read subtitle file and check PlayRes values
-            content = plan_item.extracted_path.read_text(encoding='utf-8')
+            content = plan_item.extracted_path.read_text(encoding="utf-8")
 
-            rx = re.search(r'^\s*PlayResX:\s*(\d+)', content, re.MULTILINE)
-            ry = re.search(r'^\s*PlayResY:\s*(\d+)', content, re.MULTILINE)
+            rx = re.search(r"^\s*PlayResX:\s*(\d+)", content, re.MULTILINE)
+            ry = re.search(r"^\s*PlayResY:\s*(\d+)", content, re.MULTILINE)
 
             if not rx or not ry:
                 # No PlayRes tags - rescaling might not have been needed
@@ -190,10 +232,12 @@ class SubtitleFormatsAuditor(BaseAuditor):
                 self.log(f"[WARNING] Rescaling verification failed for '{track_name}'")
                 self.log(f"          Expected: {expected_width}x{expected_height}")
                 self.log(f"          Actual:   {actual_width}x{actual_height}")
-                self.log(f"          → Rescaling was enabled but not applied!")
+                self.log("          → Rescaling was enabled but not applied!")
                 issues += 1
             else:
-                self.log(f"  ✓ Subtitle '{track_name}' correctly rescaled to {actual_width}x{actual_height}")
+                self.log(
+                    f"  ✓ Subtitle '{track_name}' correctly rescaled to {actual_width}x{actual_height}"
+                )
 
         except Exception as e:
             self.log(f"[WARNING] Could not verify rescaling for '{track_name}': {e}")
@@ -209,18 +253,20 @@ class SubtitleFormatsAuditor(BaseAuditor):
         issues = 0
 
         if not plan_item.extracted_path or not plan_item.extracted_path.exists():
-            self.log(f"[WARNING] Cannot verify font size for '{track_name}' - file not found")
+            self.log(
+                f"[WARNING] Cannot verify font size for '{track_name}' - file not found"
+            )
             return 1
 
         # Only check ASS/SSA files
-        if plan_item.extracted_path.suffix.lower() not in ['.ass', '.ssa']:
+        if plan_item.extracted_path.suffix.lower() not in [".ass", ".ssa"]:
             return 0
 
         try:
-            content = plan_item.extracted_path.read_text(encoding='utf-8-sig')
+            content = plan_item.extracted_path.read_text(encoding="utf-8-sig")
 
             # Find all Style: lines and extract font sizes
-            style_pattern = re.compile(r'^Style:\s*(.+?)$', re.MULTILINE)
+            style_pattern = re.compile(r"^Style:\s*(.+?)$", re.MULTILINE)
             styles = style_pattern.findall(content)
 
             if not styles:
@@ -228,7 +274,7 @@ class SubtitleFormatsAuditor(BaseAuditor):
 
             font_sizes = []
             for style_line in styles:
-                parts = style_line.split(',')
+                parts = style_line.split(",")
                 if len(parts) >= 3:
                     try:
                         # Font size is typically the 3rd field (index 2) in Style definition
@@ -252,22 +298,36 @@ class SubtitleFormatsAuditor(BaseAuditor):
             if multiplier > 1.5:
                 # Should be larger than typical
                 if avg_size < 45:  # If still in typical range, might not be applied
-                    self.log(f"[WARNING] Font size multiplier {multiplier:.2f}x may not have been applied to '{track_name}'")
-                    self.log(f"          Average font size: {avg_size:.1f} (expected >45 for {multiplier:.2f}x)")
+                    self.log(
+                        f"[WARNING] Font size multiplier {multiplier:.2f}x may not have been applied to '{track_name}'"
+                    )
+                    self.log(
+                        f"          Average font size: {avg_size:.1f} (expected >45 for {multiplier:.2f}x)"
+                    )
                     issues += 1
                 else:
-                    self.log(f"  ✓ Font size multiplier {multiplier:.2f}x applied to '{track_name}' (avg: {avg_size:.1f})")
+                    self.log(
+                        f"  ✓ Font size multiplier {multiplier:.2f}x applied to '{track_name}' (avg: {avg_size:.1f})"
+                    )
             elif multiplier < 0.8:
                 # Should be smaller than typical
                 if avg_size > 25:
-                    self.log(f"[WARNING] Font size multiplier {multiplier:.2f}x may not have been applied to '{track_name}'")
-                    self.log(f"          Average font size: {avg_size:.1f} (expected <25 for {multiplier:.2f}x)")
+                    self.log(
+                        f"[WARNING] Font size multiplier {multiplier:.2f}x may not have been applied to '{track_name}'"
+                    )
+                    self.log(
+                        f"          Average font size: {avg_size:.1f} (expected <25 for {multiplier:.2f}x)"
+                    )
                     issues += 1
                 else:
-                    self.log(f"  ✓ Font size multiplier {multiplier:.2f}x applied to '{track_name}' (avg: {avg_size:.1f})")
+                    self.log(
+                        f"  ✓ Font size multiplier {multiplier:.2f}x applied to '{track_name}' (avg: {avg_size:.1f})"
+                    )
             else:
                 # Multiplier close to 1.0 or within normal range - sizes should be typical
-                self.log(f"  ✓ Font sizes appear normal for '{track_name}' (multiplier {multiplier:.2f}x)")
+                self.log(
+                    f"  ✓ Font sizes appear normal for '{track_name}' (multiplier {multiplier:.2f}x)"
+                )
 
         except Exception as e:
             self.log(f"[WARNING] Could not verify font size for '{track_name}': {e}")

@@ -1,5 +1,4 @@
 # vsg_qt/subtitle_editor/video_panel.py
-# -*- coding: utf-8 -*-
 """
 Video panel widget for subtitle editor.
 
@@ -8,18 +7,24 @@ Contains:
 - Playback controls (play/pause, seek slider)
 - Time display
 """
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QImage, QPixmap, QPainter, QColor
+from PySide6.QtGui import QImage, QPainter, QPixmap
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSlider, QLabel
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QSlider,
+    QVBoxLayout,
+    QWidget,
 )
 
-from .utils import ms_to_ass_time
 from .player import PlayerThread
+from .utils import ms_to_ass_time
 
 if TYPE_CHECKING:
     from .state import EditorState
@@ -30,7 +35,7 @@ class VideoWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._pixmap: Optional[QPixmap] = None
+        self._pixmap: QPixmap | None = None
         self.setMinimumSize(320, 180)
 
     def set_pixmap(self, pixmap: QPixmap):
@@ -49,9 +54,7 @@ class VideoWidget(QWidget):
 
         # Scale pixmap to fit widget while maintaining aspect ratio
         scaled = self._pixmap.scaled(
-            self.size(),
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation
+            self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
         )
 
         # Center the scaled pixmap
@@ -74,8 +77,8 @@ class VideoPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._state: Optional['EditorState'] = None
-        self._player: Optional[PlayerThread] = None
+        self._state: EditorState | None = None
+        self._player: PlayerThread | None = None
         self._duration_ms: int = 0
         self._is_seeking: bool = False
 
@@ -116,12 +119,17 @@ class VideoPanel(QWidget):
 
         layout.addLayout(controls_layout)
 
-    def set_state(self, state: 'EditorState'):
+    def set_state(self, state: EditorState):
         """Set the editor state."""
         self._state = state
 
-    def start_player(self, video_path: str, subtitle_path: str,
-                     index_dir: Optional[str] = None, fonts_dir: Optional[str] = None):
+    def start_player(
+        self,
+        video_path: str,
+        subtitle_path: str,
+        index_dir: str | None = None,
+        fonts_dir: str | None = None,
+    ):
         """
         Start the video player.
 
@@ -139,7 +147,7 @@ class VideoPanel(QWidget):
             subtitle_path=subtitle_path,
             widget_win_id=self._video_widget.winId(),
             fonts_dir=fonts_dir,
-            parent=self
+            parent=self,
         )
 
         # Connect signals
@@ -167,7 +175,7 @@ class VideoPanel(QWidget):
         if self._player:
             self._player.seek(time_ms)
 
-    def reload_subtitles(self, subtitle_path: Optional[str] = None):
+    def reload_subtitles(self, subtitle_path: str | None = None):
         """
         Reload the subtitle track.
 

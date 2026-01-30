@@ -1,19 +1,20 @@
 # vsg_core/orchestrator/steps/attachments_step.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 import shutil
 from pathlib import Path
-from typing import List, Set
 
+from vsg_core.extraction.attachments import extract_attachments
 from vsg_core.io.runner import CommandRunner
 from vsg_core.orchestrator.steps.context import Context
-from vsg_core.extraction.attachments import extract_attachments
+
 
 class AttachmentsStep:
     """
     Extracts attachments from all sources specified by the user in the UI.
     Also handles copying replacement fonts from Font Manager.
     """
+
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
         if not ctx.and_merge or not ctx.attachment_sources:
             ctx.attachments = []
@@ -21,7 +22,7 @@ class AttachmentsStep:
             self._add_replacement_fonts(ctx, runner)
             return ctx
 
-        all_attachments: List[str] = []
+        all_attachments: list[str] = []
         for source_key in ctx.attachment_sources:
             source_file = ctx.sources.get(source_key)
             if source_file:
@@ -47,21 +48,23 @@ class AttachmentsStep:
             return
 
         # Collect all font replacements from tracks
-        replacement_files: Set[str] = set()
+        replacement_files: set[str] = set()
         for item in ctx.extracted_items:
             if item.font_replacements:
                 for repl_data in item.font_replacements.values():
-                    font_file = repl_data.get('font_file_path')
+                    font_file = repl_data.get("font_file_path")
                     if font_file:
                         replacement_files.add(font_file)
 
         if not replacement_files:
             return
 
-        runner._log_message(f"[Font] Copying {len(replacement_files)} replacement font(s)...")
+        runner._log_message(
+            f"[Font] Copying {len(replacement_files)} replacement font(s)..."
+        )
 
         # Create fonts subdirectory in temp
-        fonts_temp_dir = ctx.temp_dir / 'replacement_fonts'
+        fonts_temp_dir = ctx.temp_dir / "replacement_fonts"
         fonts_temp_dir.mkdir(parents=True, exist_ok=True)
 
         copied_fonts = []
@@ -74,7 +77,9 @@ class AttachmentsStep:
                     copied_fonts.append(str(dst_path))
                     runner._log_message(f"[Font] Copied: {src_path.name}")
                 except Exception as e:
-                    runner._log_message(f"[Font] WARNING: Failed to copy {src_path.name}: {e}")
+                    runner._log_message(
+                        f"[Font] WARNING: Failed to copy {src_path.name}: {e}"
+                    )
             else:
                 runner._log_message(f"[Font] WARNING: Font file not found: {font_file}")
 
@@ -83,4 +88,6 @@ class AttachmentsStep:
             if ctx.attachments is None:
                 ctx.attachments = []
             ctx.attachments.extend(copied_fonts)
-            runner._log_message(f"[Font] Added {len(copied_fonts)} replacement font(s) to attachments.")
+            runner._log_message(
+                f"[Font] Added {len(copied_fonts)} replacement font(s) to attachments."
+            )
