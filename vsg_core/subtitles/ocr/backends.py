@@ -5,46 +5,33 @@ OCR Engine Backends
 Provides abstract interface and implementations for different OCR engines:
     - Tesseract (traditional, fast, good for clean text)
     - EasyOCR (deep learning, better for varied fonts)
-    - PaddleOCR (state-of-art, best accuracy) [future]
+    - PaddleOCR (state-of-art, best accuracy)
 
 This abstraction allows easy switching between engines for comparison.
+
+NOTE: Model classes (OCRLineResult, OCRResult) have been moved to
+vsg_core/models/subtitles/ocr.py. This file re-exports them for compatibility.
 """
 
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 
 import numpy as np
 
+# Import models from centralized location
+from vsg_core.models.subtitles.ocr import OCRLineResult, OCRResult
+
 logger = logging.getLogger(__name__)
 
-
-@dataclass
-class OCRLineResult:
-    """Result for a single OCR line."""
-
-    text: str
-    confidence: float  # 0-100 scale
-    word_confidences: list[tuple[str, float]] = field(default_factory=list)
-    backend: str = "unknown"
-
-
-@dataclass
-class OCRResult:
-    """Complete OCR result for a subtitle image."""
-
-    text: str  # Full recognized text
-    lines: list[OCRLineResult] = field(default_factory=list)
-    average_confidence: float = 0.0
-    min_confidence: float = 0.0
-    low_confidence: bool = False
-    error: str | None = None
-    backend: str = "unknown"
-
-    @property
-    def success(self) -> bool:
-        """Check if OCR was successful."""
-        return self.error is None and len(self.text.strip()) > 0
+# Re-export for backward compatibility
+__all__ = [
+    "OCRLineResult",
+    "OCRResult",
+    "OCRBackend",
+    "TesseractBackend",
+    "EasyOCRBackend",
+    "PaddleOCRBackend",
+]
 
 
 class OCRBackend(ABC):

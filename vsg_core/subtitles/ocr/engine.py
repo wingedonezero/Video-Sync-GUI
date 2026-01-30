@@ -9,11 +9,15 @@ Provides OCR functionality with:
     - Line-by-line OCR for better accuracy
 
 Uses pytesseract as the interface to Tesseract 5.x
+
+NOTE: Model classes (OCRConfig, OCRLineResult, OCRResult) have been moved to
+vsg_core/models/subtitles/ocr.py. This file re-exports them for compatibility.
 """
 
-from dataclasses import dataclass, field
-
 import numpy as np
+
+# Import models from centralized location
+from vsg_core.models.subtitles.ocr import OCRConfig, OCRLineResult, OCRResult
 
 try:
     import pytesseract
@@ -24,51 +28,8 @@ except ImportError:
     PYTESSERACT_AVAILABLE = False
 
 
-@dataclass
-class OCRConfig:
-    """Configuration for OCR engine."""
-
-    language: str = "eng"
-    psm: int = 6  # Block mode - works better for DVD subtitles than line mode
-    oem: int = 3  # Default - use LSTM if available
-    char_whitelist: str = ""  # Characters to allow (empty = all)
-    char_blacklist: str = "|"  # Exclude pipe which is often misread
-
-    # Confidence thresholds
-    min_confidence: float = 0.0  # Minimum confidence to accept (0-100)
-    low_confidence_threshold: float = 60.0  # Flag if below this
-
-    # Multi-pass settings
-    enable_multi_pass: bool = True  # Retry with different settings if low confidence
-    fallback_psm: int = 4  # PSM to use on retry (single column)
-
-
-@dataclass
-class OCRLineResult:
-    """Result for a single OCR line."""
-
-    text: str
-    confidence: float  # 0-100 scale
-    word_confidences: list[tuple[str, float]] = field(default_factory=list)
-    psm_used: int = 7
-    was_retry: bool = False
-
-
-@dataclass
-class OCRResult:
-    """Complete OCR result for a subtitle image."""
-
-    text: str  # Full recognized text
-    lines: list[OCRLineResult] = field(default_factory=list)
-    average_confidence: float = 0.0
-    min_confidence: float = 0.0
-    low_confidence: bool = False
-    error: str | None = None
-
-    @property
-    def success(self) -> bool:
-        """Check if OCR was successful."""
-        return self.error is None and len(self.text.strip()) > 0
+# Re-export models for backward compatibility (deprecated - import from vsg_core.models)
+__all__ = ["OCRConfig", "OCRLineResult", "OCRResult", "OCREngine"]
 
 
 class OCREngine:

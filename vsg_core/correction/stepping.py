@@ -1,14 +1,19 @@
 # vsg_core/correction/stepping.py
+"""
+Stepping correction module for handling edit-based timing differences.
+
+NOTE: Model classes (CorrectionVerdict, CorrectionResult, AudioSegment)
+have been moved to vsg_core/models/correction.py.
+This file re-exports them for backward compatibility.
+"""
+
 from __future__ import annotations
 
 import copy
 import gc
 import json
 import shutil
-from dataclasses import dataclass
-from enum import Enum, auto
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 from scipy.signal import correlate
@@ -16,34 +21,10 @@ from scipy.signal import correlate
 from ..analysis.audio_corr import get_audio_stream_info, run_audio_correlation
 from ..extraction.tracks import extract_tracks
 from ..io.runner import CommandRunner
+from ..models.correction import AudioSegment, CorrectionResult, CorrectionVerdict
 from ..models.enums import TrackType
 from ..models.media import StreamProps, Track
 from ..orchestrator.steps.context import Context
-
-
-class CorrectionVerdict(Enum):
-    UNIFORM = auto()
-    STEPPED = auto()
-    FAILED = auto()
-
-
-@dataclass
-class CorrectionResult:
-    verdict: CorrectionVerdict
-    data: Any = None
-
-
-@dataclass(unsafe_hash=True)
-class AudioSegment:
-    """Represents an action point on the target timeline for the assembly function."""
-
-    start_s: float
-    end_s: float
-    delay_ms: int
-    delay_raw: float = (
-        0.0  # Raw float delay for subtitle precision (avoids double rounding)
-    )
-    drift_rate_ms_s: float = 0.0
 
 
 def generate_edl_from_correlation(
