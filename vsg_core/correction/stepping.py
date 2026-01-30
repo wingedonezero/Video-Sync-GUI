@@ -19,6 +19,7 @@ import numpy as np
 from scipy.signal import correlate
 
 from ..analysis import get_audio_stream_info, run_correlation
+from ..models import ChunkResult
 from ..extraction.tracks import extract_tracks
 from ..io.runner import CommandRunner
 from ..models import (
@@ -33,7 +34,7 @@ from ..models import (
 
 
 def generate_edl_from_correlation(
-    chunks: list[dict],
+    chunks: list[ChunkResult],
     config: dict,
     runner: CommandRunner,
     diagnosis_details: dict | None = None,
@@ -43,7 +44,7 @@ def generate_edl_from_correlation(
     Used when stepping is detected but no audio correction is needed.
 
     Args:
-        chunks: List of correlation chunk results with 'delay', 'accepted', and 'start' keys
+        chunks: List of ChunkResult dataclasses
         config: Configuration dictionary
         runner: CommandRunner for logging
         diagnosis_details: Optional diagnosis details with filtered cluster information
@@ -51,7 +52,7 @@ def generate_edl_from_correlation(
     Returns:
         List of AudioSegment objects representing delay regions
     """
-    accepted = [c for c in chunks if c.get("accepted", False)]
+    accepted = [c for c in chunks if c.accepted]
     if not accepted:
         runner._log_message(
             "[EDL Generation] No accepted chunks available for EDL generation"
@@ -77,7 +78,7 @@ def generate_edl_from_correlation(
                 filtered_accepted = []
                 filtered_count = 0
                 for chunk in accepted:
-                    chunk_time = chunk["start"]
+                    chunk_time = chunk.start_time
                     in_invalid_cluster = any(
                         start <= chunk_time <= end for start, end in invalid_time_ranges
                     )
@@ -103,8 +104,8 @@ def generate_edl_from_correlation(
     # Group consecutive chunks by delay (within tolerance)
     tolerance_ms = config.get("segment_triage_std_dev_ms", 50)
     edl = []
-    current_delay_ms = accepted[0]["delay"]
-    current_delay_raw = accepted[0].get("raw_delay", float(current_delay_ms))
+    current_delay_ms = accepted[0].delay_ms
+    current_delay_raw = accepted[0].raw_delay_ms
     edl.append(
         AudioSegment(
             start_s=0.0,
@@ -119,12 +120,12 @@ def generate_edl_from_correlation(
     )
 
     for chunk in accepted[1:]:
-        delay_diff = abs(chunk["delay"] - current_delay_ms)
+        delay_diff = abs(chunk.delay_ms - current_delay_ms)
         if delay_diff > tolerance_ms:
             # Delay change detected - add new segment
-            boundary_time_s = chunk["start"]  # Chunk start time in seconds
-            current_delay_ms = chunk["delay"]
-            current_delay_raw = chunk.get("raw_delay", float(current_delay_ms))
+            boundary_time_s = chunk.start_time
+            current_delay_ms = chunk.delay_ms
+            current_delay_raw = chunk.raw_delay_ms
             edl.append(
                 AudioSegment(
                     start_s=boundary_time_s,
@@ -2019,7 +2020,7 @@ class SteppingCorrector:
                 log=self.log,
                 role_tag="QA",
             )
-            accepted = [r for r in results if r.get("accepted", False)]
+            accepted = [r for r in results if r.accepted]
 
             min_accepted = qa_config.get("min_accepted_chunks", 3)
             if len(accepted) < min_accepted:
@@ -2028,7 +2029,7 @@ class SteppingCorrector:
                 )
                 return False
 
-            delays = [r["delay"] for r in accepted]
+            delays = [r.delay_ms for r in accepted]
             median_delay = np.median(delays)
 
             # For skip mode, use a more lenient median check since we expect different delays

@@ -57,6 +57,20 @@ from .results import StepResult, StepStatus
 # Settings
 from .settings import AppSettings
 
+# Analysis models (re-export from analysis subpackage)
+from .analysis import (
+    ChunkResult,
+    ClusterInfo,
+    ClusterValidation,
+    CorrelationResult,
+    DelayResult,
+    DelaySelectionMode,
+    DiagnosisType,
+    DriftDiagnosis,
+    StabilityOutlier,
+    StabilityResult,
+)
+
 # Subtitle models (re-export from subtitles subpackage)
 from .subtitles import (
     # Edit plan models
@@ -93,6 +107,17 @@ __all__ = [
     "SnapMode",
     "StepStatus",
     "CorrectionVerdict",
+    "DiagnosisType",
+    "DelaySelectionMode",
+    # Analysis models
+    "ChunkResult",
+    "ClusterInfo",
+    "ClusterValidation",
+    "DriftDiagnosis",
+    "StabilityOutlier",
+    "StabilityResult",
+    "DelayResult",
+    "CorrelationResult",
     # Media
     "StreamProps",
     "Track",

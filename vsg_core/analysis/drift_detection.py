@@ -2,16 +2,19 @@
 from __future__ import annotations
 
 import warnings
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from sklearn.cluster import DBSCAN
 
 from ..io.runner import CommandRunner
 
+if TYPE_CHECKING:
+    from vsg_core.models import ChunkResult
+
 
 def _build_cluster_diagnostics(
-    accepted_chunks: list[dict[str, Any]],
+    accepted_chunks: list[ChunkResult],
     labels: np.ndarray,
     cluster_members: dict[int, list[int]],
     delays: np.ndarray,
@@ -37,7 +40,7 @@ def _build_cluster_diagnostics(
         chunk_count = len(member_indices)
 
         # Get time range for this cluster
-        start_times = [chunk["start"] for chunk in member_chunks]
+        start_times = [chunk.start_time for chunk in member_chunks]
         min_time = min(start_times)
         max_time = max(start_times)
 
@@ -46,8 +49,7 @@ def _build_cluster_diagnostics(
         chunk_numbers.sort()
 
         # Get match scores for quality analysis
-        # Note: chunks use 'match' key (0-100 percentage scale)
-        match_scores = [chunk.get("match", 0) for chunk in member_chunks]
+        match_scores = [chunk.confidence for chunk in member_chunks]
         mean_match = np.mean(match_scores)
         min_match = min(match_scores)
 
@@ -261,7 +263,7 @@ def _get_quality_thresholds(config: dict) -> dict[str, Any]:
 def _validate_cluster(
     cluster_label: int,
     cluster_members: list[int],
-    accepted_chunks: list[dict[str, Any]],
+    accepted_chunks: list[ChunkResult],
     total_chunks: int,
     thresholds: dict[str, Any],
     chunk_duration: float = 15.0,
@@ -280,14 +282,14 @@ def _validate_cluster(
     )
 
     # Calculate duration
-    chunk_times = [accepted_chunks[i]["start"] for i in cluster_members]
+    chunk_times = [accepted_chunks[i].start_time for i in cluster_members]
     min_time = min(chunk_times)
     max_time = max(chunk_times)
     # chunk_duration comes from config, not from chunk data
     cluster_duration_s = (max_time - min_time) + chunk_duration
 
     # Calculate match quality
-    match_qualities = [accepted_chunks[i].get("match", 0.0) for i in cluster_members]
+    match_qualities = [accepted_chunks[i].confidence for i in cluster_members]
     avg_match_quality = np.mean(match_qualities) if match_qualities else 0.0
     min_match_quality = min(match_qualities) if match_qualities else 0.0
 
@@ -340,7 +342,7 @@ def _validate_cluster(
 
 def _filter_clusters(
     cluster_members: dict[int, list[int]],
-    accepted_chunks: list[dict[str, Any]],
+    accepted_chunks: list[ChunkResult],
     delays: np.ndarray,
     thresholds: dict[str, Any],
     runner: CommandRunner,
@@ -374,7 +376,7 @@ def _filter_clusters(
 
 def diagnose_audio_issue(
     video_path: str,
-    chunks: list[dict[str, Any]],
+    chunks: list[ChunkResult],
     config: dict,
     runner: CommandRunner,
     tool_paths: dict,
@@ -385,12 +387,12 @@ def diagnose_audio_issue(
     Returns:
         A tuple of (diagnosis_string, details_dict).
     """
-    accepted_chunks = [c for c in chunks if c.get("accepted", False)]
+    accepted_chunks = [c for c in chunks if c.accepted]
     if len(accepted_chunks) < 6:
         return "UNIFORM", {}
 
-    times = np.array([c["start"] for c in accepted_chunks])
-    delays = np.array([c["delay"] for c in accepted_chunks])
+    times = np.array([c.start_time for c in accepted_chunks])
+    delays = np.array([c.delay_ms for c in accepted_chunks])
 
     # --- Test 1: Check for PAL Drift (Specific Linear Drift) ---
     framerate = _get_video_framerate(video_path, runner, tool_paths)

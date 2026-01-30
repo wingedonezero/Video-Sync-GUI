@@ -11,7 +11,10 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from vsg_core.models import ChunkResult
 
 
 class ModeEarlyClusterSelector:
@@ -22,7 +25,7 @@ class ModeEarlyClusterSelector:
 
     def select(
         self,
-        accepted_results: list[dict[str, Any]],
+        accepted_results: list[ChunkResult],
         config: dict[str, Any],
         log: Callable[[str], None] | None = None,
     ) -> tuple[int, float]:
@@ -39,7 +42,7 @@ class ModeEarlyClusterSelector:
         early_window = int(config.get("early_cluster_window", 10))
         early_threshold = int(config.get("early_cluster_threshold", 5))
 
-        delays = [r["delay"] for r in accepted_results]
+        delays = [r.delay_ms for r in accepted_results]
         counts = Counter(delays)
 
         # Build clusters: group delays within ±1ms of each other
@@ -48,13 +51,13 @@ class ModeEarlyClusterSelector:
 
         for delay_val in counts.keys():
             # Collect all chunks within ±1ms of this delay value
-            cluster_raw_values = []
+            cluster_raw_values: list[float] = []
             early_count = 0
             first_chunk_idx = None
 
             for idx, r in enumerate(accepted_results):
-                if abs(r["delay"] - delay_val) <= 1:
-                    cluster_raw_values.append(r.get("raw_delay", float(r["delay"])))
+                if abs(r.delay_ms - delay_val) <= 1:
+                    cluster_raw_values.append(r.raw_delay_ms)
                     if idx < early_window:
                         early_count += 1
                     if first_chunk_idx is None:
@@ -97,9 +100,9 @@ class ModeEarlyClusterSelector:
         # No cluster meets early threshold - fall back to Mode (Clustered)
         mode_winner = counts.most_common(1)[0][0]
         cluster_raw_values = [
-            r.get("raw_delay", float(r["delay"]))
+            r.raw_delay_ms
             for r in accepted_results
-            if abs(r["delay"] - mode_winner) <= 1
+            if abs(r.delay_ms - mode_winner) <= 1
         ]
 
         if cluster_raw_values:

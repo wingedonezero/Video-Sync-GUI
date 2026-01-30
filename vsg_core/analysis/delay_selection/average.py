@@ -8,7 +8,10 @@ Averages all raw delay values and rounds once at the end.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from vsg_core.models import ChunkResult
 
 
 class AverageSelector:
@@ -19,7 +22,7 @@ class AverageSelector:
 
     def select(
         self,
-        accepted_results: list[dict[str, Any]],
+        accepted_results: list[ChunkResult],
         config: dict[str, Any],
         log: Callable[[str], None] | None = None,
     ) -> tuple[int, float]:
@@ -29,9 +32,7 @@ class AverageSelector:
         Returns:
             Tuple of (rounded_delay_ms, raw_delay_ms)
         """
-        raw_delays = [
-            r.get("raw_delay", float(r.get("delay", 0))) for r in accepted_results
-        ]
+        raw_delays = [r.raw_delay_ms for r in accepted_results]
 
         raw_avg = sum(raw_delays) / len(raw_delays)
         rounded = round(raw_avg)

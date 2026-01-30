@@ -18,6 +18,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from vsg_core.models import ChunkResult
+
 from ..preprocessing import (
     apply_filter,
     decode_to_memory,
@@ -46,7 +48,7 @@ def run_correlation(
     use_source_separation: bool = False,
     log: Callable[[str], None] | None = None,
     role_tag: str = "Source 2",
-) -> list[dict[str, Any]]:
+) -> list[ChunkResult]:
     """
     Run correlation analysis between reference and target files.
 
@@ -67,7 +69,7 @@ def run_correlation(
         role_tag: Source identifier for logging
 
     Returns:
-        List of chunk results with delay, raw_delay, match, start, accepted keys
+        List of ChunkResult dataclasses with correlation results
     """
     if log is None:
         log = lambda x: None
@@ -136,20 +138,22 @@ def run_correlation(
     log(f"[AUDIO_CORR] Extracted {len(chunks)} chunks for analysis")
 
     # Run correlation on each chunk
-    results = []
+    results: list[ChunkResult] = []
     for chunk in chunks:
         delay_ms, match = algorithm.find_delay(
             chunk.ref_audio, chunk.target_audio, sample_rate
         )
 
         accepted = match >= acceptance_threshold
-        result = {
-            "delay": round(delay_ms),
-            "raw_delay": delay_ms,
-            "match": match,
-            "start": chunk.start_time,
-            "accepted": accepted,
-        }
+        result = ChunkResult(
+            chunk_index=chunk.index,
+            start_time=chunk.start_time,
+            delay_samples=0,  # Not tracked at this level
+            delay_ms=round(delay_ms),
+            raw_delay_ms=delay_ms,
+            confidence=match,
+            accepted=accepted,
+        )
         results.append(result)
 
         status = "ACCEPTED" if accepted else "REJECTED"
@@ -158,7 +162,7 @@ def run_correlation(
             f"match={match:.1f}% [{status}]"
         )
 
-    accepted_count = sum(1 for r in results if r["accepted"])
+    accepted_count = sum(1 for r in results if r.accepted)
     log(f"[AUDIO_CORR] {accepted_count}/{len(results)} chunks accepted")
 
     return results
@@ -177,7 +181,7 @@ def run_multi_correlation(
     use_source_separation: bool = False,
     log: Callable[[str], None] | None = None,
     role_tag: str = "Source 2",
-) -> dict[str, list[dict[str, Any]]]:
+) -> dict[str, list[ChunkResult]]:
     """
     Run multiple correlation methods on the same decoded audio.
 
@@ -198,7 +202,7 @@ def run_multi_correlation(
         role_tag: Source identifier for logging
 
     Returns:
-        Dictionary mapping method names to their chunk results
+        Dictionary mapping method names to list of ChunkResult dataclasses
     """
     from . import MULTI_CORR_METHODS
 
@@ -273,29 +277,31 @@ def run_multi_correlation(
     log(f"[MULTI_CORR] Running {len(enabled_methods)} method(s): {enabled_methods}")
 
     # Run each method
-    all_results: dict[str, list[dict[str, Any]]] = {}
+    all_results: dict[str, list[ChunkResult]] = {}
 
     for method_name in enabled_methods:
         algorithm = get_algorithm_for_method(method_name)
         log(f"[MULTI_CORR] Running {algorithm.name}...")
 
-        method_results = []
+        method_results: list[ChunkResult] = []
         for chunk in chunks:
             delay_ms, match = algorithm.find_delay(
                 chunk.ref_audio, chunk.target_audio, sample_rate
             )
 
             accepted = match >= acceptance_threshold
-            result = {
-                "delay": round(delay_ms),
-                "raw_delay": delay_ms,
-                "match": match,
-                "start": chunk.start_time,
-                "accepted": accepted,
-            }
+            result = ChunkResult(
+                chunk_index=chunk.index,
+                start_time=chunk.start_time,
+                delay_samples=0,
+                delay_ms=round(delay_ms),
+                raw_delay_ms=delay_ms,
+                confidence=match,
+                accepted=accepted,
+            )
             method_results.append(result)
 
-        accepted_count = sum(1 for r in method_results if r["accepted"])
+        accepted_count = sum(1 for r in method_results if r.accepted)
         log(
             f"  {algorithm.name}: {accepted_count}/{len(method_results)} chunks accepted"
         )

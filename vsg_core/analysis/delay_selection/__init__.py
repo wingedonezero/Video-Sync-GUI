@@ -21,7 +21,10 @@ Usage:
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from vsg_core.models import ChunkResult
 
 from ._base import DelaySelector
 from .average import AverageSelector
@@ -78,7 +81,7 @@ def get_selector(mode: str) -> DelaySelector:
 
 
 def select_delay(
-    results: list[dict[str, Any]],
+    results: list[ChunkResult],
     mode: str,
     config: dict[str, Any],
     log: Callable[[str], None] | None = None,
@@ -91,7 +94,7 @@ def select_delay(
     chunks and delegates to the appropriate selector.
 
     Args:
-        results: List of all chunk results (accepted and rejected)
+        results: List of all ChunkResult dataclasses (accepted and rejected)
         mode: Selection mode name (e.g., "Mode (Most Common)")
         config: Configuration dictionary with mode-specific settings
         log: Optional logging callback
@@ -103,7 +106,7 @@ def select_delay(
     if min_accepted_chunks is None:
         min_accepted_chunks = int(config.get("min_accepted_chunks", 3))
 
-    accepted = [r for r in results if r.get("accepted", False)]
+    accepted = [r for r in results if r.accepted]
 
     if len(accepted) < min_accepted_chunks:
         if log:
@@ -118,7 +121,7 @@ def select_delay(
 
 
 def select_delay_with_tag(
-    results: list[dict[str, Any]],
+    results: list[ChunkResult],
     mode: str,
     config: dict[str, Any],
     log: Callable[[str], None] | None = None,
@@ -130,7 +133,7 @@ def select_delay_with_tag(
     Similar to select_delay but also returns the method label for logging.
 
     Args:
-        results: List of all chunk results
+        results: List of all ChunkResult dataclasses
         mode: Selection mode name
         config: Configuration dictionary
         log: Optional logging callback

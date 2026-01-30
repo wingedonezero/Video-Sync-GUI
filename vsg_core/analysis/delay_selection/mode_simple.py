@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from vsg_core.models import ChunkResult
 
 
 class ModeSimpleSelector:
@@ -21,7 +24,7 @@ class ModeSimpleSelector:
 
     def select(
         self,
-        accepted_results: list[dict[str, Any]],
+        accepted_results: list[ChunkResult],
         config: dict[str, Any],
         log: Callable[[str], None] | None = None,
     ) -> tuple[int, float]:
@@ -31,15 +34,13 @@ class ModeSimpleSelector:
         Returns:
             Tuple of (rounded_delay_ms, raw_delay_ms averaged from matching chunks)
         """
-        delays = [r["delay"] for r in accepted_results]
+        delays = [r.delay_ms for r in accepted_results]
         counts = Counter(delays)
         winner_rounded = counts.most_common(1)[0][0]
 
         # Average raw values from all chunks matching the most common rounded delay
         matching_raw_values = [
-            r.get("raw_delay", float(winner_rounded))
-            for r in accepted_results
-            if r.get("delay") == winner_rounded
+            r.raw_delay_ms for r in accepted_results if r.delay_ms == winner_rounded
         ]
 
         if matching_raw_values:

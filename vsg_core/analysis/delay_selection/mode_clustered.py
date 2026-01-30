@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from vsg_core.models import ChunkResult
 
 
 class ModeClusteredSelector:
@@ -21,7 +24,7 @@ class ModeClusteredSelector:
 
     def select(
         self,
-        accepted_results: list[dict[str, Any]],
+        accepted_results: list[ChunkResult],
         config: dict[str, Any],
         log: Callable[[str], None] | None = None,
     ) -> tuple[int, float]:
@@ -31,7 +34,7 @@ class ModeClusteredSelector:
         Returns:
             Tuple of (rounded_delay_ms, raw_delay_ms)
         """
-        delays = [r["delay"] for r in accepted_results]
+        delays = [r.delay_ms for r in accepted_results]
 
         counts = Counter(delays)
         mode_winner = counts.most_common(1)[0][0]
@@ -40,9 +43,9 @@ class ModeClusteredSelector:
         cluster_raw_values = []
         cluster_delays = []
         for r in accepted_results:
-            if abs(r["delay"] - mode_winner) <= 1:
-                cluster_raw_values.append(r.get("raw_delay", float(r["delay"])))
-                cluster_delays.append(r["delay"])
+            if abs(r.delay_ms - mode_winner) <= 1:
+                cluster_raw_values.append(r.raw_delay_ms)
+                cluster_delays.append(r.delay_ms)
 
         # Average the clustered raw values
         if cluster_raw_values:

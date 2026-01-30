@@ -9,7 +9,10 @@ consistent interface across different selection methods.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from vsg_core.models import ChunkResult
 
 
 class DelaySelector(Protocol):
@@ -20,7 +23,7 @@ class DelaySelector(Protocol):
 
     def select(
         self,
-        accepted_results: list[dict[str, Any]],
+        accepted_results: list[ChunkResult],
         config: dict[str, Any],
         log: Callable[[str], None] | None = None,
     ) -> tuple[int, float]:
@@ -28,7 +31,7 @@ class DelaySelector(Protocol):
         Select final delay from correlation results.
 
         Args:
-            accepted_results: List of accepted chunk results with 'delay' and 'raw_delay' keys
+            accepted_results: List of accepted ChunkResult dataclasses
             config: Configuration dictionary with selector-specific settings
             log: Optional logging callback
 

@@ -336,12 +336,12 @@ class AnalysisStep:
                 runner._log_message(f"{'═' * 70}")
 
                 for method_name, method_results in all_method_results.items():
-                    accepted = [r for r in method_results if r.get("accepted", False)]
+                    accepted = [r for r in method_results if r.accepted]
                     if accepted:
-                        delays = [r["delay"] for r in accepted]
-                        raw_delays = [r["raw_delay"] for r in accepted]
+                        delays = [r.delay_ms for r in accepted]
+                        raw_delays = [r.raw_delay_ms for r in accepted]
                         mode_delay = Counter(delays).most_common(1)[0][0]
-                        avg_match = sum(r["match"] for r in accepted) / len(accepted)
+                        avg_match = sum(r.confidence for r in accepted) / len(accepted)
                         avg_raw = sum(raw_delays) / len(raw_delays)
                         runner._log_message(
                             f"  {method_name}: {mode_delay:+d}ms (raw avg: {avg_raw:+.3f}ms) | "
@@ -433,9 +433,7 @@ class AnalysisStep:
 
                 if correlation_delay_ms is None or correlation_delay_raw is None:
                     # ENHANCED ERROR MESSAGE
-                    accepted_count = len(
-                        [r for r in results if r.get("accepted", False)]
-                    )
+                    accepted_count = len([r for r in results if r.accepted])
                     min_required = source_config.get("min_accepted_chunks", 3)
                     total_chunks = len(results)
 
@@ -525,7 +523,7 @@ class AnalysisStep:
 
             # === AUDIT: Record delay calculation chain ===
             if ctx.audit:
-                accepted_count = len([r for r in results if r.get("accepted", False)])
+                accepted_count = len([r for r in results if r.accepted])
                 ctx.audit.record_delay_calculation(
                     source_key=source_key,
                     correlation_raw_ms=correlation_delay_raw,

@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from vsg_core.models import ChunkResult
 
 
 class FirstStableSelector:
@@ -21,7 +24,7 @@ class FirstStableSelector:
 
     def select(
         self,
-        accepted_results: list[dict[str, Any]],
+        accepted_results: list[ChunkResult],
         config: dict[str, Any],
         log: Callable[[str], None] | None = None,
     ) -> tuple[int, float]:
@@ -44,20 +47,20 @@ class FirstStableSelector:
         if log:
             log("[WARNING] No stable segment found, falling back to mode.")
 
-        delays = [r["delay"] for r in accepted_results]
+        delays = [r.delay_ms for r in accepted_results]
         counts = Counter(delays)
         winner_rounded = counts.most_common(1)[0][0]
 
         # Get raw value for the mode
         for r in accepted_results:
-            if r.get("delay") == winner_rounded:
-                return winner_rounded, r.get("raw_delay", float(winner_rounded))
+            if r.delay_ms == winner_rounded:
+                return winner_rounded, r.raw_delay_ms
 
         return winner_rounded, float(winner_rounded)
 
 
 def find_first_stable_segment_delay(
-    results: list[dict[str, Any]],
+    results: list[ChunkResult],
     config: dict[str, Any],
     log: Callable[[str], None] | None = None,
 ) -> tuple[int, float] | None:
@@ -68,7 +71,7 @@ def find_first_stable_segment_delay(
     and returns the delay from the first such stable group that meets stability criteria.
 
     Args:
-        results: List of correlation results (may include rejected chunks)
+        results: List of ChunkResult dataclasses (may include rejected chunks)
         config: Configuration dictionary with stability settings
         log: Optional logging callback
 
@@ -78,7 +81,7 @@ def find_first_stable_segment_delay(
     min_chunks = int(config.get("first_stable_min_chunks", 3))
     skip_unstable = config.get("first_stable_skip_unstable", True)
 
-    accepted = [r for r in results if r.get("accepted", False)]
+    accepted = [r for r in results if r.accepted]
     if len(accepted) < min_chunks:
         return None
 
@@ -86,29 +89,25 @@ def find_first_stable_segment_delay(
     # Track both rounded and raw delays for each segment
     segments: list[dict[str, Any]] = []
     current_segment = {
-        "delay": accepted[0]["delay"],
-        "raw_delays": [accepted[0].get("raw_delay", float(accepted[0]["delay"]))],
+        "delay": accepted[0].delay_ms,
+        "raw_delays": [accepted[0].raw_delay_ms],
         "count": 1,
-        "start_time": accepted[0]["start"],
+        "start_time": accepted[0].start_time,
     }
 
     for i in range(1, len(accepted)):
-        if abs(accepted[i]["delay"] - current_segment["delay"]) <= 1:
+        if abs(accepted[i].delay_ms - current_segment["delay"]) <= 1:
             # Same segment continues - accumulate raw delays for averaging
             current_segment["count"] += 1
-            current_segment["raw_delays"].append(
-                accepted[i].get("raw_delay", float(accepted[i]["delay"]))
-            )
+            current_segment["raw_delays"].append(accepted[i].raw_delay_ms)
         else:
             # New segment starts
             segments.append(current_segment)
             current_segment = {
-                "delay": accepted[i]["delay"],
-                "raw_delays": [
-                    accepted[i].get("raw_delay", float(accepted[i]["delay"]))
-                ],
+                "delay": accepted[i].delay_ms,
+                "raw_delays": [accepted[i].raw_delay_ms],
                 "count": 1,
-                "start_time": accepted[i]["start"],
+                "start_time": accepted[i].start_time,
             }
 
     # Don't forget the last segment
