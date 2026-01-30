@@ -104,8 +104,7 @@ class BatchCompletionDialog(QDialog):
         icon_label = QLabel(icon_text)
         icon_label.setFixedSize(48, 48)
         icon_label.setAlignment(Qt.AlignCenter)
-        icon_label.setStyleSheet(
-            f"""
+        icon_label.setStyleSheet(f"""
             QLabel {{
                 background-color: {icon_color};
                 color: white;
@@ -113,8 +112,7 @@ class BatchCompletionDialog(QDialog):
                 font-size: 24px;
                 font-weight: bold;
             }}
-        """
-        )
+        """)
         header_layout.addWidget(icon_label)
 
         title_label = QLabel(
