@@ -32,9 +32,10 @@ from vsg_core.analysis.delay_calculation import (
     calculate_global_shift,
     convert_to_relative_delays,
     extract_container_delays,
+    get_actual_container_delay,
 )
 from vsg_core.analysis.delay_selection import (
-    find_first_stable_segment_delay,
+    evaluate_stepping_override,
     select_delay,
 )
 from vsg_core.analysis.diagnostics import (
@@ -162,9 +163,9 @@ class AnalysisStep:
             return ctx
 
         source_delays: dict[str, int] = {}
-        raw_source_delays: dict[str, float] = (
-            {}
-        )  # Unrounded delays for VideoTimestamps precision
+        raw_source_delays: dict[
+            str, float
+        ] = {}  # Unrounded delays for VideoTimestamps precision
 
         # --- Step 1: Get Source 1's container delays for chain calculation ---
         runner._log_message("--- Getting Source 1 Container Delays for Analysis ---")
@@ -379,8 +380,6 @@ class AnalysisStep:
             # --- CRITICAL FIX: Detect stepping BEFORE calculating mode delay ---
             diagnosis = None
             details = {}
-            stepping_override_delay = None
-            stepping_override_delay_raw = None
             stepping_enabled = source_config.get("segmented_enabled", False)
 
             # ALWAYS run diagnosis to detect stepping (even if correction is disabled)
@@ -393,114 +392,37 @@ class AnalysisStep:
                 codec_id=target_codec_id,
             )
 
-            # If stepping detected, handle based on whether correction is enabled
-            if diagnosis == "STEPPING":
-                # CRITICAL: Stepping correction doesn't work on source-separated audio
-                # Separated stems have fundamentally different waveform characteristics
-                if stepping_enabled and not use_source_separated_settings:
-                    # Stepping correction is ENABLED - proceed with correction logic
-                    stepping_sources.append(source_key)  # Track for final report
+            # Evaluate stepping override using module
+            has_audio_from_source = any(
+                t.get("type") == "audio" and t.get("source") == source_key
+                for t in ctx.manual_layout
+            )
+            stepping_result = evaluate_stepping_override(
+                diagnosis=diagnosis,
+                details=details,
+                results=results,
+                source_key=source_key,
+                source_config=source_config,
+                stepping_enabled=stepping_enabled,
+                use_source_separation=use_source_separated_settings,
+                has_audio_from_source=has_audio_from_source,
+                log=runner._log_message,
+            )
 
-                    # Check if any audio tracks from this source are being merged
-                    has_audio_from_source = any(
-                        t.get("type") == "audio" and t.get("source") == source_key
-                        for t in ctx.manual_layout
-                    )
-
-                    if has_audio_from_source:
-                        # Stepping correction will run, so use first segment delay
-                        # Use stepping-specific stability criteria (separate from First Stable delay selection mode)
-                        stepping_config = {
-                            "first_stable_min_chunks": source_config.get(
-                                "stepping_first_stable_min_chunks", 3
-                            ),
-                            "first_stable_skip_unstable": source_config.get(
-                                "stepping_first_stable_skip_unstable", True
-                            ),
-                        }
-                        # Get both rounded (for mkvmerge) and raw (for subtitle precision)
-                        stable_result = find_first_stable_segment_delay(
-                            results, stepping_config, runner._log_message
-                        )
-                        if stable_result is not None:
-                            first_segment_delay, first_segment_delay_raw = stable_result
-                            stepping_override_delay = first_segment_delay
-                            stepping_override_delay_raw = first_segment_delay_raw
-                            runner._log_message(
-                                f"[Stepping Detected] Found stepping in {source_key}"
-                            )
-                            runner._log_message(
-                                f"[Stepping Override] Using first segment's delay: {stepping_override_delay:+d}ms (raw: {stepping_override_delay_raw:.3f}ms)"
-                            )
-                            runner._log_message(
-                                f"[Stepping Override] This delay will be used for ALL tracks (audio + subtitles) from {source_key}"
-                            )
-                            runner._log_message(
-                                "[Stepping Override] Stepping correction will be applied to audio tracks during processing"
-                            )
-                    else:
-                        # No audio tracks from this source - stepping correction won't run
-                        # Use normal delay selection mode instead
-                        delay_mode = source_config.get(
-                            "delay_selection_mode", "Mode (Most Common)"
-                        )
-                        runner._log_message(
-                            f"[Stepping Detected] Found stepping in {source_key}"
-                        )
-                        runner._log_message(
-                            "[Stepping] No audio tracks from this source are being merged"
-                        )
-                        runner._log_message(
-                            f"[Stepping] Using delay_selection_mode='{delay_mode}' instead of first segment (stepping correction won't run)"
-                        )
-                        # Don't set stepping_override_delay - let normal flow handle it
-                elif use_source_separated_settings:
-                    # Source separation blocks stepping correction (unreliable on separated stems)
-                    # Track for audit warning - user should manually review this file
-                    ctx.stepping_detected_separated.append(source_key)
-                    delay_mode = source_config.get(
-                        "delay_selection_mode", "Mode (Clustered)"
-                    )
-                    runner._log_message(
-                        f"[Stepping Detected] Found stepping in {source_key}"
-                    )
-                    runner._log_message(
-                        "[Stepping Disabled] Source separation is enabled - stepping correction is unreliable on separated stems"
-                    )
-                    runner._log_message(
-                        "[Stepping Disabled] Separated stems have different waveform characteristics that break stepping detection"
-                    )
-                    runner._log_message(
-                        f"[Stepping Disabled] Using delay_selection_mode='{delay_mode}' instead"
-                    )
-                    # Don't set stepping_override_delay - let normal flow handle it with source-separated delay mode
-                else:
-                    # Stepping correction is DISABLED globally - just warn the user
-                    ctx.stepping_detected_disabled.append(
-                        source_key
-                    )  # Track for warning
-                    runner._log_message(
-                        f"⚠️  [Stepping Detected] Found stepping in {source_key}"
-                    )
-                    runner._log_message(
-                        "⚠️  [Stepping Disabled] Stepping correction is disabled - timing may be inconsistent"
-                    )
-                    runner._log_message(
-                        "⚠️  [Recommendation] Enable 'Stepping Correction' in settings if you want automatic correction"
-                    )
-                    runner._log_message(
-                        "⚠️  [Manual Review] You should manually review this file's sync quality"
-                    )
-                    # Use normal delay selection mode
-                    # Don't set stepping_override_delay - let normal flow handle it
+            # Handle stepping result - update context and log messages
+            if stepping_result.add_to_stepping_sources:
+                stepping_sources.append(source_key)
+            if stepping_result.track_as_separated:
+                ctx.stepping_detected_separated.append(source_key)
+            if stepping_result.track_as_disabled:
+                ctx.stepping_detected_disabled.append(source_key)
+            for msg in stepping_result.log_messages:
+                runner._log_message(msg)
 
             # Use stepping override if available, otherwise calculate using configured mode
-            # Get both rounded (for mkvmerge/audio) and raw (for subtitle sync precision)
-            if stepping_override_delay is not None:
-                correlation_delay_ms = stepping_override_delay
-                correlation_delay_raw = (
-                    stepping_override_delay_raw  # Use true raw, not float(int)
-                )
+            if stepping_result.override_delay is not None:
+                correlation_delay_ms = stepping_result.override_delay
+                correlation_delay_raw = stepping_result.override_delay_raw
                 runner._log_message(
                     f"{source_key.capitalize()} delay determined: {correlation_delay_ms:+d} ms (first segment, stepping corrected)."
                 )
@@ -523,7 +445,7 @@ class AnalysisStep:
                         f"  - Accepted chunks: {accepted_count}\n"
                         f"  - Minimum required: {min_required}\n"
                         f"  - Total chunks scanned: {total_chunks}\n"
-                        f'  - Match threshold: {source_config.get("min_match_pct", 5.0)}%\n'
+                        f"  - Match threshold: {source_config.get('min_match_pct', 5.0)}%\n"
                         f"\n"
                         f"Possible causes:\n"
                         f"  - Audio quality is too poor for reliable correlation\n"
@@ -562,55 +484,20 @@ class AnalysisStep:
             if stability_result:
                 ctx.sync_stability_issues.append(stability_result)
 
-            # Calculate final delay including container delay chain correction
-            # CRITICAL: Use the container delay from the ACTUAL Source 1 track used for correlation
-            actual_container_delay = source1_audio_container_delay
-
-            # Try to determine which Source 1 track was actually used for correlation
-            # This is needed when Source 1 has multiple audio tracks with different container delays
-            if source1_info:
-                source1_audio_tracks = [
-                    t
-                    for t in source1_info.get("tracks", [])
-                    if t.get("type") == "audio"
-                ]
-
-                # Priority 1: Explicit per-job track selection
-                if (
-                    correlation_ref_track is not None
-                    and 0 <= correlation_ref_track < len(source1_audio_tracks)
-                ):
-                    ref_track_id = source1_audio_tracks[correlation_ref_track].get("id")
-                    track_container_delay = source1_container_delays.get(
-                        ref_track_id, 0
-                    )
-                    if track_container_delay != source1_audio_container_delay:
-                        actual_container_delay = track_container_delay
-                        runner._log_message(
-                            f"[Container Delay Override] Using Source 1 audio index {correlation_ref_track} (track ID {ref_track_id}) delay: "
-                            f"{actual_container_delay:+.3f}ms (global reference was {source1_audio_container_delay:+.3f}ms)"
-                        )
-                # Priority 2: Language matching fallback
-                elif source_config.get("analysis_lang_source1"):
-                    ref_lang_str = str(source_config.get("analysis_lang_source1", ""))
-                    for i, track in enumerate(source1_audio_tracks):
-                        track_lang = (
-                            (track.get("properties", {}).get("language", "") or "")
-                            .strip()
-                            .lower()
-                        )
-                        if track_lang == ref_lang_str.strip().lower():
-                            ref_track_id = track.get("id")
-                            track_container_delay = source1_container_delays.get(
-                                ref_track_id, 0
-                            )
-                            if track_container_delay != source1_audio_container_delay:
-                                actual_container_delay = track_container_delay
-                                runner._log_message(
-                                    f"[Container Delay Override] Using Source 1 audio index {i} (track ID {ref_track_id}, lang={ref_lang_str}) delay: "
-                                    f"{actual_container_delay:+.3f}ms (global reference was {source1_audio_container_delay:+.3f}ms)"
-                                )
-                            break
+            # Get actual container delay from Source 1 track used for correlation
+            source1_audio_tracks = (
+                get_audio_tracks(source1_info) if source1_info else []
+            )
+            container_override = get_actual_container_delay(
+                source1_audio_tracks=source1_audio_tracks,
+                container_delays=source1_container_delays,
+                default_delay=source1_audio_container_delay,
+                correlation_ref_track=correlation_ref_track,
+                ref_lang=source_config.get("analysis_lang_source1"),
+            )
+            actual_container_delay = container_override.delay
+            if container_override.override_info:
+                runner._log_message(container_override.override_info)
 
             # Calculate final delay using module
             final_delay = calculate_final_delay(

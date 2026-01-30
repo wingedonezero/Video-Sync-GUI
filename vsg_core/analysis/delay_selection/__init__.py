@@ -29,6 +29,7 @@ from .first_stable import FirstStableSelector, find_first_stable_segment_delay
 from .mode_clustered import ModeClusteredSelector
 from .mode_early_cluster import ModeEarlyClusterSelector
 from .mode_simple import ModeSimpleSelector
+from .stepping_override import SteppingOverrideResult, evaluate_stepping_override
 
 # Registry of available selectors
 SELECTORS: dict[str, type[DelaySelector]] = {
@@ -163,6 +164,9 @@ __all__ = [
     "select_delay_with_tag",
     "get_selector",
     "find_first_stable_segment_delay",
+    # Stepping override
+    "evaluate_stepping_override",
+    "SteppingOverrideResult",
     # Registry
     "SELECTORS",
     # Protocol

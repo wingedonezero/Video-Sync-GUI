@@ -242,3 +242,86 @@ def apply_global_shift(
             )
 
     return source_delays, raw_source_delays
+
+
+@dataclass
+class ContainerDelayOverride:
+    """Result of container delay override lookup."""
+
+    delay: float
+    override_applied: bool = False
+    override_info: str | None = None  # Log message if override was applied
+
+
+def get_actual_container_delay(
+    source1_audio_tracks: list[dict[str, Any]],
+    container_delays: dict[int, float],
+    default_delay: float,
+    correlation_ref_track: int | None,
+    ref_lang: str | None,
+) -> ContainerDelayOverride:
+    """
+    Determine the actual container delay to use for final delay calculation.
+
+    When Source 1 has multiple audio tracks with different container delays,
+    this function finds the delay for the track that was actually used for
+    correlation.
+
+    Args:
+        source1_audio_tracks: List of Source 1 audio tracks
+        container_delays: Dict mapping track_id to container delay
+        default_delay: Default container delay (from initially selected track)
+        correlation_ref_track: Explicit track index if configured
+        ref_lang: Reference language for track matching
+
+    Returns:
+        ContainerDelayOverride with the delay to use and override info
+    """
+    # Priority 1: Explicit per-job track selection
+    if correlation_ref_track is not None and 0 <= correlation_ref_track < len(
+        source1_audio_tracks
+    ):
+        track = source1_audio_tracks[correlation_ref_track]
+        ref_track_id = track.get("id")
+        if ref_track_id is None:
+            return ContainerDelayOverride(delay=default_delay)
+        track_delay = container_delays.get(ref_track_id, 0)
+
+        if track_delay != default_delay:
+            return ContainerDelayOverride(
+                delay=track_delay,
+                override_applied=True,
+                override_info=(
+                    f"[Container Delay Override] Using Source 1 audio index {correlation_ref_track} "
+                    f"(track ID {ref_track_id}) delay: {track_delay:+.3f}ms "
+                    f"(global reference was {default_delay:+.3f}ms)"
+                ),
+            )
+
+    # Priority 2: Language matching fallback
+    if ref_lang:
+        ref_lang_lower = ref_lang.strip().lower()
+        for i, track in enumerate(source1_audio_tracks):
+            track_lang = (
+                (track.get("properties", {}).get("language", "") or "").strip().lower()
+            )
+            if track_lang == ref_lang_lower:
+                ref_track_id = track.get("id")
+                if ref_track_id is None:
+                    break
+                track_delay = container_delays.get(ref_track_id, 0)
+
+                if track_delay != default_delay:
+                    return ContainerDelayOverride(
+                        delay=track_delay,
+                        override_applied=True,
+                        override_info=(
+                            f"[Container Delay Override] Using Source 1 audio index {i} "
+                            f"(track ID {ref_track_id}, lang={ref_lang}) delay: {track_delay:+.3f}ms "
+                            f"(global reference was {default_delay:+.3f}ms)"
+                        ),
+                    )
+                break
+
+    # No override needed
+    return ContainerDelayOverride(delay=default_delay)
