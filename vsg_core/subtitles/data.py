@@ -10,8 +10,7 @@ This module provides the central data structure for subtitle processing:
 All timing is stored as FLOAT MILLISECONDS internally.
 Rounding happens ONLY at final save (ASS -> centiseconds, SRT -> milliseconds).
 
-NOTE: Model classes have been moved to vsg_core/models/subtitles/core.py
-This file re-exports them for backward compatibility.
+Model classes are in vsg_core/models/subtitles/core.py - import from vsg_core.models.
 """
 
 from __future__ import annotations
@@ -22,37 +21,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-# Import models from centralized location
 from vsg_core.models.subtitles.core import (
     EmbeddedFont,
     EmbeddedGraphic,
-    OCREventData,
     OCRMetadata,
     OperationRecord,
     OperationResult,
-    SteppingEventData,
     SubtitleEvent,
     SubtitleStyle,
-    SyncEventData,
 )
 
 if TYPE_CHECKING:
     pass
 
-# Re-export models for backward compatibility
-__all__ = [
-    "OCREventData",
-    "SyncEventData",
-    "SteppingEventData",
-    "OCRMetadata",
-    "SubtitleStyle",
-    "SubtitleEvent",
-    "EmbeddedFont",
-    "EmbeddedGraphic",
-    "OperationRecord",
-    "OperationResult",
-    "SubtitleData",
-]
+__all__ = ["SubtitleData"]
 
 
 # =============================================================================

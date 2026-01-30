@@ -212,7 +212,8 @@ def test_time_based_sync():
 
     from collections import OrderedDict
 
-    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
+    from vsg_core.models import SubtitleEvent, SubtitleStyle
+    from vsg_core.subtitles.data import SubtitleData
 
     # Create test data
     data = SubtitleData()
@@ -259,7 +260,8 @@ def test_float_precision_through_pipeline():
     import tempfile
     from collections import OrderedDict
 
-    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
+    from vsg_core.models import SubtitleEvent, SubtitleStyle
+    from vsg_core.subtitles.data import SubtitleData
 
     # Create test data with precise float timing
     data = SubtitleData()
@@ -348,7 +350,8 @@ def test_style_operations():
 
     from collections import OrderedDict
 
-    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
+    from vsg_core.models import SubtitleEvent, SubtitleStyle
+    from vsg_core.subtitles.data import SubtitleData
 
     # Create test data
     data = SubtitleData()
@@ -389,7 +392,8 @@ def test_validation():
 
     from collections import OrderedDict
 
-    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
+    from vsg_core.models import SubtitleEvent, SubtitleStyle
+    from vsg_core.subtitles.data import SubtitleData
 
     # Create test data with issues
     data = SubtitleData()
@@ -422,7 +426,8 @@ def test_timebase_frame_locked_sync():
 
     from collections import OrderedDict
 
-    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
+    from vsg_core.models import SubtitleEvent, SubtitleStyle
+    from vsg_core.subtitles.data import SubtitleData
     from vsg_core.subtitles.sync_modes import get_sync_plugin
 
     # Get the plugin
@@ -488,7 +493,8 @@ def test_mkvmerge_sync_mode():
 
     from collections import OrderedDict
 
-    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
+    from vsg_core.models import SubtitleEvent, SubtitleStyle
+    from vsg_core.subtitles.data import SubtitleData
 
     # Create test data
     data = SubtitleData()
@@ -533,7 +539,8 @@ def test_json_export():
     import tempfile
     from collections import OrderedDict
 
-    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
+    from vsg_core.models import SubtitleEvent, SubtitleStyle
+    from vsg_core.subtitles.data import SubtitleData
 
     # Create test data
     data = SubtitleData()
