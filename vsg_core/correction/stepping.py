@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 from scipy.signal import correlate
 
-from ..analysis.audio_corr import get_audio_stream_info, run_audio_correlation
+from ..analysis import get_audio_stream_info, run_correlation
 from ..extraction.tracks import extract_tracks
 from ..io.runner import CommandRunner
 from ..models import (
@@ -2008,7 +2008,7 @@ class SteppingCorrector:
         try:
             # Use analysis_lang_source1 to select correct Source 1 track for QA comparison
             ref_lang = self.config.get("analysis_lang_source1")
-            results = run_audio_correlation(
+            results = run_correlation(
                 ref_file=ref_file_path,
                 target_file=corrected_path,
                 config=qa_config,
@@ -2016,6 +2016,7 @@ class SteppingCorrector:
                 tool_paths=self.tool_paths,
                 ref_lang=ref_lang,
                 target_lang=None,
+                log=self.log,
                 role_tag="QA",
             )
             accepted = [r for r in results if r.get("accepted", False)]

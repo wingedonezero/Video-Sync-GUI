@@ -20,33 +20,32 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
-from vsg_core.analysis.audio_corr import run_audio_correlation, run_multi_correlation
-from vsg_core.analysis.config_builder import (
-    build_source_config,
-    get_correlation_track_settings,
-    get_reference_track_settings,
-)
-from vsg_core.analysis.delay_calculation import (
+from vsg_core.analysis import (
+    # Diagnostics
+    analyze_sync_stability,
+    apply_diagnosis_flags,
+    # Delay calculation
     apply_global_shift,
+    # Config building
+    build_source_config,
     calculate_final_delay,
     calculate_global_shift,
     convert_to_relative_delays,
-    extract_container_delays,
-    get_actual_container_delay,
-)
-from vsg_core.analysis.delay_selection import (
-    evaluate_stepping_override,
-    select_delay,
-)
-from vsg_core.analysis.diagnostics import (
-    apply_diagnosis_flags,
     diagnose_audio_issue,
-)
-from vsg_core.analysis.sync_stability import analyze_sync_stability
-from vsg_core.analysis.track_selection import (
+    # Delay selection
+    evaluate_stepping_override,
+    extract_container_delays,
+    # Track selection
     format_track_details,
+    get_actual_container_delay,
     get_audio_tracks,
+    get_correlation_track_settings,
+    get_reference_track_settings,
+    # Correlation
+    run_correlation,
+    run_multi_correlation,
     select_audio_track,
+    select_delay,
 )
 from vsg_core.extraction.tracks import get_stream_info, get_stream_info_with_delays
 from vsg_core.io.runner import CommandRunner
@@ -163,9 +162,9 @@ class AnalysisStep:
             return ctx
 
         source_delays: dict[str, int] = {}
-        raw_source_delays: dict[
-            str, float
-        ] = {}  # Unrounded delays for VideoTimestamps precision
+        raw_source_delays: dict[str, float] = (
+            {}
+        )  # Unrounded delays for VideoTimestamps precision
 
         # --- Step 1: Get Source 1's container delays for chain calculation ---
         runner._log_message("--- Getting Source 1 Container Delays for Analysis ---")
@@ -300,7 +299,7 @@ class AnalysisStep:
                 f"{format_track_details(track_info, target_selected.track_index or 0)}"
             )
 
-            # Update correlation_source_track to match selected index (needed for run_audio_correlation)
+            # Update correlation_source_track to match selected index (needed for run_correlation)
             correlation_source_track = target_selected.track_index
 
             target_track_id = target_selected.track_id
@@ -323,12 +322,12 @@ class AnalysisStep:
                     source_config,
                     runner,
                     ctx.tool_paths,
-                    ref_lang=source_config.get("analysis_lang_source1"),
-                    target_lang=tgt_lang,
-                    role_tag=source_key,
-                    ref_track_index=correlation_ref_track,  # Use per-job setting if configured
+                    ref_track_index=correlation_ref_track,
                     target_track_index=correlation_source_track,
+                    target_lang=tgt_lang,
                     use_source_separation=use_source_separated_settings,
+                    log=runner._log_message,
+                    role_tag=source_key,
                 )
 
                 # Log summary for each method
@@ -363,18 +362,18 @@ class AnalysisStep:
             else:
                 # Normal single-method correlation
                 # Use source_config which already has the right correlation_method set
-                results = run_audio_correlation(
+                results = run_correlation(
                     str(source1_file),
                     str(source_file),
                     source_config,
                     runner,
                     ctx.tool_paths,
-                    ref_lang=source_config.get("analysis_lang_source1"),
-                    target_lang=tgt_lang,
-                    role_tag=source_key,
-                    ref_track_index=correlation_ref_track,  # Use per-job setting if configured
+                    ref_track_index=correlation_ref_track,
                     target_track_index=correlation_source_track,
+                    target_lang=tgt_lang,
                     use_source_separation=use_source_separated_settings,
+                    log=runner._log_message,
+                    role_tag=source_key,
                 )
 
             # --- CRITICAL FIX: Detect stepping BEFORE calculating mode delay ---

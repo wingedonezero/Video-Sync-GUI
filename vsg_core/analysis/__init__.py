@@ -19,13 +19,6 @@ Legacy imports are preserved for backward compatibility.
 
 from __future__ import annotations
 
-# Legacy import for backward compatibility
-# run_audio_correlation is still in audio_corr.py during transition
-from .audio_corr import (
-    run_audio_correlation,
-    run_multi_correlation as legacy_run_multi_correlation,
-)
-
 # Config and track selection
 from .config_builder import (
     build_source_config,
@@ -37,13 +30,20 @@ from .config_builder import (
 # New modular imports
 from .correlation import run_correlation, run_multi_correlation
 from .delay_calculation import (
+    ContainerDelayOverride,
+    FinalDelay,
     apply_global_shift,
     calculate_final_delay,
     calculate_global_shift,
     convert_to_relative_delays,
     extract_container_delays,
+    get_actual_container_delay,
 )
-from .delay_selection import select_delay
+from .delay_selection import (
+    SteppingOverrideResult,
+    evaluate_stepping_override,
+    select_delay,
+)
 from .diagnostics import (
     analyze_sync_stability,
     apply_diagnosis_flags,
@@ -93,6 +93,12 @@ __all__ = [
     "apply_global_shift",
     "extract_container_delays",
     "convert_to_relative_delays",
+    "get_actual_container_delay",
+    "FinalDelay",
+    "ContainerDelayOverride",
+    # Delay selection
+    "evaluate_stepping_override",
+    "SteppingOverrideResult",
     # Preprocessing
     "decode_to_memory",
     "get_audio_stream_info",
@@ -103,7 +109,6 @@ __all__ = [
     "is_audio_separator_available",
     "list_available_models",
     "SEPARATION_MODES",
-    # Legacy API (still supported)
-    "run_audio_correlation",
+    # Videodiff
     "run_videodiff",
 ]

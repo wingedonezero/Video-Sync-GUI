@@ -40,6 +40,8 @@ def run_correlation(
     runner: CommandRunner,
     tool_paths: dict[str, str],
     ref_track_index: int | None = None,
+    target_track_index: int | None = None,
+    ref_lang: str | None = None,
     target_lang: str | None = None,
     use_source_separation: bool = False,
     log: Callable[[str], None] | None = None,
@@ -56,7 +58,9 @@ def run_correlation(
         config: Configuration dictionary
         runner: CommandRunner for external tools
         tool_paths: Paths to external tools
-        ref_track_index: Optional specific reference track index
+        ref_track_index: Optional specific reference track index (bypasses language matching)
+        target_track_index: Optional specific target track index (bypasses language matching)
+        ref_lang: Optional reference language code for track selection
         target_lang: Optional target language code for track selection
         use_source_separation: Whether to apply source separation
         log: Optional logging callback
@@ -73,16 +77,24 @@ def run_correlation(
     method_name = config.get("correlation_method", "Standard Correlation (SCC)")
     acceptance_threshold = float(config.get("match_threshold_pct", 50.0))
 
-    # Get track indices
-    if ref_track_index is None:
-        ref_idx, _ = get_audio_stream_info(ref_file, None, runner, tool_paths)
-        ref_idx = ref_idx or 0
-    else:
+    # Get reference track index
+    if ref_track_index is not None:
         ref_idx = ref_track_index
+        log(f"[AUDIO_CORR] Using explicit reference track index: {ref_idx}")
+    else:
+        ref_lang_norm = normalize_lang(ref_lang)
+        ref_idx, _ = get_audio_stream_info(ref_file, ref_lang_norm, runner, tool_paths)
+        ref_idx = ref_idx or 0
 
-    tgt_lang = normalize_lang(target_lang)
-    tgt_idx, _ = get_audio_stream_info(target_file, tgt_lang, runner, tool_paths)
-    tgt_idx = tgt_idx or 0
+    # Get target track index
+    if target_track_index is not None:
+        tgt_idx = target_track_index
+        tgt_lang = normalize_lang(target_lang)
+        log(f"[AUDIO_CORR] Using explicit target track index: {tgt_idx}")
+    else:
+        tgt_lang = normalize_lang(target_lang)
+        tgt_idx, _ = get_audio_stream_info(target_file, tgt_lang, runner, tool_paths)
+        tgt_idx = tgt_idx or 0
 
     log(f"[AUDIO_CORR] Reference track index: {ref_idx}")
     log(
@@ -159,6 +171,8 @@ def run_multi_correlation(
     runner: CommandRunner,
     tool_paths: dict[str, str],
     ref_track_index: int | None = None,
+    target_track_index: int | None = None,
+    ref_lang: str | None = None,
     target_lang: str | None = None,
     use_source_separation: bool = False,
     log: Callable[[str], None] | None = None,
@@ -175,7 +189,9 @@ def run_multi_correlation(
         config: Configuration dictionary with multi_corr_* settings
         runner: CommandRunner for external tools
         tool_paths: Paths to external tools
-        ref_track_index: Optional specific reference track index
+        ref_track_index: Optional specific reference track index (bypasses language matching)
+        target_track_index: Optional specific target track index (bypasses language matching)
+        ref_lang: Optional reference language code for track selection
         target_lang: Optional target language code for track selection
         use_source_separation: Whether to apply source separation
         log: Optional logging callback
@@ -193,16 +209,24 @@ def run_multi_correlation(
     use_soxr = bool(config.get("use_soxr_resampler", False))
     acceptance_threshold = float(config.get("match_threshold_pct", 50.0))
 
-    # Get track indices
-    if ref_track_index is None:
-        ref_idx, _ = get_audio_stream_info(ref_file, None, runner, tool_paths)
-        ref_idx = ref_idx or 0
-    else:
+    # Get reference track index
+    if ref_track_index is not None:
         ref_idx = ref_track_index
+        log(f"[MULTI_CORR] Using explicit reference track index: {ref_idx}")
+    else:
+        ref_lang_norm = normalize_lang(ref_lang)
+        ref_idx, _ = get_audio_stream_info(ref_file, ref_lang_norm, runner, tool_paths)
+        ref_idx = ref_idx or 0
 
-    tgt_lang = normalize_lang(target_lang)
-    tgt_idx, _ = get_audio_stream_info(target_file, tgt_lang, runner, tool_paths)
-    tgt_idx = tgt_idx or 0
+    # Get target track index
+    if target_track_index is not None:
+        tgt_idx = target_track_index
+        tgt_lang = normalize_lang(target_lang)
+        log(f"[MULTI_CORR] Using explicit target track index: {tgt_idx}")
+    else:
+        tgt_lang = normalize_lang(target_lang)
+        tgt_idx, _ = get_audio_stream_info(target_file, tgt_lang, runner, tool_paths)
+        tgt_idx = tgt_idx or 0
 
     log(f"[MULTI_CORR] Reference track index: {ref_idx}")
     log(
