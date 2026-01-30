@@ -21,7 +21,18 @@ from collections import Counter
 from typing import Any
 
 from vsg_core.analysis.audio_corr import run_audio_correlation, run_multi_correlation
-from vsg_core.analysis.config_builder import should_use_source_separation
+from vsg_core.analysis.config_builder import (
+    build_source_config,
+    get_correlation_track_settings,
+    get_reference_track_settings,
+)
+from vsg_core.analysis.delay_calculation import (
+    apply_global_shift,
+    calculate_final_delay,
+    calculate_global_shift,
+    convert_to_relative_delays,
+    extract_container_delays,
+)
 from vsg_core.analysis.delay_selection import (
     find_first_stable_segment_delay,
     select_delay,
@@ -31,7 +42,11 @@ from vsg_core.analysis.diagnostics import (
     diagnose_audio_issue,
 )
 from vsg_core.analysis.sync_stability import analyze_sync_stability
-from vsg_core.analysis.track_selection import format_track_details
+from vsg_core.analysis.track_selection import (
+    format_track_details,
+    get_audio_tracks,
+    select_audio_track,
+)
 from vsg_core.extraction.tracks import get_stream_info, get_stream_info_with_delays
 from vsg_core.io.runner import CommandRunner
 from vsg_core.models import Context, Delays
@@ -154,83 +169,55 @@ class AnalysisStep:
         # --- Step 1: Get Source 1's container delays for chain calculation ---
         runner._log_message("--- Getting Source 1 Container Delays for Analysis ---")
         source1_info = get_stream_info_with_delays(source1_file, runner, ctx.tool_paths)
-        source1_container_delays = {}
 
-        if source1_info:
-            for track in source1_info.get("tracks", []):
-                tid = track.get("id")
-                delay_ms = track.get("container_delay_ms", 0)
-                source1_container_delays[tid] = delay_ms
+        # Extract and convert container delays using modules
+        source1_container_delays = extract_container_delays(
+            source1_info, runner._log_message
+        )
+        source1_container_delays = convert_to_relative_delays(
+            source1_container_delays, source1_info
+        )
 
-                track_type = track.get("type")
-                if delay_ms != 0 and track_type in ["video", "audio"]:
-                    runner._log_message(
-                        f"[Container Delay] Source 1 {track_type} track {tid} has container delay: {delay_ms:+.1f}ms"
-                    )
+        # Select Source 1 audio track using track selection module
+        ref_explicit_idx, ref_lang = get_reference_track_settings(
+            ctx.source_settings, config
+        )
+        source1_selected = select_audio_track(
+            source1_info,
+            explicit_index=ref_explicit_idx,
+            language=ref_lang,
+        )
 
-        # Find which audio track from Source 1 will be used for correlation
-        source1_audio_track_id = None
-        source1_audio_container_delay = 0
-        source1_video_container_delay = 0
+        source1_audio_track_id = source1_selected.track_id
+        source1_audio_container_delay = 0.0
 
-        ref_lang = config.get("analysis_lang_source1")
-        if source1_info:
-            # Get video track delay first
-            video_tracks = [
-                t for t in source1_info.get("tracks", []) if t.get("type") == "video"
-            ]
-            if video_tracks:
-                video_track_id = video_tracks[0].get("id")
-                source1_video_container_delay = source1_container_delays.get(
-                    video_track_id, 0
-                )
+        # Log track selection
+        if source1_selected.track_id is not None and source1_selected.track_info:
+            source1_audio_track_id = (
+                source1_selected.track_id
+            )  # Narrow type for Pyright
+            method_label = {
+                "explicit": f"explicit index {source1_selected.track_index}",
+                "language": f"lang={ref_lang}",
+                "first": "first track",
+            }.get(source1_selected.selection_method, source1_selected.selection_method)
+            runner._log_message(
+                f"[Source 1] Selected ({method_label}): "
+                f"{format_track_details(source1_selected.track_info, source1_selected.track_index or 0)}"
+            )
 
-            # CRITICAL FIX: Convert ALL Source 1 audio tracks to relative delays
-            # This ensures they're stored correctly for later use in extraction/mux
-            for track in source1_info.get("tracks", []):
-                if track.get("type") == "audio":
-                    tid = track.get("id")
-                    absolute_delay = source1_container_delays.get(tid, 0)
-                    relative_delay = absolute_delay - source1_video_container_delay
-                    source1_container_delays[tid] = (
-                        relative_delay  # Update with relative delay
-                    )
+            # Get the relative delay for the selected track
+            source1_audio_container_delay = source1_container_delays.get(
+                source1_audio_track_id, 0
+            )
+            ctx.source1_audio_container_delay_ms = source1_audio_container_delay
 
-            audio_tracks = [
-                t for t in source1_info.get("tracks", []) if t.get("type") == "audio"
-            ]
-
-            # Log Source 1 track selection for clarity
-            if ref_lang:
-                for idx, track in enumerate(audio_tracks):
-                    if (
-                        track.get("properties", {}).get("language", "") or ""
-                    ).strip().lower() == ref_lang:
-                        source1_audio_track_id = track.get("id")
-                        runner._log_message(
-                            f"[Source 1] Selected (lang={ref_lang}): {format_track_details(track, idx)}"
-                        )
-                        break
-
-            if source1_audio_track_id is None and audio_tracks:
-                source1_audio_track_id = audio_tracks[0].get("id")
+            if source1_audio_container_delay != 0:
                 runner._log_message(
-                    f"[Source 1] Selected (first track): {format_track_details(audio_tracks[0], 0)}"
+                    f"[Container Delay] Audio track {source1_audio_track_id} relative delay (audio relative to video): "
+                    f"{source1_audio_container_delay:+.1f}ms. "
+                    f"This will be added to all correlation results."
                 )
-
-            if source1_audio_track_id is not None:
-                # Now get the relative delay (already corrected in the dict)
-                source1_audio_container_delay = source1_container_delays.get(
-                    source1_audio_track_id, 0
-                )
-                ctx.source1_audio_container_delay_ms = source1_audio_container_delay
-
-                if source1_audio_container_delay != 0:
-                    runner._log_message(
-                        f"[Container Delay] Audio track {source1_audio_track_id} relative delay (audio relative to video): "
-                        f"{source1_audio_container_delay:+.1f}ms. "
-                        f"This will be added to all correlation results."
-                    )
 
         # --- Step 2: Run correlation for other sources ---
         runner._log_message("\n--- Running Audio Correlation Analysis ---")
@@ -244,85 +231,35 @@ class AnalysisStep:
 
             runner._log_message(f"\n[Analyzing {source_key}]")
 
-            # Get per-source settings for this source
-            per_source_settings = ctx.source_settings.get(source_key, {})
-
-            # Get explicit track index for this source (Source 2/3)
-            correlation_source_track = per_source_settings.get(
-                "correlation_source_track"
-            )  # Which Source 2/3 track to use
-
-            # Determine target language
-            if correlation_source_track is not None:
-                tgt_lang = None  # Bypassed by explicit track index
-            else:
-                # Fall back to global language setting for target
-                tgt_lang = config.get("analysis_lang_others")
-
-            # Get Source 1 track selection (can be per-job or global)
-            # Check if Source 1 has per-job track selection configured
-            source1_settings = ctx.source_settings.get("Source 1", {})
-            correlation_ref_track = source1_settings.get(
-                "correlation_ref_track"
-            )  # Which Source 1 track to use
-            if correlation_ref_track is not None and source1_info:
-                source1_audio_tracks = [
-                    t
-                    for t in source1_info.get("tracks", [])
-                    if t.get("type") == "audio"
-                ]
-                if 0 <= correlation_ref_track < len(source1_audio_tracks):
-                    ref_track = source1_audio_tracks[correlation_ref_track]
-                    runner._log_message(
-                        f"[Source 1] Selected (explicit): {format_track_details(ref_track, correlation_ref_track)}"
-                    )
-                else:
-                    runner._log_message(
-                        f"[Source 1] WARNING: Invalid track index {correlation_ref_track}, using previously selected track"
-                    )
-
-            # ===================================================================
-            # CRITICAL DECISION POINT: Determine if source separation was applied
-            # This decision affects correlation method and delay selection mode
-            # Make this decision ONCE and create appropriate config for this source
-            # ===================================================================
-            use_source_separated_settings = should_use_source_separation(
-                source_key, config, ctx.source_settings
+            # Get track settings and build source config using modules
+            correlation_source_track, tgt_lang = get_correlation_track_settings(
+                source_key, ctx.source_settings, config
+            )
+            correlation_ref_track, _ = get_reference_track_settings(
+                ctx.source_settings, config
             )
 
+            # Build source-specific config (handles source separation overrides)
+            source_config = build_source_config(config, source_key, ctx.source_settings)
+            use_source_separated_settings = source_config.get(
+                "_use_source_separation", False
+            )
+
+            # Log analysis config
             if use_source_separated_settings:
-                # Create config with source-separated overrides
-                # Use dict spread to create new dict without modifying original
-                source_config = {
-                    **config,
-                    "correlation_method": config.get(
-                        "correlation_method_source_separated",
-                        "Phase Correlation (GCC-PHAT)",
-                    ),
-                    "delay_selection_mode": config.get(
-                        "delay_selection_mode_source_separated", "Mode (Clustered)"
-                    ),
-                }
                 runner._log_message(
                     "[Analysis Config] Source separation enabled - using:"
                 )
-                runner._log_message(
-                    f"  Correlation: {source_config['correlation_method']}"
-                )
-                runner._log_message(
-                    f"  Delay Mode: {source_config['delay_selection_mode']}"
-                )
             else:
-                # Use original config as-is (no source separation)
-                source_config = config
                 runner._log_message("[Analysis Config] Standard mode - using:")
-                runner._log_message(
-                    f"  Correlation: {source_config.get('correlation_method', 'SCC (Sliding Cross-Correlation)')}"
-                )
-                runner._log_message(
-                    f"  Delay Mode: {source_config.get('delay_selection_mode', 'Mode (Most Common)')}"
-                )
+            runner._log_message(
+                f"  Correlation: {source_config.get('correlation_method', 'SCC (Sliding Cross-Correlation)')}"
+            )
+            runner._log_message(
+                f"  Delay Mode: {source_config.get('delay_selection_mode', 'Mode (Most Common)')}"
+            )
 
+            # Get stream info for this source
             stream_info = get_stream_info(source_file, runner, ctx.tool_paths)
             if not stream_info:
                 runner._log_message(
@@ -330,63 +267,45 @@ class AnalysisStep:
                 )
                 continue
 
-            audio_tracks = [
-                t for t in stream_info.get("tracks", []) if t.get("type") == "audio"
-            ]
-            target_track_obj = None
+            audio_tracks = get_audio_tracks(stream_info)
             if not audio_tracks:
                 runner._log_message(
                     f"[WARN] No audio tracks found in {source_key}. Skipping."
                 )
                 continue
 
-            # Priority 1: Explicit track index from per-source settings
-            if correlation_source_track is not None:
-                if 0 <= correlation_source_track < len(audio_tracks):
-                    target_track_obj = audio_tracks[correlation_source_track]
-                    runner._log_message(
-                        f"[{source_key}] Selected (explicit): {format_track_details(target_track_obj, correlation_source_track)}"
-                    )
-                else:
-                    runner._log_message(
-                        f"[WARN] Invalid track index {correlation_source_track}, falling back to first track"
-                    )
-                    target_track_obj = audio_tracks[0]
-                    # CRITICAL FIX: Also update correlation_source_track to match the fallback!
-                    # Otherwise run_audio_correlation would receive the invalid index
-                    correlation_source_track = 0
-                    runner._log_message(
-                        f"[{source_key}] Selected (fallback): {format_track_details(target_track_obj, 0)}"
-                    )
-            # Priority 2: Language matching
-            elif tgt_lang:
-                for idx, track in enumerate(audio_tracks):
-                    if (
-                        track.get("properties", {}).get("language", "") or ""
-                    ).strip().lower() == tgt_lang:
-                        target_track_obj = track
-                        runner._log_message(
-                            f"[{source_key}] Selected (lang={tgt_lang}): {format_track_details(track, idx)}"
-                        )
-                        break
-
-            # Fallback: First track
-            if not target_track_obj:
-                target_track_obj = audio_tracks[0]
-                runner._log_message(
-                    f"[{source_key}] Selected (first track): {format_track_details(target_track_obj, 0)}"
-                )
-
-            target_track_id = target_track_obj.get("id")
-            target_codec_id = target_track_obj.get("properties", {}).get(
-                "codec_id", "unknown"
+            # Select target track using track selection module
+            target_selected = select_audio_track(
+                stream_info,
+                explicit_index=correlation_source_track,
+                language=tgt_lang,
             )
 
-            if target_track_id is None:
+            if target_selected.track_id is None:
                 runner._log_message(
                     f"[WARN] No suitable audio track found in {source_key} for analysis. Skipping."
                 )
                 continue
+
+            # Log track selection (track_info is always set when track_id is not None)
+            track_info = target_selected.track_info or {}
+            method_label = {
+                "explicit": f"explicit index {target_selected.track_index}",
+                "language": f"lang={tgt_lang}",
+                "first": "first track",
+            }.get(target_selected.selection_method, target_selected.selection_method)
+            runner._log_message(
+                f"[{source_key}] Selected ({method_label}): "
+                f"{format_track_details(track_info, target_selected.track_index or 0)}"
+            )
+
+            # Update correlation_source_track to match selected index (needed for run_audio_correlation)
+            correlation_source_track = target_selected.track_index
+
+            target_track_id = target_selected.track_id
+            target_codec_id = track_info.get("properties", {}).get(
+                "codec_id", "unknown"
+            )
 
             # Check if multi-correlation comparison is enabled (Analyze Only mode only)
             multi_corr_enabled = bool(
@@ -620,6 +539,10 @@ class AnalysisStep:
                         f"  - Check that both files are from the same video source"
                     )
 
+            # Type assertions for Pyright (both are guaranteed non-None after error check above)
+            assert correlation_delay_ms is not None
+            assert correlation_delay_raw is not None
+
             # --- Sync Stability Analysis ---
             # Check for variance in correlation results that may indicate sync issues
             # Pass stepping cluster info if available to avoid false positives
@@ -669,14 +592,14 @@ class AnalysisStep:
                         )
                 # Priority 2: Language matching fallback
                 elif source_config.get("analysis_lang_source1"):
-                    ref_lang = source_config.get("analysis_lang_source1")
+                    ref_lang_str = str(source_config.get("analysis_lang_source1", ""))
                     for i, track in enumerate(source1_audio_tracks):
                         track_lang = (
                             (track.get("properties", {}).get("language", "") or "")
                             .strip()
                             .lower()
                         )
-                        if track_lang == ref_lang.strip().lower():
+                        if track_lang == ref_lang_str.strip().lower():
                             ref_track_id = track.get("id")
                             track_container_delay = source1_container_delays.get(
                                 ref_track_id, 0
@@ -684,26 +607,31 @@ class AnalysisStep:
                             if track_container_delay != source1_audio_container_delay:
                                 actual_container_delay = track_container_delay
                                 runner._log_message(
-                                    f"[Container Delay Override] Using Source 1 audio index {i} (track ID {ref_track_id}, lang={ref_lang}) delay: "
+                                    f"[Container Delay Override] Using Source 1 audio index {i} (track ID {ref_track_id}, lang={ref_lang_str}) delay: "
                                     f"{actual_container_delay:+.3f}ms (global reference was {source1_audio_container_delay:+.3f}ms)"
                                 )
                             break
 
-            # Store both rounded (for mkvmerge) and raw (for subtitle sync precision)
-            final_delay_ms = round(correlation_delay_ms + actual_container_delay)
-            final_delay_raw = correlation_delay_raw + actual_container_delay
+            # Calculate final delay using module
+            final_delay = calculate_final_delay(
+                correlation_delay_ms=correlation_delay_ms,
+                correlation_delay_raw=correlation_delay_raw,
+                container_delay_ms=actual_container_delay,
+            )
+            final_delay_ms = final_delay.rounded_ms
+            final_delay_raw = final_delay.raw_ms
 
             # Log the delay calculation chain for transparency
             runner._log_message(f"[Delay Calculation] {source_key} delay chain:")
             runner._log_message(
-                f"[Delay Calculation]   Correlation delay: {correlation_delay_raw:+.3f}ms (raw) → {correlation_delay_ms:+d}ms (rounded)"
+                f"[Delay Calculation]   Correlation delay: {final_delay.correlation_raw_ms:+.3f}ms (raw) → {final_delay.correlation_rounded_ms:+d}ms (rounded)"
             )
-            if actual_container_delay != 0:
+            if final_delay.container_delay_ms != 0:
                 runner._log_message(
-                    f"[Delay Calculation]   + Container delay:  {actual_container_delay:+.3f}ms"
+                    f"[Delay Calculation]   + Container delay:  {final_delay.container_delay_ms:+.3f}ms"
                 )
                 runner._log_message(
-                    f"[Delay Calculation]   = Final delay:      {final_delay_raw:+.3f}ms (raw) → {final_delay_ms:+d}ms (rounded)"
+                    f"[Delay Calculation]   = Final delay:      {final_delay.raw_ms:+.3f}ms (raw) → {final_delay.rounded_ms:+d}ms (rounded)"
                 )
 
             source_delays[source_key] = final_delay_ms
@@ -750,70 +678,31 @@ class AnalysisStep:
         # --- Step 3: Calculate Global Shift to Handle Negative Delays ---
         runner._log_message("\n--- Calculating Global Shift ---")
 
-        delays_to_consider = []
-        raw_delays_to_consider = []  # For VideoTimestamps precision
-        if ctx.global_shift_is_required:
-            runner._log_message(
-                "[Global Shift] Identifying delays from sources contributing audio tracks..."
-            )
-            for item in ctx.manual_layout:
-                item_source = item.get("source")
-                item_type = item.get("type")
-                if item_type == "audio":
-                    if (
-                        item_source in source_delays
-                        and source_delays[item_source] not in delays_to_consider
-                    ):
-                        delays_to_consider.append(source_delays[item_source])
-                        raw_delays_to_consider.append(raw_source_delays[item_source])
-                        runner._log_message(
-                            f"  - Considering delay from {item_source}: {source_delays[item_source]}ms"
-                        )
-
-            if source1_container_delays and source1_info:
-                audio_container_delays = []
-                for track in source1_info.get("tracks", []):
-                    if track.get("type") == "audio":
-                        tid = track.get("id")
-                        delay = source1_container_delays.get(tid, 0)
-                        if delay != 0:
-                            audio_container_delays.append(delay)
-
-                if audio_container_delays:
-                    delays_to_consider.extend(audio_container_delays)
-                    runner._log_message(
-                        "  - Considering Source 1 audio container delays (video delays ignored)."
-                    )
-
-        most_negative = min(delays_to_consider) if delays_to_consider else 0
-        most_negative_raw = (
-            min(raw_delays_to_consider) if raw_delays_to_consider else 0.0
-        )
+        # Calculate global shift using module (only if required)
         global_shift_ms = 0
         raw_global_shift_ms = 0.0
 
-        if most_negative < 0:
-            # Rounded global shift for mkvmerge/audio sync (existing behavior)
-            global_shift_ms = abs(most_negative)
-            # Raw global shift for VideoTimestamps precision (prevents triple rounding)
-            raw_global_shift_ms = abs(most_negative_raw)
-
-            runner._log_message(
-                f"[Delay] Most negative relevant delay: {most_negative}ms (rounded), {most_negative_raw:.3f}ms (raw)"
+        if ctx.global_shift_is_required:
+            global_shift_ms, raw_global_shift_ms = calculate_global_shift(
+                source_delays=source_delays,
+                raw_source_delays=raw_source_delays,
+                container_delays=source1_container_delays,
+                stream_info=source1_info,
+                layout=ctx.manual_layout,
+                log=runner._log_message,
             )
-            runner._log_message(
-                f"[Delay] Applying lossless global shift: +{global_shift_ms}ms (rounded), +{raw_global_shift_ms:.3f}ms (raw)"
-            )
-            runner._log_message("[Delay] Adjusted delays after global shift:")
-            for source_key in sorted(source_delays.keys()):
-                original_delay = source_delays[source_key]
-                original_raw_delay = raw_source_delays[source_key]
-                source_delays[source_key] += global_shift_ms
-                raw_source_delays[source_key] += raw_global_shift_ms
-                runner._log_message(
-                    f"  - {source_key}: {original_delay:+.1f}ms → {source_delays[source_key]:+.1f}ms (rounded: {original_raw_delay:+.3f}ms → {raw_source_delays[source_key]:+.3f}ms raw)"
-                )
 
+        # Apply global shift if needed
+        if global_shift_ms > 0:
+            source_delays, raw_source_delays = apply_global_shift(
+                source_delays=source_delays,
+                raw_source_delays=raw_source_delays,
+                shift_ms=global_shift_ms,
+                raw_shift_ms=raw_global_shift_ms,
+                log=runner._log_message,
+            )
+
+            # Log Source 1 container delay adjustments for transparency
             if source1_container_delays and source1_info:
                 runner._log_message(
                     f"[Delay] Source 1 container delays (will have +{global_shift_ms}ms added during mux):"
@@ -840,6 +729,9 @@ class AnalysisStep:
 
         # === AUDIT: Record global shift calculation ===
         if ctx.audit:
+            # Derive most_negative from shift (shift = abs(most_negative))
+            most_negative = -global_shift_ms if global_shift_ms > 0 else 0
+            most_negative_raw = -raw_global_shift_ms if raw_global_shift_ms > 0 else 0.0
             ctx.audit.record_global_shift(
                 most_negative_raw_ms=most_negative_raw,
                 most_negative_rounded_ms=most_negative,
