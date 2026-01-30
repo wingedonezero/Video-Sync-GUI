@@ -30,6 +30,7 @@ from .auditors import (
     DriftCorrectionAuditor,
     SteppingCorrectionAuditor,
     GlobalShiftAuditor,
+    SubtitleClampingAuditor,
 )
 
 
@@ -199,6 +200,12 @@ class FinalAuditor:
 
         self.log("\n--- Auditing FrameLocked Subtitle Quality ---")
         total_issues += self._audit_framelocked_stats()
+
+        self.log("\n--- Auditing Subtitle Timestamp Clamping ---")
+        auditor = SubtitleClampingAuditor(self.ctx, self.runner)
+        auditor._source_ffprobe_cache = self._shared_ffprobe_cache
+        auditor._source_mkvmerge_cache = self._shared_mkvmerge_cache
+        total_issues += auditor.run(final_mkv_path, final_mkvmerge_data, final_ffprobe_data)
 
         self.log("\n--- Auditing Chapters ---")
         auditor = ChaptersAuditor(self.ctx, self.runner)

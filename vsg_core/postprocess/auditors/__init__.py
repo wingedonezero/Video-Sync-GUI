@@ -18,6 +18,7 @@ from .attachments import AttachmentsAuditor
 from .drift_correction import DriftCorrectionAuditor
 from .stepping_correction import SteppingCorrectionAuditor
 from .global_shift import GlobalShiftAuditor
+from .subtitle_clamping import SubtitleClampingAuditor
 
 __all__ = [
     'TrackFlagsAuditor',
@@ -37,4 +38,5 @@ __all__ = [
     'DriftCorrectionAuditor',
     'SteppingCorrectionAuditor',
     'GlobalShiftAuditor',
+    'SubtitleClampingAuditor',
 ]
