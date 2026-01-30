@@ -21,18 +21,17 @@ from collections import Counter
 from typing import Any
 
 from vsg_core.analysis.audio_corr import run_audio_correlation, run_multi_correlation
-from vsg_core.analysis.config_builder import (
-    should_use_source_separation as _should_use_source_separated_mode,
-)
+from vsg_core.analysis.config_builder import should_use_source_separation
 from vsg_core.analysis.delay_selection import (
     find_first_stable_segment_delay,
     select_delay,
 )
-from vsg_core.analysis.diagnostics import diagnose_audio_issue
-from vsg_core.analysis.sync_stability import analyze_sync_stability
-from vsg_core.analysis.track_selection import (
-    format_track_details as _format_track_details,
+from vsg_core.analysis.diagnostics import (
+    apply_diagnosis_flags,
+    diagnose_audio_issue,
 )
+from vsg_core.analysis.sync_stability import analyze_sync_stability
+from vsg_core.analysis.track_selection import format_track_details
 from vsg_core.extraction.tracks import get_stream_info, get_stream_info_with_delays
 from vsg_core.io.runner import CommandRunner
 from vsg_core.models import Context, Delays
@@ -209,14 +208,14 @@ class AnalysisStep:
                     ).strip().lower() == ref_lang:
                         source1_audio_track_id = track.get("id")
                         runner._log_message(
-                            f"[Source 1] Selected (lang={ref_lang}): {_format_track_details(track, idx)}"
+                            f"[Source 1] Selected (lang={ref_lang}): {format_track_details(track, idx)}"
                         )
                         break
 
             if source1_audio_track_id is None and audio_tracks:
                 source1_audio_track_id = audio_tracks[0].get("id")
                 runner._log_message(
-                    f"[Source 1] Selected (first track): {_format_track_details(audio_tracks[0], 0)}"
+                    f"[Source 1] Selected (first track): {format_track_details(audio_tracks[0], 0)}"
                 )
 
             if source1_audio_track_id is not None:
@@ -275,7 +274,7 @@ class AnalysisStep:
                 if 0 <= correlation_ref_track < len(source1_audio_tracks):
                     ref_track = source1_audio_tracks[correlation_ref_track]
                     runner._log_message(
-                        f"[Source 1] Selected (explicit): {_format_track_details(ref_track, correlation_ref_track)}"
+                        f"[Source 1] Selected (explicit): {format_track_details(ref_track, correlation_ref_track)}"
                     )
                 else:
                     runner._log_message(
@@ -287,7 +286,7 @@ class AnalysisStep:
             # This decision affects correlation method and delay selection mode
             # Make this decision ONCE and create appropriate config for this source
             # ===================================================================
-            use_source_separated_settings = _should_use_source_separated_mode(
+            use_source_separated_settings = should_use_source_separation(
                 source_key, config, ctx.source_settings
             )
 
@@ -346,7 +345,7 @@ class AnalysisStep:
                 if 0 <= correlation_source_track < len(audio_tracks):
                     target_track_obj = audio_tracks[correlation_source_track]
                     runner._log_message(
-                        f"[{source_key}] Selected (explicit): {_format_track_details(target_track_obj, correlation_source_track)}"
+                        f"[{source_key}] Selected (explicit): {format_track_details(target_track_obj, correlation_source_track)}"
                     )
                 else:
                     runner._log_message(
@@ -357,7 +356,7 @@ class AnalysisStep:
                     # Otherwise run_audio_correlation would receive the invalid index
                     correlation_source_track = 0
                     runner._log_message(
-                        f"[{source_key}] Selected (fallback): {_format_track_details(target_track_obj, 0)}"
+                        f"[{source_key}] Selected (fallback): {format_track_details(target_track_obj, 0)}"
                     )
             # Priority 2: Language matching
             elif tgt_lang:
@@ -367,7 +366,7 @@ class AnalysisStep:
                     ).strip().lower() == tgt_lang:
                         target_track_obj = track
                         runner._log_message(
-                            f"[{source_key}] Selected (lang={tgt_lang}): {_format_track_details(track, idx)}"
+                            f"[{source_key}] Selected (lang={tgt_lang}): {format_track_details(track, idx)}"
                         )
                         break
 
@@ -375,7 +374,7 @@ class AnalysisStep:
             if not target_track_obj:
                 target_track_obj = audio_tracks[0]
                 runner._log_message(
-                    f"[{source_key}] Selected (first track): {_format_track_details(target_track_obj, 0)}"
+                    f"[{source_key}] Selected (first track): {format_track_details(target_track_obj, 0)}"
                 )
 
             target_track_id = target_track_obj.get("id")
@@ -728,129 +727,18 @@ class AnalysisStep:
                 )
 
             # --- Handle drift detection flags ---
-            # CRITICAL: Drift/stepping corrections are NOT compatible with source separation
-            # The separated stems have different waveform characteristics that make
-            # precise timing corrections unreliable
-            if diagnosis:
-                analysis_track_key = f"{source_key}_{target_track_id}"
-
-                if diagnosis == "PAL_DRIFT":
-                    # Block PAL drift correction when source separation is enabled
-                    if use_source_separated_settings:
-                        runner._log_message(
-                            f"[PAL Drift Detected] PAL drift detected in {source_key}, but source separation "
-                            f"is enabled. PAL correction is unreliable on separated stems - skipping."
-                        )
-                    else:
-                        source_has_audio_in_layout = any(
-                            item.get("source") == source_key
-                            and item.get("type") == "audio"
-                            for item in ctx.manual_layout
-                        )
-
-                        if source_has_audio_in_layout:
-                            ctx.pal_drift_flags[analysis_track_key] = details
-                        else:
-                            runner._log_message(
-                                f"[PAL Drift Detected] PAL drift detected in {source_key}, but no audio tracks "
-                                f"from this source are being used. Skipping PAL correction for {source_key}."
-                            )
-
-                elif diagnosis == "LINEAR_DRIFT":
-                    # Block linear drift correction when source separation is enabled
-                    if use_source_separated_settings:
-                        runner._log_message(
-                            f"[Linear Drift Detected] Linear drift detected in {source_key}, but source separation "
-                            f"is enabled. Linear drift correction is unreliable on separated stems - skipping."
-                        )
-                    else:
-                        source_has_audio_in_layout = any(
-                            item.get("source") == source_key
-                            and item.get("type") == "audio"
-                            for item in ctx.manual_layout
-                        )
-
-                        if source_has_audio_in_layout:
-                            ctx.linear_drift_flags[analysis_track_key] = details
-                        else:
-                            runner._log_message(
-                                f"[Linear Drift Detected] Linear drift detected in {source_key}, but no audio tracks "
-                                f"from this source are being used. Skipping linear drift correction for {source_key}."
-                            )
-
-                elif diagnosis == "STEPPING":
-                    # Block stepping correction when source separation is enabled
-                    # (Already handled earlier in the stepping detection block, but also skip flag storage)
-                    if use_source_separated_settings:
-                        # Already logged above, just skip storing flags
-                        pass
-                    else:
-                        source_has_audio_in_layout = any(
-                            item.get("source") == source_key
-                            and item.get("type") == "audio"
-                            for item in ctx.manual_layout
-                        )
-                        source_has_subs_in_layout = any(
-                            item.get("source") == source_key
-                            and item.get("type") == "subtitles"
-                            for item in ctx.manual_layout
-                        )
-
-                        if source_has_audio_in_layout:
-                            # Store stepping correction info with the corrected delay and cluster diagnostics
-                            ctx.segment_flags[analysis_track_key] = {
-                                "base_delay": final_delay_ms,
-                                "cluster_details": details.get("cluster_details", []),
-                                "valid_clusters": details.get("valid_clusters", {}),
-                                "invalid_clusters": details.get("invalid_clusters", {}),
-                                "validation_results": details.get(
-                                    "validation_results", {}
-                                ),
-                                "correction_mode": details.get(
-                                    "correction_mode", "full"
-                                ),
-                                "fallback_mode": details.get(
-                                    "fallback_mode", "nearest"
-                                ),
-                                "subs_only": False,
-                            }
-                            runner._log_message(
-                                f"[Stepping] Stepping correction will be applied to audio tracks from {source_key}."
-                            )
-                        elif source_has_subs_in_layout and config.get(
-                            "stepping_adjust_subtitles_no_audio", True
-                        ):
-                            # No audio but subs exist - run full stepping correction to get verified EDL
-                            runner._log_message(
-                                f"[Stepping Detected] Stepping detected in {source_key}. No audio tracks "
-                                f"from this source, but subtitles will use verified stepping EDL."
-                            )
-                            # Set segment_flags so stepping correction step runs full analysis
-                            ctx.segment_flags[analysis_track_key] = {
-                                "base_delay": final_delay_ms,
-                                "cluster_details": details.get("cluster_details", []),
-                                "valid_clusters": details.get("valid_clusters", {}),
-                                "invalid_clusters": details.get("invalid_clusters", {}),
-                                "validation_results": details.get(
-                                    "validation_results", {}
-                                ),
-                                "correction_mode": details.get(
-                                    "correction_mode", "full"
-                                ),
-                                "fallback_mode": details.get(
-                                    "fallback_mode", "nearest"
-                                ),
-                                "subs_only": True,  # Flag to indicate no audio application needed
-                            }
-                            runner._log_message(
-                                "[Stepping] Full stepping analysis will run for verified subtitle EDL."
-                            )
-                        else:
-                            # No audio and no subs (or setting disabled)
-                            runner._log_message(
-                                f"[Stepping Detected] Stepping detected in {source_key}, but no audio or subtitle tracks "
-                                f"from this source are being used. Skipping stepping correction."
-                            )
+            # Delegate to diagnostics module for flag handling
+            apply_diagnosis_flags(
+                ctx=ctx,
+                diagnosis=diagnosis,
+                details=details,
+                source_key=source_key,
+                track_id=target_track_id,
+                use_source_separation=use_source_separated_settings,
+                final_delay_ms=final_delay_ms,
+                config=config,
+                log=runner._log_message,
+            )
 
         # Store stepping sources in context for final report
         ctx.stepping_sources = stepping_sources
