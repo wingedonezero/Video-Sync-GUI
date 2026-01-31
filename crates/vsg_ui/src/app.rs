@@ -155,71 +155,32 @@ impl App {
 /// - text/uri-list: KDE Dolphin, many file managers
 /// - text/plain: Fallback for some apps
 fn setup_drop_target(entry: &gtk::Entry, source_idx: usize, sender: ComponentSender<App>) {
-    use gtk::gio::prelude::*;
+    let drop_target = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY);
+    drop_target.set_types(&[gdk::FileList::static_type(), glib::Type::STRING]);
 
-    // Create ContentFormats with MIME types that Dolphin and other file managers use
-    let formats = gdk::ContentFormats::new(&["text/uri-list", "text/plain"]);
-
-    let drop_target = gtk::DropTargetAsync::new(Some(formats), gdk::DragAction::COPY);
-
-    // Connect to the drop signal
-    let sender_clone = sender.clone();
-    drop_target.connect_drop(move |_target, drop, _x, _y| {
-        let sender = sender_clone.clone();
-        let drop = drop.clone();
-
-        // Spawn async task to read the drop data
-        relm4::spawn_local(async move {
-            eprintln!("[DnD] Drop received, reading data...");
-
-            // Try reading as text/uri-list first
-            match drop
-                .read_future(&["text/uri-list", "text/plain"], glib::Priority::DEFAULT)
-                .await
-            {
-                Ok((stream, mime_type)) => {
-                    eprintln!("[DnD] Got stream with MIME type: {}", mime_type);
-
-                    // Read all content from the stream using read_all_future
-                    // Buffer size of 8KB should be plenty for file URIs
-                    let buffer = vec![0u8; 8192];
-                    match stream
-                        .read_all_future(buffer, glib::Priority::DEFAULT)
-                        .await
-                    {
-                        Ok((buffer, bytes_read, _)) => {
-                            eprintln!("[DnD] Read {} bytes", bytes_read);
-                            if let Ok(text) = String::from_utf8(buffer[..bytes_read].to_vec()) {
-                                eprintln!("[DnD] Raw text: {:?}", text);
-                                let cleaned = clean_file_url(&text);
-                                eprintln!("[DnD] Cleaned path: {:?}", cleaned);
-                                if !cleaned.is_empty() {
-                                    let path = std::path::PathBuf::from(&cleaned);
-                                    if path.exists() {
-                                        eprintln!("[DnD] File exists, sending FileDropped");
-                                        sender.input(AppMsg::FileDropped(source_idx, path));
-                                        drop.finish(gdk::DragAction::COPY);
-                                        return;
-                                    } else {
-                                        eprintln!("[DnD] Path does not exist: {:?}", path);
-                                    }
-                                }
-                            }
-                        }
-                        Err((_, e)) => {
-                            eprintln!("[DnD] Error reading stream: {:?}", e);
-                        }
-                    }
-                    drop.finish(gdk::DragAction::empty());
-                }
-                Err(e) => {
-                    eprintln!("[DnD] Error reading drop: {:?}", e);
-                    drop.finish(gdk::DragAction::empty());
+    let input_sender = sender.input_sender().clone();
+    drop_target.connect_drop(move |_target, value, _x, _y| {
+        if let Ok(file_list) = value.get::<gdk::FileList>() {
+            if let Some(file) = file_list.files().first() {
+                if let Some(path) = file.path() {
+                    let _ = input_sender.send(AppMsg::FileDropped(source_idx, path));
+                    return true;
                 }
             }
-        });
+        }
 
-        true // We're handling it asynchronously
+        if let Ok(text) = value.get::<String>() {
+            let cleaned = clean_file_url(&text);
+            if !cleaned.is_empty() {
+                let path = std::path::PathBuf::from(&cleaned);
+                if path.exists() {
+                    let _ = input_sender.send(AppMsg::FileDropped(source_idx, path));
+                    return true;
+                }
+            }
+        }
+
+        false
     });
 
     entry.add_controller(drop_target);
@@ -618,7 +579,10 @@ impl Component for App {
 
             AppMsg::PasteToSource(idx) => {
                 let sender = sender.clone();
-                let display = gdk::Display::default().unwrap();
+                let Some(display) = gdk::Display::default() else {
+                    self.append_log("Clipboard unavailable: no display.");
+                    return;
+                };
                 let clipboard = display.clipboard();
 
                 relm4::spawn_local(async move {

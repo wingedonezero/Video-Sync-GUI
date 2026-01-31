@@ -192,6 +192,16 @@ impl Component for AddJobDialog {
             });
         });
 
+        // Window close button
+        let output_sender = sender.output_sender().clone();
+        root.connect_close_request(move |_| {
+            let sender = output_sender.clone();
+            glib::idle_add_local_once(move || {
+                let _ = sender.send(AddJobOutput::Cancelled);
+            });
+            glib::Propagation::Proceed
+        });
+
         ComponentParts { model, widgets }
     }
 
