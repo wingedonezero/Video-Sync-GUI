@@ -49,3 +49,69 @@
 - When producing code changes:
   - summarize what changed and why,
   - note any behavior changes,
+
+---
+
+# Rust Rewrite Guidelines
+
+## 9) Python Reference Folder
+
+- `Original Python Codebase/` is the **reference implementation only**
+- Purpose: Blueprint for rewriting to Rust - study the logic, not copy the patterns
+- The Rust version should be **better**: stronger types, no dict chaos, modular, testable
+- UI files are blueprints for layout/flow - replicate UX, not implementation
+
+### Removing Python code
+- **Never delete Python files without explicit approval**
+- Only request removal when:
+  1. The equivalent Rust code is 100% complete
+  2. All features from that Python module are implemented
+  3. Tests/validation confirm feature parity
+- Ask before removal: "Module X is fully rewritten. Approve removal of Python file Y?"
+- Track progress: note which Python modules remain vs completed
+
+## 10) Rust Architecture (strict hierarchy)
+
+```
+ORCHESTRATOR (vsg_core/orchestrator/)
+  → Owns Context, runs steps in sequence, validates between steps
+  → Single source of truth for job state
+
+STEPS (vsg_core/orchestrator/steps/)
+  → Micro-orchestrators: coordinate modules, log progress, update Context
+  → NO business logic - only control flow and delegation
+  → Each step validates its inputs/outputs
+
+MODULES (vsg_core/analysis/, correction/, subtitles/, etc.)
+  → ALL business logic lives here as pure functions
+  → Return typed structs, never modify Context directly
+  → Steps call modules, modules never call steps
+```
+
+### Data flow rules
+- Context is read-only to modules; only steps mutate JobState
+- Modules return `Result<TypedStruct, Error>` - steps decide what to do
+- No `HashMap<String, Value>` for known shapes - use structs with named fields
+
+## 11) Data Structures (Rust)
+
+- **Always use structs/enums** - never untyped maps for known shapes
+- **Define types close to usage** - `models/` for shared, local `types.rs` for module-specific
+- **Single source of truth** - one canonical type per concept (e.g., one `Delays` struct)
+- **Derive traits consistently**: `Debug, Clone, Serialize, Deserialize` on all data types
+- **Use newtype wrappers** for domain concepts (e.g., `Milliseconds(f64)`, `TrackId(u32)`)
+
+## 12) UI Framework (GTK4 + Relm4)
+
+- UI lives in `vsg_ui` crate, depends on `vsg_core`
+- **Relm4 pattern**: Components with Model, Widgets, Messages
+- **No business logic in UI** - call vsg_core functions, display results
+- Keep UI state separate from core job state
+- Use async channels for long operations (analysis, mux)
+
+## 13) No Duplication
+
+- Before adding a type/function, search for existing ones
+- One module owns each concept - others import, never redefine
+- If two places need similar logic, extract to shared module
+- Conversion functions live with the target type (`impl From<X> for Y` on Y)
