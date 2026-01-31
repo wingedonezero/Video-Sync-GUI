@@ -342,12 +342,10 @@ impl Component for TrackSettingsDialog {
 
             TrackSettingsMsg::Accept => {
                 let _ = sender.output(TrackSettingsOutput::Accepted(self.track.clone()));
-                root.close();
             }
 
             TrackSettingsMsg::Cancel => {
                 let _ = sender.output(TrackSettingsOutput::Cancelled);
-                root.close();
             }
         }
     }

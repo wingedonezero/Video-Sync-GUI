@@ -483,13 +483,13 @@ impl Component for JobQueueDialog {
 
                 // All jobs configured - collect and start processing
                 let configured_jobs: Vec<JobQueueEntry> = jobs.to_vec();
+                // Just send output - parent will drop controller which closes window
                 let _ = sender.output(JobQueueOutput::StartProcessing(configured_jobs));
-                root.close();
             }
 
             JobQueueMsg::Close => {
+                // Just send output - parent will drop controller which closes window
                 let _ = sender.output(JobQueueOutput::Closed);
-                root.close();
             }
 
             JobQueueMsg::RefreshList => {

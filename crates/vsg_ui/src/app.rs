@@ -150,15 +150,11 @@ impl App {
 
 /// Setup drag-drop for an entry widget
 fn setup_drop_target(entry: &gtk::Entry, source_idx: usize, sender: ComponentSender<App>) {
-    // Create drop target that accepts both FileList and text (for URI strings)
+    // Create drop target for FileList (standard file drops from most file managers)
     let drop_target = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY);
-
-    // Also accept text/uri-list format (used by some file managers like Dolphin)
-    drop_target.set_types(&[gdk::FileList::static_type(), glib::GString::static_type()]);
 
     let sender_clone = sender.clone();
     drop_target.connect_drop(move |_target, value, _x, _y| {
-        // Try FileList first (standard drag-drop)
         if let Ok(file_list) = value.get::<gdk::FileList>() {
             if let Some(file) = file_list.files().first() {
                 if let Some(path) = file.path() {
@@ -167,23 +163,30 @@ fn setup_drop_target(entry: &gtk::Entry, source_idx: usize, sender: ComponentSen
                 }
             }
         }
+        false
+    });
 
-        // Try GString (text/uri-list format from some file managers)
+    entry.add_controller(drop_target);
+
+    // Create separate drop target for text/uri-list (Dolphin and some other file managers)
+    let text_drop_target = gtk::DropTarget::new(glib::GString::static_type(), gdk::DragAction::COPY);
+
+    let sender_clone2 = sender.clone();
+    text_drop_target.connect_drop(move |_target, value, _x, _y| {
         if let Ok(text) = value.get::<glib::GString>() {
             let cleaned = clean_file_url(text.as_str());
             if !cleaned.is_empty() {
                 let path = std::path::PathBuf::from(&cleaned);
                 if path.exists() {
-                    sender_clone.input(AppMsg::FileDropped(source_idx, path));
+                    sender_clone2.input(AppMsg::FileDropped(source_idx, path));
                     return true;
                 }
             }
         }
-
         false
     });
 
-    entry.add_controller(drop_target);
+    entry.add_controller(text_drop_target);
 }
 
 /// Setup clipboard paste for an entry widget

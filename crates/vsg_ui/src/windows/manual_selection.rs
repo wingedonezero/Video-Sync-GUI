@@ -561,12 +561,10 @@ impl Component for ManualSelectionDialog {
                 }
 
                 let _ = sender.output(ManualSelectionOutput::LayoutAccepted);
-                root.close();
             }
 
             ManualSelectionMsg::Cancel => {
                 let _ = sender.output(ManualSelectionOutput::Cancelled);
-                root.close();
             }
         }
     }
