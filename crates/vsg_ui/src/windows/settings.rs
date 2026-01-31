@@ -159,6 +159,7 @@ impl Component for SettingsDialog {
                                     add_suffix = &gtk::Entry {
                                         set_hexpand: true,
                                         set_valign: gtk::Align::Center,
+                                        #[watch]
                                         set_text: &model.settings.paths.output_folder,
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::OutputFolderChanged(e.text().to_string()));
@@ -179,6 +180,7 @@ impl Component for SettingsDialog {
                                     add_suffix = &gtk::Entry {
                                         set_hexpand: true,
                                         set_valign: gtk::Align::Center,
+                                        #[watch]
                                         set_text: &model.settings.paths.temp_root,
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::TempFolderChanged(e.text().to_string()));
@@ -199,6 +201,7 @@ impl Component for SettingsDialog {
                                     add_suffix = &gtk::Entry {
                                         set_hexpand: true,
                                         set_valign: gtk::Align::Center,
+                                        #[watch]
                                         set_text: &model.settings.paths.logs_folder,
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::LogsFolderChanged(e.text().to_string()));
@@ -260,6 +263,7 @@ impl Component for SettingsDialog {
 
                                     adw::EntryRow {
                                         set_title: "Source 1 Language",
+                                        #[watch]
                                         set_text: model.settings.analysis.lang_source1.as_deref().unwrap_or(""),
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::LangSource1Changed(e.text().to_string()));
@@ -268,6 +272,7 @@ impl Component for SettingsDialog {
 
                                     adw::EntryRow {
                                         set_title: "Other Sources Language",
+                                        #[watch]
                                         set_text: model.settings.analysis.lang_others.as_deref().unwrap_or(""),
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::LangOthersChanged(e.text().to_string()));
