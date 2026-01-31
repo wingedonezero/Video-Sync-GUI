@@ -696,67 +696,116 @@ verify_dependencies() {
         return 1
     fi
 
-    echo -e "${YELLOW}Checking required dependencies...${NC}"
+    echo -e "${YELLOW}Checking dependencies from pyproject.toml...${NC}"
     echo ""
 
-    # Read requirements.txt and check each package
-    missing=()
-    installed=()
+    # Use Python to parse pyproject.toml and check packages
+    "$VENV_PYTHON" << 'PYEOF'
+import sys
+import tomllib
+from pathlib import Path
+import subprocess
 
-    while IFS= read -r line; do
-        # Skip comments and empty lines
-        [[ "$line" =~ ^#.*$ ]] && continue
-        [[ -z "$line" ]] && continue
+# Colors
+GREEN = '\033[0;32m'
+RED = '\033[0;31m'
+YELLOW = '\033[1;33m'
+CYAN = '\033[0;36m'
+NC = '\033[0m'
 
-        # Extract package name (before any version specifier)
-        pkg=$(echo "$line" | sed 's/[>=<\[].*$//' | xargs)
+def get_installed_version(pkg_name):
+    """Get installed version of a package, or None if not installed."""
+    # Normalize package name for pip show
+    normalized = pkg_name.lower().replace('_', '-').split('[')[0]
+    try:
+        result = subprocess.run(
+            [sys.executable, '-m', 'pip', 'show', normalized],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            for line in result.stdout.split('\n'):
+                if line.startswith('Version:'):
+                    return line.split(':', 1)[1].strip()
+    except Exception:
+        pass
+    return None
 
-        if venv_pip show "$pkg" &> /dev/null; then
-            version=$(venv_pip show "$pkg" 2>/dev/null | grep "^Version:" | cut -d' ' -f2)
-            installed+=("$pkg ($version)")
-        else
-            missing+=("$pkg")
-        fi
-    done < "$PROJECT_DIR/requirements.txt"
+def parse_dep_name(dep):
+    """Extract package name from dependency string like 'foo>=1.0' or 'bar[extra]'."""
+    import re
+    match = re.match(r'^([a-zA-Z0-9_-]+)', dep.replace('_', '-'))
+    return match.group(1).lower() if match else dep.lower()
 
-    # Display results
-    echo -e "${GREEN}✓ Installed packages: ${#installed[@]}${NC}"
-    for pkg in "${installed[@]}"; do
-        echo "  $pkg"
-    done
+# Read pyproject.toml
+pyproject_path = Path('pyproject.toml')
+if not pyproject_path.exists():
+    print(f"{RED}✗ pyproject.toml not found{NC}")
+    sys.exit(1)
 
-    echo ""
+with open(pyproject_path, 'rb') as f:
+    config = tomllib.load(f)
 
-    if [ ${#missing[@]} -eq 0 ]; then
-        echo -e "${GREEN}✓ All required dependencies are installed!${NC}"
-    else
-        echo -e "${RED}✗ Missing packages: ${#missing[@]}${NC}"
-        for pkg in "${missing[@]}"; do
-            echo "  $pkg"
-        done
-        echo ""
-        echo -n "Do you want to install missing packages? [y/N]: "
-        read -r response
+# Get dependencies
+deps = config.get('project', {}).get('dependencies', [])
+optional_deps = config.get('project', {}).get('optional-dependencies', {})
 
-        if [[ "$response" =~ ^[Yy]$ ]]; then
-            echo ""
-            echo -e "${BLUE}Installing missing packages...${NC}"
-            venv_pip install -r "$PROJECT_DIR/requirements.txt"
-            echo ""
-            echo -e "${GREEN}✓ Missing packages installed${NC}"
-        fi
+installed = []
+missing = []
+
+print(f"{CYAN}Core dependencies:{NC}")
+for dep in deps:
+    name = parse_dep_name(dep)
+    version = get_installed_version(name)
+    if version:
+        installed.append((name, version))
+        print(f"  {GREEN}✓{NC} {name} ({version})")
+    else:
+        missing.append(name)
+        print(f"  {RED}✗{NC} {name} (missing)")
+
+print()
+print(f"{CYAN}Optional dependencies:{NC}")
+for group, group_deps in optional_deps.items():
+    print(f"  [{group}]:")
+    for dep in group_deps:
+        name = parse_dep_name(dep)
+        version = get_installed_version(name)
+        if version:
+            print(f"    {GREEN}✓{NC} {name} ({version})")
+        else:
+            print(f"    {YELLOW}○{NC} {name} (not installed)")
+
+print()
+if missing:
+    print(f"{RED}✗ Missing core packages: {len(missing)}{NC}")
+    for name in missing:
+        print(f"  {name}")
+else:
+    print(f"{GREEN}✓ All core dependencies installed!{NC}")
+
+# Summary
+print()
+print(f"{GREEN}Summary: {len(installed)} core packages installed, {len(missing)} missing{NC}")
+PYEOF
+
+    local exit_code=$?
+
+    if [ $exit_code -ne 0 ]; then
+        echo -e "${RED}Failed to verify dependencies${NC}"
+        return 1
     fi
 
-    # Check optional dependencies
+    # Offer to install missing
     echo ""
-    echo -e "${YELLOW}Checking optional AI audio dependencies...${NC}"
-    if venv_pip show audio-separator &> /dev/null; then
-        sep_version=$(venv_pip show audio-separator 2>/dev/null | grep "^Version:" | cut -d' ' -f2)
-        echo -e "${GREEN}✓ AI audio features installed${NC}"
-        echo "  audio-separator ($sep_version)"
-    else
-        echo -e "${YELLOW}○ AI audio features not installed (optional)${NC}"
-        echo "  Use option 3 to install them"
+    echo -n "Install/update all dependencies? [y/N]: "
+    read -r response
+
+    if [[ "$response" =~ ^[Yy]$ ]]; then
+        echo ""
+        echo -e "${BLUE}Installing dependencies from pyproject.toml...${NC}"
+        venv_pip install -e ".[dev]"
+        echo ""
+        echo -e "${GREEN}✓ Dependencies installed/updated${NC}"
     fi
 }
 
@@ -959,7 +1008,15 @@ echo -e "${YELLOW}[3/3] Installing dependencies...${NC}"
 echo "This may take a few minutes..."
 
 cd "$PROJECT_DIR"
-venv_pip install -r requirements.txt
+
+# Install from pyproject.toml (editable mode)
+echo -e "${BLUE}Installing core dependencies from pyproject.toml...${NC}"
+venv_pip install -e .
+
+# Install dev dependencies (ruff, pyright, pytest, type stubs)
+echo -e "${BLUE}Installing development tools...${NC}"
+venv_pip install -e ".[dev]"
+
 rebuild_pyav_from_source
 
 echo -e "${GREEN}✓ Dependencies installed${NC}"
