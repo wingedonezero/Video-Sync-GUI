@@ -22,47 +22,30 @@
 - Do not add new libraries without proposing options + tradeoffs.
 - Prefer fewer dependencies; justify any new one.
 - If a library/version is uncertain, stop and discuss first.
+- Use latest stable librarys always check wen add a new lib
 
 ## 4) Research, don’t assume
 - When API/behavior is uncertain: consult official docs or upstream source.
 - If you can’t verify: say so and propose the safest path.
 
-## 5) Code style and tooling (Python)
-- Python code MUST be:
-  - formatted with **Black** (line length 88),
-  - linted with **Ruff** (including import sorting).
-- Do not hand-format or bikeshed formatting; rely on Black/Ruff outputs.
-- Follow the repository’s `pyproject.toml` settings.
-
-## 6) Gradual formatting policy (avoid giant diffs)
-- Do NOT run mass reformat/lint across the entire repo unless explicitly requested.
-- Default behavior:
-  - format/lint only the files you touch,
-  - keep diffs focused on the intended change.
-- If a file is already being edited, it’s OK to format/lint that file as part of the change.
-
-## 7) Type hints and readability
+## 5) Type hints and readability
 - Add type hints for all public functions and any non-trivial internal functions you modify/create.
 - Prefer small functions, clear naming, and predictable structure.
 - Add comments/docstrings when intent is not obvious (explain WHY more than WHAT).
 
-## 8) Tests / validation expectations
+## 6) Tests / validation expectations
 - For risky changes (parsing, timing, IO, concurrency, data transforms):
   - add/extend tests OR provide a clear validation plan (commands + expected output).
 - Prefer preventing regressions over “looks correct”.
 
-## 9) Rewrite/refactor quality rules
+## 7) Rewrite/refactor quality rules
 - If asked to rewrite/refactor:
   - keep feature parity unless approved otherwise,
   - remove single points of failure where feasible,
   - improve architecture without changing external behavior,
   - prefer incremental refactors over big rewrites unless requested.
 
-## 10) Explicit ignore
-- Do not read or use `Rust.tar.gz` (experiment; ignore completely).
-
-## 11) Output requirements
+## 8) Output requirements
 - When producing code changes:
   - summarize what changed and why,
   - note any behavior changes,
-  - list how to run format/lint/tests for the touched files.
