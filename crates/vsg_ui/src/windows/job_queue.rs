@@ -223,15 +223,17 @@ impl Component for JobQueueDialog {
                         set_spacing: 8,
                         set_halign: gtk::Align::End,
 
+                        #[name = "start_btn"]
                         gtk::Button {
                             set_label: "Start Processing",
                             add_css_class: "suggested-action",
-                            connect_clicked => JobQueueMsg::StartProcessing,
+                            // Connected manually in init to avoid panic
                         },
 
+                        #[name = "close_btn"]
                         gtk::Button {
                             set_label: "Close",
-                            connect_clicked => JobQueueMsg::Close,
+                            // Connected manually in init to avoid panic
                         },
                     },
                 },
@@ -262,6 +264,19 @@ impl Component for JobQueueDialog {
 
         // Populate the list
         Self::populate_list(&model, &widgets.job_list, &sender);
+
+        // Manually connect buttons to avoid panic if component is destroyed
+        // Close button - sends output directly
+        let output_sender = sender.output_sender().clone();
+        widgets.close_btn.connect_clicked(move |_| {
+            let _ = output_sender.send(JobQueueOutput::Closed);
+        });
+
+        // Start Processing button - needs to go through message for validation
+        let input_sender = sender.input_sender().clone();
+        widgets.start_btn.connect_clicked(move |_| {
+            let _ = input_sender.send(JobQueueMsg::StartProcessing);
+        });
 
         ComponentParts { model, widgets }
     }
@@ -492,11 +507,8 @@ impl Component for JobQueueDialog {
             }
 
             JobQueueMsg::Close => {
-                // Defer output to avoid panic when controller is dropped while in click handler
-                let output_sender = sender.output_sender().clone();
-                glib::idle_add_local_once(move || {
-                    let _ = output_sender.send(JobQueueOutput::Closed);
-                });
+                // Note: Close button is now connected directly in init to avoid panic
+                // This handler is kept for completeness but should not be called
             }
 
             JobQueueMsg::RefreshList => {

@@ -133,9 +133,11 @@ impl Component for AddJobDialog {
                             connect_clicked => AddJobMsg::FindAndAddJobs,
                         },
 
+                        #[name = "cancel_btn"]
                         gtk::Button {
                             set_label: "Cancel",
-                            connect_clicked => AddJobMsg::Cancel,
+                            // Don't use connect_clicked => here because sender.input() panics
+                            // if component is destroyed. We'll connect manually in init.
                         },
                     },
                 },
@@ -164,6 +166,13 @@ impl Component for AddJobDialog {
 
         // Build initial source rows
         Self::rebuild_sources(&model, &widgets.sources_box, &sender);
+
+        // Manually connect Cancel button to avoid panic if component is destroyed
+        // (the view macro's connect_clicked => uses sender.input() which panics)
+        let output_sender = sender.output_sender().clone();
+        widgets.cancel_btn.connect_clicked(move |_| {
+            let _ = output_sender.send(AddJobOutput::Cancelled);
+        });
 
         ComponentParts { model, widgets }
     }
@@ -295,11 +304,8 @@ impl Component for AddJobDialog {
             }
 
             AddJobMsg::Cancel => {
-                // Defer the output to avoid panic when controller is dropped while still in click handler
-                let output_sender = sender.output_sender().clone();
-                glib::idle_add_local_once(move || {
-                    let _ = output_sender.send(AddJobOutput::Cancelled);
-                });
+                // Note: Cancel button is now connected directly in init to avoid panic
+                // This handler is kept for completeness but should not be called
             }
         }
     }
