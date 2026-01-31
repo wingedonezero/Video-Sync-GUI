@@ -159,11 +159,12 @@ impl Component for SettingsDialog {
                                     add_suffix = &gtk::Entry {
                                         set_hexpand: true,
                                         set_valign: gtk::Align::Center,
-                                        #[watch]
-                                        set_text: &model.settings.paths.output_folder,
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::OutputFolderChanged(e.text().to_string()));
-                                        },
+                                        } -> output_folder_signal,
+                                        #[watch]
+                                        #[block_signal(output_folder_signal)]
+                                        set_text: &model.settings.paths.output_folder,
                                     },
 
                                     add_suffix = &gtk::Button {
@@ -180,11 +181,12 @@ impl Component for SettingsDialog {
                                     add_suffix = &gtk::Entry {
                                         set_hexpand: true,
                                         set_valign: gtk::Align::Center,
-                                        #[watch]
-                                        set_text: &model.settings.paths.temp_root,
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::TempFolderChanged(e.text().to_string()));
-                                        },
+                                        } -> temp_folder_signal,
+                                        #[watch]
+                                        #[block_signal(temp_folder_signal)]
+                                        set_text: &model.settings.paths.temp_root,
                                     },
 
                                     add_suffix = &gtk::Button {
@@ -201,11 +203,12 @@ impl Component for SettingsDialog {
                                     add_suffix = &gtk::Entry {
                                         set_hexpand: true,
                                         set_valign: gtk::Align::Center,
-                                        #[watch]
-                                        set_text: &model.settings.paths.logs_folder,
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::LogsFolderChanged(e.text().to_string()));
-                                        },
+                                        } -> logs_folder_signal,
+                                        #[watch]
+                                        #[block_signal(logs_folder_signal)]
+                                        set_text: &model.settings.paths.logs_folder,
                                     },
 
                                     add_suffix = &gtk::Button {
@@ -263,20 +266,22 @@ impl Component for SettingsDialog {
 
                                     adw::EntryRow {
                                         set_title: "Source 1 Language",
-                                        #[watch]
-                                        set_text: model.settings.analysis.lang_source1.as_deref().unwrap_or(""),
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::LangSource1Changed(e.text().to_string()));
-                                        },
+                                        } -> lang_source1_signal,
+                                        #[watch]
+                                        #[block_signal(lang_source1_signal)]
+                                        set_text: model.settings.analysis.lang_source1.as_deref().unwrap_or(""),
                                     },
 
                                     adw::EntryRow {
                                         set_title: "Other Sources Language",
-                                        #[watch]
-                                        set_text: model.settings.analysis.lang_others.as_deref().unwrap_or(""),
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::LangOthersChanged(e.text().to_string()));
-                                        },
+                                        } -> lang_others_signal,
+                                        #[watch]
+                                        #[block_signal(lang_others_signal)]
+                                        set_text: model.settings.analysis.lang_others.as_deref().unwrap_or(""),
                                     },
                                 },
 

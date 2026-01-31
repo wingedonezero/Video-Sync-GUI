@@ -144,11 +144,12 @@ impl Component for TrackSettingsDialog {
                                 gtk::Entry {
                                     set_hexpand: true,
                                     set_placeholder_text: Some("Optional track name"),
-                                    #[watch]
-                                    set_text: model.track.custom_name.as_deref().unwrap_or(""),
                                     connect_changed[sender] => move |entry| {
                                         sender.input(TrackSettingsMsg::CustomNameChanged(entry.text().to_string()));
-                                    },
+                                    } -> custom_name_signal,
+                                    #[watch]
+                                    #[block_signal(custom_name_signal)]
+                                    set_text: model.track.custom_name.as_deref().unwrap_or(""),
                                 },
                             },
                         },
@@ -208,11 +209,12 @@ impl Component for TrackSettingsDialog {
 
                                 gtk::Entry {
                                     set_width_chars: 6,
-                                    #[watch]
-                                    set_text: &model.track.size_multiplier_pct.to_string(),
                                     connect_changed[sender] => move |entry| {
                                         sender.input(TrackSettingsMsg::SizeMultiplierChanged(entry.text().to_string()));
-                                    },
+                                    } -> size_multiplier_signal,
+                                    #[watch]
+                                    #[block_signal(size_multiplier_signal)]
+                                    set_text: &model.track.size_multiplier_pct.to_string(),
                                 },
                             },
                         },

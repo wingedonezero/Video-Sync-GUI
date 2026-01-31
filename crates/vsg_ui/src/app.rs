@@ -327,11 +327,12 @@ impl Component for App {
                                 gtk::Entry {
                                     set_hexpand: true,
                                     set_placeholder_text: Some("Drop file or Ctrl+V to paste path..."),
-                                    #[watch]
-                                    set_text: &model.source1_path,
                                     connect_changed[sender] => move |entry| {
                                         sender.input(AppMsg::SourcePathChanged(1, entry.text().to_string()));
-                                    },
+                                    } -> source1_signal,
+                                    #[watch]
+                                    #[block_signal(source1_signal)]
+                                    set_text: &model.source1_path,
                                 },
 
                                 gtk::Button {
@@ -355,11 +356,12 @@ impl Component for App {
                                 gtk::Entry {
                                     set_hexpand: true,
                                     set_placeholder_text: Some("Drop file or Ctrl+V to paste path..."),
-                                    #[watch]
-                                    set_text: &model.source2_path,
                                     connect_changed[sender] => move |entry| {
                                         sender.input(AppMsg::SourcePathChanged(2, entry.text().to_string()));
-                                    },
+                                    } -> source2_signal,
+                                    #[watch]
+                                    #[block_signal(source2_signal)]
+                                    set_text: &model.source2_path,
                                 },
 
                                 gtk::Button {
@@ -383,11 +385,12 @@ impl Component for App {
                                 gtk::Entry {
                                     set_hexpand: true,
                                     set_placeholder_text: Some("Drop file or Ctrl+V to paste path..."),
-                                    #[watch]
-                                    set_text: &model.source3_path,
                                     connect_changed[sender] => move |entry| {
                                         sender.input(AppMsg::SourcePathChanged(3, entry.text().to_string()));
-                                    },
+                                    } -> source3_signal,
+                                    #[watch]
+                                    #[block_signal(source3_signal)]
+                                    set_text: &model.source3_path,
                                 },
 
                                 gtk::Button {
