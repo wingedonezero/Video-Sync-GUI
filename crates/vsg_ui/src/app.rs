@@ -17,7 +17,7 @@ use vsg_core::analysis::Analyzer;
 use vsg_core::config::{ConfigManager, Settings};
 use vsg_core::jobs::{JobQueue, JobQueueEntry, LayoutManager};
 
-use crate::handlers::run_job_pipeline;
+use crate::handlers::{clean_file_url, run_job_pipeline};
 use crate::types::{
     FinalTrackState, SourceGroupState, SyncExclusionMode, TrackSettingsState,
 };
@@ -150,17 +150,36 @@ impl App {
 
 /// Setup drag-drop for an entry widget
 fn setup_drop_target(entry: &gtk::Entry, source_idx: usize, sender: ComponentSender<App>) {
+    // Create drop target that accepts both FileList and text (for URI strings)
     let drop_target = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY);
 
+    // Also accept text/uri-list format (used by some file managers like Dolphin)
+    drop_target.set_gtypes(&[gdk::FileList::static_type(), glib::GString::static_type()]);
+
+    let sender_clone = sender.clone();
     drop_target.connect_drop(move |_target, value, _x, _y| {
+        // Try FileList first (standard drag-drop)
         if let Ok(file_list) = value.get::<gdk::FileList>() {
             if let Some(file) = file_list.files().first() {
                 if let Some(path) = file.path() {
-                    sender.input(AppMsg::FileDropped(source_idx, path));
+                    sender_clone.input(AppMsg::FileDropped(source_idx, path));
                     return true;
                 }
             }
         }
+
+        // Try GString (text/uri-list format from some file managers)
+        if let Ok(text) = value.get::<glib::GString>() {
+            let cleaned = clean_file_url(text.as_str());
+            if !cleaned.is_empty() {
+                let path = std::path::PathBuf::from(&cleaned);
+                if path.exists() {
+                    sender_clone.input(AppMsg::FileDropped(source_idx, path));
+                    return true;
+                }
+            }
+        }
+
         false
     });
 
