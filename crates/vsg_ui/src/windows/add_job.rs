@@ -102,9 +102,9 @@ impl Component for AddJobDialog {
                     gtk::Box {
                         set_orientation: gtk::Orientation::Horizontal,
 
+                        #[name = "add_source_btn"]
                         gtk::Button {
                             set_label: "Add Another Source",
-                            connect_clicked => AddJobMsg::AddSource,
                         },
                     },
 
@@ -124,20 +124,18 @@ impl Component for AddJobDialog {
                         set_spacing: 8,
                         set_halign: gtk::Align::End,
 
+                        #[name = "find_btn"]
                         gtk::Button {
                             #[watch]
                             set_label: if model.is_finding { "Finding..." } else { "Find & Add Jobs" },
                             #[watch]
                             set_sensitive: !model.is_finding,
                             add_css_class: "suggested-action",
-                            connect_clicked => AddJobMsg::FindAndAddJobs,
                         },
 
                         #[name = "cancel_btn"]
                         gtk::Button {
                             set_label: "Cancel",
-                            // Don't use connect_clicked => here because sender.input() panics
-                            // if component is destroyed. We'll connect manually in init.
                         },
                     },
                 },
@@ -167,8 +165,22 @@ impl Component for AddJobDialog {
         // Build initial source rows
         Self::rebuild_sources(&model, &widgets.sources_box, &sender);
 
-        // Manually connect Cancel button to avoid panic if component is destroyed
-        // (the view macro's connect_clicked => uses sender.input() which panics)
+        // Manually connect ALL buttons to avoid panic if component is destroyed
+        // Using input_sender.send() which returns Result instead of panicking
+
+        // Add Another Source button
+        let input_sender = sender.input_sender().clone();
+        widgets.add_source_btn.connect_clicked(move |_| {
+            let _ = input_sender.send(AddJobMsg::AddSource);
+        });
+
+        // Find & Add Jobs button
+        let input_sender = sender.input_sender().clone();
+        widgets.find_btn.connect_clicked(move |_| {
+            let _ = input_sender.send(AddJobMsg::FindAndAddJobs);
+        });
+
+        // Cancel button - sends output directly
         let output_sender = sender.output_sender().clone();
         widgets.cancel_btn.connect_clicked(move |_| {
             let _ = output_sender.send(AddJobOutput::Cancelled);
