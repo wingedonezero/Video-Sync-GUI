@@ -6,10 +6,12 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use gtk::gdk;
 use gtk::prelude::*;
 use relm4::prelude::*;
 use relm4::{Component, ComponentParts, ComponentSender};
 
+use vsg_core::analysis::Analyzer;
 use vsg_core::config::{ConfigManager, Settings};
 use vsg_core::jobs::{JobQueue, JobQueueEntry, LayoutManager};
 
@@ -209,63 +211,6 @@ pub struct TrackSettingsState {
     pub sync_exclusion_mode: SyncExclusionMode,
 }
 
-/// Settings keys for type-safe settings updates.
-#[derive(Debug, Clone, PartialEq)]
-pub enum SettingKey {
-    OutputFolder,
-    TempRoot,
-    LogsFolder,
-    CompactLogging,
-    Autoscroll,
-    ErrorTail,
-    ProgressStep,
-    ShowOptionsPretty,
-    ShowOptionsJson,
-    AnalysisMode,
-    CorrelationMethod,
-    SyncMode,
-    LangSource1,
-    LangOthers,
-    ChunkCount,
-    ChunkDuration,
-    MinMatchPct,
-    ScanStartPct,
-    ScanEndPct,
-    FilteringMethod,
-    FilterLowCutoffHz,
-    FilterHighCutoffHz,
-    UseSoxr,
-    AudioPeakFit,
-    MultiCorrelationEnabled,
-    MultiCorrScc,
-    MultiCorrGccPhat,
-    MultiCorrGccScot,
-    MultiCorrWhitened,
-    DelaySelectionMode,
-    MinAcceptedChunks,
-    FirstStableMinChunks,
-    FirstStableSkipUnstable,
-    EarlyClusterWindow,
-    EarlyClusterThreshold,
-    ChapterRename,
-    ChapterSnap,
-    SnapMode,
-    SnapThresholdMs,
-    SnapStartsOnly,
-    DisableTrackStats,
-    DisableHeaderCompression,
-    ApplyDialogNorm,
-}
-
-/// Setting values for type-safe settings updates.
-#[derive(Debug, Clone)]
-pub enum SettingValue {
-    String(String),
-    Bool(bool),
-    I32(i32),
-    F32(f32),
-}
-
 /// All possible messages the application can receive.
 #[derive(Debug)]
 pub enum AppMsg {
@@ -273,10 +218,11 @@ pub enum AppMsg {
     SourcePathChanged(usize, String),
     BrowseSource(usize),
     FileSelected(usize, Option<PathBuf>),
+    FileDropped(usize, PathBuf),
+    PasteToSource(usize),
     AnalyzeOnly,
     ArchiveLogsChanged(bool),
-    AnalysisProgress(f32),
-    AnalysisLog(String),
+    AnalysisProgress(f32, String),
     AnalysisComplete {
         delay_source2_ms: Option<i64>,
         delay_source3_ms: Option<i64>,
@@ -371,6 +317,45 @@ impl App {
     }
 }
 
+/// Setup drag-drop for an entry widget
+fn setup_drop_target(entry: &gtk::Entry, source_idx: usize, sender: ComponentSender<App>) {
+    let drop_target = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY);
+
+    drop_target.connect_drop(move |_target, value, _x, _y| {
+        if let Ok(file_list) = value.get::<gdk::FileList>() {
+            if let Some(file) = file_list.files().first() {
+                if let Some(path) = file.path() {
+                    sender.input(AppMsg::FileDropped(source_idx, path));
+                    return true;
+                }
+            }
+        }
+        false
+    });
+
+    entry.add_controller(drop_target);
+}
+
+/// Setup clipboard paste for an entry widget
+fn setup_paste_handler(entry: &gtk::Entry, source_idx: usize, sender: ComponentSender<App>) {
+    let gesture = gtk::GestureClick::new();
+    gesture.set_button(0); // Any button
+
+    let key_controller = gtk::EventControllerKey::new();
+    let sender_clone = sender.clone();
+
+    key_controller.connect_key_pressed(move |_controller, key, _code, state| {
+        // Check for Ctrl+V
+        if state.contains(gdk::ModifierType::CONTROL_MASK) && key == gdk::Key::v {
+            sender_clone.input(AppMsg::PasteToSource(source_idx));
+            return glib::Propagation::Stop;
+        }
+        glib::Propagation::Proceed
+    });
+
+    entry.add_controller(key_controller);
+}
+
 #[relm4::component(pub)]
 impl Component for App {
     type Init = AppInit;
@@ -453,7 +438,7 @@ impl Component for App {
                                 #[name = "source1_entry"]
                                 gtk::Entry {
                                     set_hexpand: true,
-                                    set_placeholder_text: Some("Drop file here or browse..."),
+                                    set_placeholder_text: Some("Drop file or Ctrl+V to paste path..."),
                                     #[watch]
                                     set_text: &model.source1_path,
                                     connect_changed[sender] => move |entry| {
@@ -481,7 +466,7 @@ impl Component for App {
                                 #[name = "source2_entry"]
                                 gtk::Entry {
                                     set_hexpand: true,
-                                    set_placeholder_text: Some("Drop file here or browse..."),
+                                    set_placeholder_text: Some("Drop file or Ctrl+V to paste path..."),
                                     #[watch]
                                     set_text: &model.source2_path,
                                     connect_changed[sender] => move |entry| {
@@ -509,7 +494,7 @@ impl Component for App {
                                 #[name = "source3_entry"]
                                 gtk::Entry {
                                     set_hexpand: true,
-                                    set_placeholder_text: Some("Drop file here or browse..."),
+                                    set_placeholder_text: Some("Drop file or Ctrl+V to paste path..."),
                                     #[watch]
                                     set_text: &model.source3_path,
                                     connect_changed[sender] => move |entry| {
@@ -532,7 +517,7 @@ impl Component for App {
                                     #[watch]
                                     set_label: if model.is_analyzing { "Analyzing..." } else { "Analyze Only" },
                                     #[watch]
-                                    set_sensitive: !model.is_analyzing,
+                                    set_sensitive: !model.is_analyzing && !model.source1_path.is_empty() && !model.source2_path.is_empty(),
                                     connect_clicked => AppMsg::AnalyzeOnly,
                                 },
                             },
@@ -674,6 +659,16 @@ impl Component for App {
         // Set initial log text
         widgets.log_view.buffer().set_text(&model.log_text);
 
+        // Setup drag-drop for source entries
+        setup_drop_target(&widgets.source1_entry, 1, sender.clone());
+        setup_drop_target(&widgets.source2_entry, 2, sender.clone());
+        setup_drop_target(&widgets.source3_entry, 3, sender.clone());
+
+        // Setup paste handlers
+        setup_paste_handler(&widgets.source1_entry, 1, sender.clone());
+        setup_paste_handler(&widgets.source2_entry, 2, sender.clone());
+        setup_paste_handler(&widgets.source3_entry, 3, sender.clone());
+
         ComponentParts { model, widgets }
     }
 
@@ -705,8 +700,16 @@ impl Component for App {
                 });
             }
 
-            AppMsg::FileSelected(idx, path) => {
-                if let Some(p) = path {
+            AppMsg::FileSelected(idx, path) | AppMsg::FileDropped(idx, path) => {
+                if let Some(p) = path.as_ref().or(None) {
+                    let path_str = p.to_string_lossy().to_string();
+                    match idx {
+                        1 => self.source1_path = path_str,
+                        2 => self.source2_path = path_str,
+                        3 => self.source3_path = path_str,
+                        _ => {}
+                    }
+                } else if let AppMsg::FileDropped(idx, p) = &msg {
                     let path_str = p.to_string_lossy().to_string();
                     match idx {
                         1 => self.source1_path = path_str,
@@ -717,21 +720,105 @@ impl Component for App {
                 }
             }
 
+            AppMsg::PasteToSource(idx) => {
+                let sender = sender.clone();
+                let display = gdk::Display::default().unwrap();
+                let clipboard = display.clipboard();
+
+                relm4::spawn_local(async move {
+                    if let Ok(text) = clipboard.read_text_future().await {
+                        if let Some(text) = text {
+                            let path = text.trim().to_string();
+                            // Handle file:// URIs
+                            let path = if path.starts_with("file://") {
+                                percent_encoding::percent_decode_str(&path[7..])
+                                    .decode_utf8_lossy()
+                                    .to_string()
+                            } else {
+                                path
+                            };
+                            sender.input(AppMsg::SourcePathChanged(idx, path));
+                        }
+                    }
+                });
+            }
+
             AppMsg::AnalyzeOnly => {
-                if !self.is_analyzing {
+                if !self.is_analyzing && !self.source1_path.is_empty() && !self.source2_path.is_empty() {
                     self.is_analyzing = true;
                     self.status_text = "Analyzing...".to_string();
-                    self.append_log("Starting analysis...");
+                    self.progress_value = 0.0;
+                    self.delay_source2.clear();
+                    self.delay_source3.clear();
+                    self.append_log("\n--- Starting Analysis ---");
 
-                    // TODO: Implement actual analysis using vsg_core
-                    // For now, just simulate completion
+                    let source1 = PathBuf::from(&self.source1_path);
+                    let source2 = PathBuf::from(&self.source2_path);
+                    let source3 = if self.source3_path.is_empty() {
+                        None
+                    } else {
+                        Some(PathBuf::from(&self.source3_path))
+                    };
+
+                    // Get analysis settings
+                    let settings = {
+                        let cfg = self.config.lock().unwrap();
+                        cfg.settings().analysis.clone()
+                    };
+
                     let sender = sender.clone();
-                    relm4::spawn_local(async move {
-                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                        sender.input(AppMsg::AnalysisComplete {
-                            delay_source2_ms: Some(150),
-                            delay_source3_ms: None,
-                        });
+
+                    // Run analysis in background thread
+                    std::thread::spawn(move || {
+                        let analyzer = Analyzer::from_settings(&settings);
+
+                        sender.input(AppMsg::AnalysisProgress(10.0, "Analyzing Source 2...".to_string()));
+
+                        // Analyze Source 2
+                        let delay2 = match analyzer.analyze(&source1, &source2, "Source 2") {
+                            Ok(result) => {
+                                let delay_ms = result.final_delay_ms;
+                                sender.input(AppMsg::AnalysisProgress(
+                                    50.0,
+                                    format!("Source 2: {} ms (confidence: {:.1}%)", delay_ms, result.confidence * 100.0),
+                                ));
+                                Some(delay_ms)
+                            }
+                            Err(e) => {
+                                sender.input(AppMsg::AnalysisProgress(50.0, format!("Source 2 failed: {}", e)));
+                                None
+                            }
+                        };
+
+                        // Analyze Source 3 if provided
+                        let delay3 = if let Some(ref s3) = source3 {
+                            sender.input(AppMsg::AnalysisProgress(60.0, "Analyzing Source 3...".to_string()));
+                            match analyzer.analyze(&source1, s3, "Source 3") {
+                                Ok(result) => {
+                                    let delay_ms = result.final_delay_ms;
+                                    sender.input(AppMsg::AnalysisProgress(
+                                        90.0,
+                                        format!("Source 3: {} ms (confidence: {:.1}%)", delay_ms, result.confidence * 100.0),
+                                    ));
+                                    Some(delay_ms)
+                                }
+                                Err(e) => {
+                                    sender.input(AppMsg::AnalysisProgress(90.0, format!("Source 3 failed: {}", e)));
+                                    None
+                                }
+                            }
+                        } else {
+                            None
+                        };
+
+                        if delay2.is_some() || delay3.is_some() {
+                            sender.input(AppMsg::AnalysisComplete {
+                                delay_source2_ms: delay2,
+                                delay_source3_ms: delay3,
+                            });
+                        } else {
+                            sender.input(AppMsg::AnalysisFailed("All sources failed to analyze".to_string()));
+                        }
                     });
                 }
             }
@@ -740,12 +827,10 @@ impl Component for App {
                 self.archive_logs = value;
             }
 
-            AppMsg::AnalysisProgress(progress) => {
+            AppMsg::AnalysisProgress(progress, message) => {
                 self.progress_value = progress;
-            }
-
-            AppMsg::AnalysisLog(msg) => {
-                self.append_log(&msg);
+                self.status_text = message.clone();
+                self.append_log(&message);
             }
 
             AppMsg::AnalysisComplete { delay_source2_ms, delay_source3_ms } => {
@@ -755,20 +840,21 @@ impl Component for App {
 
                 if let Some(delay) = delay_source2_ms {
                     self.delay_source2 = format!("{} ms", delay);
-                    self.append_log(&format!("Source 2 delay: {} ms", delay));
+                    self.append_log(&format!("✓ Source 2 delay: {} ms", delay));
                 }
                 if let Some(delay) = delay_source3_ms {
                     self.delay_source3 = format!("{} ms", delay);
-                    self.append_log(&format!("Source 3 delay: {} ms", delay));
+                    self.append_log(&format!("✓ Source 3 delay: {} ms", delay));
                 }
 
-                self.append_log("Analysis complete.");
+                self.append_log("--- Analysis Complete ---\n");
             }
 
             AppMsg::AnalysisFailed(error) => {
                 self.is_analyzing = false;
                 self.status_text = format!("Analysis failed: {}", error);
-                self.append_log(&format!("Analysis failed: {}", error));
+                self.progress_value = 0.0;
+                self.append_log(&format!("✗ Analysis failed: {}", error));
             }
 
             AppMsg::OpenSettings => {
@@ -925,7 +1011,7 @@ impl Component for App {
                     );
                     self.append_log(&self.batch_status.clone());
 
-                    // TODO: Implement actual job processing
+                    // TODO: Implement actual job processing using orchestrator
                     let sender = sender.clone();
                     let job_idx = self.current_job_index;
                     relm4::spawn_local(async move {

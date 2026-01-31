@@ -5,6 +5,8 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use gtk::gdk;
+use gtk::glib;
 use gtk::prelude::*;
 use relm4::prelude::*;
 use relm4::{Component, ComponentParts, ComponentSender};
@@ -28,6 +30,10 @@ pub enum ManualSelectionMsg {
     RemoveFromFinal(usize),
     MoveTrackUp(usize),
     MoveTrackDown(usize),
+
+    // Drag-drop reorder
+    DragStart(usize),
+    DragDrop(usize, usize), // from_idx, to_idx
 
     // Track settings
     SetDefault(usize, bool),
@@ -58,6 +64,7 @@ pub struct ManualSelectionDialog {
     attachment_sources: std::collections::HashMap<String, bool>,
     external_subtitles: Vec<PathBuf>,
     info_text: String,
+    dragging_idx: Option<usize>, // Currently dragged track index
 }
 
 #[relm4::component(pub)]
@@ -236,7 +243,8 @@ impl Component for ManualSelectionDialog {
             final_tracks,
             attachment_sources,
             external_subtitles: Vec::new(),
-            info_text: "Double-click a track to add it to the final layout.".to_string(),
+            info_text: "Double-click a track to add it. Drag to reorder final tracks.".to_string(),
+            dragging_idx: None,
         };
 
         let widgets = view_output!();
@@ -287,6 +295,21 @@ impl Component for ManualSelectionDialog {
                 if idx + 1 < self.final_tracks.len() {
                     self.final_tracks.swap(idx, idx + 1);
                 }
+            }
+
+            ManualSelectionMsg::DragStart(idx) => {
+                self.dragging_idx = Some(idx);
+            }
+
+            ManualSelectionMsg::DragDrop(from_idx, to_idx) => {
+                if from_idx != to_idx && from_idx < self.final_tracks.len() && to_idx < self.final_tracks.len() {
+                    let track = self.final_tracks.remove(from_idx);
+                    // Adjust target index if we removed from before it
+                    let adjusted_to = if from_idx < to_idx { to_idx - 1 } else { to_idx };
+                    self.final_tracks.insert(adjusted_to.min(self.final_tracks.len()), track);
+                    self.info_text = format!("Moved track from position {} to {}", from_idx + 1, adjusted_to + 1);
+                }
+                self.dragging_idx = None;
             }
 
             ManualSelectionMsg::SetDefault(idx, value) => {
@@ -463,10 +486,48 @@ impl ManualSelectionDialog {
                     ))
                     .build();
 
+                // Add drag source for reordering
+                let drag_source = gtk::DragSource::new();
+                drag_source.set_actions(gdk::DragAction::MOVE);
+
+                let sender_drag = sender.clone();
+                let drag_idx = idx;
+                drag_source.connect_prepare(move |_source, _x, _y| {
+                    sender_drag.input(ManualSelectionMsg::DragStart(drag_idx));
+                    // Use a simple string content provider with the index
+                    Some(gdk::ContentProvider::for_value(&glib::Value::from(&format!("{}", drag_idx))))
+                });
+
+                // Add icon for drag
+                drag_source.connect_drag_begin(|source, _drag| {
+                    let icon = gtk::Image::from_icon_name("view-list-symbolic");
+                    source.set_icon(Some(&icon), 0, 0);
+                });
+
+                row.add_controller(drag_source);
+
+                // Add drop target for receiving dragged tracks
+                let drop_target = gtk::DropTarget::new(glib::Type::STRING, gdk::DragAction::MOVE);
+
+                let sender_drop = sender.clone();
+                let drop_idx = idx;
+                drop_target.connect_drop(move |_target, value, _x, _y| {
+                    if let Ok(from_str) = value.get::<String>() {
+                        if let Ok(from_idx) = from_str.parse::<usize>() {
+                            sender_drop.input(ManualSelectionMsg::DragDrop(from_idx, drop_idx));
+                            return true;
+                        }
+                    }
+                    false
+                });
+
+                row.add_controller(drop_target);
+
                 // Move buttons
                 let up_btn = gtk::Button::builder()
                     .icon_name("go-up-symbolic")
                     .valign(gtk::Align::Center)
+                    .tooltip_text("Move up")
                     .build();
 
                 let sender_clone = sender.clone();
@@ -478,6 +539,7 @@ impl ManualSelectionDialog {
                 let down_btn = gtk::Button::builder()
                     .icon_name("go-down-symbolic")
                     .valign(gtk::Align::Center)
+                    .tooltip_text("Move down")
                     .build();
 
                 let sender_clone = sender.clone();
@@ -490,6 +552,7 @@ impl ManualSelectionDialog {
                 let remove_btn = gtk::Button::builder()
                     .icon_name("list-remove-symbolic")
                     .valign(gtk::Align::Center)
+                    .tooltip_text("Remove track")
                     .build();
 
                 let sender_clone = sender.clone();
@@ -502,6 +565,7 @@ impl ManualSelectionDialog {
                 let settings_btn = gtk::Button::builder()
                     .icon_name("emblem-system-symbolic")
                     .valign(gtk::Align::Center)
+                    .tooltip_text("Track settings")
                     .build();
 
                 let sender_clone = sender.clone();

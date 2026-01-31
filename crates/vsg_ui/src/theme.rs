@@ -34,6 +34,18 @@ pub const APP_CSS: &str = r#"
     .monospace {
         font-family: monospace;
     }
+
+    row.selected {
+        background-color: alpha(@accent_color, 0.2);
+    }
+
+    row.selected:hover {
+        background-color: alpha(@accent_color, 0.3);
+    }
+
+    row.activatable.selected:active {
+        background-color: alpha(@accent_color, 0.4);
+    }
 "#;
 
 /// Spacing constants (in pixels).

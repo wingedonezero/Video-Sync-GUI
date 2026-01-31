@@ -22,8 +22,9 @@ pub enum JobQueueOutput {
 /// Input messages for the job queue dialog.
 #[derive(Debug)]
 pub enum JobQueueMsg {
-    // Job selection
-    SelectJob(usize),
+    // Job selection - supports Ctrl/Shift+click
+    SelectJob(usize, bool, bool), // index, ctrl_pressed, shift_pressed
+    SelectionChanged(Vec<usize>),
     DeselectAll,
 
     // Job actions
@@ -49,6 +50,7 @@ pub enum JobQueueMsg {
 pub struct JobQueueDialog {
     job_queue: Arc<Mutex<JobQueue>>,
     selected_indices: Vec<usize>,
+    last_selected_idx: Option<usize>, // For shift-select range
     clipboard_layout: Option<String>,
     status_text: String,
 }
@@ -243,6 +245,7 @@ impl Component for JobQueueDialog {
         let model = JobQueueDialog {
             job_queue: init,
             selected_indices: Vec::new(),
+            last_selected_idx: None,
             clipboard_layout: None,
             status_text: String::new(),
         };
@@ -250,21 +253,67 @@ impl Component for JobQueueDialog {
         let widgets = view_output!();
 
         // Populate the list
-        Self::populate_list(&model, &widgets.job_list);
+        Self::populate_list(&model, &widgets.job_list, &sender);
 
         ComponentParts { model, widgets }
     }
 
     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, root: &Self::Root) {
         match msg {
-            JobQueueMsg::SelectJob(idx) => {
-                if !self.selected_indices.contains(&idx) {
-                    self.selected_indices.push(idx);
+            JobQueueMsg::SelectJob(idx, ctrl_pressed, shift_pressed) => {
+                let job_count = {
+                    let queue = self.job_queue.lock().unwrap();
+                    queue.jobs().len()
+                };
+
+                if shift_pressed && self.last_selected_idx.is_some() {
+                    // Shift+click: select range from last to current
+                    let last = self.last_selected_idx.unwrap();
+                    let start = last.min(idx);
+                    let end = last.max(idx);
+
+                    if !ctrl_pressed {
+                        // Without Ctrl, replace selection with range
+                        self.selected_indices.clear();
+                    }
+
+                    for i in start..=end {
+                        if i < job_count && !self.selected_indices.contains(&i) {
+                            self.selected_indices.push(i);
+                        }
+                    }
+                } else if ctrl_pressed {
+                    // Ctrl+click: toggle selection
+                    if let Some(pos) = self.selected_indices.iter().position(|&x| x == idx) {
+                        self.selected_indices.remove(pos);
+                    } else if idx < job_count {
+                        self.selected_indices.push(idx);
+                    }
+                    self.last_selected_idx = Some(idx);
+                } else {
+                    // Normal click: select only this item
+                    self.selected_indices.clear();
+                    if idx < job_count {
+                        self.selected_indices.push(idx);
+                    }
+                    self.last_selected_idx = Some(idx);
+                }
+
+                // Keep indices sorted for consistent behavior
+                self.selected_indices.sort();
+            }
+
+            JobQueueMsg::SelectionChanged(indices) => {
+                self.selected_indices = indices;
+                self.selected_indices.sort();
+                if let Some(&last) = self.selected_indices.last() {
+                    self.last_selected_idx = Some(last);
                 }
             }
 
             JobQueueMsg::DeselectAll => {
                 self.selected_indices.clear();
+                self.last_selected_idx = None;
             }
 
             JobQueueMsg::AddJobs => {
@@ -368,14 +417,14 @@ impl Component for JobQueueDialog {
         }
     }
 
-    fn update_view(&self, widgets: &mut Self::Widgets, _sender: ComponentSender<Self>) {
+    fn update_view(&self, widgets: &mut Self::Widgets, sender: ComponentSender<Self>) {
         // Clear and repopulate the list
-        Self::populate_list(self, &widgets.job_list);
+        Self::populate_list(self, &widgets.job_list, &sender);
     }
 }
 
 impl JobQueueDialog {
-    fn populate_list(model: &JobQueueDialog, list_box: &gtk::ListBox) {
+    fn populate_list(model: &JobQueueDialog, list_box: &gtk::ListBox, sender: &ComponentSender<Self>) {
         // Remove all existing rows
         while let Some(child) = list_box.first_child() {
             list_box.remove(&child);
@@ -405,15 +454,41 @@ impl JobQueueDialog {
                         "{} | {} source(s) | {}",
                         job.source1_name, job.source_count, job.status
                     ))
+                    .activatable(true)
                     .build();
+
+                // Add selection styling if selected
+                if model.selected_indices.contains(&job.index) {
+                    row.add_css_class("selected");
+                }
 
                 let icon = gtk::Image::from_icon_name(status_icon);
                 row.add_prefix(&icon);
 
+                // Add click gesture for selection with Ctrl/Shift support
+                let gesture = gtk::GestureClick::new();
+                let sender_click = sender.clone();
+                let job_idx = job.index;
+                gesture.connect_pressed(move |gesture, _n_press, _x, _y| {
+                    let modifiers = gesture.current_event_state();
+                    let ctrl = modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK);
+                    let shift = modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK);
+                    sender_click.input(JobQueueMsg::SelectJob(job_idx, ctrl, shift));
+                });
+                row.add_controller(gesture);
+
+                // Configure button
                 let configure_btn = gtk::Button::builder()
                     .label("Configure")
                     .valign(gtk::Align::Center)
                     .build();
+
+                let sender_cfg = sender.clone();
+                let cfg_idx = job.index;
+                configure_btn.connect_clicked(move |_| {
+                    sender_cfg.input(JobQueueMsg::ConfigureJob(cfg_idx));
+                });
+
                 row.add_suffix(&configure_btn);
 
                 list_box.append(&row);
