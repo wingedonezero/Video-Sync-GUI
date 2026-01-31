@@ -1,0 +1,355 @@
+//! Add job dialog component.
+//!
+//! Dialog for adding new jobs to the queue by specifying source files.
+
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use gtk::prelude::*;
+use relm4::prelude::*;
+use relm4::{Component, ComponentParts, ComponentSender};
+
+use vsg_core::jobs::JobQueue;
+
+/// Output messages from the add job dialog.
+#[derive(Debug)]
+pub enum AddJobOutput {
+    JobsAdded(usize),
+    Cancelled,
+}
+
+/// Input messages for the add job dialog.
+#[derive(Debug)]
+pub enum AddJobMsg {
+    // Source management
+    SourceChanged(usize, String),
+    BrowseSource(usize),
+    FileSelected(usize, Option<PathBuf>),
+    AddSource,
+    RemoveSource(usize),
+
+    // Actions
+    FindAndAddJobs,
+    JobsDiscovered(usize),
+    DiscoveryFailed(String),
+
+    // Dialog
+    Cancel,
+}
+
+/// Add job dialog state.
+pub struct AddJobDialog {
+    job_queue: Arc<Mutex<JobQueue>>,
+    sources: Vec<String>,
+    error_text: String,
+    is_finding: bool,
+}
+
+#[relm4::component(pub)]
+impl Component for AddJobDialog {
+    type Init = Arc<Mutex<JobQueue>>;
+    type Input = AddJobMsg;
+    type Output = AddJobOutput;
+    type CommandOutput = ();
+
+    view! {
+        adw::Window {
+            set_title: Some("Add Jobs"),
+            set_default_width: 600,
+            set_default_height: 400,
+            set_modal: true,
+
+            #[wrap(Some)]
+            set_content = &gtk::Box {
+                set_orientation: gtk::Orientation::Vertical,
+
+                adw::HeaderBar {
+                    #[wrap(Some)]
+                    set_title_widget = &gtk::Label {
+                        set_label: "Add Jobs",
+                    },
+                },
+
+                gtk::Box {
+                    set_orientation: gtk::Orientation::Vertical,
+                    set_spacing: 12,
+                    set_margin_all: 16,
+                    set_vexpand: true,
+
+                    gtk::Label {
+                        set_label: "Specify source files. Source 1 is the reference (video track source).",
+                        set_xalign: 0.0,
+                        set_wrap: true,
+                    },
+
+                    // Source list
+                    gtk::ScrolledWindow {
+                        set_vexpand: true,
+                        set_hexpand: true,
+
+                        #[name = "sources_box"]
+                        gtk::Box {
+                            set_orientation: gtk::Orientation::Vertical,
+                            set_spacing: 8,
+                        },
+                    },
+
+                    // Add source button
+                    gtk::Box {
+                        set_orientation: gtk::Orientation::Horizontal,
+
+                        gtk::Button {
+                            set_label: "Add Another Source",
+                            connect_clicked => AddJobMsg::AddSource,
+                        },
+                    },
+
+                    // Error text
+                    gtk::Label {
+                        #[watch]
+                        set_label: &model.error_text,
+                        #[watch]
+                        set_visible: !model.error_text.is_empty(),
+                        set_xalign: 0.0,
+                        add_css_class: "error",
+                    },
+
+                    // Dialog buttons
+                    gtk::Box {
+                        set_orientation: gtk::Orientation::Horizontal,
+                        set_spacing: 8,
+                        set_halign: gtk::Align::End,
+
+                        gtk::Button {
+                            #[watch]
+                            set_label: if model.is_finding { "Finding..." } else { "Find & Add Jobs" },
+                            #[watch]
+                            set_sensitive: !model.is_finding,
+                            add_css_class: "suggested-action",
+                            connect_clicked => AddJobMsg::FindAndAddJobs,
+                        },
+
+                        gtk::Button {
+                            set_label: "Cancel",
+                            connect_clicked => AddJobMsg::Cancel,
+                        },
+                    },
+                },
+            },
+        }
+    }
+
+    fn init(
+        init: Self::Init,
+        root: Self::Root,
+        sender: ComponentSender<Self>,
+    ) -> ComponentParts<Self> {
+        let model = AddJobDialog {
+            job_queue: init,
+            sources: vec![String::new(), String::new()],
+            error_text: String::new(),
+            is_finding: false,
+        };
+
+        let widgets = view_output!();
+
+        // Build initial source rows
+        Self::rebuild_sources(&model, &widgets.sources_box, &sender);
+
+        ComponentParts { model, widgets }
+    }
+
+    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, root: &Self::Root) {
+        match msg {
+            AddJobMsg::SourceChanged(idx, path) => {
+                if idx < self.sources.len() {
+                    self.sources[idx] = path;
+                }
+            }
+
+            AddJobMsg::BrowseSource(idx) => {
+                let sender = sender.clone();
+                let root = root.clone();
+                relm4::spawn_local(async move {
+                    let dialog = gtk::FileDialog::builder()
+                        .title("Select Source File")
+                        .modal(true)
+                        .build();
+
+                    if let Ok(file) = dialog.open_future(Some(&root)).await {
+                        sender.input(AddJobMsg::FileSelected(idx, file.path()));
+                    }
+                });
+            }
+
+            AddJobMsg::FileSelected(idx, path) => {
+                if let Some(p) = path {
+                    if idx < self.sources.len() {
+                        self.sources[idx] = p.to_string_lossy().to_string();
+                    }
+                }
+            }
+
+            AddJobMsg::AddSource => {
+                if self.sources.len() < 10 {
+                    self.sources.push(String::new());
+                }
+            }
+
+            AddJobMsg::RemoveSource(idx) => {
+                if self.sources.len() > 2 && idx < self.sources.len() {
+                    self.sources.remove(idx);
+                }
+            }
+
+            AddJobMsg::FindAndAddJobs => {
+                self.error_text.clear();
+
+                // Validate that at least 2 sources are specified
+                let valid_sources: Vec<&String> =
+                    self.sources.iter().filter(|s| !s.is_empty()).collect();
+
+                if valid_sources.len() < 2 {
+                    self.error_text = "At least 2 source files are required.".to_string();
+                    return;
+                }
+
+                self.is_finding = true;
+
+                // TODO: Implement actual job discovery using vsg_core
+                // For now, simulate adding jobs
+                let sender = sender.clone();
+                let sources = self.sources.clone();
+                let job_queue = self.job_queue.clone();
+
+                relm4::spawn_local(async move {
+                    // Simulate discovery
+                    tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+                    // Create a job from the sources
+                    let valid: Vec<PathBuf> = sources
+                        .iter()
+                        .filter(|s| !s.is_empty())
+                        .map(PathBuf::from)
+                        .collect();
+
+                    if !valid.is_empty() {
+                        let mut queue = job_queue.lock().unwrap();
+                        // Create a basic job entry
+                        let name = valid
+                            .first()
+                            .and_then(|p| p.file_stem())
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "New Job".to_string());
+
+                        let mut sources_map = std::collections::HashMap::new();
+                        for (i, path) in valid.iter().enumerate() {
+                            sources_map.insert(vsg_core::models::SourceIndex::new(i + 1), path.clone());
+                        }
+
+                        let entry = vsg_core::jobs::JobQueueEntry {
+                            name,
+                            sources: sources_map,
+                            status: vsg_core::jobs::JobQueueStatus::Pending,
+                            layout: None,
+                            error: None,
+                        };
+                        queue.add(entry);
+                        sender.input(AddJobMsg::JobsDiscovered(1));
+                    } else {
+                        sender.input(AddJobMsg::DiscoveryFailed(
+                            "No valid source files.".to_string(),
+                        ));
+                    }
+                });
+            }
+
+            AddJobMsg::JobsDiscovered(count) => {
+                self.is_finding = false;
+                let _ = sender.output(AddJobOutput::JobsAdded(count));
+                root.close();
+            }
+
+            AddJobMsg::DiscoveryFailed(error) => {
+                self.is_finding = false;
+                self.error_text = error;
+            }
+
+            AddJobMsg::Cancel => {
+                let _ = sender.output(AddJobOutput::Cancelled);
+                root.close();
+            }
+        }
+    }
+
+    fn update_view(&self, widgets: &mut Self::Widgets, sender: ComponentSender<Self>) {
+        Self::rebuild_sources(self, &widgets.sources_box, &sender);
+    }
+}
+
+impl AddJobDialog {
+    fn rebuild_sources(model: &AddJobDialog, container: &gtk::Box, sender: &ComponentSender<Self>) {
+        // Clear existing children
+        while let Some(child) = container.first_child() {
+            container.remove(&child);
+        }
+
+        for (idx, path) in model.sources.iter().enumerate() {
+            let row = gtk::Box::builder()
+                .orientation(gtk::Orientation::Horizontal)
+                .spacing(8)
+                .build();
+
+            let label_text = if idx == 0 {
+                "Source 1 (Reference):".to_string()
+            } else {
+                format!("Source {}:", idx + 1)
+            };
+
+            let label = gtk::Label::builder()
+                .label(&label_text)
+                .width_chars(18)
+                .xalign(0.0)
+                .build();
+
+            let entry = gtk::Entry::builder()
+                .hexpand(true)
+                .text(path)
+                .placeholder_text("Drop file here or browse...")
+                .build();
+
+            let sender_clone = sender.clone();
+            let idx_clone = idx;
+            entry.connect_changed(move |e| {
+                sender_clone.input(AddJobMsg::SourceChanged(idx_clone, e.text().to_string()));
+            });
+
+            let browse_btn = gtk::Button::builder().label("Browse...").build();
+
+            let sender_clone = sender.clone();
+            browse_btn.connect_clicked(move |_| {
+                sender_clone.input(AddJobMsg::BrowseSource(idx));
+            });
+
+            row.append(&label);
+            row.append(&entry);
+            row.append(&browse_btn);
+
+            // Add remove button for sources > 2
+            if model.sources.len() > 2 {
+                let remove_btn = gtk::Button::builder()
+                    .icon_name("list-remove-symbolic")
+                    .build();
+
+                let sender_clone = sender.clone();
+                remove_btn.connect_clicked(move |_| {
+                    sender_clone.input(AddJobMsg::RemoveSource(idx));
+                });
+
+                row.append(&remove_btn);
+            }
+
+            container.append(&row);
+        }
+    }
+}

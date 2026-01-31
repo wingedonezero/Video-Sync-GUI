@@ -1,292 +1,40 @@
 //! Main application module for Video Sync GUI.
 //!
-//! This module contains the core Application struct, Message enum,
-//! and the update/view logic following the iced MVU pattern.
+//! This module contains the core Application component and shared types
+//! following the Relm4 component pattern.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use iced::event::{self, Event};
-use iced::keyboard;
-use iced::widget::{self, text};
-use iced::window;
-use iced::{Element, Size, Subscription, Task, Theme};
+use gtk::gdk;
+use gtk::prelude::*;
+use relm4::prelude::*;
+use relm4::{Component, ComponentParts, ComponentSender};
 
+use vsg_core::analysis::Analyzer;
 use vsg_core::config::{ConfigManager, Settings};
 use vsg_core::jobs::{JobQueue, JobQueueEntry, LayoutManager};
 
-use crate::pages;
-use crate::windows;
+use crate::components::{
+    add_job::{AddJobDialog, AddJobOutput},
+    job_queue::{JobQueueDialog, JobQueueOutput},
+    manual_selection::{ManualSelectionDialog, ManualSelectionOutput},
+    settings::{SettingsDialog, SettingsOutput},
+    track_settings::{TrackSettingsDialog, TrackSettingsOutput},
+};
 
-/// Language codes matching the picker options in track_settings.rs.
+/// Language codes matching the picker options.
 /// Index 0 = "und", 1 = "eng", 2 = "jpn", etc.
 pub const LANGUAGE_CODES: &[&str] = &[
     "und", "eng", "jpn", "spa", "fre", "ger", "ita", "por", "rus", "chi", "kor", "ara",
 ];
 
-/// Unique identifier for windows.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum WindowKind {
-    Main,
-    Settings,
-    JobQueue,
-    AddJob,
-    ManualSelection(usize),
-    TrackSettings(usize),
-}
-
-/// All possible messages the application can receive.
-#[derive(Debug, Clone)]
-pub enum Message {
-    // Window Management
-    OpenSettings,
-    CloseSettings,
-    OpenJobQueue,
-    CloseJobQueue,
-    OpenAddJob,
-    CloseAddJob,
-    OpenManualSelection(usize),
-    CloseManualSelection,
-    OpenTrackSettings(usize),
-    CloseTrackSettings,
-    WindowClosed(window::Id),
-    WindowOpened(WindowKind, window::Id),
-
-    // Main Window
-    SourcePathChanged(usize, String),
-    BrowseSource(usize),
-    FileSelected(usize, Option<PathBuf>),
-    PasteToSource(usize),  // Paste clipboard content to source input
-    AnalyzeOnly,
-    ArchiveLogsChanged(bool),
-    AnalysisProgress(f32),
-    AnalysisLog(String),
-    AnalysisComplete {
-        delay_source2_ms: Option<i64>,
-        delay_source3_ms: Option<i64>,
-    },
-    AnalysisFailed(String),
-
-    // Settings Window
-    SettingChanged(SettingKey, SettingValue),
-    SaveSettings,
-    CancelSettings,
-    BrowseFolder(FolderType),
-    FolderSelected(FolderType, Option<PathBuf>),
-    SettingsTabSelected(usize),
-
-    // Job Queue Dialog
-    AddJobsClicked,
-    JobRowClicked(usize),          // Single click - select row
-    JobRowDoubleClicked(usize),    // Double click - open config
-    JobRowCtrlClicked(usize),      // Ctrl+click - toggle selection
-    JobRowShiftClicked(usize),     // Shift+click - range selection
-    RemoveSelectedJobs,
-    MoveJobsUp,
-    MoveJobsDown,
-    CopyLayout(usize),
-    PasteLayout,
-    StartProcessing,
-    StartBatchProcessing(Vec<JobQueueEntry>),  // Jobs handed off from queue to main
-    ProcessNextJob,                             // Trigger next job in batch
-    ProcessingProgress { job_idx: usize, progress: f32 },
-    ProcessingComplete,
-    ProcessingFailed(String),
-    JobCompleted { job_idx: usize, success: bool, error: Option<String> },
-    BatchCompleted,
-
-    // Add Job Dialog
-    AddSource,
-    RemoveSource(usize),
-    AddJobSourceChanged(usize, String),
-    AddJobBrowseSource(usize),
-    AddJobFileSelected(usize, Option<PathBuf>),
-    FindAndAddJobs,
-    JobsAdded(usize),
-
-    // Manual Selection Dialog
-    SourceTrackDoubleClicked { track_id: usize, source_key: String },
-    FinalTrackMoved(usize, usize),
-    FinalTrackRemoved(usize),
-    // Drag-and-drop reordering
-    DragStart(usize),       // Start dragging item at index
-    DragHover(usize),       // Hovering over item at index
-    DragEnd,                // Release - commit reorder
-    DragCancel,             // Cancel drag operation
-    FinalTrackDefaultChanged(usize, bool),
-    FinalTrackForcedChanged(usize, bool),
-    FinalTrackSyncChanged(usize, String),
-    FinalTrackSettingsClicked(usize),
-    AttachmentToggled(String, bool),
-    AddExternalSubtitles,
-    ExternalFilesSelected(Vec<PathBuf>),
-    AcceptLayout,
-
-    // Track Settings Dialog
-    TrackLanguageChanged(usize),
-    TrackCustomNameChanged(String),
-    TrackPerformOcrChanged(bool),
-    TrackConvertToAssChanged(bool),
-    TrackRescaleChanged(bool),
-    TrackSizeMultiplierChanged(i32),
-    ConfigureSyncExclusion,
-    AcceptTrackSettings,
-
-    // Stub Dialogs
-    OpenStyleEditor(usize),
-    CloseStyleEditor,
-    OpenGeneratedTrack,
-    CloseGeneratedTrack,
-    OpenSyncExclusion,
-    CloseSyncExclusion,
-    OpenSourceSettings(String),
-    CloseSourceSettings,
-
-    // File Drop
-    FileDropped(window::Id, PathBuf),
-
-    // Keyboard
-    KeyboardModifiersChanged(keyboard::Modifiers),
-
-    // Internal
-    Noop,
-    Tick,  // For time-based operations like double-click detection
-}
-
-/// Settings keys for type-safe settings updates.
-#[derive(Debug, Clone, PartialEq)]
-pub enum SettingKey {
-    OutputFolder,
-    TempRoot,
-    LogsFolder,
-    CompactLogging,
-    Autoscroll,
-    ErrorTail,
-    ProgressStep,
-    ShowOptionsPretty,
-    ShowOptionsJson,
-    AnalysisMode,
-    CorrelationMethod,
-    SyncMode,
-    LangSource1,
-    LangOthers,
-    ChunkCount,
-    ChunkDuration,
-    MinMatchPct,
-    ScanStartPct,
-    ScanEndPct,
-    FilteringMethod,
-    FilterLowCutoffHz,
-    FilterHighCutoffHz,
-    UseSoxr,
-    AudioPeakFit,
-    MultiCorrelationEnabled,
-    MultiCorrScc,
-    MultiCorrGccPhat,
-    MultiCorrGccScot,
-    MultiCorrWhitened,
-    DelaySelectionMode,
-    MinAcceptedChunks,
-    FirstStableMinChunks,
-    FirstStableSkipUnstable,
-    EarlyClusterWindow,
-    EarlyClusterThreshold,
-    ChapterRename,
-    ChapterSnap,
-    SnapMode,
-    SnapThresholdMs,
-    SnapStartsOnly,
-    DisableTrackStats,
-    DisableHeaderCompression,
-    ApplyDialogNorm,
-}
-
-/// Setting values for type-safe settings updates.
-#[derive(Debug, Clone)]
-pub enum SettingValue {
-    String(String),
-    Bool(bool),
-    I32(i32),
-    F32(f32),
-}
-
-/// Folder types for browse dialogs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FolderType {
-    Output,
-    Temp,
-    Logs,
-}
-
-/// Main application state.
-pub struct App {
+/// Initialization data for the App component.
+pub struct AppInit {
     pub config: Arc<Mutex<ConfigManager>>,
     pub job_queue: Arc<Mutex<JobQueue>>,
-    pub layout_manager: Arc<Mutex<LayoutManager>>,
-
-    // Main Window State
-    pub main_window_id: window::Id,
-    pub source1_path: String,
-    pub source2_path: String,
-    pub source3_path: String,
-    pub archive_logs: bool,
-    pub status_text: String,
-    pub progress_value: f32,
-    pub delay_source2: String,
-    pub delay_source3: String,
-    pub log_text: String,
-    pub is_analyzing: bool,
-
-    // Settings Window State
-    pub settings_window_id: Option<window::Id>,
-    pub pending_settings: Option<Settings>,
-    pub settings_active_tab: usize,
-
-    // Job Queue Dialog State
-    pub job_queue_window_id: Option<window::Id>,
-    pub selected_job_indices: Vec<usize>,
-    pub last_clicked_job_idx: Option<usize>,
-    pub last_click_time: Option<std::time::Instant>,
-    pub has_clipboard: bool,
-    pub is_processing: bool,
-    pub job_queue_status: String,
-
-    // Keyboard modifier state (tracked via subscription)
-    pub ctrl_pressed: bool,
-    pub shift_pressed: bool,
-
-    // Batch Processing State (jobs from queue running in main)
-    pub processing_jobs: Vec<JobQueueEntry>,
-    pub current_job_index: usize,
-    pub total_jobs: usize,
-    pub batch_status: String,
-
-    // Add Job Dialog State
-    pub add_job_window_id: Option<window::Id>,
-    pub add_job_sources: Vec<String>,
-    pub add_job_error: String,
-    pub is_finding_jobs: bool,
-
-    // Manual Selection Dialog State
-    pub manual_selection_window_id: Option<window::Id>,
-    pub manual_selection_job_idx: Option<usize>,
-    pub source_groups: Vec<SourceGroupState>,
-    pub final_tracks: Vec<FinalTrackState>,
-    pub attachment_sources: HashMap<String, bool>,
-    pub external_subtitles: Vec<PathBuf>,
-    pub manual_selection_info: String,
-
-    // Track Settings Dialog State
-    pub track_settings_window_id: Option<window::Id>,
-    pub track_settings_idx: Option<usize>,
-    pub track_settings: TrackSettingsState,
-
-    // Drag-and-drop state for reorderable lists
-    pub drag_state: DragState,
-
-    // Window ID Mapping
-    pub window_map: HashMap<window::Id, WindowKind>,
+    pub layouts_dir: PathBuf,
+    pub version_info: String,
 }
 
 /// State for a source group in manual selection.
@@ -304,91 +52,41 @@ pub struct TrackWidgetState {
     pub id: usize,
     pub track_type: String,
     pub codec_id: String,
-    pub language: Option<String>,  // Original language from source
+    pub language: Option<String>,
     pub summary: String,
     pub badges: String,
     pub is_blocked: bool,
 }
 
 /// State for a final track in the layout.
-/// Each track entry has its own unique settings - this is critical for the job system.
 #[derive(Debug, Clone)]
 pub struct FinalTrackState {
-    /// Unique ID for this entry (different from track_id, allows same track added multiple times)
     pub entry_id: uuid::Uuid,
     pub track_id: usize,
     pub source_key: String,
     pub track_type: String,
     pub codec_id: String,
     pub summary: String,
-
-    // Basic flags
     pub is_default: bool,
     pub is_forced_display: bool,
     pub sync_to_source: String,
-
-    // Language
-    pub original_lang: Option<String>,  // Language from source file
-    pub custom_lang: Option<String>,    // User override (None = use original)
-    pub custom_name: Option<String>,
-
-    // Subtitle processing options (per-track, not global!)
-    pub perform_ocr: bool,           // Only for VOBSUB/PGS
-    pub convert_to_ass: bool,        // Only for SRT (S_TEXT/UTF8)
-    pub rescale: bool,               // Rescale subtitle timing
-    pub size_multiplier_pct: i32,    // Font size multiplier (100 = 100%)
-
-    // Style editing (for ASS/SSA subtitles)
-    pub style_patch: Option<String>,       // JSON-serialized style changes
-    pub font_replacements: Option<String>, // JSON-serialized font mappings
-
-    // Sync exclusion (for styled subtitles)
-    pub sync_exclusion_styles: Vec<String>,
-    pub sync_exclusion_mode: SyncExclusionMode,
-
-    // Generated track info
-    pub is_generated: bool,
-    pub generated_filter_styles: Vec<String>,
-    pub generated_from_entry_id: Option<uuid::Uuid>,
-}
-
-/// Sync exclusion mode for subtitle tracks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SyncExclusionMode {
-    #[default]
-    Exclude,  // Exclude listed styles from sync
-    Include,  // Only include listed styles in sync
-}
-
-/// State for drag-and-drop reordering in lists.
-#[derive(Debug, Clone, Default)]
-pub struct DragState {
-    /// Index of the item currently being dragged (None if not dragging)
-    pub dragging_idx: Option<usize>,
-    /// Index of the item we're hovering over (drop target)
-    pub hover_idx: Option<usize>,
-}
-
-/// State for track settings dialog.
-/// This is a temporary editing state - changes are applied back to the FinalTrackState on accept.
-#[derive(Debug, Clone, Default)]
-pub struct TrackSettingsState {
-    pub track_type: String,
-    pub codec_id: String,
-    pub selected_language_idx: usize,
+    pub original_lang: Option<String>,
     pub custom_lang: Option<String>,
     pub custom_name: Option<String>,
     pub perform_ocr: bool,
     pub convert_to_ass: bool,
     pub rescale: bool,
     pub size_multiplier_pct: i32,
-    // Sync exclusion editing state
+    pub style_patch: Option<String>,
+    pub font_replacements: Option<String>,
     pub sync_exclusion_styles: Vec<String>,
     pub sync_exclusion_mode: SyncExclusionMode,
+    pub is_generated: bool,
+    pub generated_filter_styles: Vec<String>,
+    pub generated_from_entry_id: Option<uuid::Uuid>,
 }
 
 impl FinalTrackState {
-    /// Create a new FinalTrackState with defaults.
     pub fn new(
         track_id: usize,
         source_key: String,
@@ -424,29 +122,24 @@ impl FinalTrackState {
         }
     }
 
-    /// Check if this track is OCR-compatible (image-based subtitles).
     pub fn is_ocr_compatible(&self) -> bool {
         let codec_upper = self.codec_id.to_uppercase();
         codec_upper.contains("VOBSUB") || codec_upper.contains("PGS")
     }
 
-    /// Check if this track can be converted to ASS (SRT subtitles).
     pub fn is_convert_to_ass_compatible(&self) -> bool {
         self.codec_id.to_uppercase().contains("S_TEXT/UTF8")
     }
 
-    /// Check if this track supports style editing (ASS/SSA subtitles).
     pub fn is_style_editable(&self) -> bool {
         let codec_upper = self.codec_id.to_uppercase();
         codec_upper.contains("S_TEXT/ASS") || codec_upper.contains("S_TEXT/SSA")
     }
 
-    /// Check if this track supports sync exclusion (styled subtitles).
     pub fn supports_sync_exclusion(&self) -> bool {
         self.is_style_editable()
     }
 
-    /// Generate badges string for display.
     pub fn badges(&self) -> String {
         let mut badges: Vec<String> = Vec::new();
 
@@ -480,7 +173,6 @@ impl FinalTrackState {
         if self.is_generated {
             badges.push("Generated".to_string());
         }
-        // Show badge if language was customized (different from original)
         if let Some(ref custom_lang) = self.custom_lang {
             let original = self.original_lang.as_deref().unwrap_or("und");
             if custom_lang != original {
@@ -495,556 +187,126 @@ impl FinalTrackState {
     }
 }
 
+/// Sync exclusion mode for subtitle tracks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SyncExclusionMode {
+    #[default]
+    Exclude,
+    Include,
+}
+
+/// State for track settings dialog.
+#[derive(Debug, Clone, Default)]
+pub struct TrackSettingsState {
+    pub track_type: String,
+    pub codec_id: String,
+    pub selected_language_idx: usize,
+    pub custom_lang: Option<String>,
+    pub custom_name: Option<String>,
+    pub perform_ocr: bool,
+    pub convert_to_ass: bool,
+    pub rescale: bool,
+    pub size_multiplier_pct: i32,
+    pub sync_exclusion_styles: Vec<String>,
+    pub sync_exclusion_mode: SyncExclusionMode,
+}
+
+/// All possible messages the application can receive.
+#[derive(Debug)]
+pub enum AppMsg {
+    // Main Window Actions
+    SourcePathChanged(usize, String),
+    BrowseSource(usize),
+    FileSelected(usize, Option<PathBuf>),
+    FileDropped(usize, PathBuf),
+    PasteToSource(usize),
+    AnalyzeOnly,
+    ArchiveLogsChanged(bool),
+    AnalysisProgress(f32, String),
+    AnalysisComplete {
+        delay_source2_ms: Option<i64>,
+        delay_source3_ms: Option<i64>,
+    },
+    AnalysisFailed(String),
+
+    // Window Management
+    OpenSettings,
+    OpenJobQueue,
+    OpenAddJob,
+    OpenManualSelection(usize),
+    OpenTrackSettings(usize),
+
+    // Dialog Outputs
+    SettingsClosed(SettingsOutput),
+    JobQueueClosed(JobQueueOutput),
+    AddJobClosed(AddJobOutput),
+    ManualSelectionClosed(ManualSelectionOutput),
+    TrackSettingsClosed(TrackSettingsOutput),
+
+    // Batch Processing
+    StartBatchProcessing(Vec<JobQueueEntry>),
+    ProcessNextJob,
+    ProcessingProgress { job_idx: usize, progress: f32 },
+    JobCompleted { job_idx: usize, success: bool, error: Option<String> },
+    BatchCompleted,
+
+    // Internal
+    Quit,
+}
+
+/// Main application state.
+pub struct App {
+    pub config: Arc<Mutex<ConfigManager>>,
+    pub job_queue: Arc<Mutex<JobQueue>>,
+    pub layout_manager: Arc<Mutex<LayoutManager>>,
+
+    // Main Window State
+    pub source1_path: String,
+    pub source2_path: String,
+    pub source3_path: String,
+    pub archive_logs: bool,
+    pub status_text: String,
+    pub progress_value: f32,
+    pub delay_source2: String,
+    pub delay_source3: String,
+    pub log_text: String,
+    pub is_analyzing: bool,
+
+    // Settings Dialog
+    pub settings_dialog: Option<Controller<SettingsDialog>>,
+    pub pending_settings: Option<Settings>,
+
+    // Job Queue Dialog
+    pub job_queue_dialog: Option<Controller<JobQueueDialog>>,
+    pub selected_job_indices: Vec<usize>,
+    pub has_clipboard: bool,
+    pub is_processing: bool,
+    pub job_queue_status: String,
+
+    // Batch Processing State
+    pub processing_jobs: Vec<JobQueueEntry>,
+    pub current_job_index: usize,
+    pub total_jobs: usize,
+    pub batch_status: String,
+
+    // Add Job Dialog
+    pub add_job_dialog: Option<Controller<AddJobDialog>>,
+
+    // Manual Selection Dialog
+    pub manual_selection_dialog: Option<Controller<ManualSelectionDialog>>,
+    pub manual_selection_job_idx: Option<usize>,
+    pub source_groups: Vec<SourceGroupState>,
+    pub final_tracks: Vec<FinalTrackState>,
+    pub attachment_sources: std::collections::HashMap<String, bool>,
+    pub external_subtitles: Vec<PathBuf>,
+
+    // Track Settings Dialog
+    pub track_settings_dialog: Option<Controller<TrackSettingsDialog>>,
+    pub track_settings_idx: Option<usize>,
+    pub track_settings: TrackSettingsState,
+}
+
 impl App {
-    /// Create and run the application.
-    pub fn run(
-        config: Arc<Mutex<ConfigManager>>,
-        job_queue: Arc<Mutex<JobQueue>>,
-        config_path: PathBuf,
-        logs_dir: PathBuf,
-    ) -> iced::Result {
-        let (archive_logs, layouts_dir) = {
-            let cfg = config.lock().unwrap();
-            let archive = cfg.settings().logging.archive_logs;
-            // Create layout manager - layouts stored in temp_root/job_layouts (like Qt version)
-            let temp_root = &cfg.settings().paths.temp_root;
-            let layouts = PathBuf::from(temp_root).join("job_layouts");
-            (archive, layouts)
-        };
-        let layout_manager = Arc::new(Mutex::new(LayoutManager::new(&layouts_dir)));
-
-        let version_info = format!(
-            "Video Sync GUI started.\nCore version: {}\nConfig: {}\nLogs: {}\nLayouts: {}\n",
-            vsg_core::version(),
-            config_path.display(),
-            logs_dir.display(),
-            layouts_dir.display()
-        );
-
-        iced::daemon(
-            move || {
-                // Open the main window and get its actual ID
-                let (main_window_id, open_task) = window::open(window::Settings {
-                    size: Size::new(1200.0, 720.0),
-                    min_size: Some(Size::new(900.0, 600.0)),
-                    ..Default::default()
-                });
-
-                let mut window_map = HashMap::new();
-                window_map.insert(main_window_id, WindowKind::Main);
-
-                let app = App {
-                    config: config.clone(),
-                    job_queue: job_queue.clone(),
-                    layout_manager: layout_manager.clone(),
-
-                    main_window_id,
-                    source1_path: String::new(),
-                    source2_path: String::new(),
-                    source3_path: String::new(),
-                    archive_logs,
-                    status_text: "Ready".to_string(),
-                    progress_value: 0.0,
-                    delay_source2: String::new(),
-                    delay_source3: String::new(),
-                    log_text: version_info.clone(),
-                    is_analyzing: false,
-
-                    settings_window_id: None,
-                    pending_settings: None,
-                    settings_active_tab: 0,
-
-                    job_queue_window_id: None,
-                    selected_job_indices: Vec::new(),
-                    last_clicked_job_idx: None,
-                    last_click_time: None,
-                    has_clipboard: false,
-                    is_processing: false,
-                    job_queue_status: String::new(),
-
-                    ctrl_pressed: false,
-                    shift_pressed: false,
-
-                    processing_jobs: Vec::new(),
-                    current_job_index: 0,
-                    total_jobs: 0,
-                    batch_status: String::new(),
-
-                    add_job_window_id: None,
-                    add_job_sources: vec![String::new(), String::new()],
-                    add_job_error: String::new(),
-                    is_finding_jobs: false,
-
-                    manual_selection_window_id: None,
-                    manual_selection_job_idx: None,
-                    source_groups: Vec::new(),
-                    final_tracks: Vec::new(),
-                    attachment_sources: HashMap::new(),
-                    external_subtitles: Vec::new(),
-                    manual_selection_info: String::new(),
-
-                    track_settings_window_id: None,
-                    track_settings_idx: None,
-                    track_settings: TrackSettingsState::default(),
-
-                    drag_state: DragState::default(),
-
-                    window_map,
-                };
-
-                (app, open_task.map(|_| Message::Noop))
-            },
-            Self::update,
-            Self::view,
-        )
-        .title(Self::title)
-        .theme(Self::theme)
-        .subscription(Self::subscription)
-        .run()
-    }
-
-    fn title(&self, id: window::Id) -> String {
-        if id == self.main_window_id {
-            "Video Sync GUI".to_string()
-        } else if self.settings_window_id == Some(id) {
-            "Settings - Video Sync GUI".to_string()
-        } else if self.job_queue_window_id == Some(id) {
-            "Job Queue - Video Sync GUI".to_string()
-        } else if self.add_job_window_id == Some(id) {
-            "Add Jobs - Video Sync GUI".to_string()
-        } else if self.manual_selection_window_id == Some(id) {
-            "Manual Selection - Video Sync GUI".to_string()
-        } else if self.track_settings_window_id == Some(id) {
-            "Track Settings - Video Sync GUI".to_string()
-        } else {
-            "Video Sync GUI".to_string()
-        }
-    }
-
-    fn theme(&self, _id: window::Id) -> Theme {
-        Theme::Dark
-    }
-
-    fn subscription(&self) -> Subscription<Message> {
-        Subscription::batch([
-            window::close_events().map(Message::WindowClosed),
-            event::listen_with(|event, _status, id| {
-                match event {
-                    Event::Window(window::Event::FileDropped(path)) => {
-                        Some(Message::FileDropped(id, path))
-                    }
-                    Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
-                        Some(Message::KeyboardModifiersChanged(modifiers))
-                    }
-                    _ => None,
-                }
-            }),
-        ])
-    }
-
-    fn update(&mut self, message: Message) -> Task<Message> {
-        match message {
-            Message::OpenSettings => self.open_settings_window(),
-            Message::CloseSettings => self.close_settings_window(),
-            Message::CancelSettings => self.close_settings_window(),
-            Message::OpenJobQueue => self.open_job_queue_window(),
-            Message::CloseJobQueue => self.close_job_queue_window(),
-            Message::OpenAddJob => self.open_add_job_window(),
-            Message::CloseAddJob => self.close_add_job_window(),
-            Message::OpenManualSelection(idx) => self.open_manual_selection_window(idx),
-            Message::CloseManualSelection => self.close_manual_selection_window(),
-            Message::OpenTrackSettings(idx) => self.open_track_settings_window(idx),
-            Message::CloseTrackSettings => self.close_track_settings_window(),
-            Message::WindowClosed(id) => self.handle_window_closed(id),
-            Message::WindowOpened(window_kind, id) => self.handle_window_opened(window_kind, id),
-
-            Message::SourcePathChanged(idx, path) => {
-                self.handle_source_path_changed(idx, path);
-                Task::none()
-            }
-            Message::PasteToSource(idx) => {
-                // Read clipboard and paste to the appropriate source input
-                tracing::debug!("PasteToSource triggered for source {}", idx);
-                match arboard::Clipboard::new() {
-                    Ok(mut clipboard) => {
-                        match clipboard.get_text() {
-                            Ok(text) => {
-                                tracing::debug!("Clipboard text: {:?}", text);
-                                self.handle_source_path_changed(idx, text);
-                            }
-                            Err(e) => {
-                                tracing::warn!("Failed to get clipboard text: {}", e);
-                                self.append_log(&format!("Clipboard read failed: {}", e));
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to create clipboard: {}", e);
-                        self.append_log(&format!("Clipboard access failed: {}", e));
-                    }
-                }
-                Task::none()
-            }
-            Message::BrowseSource(idx) => self.browse_source(idx),
-            Message::FileSelected(idx, path) => {
-                self.handle_file_selected(idx, path);
-                Task::none()
-            }
-            Message::AnalyzeOnly => self.start_analysis(),
-            Message::ArchiveLogsChanged(value) => {
-                self.archive_logs = value;
-                Task::none()
-            }
-            Message::AnalysisProgress(progress) => {
-                self.progress_value = progress;
-                Task::none()
-            }
-            Message::AnalysisLog(msg) => {
-                self.append_log(&msg);
-                Task::none()
-            }
-            Message::AnalysisComplete {
-                delay_source2_ms,
-                delay_source3_ms,
-            } => {
-                self.handle_analysis_complete(delay_source2_ms, delay_source3_ms);
-                Task::none()
-            }
-            Message::AnalysisFailed(error) => {
-                self.handle_analysis_failed(&error);
-                Task::none()
-            }
-
-            Message::SettingChanged(key, value) => {
-                self.handle_setting_changed(key, value);
-                Task::none()
-            }
-            Message::SaveSettings => {
-                self.save_settings();
-                self.close_settings_window()
-            }
-            Message::BrowseFolder(folder_type) => self.browse_folder(folder_type),
-            Message::FolderSelected(folder_type, path) => {
-                self.handle_folder_selected(folder_type, path);
-                Task::none()
-            }
-            Message::SettingsTabSelected(tab) => {
-                self.settings_active_tab = tab;
-                Task::none()
-            }
-
-            Message::AddJobsClicked => self.open_add_job_window(),
-            Message::JobRowDoubleClicked(idx) => self.open_manual_selection_window(idx),
-            Message::RemoveSelectedJobs => {
-                self.remove_selected_jobs();
-                Task::none()
-            }
-            Message::MoveJobsUp => {
-                self.move_jobs_up();
-                Task::none()
-            }
-            Message::MoveJobsDown => {
-                self.move_jobs_down();
-                Task::none()
-            }
-            Message::CopyLayout(idx) => {
-                self.copy_layout(idx);
-                Task::none()
-            }
-            Message::PasteLayout => {
-                self.paste_layout();
-                Task::none()
-            }
-            Message::StartProcessing => self.start_processing(),
-            Message::StartBatchProcessing(jobs) => self.handle_start_batch_processing(jobs),
-            Message::ProcessNextJob => self.handle_process_next_job(),
-            Message::ProcessingProgress { job_idx, progress } => {
-                // Update progress display for current job
-                if job_idx == self.current_job_index && self.is_processing {
-                    self.progress_value = progress;
-                    self.batch_status = format!(
-                        "Processing job {} of {}: {:.0}%",
-                        job_idx + 1,
-                        self.total_jobs,
-                        progress * 100.0
-                    );
-                }
-                Task::none()
-            }
-            Message::ProcessingComplete => {
-                self.is_processing = false;
-                self.job_queue_status = "Processing complete".to_string();
-                Task::none()
-            }
-            Message::ProcessingFailed(error) => {
-                self.is_processing = false;
-                self.job_queue_status = format!("Processing failed: {}", error);
-                Task::none()
-            }
-            Message::JobCompleted { job_idx, success, error } => {
-                self.handle_job_completed(job_idx, success, error)
-            }
-            Message::BatchCompleted => self.handle_batch_completed(),
-
-            Message::AddSource => {
-                if self.add_job_sources.len() < 10 {
-                    self.add_job_sources.push(String::new());
-                }
-                Task::none()
-            }
-            Message::RemoveSource(idx) => {
-                if self.add_job_sources.len() > 2 && idx < self.add_job_sources.len() {
-                    self.add_job_sources.remove(idx);
-                }
-                Task::none()
-            }
-            Message::AddJobSourceChanged(idx, path) => {
-                if idx < self.add_job_sources.len() {
-                    self.add_job_sources[idx] = path;
-                }
-                Task::none()
-            }
-            Message::AddJobBrowseSource(idx) => self.browse_add_job_source(idx),
-            Message::AddJobFileSelected(idx, path) => {
-                self.handle_add_job_file_selected(idx, path);
-                Task::none()
-            }
-            Message::FindAndAddJobs => self.find_and_add_jobs(),
-            Message::JobsAdded(count) => {
-                self.is_finding_jobs = false;
-                if count > 0 {
-                    self.job_queue_status = format!("Added {} job(s)", count);
-                    self.close_add_job_window()
-                } else {
-                    self.add_job_error = "No jobs could be discovered".to_string();
-                    Task::none()
-                }
-            }
-
-            Message::SourceTrackDoubleClicked { track_id, source_key } => {
-                self.add_track_to_final_list(track_id, &source_key);
-                Task::none()
-            }
-            Message::FinalTrackMoved(from, to) => {
-                self.move_final_track(from, to);
-                Task::none()
-            }
-            Message::DragStart(idx) => {
-                self.drag_state.dragging_idx = Some(idx);
-                self.drag_state.hover_idx = Some(idx);
-                Task::none()
-            }
-            Message::DragHover(idx) => {
-                if self.drag_state.dragging_idx.is_some() {
-                    self.drag_state.hover_idx = Some(idx);
-                }
-                Task::none()
-            }
-            Message::DragEnd => {
-                if let (Some(from), Some(to)) = (self.drag_state.dragging_idx, self.drag_state.hover_idx) {
-                    if from != to {
-                        self.move_final_track(from, to);
-                    }
-                }
-                self.drag_state = DragState::default();
-                Task::none()
-            }
-            Message::DragCancel => {
-                self.drag_state = DragState::default();
-                Task::none()
-            }
-            Message::FinalTrackRemoved(idx) => {
-                self.remove_final_track(idx);
-                Task::none()
-            }
-            Message::FinalTrackDefaultChanged(idx, value) => {
-                if let Some(track) = self.final_tracks.get_mut(idx) {
-                    track.is_default = value;
-                }
-                Task::none()
-            }
-            Message::FinalTrackForcedChanged(idx, value) => {
-                if let Some(track) = self.final_tracks.get_mut(idx) {
-                    track.is_forced_display = value;
-                }
-                Task::none()
-            }
-            Message::FinalTrackSyncChanged(idx, source) => {
-                if let Some(track) = self.final_tracks.get_mut(idx) {
-                    track.sync_to_source = source;
-                }
-                Task::none()
-            }
-            Message::FinalTrackSettingsClicked(idx) => {
-                tracing::debug!("FinalTrackSettingsClicked received for idx={}", idx);
-                self.open_track_settings_window(idx)
-            }
-            Message::AttachmentToggled(source, checked) => {
-                self.attachment_sources.insert(source, checked);
-                Task::none()
-            }
-            Message::AddExternalSubtitles => self.browse_external_subtitles(),
-            Message::ExternalFilesSelected(paths) => {
-                self.external_subtitles.extend(paths);
-                Task::none()
-            }
-            Message::AcceptLayout => {
-                self.accept_layout();
-                self.close_manual_selection_window()
-            }
-
-            Message::TrackLanguageChanged(idx) => {
-                self.track_settings.selected_language_idx = idx;
-                // Extract the language code from the selection (e.g., "jpn (Japanese)" -> "jpn")
-                let lang_code = LANGUAGE_CODES.get(idx).map(|s| s.to_string());
-                self.track_settings.custom_lang = lang_code;
-                Task::none()
-            }
-            Message::TrackCustomNameChanged(name) => {
-                self.track_settings.custom_name = if name.is_empty() { None } else { Some(name) };
-                Task::none()
-            }
-            Message::TrackPerformOcrChanged(value) => {
-                self.track_settings.perform_ocr = value;
-                Task::none()
-            }
-            Message::TrackConvertToAssChanged(value) => {
-                self.track_settings.convert_to_ass = value;
-                Task::none()
-            }
-            Message::TrackRescaleChanged(value) => {
-                self.track_settings.rescale = value;
-                Task::none()
-            }
-            Message::TrackSizeMultiplierChanged(value) => {
-                self.track_settings.size_multiplier_pct = value;
-                Task::none()
-            }
-            Message::ConfigureSyncExclusion => Task::none(),
-            Message::AcceptTrackSettings => {
-                self.accept_track_settings();
-                self.close_track_settings_window()
-            }
-
-            Message::OpenStyleEditor(_) | Message::CloseStyleEditor => Task::none(),
-            Message::OpenGeneratedTrack | Message::CloseGeneratedTrack => Task::none(),
-            Message::OpenSyncExclusion | Message::CloseSyncExclusion => Task::none(),
-            Message::OpenSourceSettings(_) | Message::CloseSourceSettings => Task::none(),
-
-            // Job Queue click handling
-            Message::JobRowClicked(idx) => {
-                // Check for keyboard modifiers and delegate to appropriate handler
-                if self.ctrl_pressed {
-                    // Ctrl+click: toggle selection
-                    if self.selected_job_indices.contains(&idx) {
-                        self.selected_job_indices.retain(|&i| i != idx);
-                    } else {
-                        self.selected_job_indices.push(idx);
-                    }
-                    self.last_clicked_job_idx = Some(idx);
-                    self.last_click_time = None; // Reset double-click tracking
-                    Task::none()
-                } else if self.shift_pressed {
-                    // Shift+click: range selection from last clicked to this one
-                    if let Some(anchor) = self.last_clicked_job_idx {
-                        let (start, end) = if anchor <= idx {
-                            (anchor, idx)
-                        } else {
-                            (idx, anchor)
-                        };
-                        // Add all in range to selection
-                        for i in start..=end {
-                            if !self.selected_job_indices.contains(&i) {
-                                self.selected_job_indices.push(i);
-                            }
-                        }
-                    } else {
-                        // No anchor, just select this one
-                        self.selected_job_indices.clear();
-                        self.selected_job_indices.push(idx);
-                        self.last_clicked_job_idx = Some(idx);
-                    }
-                    self.last_click_time = None; // Reset double-click tracking
-                    Task::none()
-                } else {
-                    // Normal click - use existing double-click detection logic
-                    if self.handle_job_row_clicked(idx) {
-                        // It was a double-click - open manual selection
-                        self.open_manual_selection_window(idx)
-                    } else {
-                        Task::none()
-                    }
-                }
-            }
-            Message::JobRowCtrlClicked(idx) => {
-                // Toggle selection without clearing others
-                if self.selected_job_indices.contains(&idx) {
-                    self.selected_job_indices.retain(|&i| i != idx);
-                } else {
-                    self.selected_job_indices.push(idx);
-                }
-                // Track last clicked for shift-click range
-                self.last_clicked_job_idx = Some(idx);
-                Task::none()
-            }
-            Message::JobRowShiftClicked(idx) => {
-                // Range selection from last clicked to current
-                if let Some(anchor) = self.last_clicked_job_idx {
-                    let start = anchor.min(idx);
-                    let end = anchor.max(idx);
-                    // Add all indices in range (keep anchor, add range)
-                    for i in start..=end {
-                        if !self.selected_job_indices.contains(&i) {
-                            self.selected_job_indices.push(i);
-                        }
-                    }
-                } else {
-                    // No anchor - just select this one
-                    self.selected_job_indices.clear();
-                    self.selected_job_indices.push(idx);
-                    self.last_clicked_job_idx = Some(idx);
-                }
-                Task::none()
-            }
-
-            // File drop handling
-            Message::FileDropped(window_id, path) => {
-                self.handle_file_dropped(window_id, path);
-                Task::none()
-            }
-
-            Message::KeyboardModifiersChanged(modifiers) => {
-                self.ctrl_pressed = modifiers.control();
-                self.shift_pressed = modifiers.shift();
-                Task::none()
-            }
-
-            Message::Noop => Task::none(),
-            Message::Tick => Task::none(),
-        }
-    }
-
-    fn view(&self, id: window::Id) -> Element<Message> {
-        match self.window_map.get(&id) {
-            Some(WindowKind::Main) => pages::main_window::view(self),
-            Some(WindowKind::Settings) => windows::settings::view(self),
-            Some(WindowKind::JobQueue) => windows::job_queue::view(self),
-            Some(WindowKind::AddJob) => windows::add_job::view(self),
-            Some(WindowKind::ManualSelection(_)) => windows::manual_selection::view(self),
-            Some(WindowKind::TrackSettings(_)) => windows::track_settings::view(self),
-            _ => {
-                // Fallback: If window is main window ID but not in map yet
-                if id == self.main_window_id {
-                    pages::main_window::view(self)
-                } else {
-                    widget::container(text("Loading..."))
-                        .padding(20)
-                        .into()
-                }
-            }
-        }
-    }
-
     pub fn append_log(&mut self, message: &str) {
         self.log_text.push_str(message);
         self.log_text.push('\n');
@@ -1052,5 +314,757 @@ impl App {
 
     pub fn source_keys(&self) -> Vec<String> {
         self.source_groups.iter().map(|g| g.source_key.clone()).collect()
+    }
+}
+
+/// Setup drag-drop for an entry widget
+fn setup_drop_target(entry: &gtk::Entry, source_idx: usize, sender: ComponentSender<App>) {
+    let drop_target = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY);
+
+    drop_target.connect_drop(move |_target, value, _x, _y| {
+        if let Ok(file_list) = value.get::<gdk::FileList>() {
+            if let Some(file) = file_list.files().first() {
+                if let Some(path) = file.path() {
+                    sender.input(AppMsg::FileDropped(source_idx, path));
+                    return true;
+                }
+            }
+        }
+        false
+    });
+
+    entry.add_controller(drop_target);
+}
+
+/// Setup clipboard paste for an entry widget
+fn setup_paste_handler(entry: &gtk::Entry, source_idx: usize, sender: ComponentSender<App>) {
+    let gesture = gtk::GestureClick::new();
+    gesture.set_button(0); // Any button
+
+    let key_controller = gtk::EventControllerKey::new();
+    let sender_clone = sender.clone();
+
+    key_controller.connect_key_pressed(move |_controller, key, _code, state| {
+        // Check for Ctrl+V
+        if state.contains(gdk::ModifierType::CONTROL_MASK) && key == gdk::Key::v {
+            sender_clone.input(AppMsg::PasteToSource(source_idx));
+            return glib::Propagation::Stop;
+        }
+        glib::Propagation::Proceed
+    });
+
+    entry.add_controller(key_controller);
+}
+
+#[relm4::component(pub)]
+impl Component for App {
+    type Init = AppInit;
+    type Input = AppMsg;
+    type Output = ();
+    type CommandOutput = ();
+
+    view! {
+        adw::ApplicationWindow {
+            set_title: Some("Video Sync GUI"),
+            set_default_width: 1200,
+            set_default_height: 720,
+
+            #[wrap(Some)]
+            set_content = &adw::ToolbarView {
+                add_top_bar = &adw::HeaderBar {
+                    #[wrap(Some)]
+                    set_title_widget = &gtk::Label {
+                        set_label: "Video Sync GUI",
+                    },
+                    pack_end = &gtk::Button {
+                        set_label: "Settings...",
+                        connect_clicked => AppMsg::OpenSettings,
+                    },
+                },
+
+                #[wrap(Some)]
+                set_content = &gtk::Box {
+                    set_orientation: gtk::Orientation::Vertical,
+                    set_spacing: 12,
+                    set_margin_all: 16,
+
+                    // Archive logs checkbox
+                    gtk::CheckButton {
+                        set_label: Some("Archive logs to zip on batch completion"),
+                        #[watch]
+                        set_active: model.archive_logs,
+                        connect_toggled[sender] => move |btn| {
+                            sender.input(AppMsg::ArchiveLogsChanged(btn.is_active()));
+                        },
+                    },
+
+                    // Main Workflow Section
+                    gtk::Frame {
+                        set_label: Some("Main Workflow"),
+
+                        gtk::Box {
+                            set_orientation: gtk::Orientation::Vertical,
+                            set_spacing: 8,
+                            set_margin_all: 12,
+
+                            gtk::Button {
+                                set_label: "Open Job Queue for Merging...",
+                                add_css_class: "suggested-action",
+                                connect_clicked => AppMsg::OpenJobQueue,
+                            },
+                        },
+                    },
+
+                    // Quick Analysis Section
+                    gtk::Frame {
+                        set_label: Some("Quick Analysis (Analyze Only)"),
+
+                        gtk::Box {
+                            set_orientation: gtk::Orientation::Vertical,
+                            set_spacing: 8,
+                            set_margin_all: 12,
+
+                            // Source 1
+                            gtk::Box {
+                                set_orientation: gtk::Orientation::Horizontal,
+                                set_spacing: 8,
+
+                                gtk::Label {
+                                    set_label: "Source 1 (Reference):",
+                                    set_width_chars: 18,
+                                    set_xalign: 0.0,
+                                },
+
+                                #[name = "source1_entry"]
+                                gtk::Entry {
+                                    set_hexpand: true,
+                                    set_placeholder_text: Some("Drop file or Ctrl+V to paste path..."),
+                                    #[watch]
+                                    set_text: &model.source1_path,
+                                    connect_changed[sender] => move |entry| {
+                                        sender.input(AppMsg::SourcePathChanged(1, entry.text().to_string()));
+                                    },
+                                },
+
+                                gtk::Button {
+                                    set_label: "Browse...",
+                                    connect_clicked => AppMsg::BrowseSource(1),
+                                },
+                            },
+
+                            // Source 2
+                            gtk::Box {
+                                set_orientation: gtk::Orientation::Horizontal,
+                                set_spacing: 8,
+
+                                gtk::Label {
+                                    set_label: "Source 2:",
+                                    set_width_chars: 18,
+                                    set_xalign: 0.0,
+                                },
+
+                                #[name = "source2_entry"]
+                                gtk::Entry {
+                                    set_hexpand: true,
+                                    set_placeholder_text: Some("Drop file or Ctrl+V to paste path..."),
+                                    #[watch]
+                                    set_text: &model.source2_path,
+                                    connect_changed[sender] => move |entry| {
+                                        sender.input(AppMsg::SourcePathChanged(2, entry.text().to_string()));
+                                    },
+                                },
+
+                                gtk::Button {
+                                    set_label: "Browse...",
+                                    connect_clicked => AppMsg::BrowseSource(2),
+                                },
+                            },
+
+                            // Source 3
+                            gtk::Box {
+                                set_orientation: gtk::Orientation::Horizontal,
+                                set_spacing: 8,
+
+                                gtk::Label {
+                                    set_label: "Source 3:",
+                                    set_width_chars: 18,
+                                    set_xalign: 0.0,
+                                },
+
+                                #[name = "source3_entry"]
+                                gtk::Entry {
+                                    set_hexpand: true,
+                                    set_placeholder_text: Some("Drop file or Ctrl+V to paste path..."),
+                                    #[watch]
+                                    set_text: &model.source3_path,
+                                    connect_changed[sender] => move |entry| {
+                                        sender.input(AppMsg::SourcePathChanged(3, entry.text().to_string()));
+                                    },
+                                },
+
+                                gtk::Button {
+                                    set_label: "Browse...",
+                                    connect_clicked => AppMsg::BrowseSource(3),
+                                },
+                            },
+
+                            // Analyze button
+                            gtk::Box {
+                                set_orientation: gtk::Orientation::Horizontal,
+                                set_halign: gtk::Align::End,
+
+                                gtk::Button {
+                                    #[watch]
+                                    set_label: if model.is_analyzing { "Analyzing..." } else { "Analyze Only" },
+                                    #[watch]
+                                    set_sensitive: !model.is_analyzing && !model.source1_path.is_empty() && !model.source2_path.is_empty(),
+                                    connect_clicked => AppMsg::AnalyzeOnly,
+                                },
+                            },
+                        },
+                    },
+
+                    // Latest Job Results Section
+                    gtk::Frame {
+                        set_label: Some("Latest Job Results"),
+
+                        gtk::Box {
+                            set_orientation: gtk::Orientation::Horizontal,
+                            set_spacing: 16,
+                            set_margin_all: 12,
+
+                            gtk::Label {
+                                set_label: "Source 2 Delay:",
+                            },
+                            gtk::Label {
+                                #[watch]
+                                set_label: if model.delay_source2.is_empty() { "-" } else { &model.delay_source2 },
+                            },
+
+                            gtk::Label {
+                                set_label: "Source 3 Delay:",
+                            },
+                            gtk::Label {
+                                #[watch]
+                                set_label: if model.delay_source3.is_empty() { "-" } else { &model.delay_source3 },
+                            },
+                        },
+                    },
+
+                    // Log Section
+                    gtk::Frame {
+                        set_label: Some("Log"),
+                        set_vexpand: true,
+
+                        gtk::ScrolledWindow {
+                            set_vexpand: true,
+                            set_hexpand: true,
+                            set_min_content_height: 200,
+
+                            #[name = "log_view"]
+                            gtk::TextView {
+                                set_editable: false,
+                                set_monospace: true,
+                                set_wrap_mode: gtk::WrapMode::None,
+                                set_left_margin: 8,
+                                set_right_margin: 8,
+                                set_top_margin: 8,
+                                set_bottom_margin: 8,
+                            },
+                        },
+                    },
+
+                    // Status Bar
+                    gtk::Box {
+                        set_orientation: gtk::Orientation::Horizontal,
+                        set_spacing: 8,
+
+                        gtk::Label {
+                            set_label: "Status:",
+                        },
+                        gtk::Label {
+                            #[watch]
+                            set_label: &model.status_text,
+                            set_hexpand: true,
+                            set_xalign: 0.0,
+                        },
+                        gtk::ProgressBar {
+                            set_width_request: 200,
+                            #[watch]
+                            set_fraction: model.progress_value as f64 / 100.0,
+                        },
+                    },
+                },
+            },
+        }
+    }
+
+    fn init(
+        init: Self::Init,
+        root: Self::Root,
+        sender: ComponentSender<Self>,
+    ) -> ComponentParts<Self> {
+        let archive_logs = {
+            let cfg = init.config.lock().unwrap();
+            cfg.settings().logging.archive_logs
+        };
+        let layout_manager = Arc::new(Mutex::new(LayoutManager::new(&init.layouts_dir)));
+
+        let model = App {
+            config: init.config,
+            job_queue: init.job_queue,
+            layout_manager,
+
+            source1_path: String::new(),
+            source2_path: String::new(),
+            source3_path: String::new(),
+            archive_logs,
+            status_text: "Ready".to_string(),
+            progress_value: 0.0,
+            delay_source2: String::new(),
+            delay_source3: String::new(),
+            log_text: init.version_info,
+            is_analyzing: false,
+
+            settings_dialog: None,
+            pending_settings: None,
+
+            job_queue_dialog: None,
+            selected_job_indices: Vec::new(),
+            has_clipboard: false,
+            is_processing: false,
+            job_queue_status: String::new(),
+
+            processing_jobs: Vec::new(),
+            current_job_index: 0,
+            total_jobs: 0,
+            batch_status: String::new(),
+
+            add_job_dialog: None,
+
+            manual_selection_dialog: None,
+            manual_selection_job_idx: None,
+            source_groups: Vec::new(),
+            final_tracks: Vec::new(),
+            attachment_sources: std::collections::HashMap::new(),
+            external_subtitles: Vec::new(),
+
+            track_settings_dialog: None,
+            track_settings_idx: None,
+            track_settings: TrackSettingsState::default(),
+        };
+
+        let widgets = view_output!();
+
+        // Set initial log text
+        widgets.log_view.buffer().set_text(&model.log_text);
+
+        // Setup drag-drop for source entries
+        setup_drop_target(&widgets.source1_entry, 1, sender.clone());
+        setup_drop_target(&widgets.source2_entry, 2, sender.clone());
+        setup_drop_target(&widgets.source3_entry, 3, sender.clone());
+
+        // Setup paste handlers
+        setup_paste_handler(&widgets.source1_entry, 1, sender.clone());
+        setup_paste_handler(&widgets.source2_entry, 2, sender.clone());
+        setup_paste_handler(&widgets.source3_entry, 3, sender.clone());
+
+        ComponentParts { model, widgets }
+    }
+
+    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, root: &Self::Root) {
+        match msg {
+            AppMsg::SourcePathChanged(idx, path) => {
+                match idx {
+                    1 => self.source1_path = path,
+                    2 => self.source2_path = path,
+                    3 => self.source3_path = path,
+                    _ => {}
+                }
+            }
+
+            AppMsg::BrowseSource(idx) => {
+                let sender = sender.clone();
+                let root = root.clone();
+                relm4::spawn_local(async move {
+                    let dialog = gtk::FileDialog::builder()
+                        .title("Select Source File")
+                        .modal(true)
+                        .build();
+
+                    if let Ok(file) = dialog.open_future(Some(&root)).await {
+                        if let Some(path) = file.path() {
+                            sender.input(AppMsg::FileSelected(idx, Some(path)));
+                        }
+                    }
+                });
+            }
+
+            AppMsg::FileSelected(idx, path) | AppMsg::FileDropped(idx, path) => {
+                if let Some(p) = path.as_ref().or(None) {
+                    let path_str = p.to_string_lossy().to_string();
+                    match idx {
+                        1 => self.source1_path = path_str,
+                        2 => self.source2_path = path_str,
+                        3 => self.source3_path = path_str,
+                        _ => {}
+                    }
+                } else if let AppMsg::FileDropped(idx, p) = &msg {
+                    let path_str = p.to_string_lossy().to_string();
+                    match idx {
+                        1 => self.source1_path = path_str,
+                        2 => self.source2_path = path_str,
+                        3 => self.source3_path = path_str,
+                        _ => {}
+                    }
+                }
+            }
+
+            AppMsg::PasteToSource(idx) => {
+                let sender = sender.clone();
+                let display = gdk::Display::default().unwrap();
+                let clipboard = display.clipboard();
+
+                relm4::spawn_local(async move {
+                    if let Ok(text) = clipboard.read_text_future().await {
+                        if let Some(text) = text {
+                            let path = text.trim().to_string();
+                            // Handle file:// URIs
+                            let path = if path.starts_with("file://") {
+                                percent_encoding::percent_decode_str(&path[7..])
+                                    .decode_utf8_lossy()
+                                    .to_string()
+                            } else {
+                                path
+                            };
+                            sender.input(AppMsg::SourcePathChanged(idx, path));
+                        }
+                    }
+                });
+            }
+
+            AppMsg::AnalyzeOnly => {
+                if !self.is_analyzing && !self.source1_path.is_empty() && !self.source2_path.is_empty() {
+                    self.is_analyzing = true;
+                    self.status_text = "Analyzing...".to_string();
+                    self.progress_value = 0.0;
+                    self.delay_source2.clear();
+                    self.delay_source3.clear();
+                    self.append_log("\n--- Starting Analysis ---");
+
+                    let source1 = PathBuf::from(&self.source1_path);
+                    let source2 = PathBuf::from(&self.source2_path);
+                    let source3 = if self.source3_path.is_empty() {
+                        None
+                    } else {
+                        Some(PathBuf::from(&self.source3_path))
+                    };
+
+                    // Get analysis settings
+                    let settings = {
+                        let cfg = self.config.lock().unwrap();
+                        cfg.settings().analysis.clone()
+                    };
+
+                    let sender = sender.clone();
+
+                    // Run analysis in background thread
+                    std::thread::spawn(move || {
+                        let analyzer = Analyzer::from_settings(&settings);
+
+                        sender.input(AppMsg::AnalysisProgress(10.0, "Analyzing Source 2...".to_string()));
+
+                        // Analyze Source 2
+                        let delay2 = match analyzer.analyze(&source1, &source2, "Source 2") {
+                            Ok(result) => {
+                                let delay_ms = result.final_delay_ms;
+                                sender.input(AppMsg::AnalysisProgress(
+                                    50.0,
+                                    format!("Source 2: {} ms (confidence: {:.1}%)", delay_ms, result.confidence * 100.0),
+                                ));
+                                Some(delay_ms)
+                            }
+                            Err(e) => {
+                                sender.input(AppMsg::AnalysisProgress(50.0, format!("Source 2 failed: {}", e)));
+                                None
+                            }
+                        };
+
+                        // Analyze Source 3 if provided
+                        let delay3 = if let Some(ref s3) = source3 {
+                            sender.input(AppMsg::AnalysisProgress(60.0, "Analyzing Source 3...".to_string()));
+                            match analyzer.analyze(&source1, s3, "Source 3") {
+                                Ok(result) => {
+                                    let delay_ms = result.final_delay_ms;
+                                    sender.input(AppMsg::AnalysisProgress(
+                                        90.0,
+                                        format!("Source 3: {} ms (confidence: {:.1}%)", delay_ms, result.confidence * 100.0),
+                                    ));
+                                    Some(delay_ms)
+                                }
+                                Err(e) => {
+                                    sender.input(AppMsg::AnalysisProgress(90.0, format!("Source 3 failed: {}", e)));
+                                    None
+                                }
+                            }
+                        } else {
+                            None
+                        };
+
+                        if delay2.is_some() || delay3.is_some() {
+                            sender.input(AppMsg::AnalysisComplete {
+                                delay_source2_ms: delay2,
+                                delay_source3_ms: delay3,
+                            });
+                        } else {
+                            sender.input(AppMsg::AnalysisFailed("All sources failed to analyze".to_string()));
+                        }
+                    });
+                }
+            }
+
+            AppMsg::ArchiveLogsChanged(value) => {
+                self.archive_logs = value;
+            }
+
+            AppMsg::AnalysisProgress(progress, message) => {
+                self.progress_value = progress;
+                self.status_text = message.clone();
+                self.append_log(&message);
+            }
+
+            AppMsg::AnalysisComplete { delay_source2_ms, delay_source3_ms } => {
+                self.is_analyzing = false;
+                self.status_text = "Analysis complete".to_string();
+                self.progress_value = 100.0;
+
+                if let Some(delay) = delay_source2_ms {
+                    self.delay_source2 = format!("{} ms", delay);
+                    self.append_log(&format!("✓ Source 2 delay: {} ms", delay));
+                }
+                if let Some(delay) = delay_source3_ms {
+                    self.delay_source3 = format!("{} ms", delay);
+                    self.append_log(&format!("✓ Source 3 delay: {} ms", delay));
+                }
+
+                self.append_log("--- Analysis Complete ---\n");
+            }
+
+            AppMsg::AnalysisFailed(error) => {
+                self.is_analyzing = false;
+                self.status_text = format!("Analysis failed: {}", error);
+                self.progress_value = 0.0;
+                self.append_log(&format!("✗ Analysis failed: {}", error));
+            }
+
+            AppMsg::OpenSettings => {
+                if self.settings_dialog.is_none() {
+                    let settings = {
+                        let cfg = self.config.lock().unwrap();
+                        cfg.settings().clone()
+                    };
+
+                    let dialog = SettingsDialog::builder()
+                        .transient_for(root)
+                        .launch(settings)
+                        .forward(sender.input_sender(), |output| {
+                            AppMsg::SettingsClosed(output)
+                        });
+
+                    self.settings_dialog = Some(dialog);
+                }
+            }
+
+            AppMsg::SettingsClosed(output) => {
+                self.settings_dialog = None;
+                if let SettingsOutput::Saved(settings) = output {
+                    let mut cfg = self.config.lock().unwrap();
+                    *cfg.settings_mut() = settings;
+                    if let Err(e) = cfg.save() {
+                        self.append_log(&format!("Failed to save settings: {}", e));
+                    } else {
+                        self.append_log("Settings saved.");
+                    }
+                }
+            }
+
+            AppMsg::OpenJobQueue => {
+                if self.job_queue_dialog.is_none() {
+                    let dialog = JobQueueDialog::builder()
+                        .transient_for(root)
+                        .launch(self.job_queue.clone())
+                        .forward(sender.input_sender(), |output| {
+                            AppMsg::JobQueueClosed(output)
+                        });
+
+                    self.job_queue_dialog = Some(dialog);
+                }
+            }
+
+            AppMsg::JobQueueClosed(output) => {
+                self.job_queue_dialog = None;
+                match output {
+                    JobQueueOutput::StartProcessing(jobs) => {
+                        sender.input(AppMsg::StartBatchProcessing(jobs));
+                    }
+                    JobQueueOutput::OpenManualSelection(idx) => {
+                        sender.input(AppMsg::OpenManualSelection(idx));
+                    }
+                    JobQueueOutput::Closed => {}
+                }
+            }
+
+            AppMsg::OpenAddJob => {
+                if self.add_job_dialog.is_none() {
+                    let dialog = AddJobDialog::builder()
+                        .transient_for(root)
+                        .launch(self.job_queue.clone())
+                        .forward(sender.input_sender(), |output| {
+                            AppMsg::AddJobClosed(output)
+                        });
+
+                    self.add_job_dialog = Some(dialog);
+                }
+            }
+
+            AppMsg::AddJobClosed(output) => {
+                self.add_job_dialog = None;
+                if let AddJobOutput::JobsAdded(count) = output {
+                    self.job_queue_status = format!("Added {} job(s)", count);
+                }
+            }
+
+            AppMsg::OpenManualSelection(idx) => {
+                self.manual_selection_job_idx = Some(idx);
+
+                if self.manual_selection_dialog.is_none() {
+                    let dialog = ManualSelectionDialog::builder()
+                        .transient_for(root)
+                        .launch((self.job_queue.clone(), self.layout_manager.clone(), idx))
+                        .forward(sender.input_sender(), |output| {
+                            AppMsg::ManualSelectionClosed(output)
+                        });
+
+                    self.manual_selection_dialog = Some(dialog);
+                }
+            }
+
+            AppMsg::ManualSelectionClosed(output) => {
+                self.manual_selection_dialog = None;
+                self.manual_selection_job_idx = None;
+
+                if let ManualSelectionOutput::LayoutAccepted = output {
+                    self.job_queue_status = "Layout saved.".to_string();
+                }
+            }
+
+            AppMsg::OpenTrackSettings(idx) => {
+                self.track_settings_idx = Some(idx);
+
+                if self.track_settings_dialog.is_none() {
+                    let track = self.final_tracks.get(idx).cloned();
+
+                    if let Some(track) = track {
+                        let dialog = TrackSettingsDialog::builder()
+                            .transient_for(root)
+                            .launch(track)
+                            .forward(sender.input_sender(), |output| {
+                                AppMsg::TrackSettingsClosed(output)
+                            });
+
+                        self.track_settings_dialog = Some(dialog);
+                    }
+                }
+            }
+
+            AppMsg::TrackSettingsClosed(output) => {
+                self.track_settings_dialog = None;
+
+                if let TrackSettingsOutput::Accepted(updated_track) = output {
+                    if let Some(idx) = self.track_settings_idx {
+                        if let Some(track) = self.final_tracks.get_mut(idx) {
+                            *track = updated_track;
+                        }
+                    }
+                }
+
+                self.track_settings_idx = None;
+            }
+
+            AppMsg::StartBatchProcessing(jobs) => {
+                self.processing_jobs = jobs;
+                self.total_jobs = self.processing_jobs.len();
+                self.current_job_index = 0;
+                self.is_processing = true;
+
+                if !self.processing_jobs.is_empty() {
+                    sender.input(AppMsg::ProcessNextJob);
+                }
+            }
+
+            AppMsg::ProcessNextJob => {
+                if self.current_job_index < self.total_jobs {
+                    self.batch_status = format!(
+                        "Processing job {} of {}",
+                        self.current_job_index + 1,
+                        self.total_jobs
+                    );
+                    self.append_log(&self.batch_status.clone());
+
+                    // TODO: Implement actual job processing using orchestrator
+                    let sender = sender.clone();
+                    let job_idx = self.current_job_index;
+                    relm4::spawn_local(async move {
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                        sender.input(AppMsg::JobCompleted {
+                            job_idx,
+                            success: true,
+                            error: None,
+                        });
+                    });
+                } else {
+                    sender.input(AppMsg::BatchCompleted);
+                }
+            }
+
+            AppMsg::ProcessingProgress { job_idx, progress } => {
+                if job_idx == self.current_job_index && self.is_processing {
+                    self.progress_value = progress;
+                }
+            }
+
+            AppMsg::JobCompleted { job_idx, success, error } => {
+                if success {
+                    self.append_log(&format!("Job {} completed successfully.", job_idx + 1));
+                } else if let Some(err) = error {
+                    self.append_log(&format!("Job {} failed: {}", job_idx + 1, err));
+                }
+
+                self.current_job_index += 1;
+                sender.input(AppMsg::ProcessNextJob);
+            }
+
+            AppMsg::BatchCompleted => {
+                self.is_processing = false;
+                self.batch_status = "Batch processing complete.".to_string();
+                self.append_log("Batch processing complete.");
+                self.status_text = "Ready".to_string();
+                self.progress_value = 100.0;
+            }
+
+            AppMsg::Quit => {
+                relm4::main_application().quit();
+            }
+        }
+    }
+
+    fn update_view(&self, widgets: &mut Self::Widgets, _sender: ComponentSender<Self>) {
+        // Update log text view
+        widgets.log_view.buffer().set_text(&self.log_text);
+
+        // Auto-scroll to bottom
+        if let Some(iter) = widgets.log_view.buffer().end_iter().into() {
+            widgets.log_view.scroll_to_iter(&mut iter.clone(), 0.0, false, 0.0, 1.0);
+        }
     }
 }

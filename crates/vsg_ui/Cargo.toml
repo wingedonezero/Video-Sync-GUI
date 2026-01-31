@@ -1,6 +1,6 @@
 [package]
 name = "vsg_ui"
-description = "Video Sync GUI - iced-based user interface"
+description = "Video Sync GUI - GTK4/Relm4 user interface"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -14,20 +14,14 @@ path = "src/main.rs"
 # Core library
 vsg_core = { path = "../vsg_core" }
 
-# iced - Cross-platform GUI library
-iced = { version = "0.14.0", features = ["tokio", "advanced"] }
-
-# iced_aw - Additional widgets (tabs, context menus, etc.)
-iced_aw = { version = "0.13.0", default-features = false, features = ["tabs", "card", "number_input", "context_menu"] }
-
-# Clipboard access for paste functionality (wayland-data-control needed for Wayland/KDE)
-arboard = { version = "3.6.1", features = ["wayland-data-control"] }
+# GTK4 + Relm4 - Modern Rust GUI framework
+gtk = { package = "gtk4", version = "0.10", features = ["v4_12"] }
+relm4 = { version = "0.10", features = ["macros", "libadwaita"] }
+relm4-components = "0.10"
+libadwaita = { version = "0.8", features = ["v1_4"] }
 
 # Async runtime
 tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "sync"] }
-
-# File dialogs
-rfd = "0.17.2"
 
 # Serialization
 serde = { workspace = true }
