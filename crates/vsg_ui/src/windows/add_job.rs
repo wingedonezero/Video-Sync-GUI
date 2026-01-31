@@ -46,7 +46,7 @@ pub struct AddJobDialog {
     sources: Vec<String>,
     error_text: String,
     is_finding: bool,
-    sources_changed: bool,
+    sources_box: Option<gtk::Box>,
 }
 
 #[relm4::component(pub)]
@@ -145,19 +145,22 @@ impl Component for AddJobDialog {
 
     fn init(
         init: Self::Init,
-        root: Self::Root,
+        _root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
-        let model = AddJobDialog {
+        let mut model = AddJobDialog {
             job_queue: init,
             // Initialize with 3 sources (Source 1, Source 2, Source 3)
             sources: vec![String::new(), String::new(), String::new()],
             error_text: String::new(),
             is_finding: false,
-            sources_changed: true, // trigger initial build
+            sources_box: None,
         };
 
         let widgets = view_output!();
+
+        // Store reference to sources_box for later rebuilds
+        model.sources_box = Some(widgets.sources_box.clone());
 
         // Build initial source rows
         Self::rebuild_sources(&model, &widgets.sources_box, &sender);
@@ -165,17 +168,7 @@ impl Component for AddJobDialog {
         ComponentParts { model, widgets }
     }
 
-    fn update_view(&self, widgets: &mut Self::Widgets, sender: &ComponentSender<Self>) {
-        // Rebuild sources list when sources have changed
-        if self.sources_changed {
-            Self::rebuild_sources(self, &widgets.sources_box, sender);
-        }
-    }
-
     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, root: &Self::Root) {
-        // Reset sources_changed flag at start of each update
-        self.sources_changed = false;
-
         match msg {
             AddJobMsg::SourceChanged(idx, path) => {
                 if idx < self.sources.len() {
@@ -204,7 +197,9 @@ impl Component for AddJobDialog {
                     if idx < self.sources.len() {
                         self.sources[idx] = p.to_string_lossy().to_string();
                         // Rebuild to update entry text
-                        self.sources_changed = true;
+                        if let Some(ref sources_box) = self.sources_box {
+                            Self::rebuild_sources(self, sources_box, &sender);
+                        }
                     }
                 }
             }
@@ -212,14 +207,18 @@ impl Component for AddJobDialog {
             AddJobMsg::AddSource => {
                 if self.sources.len() < 10 {
                     self.sources.push(String::new());
-                    self.sources_changed = true;
+                    if let Some(ref sources_box) = self.sources_box {
+                        Self::rebuild_sources(self, sources_box, &sender);
+                    }
                 }
             }
 
             AddJobMsg::RemoveSource(idx) => {
                 if self.sources.len() > 2 && idx < self.sources.len() {
                     self.sources.remove(idx);
-                    self.sources_changed = true;
+                    if let Some(ref sources_box) = self.sources_box {
+                        Self::rebuild_sources(self, sources_box, &sender);
+                    }
                 }
             }
 
@@ -283,7 +282,11 @@ impl Component for AddJobDialog {
 
             AddJobMsg::JobsDiscovered(count) => {
                 self.is_finding = false;
-                let _ = sender.output(AddJobOutput::JobsAdded(count));
+                // Defer the output to avoid panic when controller is dropped
+                let output_sender = sender.output_sender().clone();
+                glib::idle_add_local_once(move || {
+                    let _ = output_sender.send(AddJobOutput::JobsAdded(count));
+                });
             }
 
             AddJobMsg::DiscoveryFailed(error) => {
