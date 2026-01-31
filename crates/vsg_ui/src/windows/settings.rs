@@ -759,15 +759,17 @@ impl Component for SettingsDialog {
                         set_halign: gtk::Align::End,
                         set_margin_top: 8,
 
+                        #[name = "cancel_btn"]
                         gtk::Button {
                             set_label: "Cancel",
-                            connect_clicked => SettingsMsg::Cancel,
+                            // Connected manually in init to avoid panic
                         },
 
+                        #[name = "save_btn"]
                         gtk::Button {
                             set_label: "Save",
                             add_css_class: "suggested-action",
-                            connect_clicked => SettingsMsg::Save,
+                            // Connected manually in init to avoid panic
                         },
                     },
                 },
@@ -782,6 +784,20 @@ impl Component for SettingsDialog {
     ) -> ComponentParts<Self> {
         let model = SettingsDialog { settings: init };
         let widgets = view_output!();
+
+        // Manually connect buttons to avoid panic if component is destroyed
+        // Save button - needs to go through message to get current settings
+        let input_sender = sender.input_sender().clone();
+        widgets.save_btn.connect_clicked(move |_| {
+            let _ = input_sender.send(SettingsMsg::Save);
+        });
+
+        // Cancel button - sends output directly
+        let output_sender = sender.output_sender().clone();
+        widgets.cancel_btn.connect_clicked(move |_| {
+            let _ = output_sender.send(SettingsOutput::Cancelled);
+        });
+
         ComponentParts { model, widgets }
     }
 
@@ -916,11 +932,8 @@ impl Component for SettingsDialog {
                 });
             }
             SettingsMsg::Cancel => {
-                // Defer output to avoid panic when controller is dropped while in click handler
-                let output_sender = sender.output_sender().clone();
-                glib::idle_add_local_once(move || {
-                    let _ = output_sender.send(SettingsOutput::Cancelled);
-                });
+                // Note: Cancel button is now connected directly in init to avoid panic
+                // This handler is kept for completeness but should not be called
             }
         }
     }

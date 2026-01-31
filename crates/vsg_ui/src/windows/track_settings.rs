@@ -257,15 +257,17 @@ impl Component for TrackSettingsDialog {
                         set_spacing: 8,
                         set_halign: gtk::Align::End,
 
+                        #[name = "accept_btn"]
                         gtk::Button {
                             set_label: "Accept",
                             add_css_class: "suggested-action",
-                            connect_clicked => TrackSettingsMsg::Accept,
+                            // Connected manually in init to avoid panic
                         },
 
+                        #[name = "cancel_btn"]
                         gtk::Button {
                             set_label: "Cancel",
-                            connect_clicked => TrackSettingsMsg::Cancel,
+                            // Connected manually in init to avoid panic
                         },
                     },
                 },
@@ -294,6 +296,19 @@ impl Component for TrackSettingsDialog {
         };
 
         let widgets = view_output!();
+
+        // Manually connect buttons to avoid panic if component is destroyed
+        // Accept button - needs to go through message to get current track state
+        let input_sender = sender.input_sender().clone();
+        widgets.accept_btn.connect_clicked(move |_| {
+            let _ = input_sender.send(TrackSettingsMsg::Accept);
+        });
+
+        // Cancel button - sends output directly
+        let output_sender = sender.output_sender().clone();
+        widgets.cancel_btn.connect_clicked(move |_| {
+            let _ = output_sender.send(TrackSettingsOutput::Cancelled);
+        });
 
         ComponentParts { model, widgets }
     }
@@ -351,11 +366,8 @@ impl Component for TrackSettingsDialog {
             }
 
             TrackSettingsMsg::Cancel => {
-                // Defer output to avoid panic when controller is dropped while in click handler
-                let output_sender = sender.output_sender().clone();
-                glib::idle_add_local_once(move || {
-                    let _ = output_sender.send(TrackSettingsOutput::Cancelled);
-                });
+                // Note: Cancel button is now connected directly in init to avoid panic
+                // This handler is kept for completeness but should not be called
             }
         }
     }

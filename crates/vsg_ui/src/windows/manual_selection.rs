@@ -191,15 +191,17 @@ impl Component for ManualSelectionDialog {
                         set_spacing: 8,
                         set_halign: gtk::Align::End,
 
+                        #[name = "accept_btn"]
                         gtk::Button {
                             set_label: "Accept",
                             add_css_class: "suggested-action",
-                            connect_clicked => ManualSelectionMsg::Accept,
+                            // Connected manually in init to avoid panic
                         },
 
+                        #[name = "cancel_btn"]
                         gtk::Button {
                             set_label: "Cancel",
-                            connect_clicked => ManualSelectionMsg::Cancel,
+                            // Connected manually in init to avoid panic
                         },
                     },
                 },
@@ -310,6 +312,19 @@ impl Component for ManualSelectionDialog {
         Self::populate_source_list(&model, &widgets.source_list, &sender);
         Self::populate_final_list(&model, &widgets.final_list, &sender);
         Self::populate_attachments(&model, &widgets.attachments_box, &sender);
+
+        // Manually connect buttons to avoid panic if component is destroyed
+        // Accept button - needs to go through message for layout saving logic
+        let input_sender = sender.input_sender().clone();
+        widgets.accept_btn.connect_clicked(move |_| {
+            let _ = input_sender.send(ManualSelectionMsg::Accept);
+        });
+
+        // Cancel button - sends output directly
+        let output_sender = sender.output_sender().clone();
+        widgets.cancel_btn.connect_clicked(move |_| {
+            let _ = output_sender.send(ManualSelectionOutput::Cancelled);
+        });
 
         ComponentParts { model, widgets }
     }
@@ -569,11 +584,8 @@ impl Component for ManualSelectionDialog {
             }
 
             ManualSelectionMsg::Cancel => {
-                // Defer output to avoid panic when controller is dropped while in click handler
-                let output_sender = sender.output_sender().clone();
-                glib::idle_add_local_once(move || {
-                    let _ = output_sender.send(ManualSelectionOutput::Cancelled);
-                });
+                // Note: Cancel button is now connected directly in init to avoid panic
+                // This handler is kept for completeness but should not be called
             }
         }
     }
