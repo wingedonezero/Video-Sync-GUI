@@ -328,11 +328,14 @@ impl Component for ManualSelectionDialog {
             let _ = input_sender.send(ManualSelectionMsg::Accept);
         });
 
-        // Cancel button - sends output directly
+        // Cancel button - defer output to avoid panic when component is destroyed in handler
         let output_sender = sender.output_sender().clone();
         widgets.cancel_btn.connect_clicked(move |_| {
             eprintln!("[ManualSelection] Cancel button clicked");
-            let _ = output_sender.send(ManualSelectionOutput::Cancelled);
+            let sender = output_sender.clone();
+            glib::idle_add_local_once(move || {
+                let _ = sender.send(ManualSelectionOutput::Cancelled);
+            });
         });
 
         ComponentParts { model, widgets }

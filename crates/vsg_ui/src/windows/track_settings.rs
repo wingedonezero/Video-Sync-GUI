@@ -310,11 +310,14 @@ impl Component for TrackSettingsDialog {
             let _ = input_sender.send(TrackSettingsMsg::Accept);
         });
 
-        // Cancel button - sends output directly
+        // Cancel button - defer output to avoid panic when component is destroyed in handler
         let output_sender = sender.output_sender().clone();
         widgets.cancel_btn.connect_clicked(move |_| {
             eprintln!("[TrackSettings] Cancel button clicked");
-            let _ = output_sender.send(TrackSettingsOutput::Cancelled);
+            let sender = output_sender.clone();
+            glib::idle_add_local_once(move || {
+                let _ = sender.send(TrackSettingsOutput::Cancelled);
+            });
         });
 
         ComponentParts { model, widgets }

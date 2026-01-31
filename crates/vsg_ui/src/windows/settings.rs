@@ -810,11 +810,14 @@ impl Component for SettingsDialog {
             let _ = input_sender.send(SettingsMsg::Save);
         });
 
-        // Cancel button - sends output directly
+        // Cancel button - defer output to avoid panic when component is destroyed in handler
         let output_sender = sender.output_sender().clone();
         widgets.cancel_btn.connect_clicked(move |_| {
             eprintln!("[Settings] Cancel button clicked");
-            let _ = output_sender.send(SettingsOutput::Cancelled);
+            let sender = output_sender.clone();
+            glib::idle_add_local_once(move || {
+                let _ = sender.send(SettingsOutput::Cancelled);
+            });
         });
 
         ComponentParts { model, widgets }
