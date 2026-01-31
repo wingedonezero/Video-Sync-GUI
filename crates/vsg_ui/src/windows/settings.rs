@@ -908,11 +908,9 @@ impl Component for SettingsDialog {
             // Dialog actions
             SettingsMsg::Save => {
                 let _ = sender.output(SettingsOutput::Saved(self.settings.clone()));
-                root.close();
             }
             SettingsMsg::Cancel => {
                 let _ = sender.output(SettingsOutput::Cancelled);
-                root.close();
             }
         }
     }

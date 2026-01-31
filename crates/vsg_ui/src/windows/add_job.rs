@@ -265,7 +265,6 @@ impl Component for AddJobDialog {
             AddJobMsg::JobsDiscovered(count) => {
                 self.is_finding = false;
                 let _ = sender.output(AddJobOutput::JobsAdded(count));
-                root.close();
             }
 
             AddJobMsg::DiscoveryFailed(error) => {
@@ -275,7 +274,6 @@ impl Component for AddJobDialog {
 
             AddJobMsg::Cancel => {
                 let _ = sender.output(AddJobOutput::Cancelled);
-                root.close();
             }
         }
     }
