@@ -1,10 +1,8 @@
 # vsg_core/models/results.py
-# -*- coding: utf-8 -*-
 """
 Result types for pipeline step validation and error reporting.
 """
 from dataclasses import dataclass, field
-from typing import Optional, List
 from enum import Enum
 
 
@@ -19,8 +17,8 @@ class StepStatus(Enum):
 class StepResult:
     """Result of a pipeline step execution."""
     status: StepStatus
-    error: Optional[str] = None
-    warnings: List[str] = field(default_factory=list)
+    error: str | None = None
+    warnings: list[str] = field(default_factory=list)
 
     def is_fatal(self) -> bool:
         """Returns True if this result should stop the job."""
@@ -41,8 +39,8 @@ class StepResult:
 class CorrectionResult:
     """Result of an audio correction operation."""
     success: bool
-    error: Optional[str] = None
-    corrected_tracks: List[str] = field(default_factory=list)
+    error: str | None = None
+    corrected_tracks: list[str] = field(default_factory=list)
 
     @classmethod
     def failed(cls, error: str) -> "CorrectionResult":
@@ -50,6 +48,6 @@ class CorrectionResult:
         return cls(success=False, error=error)
 
     @classmethod
-    def succeeded(cls, corrected_tracks: List[str]) -> "CorrectionResult":
+    def succeeded(cls, corrected_tracks: list[str]) -> "CorrectionResult":
         """Create a successful result."""
         return cls(success=True, corrected_tracks=corrected_tracks)

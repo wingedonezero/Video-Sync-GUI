@@ -1,5 +1,4 @@
 # vsg_core/pipeline_components/tool_validator.py
-# -*- coding: utf-8 -*-
 """
 Tool validation component.
 
@@ -7,7 +6,6 @@ Validates that required external tools are available in the system PATH.
 """
 
 import shutil
-from typing import Dict
 
 
 class ToolValidator:
@@ -17,7 +15,7 @@ class ToolValidator:
     OPTIONAL_TOOLS = ['videodiff']
 
     @staticmethod
-    def validate_tools() -> Dict[str, str]:
+    def validate_tools() -> dict[str, str]:
         """
         Validates that all required tools are available in PATH.
 

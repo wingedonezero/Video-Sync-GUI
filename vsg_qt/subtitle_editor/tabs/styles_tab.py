@@ -1,5 +1,4 @@
 # vsg_qt/subtitle_editor/tabs/styles_tab.py
-# -*- coding: utf-8 -*-
 """
 Styles tab for subtitle editor.
 
@@ -8,20 +7,28 @@ Provides style editing functionality migrated from StyleEditorDialog.
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Optional, Dict, Any
+from typing import Any
 
-from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
-    QComboBox, QLineEdit, QDoubleSpinBox, QSpinBox, QCheckBox,
-    QPushButton, QToolButton, QLabel, QColorDialog, QMenu, QInputDialog
+    QCheckBox,
+    QColorDialog,
+    QComboBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QMenu,
+    QPushButton,
+    QSpinBox,
+    QToolButton,
+    QWidget,
 )
 
 from .base_tab import BaseTab
-
-if TYPE_CHECKING:
-    from ..state import EditorState
 
 
 class StylesTab(BaseTab):
@@ -39,12 +46,12 @@ class StylesTab(BaseTab):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._current_style_name: Optional[str] = None
-        self._edit_snapshots: Dict[str, Dict[str, Any]] = {}
+        self._current_style_name: str | None = None
+        self._edit_snapshots: dict[str, dict[str, Any]] = {}
         self._favorites_manager = None
-        self._style_widgets: Dict[str, QWidget] = {}
-        self._favorite_save_btns: Dict[str, QPushButton] = {}
-        self._favorite_load_btns: Dict[str, QToolButton] = {}
+        self._style_widgets: dict[str, QWidget] = {}
+        self._favorite_save_btns: dict[str, QPushButton] = {}
+        self._favorite_load_btns: dict[str, QToolButton] = {}
 
         self._tag_pattern = re.compile(r'{[^}]+}')
 
@@ -355,7 +362,7 @@ class StylesTab(BaseTab):
             self._state.save_preview()
             self._state.style_changed.emit(self._current_style_name)
 
-    def _get_ui_attrs(self) -> Dict[str, Any]:
+    def _get_ui_attrs(self) -> dict[str, Any]:
         """Get all style attributes from UI."""
         return {
             'fontname': self._style_widgets['fontname'].text(),

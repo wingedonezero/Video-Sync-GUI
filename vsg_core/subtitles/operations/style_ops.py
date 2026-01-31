@@ -1,5 +1,4 @@
 # vsg_core/subtitles/operations/style_ops.py
-# -*- coding: utf-8 -*-
 """
 Style operations for SubtitleData.
 
@@ -14,10 +13,10 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import Any, Dict, Tuple, TYPE_CHECKING, Optional, List
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..data import SubtitleData, OperationResult, OperationRecord
+    from ..data import OperationResult, SubtitleData
 
 
 def _scale_override_tags(text: str, scale: float, scale_h: float, offset_x: float, offset_y: float) -> str:
@@ -165,10 +164,10 @@ def _convert_patch_value(attr_name: str, value: Any) -> Any:
 
 
 def apply_style_patch(
-    data: 'SubtitleData',
-    patches: Dict[str, Dict[str, Any]],
+    data: SubtitleData,
+    patches: dict[str, dict[str, Any]],
     runner=None
-) -> 'OperationResult':
+) -> OperationResult:
     """
     Apply attribute patches to styles.
 
@@ -180,7 +179,7 @@ def apply_style_patch(
     Returns:
         OperationResult
     """
-    from ..data import OperationResult, OperationRecord
+    from ..data import OperationRecord, OperationResult
 
     def log(msg: str):
         if runner:
@@ -240,10 +239,10 @@ def apply_style_patch(
 
 
 def apply_font_replacement(
-    data: 'SubtitleData',
-    replacements: Dict[str, str],
+    data: SubtitleData,
+    replacements: dict[str, str],
     runner=None
-) -> 'OperationResult':
+) -> OperationResult:
     """
     Replace font names in styles.
 
@@ -255,7 +254,7 @@ def apply_font_replacement(
     Returns:
         OperationResult
     """
-    from ..data import OperationResult, OperationRecord
+    from ..data import OperationRecord, OperationResult
 
     def log(msg: str):
         if runner:
@@ -301,10 +300,10 @@ def apply_font_replacement(
 
 
 def apply_size_multiplier(
-    data: 'SubtitleData',
+    data: SubtitleData,
     multiplier: float,
     runner=None
-) -> 'OperationResult':
+) -> OperationResult:
     """
     Apply font size multiplier to all styles.
 
@@ -316,7 +315,7 @@ def apply_size_multiplier(
     Returns:
         OperationResult
     """
-    from ..data import OperationResult, OperationRecord
+    from ..data import OperationRecord, OperationResult
 
     def log(msg: str):
         if runner:
@@ -370,10 +369,10 @@ def apply_size_multiplier(
 
 
 def apply_rescale(
-    data: 'SubtitleData',
-    target_resolution: Tuple[int, int],
+    data: SubtitleData,
+    target_resolution: tuple[int, int],
     runner=None
-) -> 'OperationResult':
+) -> OperationResult:
     """
     Rescale subtitle to target resolution using Aegisub "Add Borders" style.
 
@@ -389,7 +388,7 @@ def apply_rescale(
     Returns:
         OperationResult
     """
-    from ..data import OperationResult, OperationRecord
+    from ..data import OperationRecord, OperationResult
 
     def log(msg: str):
         if runner:
@@ -556,13 +555,13 @@ def _map_style_attribute(attr: str) -> str:
 
 
 def apply_style_filter(
-    data: 'SubtitleData',
+    data: SubtitleData,
     styles: list,
     mode: str = 'exclude',
-    forced_include: Optional[List[int]] = None,
-    forced_exclude: Optional[List[int]] = None,
+    forced_include: list[int] | None = None,
+    forced_exclude: list[int] | None = None,
     runner=None
-) -> 'OperationResult':
+) -> OperationResult:
     """
     Filter events by style name.
 
@@ -575,7 +574,7 @@ def apply_style_filter(
     Returns:
         OperationResult with filtering statistics
     """
-    from ..data import OperationResult, OperationRecord
+    from ..data import OperationRecord, OperationResult
 
     def log(msg: str):
         if runner:

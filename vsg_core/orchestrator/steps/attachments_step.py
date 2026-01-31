@@ -1,13 +1,13 @@
 # vsg_core/orchestrator/steps/attachments_step.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 import shutil
 from pathlib import Path
-from typing import List, Set
 
+from vsg_core.extraction.attachments import extract_attachments
 from vsg_core.io.runner import CommandRunner
 from vsg_core.orchestrator.steps.context import Context
-from vsg_core.extraction.attachments import extract_attachments
+
 
 class AttachmentsStep:
     """
@@ -21,7 +21,7 @@ class AttachmentsStep:
             self._add_replacement_fonts(ctx, runner)
             return ctx
 
-        all_attachments: List[str] = []
+        all_attachments: list[str] = []
         for source_key in ctx.attachment_sources:
             source_file = ctx.sources.get(source_key)
             if source_file:
@@ -47,7 +47,7 @@ class AttachmentsStep:
             return
 
         # Collect all font replacements from tracks
-        replacement_files: Set[str] = set()
+        replacement_files: set[str] = set()
         for item in ctx.extracted_items:
             if item.font_replacements:
                 for repl_data in item.font_replacements.values():

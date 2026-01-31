@@ -1,11 +1,28 @@
 # vsg_qt/options_dialog/ui.py
 from __future__ import annotations
-from typing import Dict
+
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QTabWidget, QDialogButtonBox, QScrollArea, QWidget, QMessageBox
+    QDialog,
+    QDialogButtonBox,
+    QMessageBox,
+    QScrollArea,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
+
 from .logic import OptionsLogic
-from .tabs import StorageTab, AnalysisTab, SteppingTab, SubtitleSyncTab, ChaptersTab, MergeBehaviorTab, LoggingTab, OCRTab
+from .tabs import (
+    AnalysisTab,
+    ChaptersTab,
+    LoggingTab,
+    MergeBehaviorTab,
+    OCRTab,
+    SteppingTab,
+    StorageTab,
+    SubtitleSyncTab,
+)
+
 
 def _wrap_scroll(widget: QWidget) -> QScrollArea:
     sa = QScrollArea()
@@ -25,12 +42,12 @@ class OptionsDialog(QDialog):
     Exposes:
         - self.sections: dict[str, dict[str, QWidget]] of all keyed widgets
     """
-    def __init__(self, config: Dict, parent=None):
+    def __init__(self, config: dict, parent=None):
         super().__init__(parent)
         self.setWindowTitle('Application Settings')
         self.setMinimumSize(900, 600)
         self.config = config
-        self.sections: Dict[str, Dict[str, object]] = {}
+        self.sections: dict[str, dict[str, object]] = {}
 
         v = QVBoxLayout(self)
         self.tabs = QTabWidget()

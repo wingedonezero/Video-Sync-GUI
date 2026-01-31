@@ -1,14 +1,22 @@
 # vsg_qt/add_job_dialog/ui.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import List, Dict
 
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QDialogButtonBox,
-    QLineEdit, QLabel, QMessageBox, QFileDialog, QScrollArea, QWidget
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
 from vsg_core.job_discovery import discover_jobs
+
 
 class SourceInputWidget(QWidget):
     """A self-contained widget for a single source input row that handles drag-and-drop."""
@@ -62,8 +70,8 @@ class AddJobDialog(QDialog):
         self.setWindowTitle("Add Job(s) to Queue")
         self.setMinimumSize(700, 300)
 
-        self.discovered_jobs: List[Dict] = []
-        self.source_widgets: List[SourceInputWidget] = []
+        self.discovered_jobs: list[dict] = []
+        self.source_widgets: list[SourceInputWidget] = []
         self._build_ui()
 
         # Start with 2 sources by default
@@ -102,7 +110,7 @@ class AddJobDialog(QDialog):
         self.source_widgets.append(source_widget)
         self.inputs_layout.addWidget(source_widget)
 
-    def populate_sources_from_paths(self, paths: List[str]):
+    def populate_sources_from_paths(self, paths: list[str]):
         """Pre-fills the source inputs from a list of paths."""
         # Clear any default inputs
         while self.inputs_layout.count():
@@ -122,7 +130,7 @@ class AddJobDialog(QDialog):
 
     def find_and_accept(self):
         """Discover jobs from paths and accept the dialog if any are found."""
-        sources: Dict[str, str] = {}
+        sources: dict[str, str] = {}
         for i, source_widget in enumerate(self.source_widgets):
             path = source_widget.text().strip()
             if path:
@@ -142,5 +150,5 @@ class AddJobDialog(QDialog):
         except (ValueError, FileNotFoundError) as e:
             QMessageBox.critical(self, "Error Discovering Jobs", str(e))
 
-    def get_discovered_jobs(self) -> List[Dict]:
+    def get_discovered_jobs(self) -> list[dict]:
         return self.discovered_jobs

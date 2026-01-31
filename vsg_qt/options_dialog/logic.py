@@ -1,5 +1,7 @@
 from __future__ import annotations
-from typing import Dict, Any
+
+from typing import Any
+
 
 class OptionsLogic:
     """
@@ -11,19 +13,26 @@ class OptionsLogic:
         self.dlg = dialog
 
     # --- load/save over a flat dict (same keys as before) ---
-    def load_from_config(self, cfg: Dict[str, Any]):
+    def load_from_config(self, cfg: dict[str, Any]):
         for section in self.dlg.sections.values():
             for key, widget in section.items():
                 self._set_widget_val(widget, cfg.get(key))
 
-    def save_to_config(self, cfg: Dict[str, Any]):
+    def save_to_config(self, cfg: dict[str, Any]):
         for section in self.dlg.sections.values():
             for key, widget in section.items():
                 cfg[key] = self._get_widget_val(widget)
 
     # --- widget helpers copied from previous OptionsDialog (kept behavior) ---
     def _get_widget_val(self, widget):
-        from PySide6.QtWidgets import QSpinBox, QDoubleSpinBox, QComboBox, QCheckBox, QWidget, QLineEdit
+        from PySide6.QtWidgets import (
+            QCheckBox,
+            QComboBox,
+            QDoubleSpinBox,
+            QLineEdit,
+            QSpinBox,
+            QWidget,
+        )
         if isinstance(widget, QCheckBox):
             return widget.isChecked()
         if isinstance(widget, (QSpinBox, QDoubleSpinBox)):
@@ -40,7 +49,14 @@ class OptionsLogic:
         return widget.text() if isinstance(widget, QLineEdit) else None
 
     def _set_widget_val(self, widget, value):
-        from PySide6.QtWidgets import QSpinBox, QDoubleSpinBox, QComboBox, QCheckBox, QWidget, QLineEdit
+        from PySide6.QtWidgets import (
+            QCheckBox,
+            QComboBox,
+            QDoubleSpinBox,
+            QLineEdit,
+            QSpinBox,
+            QWidget,
+        )
         # Skip if value is None (config key doesn't exist yet)
         if value is None:
             return

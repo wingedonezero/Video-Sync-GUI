@@ -1,6 +1,4 @@
 # vsg_core/postprocess/auditors/language_tags.py
-# -*- coding: utf-8 -*-
-from typing import Dict
 from pathlib import Path
 
 from .base import BaseAuditor
@@ -9,7 +7,7 @@ from .base import BaseAuditor
 class LanguageTagsAuditor(BaseAuditor):
     """Verifies language tags were preserved correctly."""
 
-    def run(self, final_mkv_path: Path, final_mkvmerge_data: Dict, final_ffprobe_data=None) -> int:
+    def run(self, final_mkv_path: Path, final_mkvmerge_data: dict, final_ffprobe_data=None) -> int:
         """
         Audits language tags, respecting custom language overrides.
         Returns the number of issues found.

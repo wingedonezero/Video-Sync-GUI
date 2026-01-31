@@ -1,5 +1,4 @@
 # vsg_core/pipeline_components/sync_executor.py
-# -*- coding: utf-8 -*-
 """
 Sync executor component.
 
@@ -8,10 +7,9 @@ Handles merge execution and post-processing finalization.
 
 import shutil
 from pathlib import Path
-from typing import Dict
 
 from ..io.runner import CommandRunner
-from ..postprocess import finalize_merged_file, check_if_rebasing_is_needed
+from ..postprocess import check_if_rebasing_is_needed, finalize_merged_file
 
 
 class SyncExecutor:
@@ -20,7 +18,7 @@ class SyncExecutor:
     @staticmethod
     def execute_merge(
         mkvmerge_options_path: str,
-        tool_paths: Dict[str, str],
+        tool_paths: dict[str, str],
         runner: CommandRunner
     ) -> bool:
         """
@@ -42,7 +40,7 @@ class SyncExecutor:
         temp_output_path: Path,
         final_output_path: Path,
         config: dict,
-        tool_paths: Dict[str, str],
+        tool_paths: dict[str, str],
         runner: CommandRunner
     ):
         """

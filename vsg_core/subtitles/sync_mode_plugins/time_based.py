@@ -1,5 +1,4 @@
 # vsg_core/subtitles/sync_mode_plugins/time_based.py
-# -*- coding: utf-8 -*-
 """
 Time-based sync plugin for SubtitleData.
 
@@ -9,12 +8,12 @@ Used when mkvmerge --sync is not handling the delay.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from ..sync_modes import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
-    from ..data import SubtitleData, OperationResult, OperationRecord, SyncEventData
+    from ..data import OperationResult, SubtitleData
 
 
 @register_sync_plugin
@@ -31,16 +30,16 @@ class TimeBasedSync(SyncPlugin):
 
     def apply(
         self,
-        subtitle_data: 'SubtitleData',
+        subtitle_data: SubtitleData,
         total_delay_ms: float,
         global_shift_ms: float,
-        target_fps: Optional[float] = None,
-        source_video: Optional[str] = None,
-        target_video: Optional[str] = None,
+        target_fps: float | None = None,
+        source_video: str | None = None,
+        target_video: str | None = None,
         runner=None,
-        config: Optional[dict] = None,
+        config: dict | None = None,
         **kwargs
-    ) -> 'OperationResult':
+    ) -> OperationResult:
         """
         Apply time-based sync.
 
@@ -49,7 +48,7 @@ class TimeBasedSync(SyncPlugin):
 
         If True, applies raw delay to subtitle events.
         """
-        from ..data import OperationResult, OperationRecord
+        from ..data import OperationRecord, OperationResult
 
         config = config or {}
 
@@ -61,7 +60,7 @@ class TimeBasedSync(SyncPlugin):
 
         if not use_raw_values:
             # Default: mkvmerge --sync handles the delay
-            log(f"[TimeBased] Using mkvmerge --sync mode (no subtitle modification)")
+            log("[TimeBased] Using mkvmerge --sync mode (no subtitle modification)")
 
             record = OperationRecord(
                 operation='sync',
@@ -86,7 +85,7 @@ class TimeBasedSync(SyncPlugin):
         # Raw values mode: apply delay directly
         from ..data import SyncEventData
 
-        log(f"[TimeBased] === Time-Based Sync (Raw Values) ===")
+        log("[TimeBased] === Time-Based Sync (Raw Values) ===")
         log(f"[TimeBased] Events: {len(subtitle_data.events)}")
         log(f"[TimeBased] Delay: {total_delay_ms:+.3f}ms")
 

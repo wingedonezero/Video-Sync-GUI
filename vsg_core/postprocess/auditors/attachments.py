@@ -1,6 +1,4 @@
 # vsg_core/postprocess/auditors/attachments.py
-# -*- coding: utf-8 -*-
-from typing import Dict, List
 from pathlib import Path
 
 from .base import BaseAuditor
@@ -9,7 +7,7 @@ from .base import BaseAuditor
 class AttachmentsAuditor(BaseAuditor):
     """Checks if expected attachments are present with correct filenames and reasonable sizes."""
 
-    def run(self, final_mkv_path: Path, final_mkvmerge_data: Dict, final_ffprobe_data=None) -> int:
+    def run(self, final_mkv_path: Path, final_mkvmerge_data: dict, final_ffprobe_data=None) -> int:
         """
         Comprehensive attachment audit:
         - Count verification
@@ -66,7 +64,7 @@ class AttachmentsAuditor(BaseAuditor):
 
         return issues
 
-    def _verify_attachments(self, expected: List[Dict], actual: List[Dict]) -> int:
+    def _verify_attachments(self, expected: list[dict], actual: list[dict]) -> int:
         """
         Verify expected attachments are in the final file with correct names and reasonable sizes.
         """
@@ -112,7 +110,7 @@ class AttachmentsAuditor(BaseAuditor):
                 self.log(f"[WARNING] Attachment '{exp_name}' size mismatch!")
                 self.log(f"          Expected: {exp_size:,} bytes")
                 self.log(f"          Actual:   {act_size:,} bytes ({size_diff_pct:.1f}% difference)")
-                self.log(f"          → May be a different version of the file")
+                self.log("          → May be a different version of the file")
                 issues += 1
             else:
                 # Size is close enough

@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/preview_subprocess.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import argparse
@@ -8,7 +7,6 @@ import sys
 from pathlib import Path
 
 from . import run_preview_ocr
-
 
 JSON_PREFIX = "__VSG_PREVIEW_JSON__ "
 

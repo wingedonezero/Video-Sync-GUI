@@ -1,18 +1,16 @@
 # vsg_core/mux/options_builder.py
-# -*- coding: utf-8 -*-
-from pathlib import Path
-from typing import List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
+from ..models.enums import TrackType
 from ..models.jobs import MergePlan, PlanItem
 from ..models.settings import AppSettings
-from ..models.enums import TrackType
 
 if TYPE_CHECKING:
     from ..audit import AuditTrail
 
 class MkvmergeOptionsBuilder:
-    def build(self, plan: MergePlan, settings: AppSettings, audit: Optional['AuditTrail'] = None) -> List[str]:
-        tokens: List[str] = []
+    def build(self, plan: MergePlan, settings: AppSettings, audit: Optional['AuditTrail'] = None) -> list[str]:
+        tokens: list[str] = []
 
         if plan.chapters_xml:
             tokens += ['--chapters', str(plan.chapters_xml)]
@@ -53,7 +51,7 @@ class MkvmergeOptionsBuilder:
         first_video_idx = self._first_index(final_items, kind='video', predicate=lambda it: True)
         forced_sub_idx = self._first_index(final_items, kind='subtitles', predicate=lambda it: it.is_forced_display)
 
-        order_entries: List[str] = []
+        order_entries: list[str] = []
         for i, item in enumerate(final_items):
             tr = item.track
 
@@ -153,7 +151,7 @@ class MkvmergeOptionsBuilder:
 
         return tokens
 
-    def _first_index(self, items: List[PlanItem], kind: str, predicate) -> int:
+    def _first_index(self, items: list[PlanItem], kind: str, predicate) -> int:
         for i, it in enumerate(items):
             if it.track.type.value == kind and predicate(it):
                 return i

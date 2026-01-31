@@ -1,5 +1,4 @@
 # vsg_core/subtitles/writers/ass_writer.py
-# -*- coding: utf-8 -*-
 """
 ASS subtitle file writer with full metadata preservation.
 
@@ -16,7 +15,7 @@ if TYPE_CHECKING:
     from ..data import SubtitleData
 
 
-def write_ass_file(data: 'SubtitleData', path: Path, rounding: str = 'floor') -> None:
+def write_ass_file(data: SubtitleData, path: Path, rounding: str = 'floor') -> None:
     """
     Write SubtitleData to ASS file.
 
@@ -137,7 +136,7 @@ def _default_section_order() -> list:
     ]
 
 
-def _write_script_info(data: 'SubtitleData', lines: list) -> None:
+def _write_script_info(data: SubtitleData, lines: list) -> None:
     """Write [Script Info] section."""
     lines.append('[Script Info]')
 
@@ -172,7 +171,7 @@ def _write_script_info(data: 'SubtitleData', lines: list) -> None:
     lines.append('')
 
 
-def _write_styles(data: 'SubtitleData', lines: list, section_name: str) -> None:
+def _write_styles(data: SubtitleData, lines: list, section_name: str) -> None:
     """Write [V4+ Styles] section."""
     lines.append(section_name)
 
@@ -188,7 +187,7 @@ def _write_styles(data: 'SubtitleData', lines: list, section_name: str) -> None:
     lines.append('')
 
 
-def _write_events(data: 'SubtitleData', lines: list, rounding_mode: str) -> None:
+def _write_events(data: SubtitleData, lines: list, rounding_mode: str) -> None:
     """
     Write [Events] section.
 
@@ -239,7 +238,7 @@ def _write_events(data: 'SubtitleData', lines: list, rounding_mode: str) -> None
     lines.append('')
 
 
-def _write_fonts(data: 'SubtitleData', lines: list) -> None:
+def _write_fonts(data: SubtitleData, lines: list) -> None:
     """Write [Fonts] section."""
     if not data.fonts:
         return
@@ -255,7 +254,7 @@ def _write_fonts(data: 'SubtitleData', lines: list) -> None:
     lines.append('')
 
 
-def _write_graphics(data: 'SubtitleData', lines: list) -> None:
+def _write_graphics(data: SubtitleData, lines: list) -> None:
     """Write [Graphics] section."""
     if not data.graphics:
         return
@@ -270,7 +269,7 @@ def _write_graphics(data: 'SubtitleData', lines: list) -> None:
     lines.append('')
 
 
-def _write_aegisub_garbage(data: 'SubtitleData', lines: list) -> None:
+def _write_aegisub_garbage(data: SubtitleData, lines: list) -> None:
     """Write [Aegisub Project Garbage] section."""
     if not data.aegisub_garbage:
         return
@@ -283,7 +282,7 @@ def _write_aegisub_garbage(data: 'SubtitleData', lines: list) -> None:
     lines.append('')
 
 
-def _write_aegisub_extradata(data: 'SubtitleData', lines: list) -> None:
+def _write_aegisub_extradata(data: SubtitleData, lines: list) -> None:
     """Write [Aegisub Extradata] section."""
     if not data.aegisub_extradata:
         return
@@ -312,8 +311,7 @@ def _format_ass_time(ms: float, rounding: str) -> str:
     total_cs = _round_centiseconds(ms, rounding)
 
     # Ensure non-negative
-    if total_cs < 0:
-        total_cs = 0
+    total_cs = max(total_cs, 0)
 
     cs = total_cs % 100
     total_seconds = total_cs // 100

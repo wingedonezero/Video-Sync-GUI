@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/output.py
-# -*- coding: utf-8 -*-
 """
 Subtitle Output Generation
 
@@ -19,8 +18,7 @@ Position handling:
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple, TYPE_CHECKING
-import re
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..data import SubtitleData
@@ -73,14 +71,14 @@ class SubtitleWriter:
     Handles position preservation for non-bottom subtitles.
     """
 
-    def __init__(self, config: Optional[OutputConfig] = None):
+    def __init__(self, config: OutputConfig | None = None):
         self.config = config or OutputConfig()
 
     def write(
         self,
-        subtitles: List[SubtitleEntry],
+        subtitles: list[SubtitleEntry],
         output_path: Path,
-        format_override: Optional[str] = None
+        format_override: str | None = None
     ):
         """
         Write subtitles to file.
@@ -97,7 +95,7 @@ class SubtitleWriter:
         else:
             self._write_ass(subtitles, output_path)
 
-    def _write_ass(self, subtitles: List[SubtitleEntry], output_path: Path):
+    def _write_ass(self, subtitles: list[SubtitleEntry], output_path: Path):
         """Write ASS format with position support."""
         lines = []
 
@@ -168,7 +166,7 @@ class SubtitleWriter:
         with open(output_path, 'w', encoding='utf-8-sig', newline='\r\n') as f:
             f.write('\n'.join(lines))
 
-    def _write_srt(self, subtitles: List[SubtitleEntry], output_path: Path):
+    def _write_srt(self, subtitles: list[SubtitleEntry], output_path: Path):
         """Write SRT format (no position support)."""
         lines = []
 
@@ -215,7 +213,7 @@ class SubtitleWriter:
         y: int,
         source_width: int,
         source_height: int
-    ) -> Tuple[int, int]:
+    ) -> tuple[int, int]:
         """
         Scale position from source resolution to output resolution.
 
@@ -249,8 +247,7 @@ class SubtitleWriter:
     @staticmethod
     def _ms_to_ass_time(ms: int) -> str:
         """Convert milliseconds to ASS time format (H:MM:SS.cc)."""
-        if ms < 0:
-            ms = 0
+        ms = max(ms, 0)
         hours = ms // 3600000
         ms %= 3600000
         minutes = ms // 60000
@@ -262,8 +259,7 @@ class SubtitleWriter:
     @staticmethod
     def _ms_to_srt_time(ms: int) -> str:
         """Convert milliseconds to SRT time format (HH:MM:SS,mmm)."""
-        if ms < 0:
-            ms = 0
+        ms = max(ms, 0)
         hours = ms // 3600000
         ms %= 3600000
         minutes = ms // 60000
@@ -314,7 +310,7 @@ class OCRSubtitleResult:
     confidence: float = 0.0
     raw_ocr_text: str = ''
     fixes_applied: dict = field(default_factory=dict)
-    unknown_words: List[str] = field(default_factory=list)
+    unknown_words: list[str] = field(default_factory=list)
 
     # Position data
     x: int = 0
@@ -326,23 +322,23 @@ class OCRSubtitleResult:
 
     # VobSub specific
     is_forced: bool = False
-    subtitle_colors: List[List[int]] = field(default_factory=list)
-    dominant_color: List[int] = field(default_factory=list)
+    subtitle_colors: list[list[int]] = field(default_factory=list)
+    dominant_color: list[int] = field(default_factory=list)
 
     # Debug image reference
     debug_image: str = ''  # e.g., "sub_0000.png"
 
 
 def create_subtitle_data_from_ocr(
-    ocr_results: List[OCRSubtitleResult],
+    ocr_results: list[OCRSubtitleResult],
     source_file: str,
     engine: str = 'tesseract',
     language: str = 'eng',
     source_format: str = 'vobsub',
-    source_resolution: Tuple[int, int] = (720, 480),
-    output_resolution: Tuple[int, int] = (1920, 1080),
-    master_palette: Optional[List[List[int]]] = None,
-    config: Optional[OutputConfig] = None
+    source_resolution: tuple[int, int] = (720, 480),
+    output_resolution: tuple[int, int] = (1920, 1080),
+    master_palette: list[list[int]] | None = None,
+    config: OutputConfig | None = None
 ) -> 'SubtitleData':
     """
     Create SubtitleData from OCR results.
@@ -364,11 +360,15 @@ def create_subtitle_data_from_ocr(
     Returns:
         SubtitleData with all OCR metadata populated
     """
-    from ..data import (
-        SubtitleData, SubtitleEvent, SubtitleStyle,
-        OCREventData, OCRMetadata
-    )
     from collections import OrderedDict
+
+    from ..data import (
+        OCREventData,
+        OCRMetadata,
+        SubtitleData,
+        SubtitleEvent,
+        SubtitleStyle,
+    )
 
     config = config or OutputConfig()
 

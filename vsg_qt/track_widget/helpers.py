@@ -1,6 +1,7 @@
 # vsg_qt/track_widget/helpers.py
 from __future__ import annotations
 
+
 def compose_label_text(w) -> str:
     """
     Build the row label with badges. `w` is the TrackWidget instance.

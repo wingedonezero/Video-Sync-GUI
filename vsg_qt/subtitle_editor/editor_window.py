@@ -1,5 +1,4 @@
 # vsg_qt/subtitle_editor/editor_window.py
-# -*- coding: utf-8 -*-
 """
 Main subtitle editor window.
 
@@ -17,21 +16,21 @@ from __future__ import annotations
 
 import gc
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Dict, Any
+from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QSplitter,
-    QDialogButtonBox, QMessageBox
+    QDialog,
+    QDialogButtonBox,
+    QMessageBox,
+    QSplitter,
+    QVBoxLayout,
 )
 
-from .state import EditorState
-from .video_panel import VideoPanel
-from .tab_panel import TabPanel
 from .events_table import EventsTable
-
-if TYPE_CHECKING:
-    pass
+from .state import EditorState
+from .tab_panel import TabPanel
+from .video_panel import VideoPanel
 
 
 class SubtitleEditorWindow(QDialog):
@@ -58,10 +57,10 @@ class SubtitleEditorWindow(QDialog):
         self,
         subtitle_path: str,
         video_path: str,
-        fonts_dir: Optional[str] = None,
-        existing_font_replacements: Optional[Dict] = None,
-        existing_style_patch: Optional[Dict] = None,
-        existing_filter_config: Optional[Dict] = None,
+        fonts_dir: str | None = None,
+        existing_font_replacements: dict | None = None,
+        existing_style_patch: dict | None = None,
+        existing_filter_config: dict | None = None,
         parent=None
     ):
         super().__init__(parent)
@@ -84,9 +83,9 @@ class SubtitleEditorWindow(QDialog):
         )
 
         # Cached results (populated on accept)
-        self._cached_style_patch: Dict[str, Dict[str, Any]] = {}
-        self._cached_font_replacements: Dict[str, Dict[str, Any]] = {}
-        self._cached_filter_config: Dict[str, Any] = {}
+        self._cached_style_patch: dict[str, dict[str, Any]] = {}
+        self._cached_font_replacements: dict[str, dict[str, Any]] = {}
+        self._cached_filter_config: dict[str, Any] = {}
 
         self._setup_window()
         self._build_ui()
@@ -338,7 +337,7 @@ class SubtitleEditorWindow(QDialog):
 
     # --- Public API ---
 
-    def get_style_patch(self) -> Dict[str, Dict[str, Any]]:
+    def get_style_patch(self) -> dict[str, dict[str, Any]]:
         """
         Get the style changes made in this session.
 
@@ -347,7 +346,7 @@ class SubtitleEditorWindow(QDialog):
         """
         return self._cached_style_patch.copy()
 
-    def get_font_replacements(self) -> Dict[str, Dict[str, Any]]:
+    def get_font_replacements(self) -> dict[str, dict[str, Any]]:
         """
         Get the configured font replacements.
 
@@ -356,7 +355,7 @@ class SubtitleEditorWindow(QDialog):
         """
         return self._cached_font_replacements.copy()
 
-    def get_filter_config(self) -> Dict[str, Any]:
+    def get_filter_config(self) -> dict[str, Any]:
         """
         Get the filter configuration.
 

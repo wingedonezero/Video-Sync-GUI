@@ -1,5 +1,4 @@
 # vsg_qt/subtitle_editor/subprocess_launcher.py
-# -*- coding: utf-8 -*-
 """
 Subprocess launcher for the subtitle editor.
 
@@ -52,7 +51,7 @@ def main():
     result_file = Path(sys.argv[2])
 
     # Read parameters
-    with open(params_file, 'r') as f:
+    with open(params_file) as f:
         params = json.load(f)
 
     # Handle versioned format (v1.0+) and legacy format

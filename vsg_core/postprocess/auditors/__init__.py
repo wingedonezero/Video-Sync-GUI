@@ -1,42 +1,41 @@
 # vsg_core/postprocess/auditors/__init__.py
-# -*- coding: utf-8 -*-
 
-from .track_flags import TrackFlagsAuditor
-from .video_metadata import VideoMetadataAuditor
-from .dolby_vision import DolbyVisionAuditor
-from .audio_object_based import AudioObjectBasedAuditor
-from .codec_integrity import CodecIntegrityAuditor
+from .attachments import AttachmentsAuditor
 from .audio_channels import AudioChannelsAuditor
+from .audio_object_based import AudioObjectBasedAuditor
 from .audio_quality import AudioQualityAuditor
 from .audio_sync import AudioSyncAuditor
-from .subtitle_formats import SubtitleFormatsAuditor
 from .chapters import ChaptersAuditor
-from .track_order import TrackOrderAuditor
-from .language_tags import LanguageTagsAuditor
-from .track_names import TrackNamesAuditor
-from .attachments import AttachmentsAuditor
+from .codec_integrity import CodecIntegrityAuditor
+from .dolby_vision import DolbyVisionAuditor
 from .drift_correction import DriftCorrectionAuditor
-from .stepping_correction import SteppingCorrectionAuditor
 from .global_shift import GlobalShiftAuditor
+from .language_tags import LanguageTagsAuditor
+from .stepping_correction import SteppingCorrectionAuditor
 from .subtitle_clamping import SubtitleClampingAuditor
+from .subtitle_formats import SubtitleFormatsAuditor
+from .track_flags import TrackFlagsAuditor
+from .track_names import TrackNamesAuditor
+from .track_order import TrackOrderAuditor
+from .video_metadata import VideoMetadataAuditor
 
 __all__ = [
-    'TrackFlagsAuditor',
-    'VideoMetadataAuditor',
-    'DolbyVisionAuditor',
-    'AudioObjectBasedAuditor',
-    'CodecIntegrityAuditor',
+    'AttachmentsAuditor',
     'AudioChannelsAuditor',
+    'AudioObjectBasedAuditor',
     'AudioQualityAuditor',
     'AudioSyncAuditor',
-    'SubtitleFormatsAuditor',
     'ChaptersAuditor',
-    'TrackOrderAuditor',
-    'LanguageTagsAuditor',
-    'TrackNamesAuditor',
-    'AttachmentsAuditor',
+    'CodecIntegrityAuditor',
+    'DolbyVisionAuditor',
     'DriftCorrectionAuditor',
-    'SteppingCorrectionAuditor',
     'GlobalShiftAuditor',
+    'LanguageTagsAuditor',
+    'SteppingCorrectionAuditor',
     'SubtitleClampingAuditor',
+    'SubtitleFormatsAuditor',
+    'TrackFlagsAuditor',
+    'TrackNamesAuditor',
+    'TrackOrderAuditor',
+    'VideoMetadataAuditor',
 ]

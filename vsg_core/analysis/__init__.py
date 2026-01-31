@@ -1,19 +1,18 @@
 # vsg_core/analysis/__init__.py
-# -*- coding: utf-8 -*-
 from .audio_corr import run_audio_correlation
-from .videodiff import run_videodiff
 from .drift_detection import diagnose_audio_issue
 from .source_separation import (
+    SEPARATION_MODES,
     is_audio_separator_available,
     list_available_models,
-    SEPARATION_MODES,
 )
+from .videodiff import run_videodiff
 
 __all__ = [
-    "run_audio_correlation",
-    "run_videodiff",
+    "SEPARATION_MODES",
     "diagnose_audio_issue",
     "is_audio_separator_available",
     "list_available_models",
-    "SEPARATION_MODES",
+    "run_audio_correlation",
+    "run_videodiff",
 ]

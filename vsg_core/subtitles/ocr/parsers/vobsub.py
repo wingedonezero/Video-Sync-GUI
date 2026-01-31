@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/parsers/vobsub.py
-# -*- coding: utf-8 -*-
 """
 VobSub (.sub/.idx) Parser
 
@@ -26,10 +25,11 @@ import re
 import struct
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple, BinaryIO
+from typing import BinaryIO
+
 import numpy as np
 
-from .base import SubtitleImage, SubtitleImageParser, ParseResult
+from .base import ParseResult, SubtitleImage, SubtitleImageParser
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ class VobSubHeader:
     size_y: int = 480
     org_x: int = 0
     org_y: int = 0
-    palette: List[Tuple[int, int, int]] = None  # RGB tuples
+    palette: list[tuple[int, int, int]] = None  # RGB tuples
     language: str = "en"
     language_index: int = 0
 
@@ -74,7 +74,7 @@ class VobSubParser(SubtitleImageParser):
             return file_path.with_suffix('.idx').exists()
         return False
 
-    def parse(self, file_path: Path, work_dir: Optional[Path] = None) -> ParseResult:
+    def parse(self, file_path: Path, work_dir: Path | None = None) -> ParseResult:
         """
         Parse VobSub files and extract subtitle images.
 
@@ -134,7 +134,7 @@ class VobSubParser(SubtitleImageParser):
 
         return result
 
-    def _parse_idx(self, idx_path: Path) -> Tuple[VobSubHeader, List[IdxEntry]]:
+    def _parse_idx(self, idx_path: Path) -> tuple[VobSubHeader, list[IdxEntry]]:
         """
         Parse the .idx index file.
 
@@ -142,9 +142,9 @@ class VobSubParser(SubtitleImageParser):
             Tuple of (header info, list of subtitle entries)
         """
         header = VobSubHeader()
-        entries: List[IdxEntry] = []
+        entries: list[IdxEntry] = []
 
-        with open(idx_path, 'r', encoding='utf-8', errors='replace') as f:
+        with open(idx_path, encoding='utf-8', errors='replace') as f:
             for line in f:
                 line = line.strip()
 
@@ -217,8 +217,8 @@ class VobSubParser(SubtitleImageParser):
         entry: IdxEntry,
         index: int,
         header: VobSubHeader,
-        all_entries: List[IdxEntry]
-    ) -> Optional[SubtitleImage]:
+        all_entries: list[IdxEntry]
+    ) -> SubtitleImage | None:
         """
         Parse a single subtitle from the .sub file.
 
@@ -359,7 +359,7 @@ class VobSubParser(SubtitleImageParser):
         self,
         data: bytes,
         header: VobSubHeader
-    ) -> Tuple[Optional[np.ndarray], int, int, bool, int]:
+    ) -> tuple[np.ndarray | None, int, int, bool, int]:
         """
         Decode subtitle packet into bitmap image.
 
@@ -411,7 +411,7 @@ class VobSubParser(SubtitleImageParser):
         data: bytes,
         offset: int,
         header: VobSubHeader
-    ) -> Optional[Tuple]:
+    ) -> tuple | None:
         """
         Parse subtitle control sequence.
 
@@ -534,9 +534,9 @@ class VobSubParser(SubtitleImageParser):
         bottom_offset: int,
         width: int,
         height: int,
-        color_indices: List[int],
-        alpha_values: List[int],
-        palette: List[Tuple[int, int, int]]
+        color_indices: list[int],
+        alpha_values: list[int],
+        palette: list[tuple[int, int, int]]
     ) -> np.ndarray:
         """
         Decode RLE-encoded subtitle image.
@@ -652,7 +652,7 @@ class VobSubParser(SubtitleImageParser):
         data: bytes,
         index: int,
         only_half: bool
-    ) -> Tuple[int, int, int, bool, bool]:
+    ) -> tuple[int, int, int, bool, bool]:
         """
         Decode a single RLE run from the data.
 
@@ -732,7 +732,7 @@ class VobSubParser(SubtitleImageParser):
         line_step: int,
         width: int,
         height: int,
-        colors: List[Tuple[int, int, int, int]]
+        colors: list[tuple[int, int, int, int]]
     ):
         """
         Decode one RLE field (top or bottom) into the image.
@@ -809,7 +809,7 @@ class VobSubParser(SubtitleImageParser):
         line_step: int,
         width: int,
         height: int,
-        colors: List[int]
+        colors: list[int]
     ):
         """
         Decode one RLE field directly to grayscale image.

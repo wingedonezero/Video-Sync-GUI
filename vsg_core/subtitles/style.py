@@ -1,6 +1,7 @@
-# -*- coding: utf-8 -*-
 from pathlib import Path
+
 from ..io.runner import CommandRunner
+
 
 def multiply_font_size(subtitle_path: str, multiplier: float, runner: CommandRunner) -> bool:
     sub_path = Path(subtitle_path)

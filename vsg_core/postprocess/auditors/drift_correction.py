@@ -1,20 +1,19 @@
 # vsg_core/postprocess/auditors/drift_correction.py
-# -*- coding: utf-8 -*-
 """
 Auditor for verifying drift corrections were applied correctly.
 """
-from typing import Dict, Optional
 from pathlib import Path
 
 from vsg_core.models.enums import TrackType
+
 from .base import BaseAuditor
 
 
 class DriftCorrectionAuditor(BaseAuditor):
     """Verifies drift corrections were applied correctly."""
 
-    def run(self, final_mkv_path: Path, final_mkvmerge_data: Dict,
-            final_ffprobe_data: Optional[Dict] = None) -> int:
+    def run(self, final_mkv_path: Path, final_mkvmerge_data: dict,
+            final_ffprobe_data: dict | None = None) -> int:
         """
         Audits drift corrections.
         Returns the number of issues found.
@@ -53,7 +52,7 @@ class DriftCorrectionAuditor(BaseAuditor):
 
         return issues
 
-    def _verify_correction_type(self, flag_dict: Dict, correction_name: str) -> int:
+    def _verify_correction_type(self, flag_dict: dict, correction_name: str) -> int:
         """
         Verify corrections for a specific correction type.
         Returns number of issues found.
@@ -74,7 +73,7 @@ class DriftCorrectionAuditor(BaseAuditor):
             if not corrected_items:
                 self.log(f"[WARNING] {correction_name} correction was flagged for "
                         f"{source_key} but no corrected track found in final file!")
-                self.log(f"          This indicates the correction step failed silently.")
+                self.log("          This indicates the correction step failed silently.")
                 issues += 1
                 continue
 
@@ -84,9 +83,9 @@ class DriftCorrectionAuditor(BaseAuditor):
                 if item.track.props.codec_id != "FLAC":
                     self.log(f"[WARNING] {correction_name} corrected track '{track_name}' "
                             f"({source_key}) is not FLAC!")
-                    self.log(f"          Expected: FLAC")
+                    self.log("          Expected: FLAC")
                     self.log(f"          Actual:   {item.track.props.codec_id}")
-                    self.log(f"          → Correction may not have been applied correctly.")
+                    self.log("          → Correction may not have been applied correctly.")
                     issues += 1
                 else:
                     self.log(f"  ✓ {correction_name} correction verified for "
@@ -102,7 +101,7 @@ class DriftCorrectionAuditor(BaseAuditor):
                 if not preserved_items:
                     self.log(f"[WARNING] No preserved original found for corrected track "
                             f"'{track_name}' ({source_key})")
-                    self.log(f"          Original audio was not preserved for comparison.")
+                    self.log("          Original audio was not preserved for comparison.")
                     issues += 1
 
         return issues

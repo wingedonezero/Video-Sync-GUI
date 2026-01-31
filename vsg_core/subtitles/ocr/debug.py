@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/debug.py
-# -*- coding: utf-8 -*-
 """
 OCR Debug Output
 
@@ -33,7 +32,7 @@ Folder structure:
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+
 import numpy as np
 from PIL import Image
 
@@ -46,15 +45,15 @@ class DebugSubtitle:
     end_time: str
     raw_text: str  # Text after post-processing
     confidence: float
-    image: Optional[np.ndarray] = None
+    image: np.ndarray | None = None
 
     # Raw OCR output (before any fixes)
-    raw_ocr_text: Optional[str] = None
+    raw_ocr_text: str | None = None
 
     # Issue tracking
-    unknown_words: List[str] = field(default_factory=list)
-    fixes_applied: Dict[str, str] = field(default_factory=dict)  # fix_name -> description
-    original_text: Optional[str] = None  # Before fixes (same as raw_ocr_text when set)
+    unknown_words: list[str] = field(default_factory=list)
+    fixes_applied: dict[str, str] = field(default_factory=dict)  # fix_name -> description
+    original_text: str | None = None  # Before fixes (same as raw_ocr_text when set)
 
 
 class OCRDebugger:
@@ -98,12 +97,12 @@ class OCRDebugger:
         self.low_confidence_threshold = low_confidence_threshold
 
         # Storage
-        self.subtitles: Dict[int, DebugSubtitle] = {}
+        self.subtitles: dict[int, DebugSubtitle] = {}
 
         # Track which indices have issues
-        self.unknown_word_indices: Set[int] = set()
-        self.fix_indices: Set[int] = set()
-        self.low_confidence_indices: Set[int] = set()
+        self.unknown_word_indices: set[int] = set()
+        self.fix_indices: set[int] = set()
+        self.low_confidence_indices: set[int] = set()
 
     @property
     def debug_dir(self) -> Path:
@@ -117,8 +116,8 @@ class OCRDebugger:
         end_time: str,
         text: str,
         confidence: float,
-        image: Optional[np.ndarray] = None,
-        raw_ocr_text: Optional[str] = None
+        image: np.ndarray | None = None,
+        raw_ocr_text: str | None = None
     ):
         """Add a subtitle for potential debug output.
 
@@ -162,7 +161,7 @@ class OCRDebugger:
         index: int,
         fix_name: str,
         description: str,
-        original_text: Optional[str] = None
+        original_text: str | None = None
     ):
         """Record a fix applied to a subtitle."""
         if not self.enabled:
@@ -209,21 +208,21 @@ class OCRDebugger:
         summary_path = self.debug_dir / "summary.txt"
 
         lines = [
-            f"OCR Debug Summary",
-            f"=" * 50,
+            "OCR Debug Summary",
+            "=" * 50,
             f"Base name: {self.base_name}",
             f"Timestamp: {self.timestamp}",
             f"Total subtitles: {len(self.subtitles)}",
-            f"",
-            f"Files:",
-            f"  raw_ocr.txt - Complete raw OCR output (before any fixes)",
-            f"",
-            f"Issues found:",
+            "",
+            "Files:",
+            "  raw_ocr.txt - Complete raw OCR output (before any fixes)",
+            "",
+            "Issues found:",
             f"  Unknown words: {len(self.unknown_word_indices)} subtitles",
             f"  Fixes applied: {len(self.fix_indices)} subtitles",
             f"  Low confidence: {len(self.low_confidence_indices)} subtitles",
-            f"",
-            f"Folders:",
+            "",
+            "Folders:",
             f"  all_subtitles/ - {len(self.subtitles)} images (all subtitles for verification)",
         ]
 
@@ -340,16 +339,16 @@ class OCRDebugger:
                 f"Time: {sub.start_time} -> {sub.end_time}",
                 f"Confidence: {sub.confidence:.1f}%",
                 f"Image: sub_{sub.index:04d}.png",
-                f"",
-                f"Raw OCR:",
+                "",
+                "Raw OCR:",
                 f"  {raw_text.replace(chr(10), chr(10) + '  ')}",
             ])
 
             # Show final text if different
             if raw_text != final_text:
                 lines.extend([
-                    f"",
-                    f"After fixes:",
+                    "",
+                    "After fixes:",
                     f"  {final_text.replace(chr(10), chr(10) + '  ')}",
                 ])
 
@@ -386,10 +385,10 @@ class OCRDebugger:
                 f"Time: {sub.start_time} -> {sub.end_time}",
                 f"Confidence: {sub.confidence:.1f}%",
                 f"Image: sub_{sub.index:04d}.png",
-                f"",
-                f"OCR Text:",
+                "",
+                "OCR Text:",
                 f"  {sub.raw_text.replace(chr(10), chr(10) + '  ')}",
-                f"",
+                "",
                 f"Unknown words: {', '.join(sub.unknown_words)}",
                 "",
             ])
@@ -425,21 +424,21 @@ class OCRDebugger:
                 f"Time: {sub.start_time} -> {sub.end_time}",
                 f"Confidence: {sub.confidence:.1f}%",
                 f"Image: sub_{sub.index:04d}.png",
-                f"",
+                "",
             ])
 
             if sub.original_text:
                 lines.extend([
-                    f"Original OCR:",
+                    "Original OCR:",
                     f"  {sub.original_text.replace(chr(10), chr(10) + '  ')}",
-                    f"",
+                    "",
                 ])
 
             lines.extend([
-                f"After fixes:",
+                "After fixes:",
                 f"  {sub.raw_text.replace(chr(10), chr(10) + '  ')}",
-                f"",
-                f"Fixes applied:",
+                "",
+                "Fixes applied:",
             ])
 
             for fix_name, description in sub.fixes_applied.items():
@@ -484,8 +483,8 @@ class OCRDebugger:
                 f"Time: {sub.start_time} -> {sub.end_time}",
                 f"Confidence: {sub.confidence:.1f}%",
                 f"Image: sub_{sub.index:04d}.png",
-                f"",
-                f"OCR Text:",
+                "",
+                "OCR Text:",
                 f"  {sub.raw_text.replace(chr(10), chr(10) + '  ')}",
                 "",
             ])

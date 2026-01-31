@@ -1,12 +1,20 @@
 # vsg_qt/resample_dialog/ui.py
-# -*- coding: utf-8 -*-
 import json
 import shutil
+
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QFormLayout,
-    QSpinBox, QPushButton, QDialogButtonBox, QLabel
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QGroupBox,
+    QLabel,
+    QPushButton,
+    QSpinBox,
+    QVBoxLayout,
 )
+
 from vsg_core.io.runner import CommandRunner
+
 
 class ResampleDialog(QDialog):
     """A dialog for resampling subtitle PlayResX/Y values."""

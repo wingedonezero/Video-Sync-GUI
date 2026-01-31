@@ -1,8 +1,7 @@
 # vsg_core/postprocess/auditors/chapters.py
-# -*- coding: utf-8 -*-
 import re
-from typing import Dict, Optional
 from pathlib import Path
+
 from lxml import etree as ET
 
 from .base import BaseAuditor
@@ -11,7 +10,7 @@ from .base import BaseAuditor
 class ChaptersAuditor(BaseAuditor):
     """Verifies chapters were preserved and processed correctly."""
 
-    def run(self, final_mkv_path: Path, final_mkvmerge_data: Dict, final_ffprobe_data=None) -> int:
+    def run(self, final_mkv_path: Path, final_mkvmerge_data: dict, final_ffprobe_data=None) -> int:
         """
         Audits chapters:
         - If chapters were processed: verifies final matches processed version
@@ -36,14 +35,14 @@ class ChaptersAuditor(BaseAuditor):
         # Determine what we should compare against
         if self.ctx.chapters_xml:
             # Chapters were PROCESSED - compare final vs processed
-            self.log(f"  → Chapter processing was enabled")
+            self.log("  → Chapter processing was enabled")
             return self._verify_processed_chapters(final_chapters_xml)
         else:
             # Chapters were NOT processed - compare final vs source
-            self.log(f"  → Chapter processing was not enabled")
+            self.log("  → Chapter processing was not enabled")
             return self._verify_unprocessed_chapters(source_chapters_xml, final_chapters_xml, source_has_chapters, final_has_chapters)
 
-    def _verify_processed_chapters(self, final_chapters_xml: Optional[str]) -> int:
+    def _verify_processed_chapters(self, final_chapters_xml: str | None) -> int:
         """
         Verify that the processed chapters made it into the final file.
         Compares final file chapters against ctx.chapters_xml (the processed version).
@@ -109,7 +108,7 @@ class ChaptersAuditor(BaseAuditor):
 
         return issues
 
-    def _verify_unprocessed_chapters(self, source_xml: Optional[str], final_xml: Optional[str],
+    def _verify_unprocessed_chapters(self, source_xml: str | None, final_xml: str | None,
                                      source_has_chapters: bool, final_has_chapters: bool) -> int:
         """
         Verify chapters when processing was NOT enabled.
@@ -164,7 +163,7 @@ class ChaptersAuditor(BaseAuditor):
                     self.log(f"[WARNING] Chapter {i} start time mismatch!")
                     self.log(f"          Processed: {proc_start.text}")
                     self.log(f"          Final:     {final_start.text}")
-                    self.log(f"          → Processed chapters were not merged correctly!")
+                    self.log("          → Processed chapters were not merged correctly!")
                     issues += 1
 
             # Compare end times
@@ -177,7 +176,7 @@ class ChaptersAuditor(BaseAuditor):
                     self.log(f"[INFO] Chapter {i} end time differs (may be normalized differently)")
 
         if issues == 0:
-            self.log(f"  ✓ All chapter timestamps match processed version")
+            self.log("  ✓ All chapter timestamps match processed version")
 
         return issues
 
@@ -192,15 +191,15 @@ class ChaptersAuditor(BaseAuditor):
                 actual_name = name_node.text
                 if not expected_pattern.match(actual_name):
                     self.log(f"[WARNING] Chapter {i} was not renamed: '{actual_name}' (expected 'Chapter {i:02d}')")
-                    self.log(f"          → Chapter renaming was enabled but not applied!")
+                    self.log("          → Chapter renaming was enabled but not applied!")
                     issues += 1
 
         if issues == 0:
-            self.log(f"  ✓ Chapter renaming applied correctly")
+            self.log("  ✓ Chapter renaming applied correctly")
 
         return issues
 
-    def _extract_chapters(self, file_path) -> Optional[str]:
+    def _extract_chapters(self, file_path) -> str | None:
         """Extract chapters XML from a file, return None if no chapters."""
         try:
             xml_content = self.runner.run(

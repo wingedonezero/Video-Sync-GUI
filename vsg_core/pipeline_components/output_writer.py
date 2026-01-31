@@ -1,5 +1,4 @@
 # vsg_core/pipeline_components/output_writer.py
-# -*- coding: utf-8 -*-
 """
 Output writer component.
 
@@ -8,7 +7,6 @@ Handles writing mkvmerge options files and managing output paths.
 
 import json
 from pathlib import Path
-from typing import List
 
 from ..io.runner import CommandRunner
 
@@ -18,7 +16,7 @@ class OutputWriter:
 
     @staticmethod
     def write_mkvmerge_options(
-        tokens: List[str],
+        tokens: list[str],
         temp_dir: Path,
         config: dict,
         runner: CommandRunner
@@ -61,7 +59,7 @@ class OutputWriter:
             return str(opts_path)
 
         except Exception as e:
-            raise IOError(f"Failed to write mkvmerge options file: {e}")
+            raise OSError(f"Failed to write mkvmerge options file: {e}")
 
     @staticmethod
     def prepare_output_path(output_dir: Path, source1_filename: str) -> Path:

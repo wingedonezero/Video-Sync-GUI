@@ -1,5 +1,4 @@
 # vsg_qt/subtitle_editor/state/editor_state.py
-# -*- coding: utf-8 -*-
 """
 Central state management for the subtitle editor.
 
@@ -14,7 +13,7 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Dict, List, Set, Any
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import QObject, Signal
 
@@ -40,23 +39,23 @@ class EditorState(QObject):
     def __init__(
         self,
         parent=None,
-        existing_style_patch: Optional[Dict[str, Dict[str, Any]]] = None,
-        existing_filter_config: Optional[Dict[str, Any]] = None
+        existing_style_patch: dict[str, dict[str, Any]] | None = None,
+        existing_filter_config: dict[str, Any] | None = None
     ):
         super().__init__(parent)
 
         # Core data
-        self._subtitle_data: Optional['SubtitleData'] = None
-        self._original_path: Optional[Path] = None
-        self._preview_path: Optional[Path] = None
+        self._subtitle_data: SubtitleData | None = None
+        self._original_path: Path | None = None
+        self._preview_path: Path | None = None
 
         # Selection state
-        self._selected_indices: List[int] = []
-        self._current_style: Optional[str] = None
+        self._selected_indices: list[int] = []
+        self._current_style: str | None = None
 
         # Modified tracking
         self._is_modified: bool = False
-        self._original_style_values: Dict[str, Dict[str, Any]] = {}
+        self._original_style_values: dict[str, dict[str, Any]] = {}
 
         # Filter configuration (for generated tracks)
         # Initialize from existing config if provided
@@ -75,16 +74,16 @@ class EditorState(QObject):
 
         # Style patch data (changes to apply)
         # Initialize from existing patch if provided
-        self._style_patch: Dict[str, Dict[str, Any]] = dict(existing_style_patch) if existing_style_patch else {}
+        self._style_patch: dict[str, dict[str, Any]] = dict(existing_style_patch) if existing_style_patch else {}
 
         # Font replacements
-        self._font_replacements: Dict[str, str] = {}
+        self._font_replacements: dict[str, str] = {}
 
         # Video info
-        self._video_path: Optional[Path] = None
+        self._video_path: Path | None = None
         self._video_fps: float = 23.976
 
-    def load_subtitle(self, subtitle_path: Path, video_path: Optional[Path] = None) -> bool:
+    def load_subtitle(self, subtitle_path: Path, video_path: Path | None = None) -> bool:
         """
         Load a subtitle file into the editor.
 
@@ -152,41 +151,41 @@ class EditorState(QObject):
                         print(f"[EditorState] Failed to apply {attr}={value} to {style_name}: {e}")
 
     @property
-    def subtitle_data(self) -> Optional['SubtitleData']:
+    def subtitle_data(self) -> SubtitleData | None:
         """Get the current SubtitleData."""
         return self._subtitle_data
 
     @property
-    def events(self) -> List:
+    def events(self) -> list:
         """Get the list of subtitle events."""
         if self._subtitle_data:
             return self._subtitle_data.events
         return []
 
     @property
-    def styles(self) -> Dict:
+    def styles(self) -> dict:
         """Get the styles dictionary."""
         if self._subtitle_data:
             return self._subtitle_data.styles
         return {}
 
     @property
-    def style_names(self) -> List[str]:
+    def style_names(self) -> list[str]:
         """Get list of style names."""
         return list(self.styles.keys())
 
     @property
-    def selected_indices(self) -> List[int]:
+    def selected_indices(self) -> list[int]:
         """Get currently selected event indices."""
         return self._selected_indices.copy()
 
-    def set_selection(self, indices: List[int]):
+    def set_selection(self, indices: list[int]):
         """Set the current selection."""
         self._selected_indices = indices.copy()
         self.selection_changed.emit(self._selected_indices)
 
     @property
-    def current_style(self) -> Optional[str]:
+    def current_style(self) -> str | None:
         """Get the currently selected style name."""
         return self._current_style
 
@@ -207,17 +206,17 @@ class EditorState(QObject):
             self.modified_changed.emit(True)
 
     @property
-    def preview_path(self) -> Optional[Path]:
+    def preview_path(self) -> Path | None:
         """Get the preview file path."""
         return self._preview_path
 
     @property
-    def original_path(self) -> Optional[Path]:
+    def original_path(self) -> Path | None:
         """Get the original file path."""
         return self._original_path
 
     @property
-    def video_path(self) -> Optional[Path]:
+    def video_path(self) -> Path | None:
         """Get the video path."""
         return self._video_path
 
@@ -245,17 +244,17 @@ class EditorState(QObject):
             self.filter_changed.emit()
 
     @property
-    def filter_styles(self) -> Set[str]:
+    def filter_styles(self) -> set[str]:
         """Get the set of styles to filter."""
         return self._filter_styles.copy()
 
     @property
-    def forced_include_indices(self) -> Set[int]:
+    def forced_include_indices(self) -> set[int]:
         """Get the forced-include indices."""
         return self._forced_include_indices.copy()
 
     @property
-    def forced_exclude_indices(self) -> Set[int]:
+    def forced_exclude_indices(self) -> set[int]:
         """Get the forced-exclude indices."""
         return self._forced_exclude_indices.copy()
 
@@ -296,12 +295,12 @@ class EditorState(QObject):
             self.filter_changed.emit()
             self.mark_modified()
 
-    def set_filter_styles(self, styles: Set[str]):
+    def set_filter_styles(self, styles: set[str]):
         """Set the styles to filter."""
         self._filter_styles = set(styles)
         self.filter_changed.emit()
 
-    def get_filtered_event_indices(self) -> Set[int]:
+    def get_filtered_event_indices(self) -> set[int]:
         """
         Get indices of events that would be KEPT after filtering.
 
@@ -333,7 +332,7 @@ class EditorState(QObject):
 
         return kept
 
-    def get_overlapping_events(self, event_index: int) -> List[int]:
+    def get_overlapping_events(self, event_index: int) -> list[int]:
         """
         Get indices of events that overlap with the given event.
 
@@ -381,11 +380,11 @@ class EditorState(QObject):
     # --- Style Patch ---
 
     @property
-    def style_patch(self) -> Dict[str, Dict[str, Any]]:
+    def style_patch(self) -> dict[str, dict[str, Any]]:
         """Get the style patch (changes to apply)."""
         return self._style_patch.copy()
 
-    def update_style_patch(self, style_name: str, changes: Dict[str, Any]):
+    def update_style_patch(self, style_name: str, changes: dict[str, Any]):
         """Update the style patch for a style."""
         if style_name not in self._style_patch:
             self._style_patch[style_name] = {}
@@ -412,11 +411,11 @@ class EditorState(QObject):
     # --- Font Replacements ---
 
     @property
-    def font_replacements(self) -> Dict[str, str]:
+    def font_replacements(self) -> dict[str, str]:
         """Get font replacements."""
         return self._font_replacements.copy()
 
-    def set_font_replacements(self, replacements: Dict[str, str]):
+    def set_font_replacements(self, replacements: dict[str, str]):
         """Set font replacements."""
         self._font_replacements = dict(replacements)
         self.mark_modified()
@@ -435,7 +434,7 @@ class EditorState(QObject):
             self._is_modified = False
             self.modified_changed.emit(False)
 
-    def generate_style_patch(self) -> Dict[str, Dict[str, Any]]:
+    def generate_style_patch(self) -> dict[str, dict[str, Any]]:
         """
         Generate a style patch by comparing current values to original.
 

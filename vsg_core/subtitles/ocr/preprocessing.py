@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/preprocessing.py
-# -*- coding: utf-8 -*-
 """
 Adaptive Image Preprocessing for OCR
 
@@ -18,9 +17,9 @@ which preprocessing steps are beneficial for each specific image.
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple, List
-import numpy as np
+
 import cv2
+import numpy as np
 from PIL import Image
 
 from .parsers.base import SubtitleImage
@@ -38,7 +37,7 @@ class PreprocessingConfig:
 
     # Border
     border_size: int = 10  # White border in pixels
-    border_color: Tuple[int, int, int] = (255, 255, 255)  # White
+    border_color: tuple[int, int, int] = (255, 255, 255)  # White
 
     # Binarization - ALWAYS binarize for subtitle OCR
     # Pure black on white is optimal for Tesseract
@@ -53,7 +52,7 @@ class PreprocessingConfig:
 
     # Debug
     save_debug_images: bool = False
-    debug_dir: Optional[Path] = None
+    debug_dir: Path | None = None
 
 
 @dataclass
@@ -66,7 +65,7 @@ class PreprocessedImage:
     was_upscaled: bool = False
     was_binarized: bool = False
     scale_factor: float = 1.0
-    debug_path: Optional[Path] = None
+    debug_path: Path | None = None
 
 
 class ImagePreprocessor:
@@ -76,13 +75,13 @@ class ImagePreprocessor:
     Analyzes each image to determine optimal preprocessing steps.
     """
 
-    def __init__(self, config: Optional[PreprocessingConfig] = None):
+    def __init__(self, config: PreprocessingConfig | None = None):
         self.config = config or PreprocessingConfig()
 
     def preprocess(
         self,
         subtitle: SubtitleImage,
-        work_dir: Optional[Path] = None
+        work_dir: Path | None = None
     ) -> PreprocessedImage:
         """
         Preprocess a subtitle image for OCR.
@@ -138,9 +137,9 @@ class ImagePreprocessor:
 
     def preprocess_batch(
         self,
-        subtitles: List[SubtitleImage],
-        work_dir: Optional[Path] = None
-    ) -> List[PreprocessedImage]:
+        subtitles: list[SubtitleImage],
+        work_dir: Path | None = None
+    ) -> list[PreprocessedImage]:
         """
         Preprocess multiple subtitle images.
 
@@ -236,7 +235,7 @@ class ImagePreprocessor:
         # Medium contrast - binarization might help
         return True
 
-    def _upscale(self, gray: np.ndarray) -> Tuple[np.ndarray, float]:
+    def _upscale(self, gray: np.ndarray) -> tuple[np.ndarray, float]:
         """
         Upscale image to target height.
 
@@ -350,7 +349,7 @@ class ImagePreprocessor:
 
 def create_preprocessor(
     settings_dict: dict,
-    work_dir: Optional[Path] = None
+    work_dir: Path | None = None
 ) -> ImagePreprocessor:
     """
     Create preprocessor from settings dictionary.

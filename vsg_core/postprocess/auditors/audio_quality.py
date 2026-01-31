@@ -1,16 +1,15 @@
 # vsg_core/postprocess/auditors/audio_quality.py
-# -*- coding: utf-8 -*-
-from typing import Dict, Optional
 from pathlib import Path
 
 from vsg_core.models.enums import TrackType
+
 from .base import BaseAuditor
 
 
 class AudioQualityAuditor(BaseAuditor):
     """Checks for audio quality degradation (sample rate, bit depth changes)."""
 
-    def run(self, final_mkv_path: Path, final_mkvmerge_data: Dict, final_ffprobe_data=None) -> int:
+    def run(self, final_mkv_path: Path, final_mkvmerge_data: dict, final_ffprobe_data=None) -> int:
         """
         Audits audio quality parameters.
         Returns the number of issues found.
@@ -78,7 +77,7 @@ class AudioQualityAuditor(BaseAuditor):
                     self.log(f"          Output: {actual_rate} Hz")
 
                     if actual_rate < source_rate:
-                        self.log(f"          CRITICAL: Audio was downsampled!")
+                        self.log("          CRITICAL: Audio was downsampled!")
                         issues += 1
 
             # Check bit depth
@@ -96,7 +95,7 @@ class AudioQualityAuditor(BaseAuditor):
                         self.log(f"          Output: {actual_depth}-bit")
 
                         if actual_depth < source_depth:
-                            self.log(f"          CRITICAL: Bit depth reduced!")
+                            self.log("          CRITICAL: Bit depth reduced!")
                             issues += 1
                 except (ValueError, TypeError):
                     pass
@@ -106,7 +105,7 @@ class AudioQualityAuditor(BaseAuditor):
 
         return issues
 
-    def _get_audio_stream_index_from_track_id(self, mkv_data: Dict, track_id: int) -> Optional[int]:
+    def _get_audio_stream_index_from_track_id(self, mkv_data: dict, track_id: int) -> int | None:
         """
         Maps an mkvmerge track ID to the corresponding audio stream index in ffprobe output.
 

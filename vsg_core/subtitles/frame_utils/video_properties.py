@@ -1,5 +1,4 @@
 # vsg_core/subtitles/frame_utils/video_properties.py
-# -*- coding: utf-8 -*-
 """
 Video property detection functions for subtitle synchronization.
 
@@ -9,10 +8,11 @@ Contains:
 - Video property comparison for sync strategy selection
 """
 from __future__ import annotations
-from pathlib import Path
-from typing import Dict, Any, Optional
-import subprocess
+
 import json
+import subprocess
+from pathlib import Path
+from typing import Any
 
 
 def detect_video_fps(video_path: str, runner) -> float:
@@ -49,7 +49,7 @@ def detect_video_fps(video_path: str, runner) -> float:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=env)
 
         if result.returncode != 0:
-            runner._log_message(f"[FPS Detection] WARNING: ffprobe failed, using default 23.976 fps")
+            runner._log_message("[FPS Detection] WARNING: ffprobe failed, using default 23.976 fps")
             return 23.976
 
         data = json.loads(result.stdout)
@@ -67,11 +67,11 @@ def detect_video_fps(video_path: str, runner) -> float:
 
     except Exception as e:
         runner._log_message(f"[FPS Detection] WARNING: FPS detection failed: {e}")
-        runner._log_message(f"[FPS Detection] Using default: 23.976 fps")
+        runner._log_message("[FPS Detection] Using default: 23.976 fps")
         return 23.976
 
 
-def detect_video_properties(video_path: str, runner) -> Dict[str, Any]:
+def detect_video_properties(video_path: str, runner) -> dict[str, Any]:
     """
     Detect comprehensive video properties for sync strategy selection.
 
@@ -141,13 +141,13 @@ def detect_video_properties(video_path: str, runner) -> Dict[str, Any]:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
 
         if result.returncode != 0:
-            runner._log_message(f"[VideoProps] WARNING: ffprobe failed, using defaults")
+            runner._log_message("[VideoProps] WARNING: ffprobe failed, using defaults")
             return props
 
         data = json.loads(result.stdout)
 
         if not data.get('streams'):
-            runner._log_message(f"[VideoProps] WARNING: No video streams found")
+            runner._log_message("[VideoProps] WARNING: No video streams found")
             return props
 
         stream = data['streams'][0]
@@ -249,9 +249,9 @@ def detect_video_properties(video_path: str, runner) -> Dict[str, Any]:
 
         # Additional notes for specific content types
         if props['content_type'] == 'telecine':
-            runner._log_message(f"[VideoProps] NOTE: Telecine detected - IVTC may improve frame matching")
+            runner._log_message("[VideoProps] NOTE: Telecine detected - IVTC may improve frame matching")
         elif props['content_type'] == 'interlaced':
-            runner._log_message(f"[VideoProps] NOTE: Interlaced content - deinterlacing required for frame matching")
+            runner._log_message("[VideoProps] NOTE: Interlaced content - deinterlacing required for frame matching")
 
         return props
 
@@ -260,7 +260,7 @@ def detect_video_properties(video_path: str, runner) -> Dict[str, Any]:
         return props
 
 
-def get_video_properties(video_path: str, runner, tool_paths: dict = None) -> Dict[str, Any]:
+def get_video_properties(video_path: str, runner, tool_paths: dict = None) -> dict[str, Any]:
     """
     Get video properties including resolution.
 
@@ -295,7 +295,7 @@ def get_video_duration_ms(video_path: str, runner) -> float:
     return props.get('duration_ms', 0.0)
 
 
-def compare_video_properties(source_props: Dict[str, Any], target_props: Dict[str, Any], runner) -> Dict[str, Any]:
+def compare_video_properties(source_props: dict[str, Any], target_props: dict[str, Any], runner) -> dict[str, Any]:
     """
     Compare video properties between source and target to determine sync strategy.
 
@@ -315,8 +315,8 @@ def compare_video_properties(source_props: Dict[str, Any], target_props: Dict[st
             - scale_factor: float (for PAL speedup etc.)
             - warnings: list of warning strings
     """
-    runner._log_message(f"[VideoProps] -----------------------------------------")
-    runner._log_message(f"[VideoProps] Comparing source vs target properties...")
+    runner._log_message("[VideoProps] -----------------------------------------")
+    runner._log_message("[VideoProps] Comparing source vs target properties...")
 
     result = {
         'strategy': 'frame-based',  # Default: current mode works
@@ -350,19 +350,19 @@ def compare_video_properties(source_props: Dict[str, Any], target_props: Dict[st
             result['scale_factor'] = target_fps / source_fps  # e.g., 23.976/25 = 0.959
             result['strategy'] = 'scale'
             result['warnings'].append(f"PAL speedup detected (ratio={result['fps_ratio']:.4f}), subtitles need scaling")
-            runner._log_message(f"[VideoProps] PAL speedup detected - will need subtitle scaling")
+            runner._log_message("[VideoProps] PAL speedup detected - will need subtitle scaling")
         elif 0.95 < 1/result['fps_ratio'] < 0.96:
             # Reverse PAL (25 -> 23.976)
             result['needs_scaling'] = True
             result['scale_factor'] = target_fps / source_fps
             result['strategy'] = 'scale'
-            result['warnings'].append(f"Reverse PAL detected, subtitles need scaling")
-            runner._log_message(f"[VideoProps] Reverse PAL detected - will need subtitle scaling")
+            result['warnings'].append("Reverse PAL detected, subtitles need scaling")
+            runner._log_message("[VideoProps] Reverse PAL detected - will need subtitle scaling")
         else:
             # Different framerates, use timestamp-based
             result['strategy'] = 'timestamp-based'
-            result['warnings'].append(f"Different framerates - frame-based matching may be unreliable")
-            runner._log_message(f"[VideoProps] Different framerates - timestamp-based matching recommended")
+            result['warnings'].append("Different framerates - frame-based matching may be unreliable")
+            runner._log_message("[VideoProps] Different framerates - timestamp-based matching recommended")
 
     # Check interlacing
     source_interlaced = source_props['interlaced']
@@ -376,14 +376,14 @@ def compare_video_properties(source_props: Dict[str, Any], target_props: Dict[st
         result['needs_deinterlace'] = True
         if result['strategy'] == 'frame-based':
             result['strategy'] = 'deinterlace'
-        result['warnings'].append(f"Interlaced content detected - frame hashing may be less reliable")
-        runner._log_message(f"[VideoProps] Interlaced content - will need deinterlace for frame matching")
+        result['warnings'].append("Interlaced content detected - frame hashing may be less reliable")
+        runner._log_message("[VideoProps] Interlaced content - will need deinterlace for frame matching")
 
     # Summary
     runner._log_message(f"[VideoProps] Recommended strategy: {result['strategy']}")
     if result['warnings']:
         for warn in result['warnings']:
             runner._log_message(f"[VideoProps] WARNING: {warn}")
-    runner._log_message(f"[VideoProps] -----------------------------------------")
+    runner._log_message("[VideoProps] -----------------------------------------")
 
     return result

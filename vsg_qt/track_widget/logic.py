@@ -1,10 +1,11 @@
 # vsg_qt/track_widget/logic.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import Dict, List, Any
+
+from typing import Any
+
 
 class TrackWidgetLogic:
-    def __init__(self, view: "TrackWidget", track_data: Dict, available_sources: List[str]):
+    def __init__(self, view: TrackWidget, track_data: dict, available_sources: list[str]):
         self.v = view
         self.track_data = track_data
         self.available_sources = available_sources
@@ -206,7 +207,7 @@ class TrackWidgetLogic:
         self.v.badge_label.setText(" | ".join(badges))
         self.v.badge_label.setVisible(bool(badges))
 
-    def get_config(self) -> Dict[str, Any]:
+    def get_config(self) -> dict[str, Any]:
         """Returns the current configuration from the widget's controls."""
         is_subs = self.track_data.get('type') == 'subtitles'
 

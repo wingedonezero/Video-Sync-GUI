@@ -1,6 +1,6 @@
 # vsg_core/models/enums.py
-# -*- coding: utf-8 -*-
 from enum import Enum
+
 
 class TrackType(Enum):
     VIDEO = 'video'

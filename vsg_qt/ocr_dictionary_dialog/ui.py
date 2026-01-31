@@ -1,5 +1,4 @@
 # vsg_qt/ocr_dictionary_dialog/ui.py
-# -*- coding: utf-8 -*-
 """
 OCR Dictionary Editor Dialog
 
@@ -10,27 +9,42 @@ Provides a GUI for editing the three OCR correction databases:
 """
 
 from pathlib import Path
-from typing import Optional
 
-from PySide6.QtCore import Qt, Signal, QThread
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
-    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QListWidget, QListWidgetItem,
-    QPushButton, QLineEdit, QComboBox, QCheckBox, QLabel,
-    QGroupBox, QFormLayout, QMessageBox, QFileDialog,
-    QDialogButtonBox, QSplitter, QFrame, QProgressBar
+    QAbstractItemView,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
 from vsg_core.subtitles.ocr.dictionaries import (
-    OCRDictionaries, ReplacementRule, RuleType, get_dictionaries
+    OCRDictionaries,
+    ReplacementRule,
+    get_dictionaries,
 )
 from vsg_core.subtitles.ocr.subtitle_edit import (
-    SubtitleEditParser, SEDictionaryConfig, load_se_config, save_se_config
-)
-from vsg_core.subtitles.ocr.word_lists import (
-    WordListConfig, ValidationManager, get_validation_manager,
-    initialize_validation_manager, DEFAULT_WORD_LISTS
+    SEDictionaryConfig,
+    SubtitleEditParser,
+    load_se_config,
+    save_se_config,
 )
 
 
@@ -69,7 +83,7 @@ class ReplacementEditWidget(QWidget):
         self.description_edit.setPlaceholderText("Optional description")
         layout.addRow("Description:", self.description_edit)
 
-    def get_rule(self) -> Optional[ReplacementRule]:
+    def get_rule(self) -> ReplacementRule | None:
         """Get the rule from current inputs."""
         pattern = self.pattern_edit.text().strip()
         replacement = self.replacement_edit.text()  # Can be empty
@@ -432,7 +446,7 @@ class ReplacementsTab(QWidget):
 
         msg = f"Imported {added} rules, skipped {skipped} duplicates."
         if errors:
-            msg += f"\n\nErrors:\n" + "\n".join(errors[:10])
+            msg += "\n\nErrors:\n" + "\n".join(errors[:10])
             if len(errors) > 10:
                 msg += f"\n...and {len(errors) - 10} more errors"
 
@@ -1120,7 +1134,7 @@ class RomajiBuildWorker(QThread):
             success, message = self.dictionaries.build_romaji_dictionary(progress_callback)
             self.finished.emit(success, message)
         except Exception as e:
-            self.finished.emit(False, f"Error: {str(e)}")
+            self.finished.emit(False, f"Error: {e!s}")
 
 
 class RomajiTab(QWidget):
@@ -1364,7 +1378,7 @@ class OCRDictionaryDialog(QDialog):
         - Subtitle Edit dictionaries (external OCR fix lists)
     """
 
-    def __init__(self, parent=None, config_dir: Optional[Path] = None):
+    def __init__(self, parent=None, config_dir: Path | None = None):
         super().__init__(parent)
         self.dictionaries = get_dictionaries(config_dir)
         self._setup_ui()

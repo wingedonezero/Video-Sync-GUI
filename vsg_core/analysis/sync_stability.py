@@ -1,5 +1,4 @@
 # vsg_core/analysis/sync_stability.py
-# -*- coding: utf-8 -*-
 """
 Sync stability analyzer for detecting variance in correlation results.
 
@@ -7,8 +6,9 @@ Analyzes per-chunk delay values to detect inconsistencies that may indicate
 sync issues, even when the final rounded delay appears correct.
 """
 
-from typing import List, Dict, Any, Optional, Callable
+from collections.abc import Callable
 from statistics import mean, stdev, variance
+from typing import Any
 
 
 def _to_float(value) -> float:
@@ -17,12 +17,12 @@ def _to_float(value) -> float:
 
 
 def analyze_sync_stability(
-    chunk_results: List[Dict[str, Any]],
+    chunk_results: list[dict[str, Any]],
     source_key: str,
-    config: Dict[str, Any],
-    log: Optional[Callable[[str], None]] = None,
-    stepping_clusters: Optional[List[Dict]] = None
-) -> Optional[Dict[str, Any]]:
+    config: dict[str, Any],
+    log: Callable[[str], None] | None = None,
+    stepping_clusters: list[dict] | None = None
+) -> dict[str, Any] | None:
     """
     Analyze correlation chunk results for variance/stability issues.
 
@@ -76,16 +76,16 @@ def analyze_sync_stability(
 
 
 def _analyze_uniform(
-    accepted: List[Dict],
-    raw_delays: List[float],
+    accepted: list[dict],
+    raw_delays: list[float],
     source_key: str,
-    config: Dict[str, Any],
-    log: Optional[Callable],
+    config: dict[str, Any],
+    log: Callable | None,
     variance_threshold: float,
     min_chunks: int,
     outlier_mode: str,
     outlier_threshold: float
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Analyze chunks as a single uniform group (no stepping)."""
 
     # Calculate statistics
@@ -176,17 +176,17 @@ def _analyze_uniform(
 
 
 def _analyze_with_clusters(
-    accepted: List[Dict],
-    raw_delays: List[float],
+    accepted: list[dict],
+    raw_delays: list[float],
     source_key: str,
-    config: Dict[str, Any],
-    log: Optional[Callable],
-    stepping_clusters: List[Dict],
+    config: dict[str, Any],
+    log: Callable | None,
+    stepping_clusters: list[dict],
     variance_threshold: float,
     min_chunks: int,
     outlier_mode: str,
     outlier_threshold: float
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Analyze chunks with stepping clusters.
 

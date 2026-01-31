@@ -1,6 +1,4 @@
 # vsg_core/postprocess/auditors/track_flags.py
-# -*- coding: utf-8 -*-
-from typing import Dict, List
 from pathlib import Path
 
 from .base import BaseAuditor
@@ -9,7 +7,7 @@ from .base import BaseAuditor
 class TrackFlagsAuditor(BaseAuditor):
     """Audits default and forced track flags."""
 
-    def run(self, final_mkv_path: Path, final_mkvmerge_data: Dict, final_ffprobe_data=None) -> int:
+    def run(self, final_mkv_path: Path, final_mkvmerge_data: dict, final_ffprobe_data=None) -> int:
         """
         Compares expected vs actual flags and logs warnings.
         Returns the number of issues found.

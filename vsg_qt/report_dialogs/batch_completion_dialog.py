@@ -1,5 +1,4 @@
 # vsg_qt/report_dialogs/batch_completion_dialog.py
-# -*- coding: utf-8 -*-
 """
 Batch completion dialog with Show Report button.
 
@@ -8,14 +7,18 @@ a button to open the detailed report viewer.
 """
 
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Any
 
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QSizePolicy
-)
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
+from PySide6.QtWidgets import (
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+)
 
 
 class BatchCompletionDialog(QDialog):
@@ -33,9 +36,9 @@ class BatchCompletionDialog(QDialog):
         successful: int,
         warnings: int,
         failed: int,
-        stepping_jobs: List[Dict[str, Any]],
-        stepping_disabled_jobs: List[Dict[str, Any]],
-        report_path: Optional[Path] = None
+        stepping_jobs: list[dict[str, Any]],
+        stepping_disabled_jobs: list[dict[str, Any]],
+        report_path: Path | None = None
     ):
         """
         Initialize the completion dialog.
@@ -61,8 +64,8 @@ class BatchCompletionDialog(QDialog):
         successful: int,
         warnings: int,
         failed: int,
-        stepping_jobs: List[Dict[str, Any]],
-        stepping_disabled_jobs: List[Dict[str, Any]]
+        stepping_jobs: list[dict[str, Any]],
+        stepping_disabled_jobs: list[dict[str, Any]]
     ):
         """Set up the dialog UI."""
         # Determine dialog type based on results

@@ -1,12 +1,9 @@
 # vsg_core/postprocess/auditors/stepping_correction.py
-# -*- coding: utf-8 -*-
 """
 Auditor for verifying stepping corrections quality and flagging potential issues.
 """
-from typing import Dict, Optional
 from pathlib import Path
 
-from vsg_core.models.enums import TrackType
 from .base import BaseAuditor
 
 
@@ -20,8 +17,8 @@ class SteppingCorrectionAuditor(BaseAuditor):
     - Large single corrections
     """
 
-    def run(self, final_mkv_path: Path, final_mkvmerge_data: Dict,
-            final_ffprobe_data: Optional[Dict] = None) -> int:
+    def run(self, final_mkv_path: Path, final_mkvmerge_data: dict,
+            final_ffprobe_data: dict | None = None) -> int:
         """
         Audits stepping corrections.
         Returns the number of issues found.
@@ -85,9 +82,9 @@ class SteppingCorrectionAuditor(BaseAuditor):
                 if no_silence_found:
                     self.log(f"    ⚠️  Boundary {idx} at {target_time_s:.1f}s:")
                     self.log(f"        Action: {action} {amount_s:.3f}s")
-                    self.log(f"        Issue: No silence zone found in search window")
-                    self.log(f"        → Correction applied at raw boundary without silence guarantee")
-                    self.log(f"        → High risk of cutting dialogue/music")
+                    self.log("        Issue: No silence zone found in search window")
+                    self.log("        → Correction applied at raw boundary without silence guarantee")
+                    self.log("        → High risk of cutting dialogue/music")
                     high_priority_issues.append(f"{source_key} at {target_time_s:.1f}s: No silence zone found")
                     self._add_quality_issue(source_key, 'no_silence_found', 'high',
                         f"No silence zone found at {target_time_s:.1f}s",
@@ -102,7 +99,7 @@ class SteppingCorrectionAuditor(BaseAuditor):
                     self.log(f"        Action: {action} {amount_s:.3f}s")
                     self.log(f"        Silence zone: {zone_duration:.3f}s available")
                     self.log(f"        Issue: Removal exceeds silence by {overflow_s:.3f}s")
-                    self.log(f"        → May cut into dialogue/music")
+                    self.log("        → May cut into dialogue/music")
                     high_priority_issues.append(f"{source_key} at {target_time_s:.1f}s: Silence overflow ({overflow_s:.3f}s)")
                     self._add_quality_issue(source_key, 'silence_overflow', 'high',
                         f"Removal exceeds silence by {overflow_s:.3f}s at {target_time_s:.1f}s",
@@ -116,7 +113,7 @@ class SteppingCorrectionAuditor(BaseAuditor):
                     self.log(f"        Action: {action} {amount_s:.3f}s")
                     self.log(f"        Boundary score: {score:.1f} (threshold: {min_boundary_score:.1f})")
                     self.log(f"        Silence: [{zone_start:.1f}s - {zone_end:.1f}s, {avg_db:.1f}dB]")
-                    self.log(f"        Issue: Low quality boundary (weak silence)")
+                    self.log("        Issue: Low quality boundary (weak silence)")
                     high_priority_issues.append(f"{source_key} at {target_time_s:.1f}s: Low boundary score ({score:.1f})")
                     self._add_quality_issue(source_key, 'low_boundary_score', 'high',
                         f"Low boundary score ({score:.1f}) at {target_time_s:.1f}s",
@@ -128,8 +125,8 @@ class SteppingCorrectionAuditor(BaseAuditor):
                 elif overlaps_speech:
                     self.log(f"    ⚠️  Boundary {idx} at {target_time_s:.1f}s:")
                     self.log(f"        Action: {action} {amount_s:.3f}s")
-                    self.log(f"        Issue: Speech detected near boundary")
-                    self.log(f"        → May cut dialogue")
+                    self.log("        Issue: Speech detected near boundary")
+                    self.log("        → May cut dialogue")
                     high_priority_issues.append(f"{source_key} at {target_time_s:.1f}s: Speech detected")
                     self._add_quality_issue(source_key, 'speech_detected', 'high',
                         f"Speech detected near boundary at {target_time_s:.1f}s",
@@ -141,16 +138,16 @@ class SteppingCorrectionAuditor(BaseAuditor):
                 elif near_transient:
                     self.log(f"    ℹ️  Boundary {idx} at {target_time_s:.1f}s:")
                     self.log(f"        Action: {action} {amount_s:.3f}s")
-                    self.log(f"        Note: Transient detected near boundary")
-                    self.log(f"        → May cut musical beat")
+                    self.log("        Note: Transient detected near boundary")
+                    self.log("        → May cut musical beat")
                     # Not counted as an issue, just informational
 
                 # Check 5: Large correction (informational)
                 elif amount_s > large_correction_threshold_s:
                     self.log(f"    ℹ️  Boundary {idx} at {target_time_s:.1f}s:")
                     self.log(f"        Action: {action} {amount_s:.3f}s (large correction)")
-                    self.log(f"        Note: Unusually large correction")
-                    self.log(f"        → Verify this is intentional")
+                    self.log("        Note: Unusually large correction")
+                    self.log("        → Verify this is intentional")
                     # Not counted as an issue, just informational
 
                 else:
@@ -158,20 +155,20 @@ class SteppingCorrectionAuditor(BaseAuditor):
                     self.log(f"    ✓ Boundary {idx} at {target_time_s:.1f}s: {action} {amount_s:.3f}s")
                     self.log(f"      Silence: [{zone_start:.1f}s - {zone_end:.1f}s], Score: {score:.1f}")
                     if video_snap_skipped:
-                        self.log(f"      Note: Video snap skipped to maintain silence guarantee")
+                        self.log("      Note: Video snap skipped to maintain silence guarantee")
 
             if source_issues == 0:
                 self.log(f"  ✅ {source_key}: All quality checks passed")
 
         # Summary
         if high_priority_issues:
-            self.log(f"\n⚠️  STEPPING QUALITY SUMMARY:")
+            self.log("\n⚠️  STEPPING QUALITY SUMMARY:")
             self.log(f"    Found {len(high_priority_issues)} potential issue(s) requiring review:")
             for issue in high_priority_issues:
                 self.log(f"    • {issue}")
-            self.log(f"\n    Recommendation: Manually review these timestamps in final output")
+            self.log("\n    Recommendation: Manually review these timestamps in final output")
         else:
-            self.log(f"\n✅ STEPPING QUALITY SUMMARY: All quality checks passed")
+            self.log("\n✅ STEPPING QUALITY SUMMARY: All quality checks passed")
             self.log(f"    {len(self.ctx.stepping_sources)} source(s) corrected with no detected issues")
 
         return issues

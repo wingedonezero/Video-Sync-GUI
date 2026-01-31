@@ -1,33 +1,33 @@
 # vsg_qt/main_window/controller.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 import zipfile
 from pathlib import Path
-from typing import Dict, Any, List, Optional
 
+from PySide6.QtCore import QThreadPool, QTimer
 from PySide6.QtWidgets import QMessageBox
-from PySide6.QtCore import QTimer, QThreadPool
 
 from vsg_core.config import AppConfig
 from vsg_core.job_discovery import discover_jobs
 from vsg_core.job_layouts import JobLayoutManager
 from vsg_core.reporting import ReportWriter
-from vsg_qt.worker import JobWorker
-from vsg_qt.options_dialog import OptionsDialog
 from vsg_qt.job_queue_dialog import JobQueueDialog
+from vsg_qt.options_dialog import OptionsDialog
 from vsg_qt.report_dialogs import BatchCompletionDialog
+from vsg_qt.worker import JobWorker
+
 
 class MainController:
-    def __init__(self, view: "MainWindow"):
+    def __init__(self, view: MainWindow):
         self.v = view
         self.config: AppConfig = view.config
-        self.worker: Optional[JobWorker] = None
+        self.worker: JobWorker | None = None
         self.layout_manager = JobLayoutManager(
             temp_root=self.config.get('temp_root'),
             log_callback=self.append_log
         )
         # Report tracking
-        self.report_writer: Optional[ReportWriter] = None
+        self.report_writer: ReportWriter | None = None
         self._job_counter: int = 0
 
     def open_options_dialog(self):
@@ -95,7 +95,7 @@ class MainController:
             # User cancelled or closed the dialog, so clean up.
             self.layout_manager.cleanup_all()
 
-    def _run_configured_jobs(self, final_jobs: List[Dict]):
+    def _run_configured_jobs(self, final_jobs: list[dict]):
         source1_path_str = final_jobs[0]['sources']['Source 1']
         output_dir = self.config.get('output_folder')
         is_batch = len(final_jobs) > 1
@@ -127,7 +127,7 @@ class MainController:
 
         self._start_worker(initial_jobs, and_merge=False, output_dir=output_dir)
 
-    def _start_worker(self, jobs: List[Dict], and_merge: bool, output_dir: str):
+    def _start_worker(self, jobs: list[dict], and_merge: bool, output_dir: str):
         self.v.log_output.clear()
         self.v.status_label.setText(f'Starting batch of {len(jobs)} jobs…')
         self.v.progress_bar.setValue(0)

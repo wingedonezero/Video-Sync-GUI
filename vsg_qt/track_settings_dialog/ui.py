@@ -1,9 +1,20 @@
 from __future__ import annotations
+
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QDialogButtonBox,
-    QCheckBox, QDoubleSpinBox, QComboBox, QFormLayout, QGroupBox, QLineEdit, QPushButton
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QGroupBox,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
 )
+
 from .logic import TrackSettingsLogic
+
 
 class TrackSettingsDialog(QDialog):
     """Small popup dialog to edit per-track options."""

@@ -1,5 +1,4 @@
 # vsg_qt/report_dialogs/report_viewer.py
-# -*- coding: utf-8 -*-
 """
 Report viewer dialog for displaying detailed batch results.
 
@@ -8,15 +7,25 @@ and sync delays. Selecting a job shows detailed information in a panel below.
 """
 
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Any
 
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTableWidget, QTableWidgetItem, QHeaderView, QSplitter,
-    QTextEdit, QFrame, QWidget, QAbstractItemView
-)
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtGui import QColor, QFont
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QPushButton,
+    QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 from vsg_core.reporting import ReportWriter
 
@@ -41,8 +50,8 @@ class ReportViewer(QDialog):
         """
         super().__init__(parent)
         self.report_path = report_path
-        self.report_data: Dict[str, Any] = {}
-        self.current_job: Optional[Dict[str, Any]] = None
+        self.report_data: dict[str, Any] = {}
+        self.current_job: dict[str, Any] | None = None
 
         self._load_report()
         self._setup_ui()
@@ -268,7 +277,7 @@ class ReportViewer(QDialog):
             self.current_job = jobs[row]
             self._update_details(self.current_job)
 
-    def _update_details(self, job: Optional[Dict[str, Any]]):
+    def _update_details(self, job: dict[str, Any] | None):
         """Update the details panel with job info."""
         if not job:
             self.details_title.setText("Select a job to view details")

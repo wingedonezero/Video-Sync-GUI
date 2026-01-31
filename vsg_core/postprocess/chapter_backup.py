@@ -1,12 +1,12 @@
 # vsg_core/postprocess/chapter_backup.py
-# -*- coding: utf-8 -*-
 from pathlib import Path
-from typing import Optional
+
 from lxml import etree as ET
+
 from ..io.runner import CommandRunner
 
 
-def extract_chapters_xml(mkv_path: Path, runner: CommandRunner, tool_paths: dict) -> Optional[str]:
+def extract_chapters_xml(mkv_path: Path, runner: CommandRunner, tool_paths: dict) -> str | None:
     """Extract chapters XML from MKV file, return XML content or None if no chapters."""
     try:
         xml_content = runner.run(['mkvextract', str(mkv_path), 'chapters', '-'], tool_paths)

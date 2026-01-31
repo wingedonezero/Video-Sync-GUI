@@ -1,5 +1,4 @@
 # vsg_core/reporting/report_writer.py
-# -*- coding: utf-8 -*-
 """
 Persistent batch report writer.
 
@@ -9,11 +8,11 @@ for display in the ReportViewer.
 """
 
 import json
-import tempfile
 import shutil
+import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Any
 
 try:
     import numpy as np
@@ -57,8 +56,8 @@ class ReportWriter:
         """
         self.logs_folder = Path(logs_folder)
         self.logs_folder.mkdir(parents=True, exist_ok=True)
-        self.current_report_path: Optional[Path] = None
-        self.report_data: Dict[str, Any] = {}
+        self.current_report_path: Path | None = None
+        self.report_data: dict[str, Any] = {}
 
     def create_report(
         self,
@@ -111,7 +110,7 @@ class ReportWriter:
         self._write_report()
         return self.current_report_path
 
-    def add_job(self, job_result: Dict[str, Any], job_index: int) -> None:
+    def add_job(self, job_result: dict[str, Any], job_index: int) -> None:
         """
         Add a completed job's results to the report.
 
@@ -161,7 +160,7 @@ class ReportWriter:
         # Write immediately to prevent data loss
         self._write_report()
 
-    def finalize(self) -> Dict[str, Any]:
+    def finalize(self) -> dict[str, Any]:
         """
         Finalize the report after all jobs complete.
 
@@ -235,12 +234,12 @@ class ReportWriter:
 
         return self.report_data["summary"]
 
-    def get_report_path(self) -> Optional[Path]:
+    def get_report_path(self) -> Path | None:
         """Get the path to the current report file."""
         return self.current_report_path
 
     @staticmethod
-    def load(report_path: Path) -> Dict[str, Any]:
+    def load(report_path: Path) -> dict[str, Any]:
         """
         Load an existing report from disk.
 
@@ -254,7 +253,7 @@ class ReportWriter:
             FileNotFoundError: If report file doesn't exist
             json.JSONDecodeError: If report file is corrupted
         """
-        with open(report_path, 'r', encoding='utf-8') as f:
+        with open(report_path, encoding='utf-8') as f:
             return json.load(f)
 
     def _write_report(self) -> None:
@@ -314,7 +313,7 @@ class ReportWriter:
         return result or "unnamed"
 
     @staticmethod
-    def get_job_status_summary(job: Dict[str, Any]) -> str:
+    def get_job_status_summary(job: dict[str, Any]) -> str:
         """
         Get a human-readable status summary for a job.
 
@@ -336,7 +335,7 @@ class ReportWriter:
         return "Success"
 
     @staticmethod
-    def get_stepping_summary(job: Dict[str, Any]) -> str:
+    def get_stepping_summary(job: dict[str, Any]) -> str:
         """
         Get a human-readable stepping summary for a job.
 
@@ -365,7 +364,7 @@ class ReportWriter:
         return "; ".join(parts) if parts else "-"
 
     @staticmethod
-    def get_delays_summary(job: Dict[str, Any]) -> str:
+    def get_delays_summary(job: dict[str, Any]) -> str:
         """
         Get a human-readable delays summary for a job.
 
@@ -389,7 +388,7 @@ class ReportWriter:
         return ", ".join(parts)
 
     @staticmethod
-    def get_sync_stability_summary(job: Dict[str, Any]) -> str:
+    def get_sync_stability_summary(job: dict[str, Any]) -> str:
         """
         Get a human-readable sync stability summary for a job.
 

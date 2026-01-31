@@ -1,10 +1,11 @@
 # vsg_core/job_layouts/signature.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 import hashlib
 import json
 from collections import Counter
-from typing import Dict, List, Any
+from typing import Any
+
 
 class EnhancedSignatureGenerator:
     """
@@ -12,7 +13,7 @@ class EnhancedSignatureGenerator:
     Handles duplicate tracks (e.g., PGS) by including their position.
     """
 
-    def generate_track_signature(self, track_info: Dict[str, List[dict]], strict: bool = False) -> Dict[str, Any]:
+    def generate_track_signature(self, track_info: dict[str, list[dict]], strict: bool = False) -> dict[str, Any]:
         """
         Generates a basic signature for a set of tracks.
 
@@ -53,7 +54,7 @@ class EnhancedSignatureGenerator:
             'total_tracks': sum(signature.values())
         }
 
-    def generate_structure_signature(self, track_info: Dict[str, List[dict]]) -> Dict[str, Any]:
+    def generate_structure_signature(self, track_info: dict[str, list[dict]]) -> dict[str, Any]:
         """
         Generates a detailed, order-sensitive signature of the file structure.
         This is used for exact compatibility checking.
@@ -79,6 +80,6 @@ class EnhancedSignatureGenerator:
 
         return {'structure': structure, 'hash': structure_hash}
 
-    def structures_are_compatible(self, struct1: Dict[str, Any], struct2: Dict[str, Any]) -> bool:
+    def structures_are_compatible(self, struct1: dict[str, Any], struct2: dict[str, Any]) -> bool:
         """Compares two structure signatures for exact compatibility."""
         return struct1.get('hash') and struct1.get('hash') == struct2.get('hash')

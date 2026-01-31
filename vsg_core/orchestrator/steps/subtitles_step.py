@@ -1,5 +1,4 @@
 # vsg_core/orchestrator/steps/subtitles_step.py
-# -*- coding: utf-8 -*-
 """
 Unified subtitle processing step using SubtitleData.
 
@@ -19,22 +18,21 @@ import copy
 import json
 import math
 import re
-import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from vsg_core.subtitles.data import SubtitleData
 
 from vsg_core.io.runner import CommandRunner
-from vsg_core.orchestrator.steps.context import Context
 from vsg_core.models.enums import TrackType
 from vsg_core.models.media import StreamProps, Track
+from vsg_core.orchestrator.steps.context import Context
 
 
-def _read_raw_ass_timestamps(file_path: Path, max_events: int = 5) -> List[Tuple[str, str, str]]:
+def _read_raw_ass_timestamps(file_path: Path, max_events: int = 5) -> list[tuple[str, str, str]]:
     """
     Read raw timestamp strings from an ASS file without full parsing.
 
@@ -48,7 +46,7 @@ def _read_raw_ass_timestamps(file_path: Path, max_events: int = 5) -> List[Tuple
         content = None
         for enc in encodings:
             try:
-                with open(file_path, 'r', encoding=enc) as f:
+                with open(file_path, encoding=enc) as f:
                     content = f.read()
                 break
             except (UnicodeDecodeError, LookupError):
@@ -190,7 +188,7 @@ class SubtitlesStep:
                 # BYPASS: Time-based mode with no other processing needed
                 # Pass subtitle file through unchanged - mkvmerge --sync handles delay
                 runner._log_message(f"[Subtitles] Track {item.track.id}: BYPASS mode - passing through unchanged for mkvmerge --sync")
-                runner._log_message(f"[Subtitles]   (No OCR, style ops, stepping, or format conversion needed)")
+                runner._log_message("[Subtitles]   (No OCR, style ops, stepping, or format conversion needed)")
                 continue  # Skip to next track - file is already in item.extracted_path
 
             # ================================================================
@@ -220,15 +218,14 @@ class SubtitlesStep:
                     except Exception as e:
                         runner._log_message(f"[Subtitles] ERROR processing track {item.track.id}: {e}")
                         raise
+                # Bitmap subtitles (VobSub, PGS) - can't process with unified flow
+                # but CAN use video-verified mode for frame-corrected delays
+                elif subtitle_sync_mode == 'video-verified':
+                    self._apply_video_verified_for_bitmap(
+                        item, ctx, runner, source1_file
+                    )
                 else:
-                    # Bitmap subtitles (VobSub, PGS) - can't process with unified flow
-                    # but CAN use video-verified mode for frame-corrected delays
-                    if subtitle_sync_mode == 'video-verified':
-                        self._apply_video_verified_for_bitmap(
-                            item, ctx, runner, source1_file
-                        )
-                    else:
-                        runner._log_message(f"[Subtitles] Track {item.track.id}: Bitmap format {ext} - using mkvmerge --sync for delay")
+                    runner._log_message(f"[Subtitles] Track {item.track.id}: Bitmap format {ext} - using mkvmerge --sync for delay")
 
         # Set context flag if any track used raw delay fallback
         if _any_no_scene_fallback:
@@ -244,10 +241,10 @@ class SubtitlesStep:
         item,
         ctx: Context,
         runner: CommandRunner,
-        source1_file: Optional[Path],
-        scene_cache: Dict[str, Any],
+        source1_file: Path | None,
+        scene_cache: dict[str, Any],
         items_to_add: list,
-        subtitle_data: Optional['SubtitleData'] = None
+        subtitle_data: SubtitleData | None = None
     ) -> None:
         """
         Process a subtitle track using the unified SubtitleData flow.
@@ -283,7 +280,7 @@ class SubtitlesStep:
             if item.extracted_path.suffix.lower() in ('.ass', '.ssa'):
                 raw_timestamps_before = _read_raw_ass_timestamps(item.extracted_path, max_events=3)
                 if raw_timestamps_before:
-                    runner._log_message(f"[DIAG] Original file first 3 event timestamps:")
+                    runner._log_message("[DIAG] Original file first 3 event timestamps:")
                     for i, (start_str, end_str, style) in enumerate(raw_timestamps_before):
                         start_ms = _parse_ass_time_str(start_str)
                         end_ms = _parse_ass_time_str(end_str)
@@ -294,7 +291,7 @@ class SubtitlesStep:
                         if start_precision != 2:
                             runner._log_message(f"[DIAG] WARNING: Non-standard timestamp precision detected! "
                                               f"Found {start_precision} fractional digits (expected 2 for centiseconds)")
-                            runner._log_message(f"[DIAG] This could cause timing loss during load/save cycle!")
+                            runner._log_message("[DIAG] This could cause timing loss during load/save cycle!")
 
             try:
                 subtitle_data = SubtitleDataClass.from_file(item.extracted_path)
@@ -302,7 +299,7 @@ class SubtitlesStep:
 
                 # DIAGNOSTIC: Compare parsed timestamps with raw file timestamps
                 if raw_timestamps_before and subtitle_data.events:
-                    runner._log_message(f"[DIAG] Parsed SubtitleData first 3 event timestamps:")
+                    runner._log_message("[DIAG] Parsed SubtitleData first 3 event timestamps:")
                     for i, event in enumerate(subtitle_data.events[:3]):
                         runner._log_message(f"[DIAG]   Event {i}: start={event.start_ms}ms end={event.end_ms}ms style='{event.style}'")
 
@@ -369,7 +366,7 @@ class SubtitlesStep:
         if ctx.settings_dict.get('stepping_adjust_subtitles', True):
             source_key = item.track.source
             if source_key in ctx.stepping_edls:
-                runner._log_message(f"[SubtitleData] Applying stepping correction...")
+                runner._log_message("[SubtitleData] Applying stepping correction...")
 
                 result = subtitle_data.apply_stepping(
                     edl_segments=ctx.stepping_edls[source_key],
@@ -438,7 +435,7 @@ class SubtitlesStep:
         output_format = '.ass'
         if item.convert_to_ass and item.extracted_path.suffix.lower() == '.srt':
             # Conversion happens at save - SubtitleData can save to any format
-            runner._log_message(f"[SubtitleData] Will convert SRT to ASS at save")
+            runner._log_message("[SubtitleData] Will convert SRT to ASS at save")
             output_format = '.ass'
         else:
             output_format = item.extracted_path.suffix.lower()
@@ -449,21 +446,21 @@ class SubtitlesStep:
 
         # Font replacements
         if item.font_replacements:
-            runner._log_message(f"[SubtitleData] Applying font replacements...")
+            runner._log_message("[SubtitleData] Applying font replacements...")
             result = subtitle_data.apply_font_replacement(item.font_replacements, runner)
             if result.success:
                 runner._log_message(f"[SubtitleData] Font replacement: {result.summary}")
 
         # Style patches
         if item.style_patch:
-            runner._log_message(f"[SubtitleData] Applying style patch...")
+            runner._log_message("[SubtitleData] Applying style patch...")
             result = subtitle_data.apply_style_patch(item.style_patch, runner)
             if result.success:
                 runner._log_message(f"[SubtitleData] Style patch: {result.summary}")
 
         # Rescale
         if item.rescale and source1_file:
-            runner._log_message(f"[SubtitleData] Applying rescale...")
+            runner._log_message("[SubtitleData] Applying rescale...")
             target_res = self._get_video_resolution(source1_file, runner, ctx)
             if target_res:
                 result = subtitle_data.apply_rescale(target_res, runner)
@@ -527,7 +524,7 @@ class SubtitlesStep:
             if output_path.suffix.lower() in ('.ass', '.ssa'):
                 saved_timestamps = _read_raw_ass_timestamps(output_path, max_events=3)
                 if saved_timestamps:
-                    runner._log_message(f"[DIAG] Post-save file first 3 event timestamps:")
+                    runner._log_message("[DIAG] Post-save file first 3 event timestamps:")
                     for i, (start_str, end_str, style) in enumerate(saved_timestamps):
                         start_ms = _parse_ass_time_str(start_str)
                         end_ms = _parse_ass_time_str(end_str)
@@ -586,9 +583,9 @@ class SubtitlesStep:
         subtitle_data,
         ctx: Context,
         runner: CommandRunner,
-        source1_file: Optional[Path],
+        source1_file: Path | None,
         sync_mode: str,
-        scene_cache: Dict[str, Any]
+        scene_cache: dict[str, Any]
     ):
         """Apply sync mode using unified SubtitleData flow."""
         from vsg_core.subtitles.sync_modes import get_sync_plugin
@@ -658,7 +655,7 @@ class SubtitlesStep:
         # Just apply the delay directly (which is just global_shift for Source 1)
         if sync_mode == 'video-verified' and source_key == 'Source 1':
             from vsg_core.subtitles.data import OperationResult, SyncEventData
-            runner._log_message(f"[Sync] Source 1 is reference - applying delay directly without frame matching")
+            runner._log_message("[Sync] Source 1 is reference - applying delay directly without frame matching")
 
             events_synced = 0
             for event in subtitle_data.events:
@@ -780,7 +777,7 @@ class SubtitlesStep:
 
         if subtitle_data is None:
             runner._log_message(f"[OCR] ERROR: OCR failed for track {item.track.id}")
-            runner._log_message(f"[OCR] Keeping original image-based subtitle")
+            runner._log_message("[OCR] Keeping original image-based subtitle")
             item.perform_ocr = False
             return None
 
@@ -915,7 +912,7 @@ class SubtitlesStep:
             runner._log_message(f"[OCR] ERROR: Failed to load SubtitleData JSON: {e}")
             return None
 
-    def _get_video_resolution(self, video_path: Path, runner, ctx) -> Optional[tuple]:
+    def _get_video_resolution(self, video_path: Path, runner, ctx) -> tuple | None:
         """Get video resolution for rescaling."""
         try:
             from vsg_core.subtitles.frame_utils import get_video_properties
@@ -926,7 +923,7 @@ class SubtitlesStep:
             runner._log_message(f"[Rescale] WARNING: Could not get video resolution: {e}")
         return None
 
-    def _get_ocr_debug_dir(self, item, ctx) -> Optional[Path]:
+    def _get_ocr_debug_dir(self, item, ctx) -> Path | None:
         """
         Get OCR debug directory for a track if it exists.
 
@@ -961,8 +958,8 @@ class SubtitlesStep:
 
     def _run_video_verified_per_source(
         self,
-        ctx: 'Context',
-        runner: 'CommandRunner',
+        ctx: Context,
+        runner: CommandRunner,
         source1_file: Path
     ) -> None:
         """
@@ -974,8 +971,11 @@ class SubtitlesStep:
 
         Only runs in video-verified mode.
         """
-        from vsg_core.subtitles.sync_mode_plugins.video_verified import calculate_video_verified_offset
         from pathlib import Path
+
+        from vsg_core.subtitles.sync_mode_plugins.video_verified import (
+            calculate_video_verified_offset,
+        )
 
         runner._log_message("[VideoVerified] ═══════════════════════════════════════════════════════")
         runner._log_message("[VideoVerified] Video-to-Video Frame Alignment")
@@ -1062,9 +1062,9 @@ class SubtitlesStep:
     def _apply_video_verified_for_bitmap(
         self,
         item,
-        ctx: 'Context',
-        runner: 'CommandRunner',
-        source1_file: Optional[Path]
+        ctx: Context,
+        runner: CommandRunner,
+        source1_file: Path | None
     ) -> None:
         """
         Apply video-verified frame matching for bitmap subtitles (VobSub, PGS).
@@ -1094,7 +1094,9 @@ class SubtitlesStep:
 
         # Fallback: run frame matching for this track if not pre-processed
         # This shouldn't normally happen, but provides a safety net
-        from vsg_core.subtitles.sync_mode_plugins.video_verified import calculate_video_verified_offset
+        from vsg_core.subtitles.sync_mode_plugins.video_verified import (
+            calculate_video_verified_offset,
+        )
 
         runner._log_message(f"[VideoVerified] Processing bitmap subtitle track {item.track.id} ({ext}) (fallback mode)")
 
@@ -1147,7 +1149,7 @@ class SubtitlesStep:
                     if abs(corrected_delay_ms - total_delay_ms) > 1:
                         runner._log_message(f"[VideoVerified] ⚠ Frame correction changed delay by {corrected_delay_ms - total_delay_ms:+.1f}ms")
             else:
-                runner._log_message(f"[VideoVerified] Frame matching returned None, using correlation delay")
+                runner._log_message("[VideoVerified] Frame matching returned None, using correlation delay")
                 runner._log_message(f"[VideoVerified] Reason: {details.get('reason', 'unknown')}")
 
         except Exception as e:

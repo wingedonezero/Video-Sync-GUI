@@ -1,35 +1,36 @@
 # vsg_qt/job_queue_dialog/logic.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
-import shutil
+
 import re
+import shutil
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QTableWidgetItem, QMessageBox, QHeaderView
+from PySide6.QtWidgets import QHeaderView, QMessageBox, QTableWidgetItem
 
-from vsg_core.io.runner import CommandRunner
 from vsg_core.extraction.tracks import get_track_info_for_dialog
+from vsg_core.io.runner import CommandRunner
 from vsg_core.job_layouts import JobLayoutManager
-from vsg_qt.manual_selection_dialog import ManualSelectionDialog
 from vsg_qt.add_job_dialog import AddJobDialog
+from vsg_qt.manual_selection_dialog import ManualSelectionDialog
 
-def natural_sort_key(s: str) -> List[Any]:
+
+def natural_sort_key(s: str) -> list[Any]:
     return [int(text) if text.isdigit() else text.lower() for text in re.split(r'(\d+)', s)]
 
 class JobQueueLogic:
-    def __init__(self, view: "JobQueueDialog", layout_manager: JobLayoutManager):
+    def __init__(self, view: JobQueueDialog, layout_manager: JobLayoutManager):
         self.v = view
-        self.jobs: List[Dict[str, Any]] = []
+        self.jobs: list[dict[str, Any]] = []
         self.layout_manager = layout_manager
 
-        self._layout_clipboard: Dict | None = None
+        self._layout_clipboard: dict | None = None
 
         self.runner = CommandRunner(self.v.config.settings, self.v.log_callback)
         self.tool_paths = {t: shutil.which(t) for t in ['mkvmerge', 'mkvextract', 'ffmpeg', 'ffprobe']}
 
-    def add_jobs(self, new_jobs: List[Dict]):
+    def add_jobs(self, new_jobs: list[dict]):
         """Initializes and adds new jobs to the queue."""
         for job in new_jobs:
             job['status'] = "Needs Configuration" # Set initial in-memory status
@@ -57,7 +58,7 @@ class JobQueueLogic:
         for row, job in enumerate(self.jobs):
             self._update_row(row, job)
 
-    def _update_row(self, row: int, job: Dict):
+    def _update_row(self, row: int, job: dict):
         """Updates a single row based on its on-disk and in-memory state."""
         job_id = self.layout_manager.generate_job_id(job['sources'])
         status_text = "Configured" if self.layout_manager.layout_exists(job_id) else "Needs Configuration"
@@ -103,7 +104,7 @@ class JobQueueLogic:
         item.setToolTip("\n".join(job['sources'].values()))
         self.v.table.setItem(row, 2, item)
 
-    def _validate_generated_tracks(self, layout_data: Dict, job: Dict) -> List[str]:
+    def _validate_generated_tracks(self, layout_data: dict, job: dict) -> list[str]:
         """
         Validates that generated tracks in the layout have valid style filters.
         This is an ADDITIONAL check that doesn't affect existing layout matching.
@@ -147,6 +148,7 @@ class JobQueueLogic:
                 import tempfile
                 import time
                 from pathlib import Path
+
                 from vsg_core.extraction.tracks import extract_tracks
 
                 # CRITICAL FIX: Include job_id to make temp path unique per episode
@@ -211,7 +213,7 @@ class JobQueueLogic:
 
             except Exception as e:
                 # If validation fails, warn but don't block
-                issues.append(f"'{track_name}': Could not validate styles ({str(e)})")
+                issues.append(f"'{track_name}': Could not validate styles ({e!s})")
 
         # If we auto-fixed any tracks, save the updated layout
         if layout_modified:
@@ -220,7 +222,7 @@ class JobQueueLogic:
 
         return issues
 
-    def _validate_style_edits(self, layout_data: Dict, job: Dict) -> List[str]:
+    def _validate_style_edits(self, layout_data: dict, job: dict) -> list[str]:
         """
         Validates that style_patch and font_replacements reference styles that exist in the target file.
         This is an ADDITIONAL check that doesn't affect existing layout matching.
@@ -291,6 +293,7 @@ class JobQueueLogic:
                 import tempfile
                 import time
                 from pathlib import Path
+
                 from vsg_core.extraction.tracks import extract_tracks
 
                 job_id = self.layout_manager.generate_job_id(job['sources'])
@@ -335,11 +338,11 @@ class JobQueueLogic:
 
             except Exception as e:
                 # If validation fails, warn but don't block
-                issues.append(f"'{track_name}': Could not validate style edits ({str(e)})")
+                issues.append(f"'{track_name}': Could not validate style edits ({e!s})")
 
         return issues
 
-    def _validate_sync_exclusions(self, layout_data: Dict, job: Dict) -> List[str]:
+    def _validate_sync_exclusions(self, layout_data: dict, job: dict) -> list[str]:
         """
         Validates that sync exclusion styles in the layout match the current file.
         This is an ADDITIONAL check that doesn't affect existing layout matching.
@@ -390,6 +393,7 @@ class JobQueueLogic:
                     import tempfile
                     import time
                     from pathlib import Path
+
                     from vsg_core.extraction.tracks import extract_tracks
 
                     source_id = track.get('id')  # Use the generated track's own ID
@@ -416,6 +420,7 @@ class JobQueueLogic:
                     import tempfile
                     import time
                     from pathlib import Path
+
                     from vsg_core.extraction.tracks import extract_tracks
 
                     track_id = track.get('id')
@@ -479,7 +484,7 @@ class JobQueueLogic:
 
             except Exception as e:
                 # If validation fails, warn but don't block
-                issues.append(f"'{track_name}': Could not validate sync exclusion styles ({str(e)})")
+                issues.append(f"'{track_name}': Could not validate sync exclusion styles ({e!s})")
 
         # If we auto-fixed any tracks, save the updated layout
         if layout_modified:
@@ -488,7 +493,7 @@ class JobQueueLogic:
 
         return issues
 
-    def _get_track_info_for_job(self, job: Dict) -> Dict | None:
+    def _get_track_info_for_job(self, job: dict) -> dict | None:
         """Retrieves and caches track info for a job."""
         if 'track_info' not in job or job['track_info'] is None:
             try:
@@ -527,7 +532,7 @@ class JobQueueLogic:
                 else:
                     QMessageBox.critical(self.v, "Save Failed", "Could not save the job layout. Check log for details.")
 
-    def _convert_enhanced_to_dialog_format(self, enhanced_layout: List[Dict]) -> List[Dict]:
+    def _convert_enhanced_to_dialog_format(self, enhanced_layout: list[dict]) -> list[dict]:
         if not enhanced_layout: return []
         return sorted(enhanced_layout, key=lambda x: x.get('user_order_index', 0))
 
@@ -585,7 +590,7 @@ class JobQueueLogic:
         else:
             QMessageBox.warning(self.v, "Paste Failed", "Could not paste layout to any selected jobs due to incompatible track structures.")
 
-    def _replace_paths_in_layout(self, layout_template: List[Dict], target_sources: Dict[str, str]) -> List[Dict]:
+    def _replace_paths_in_layout(self, layout_template: list[dict], target_sources: dict[str, str]) -> list[dict]:
         """Creates a new layout with file paths updated for the target job."""
         import copy
         new_layout = []
@@ -620,7 +625,7 @@ class JobQueueLogic:
             del self.jobs[row]
         self.populate_table()
 
-    def get_final_jobs(self) -> List[Dict]:
+    def get_final_jobs(self) -> list[dict]:
         """Returns all jobs that have a configured layout saved to disk."""
         final_jobs = []
         unconfigured_names = []

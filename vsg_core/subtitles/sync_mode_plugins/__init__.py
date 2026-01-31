@@ -1,5 +1,4 @@
 # vsg_core/subtitles/sync_mode_plugins/__init__.py
-# -*- coding: utf-8 -*-
 """
 Sync mode plugin implementations.
 
@@ -58,11 +57,11 @@ def __getattr__(name):
 
 
 __all__ = [
+    'CorrelationFrameSnapSync',
+    'CorrelationGuidedFrameAnchorSync',
+    'DurationAlignSync',
+    'SubtitleAnchoredFrameSnapSync',
     'TimeBasedSync',
     'TimebaseFrameLockedSync',
-    'DurationAlignSync',
-    'CorrelationFrameSnapSync',
-    'SubtitleAnchoredFrameSnapSync',
-    'CorrelationGuidedFrameAnchorSync',
     'VideoVerifiedSync',
 ]

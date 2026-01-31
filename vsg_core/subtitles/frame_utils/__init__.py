@@ -1,5 +1,4 @@
 # vsg_core/subtitles/frame_utils/__init__.py
-# -*- coding: utf-8 -*-
 """
 Shared frame timing and video utility functions for subtitle synchronization.
 
@@ -18,34 +17,15 @@ Existing imports will continue to work:
 from __future__ import annotations
 
 # ============================================================================
-# Timing functions (CFR and VFR)
+# Frame hashing and comparison
 # ============================================================================
-from .timing import (
-    # MODE 0: Frame START (floor-based, deterministic)
-    time_to_frame_floor,
-    frame_to_time_floor,
-    # MODE 1: Middle of frame
-    time_to_frame_middle,
-    frame_to_time_middle,
-    # MODE 2: Aegisub-style
-    time_to_frame_aegisub,
-    frame_to_time_aegisub,
-    # MODE 3: VFR (VideoTimestamps-based)
-    clear_vfr_cache,
-    get_vfr_timestamps,
-    frame_to_time_vfr,
-    time_to_frame_vfr,
-)
-
-# ============================================================================
-# Video property detection
-# ============================================================================
-from .video_properties import (
-    detect_video_fps,
-    detect_video_properties,
-    get_video_properties,      # Convenience wrapper for detect_video_properties
-    get_video_duration_ms,     # Convenience function for duration
-    compare_video_properties,
+from .frame_hashing import (
+    compare_frames,
+    compute_frame_hash,
+    compute_hamming_distance,
+    compute_mse,
+    compute_perceptual_hash,
+    compute_ssim,
 )
 
 # ============================================================================
@@ -56,24 +36,23 @@ from .scene_detection import (
 )
 
 # ============================================================================
-# Video reader
+# Timing functions (CFR and VFR)
 # ============================================================================
-from .video_reader import (
-    VideoReader,
-    get_vapoursynth_frame_info,
-    _get_ffms2_cache_path,     # Internal but used by validation.py
-)
-
-# ============================================================================
-# Frame hashing and comparison
-# ============================================================================
-from .frame_hashing import (
-    compute_perceptual_hash,
-    compute_frame_hash,
-    compute_hamming_distance,
-    compute_ssim,
-    compute_mse,
-    compare_frames,
+from .timing import (
+    # MODE 3: VFR (VideoTimestamps-based)
+    clear_vfr_cache,
+    frame_to_time_aegisub,
+    frame_to_time_floor,
+    frame_to_time_middle,
+    frame_to_time_vfr,
+    get_vfr_timestamps,
+    # MODE 2: Aegisub-style
+    time_to_frame_aegisub,
+    # MODE 0: Frame START (floor-based, deterministic)
+    time_to_frame_floor,
+    # MODE 1: Middle of frame
+    time_to_frame_middle,
+    time_to_frame_vfr,
 )
 
 # ============================================================================
@@ -82,6 +61,26 @@ from .frame_hashing import (
 from .validation import (
     extract_frame_as_image,
     validate_frame_alignment,
+)
+
+# ============================================================================
+# Video property detection
+# ============================================================================
+from .video_properties import (
+    compare_video_properties,
+    detect_video_fps,
+    detect_video_properties,
+    get_video_duration_ms,  # Convenience function for duration
+    get_video_properties,  # Convenience wrapper for detect_video_properties
+)
+
+# ============================================================================
+# Video reader
+# ============================================================================
+from .video_reader import (
+    VideoReader,
+    _get_ffms2_cache_path,  # Internal but used by validation.py
+    get_vapoursynth_frame_info,
 )
 
 # ============================================================================

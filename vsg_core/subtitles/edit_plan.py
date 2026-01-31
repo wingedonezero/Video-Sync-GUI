@@ -1,5 +1,4 @@
 # vsg_core/subtitles/edit_plan.py
-# -*- coding: utf-8 -*-
 """
 Non-destructive subtitle edit plan system.
 
@@ -19,10 +18,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from .data import SubtitleData, SubtitleEvent
+    from .data import SubtitleData
 
 
 class EventGroup(str, Enum):
@@ -49,33 +48,33 @@ class EventEdit:
     event_index: int
 
     # Text changes
-    new_text: Optional[str] = None
+    new_text: str | None = None
 
     # Style assignment
-    new_style: Optional[str] = None
+    new_style: str | None = None
 
     # Group assignment (for sync behavior, visual grouping)
-    group: Optional[str] = None
+    group: str | None = None
 
     # Manual timing adjustments (added to existing timing)
-    start_offset_ms: Optional[float] = None
-    end_offset_ms: Optional[float] = None
+    start_offset_ms: float | None = None
+    end_offset_ms: float | None = None
 
     # Absolute timing override (replaces existing timing)
-    new_start_ms: Optional[float] = None
-    new_end_ms: Optional[float] = None
+    new_start_ms: float | None = None
+    new_end_ms: float | None = None
 
     # Layer change
-    new_layer: Optional[int] = None
+    new_layer: int | None = None
 
     # Actor/name field
-    new_name: Optional[str] = None
+    new_name: str | None = None
 
     # Effect field
-    new_effect: Optional[str] = None
+    new_effect: str | None = None
 
     # Comment toggle
-    set_comment: Optional[bool] = None
+    set_comment: bool | None = None
 
     def has_changes(self) -> bool:
         """Check if this edit has any actual changes."""
@@ -93,7 +92,7 @@ class EventEdit:
             self.set_comment is not None,
         ])
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         result = {'event_index': self.event_index}
         if self.new_text is not None:
@@ -121,7 +120,7 @@ class EventEdit:
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'EventEdit':
+    def from_dict(cls, data: dict[str, Any]) -> EventEdit:
         """Create from dictionary."""
         return cls(
             event_index=data['event_index'],
@@ -149,38 +148,38 @@ class StyleEdit:
     style_name: str
 
     # Font changes
-    new_fontname: Optional[str] = None
-    new_fontsize: Optional[float] = None
+    new_fontname: str | None = None
+    new_fontsize: float | None = None
 
     # Color changes (ASS format: &HAABBGGRR)
-    new_primary_color: Optional[str] = None
-    new_secondary_color: Optional[str] = None
-    new_outline_color: Optional[str] = None
-    new_back_color: Optional[str] = None
+    new_primary_color: str | None = None
+    new_secondary_color: str | None = None
+    new_outline_color: str | None = None
+    new_back_color: str | None = None
 
     # Text decoration
-    new_bold: Optional[int] = None
-    new_italic: Optional[int] = None
-    new_underline: Optional[int] = None
+    new_bold: int | None = None
+    new_italic: int | None = None
+    new_underline: int | None = None
 
     # Scaling
-    new_scale_x: Optional[float] = None
-    new_scale_y: Optional[float] = None
+    new_scale_x: float | None = None
+    new_scale_y: float | None = None
 
     # Spacing and angle
-    new_spacing: Optional[float] = None
-    new_angle: Optional[float] = None
+    new_spacing: float | None = None
+    new_angle: float | None = None
 
     # Border
-    new_border_style: Optional[int] = None
-    new_outline: Optional[float] = None
-    new_shadow: Optional[float] = None
+    new_border_style: int | None = None
+    new_outline: float | None = None
+    new_shadow: float | None = None
 
     # Alignment and margins
-    new_alignment: Optional[int] = None
-    new_margin_l: Optional[int] = None
-    new_margin_r: Optional[int] = None
-    new_margin_v: Optional[int] = None
+    new_alignment: int | None = None
+    new_margin_l: int | None = None
+    new_margin_r: int | None = None
+    new_margin_v: int | None = None
 
     def has_changes(self) -> bool:
         """Check if this edit has any actual changes."""
@@ -207,7 +206,7 @@ class StyleEdit:
             self.new_margin_v is not None,
         ])
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         result = {'style_name': self.style_name}
         for attr in [
@@ -224,7 +223,7 @@ class StyleEdit:
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'StyleEdit':
+    def from_dict(cls, data: dict[str, Any]) -> StyleEdit:
         """Create from dictionary."""
         return cls(
             style_name=data['style_name'],
@@ -262,12 +261,12 @@ class NewEventSpec:
     name: str = ''
     effect: str = ''
     is_comment: bool = False
-    group: Optional[str] = None
+    group: str | None = None
 
     # Insert position (index in final event list, or None for append)
-    insert_at: Optional[int] = None
+    insert_at: int | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             'start_ms': self.start_ms,
@@ -283,7 +282,7 @@ class NewEventSpec:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'NewEventSpec':
+    def from_dict(cls, data: dict[str, Any]) -> NewEventSpec:
         """Create from dictionary."""
         return cls(
             start_ms=data['start_ms'],
@@ -325,7 +324,7 @@ class NewStyleSpec:
     margin_v: int = 10
     encoding: int = 1
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             'name': self.name,
@@ -353,7 +352,7 @@ class NewStyleSpec:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'NewStyleSpec':
+    def from_dict(cls, data: dict[str, Any]) -> NewStyleSpec:
         """Create from dictionary."""
         return cls(**data)
 
@@ -368,11 +367,11 @@ class GroupDefinition:
     name: str
     display_name: str = ''
     color: str = '#808080'        # UI display color
-    style: Optional[str] = None   # Default style for this group
+    style: str | None = None   # Default style for this group
     skip_sync: bool = False       # Whether to skip sync for this group
     description: str = ''
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             'name': self.name,
@@ -384,7 +383,7 @@ class GroupDefinition:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'GroupDefinition':
+    def from_dict(cls, data: dict[str, Any]) -> GroupDefinition:
         """Create from dictionary."""
         return cls(
             name=data['name'],
@@ -417,25 +416,25 @@ class SubtitleEditPlan:
     source_format: str = ''  # 'ass', 'srt', 'ocr'
 
     # Event modifications (by original_index)
-    event_edits: List[EventEdit] = field(default_factory=list)
+    event_edits: list[EventEdit] = field(default_factory=list)
 
     # Events to delete (by original_index)
-    deleted_events: Set[int] = field(default_factory=set)
+    deleted_events: set[int] = field(default_factory=set)
 
     # New events to add
-    new_events: List[NewEventSpec] = field(default_factory=list)
+    new_events: list[NewEventSpec] = field(default_factory=list)
 
     # Style modifications
-    style_edits: List[StyleEdit] = field(default_factory=list)
+    style_edits: list[StyleEdit] = field(default_factory=list)
 
     # Styles to delete
-    deleted_styles: Set[str] = field(default_factory=set)
+    deleted_styles: set[str] = field(default_factory=set)
 
     # New styles to add
-    new_styles: List[NewStyleSpec] = field(default_factory=list)
+    new_styles: list[NewStyleSpec] = field(default_factory=list)
 
     # Group definitions (custom groups)
-    group_definitions: List[GroupDefinition] = field(default_factory=list)
+    group_definitions: list[GroupDefinition] = field(default_factory=list)
 
     # Global timing offset (applied to all events)
     global_timing_offset_ms: float = 0.0
@@ -461,7 +460,7 @@ class SubtitleEditPlan:
             self.global_timing_offset_ms != 0.0,
         ])
 
-    def get_event_edit(self, event_index: int) -> Optional[EventEdit]:
+    def get_event_edit(self, event_index: int) -> EventEdit | None:
         """Get the edit for a specific event, or None if no edit exists."""
         for edit in self.event_edits:
             if edit.event_index == event_index:
@@ -488,7 +487,7 @@ class SubtitleEditPlan:
         self.deleted_events.discard(event_index)
         self.modified_at = datetime.now().isoformat()
 
-    def get_style_edit(self, style_name: str) -> Optional[StyleEdit]:
+    def get_style_edit(self, style_name: str) -> StyleEdit | None:
         """Get the edit for a specific style, or None if no edit exists."""
         for edit in self.style_edits:
             if edit.style_name == style_name:
@@ -514,7 +513,7 @@ class SubtitleEditPlan:
         self.new_styles.append(spec)
         self.modified_at = datetime.now().isoformat()
 
-    def get_group(self, group_name: str) -> Optional[GroupDefinition]:
+    def get_group(self, group_name: str) -> GroupDefinition | None:
         """Get a group definition by name."""
         for group in self.group_definitions:
             if group.name == group_name:
@@ -527,7 +526,7 @@ class SubtitleEditPlan:
         self.group_definitions.append(group)
         self.modified_at = datetime.now().isoformat()
 
-    def get_events_in_group(self, group_name: str) -> List[int]:
+    def get_events_in_group(self, group_name: str) -> list[int]:
         """Get indices of events assigned to a group."""
         return [
             edit.event_index
@@ -535,7 +534,7 @@ class SubtitleEditPlan:
             if edit.group == group_name
         ]
 
-    def assign_events_to_group(self, event_indices: List[int], group_name: str) -> None:
+    def assign_events_to_group(self, event_indices: list[int], group_name: str) -> None:
         """Assign multiple events to a group."""
         for idx in event_indices:
             edit = self.get_event_edit(idx)
@@ -544,7 +543,7 @@ class SubtitleEditPlan:
             edit.group = group_name
             self.set_event_edit(edit)
 
-    def apply(self, data: 'SubtitleData', runner=None) -> 'ApplyResult':
+    def apply(self, data: SubtitleData, runner=None) -> ApplyResult:
         """
         Apply this edit plan to SubtitleData.
 
@@ -743,7 +742,7 @@ class SubtitleEditPlan:
         result.success = True
         return result
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             'version': self.version,
@@ -763,7 +762,7 @@ class SubtitleEditPlan:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'SubtitleEditPlan':
+    def from_dict(cls, data: dict[str, Any]) -> SubtitleEditPlan:
         """Create from dictionary."""
         return cls(
             version=data.get('version', 1),
@@ -790,10 +789,10 @@ class SubtitleEditPlan:
             json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
 
     @classmethod
-    def load(cls, path: Path | str) -> 'SubtitleEditPlan':
+    def load(cls, path: Path | str) -> SubtitleEditPlan:
         """Load edit plan from JSON file."""
         path = Path(path)
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, encoding='utf-8') as f:
             data = json.load(f)
         return cls.from_dict(data)
 
@@ -809,7 +808,7 @@ class ApplyResult:
     styles_modified: int = 0
     styles_added: int = 0
     global_offset_applied: bool = False
-    error: Optional[str] = None
+    error: str | None = None
 
     @property
     def total_changes(self) -> int:
@@ -824,7 +823,7 @@ class ApplyResult:
             (1 if self.global_offset_applied else 0)
         )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
         return {
             'success': self.success,

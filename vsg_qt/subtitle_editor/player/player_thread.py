@@ -1,5 +1,4 @@
 # vsg_qt/subtitle_editor/player/player_thread.py
-# -*- coding: utf-8 -*-
 """
 Video player thread for subtitle editor.
 
@@ -10,10 +9,10 @@ import gc
 import time
 from pathlib import Path
 from threading import Lock
-from PySide6.QtCore import QThread, Signal, Slot
-from PySide6.QtGui import QImage
 
 import av
+from PySide6.QtCore import QThread, Signal, Slot
+from PySide6.QtGui import QImage
 
 
 class PlayerThread(QThread):

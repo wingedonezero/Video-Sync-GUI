@@ -1,13 +1,20 @@
 # vsg_qt/sync_exclusion_dialog/ui.py
-# -*- coding: utf-8 -*-
 """
 Dialog for configuring frame sync style exclusions.
 """
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QDialogButtonBox, QListWidget, QListWidgetItem,
-    QCheckBox, QGroupBox, QRadioButton, QButtonGroup
+    QButtonGroup,
+    QCheckBox,
+    QDialog,
+    QDialogButtonBox,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
+    QRadioButton,
+    QVBoxLayout,
 )
 
 from vsg_core.subtitles.data import SubtitleData
@@ -146,7 +153,7 @@ class SyncExclusionDialog(QDialog):
                 self.style_checkboxes[style_name] = checkbox
 
         except Exception as e:
-            self.preview_label.setText(f"❌ Error loading styles:\n{str(e)}")
+            self.preview_label.setText(f"❌ Error loading styles:\n{e!s}")
             self.preview_label.setStyleSheet("font-weight: bold; padding: 10px; color: #FF0000;")
 
     def _apply_existing_config(self):

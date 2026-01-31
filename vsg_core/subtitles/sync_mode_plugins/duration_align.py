@@ -1,5 +1,4 @@
 # vsg_core/subtitles/sync_mode_plugins/duration_align.py
-# -*- coding: utf-8 -*-
 """
 Duration-align sync plugin for SubtitleData.
 
@@ -12,12 +11,12 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from ..sync_modes import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
-    from ..data import SubtitleData, OperationResult, OperationRecord, SyncEventData
+    from ..data import OperationResult, SubtitleData
 
 
 @register_sync_plugin
@@ -33,17 +32,17 @@ class DurationAlignSync(SyncPlugin):
 
     def apply(
         self,
-        subtitle_data: 'SubtitleData',
+        subtitle_data: SubtitleData,
         total_delay_ms: float,
         global_shift_ms: float,
-        target_fps: Optional[float] = None,
-        source_video: Optional[str] = None,
-        target_video: Optional[str] = None,
+        target_fps: float | None = None,
+        source_video: str | None = None,
+        target_video: str | None = None,
         runner=None,
-        config: Optional[dict] = None,
-        temp_dir: Optional[Path] = None,
+        config: dict | None = None,
+        temp_dir: Path | None = None,
         **kwargs
-    ) -> 'OperationResult':
+    ) -> OperationResult:
         """
         Apply duration-align sync to subtitle data.
 
@@ -68,12 +67,12 @@ class DurationAlignSync(SyncPlugin):
         Returns:
             OperationResult with statistics
         """
-        from ..data import OperationResult, OperationRecord, SyncEventData
+        from ..data import OperationRecord, OperationResult, SyncEventData
         from ..frame_utils import (
-            get_vapoursynth_frame_info,
             detect_video_fps,
             frame_to_time_vfr,
-            validate_frame_alignment
+            get_vapoursynth_frame_info,
+            validate_frame_alignment,
         )
         from ..frame_verification import verify_alignment_with_sliding_window
 
@@ -83,7 +82,7 @@ class DurationAlignSync(SyncPlugin):
             if runner:
                 runner._log_message(msg)
 
-        log(f"[DurationAlign] === Duration-Align Sync ===")
+        log("[DurationAlign] === Duration-Align Sync ===")
         log(f"[DurationAlign] Events: {len(subtitle_data.events)}")
 
         if not source_video or not target_video:
@@ -115,7 +114,7 @@ class DurationAlignSync(SyncPlugin):
         target_duration_ms = None
 
         if use_vapoursynth:
-            log(f"[DurationAlign] Using VapourSynth for frame indexing")
+            log("[DurationAlign] Using VapourSynth for frame indexing")
 
             source_info = get_vapoursynth_frame_info(source_video, runner, temp_dir)
             if source_info:
@@ -127,15 +126,15 @@ class DurationAlignSync(SyncPlugin):
 
         # Fallback to ffprobe if needed
         if source_duration_ms is None or target_duration_ms is None:
-            log(f"[DurationAlign] Using ffprobe for duration detection")
+            log("[DurationAlign] Using ffprobe for duration detection")
 
             source_fps = detect_video_fps(source_video, runner) if not source_duration_ms else None
             target_fps_detected = detect_video_fps(target_video, runner) if not target_duration_ms else None
 
             try:
-                import subprocess
                 import json
                 import os
+                import subprocess
 
                 env = os.environ.copy()
                 env['AV_LOG_FORCE_NOCOLOR'] = '1'
@@ -298,7 +297,7 @@ class DurationAlignSync(SyncPlugin):
         subtitle_data.operations.append(record)
 
         log(f"[DurationAlign] Sync complete: {events_synced} events")
-        log(f"[DurationAlign] ===================================")
+        log("[DurationAlign] ===================================")
 
         return OperationResult(
             success=True,

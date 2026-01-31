@@ -1,13 +1,11 @@
 # vsg_core/postprocess/auditors/base.py
-# -*- coding: utf-8 -*-
 import json
-from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 
-from vsg_core.orchestrator.steps.context import Context
 from vsg_core.io.runner import CommandRunner
 from vsg_core.models.enums import TrackType
 from vsg_core.models.jobs import PlanItem
+from vsg_core.orchestrator.steps.context import Context
 
 
 class BaseAuditor:
@@ -19,10 +17,10 @@ class BaseAuditor:
         self.runner = runner
         self.tool_paths = ctx.tool_paths
         self.log = runner._log_message
-        self._source_ffprobe_cache: Dict[str, Optional[Dict]] = {}
-        self._source_mkvmerge_cache: Dict[str, Optional[Dict]] = {}
+        self._source_ffprobe_cache: dict[str, dict | None] = {}
+        self._source_mkvmerge_cache: dict[str, dict | None] = {}
 
-    def run(self, final_mkv_path: Path, final_mkvmerge_data: Dict, final_ffprobe_data: Optional[Dict] = None) -> int:
+    def run(self, final_mkv_path: Path, final_mkvmerge_data: dict, final_ffprobe_data: dict | None = None) -> int:
         """
         Main entry point for the auditor. Must be implemented by subclasses.
 
@@ -35,7 +33,7 @@ class BaseAuditor:
     # SHARED UTILITY METHODS
     # ========================================================================
 
-    def _get_metadata(self, file_path: str, tool: str) -> Optional[Dict]:
+    def _get_metadata(self, file_path: str, tool: str) -> dict | None:
         """Gets metadata using either mkvmerge or ffprobe with caching and enhanced probing for large delays."""
         cache = self._source_mkvmerge_cache if tool == 'mkvmerge' else self._source_ffprobe_cache
 
@@ -191,21 +189,21 @@ class BaseAuditor:
 
         return float(delay)
 
-    def _get_mastering_display(self, stream: Dict) -> Optional[Dict]:
+    def _get_mastering_display(self, stream: dict) -> dict | None:
         """Extracts mastering display metadata from a stream."""
         for side_data in stream.get('side_data_list', []):
             if side_data.get('side_data_type') == 'Mastering display metadata':
                 return side_data
         return None
 
-    def _get_content_light_level(self, stream: Dict) -> Optional[Dict]:
+    def _get_content_light_level(self, stream: dict) -> dict | None:
         """Extracts content light level metadata from a stream."""
         for side_data in stream.get('side_data_list', []):
             if side_data.get('side_data_type') == 'Content light level metadata':
                 return side_data
         return None
 
-    def _has_hdr_metadata(self, stream: Dict) -> bool:
+    def _has_hdr_metadata(self, stream: dict) -> bool:
         """Checks if a video stream has HDR metadata."""
         # Check for HDR transfer characteristics
         color_transfer = stream.get('color_transfer', '')
@@ -219,7 +217,7 @@ class BaseAuditor:
 
         return False
 
-    def _has_dolby_vision(self, stream: Dict) -> bool:
+    def _has_dolby_vision(self, stream: dict) -> bool:
         """Checks if a video stream has Dolby Vision metadata."""
         for side_data in stream.get('side_data_list', []):
             if 'DOVI configuration' in side_data.get('side_data_type', ''):

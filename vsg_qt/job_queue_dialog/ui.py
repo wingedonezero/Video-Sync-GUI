@@ -1,21 +1,29 @@
 # vsg_qt/job_queue_dialog/ui.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import List, Dict, Callable
 
-from PySide6.QtCore import Qt, QItemSelectionModel
-from PySide6.QtGui import QShortcut, QKeySequence
+from collections.abc import Callable
+
+from PySide6.QtCore import QItemSelectionModel, Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QDialogButtonBox,
-    QTableWidget, QAbstractItemView, QHeaderView, QMenu
+    QAbstractItemView,
+    QDialog,
+    QDialogButtonBox,
+    QHBoxLayout,
+    QMenu,
+    QPushButton,
+    QTableWidget,
+    QVBoxLayout,
 )
 
-from .logic import JobQueueLogic
 from vsg_qt.add_job_dialog import AddJobDialog
 
+from .logic import JobQueueLogic
+
+
 class JobQueueDialog(QDialog):
-    def __init__(self, config: "AppConfig", log_callback: Callable[[str], None],
-                 layout_manager: "JobLayoutManager", parent=None):
+    def __init__(self, config: AppConfig, log_callback: Callable[[str], None],
+                 layout_manager: JobLayoutManager, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Job Queue")
         self.setMinimumSize(1200, 600)
@@ -147,5 +155,5 @@ class JobQueueDialog(QDialog):
         elif action == paste_action:
             self._logic.paste_layout()
 
-    def get_final_jobs(self) -> List[Dict]:
+    def get_final_jobs(self) -> list[dict]:
         return self._logic.get_final_jobs()

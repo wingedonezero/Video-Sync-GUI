@@ -1,9 +1,10 @@
 # vsg_core/postprocess/finalizer.py
-# -*- coding: utf-8 -*-
 import shutil
 from pathlib import Path
+
 from ..io.runner import CommandRunner
 from .chapter_backup import extract_chapters_xml, inject_chapters
+
 
 def check_if_rebasing_is_needed(mkv_path: Path, runner: CommandRunner, tool_paths: dict) -> bool:
     """

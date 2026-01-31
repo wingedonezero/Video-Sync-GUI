@@ -1,5 +1,4 @@
 # vsg_qt/subtitle_editor/utils/cps.py
-# -*- coding: utf-8 -*-
 """
 Characters Per Second (CPS) calculation for subtitle editor.
 
@@ -10,7 +9,6 @@ CPS indicates reading speed:
 - > 25 CPS: Too fast (red)
 """
 import re
-from typing import Tuple
 
 
 def calculate_cps(text: str, duration_ms: float) -> float:
@@ -55,7 +53,7 @@ def strip_ass_tags(text: str) -> str:
     return re.sub(r'\{[^}]*\}', '', text)
 
 
-def cps_color(cps: float) -> Tuple[int, int, int]:
+def cps_color(cps: float) -> tuple[int, int, int]:
     """
     Get color for CPS value (RGB tuple).
 

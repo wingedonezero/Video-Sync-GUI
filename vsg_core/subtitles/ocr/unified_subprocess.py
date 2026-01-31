@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/unified_subprocess.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
 
 import argparse
@@ -8,7 +7,6 @@ import sys
 from pathlib import Path
 
 from . import run_ocr_unified
-
 
 JSON_PREFIX = "__VSG_UNIFIED_OCR_JSON__ "
 
@@ -35,7 +33,7 @@ def main() -> int:
     logs_dir = Path(args.logs_dir)
 
     try:
-        with open(config_path, 'r', encoding='utf-8') as f:
+        with open(config_path, encoding='utf-8') as f:
             config = json.load(f)
     except Exception as exc:
         payload = {"success": False, "error": f"Failed to load config JSON: {exc}"}

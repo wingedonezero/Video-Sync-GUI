@@ -103,10 +103,34 @@ select = [
     "RUF",    # Ruff-specific rules
 ]
 ignore = [
-    "E501",   # line too long (handled by formatter)
+    "E501",    # line too long (handled by formatter)
+    "E701",    # multiple statements on one line (colon) - style preference
+    "E702",    # multiple statements on one line (semicolon) - style preference
+    "E722",    # bare except (sometimes needed for cleanup)
+    "PLR0911", # too many return statements
+    "PLR0912", # too many branches
     "PLR0913", # too many arguments (we have complex functions)
+    "PLR0915", # too many statements
     "PLR2004", # magic value comparison (too noisy)
+    "PLC0415", # import not at top of file (lazy imports are intentional)
+    "PLW1510", # subprocess.run without check (intentional in many cases)
+    "PLW2901", # loop variable overwritten (sometimes intentional)
+    "ARG001",  # unused function argument (Qt callbacks)
+    "ARG002",  # unused method argument (Qt overrides)
+    "ARG005",  # unused lambda argument
+    "SIM102",  # collapsible if statements (readability preference)
+    "SIM105",  # use contextlib.suppress (style preference)
     "SIM108",  # ternary operator (readability preference)
+    "B007",    # loop variable not used (often intentional: for _ in range)
+    "B904",    # raise without from in except (too noisy)
+    "B905",    # zip without strict (Python 3.10+, gradual)
+    "RUF012",  # mutable class default (Qt widgets often do this)
+    "RUF046",  # unnecessary int cast (too noisy, sometimes intentional for clarity)
+    "PTH123",  # builtin open (pathlib migration is gradual)
+    "PTH108",  # os.unlink (pathlib migration is gradual)
+    "PTH110",  # os.path.exists (pathlib migration is gradual)
+    "PTH116",  # os.stat (pathlib migration is gradual)
+    "E741",    # ambiguous variable name (l, I, O) - sometimes needed
 ]
 
 [tool.ruff.lint.isort]

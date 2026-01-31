@@ -1,20 +1,19 @@
 # vsg_qt/manual_selection_dialog/logic.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import List, Dict, Any
 
 from vsg_qt.track_widget.ui import TrackWidget
 
+
 class ManualLogic:
     """A controller instance for the ManualSelectionDialog."""
-    def __init__(self, view: "ManualSelectionDialog"):
+    def __init__(self, view: ManualSelectionDialog):
         self.v = view
 
     def is_blocked_video(self, track_data: dict) -> bool:
         """Video is only allowed from Source 1."""
         return track_data.get('type') == 'video' and track_data.get('source') != 'Source 1'
 
-    def prepopulate_from_layout(self, layout: List[Dict]):
+    def prepopulate_from_layout(self, layout: list[dict]):
         """Populates the final list using a previously configured layout."""
         if not layout:
             return
@@ -64,7 +63,7 @@ class ManualLogic:
                 continue
             self.v.final_list.add_track_widget(track_data, preset=True)
 
-    def get_final_layout_and_attachments(self) -> tuple[List[Dict], List[str]]:
+    def get_final_layout_and_attachments(self) -> tuple[list[dict], list[str]]:
         """Builds the layout from widgets and gets selected attachment sources."""
         widgets = []
         for i in range(self.v.final_list.count()):
@@ -79,7 +78,7 @@ class ManualLogic:
 
         return layout, attachment_sources
 
-    def build_layout_from_widgets(self, widgets: List[TrackWidget]) -> List[dict]:
+    def build_layout_from_widgets(self, widgets: list[TrackWidget]) -> list[dict]:
         """Creates the final layout data structure from the UI widgets."""
         out = []
         for w in widgets:
@@ -89,7 +88,7 @@ class ManualLogic:
             out.append(td)
         return out
 
-    def normalize_single_default_for_type(self, widgets: List[TrackWidget], ttype: str, force_default_if_none: bool, prefer_widget=None):
+    def normalize_single_default_for_type(self, widgets: list[TrackWidget], ttype: str, force_default_if_none: bool, prefer_widget=None):
         """Ensures only one 'Default' flag is set per track type."""
         first_default = None
 
@@ -115,7 +114,7 @@ class ManualLogic:
                 w.cb_default.setChecked(False)
             w.logic.refresh_badges()
 
-    def normalize_forced_subtitles(self, widgets: List[TrackWidget]):
+    def normalize_forced_subtitles(self, widgets: list[TrackWidget]):
         """Ensures at most one 'Forced' flag is set for subtitles."""
         first_forced = None
         for w in widgets:

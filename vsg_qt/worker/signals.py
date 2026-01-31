@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
 from PySide6.QtCore import QObject, Signal
+
 
 class WorkerSignals(QObject):
     """Defines the signals available from a running worker thread."""

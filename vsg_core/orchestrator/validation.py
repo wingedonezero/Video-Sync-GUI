@@ -1,14 +1,12 @@
 # vsg_core/orchestrator/validation.py
-# -*- coding: utf-8 -*-
 """
 Validation helpers for pipeline steps.
 Ensures each step completed successfully before proceeding.
 """
 from pathlib import Path
-from typing import List
 
-from vsg_core.orchestrator.steps.context import Context
 from vsg_core.models.enums import TrackType
+from vsg_core.orchestrator.steps.context import Context
 
 
 class PipelineValidationError(Exception):

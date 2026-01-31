@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/subtitle_edit.py
-# -*- coding: utf-8 -*-
 """
 Subtitle Edit Dictionary Support
 
@@ -19,7 +18,6 @@ import logging
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
 
 # Try to use 'regex' module for Unicode property support (\p{L}, \p{Ll}, etc.)
 # Fall back to standard 're' module if not available
@@ -60,25 +58,25 @@ class SEDictionaryConfig:
 class SEDictionaries:
     """Loaded Subtitle Edit dictionary data."""
     # OCR Fix replacements by type
-    whole_lines: List[SEReplacementRule] = field(default_factory=list)
-    partial_lines_always: List[SEReplacementRule] = field(default_factory=list)
-    partial_lines: List[SEReplacementRule] = field(default_factory=list)
-    begin_lines: List[SEReplacementRule] = field(default_factory=list)
-    end_lines: List[SEReplacementRule] = field(default_factory=list)
-    whole_words: List[SEReplacementRule] = field(default_factory=list)
-    partial_words_always: List[SEReplacementRule] = field(default_factory=list)
-    partial_words: List[SEReplacementRule] = field(default_factory=list)
-    regex_rules: List[SEReplacementRule] = field(default_factory=list)
+    whole_lines: list[SEReplacementRule] = field(default_factory=list)
+    partial_lines_always: list[SEReplacementRule] = field(default_factory=list)
+    partial_lines: list[SEReplacementRule] = field(default_factory=list)
+    begin_lines: list[SEReplacementRule] = field(default_factory=list)
+    end_lines: list[SEReplacementRule] = field(default_factory=list)
+    whole_words: list[SEReplacementRule] = field(default_factory=list)
+    partial_words_always: list[SEReplacementRule] = field(default_factory=list)
+    partial_words: list[SEReplacementRule] = field(default_factory=list)
+    regex_rules: list[SEReplacementRule] = field(default_factory=list)
 
     # Other dictionaries
-    names: Set[str] = field(default_factory=set)
-    names_blacklist: Set[str] = field(default_factory=set)
-    no_break_after: Set[str] = field(default_factory=set)
-    spell_words: Set[str] = field(default_factory=set)
-    interjections: Set[str] = field(default_factory=set)
-    word_split_list: Set[str] = field(default_factory=set)
+    names: set[str] = field(default_factory=set)
+    names_blacklist: set[str] = field(default_factory=set)
+    no_break_after: set[str] = field(default_factory=set)
+    spell_words: set[str] = field(default_factory=set)
+    interjections: set[str] = field(default_factory=set)
+    word_split_list: set[str] = field(default_factory=set)
 
-    def get_all_valid_words(self) -> Set[str]:
+    def get_all_valid_words(self) -> set[str]:
         """Get all words that should be considered valid."""
         words = set()
         words.update(self.names - self.names_blacklist)
@@ -117,9 +115,9 @@ class SubtitleEditParser:
             se_dir: Path to directory containing SE dictionary files
         """
         self.se_dir = Path(se_dir)
-        self._cache: Dict[str, any] = {}
+        self._cache: dict[str, any] = {}
 
-    def get_available_files(self) -> Dict[str, List[Path]]:
+    def get_available_files(self) -> dict[str, list[Path]]:
         """
         Get available SE dictionary files by category.
 
@@ -339,7 +337,7 @@ class SubtitleEditParser:
 
         return result
 
-    def parse_names_xml(self, path: Path) -> Tuple[Set[str], Set[str]]:
+    def parse_names_xml(self, path: Path) -> tuple[set[str], set[str]]:
         """
         Parse a names XML file.
 
@@ -385,7 +383,7 @@ class SubtitleEditParser:
 
         return names, blacklist
 
-    def parse_no_break_list(self, path: Path) -> Set[str]:
+    def parse_no_break_list(self, path: Path) -> set[str]:
         """
         Parse a NoBreakAfterList.xml file.
 
@@ -418,7 +416,7 @@ class SubtitleEditParser:
 
         return items
 
-    def parse_spell_words_xml(self, path: Path) -> Set[str]:
+    def parse_spell_words_xml(self, path: Path) -> set[str]:
         """
         Parse a spell check words XML file (*_se.xml).
 
@@ -451,7 +449,7 @@ class SubtitleEditParser:
 
         return words
 
-    def parse_word_split_list(self, path: Path) -> Set[str]:
+    def parse_word_split_list(self, path: Path) -> set[str]:
         """
         Parse a WordSplitList.txt file.
 
@@ -480,7 +478,7 @@ class SubtitleEditParser:
 
         return words
 
-    def load_all(self, config: Optional[SEDictionaryConfig] = None) -> SEDictionaries:
+    def load_all(self, config: SEDictionaryConfig | None = None) -> SEDictionaries:
         """
         Load all available SE dictionary files.
 
@@ -551,7 +549,7 @@ class WordSplitter:
     them into "this is" or "I don't".
     """
 
-    def __init__(self, valid_words: Set[str]):
+    def __init__(self, valid_words: set[str]):
         """
         Initialize with set of valid words.
 
@@ -565,7 +563,7 @@ class WordSplitter:
         """Check if word is in the valid words set."""
         return word.lower() in self.valid_words
 
-    def try_split(self, text: str) -> Optional[str]:
+    def try_split(self, text: str) -> str | None:
         """
         Try to split a merged word into two valid words.
 
@@ -779,7 +777,7 @@ class SubtitleEditCorrector:
 
         return False
 
-    def _try_fix_word(self, word: str) -> Tuple[str, Optional[str]]:
+    def _try_fix_word(self, word: str) -> tuple[str, str | None]:
         """
         Try to fix a single word using SE rules.
 
@@ -839,7 +837,7 @@ class SubtitleEditCorrector:
         # Word couldn't be fixed
         return word, None
 
-    def apply_corrections(self, text: str) -> Tuple[str, List[str], List[str]]:
+    def apply_corrections(self, text: str) -> tuple[str, list[str], list[str]]:
         """
         Apply all SE corrections to text.
 

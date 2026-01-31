@@ -1,16 +1,15 @@
 # vsg_core/postprocess/auditors/audio_object_based.py
-# -*- coding: utf-8 -*-
-from typing import Dict, Optional
 from pathlib import Path
 
 from vsg_core.models.enums import TrackType
+
 from .base import BaseAuditor
 
 
 class AudioObjectBasedAuditor(BaseAuditor):
     """Detailed object-based audio check (Atmos, DTS:X)."""
 
-    def run(self, final_mkv_path: Path, final_mkvmerge_data: Dict, final_ffprobe_data=None) -> int:
+    def run(self, final_mkv_path: Path, final_mkvmerge_data: dict, final_ffprobe_data=None) -> int:
         """
         Audits object-based audio metadata (Atmos/DTS:X).
         Returns the number of issues found.
@@ -81,7 +80,7 @@ class AudioObjectBasedAuditor(BaseAuditor):
 
         return issues
 
-    def _get_audio_stream_index_from_track_id(self, mkv_data: Dict, track_id: int) -> Optional[int]:
+    def _get_audio_stream_index_from_track_id(self, mkv_data: dict, track_id: int) -> int | None:
         """
         Maps an mkvmerge track ID to the corresponding audio stream index in ffprobe output.
 

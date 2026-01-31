@@ -1,25 +1,25 @@
 # vsg_core/correction/stepping.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
-import json
-import gc
+
 import copy
+import gc
+import json
 import shutil
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from dataclasses import dataclass
 from enum import Enum, auto
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 from scipy.signal import correlate
-from collections import Counter
 
-from ..io.runner import CommandRunner
 from ..analysis.audio_corr import get_audio_stream_info, run_audio_correlation
-from ..orchestrator.steps.context import Context
-from ..models.media import StreamProps, Track
 from ..extraction.tracks import extract_tracks
+from ..io.runner import CommandRunner
 from ..models.enums import TrackType
+from ..models.media import StreamProps, Track
+from ..orchestrator.steps.context import Context
+
 
 class CorrectionVerdict(Enum):
     UNIFORM = auto()
@@ -40,7 +40,7 @@ class AudioSegment:
     delay_raw: float = 0.0  # Raw float delay for subtitle precision (avoids double rounding)
     drift_rate_ms_s: float = 0.0
 
-def generate_edl_from_correlation(chunks: List[Dict], config: Dict, runner: CommandRunner, diagnosis_details: Optional[Dict] = None) -> List[AudioSegment]:
+def generate_edl_from_correlation(chunks: list[dict], config: dict, runner: CommandRunner, diagnosis_details: dict | None = None) -> list[AudioSegment]:
     """
     Generate a simplified EDL from correlation chunks for subtitle adjustment.
     Used when stepping is detected but no audio correction is needed.
@@ -124,7 +124,7 @@ def generate_edl_from_correlation(chunks: List[Dict], config: Dict, runner: Comm
     runner._log_message(f"[EDL Generation] Generated EDL with {len(edl)} segment(s)")
     return edl
 
-def _get_audio_properties(file_path: str, stream_index: int, runner: CommandRunner, tool_paths: dict) -> Tuple[int, str, int]:
+def _get_audio_properties(file_path: str, stream_index: int, runner: CommandRunner, tool_paths: dict) -> tuple[int, str, int]:
     cmd = [ 'ffprobe', '-v', 'error', '-select_streams', f'a:{stream_index}', '-show_entries', 'stream=channels,channel_layout,sample_rate', '-of', 'json', str(file_path) ]
     out = runner.run(cmd, tool_paths)
     if not out: raise RuntimeError(f"Could not probe audio properties for {file_path}")
@@ -150,7 +150,7 @@ class SteppingCorrector:
         out = self.runner.run(cmd, self.tool_paths)
         return (out or '').strip().lower()
 
-    def _decode_to_memory(self, file_path: str, stream_index: int, sample_rate: int, channels: int = 1) -> Optional[np.ndarray]:
+    def _decode_to_memory(self, file_path: str, stream_index: int, sample_rate: int, channels: int = 1) -> np.ndarray | None:
         cmd = [ 'ffmpeg', '-nostdin', '-v', 'error', '-i', str(file_path), '-map', f'0:a:{stream_index}', '-ac', str(channels), '-ar', str(sample_rate), '-f', 's32le', '-' ]
         pcm_bytes = self.runner.run(cmd, self.tool_paths, is_binary=True)
         if pcm_bytes:
@@ -169,7 +169,7 @@ class SteppingCorrector:
         self.log(f"[ERROR] SteppingCorrector failed to decode audio stream {stream_index} from '{Path(file_path).name}'")
         return None
 
-    def _get_delay_for_chunk(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, start_sample: int, num_samples: int, sample_rate: int, locality_samples: int) -> Optional[tuple]:
+    def _get_delay_for_chunk(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, start_sample: int, num_samples: int, sample_rate: int, locality_samples: int) -> tuple | None:
         """
         Get delay for a chunk via correlation.
 
@@ -221,7 +221,7 @@ class SteppingCorrector:
         delay_ms = int(round(delay_raw))
         return (delay_ms, delay_raw)
 
-    def _perform_coarse_scan(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int) -> List[Tuple[float, int, float]]:
+    def _perform_coarse_scan(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int) -> list[tuple[float, int, float]]:
         """
         Perform coarse scan to find delay zones.
 
@@ -258,7 +258,7 @@ class SteppingCorrector:
                 self.log(f"    - Coarse point at {timestamp_s:.1f}s: delay = {delay_ms}ms (raw: {delay_raw:.3f}ms)")
         return coarse_map
 
-    def _find_boundary_in_zone(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int, zone_start_s: float, zone_end_s: float, delay_before: int, delay_after: int, ref_file_path: Optional[str] = None, analysis_file_path: Optional[str] = None) -> float:
+    def _find_boundary_in_zone(self, ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int, zone_start_s: float, zone_end_s: float, delay_before: int, delay_after: int, ref_file_path: str | None = None, analysis_file_path: str | None = None) -> float:
         """
         Finds the precise boundary where audio delay changes from delay_before to delay_after.
 
@@ -304,7 +304,7 @@ class SteppingCorrector:
         initial_boundary_s = high / sample_rate
         initial_boundary_target_s = initial_boundary_s + (delay_before / 1000.0)
 
-        self.log(f"    - [Boundary Detection] Initial position:")
+        self.log("    - [Boundary Detection] Initial position:")
         self.log(f"        Reference: {initial_boundary_s:.3f}s")
         self.log(f"        Target:    {initial_boundary_target_s:.3f}s (ref + {delay_before}ms delay)")
 
@@ -326,7 +326,7 @@ class SteppingCorrector:
 
         if abs(snapped_boundary_target_s - initial_boundary_target_s) > 0.001:
             offset_s = snapped_boundary_target_s - initial_boundary_target_s
-            self.log(f"    - [After Audio Snap] Adjusted position:")
+            self.log("    - [After Audio Snap] Adjusted position:")
             self.log(f"        Reference: {final_boundary_s:.3f}s (was {initial_boundary_s:.3f}s, moved {offset_s:+.3f}s)")
             self.log(f"        Target:    {snapped_boundary_target_s:.3f}s (snapped to silence center)")
 
@@ -346,7 +346,7 @@ class SteppingCorrector:
                 if not no_silence and (video_snapped_target_s < silence_start or video_snapped_target_s > silence_end):
                     self.log(f"    - [Video Snap] ⚠️  Keyframe at {video_snapped_boundary_s:.3f}s (target: {video_snapped_target_s:.3f}s) is outside silence zone")
                     self.log(f"    - [Video Snap] Silence zone: [{silence_start:.3f}s - {silence_end:.3f}s]")
-                    self.log(f"    - [Video Snap] Keeping audio-snapped boundary to maintain silence guarantee")
+                    self.log("    - [Video Snap] Keeping audio-snapped boundary to maintain silence guarantee")
                     # Flag this in metadata for audit
                     boundary_metadata['video_snap_skipped'] = True
                     boundary_metadata['video_snap_reason'] = 'outside_silence_zone'
@@ -355,7 +355,7 @@ class SteppingCorrector:
                     old_final = final_boundary_s
                     final_boundary_s = video_snapped_boundary_s
                     final_target_s = final_boundary_s + (delay_before / 1000.0)
-                    self.log(f"    - [After Video Snap] Final adjusted position:")
+                    self.log("    - [After Video Snap] Final adjusted position:")
                     self.log(f"        Reference: {final_boundary_s:.3f}s (was {old_final:.3f}s, moved to keyframe)")
                     self.log(f"        Target:    {final_target_s:.3f}s")
                     boundary_metadata['video_snap_applied'] = True
@@ -363,14 +363,14 @@ class SteppingCorrector:
         # Final summary
         final_target_s = final_boundary_s + (delay_before / 1000.0)
         delay_change = delay_after - delay_before
-        self.log(f"    - [Final Boundary] Correction will be applied at:")
+        self.log("    - [Final Boundary] Correction will be applied at:")
         self.log(f"        Reference: {final_boundary_s:.3f}s")
         self.log(f"        Target:    {final_target_s:.3f}s")
         self.log(f"        Action:    {'ADD' if delay_change > 0 else 'REMOVE'} {abs(delay_change)}ms")
 
         return final_boundary_s
 
-    def _find_silence_zones_ffmpeg(self, audio_file: str, start_s: float, end_s: float, threshold_db: float, min_duration_s: float) -> List[Tuple[float, float, float]]:
+    def _find_silence_zones_ffmpeg(self, audio_file: str, start_s: float, end_s: float, threshold_db: float, min_duration_s: float) -> list[tuple[float, float, float]]:
         """
         Find silence zones using FFmpeg's silencedetect filter (frame-accurate).
 
@@ -401,7 +401,7 @@ class SteppingCorrector:
         try:
             result = self.runner.run(cmd, self.tool_paths)
             if result is None:
-                self.log(f"    - [FFmpeg silencedetect] Warning: Failed to run silencedetect")
+                self.log("    - [FFmpeg silencedetect] Warning: Failed to run silencedetect")
                 return []
 
             # Parse stderr output for silence_start and silence_end
@@ -435,7 +435,7 @@ class SteppingCorrector:
             self.log(f"    - [FFmpeg silencedetect] Error: {e}")
             return []
 
-    def _find_silence_zones(self, pcm: np.ndarray, sample_rate: int, start_s: float, end_s: float, threshold_db: float, min_duration_ms: float) -> List[Tuple[float, float, float]]:
+    def _find_silence_zones(self, pcm: np.ndarray, sample_rate: int, start_s: float, end_s: float, threshold_db: float, min_duration_ms: float) -> list[tuple[float, float, float]]:
         """
         Find silence zones in audio within a time window using RMS-based detection.
 
@@ -458,8 +458,7 @@ class SteppingCorrector:
 
         # Window size for RMS calculation (50ms windows)
         window_size = int(0.05 * sample_rate)
-        if window_size < 1:
-            window_size = 1
+        window_size = max(window_size, 1)
 
         min_silence_samples = int((min_duration_ms / 1000.0) * sample_rate)
 
@@ -492,18 +491,17 @@ class SteppingCorrector:
                     current_silence_db_values = [db]
                 else:
                     current_silence_db_values.append(db)
-            else:
-                if current_silence_start is not None:
-                    # End of silence zone
-                    silence_end = sample_pos / sample_rate
-                    silence_duration_samples = (silence_end - current_silence_start) * sample_rate
+            elif current_silence_start is not None:
+                # End of silence zone
+                silence_end = sample_pos / sample_rate
+                silence_duration_samples = (silence_end - current_silence_start) * sample_rate
 
-                    if silence_duration_samples >= min_silence_samples:
-                        avg_db = np.mean(current_silence_db_values)
-                        silence_zones.append((current_silence_start, silence_end, avg_db))
+                if silence_duration_samples >= min_silence_samples:
+                    avg_db = np.mean(current_silence_db_values)
+                    silence_zones.append((current_silence_start, silence_end, avg_db))
 
-                    current_silence_start = None
-                    current_silence_db_values = []
+                current_silence_start = None
+                current_silence_db_values = []
 
         # Check if we're still in a silence zone at the end
         if current_silence_start is not None:
@@ -515,7 +513,7 @@ class SteppingCorrector:
 
         return silence_zones
 
-    def _detect_speech_regions_vad(self, pcm: np.ndarray, sample_rate: int, start_s: float, end_s: float) -> List[Tuple[float, float]]:
+    def _detect_speech_regions_vad(self, pcm: np.ndarray, sample_rate: int, start_s: float, end_s: float) -> list[tuple[float, float]]:
         """
         Detect speech regions using Voice Activity Detection (WebRTC VAD).
         Requires webrtcvad library: pip install webrtcvad-wheels
@@ -535,8 +533,8 @@ class SteppingCorrector:
         try:
             import webrtcvad
         except ImportError:
-            self.log(f"    - [VAD] webrtcvad not installed, skipping speech detection")
-            self.log(f"    - [VAD] Install with: pip install webrtcvad-wheels")
+            self.log("    - [VAD] webrtcvad not installed, skipping speech detection")
+            self.log("    - [VAD] Install with: pip install webrtcvad-wheels")
             return []
 
         aggressiveness = self.config.get('stepping_vad_aggressiveness', 2)
@@ -592,7 +590,7 @@ class SteppingCorrector:
         self.log(f"    - [VAD] Detected {len(speech_regions)} speech region(s)")
         return speech_regions
 
-    def _detect_transients(self, pcm: np.ndarray, sample_rate: int, start_s: float, end_s: float) -> List[float]:
+    def _detect_transients(self, pcm: np.ndarray, sample_rate: int, start_s: float, end_s: float) -> list[float]:
         """
         Detect transients (sudden amplitude increases like musical beats/impacts).
 
@@ -618,8 +616,7 @@ class SteppingCorrector:
 
         # Window size for RMS calculation (10ms windows)
         window_size = int(0.01 * sample_rate)
-        if window_size < 1:
-            window_size = 1
+        window_size = max(window_size, 1)
 
         transients = []
         prev_rms_db = None
@@ -652,7 +649,7 @@ class SteppingCorrector:
         self.log(f"    - [Transient Detection] Found {len(transients)} transient(s) with threshold {threshold_db}dB")
         return transients
 
-    def _snap_boundary_to_silence(self, analysis_pcm: np.ndarray, sample_rate: int, boundary_s: float, analysis_file: Optional[str] = None) -> Tuple[float, Optional[Dict]]:
+    def _snap_boundary_to_silence(self, analysis_pcm: np.ndarray, sample_rate: int, boundary_s: float, analysis_file: str | None = None) -> tuple[float, dict | None]:
         """
         Attempt to snap a boundary to a nearby silence zone using advanced detection methods.
 
@@ -722,7 +719,7 @@ class SteppingCorrector:
 
         if not silence_zones:
             self.log(f"    - [Silence Snap] ⚠️  No silence zones found within ±{search_window_s}s window")
-            self.log(f"    - [Silence Snap] Using raw boundary without silence guarantee")
+            self.log("    - [Silence Snap] Using raw boundary without silence guarantee")
             # Return metadata to flag this in audit
             no_silence_metadata = {
                 'zone_start': boundary_s,
@@ -844,7 +841,7 @@ class SteppingCorrector:
 
         return boundary_s, None
 
-    def _get_video_frames(self, video_file: str, mode: str) -> List[float]:
+    def _get_video_frames(self, video_file: str, mode: str) -> list[float]:
         """
         Get video frame timestamps from reference video.
 
@@ -855,14 +852,13 @@ class SteppingCorrector:
         Returns:
             List of timestamps in seconds
         """
-        import subprocess
         import json
 
         if mode == 'scenes':
             # Scene detection via lavfi is fragile with special characters in paths
             # Use keyframes as a reliable alternative that works with all file paths
             # Keyframes often align with scene changes anyway (especially for encoded content)
-            self.log(f"    - [Video Snap] Using keyframes for scene-aligned snapping (robust for all file paths)")
+            self.log("    - [Video Snap] Using keyframes for scene-aligned snapping (robust for all file paths)")
             return self._get_video_frames(video_file, 'keyframes')
 
         elif mode == 'keyframes':
@@ -966,7 +962,7 @@ class SteppingCorrector:
             return nearest
         else:
             self.log(f"    - [Video Snap] Nearest {snap_mode[:-1]} at {nearest:.3f}s is too far (offset: {offset:+.3f}s > {max_offset:.1f}s)")
-            self.log(f"    - [Video Snap] Keeping audio-based boundary")
+            self.log("    - [Video Snap] Keeping audio-based boundary")
             return boundary_s
 
     def _extract_content_from_reference(
@@ -977,7 +973,7 @@ class SteppingCorrector:
         gap_duration_ms: float,
         sample_rate: int,
         current_delay_ms: float
-    ) -> Tuple[Optional[np.ndarray], float, str]:
+    ) -> tuple[np.ndarray | None, float, str]:
         """
         Attempts to extract matching content from reference audio to fill a gap.
 
@@ -1020,7 +1016,7 @@ class SteppingCorrector:
         search_end = min(len(ref_pcm), boundary_sample_ref + search_window_samples + gap_samples)
 
         if search_end - search_start < gap_samples:
-            self.log(f"      [Smart Fill] Insufficient reference audio for content search.")
+            self.log("      [Smart Fill] Insufficient reference audio for content search.")
             return None, 0.0, 'silence'
 
         # Try to find best matching content in reference
@@ -1032,7 +1028,7 @@ class SteppingCorrector:
             content_std = np.std(candidate_content)
             # For int32 PCM audio, std < 100 indicates silence/near-silence
             if content_std < 100.0:
-                self.log(f"      [Smart Fill] Reference has silence at position → using silence fill")
+                self.log("      [Smart Fill] Reference has silence at position → using silence fill")
                 return None, 0.0, 'silence'
 
             # In 'content' mode, always use reference content if available
@@ -1073,11 +1069,11 @@ class SteppingCorrector:
 
                             if normalized_corr < correlation_threshold:
                                 # Low correlation - this content is NOT in analysis, so we should add it
-                                self.log(f"      [Smart Fill] Content appears to be missing from analysis → extracting from reference")
+                                self.log("      [Smart Fill] Content appears to be missing from analysis → extracting from reference")
                                 return candidate_content, normalized_corr, 'content'
                             else:
                                 # High correlation means content already exists in analysis
-                                self.log(f"      [Smart Fill] Content already exists in analysis → using silence")
+                                self.log("      [Smart Fill] Content already exists in analysis → using silence")
                                 return None, normalized_corr, 'silence'
 
             # Default to using content if we can't determine otherwise
@@ -1088,7 +1084,7 @@ class SteppingCorrector:
         # If we get here, use silence
         return None, 0.0, 'silence'
 
-    def _analyze_internal_drift(self, edl: List[AudioSegment], ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int, codec_name: str) -> List[AudioSegment]:
+    def _analyze_internal_drift(self, edl: list[AudioSegment], ref_pcm: np.ndarray, analysis_pcm: np.ndarray, sample_rate: int, codec_name: str) -> list[AudioSegment]:
         self.log(f"  [SteppingCorrector] Stage 2.5: Analyzing segments for internal drift (Codec: {codec_name})...")
         final_edl = []
 
@@ -1164,7 +1160,7 @@ class SteppingCorrector:
                 filtered_times, filtered_delays = times, delays
 
             if len(filtered_times) < 4:
-                self.log(f"      [STABLE] Not enough consistent points after outlier rejection.")
+                self.log("      [STABLE] Not enough consistent points after outlier rejection.")
                 final_edl.append(current_segment)
                 continue
 
@@ -1196,7 +1192,7 @@ class SteppingCorrector:
 
         return final_edl
 
-    def _assemble_from_segments_via_ffmpeg(self, pcm_data: np.ndarray, edl: List[AudioSegment], channels: int, channel_layout: str, sample_rate: int, out_path: Path, log_prefix: str, ref_pcm: Optional[np.ndarray] = None) -> bool:
+    def _assemble_from_segments_via_ffmpeg(self, pcm_data: np.ndarray, edl: list[AudioSegment], channels: int, channel_layout: str, sample_rate: int, out_path: Path, log_prefix: str, ref_pcm: np.ndarray | None = None) -> bool:
         self.log(f"  [{log_prefix}] Assembling audio from {len(edl)} segment(s) via FFmpeg...")
 
         assembly_dir = out_path.parent / f"assembly_{out_path.stem}"
@@ -1294,8 +1290,7 @@ class SteppingCorrector:
                 start_sample = int(segment_start_s_on_target_timeline * sample_rate) * channels
                 end_sample = int(segment_end_s_on_target_timeline * sample_rate) * channels
 
-                if end_sample > len(pcm_data):
-                    end_sample = len(pcm_data)
+                end_sample = min(end_sample, len(pcm_data))
 
                 chunk_to_process = pcm_data[start_sample:end_sample]
 
@@ -1326,7 +1321,7 @@ class SteppingCorrector:
                     filter_chain = ''
 
                     if resample_engine == 'rubberband':
-                        self.log(f"    - Using 'rubberband' engine for high-quality resampling.")
+                        self.log("    - Using 'rubberband' engine for high-quality resampling.")
                         rb_opts = [f'tempo={tempo_ratio}']
 
                         if not self.config.get('segment_rb_pitch_correct', False):
@@ -1343,11 +1338,11 @@ class SteppingCorrector:
                         filter_chain = 'rubberband=' + ':'.join(rb_opts)
 
                     elif resample_engine == 'atempo':
-                        self.log(f"    - Using 'atempo' engine for fast resampling.")
+                        self.log("    - Using 'atempo' engine for fast resampling.")
                         filter_chain = f'atempo={tempo_ratio}'
 
                     else: # Default to aresample
-                        self.log(f"    - Using 'aresample' engine for high-quality resampling.")
+                        self.log("    - Using 'aresample' engine for high-quality resampling.")
                         new_sample_rate = sample_rate * tempo_ratio
                         filter_chain = f'asetrate={new_sample_rate},aresample={sample_rate}'
 
@@ -1399,10 +1394,10 @@ class SteppingCorrector:
 
     def _filter_coarse_map_by_clusters(
         self,
-        coarse_map: List[Tuple[float, int, float]],
-        diagnosis_details: Dict,
+        coarse_map: list[tuple[float, int, float]],
+        diagnosis_details: dict,
         sample_rate: int
-    ) -> List[Tuple[float, int, float]]:
+    ) -> list[tuple[float, int, float]]:
         """
         Filters coarse_map to remove entries that fall within invalid clusters.
         Applies fallback strategy for filtered regions.
@@ -1457,13 +1452,13 @@ class SteppingCorrector:
 
         # Apply fallback strategy if needed
         if fallback_mode == 'nearest' and skipped_count > 0:
-            self.log(f"  [Filtered Stepping] Note: Boundaries will only be detected between valid clusters")
+            self.log("  [Filtered Stepping] Note: Boundaries will only be detected between valid clusters")
         elif fallback_mode == 'skip':
-            self.log(f"  [Filtered Stepping] Skipped regions will maintain original timing (no correction)")
+            self.log("  [Filtered Stepping] Skipped regions will maintain original timing (no correction)")
 
         return filtered_map
 
-    def _qa_check(self, corrected_path: str, ref_file_path: str, base_delay: int, diagnosis_details: Optional[Dict] = None) -> bool:
+    def _qa_check(self, corrected_path: str, ref_file_path: str, base_delay: int, diagnosis_details: dict | None = None) -> bool:
         self.log("  [SteppingCorrector] Performing rigorous QA check on corrected audio map...")
 
         # Check if we're using skip mode with filtered clusters
@@ -1476,7 +1471,7 @@ class SteppingCorrector:
             if correction_mode == 'filtered' and fallback_mode == 'skip' and invalid_clusters:
                 skip_mode_active = True
                 self.log(f"  [QA] Note: 'skip' fallback mode is active with {len(invalid_clusters)} filtered cluster(s).")
-                self.log(f"  [QA] Filtered regions retain original timing, so delay stability check will be relaxed.")
+                self.log("  [QA] Filtered regions retain original timing, so delay stability check will be relaxed.")
 
         # Create QA config with overrides (use dict spread to avoid shallow copy issues)
         qa_threshold = self.config.get('segmented_qa_threshold', 85.0)
@@ -1526,11 +1521,10 @@ class SteppingCorrector:
                     return False
                 else:
                     self.log(f"  [QA] Delay std dev = {std_dev:.1f}ms (acceptable for 'skip' mode with filtered regions).")
-            else:
-                # Normal strict std dev check
-                if std_dev > 15:
-                    self.log(f"  [QA] FAILED: Delay is unstable (Std Dev = {std_dev:.1f}ms).")
-                    return False
+            # Normal strict std dev check
+            elif std_dev > 15:
+                self.log(f"  [QA] FAILED: Delay is unstable (Std Dev = {std_dev:.1f}ms).")
+                return False
 
             self.log("  [QA] PASSED: Timing map is verified and correct.")
             return True
@@ -1538,7 +1532,7 @@ class SteppingCorrector:
             self.log(f"  [QA] FAILED with exception: {e}")
             return False
 
-    def run(self, ref_file_path: str, analysis_audio_path: str, base_delay_ms: int, diagnosis_details: Optional[Dict] = None) -> CorrectionResult:
+    def run(self, ref_file_path: str, analysis_audio_path: str, base_delay_ms: int, diagnosis_details: dict | None = None) -> CorrectionResult:
         ref_pcm = None
         analysis_pcm = None
 
@@ -1569,7 +1563,7 @@ class SteppingCorrector:
                 if not coarse_map:
                     return CorrectionResult(CorrectionVerdict.FAILED, {'error': "After filtering invalid clusters, no reliable sync points remain."})
 
-            edl: List[AudioSegment] = []
+            edl: list[AudioSegment] = []
             anchor_delay_ms = coarse_map[0][1]
             anchor_delay_raw = coarse_map[0][2]
             edl.append(AudioSegment(start_s=0.0, end_s=0.0, delay_ms=anchor_delay_ms, delay_raw=anchor_delay_raw))
@@ -1628,7 +1622,7 @@ class SteppingCorrector:
             if analysis_pcm is not None: del analysis_pcm
             gc.collect()
 
-    def apply_plan_to_file(self, target_audio_path: str, edl: List[AudioSegment], temp_dir: Path, ref_file_path: Optional[str] = None) -> Optional[Path]:
+    def apply_plan_to_file(self, target_audio_path: str, edl: list[AudioSegment], temp_dir: Path, ref_file_path: str | None = None) -> Path | None:
         """Applies a pre-generated EDL to a given audio file."""
         target_pcm = None
         ref_pcm = None
@@ -1642,13 +1636,13 @@ class SteppingCorrector:
 
             # Decode reference audio for Smart Fill if provided
             if ref_file_path:
-                self.log(f"  [SteppingCorrector] Decoding reference audio for Smart Fill capability...")
+                self.log("  [SteppingCorrector] Decoding reference audio for Smart Fill capability...")
                 ref_lang = self.config.get('analysis_lang_source1')
                 ref_index, _ = get_audio_stream_info(ref_file_path, ref_lang, self.runner, self.tool_paths)
                 if ref_index is not None:
                     ref_pcm = self._decode_to_memory(ref_file_path, ref_index, sample_rate)
                     if ref_pcm is None:
-                        self.log(f"  [WARNING] Failed to decode reference audio, Smart Fill will be disabled")
+                        self.log("  [WARNING] Failed to decode reference audio, Smart Fill will be disabled")
 
             self.log(f"  [SteppingCorrector] Applying correction plan to '{Path(target_audio_path).name}'...")
             self.log(f"    - Decoding final target audio track ({target_layout})...")
@@ -1738,7 +1732,7 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
         if result.verdict == CorrectionVerdict.UNIFORM:
             new_delay = result.data['delay']
             runner._log_message(f"[SteppingCorrection] No stepping found. Refined uniform delay is {new_delay} ms.")
-            runner._log_message(f"[SteppingCorrection] The globally-shifted delay from the main analysis will be used.")
+            runner._log_message("[SteppingCorrection] The globally-shifted delay from the main analysis will be used.")
 
         elif result.verdict == CorrectionVerdict.STEPPED:
             edl = result.data['edl']

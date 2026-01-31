@@ -1,16 +1,15 @@
 # vsg_core/postprocess/auditors/codec_integrity.py
-# -*- coding: utf-8 -*-
-from typing import Dict, List
 from pathlib import Path
 
 from vsg_core.models.enums import TrackType
+
 from .base import BaseAuditor
 
 
 class CodecIntegrityAuditor(BaseAuditor):
     """Ensures codecs weren't accidentally transcoded during muxing."""
 
-    def run(self, final_mkv_path: Path, final_mkvmerge_data: Dict, final_ffprobe_data=None) -> int:
+    def run(self, final_mkv_path: Path, final_mkvmerge_data: dict, final_ffprobe_data=None) -> int:
         """
         Verifies codecs match expectations, accounting for intentional conversions.
         Returns the number of issues found.

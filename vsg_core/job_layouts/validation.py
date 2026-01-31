@@ -1,12 +1,11 @@
 # vsg_core/job_layouts/validation.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import Dict, Tuple
+
 
 class LayoutValidator:
     """Validates that loaded layout data is well-formed."""
 
-    def validate(self, layout_data: Dict) -> Tuple[bool, str]:
+    def validate(self, layout_data: dict) -> tuple[bool, str]:
         """Validates the structure and content of a layout data dictionary."""
         if not isinstance(layout_data, dict):
             return False, "Layout data is not a dictionary."

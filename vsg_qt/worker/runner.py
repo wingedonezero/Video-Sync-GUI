@@ -1,15 +1,16 @@
 # vsg_qt/worker/runner.py
-# -*- coding: utf-8 -*-
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Any
 
 from PySide6.QtCore import QRunnable, Slot
 
 from vsg_core.pipeline import JobPipeline
+
 from .signals import WorkerSignals
 
+
 class JobWorker(QRunnable):
-    def __init__(self, config: Dict[str, Any], jobs: List[Dict], and_merge: bool, output_dir: str):
+    def __init__(self, config: dict[str, Any], jobs: list[dict], and_merge: bool, output_dir: str):
         super().__init__()
         self.config = config
         self.jobs = jobs
@@ -45,7 +46,7 @@ class JobWorker(QRunnable):
             # Signals deleted during GUI cleanup - silently ignore
             pass
 
-    def _safe_finished_job(self, result: Dict[str, Any]):
+    def _safe_finished_job(self, result: dict[str, Any]):
         """Safely emit job finished signal, handling case where signals are deleted during GUI shutdown."""
         try:
             if hasattr(self, 'signals') and self.signals is not None:
@@ -54,7 +55,7 @@ class JobWorker(QRunnable):
             # Signals deleted during GUI cleanup - silently ignore
             pass
 
-    def _safe_finished_all(self, results: List[Dict[str, Any]]):
+    def _safe_finished_all(self, results: list[dict[str, Any]]):
         """Safely emit all jobs finished signal, handling case where signals are deleted during GUI shutdown."""
         try:
             if hasattr(self, 'signals') and self.signals is not None:
@@ -75,7 +76,7 @@ class JobWorker(QRunnable):
             progress_callback=self._safe_progress,
         )
 
-        all_results: List[Dict[str, Any]] = []
+        all_results: list[dict[str, Any]] = []
         total_jobs = len(self.jobs)
 
         for i, job_data in enumerate(self.jobs, 1):

@@ -1,16 +1,25 @@
 # vsg_qt/main_window/window.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import List
-from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QLineEdit, QLabel, QGroupBox, QTextEdit, QProgressBar,
-    QCheckBox
-)
+
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMainWindow,
+    QProgressBar,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
 
 from vsg_core.config import AppConfig
+
 from .controller import MainController
+
 
 class MainWindow(QMainWindow):
     """Slim UI shell: builds widgets & delegates logic to MainController."""
@@ -37,7 +46,7 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel('Ready')
 
         # Delay Labels
-        self.delay_labels: List[QLabel] = []
+        self.delay_labels: list[QLabel] = []
 
         # Other Controls
         self.archive_logs_check = QCheckBox("Archive logs to a zip file on batch completion")

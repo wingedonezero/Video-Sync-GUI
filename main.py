@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 
 """
 Video/Audio Sync & Merge — PyQt6/PySide6 Edition
 Main application entry point.
 """
 
-import os
-import sys
-
 # Enable faulthandler FIRST to catch segfaults and print tracebacks
 # This helps diagnose crashes in native code (numpy, scipy, torch, etc.)
 import faulthandler
+import os
+import sys
+
 faulthandler.enable()
 
 # Limit BLAS/OpenBLAS threads to prevent threading issues with scipy/numpy
@@ -28,7 +27,9 @@ os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 # os.environ.setdefault("NANOBIND_DISABLE_LEAK_CHECK", "1")
 
 from PySide6.QtWidgets import QApplication
+
 from vsg_qt.main_window import MainWindow
+
 
 def main():
     """Initializes and runs the PyQt application."""

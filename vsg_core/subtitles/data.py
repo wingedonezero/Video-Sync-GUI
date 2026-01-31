@@ -1,5 +1,4 @@
 # vsg_core/subtitles/data.py
-# -*- coding: utf-8 -*-
 """
 Unified subtitle data container for all subtitle operations.
 
@@ -13,17 +12,13 @@ Rounding happens ONLY at final save (ASS → centiseconds, SRT → milliseconds)
 """
 from __future__ import annotations
 
+import json
+import math
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING
-import json
-import math
-
-if TYPE_CHECKING:
-    pass
-
+from typing import Any
 
 # =============================================================================
 # Per-Event Metadata (OCR, Sync, Stepping)
@@ -36,8 +31,8 @@ class OCREventData:
     image: str = ''                             # Debug image filename (sub_0000.png)
     confidence: float = 0.0                     # OCR confidence 0-100
     raw_text: str = ''                          # Raw OCR output before corrections
-    fixes_applied: Dict[str, int] = field(default_factory=dict)  # fix_name -> count
-    unknown_words: List[str] = field(default_factory=list)
+    fixes_applied: dict[str, int] = field(default_factory=dict)  # fix_name -> count
+    unknown_words: list[str] = field(default_factory=list)
 
     # Position data from source image
     x: int = 0
@@ -49,10 +44,10 @@ class OCREventData:
 
     # VobSub specific
     is_forced: bool = False
-    subtitle_colors: List[List[int]] = field(default_factory=list)  # 4 RGBA colors
-    dominant_color: List[int] = field(default_factory=list)         # RGB
+    subtitle_colors: list[list[int]] = field(default_factory=list)  # 4 RGBA colors
+    dominant_color: list[int] = field(default_factory=list)         # RGB
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             'index': self.index,
             'image': self.image,
@@ -73,7 +68,7 @@ class OCREventData:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'OCREventData':
+    def from_dict(cls, data: dict[str, Any]) -> OCREventData:
         position = data.get('position', {}) or {}
         frame_size = data.get('frame_size', [0, 0]) or [0, 0]
         return cls(
@@ -103,10 +98,10 @@ class SyncEventData:
     start_adjustment_ms: float = 0.0            # Delta applied to start
     end_adjustment_ms: float = 0.0              # Delta applied to end
     snapped_to_frame: bool = False              # Whether frame alignment was used
-    target_frame_start: Optional[int] = None    # Frame number if snapped
-    target_frame_end: Optional[int] = None
+    target_frame_start: int | None = None    # Frame number if snapped
+    target_frame_end: int | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         result = {
             'original_start_ms': self.original_start_ms,
             'original_end_ms': self.original_end_ms,
@@ -121,7 +116,7 @@ class SyncEventData:
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'SyncEventData':
+    def from_dict(cls, data: dict[str, Any]) -> SyncEventData:
         return cls(
             original_start_ms=float(data.get('original_start_ms', 0.0)),
             original_end_ms=float(data.get('original_end_ms', 0.0)),
@@ -138,10 +133,10 @@ class SteppingEventData:
     """Stepping-specific metadata for a single subtitle event."""
     original_start_ms: float = 0.0
     original_end_ms: float = 0.0
-    segment_index: Optional[int] = None         # Which EDL segment it fell into
+    segment_index: int | None = None         # Which EDL segment it fell into
     adjustment_ms: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             'original_start_ms': self.original_start_ms,
             'original_end_ms': self.original_end_ms,
@@ -150,7 +145,7 @@ class SteppingEventData:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'SteppingEventData':
+    def from_dict(cls, data: dict[str, Any]) -> SteppingEventData:
         return cls(
             original_start_ms=float(data.get('original_start_ms', 0.0)),
             original_end_ms=float(data.get('original_end_ms', 0.0)),
@@ -170,8 +165,8 @@ class OCRMetadata:
     language: str = 'eng'
     source_format: str = 'vobsub'               # vobsub, pgs, etc.
     source_file: str = ''
-    source_resolution: List[int] = field(default_factory=lambda: [0, 0])
-    master_palette: List[List[int]] = field(default_factory=list)  # 16 colors from IDX
+    source_resolution: list[int] = field(default_factory=lambda: [0, 0])
+    master_palette: list[list[int]] = field(default_factory=list)  # 16 colors from IDX
 
     # Statistics
     total_subtitles: int = 0
@@ -184,10 +179,10 @@ class OCRMetadata:
     positioned_subtitles: int = 0
 
     # Aggregated data
-    fixes_by_type: Dict[str, int] = field(default_factory=dict)
-    unknown_words: List[Dict[str, Any]] = field(default_factory=list)
+    fixes_by_type: dict[str, int] = field(default_factory=dict)
+    unknown_words: list[dict[str, Any]] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             'engine': self.engine,
             'language': self.language,
@@ -210,7 +205,7 @@ class OCRMetadata:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'OCRMetadata':
+    def from_dict(cls, data: dict[str, Any]) -> OCRMetadata:
         stats = data.get('statistics', {}) or {}
         return cls(
             engine=data.get('engine', 'tesseract'),
@@ -269,10 +264,10 @@ class SubtitleStyle:
     encoding: int = 1                       # Character set encoding
 
     # Original line for debugging
-    _original_line: Optional[str] = field(default=None, repr=False)
+    _original_line: str | None = field(default=None, repr=False)
 
     @classmethod
-    def from_format_line(cls, format_fields: List[str], values: List[str]) -> 'SubtitleStyle':
+    def from_format_line(cls, format_fields: list[str], values: list[str]) -> SubtitleStyle:
         """
         Parse style from Format fields and values.
 
@@ -315,7 +310,7 @@ class SubtitleStyle:
             encoding=int(field_map.get('encoding', 1)),
         )
 
-    def to_format_values(self, format_fields: List[str]) -> List[str]:
+    def to_format_values(self, format_fields: list[str]) -> list[str]:
         """
         Convert to values list matching format fields.
 
@@ -359,11 +354,11 @@ class SubtitleStyle:
         return [value_map.get(f.strip().lower(), '') for f in format_fields]
 
     @classmethod
-    def default(cls) -> 'SubtitleStyle':
+    def default(cls) -> SubtitleStyle:
         """Create default style."""
         return cls(name='Default')
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         return {
             'name': self.name,
@@ -392,7 +387,7 @@ class SubtitleStyle:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'SubtitleStyle':
+    def from_dict(cls, data: dict[str, Any]) -> SubtitleStyle:
         return cls(
             name=data.get('name', 'Default'),
             fontname=data.get('fontname', 'Arial'),
@@ -452,19 +447,19 @@ class SubtitleEvent:
     is_comment: bool = False                # Comment vs Dialogue
 
     # Aegisub extradata reference (list of IDs)
-    extradata_ids: List[int] = field(default_factory=list)
+    extradata_ids: list[int] = field(default_factory=list)
 
     # Source tracking
-    original_index: Optional[int] = None    # Original position in file
-    srt_index: Optional[int] = None         # SRT sequence number if from SRT
+    original_index: int | None = None    # Original position in file
+    srt_index: int | None = None         # SRT sequence number if from SRT
 
     # Original line for debugging
-    _original_line: Optional[str] = field(default=None, repr=False)
+    _original_line: str | None = field(default=None, repr=False)
 
     # Optional per-event metadata (populated by operations)
-    ocr: Optional[OCREventData] = None      # OCR data if from OCR
-    sync: Optional[SyncEventData] = None    # Sync data after sync applied
-    stepping: Optional[SteppingEventData] = None  # Stepping data after stepping
+    ocr: OCREventData | None = None      # OCR data if from OCR
+    sync: SyncEventData | None = None    # Sync data after sync applied
+    stepping: SteppingEventData | None = None  # Stepping data after stepping
 
     @property
     def duration_ms(self) -> float:
@@ -474,10 +469,10 @@ class SubtitleEvent:
     @classmethod
     def from_format_line(
         cls,
-        format_fields: List[str],
-        values: List[str],
+        format_fields: list[str],
+        values: list[str],
         is_comment: bool = False
-    ) -> 'SubtitleEvent':
+    ) -> SubtitleEvent:
         """
         Parse event from Format fields and values.
 
@@ -537,7 +532,7 @@ class SubtitleEvent:
             extradata_ids=extradata_ids,
         )
 
-    def to_format_values(self, format_fields: List[str]) -> List[str]:
+    def to_format_values(self, format_fields: list[str]) -> list[str]:
         """
         Convert to values list matching format fields.
 
@@ -566,7 +561,7 @@ class SubtitleEvent:
 
         return [value_map.get(f.strip().lower(), '') for f in format_fields]
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
         result = {
             'index': self.original_index,
@@ -601,7 +596,7 @@ class SubtitleEvent:
         return result
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'SubtitleEvent':
+    def from_dict(cls, data: dict[str, Any]) -> SubtitleEvent:
         event = cls(
             start_ms=float(data.get('start_ms', 0.0)),
             end_ms=float(data.get('end_ms', 0.0)),
@@ -640,7 +635,7 @@ class EmbeddedFont:
     name: str
     data: str  # Base64 encoded or raw UUE data
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {'name': self.name, 'data_length': len(self.data)}
 
 
@@ -650,7 +645,7 @@ class EmbeddedGraphic:
     name: str
     data: str  # Base64 encoded or raw UUE data
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {'name': self.name, 'data_length': len(self.data)}
 
 
@@ -663,12 +658,12 @@ class OperationRecord:
     """Record of an operation applied to subtitle data."""
     operation: str                          # 'stepping', 'sync', 'style_patch', etc.
     timestamp: datetime = field(default_factory=datetime.now)
-    parameters: Dict[str, Any] = field(default_factory=dict)
+    parameters: dict[str, Any] = field(default_factory=dict)
     events_affected: int = 0
     styles_affected: int = 0
     summary: str = ''
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             'operation': self.operation,
             'timestamp': self.timestamp.isoformat(),
@@ -679,7 +674,7 @@ class OperationRecord:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'OperationRecord':
+    def from_dict(cls, data: dict[str, Any]) -> OperationRecord:
         timestamp_raw = data.get('timestamp')
         timestamp = datetime.now()
         if timestamp_raw:
@@ -705,8 +700,8 @@ class OperationResult:
     events_affected: int = 0
     styles_affected: int = 0
     summary: str = ''
-    details: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
+    details: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
 
 
 # =============================================================================
@@ -727,7 +722,7 @@ class SubtitleData:
     """
 
     # Source information
-    source_path: Optional[Path] = None
+    source_path: Path | None = None
     source_format: str = 'ass'              # 'ass', 'ssa', 'srt', 'vtt', 'ocr'
     encoding: str = 'utf-8'
     has_bom: bool = False
@@ -737,37 +732,37 @@ class SubtitleData:
 
     # Aegisub sections (preserved in order)
     aegisub_garbage: OrderedDict = field(default_factory=OrderedDict)
-    aegisub_extradata: List[str] = field(default_factory=list)  # Raw lines
+    aegisub_extradata: list[str] = field(default_factory=list)  # Raw lines
 
     # Custom/unknown sections (preserved as raw lines)
     custom_sections: OrderedDict = field(default_factory=OrderedDict)
 
     # Section ordering (to preserve original order)
-    section_order: List[str] = field(default_factory=list)
+    section_order: list[str] = field(default_factory=list)
 
     # Styles
     styles: OrderedDict = field(default_factory=OrderedDict)  # name -> SubtitleStyle
-    styles_format: List[str] = field(default_factory=list)
+    styles_format: list[str] = field(default_factory=list)
 
     # Events
-    events: List[SubtitleEvent] = field(default_factory=list)
-    events_format: List[str] = field(default_factory=list)
+    events: list[SubtitleEvent] = field(default_factory=list)
+    events_format: list[str] = field(default_factory=list)
 
     # Embedded content
-    fonts: List[EmbeddedFont] = field(default_factory=list)
-    graphics: List[EmbeddedGraphic] = field(default_factory=list)
+    fonts: list[EmbeddedFont] = field(default_factory=list)
+    graphics: list[EmbeddedGraphic] = field(default_factory=list)
 
     # Operation tracking
-    operations: List[OperationRecord] = field(default_factory=list)
+    operations: list[OperationRecord] = field(default_factory=list)
 
     # OCR document-level metadata (populated if source is OCR)
-    ocr_metadata: Optional[OCRMetadata] = None
+    ocr_metadata: OCRMetadata | None = None
 
     # Comments before sections (for preservation)
-    section_comments: Dict[str, List[str]] = field(default_factory=dict)
+    section_comments: dict[str, list[str]] = field(default_factory=dict)
 
     # Header lines before first section
-    header_lines: List[str] = field(default_factory=list)
+    header_lines: list[str] = field(default_factory=list)
 
     def __post_init__(self):
         """Set default format fields if not provided."""
@@ -790,7 +785,7 @@ class SubtitleData:
     # =========================================================================
 
     @classmethod
-    def from_file(cls, path: Path | str) -> 'SubtitleData':
+    def from_file(cls, path: Path | str) -> SubtitleData:
         """
         Load subtitle from file, auto-detecting format.
 
@@ -816,7 +811,7 @@ class SubtitleData:
             raise ValueError(f"Unsupported subtitle format: {ext}")
 
     @classmethod
-    def from_json(cls, path: Path | str) -> 'SubtitleData':
+    def from_json(cls, path: Path | str) -> SubtitleData:
         """
         Load SubtitleData from a JSON file produced by save_json().
 
@@ -827,7 +822,7 @@ class SubtitleData:
             SubtitleData instance
         """
         path = Path(path)
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, encoding='utf-8') as f:
             payload = json.load(f)
 
         data = cls(
@@ -957,11 +952,11 @@ class SubtitleData:
         mode: str,
         total_delay_ms: float,
         global_shift_ms: float,
-        target_fps: Optional[float] = None,
-        source_video: Optional[str] = None,
-        target_video: Optional[str] = None,
+        target_fps: float | None = None,
+        source_video: str | None = None,
+        target_video: str | None = None,
         runner=None,
-        config: Optional[dict] = None,
+        config: dict | None = None,
         **kwargs
     ) -> OperationResult:
         """
@@ -1007,7 +1002,7 @@ class SubtitleData:
 
     def apply_stepping(
         self,
-        edl_segments: List[Any],
+        edl_segments: list[Any],
         boundary_mode: str = 'start',
         runner=None
     ) -> OperationResult:
@@ -1027,7 +1022,7 @@ class SubtitleData:
 
     def apply_style_patch(
         self,
-        patches: Dict[str, Dict[str, Any]],
+        patches: dict[str, dict[str, Any]],
         runner=None
     ) -> OperationResult:
         """
@@ -1045,7 +1040,7 @@ class SubtitleData:
 
     def apply_font_replacement(
         self,
-        replacements: Dict[str, str],
+        replacements: dict[str, str],
         runner=None
     ) -> OperationResult:
         """
@@ -1081,7 +1076,7 @@ class SubtitleData:
 
     def apply_rescale(
         self,
-        target_resolution: Tuple[int, int],
+        target_resolution: tuple[int, int],
         runner=None
     ) -> OperationResult:
         """
@@ -1099,12 +1094,12 @@ class SubtitleData:
 
     def filter_by_styles(
         self,
-        styles: List[str],
+        styles: list[str],
         mode: str = 'exclude',
-        forced_include: Optional[List[int]] = None,
-        forced_exclude: Optional[List[int]] = None,
+        forced_include: list[int] | None = None,
+        forced_exclude: list[int] | None = None,
         runner=None
-    ) -> 'OperationResult':
+    ) -> OperationResult:
         """
         Filter events by style name.
 
@@ -1132,15 +1127,15 @@ class SubtitleData:
     # Utility Methods
     # =========================================================================
 
-    def get_dialogue_events(self) -> List[SubtitleEvent]:
+    def get_dialogue_events(self) -> list[SubtitleEvent]:
         """Get only dialogue events (not comments)."""
         return [e for e in self.events if not e.is_comment]
 
-    def get_events_by_style(self, style_name: str) -> List[SubtitleEvent]:
+    def get_events_by_style(self, style_name: str) -> list[SubtitleEvent]:
         """Get events with specific style."""
         return [e for e in self.events if e.style == style_name]
 
-    def get_style_counts(self) -> Dict[str, int]:
+    def get_style_counts(self) -> dict[str, int]:
         """
         Get event count per style name.
 
@@ -1148,14 +1143,14 @@ class SubtitleData:
             Dictionary mapping style name to event count.
             Example: {'Default': 1243, 'Sign': 47, 'OP': 24}
         """
-        counts: Dict[str, int] = {}
+        counts: dict[str, int] = {}
         for event in self.events:
             if not event.is_comment:
                 counts[event.style] = counts.get(event.style, 0) + 1
         return counts
 
     @staticmethod
-    def get_style_counts_from_file(path: str) -> Dict[str, int]:
+    def get_style_counts_from_file(path: str) -> dict[str, int]:
         """
         Get style counts from a file without loading full SubtitleData.
 
@@ -1175,7 +1170,7 @@ class SubtitleData:
         except Exception:
             return {}
 
-    def get_timing_range(self) -> Tuple[float, float]:
+    def get_timing_range(self) -> tuple[float, float]:
         """Get (min_start_ms, max_end_ms) of all events."""
         if not self.events:
             return (0.0, 0.0)
@@ -1183,7 +1178,7 @@ class SubtitleData:
         ends = [e.end_ms for e in self.events]
         return (min(starts), max(ends))
 
-    def validate(self) -> List[str]:
+    def validate(self) -> list[str]:
         """
         Validate data integrity.
 
@@ -1206,7 +1201,7 @@ class SubtitleData:
         """Sort events by start time, preserving layer order for simultaneous events."""
         self.events.sort(key=lambda e: (e.start_ms, e.layer))
 
-    def remove_events(self, indices: List[int]) -> int:
+    def remove_events(self, indices: list[int]) -> int:
         """
         Remove events at specified indices.
 

@@ -1,21 +1,28 @@
 # vsg_core/orchestrator/pipeline.py
-# -*- coding: utf-8 -*-
 """
 Enhanced pipeline with comprehensive validation at each step.
 """
 from __future__ import annotations
-import time
-from pathlib import Path
-from typing import Optional, List, Dict, Any, Callable
 
+import time
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+from vsg_core.audit import AuditTrail
 from vsg_core.io.runner import CommandRunner
 from vsg_core.models.settings import AppSettings
 from vsg_core.orchestrator.steps import (
-    Context, AnalysisStep, ExtractStep, AudioCorrectionStep, SubtitlesStep,
-    ChaptersStep, AttachmentsStep, MuxStep
+    AnalysisStep,
+    AttachmentsStep,
+    AudioCorrectionStep,
+    ChaptersStep,
+    Context,
+    ExtractStep,
+    MuxStep,
+    SubtitlesStep,
 )
-from vsg_core.orchestrator.validation import StepValidator, PipelineValidationError
-from vsg_core.audit import AuditTrail
+from vsg_core.orchestrator.validation import PipelineValidationError, StepValidator
 
 
 class Orchestrator:
@@ -26,16 +33,16 @@ class Orchestrator:
     def run(
         self,
         *,
-        settings_dict: Dict[str, Any],
-        tool_paths: Dict[str, Optional[str]],
+        settings_dict: dict[str, Any],
+        tool_paths: dict[str, str | None],
         log: Callable[[str], None],
         progress: Callable[[float], None],
-        sources: Dict[str, str],
+        sources: dict[str, str],
         and_merge: bool,
         output_dir: str,
-        manual_layout: List[Dict[str, Any]],
-        attachment_sources: List[str],
-        source_settings: Dict[str, Dict[str, Any]] = None
+        manual_layout: list[dict[str, Any]],
+        attachment_sources: list[str],
+        source_settings: dict[str, dict[str, Any]] = None
     ) -> Context:
         """
         Executes the pipeline steps with validation.

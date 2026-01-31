@@ -1,5 +1,4 @@
 # tests/test_subtitle_data.py
-# -*- coding: utf-8 -*-
 """
 Comprehensive tests for the unified SubtitleData system.
 
@@ -204,8 +203,9 @@ def test_time_based_sync():
     """Test time-based sync mode."""
     print("\n=== Test: Time-Based Sync Mode ===")
 
-    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
     from collections import OrderedDict
+
+    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
 
     # Create test data
     data = SubtitleData()
@@ -249,9 +249,10 @@ def test_float_precision_through_pipeline():
     """Test that float precision is maintained until final save."""
     print("\n=== Test: Float Precision Through Pipeline ===")
 
-    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
-    from collections import OrderedDict
     import tempfile
+    from collections import OrderedDict
+
+    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
 
     # Create test data with precise float timing
     data = SubtitleData()
@@ -301,10 +302,10 @@ def test_float_precision_through_pipeline():
         data.save_ass(temp_output)
 
         # Read raw file to check timing format
-        with open(temp_output, 'r') as f:
+        with open(temp_output) as f:
             content = f.read()
 
-        print(f"  Output file written")
+        print("  Output file written")
 
         # ASS times should be rounded to centiseconds
         # 1234.567 + 100.333 + 50.666 = 1385.566 -> 1385.56 ms -> 138.556 cs -> 138 cs = 0:00:01.38
@@ -332,8 +333,9 @@ def test_style_operations():
     """Test style operations."""
     print("\n=== Test: Style Operations ===")
 
-    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
     from collections import OrderedDict
+
+    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
 
     # Create test data
     data = SubtitleData()
@@ -363,8 +365,9 @@ def test_validation():
     """Test data validation."""
     print("\n=== Test: Data Validation ===")
 
-    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
     from collections import OrderedDict
+
+    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
 
     # Create test data with issues
     data = SubtitleData()
@@ -391,9 +394,10 @@ def test_timebase_frame_locked_sync():
     """Test timebase-frame-locked-timestamps sync mode."""
     print("\n=== Test: TimeBase Frame-Locked Sync Mode ===")
 
+    from collections import OrderedDict
+
     from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
     from vsg_core.subtitles.sync_modes import get_sync_plugin
-    from collections import OrderedDict
 
     # Get the plugin
     plugin = get_sync_plugin('timebase-frame-locked-timestamps')
@@ -456,8 +460,9 @@ def test_mkvmerge_sync_mode():
     """Test time-based sync in mkvmerge mode (no subtitle modification)."""
     print("\n=== Test: MKVMerge Sync Mode ===")
 
-    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
     from collections import OrderedDict
+
+    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
 
     # Create test data
     data = SubtitleData()
@@ -496,10 +501,11 @@ def test_json_export():
     """Test JSON debug export."""
     print("\n=== Test: JSON Debug Export ===")
 
-    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
-    from collections import OrderedDict
-    import tempfile
     import json
+    import tempfile
+    from collections import OrderedDict
+
+    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
 
     # Create test data
     data = SubtitleData()

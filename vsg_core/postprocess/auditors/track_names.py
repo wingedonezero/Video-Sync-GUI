@@ -1,6 +1,4 @@
 # vsg_core/postprocess/auditors/track_names.py
-# -*- coding: utf-8 -*-
-from typing import Dict
 from pathlib import Path
 
 from .base import BaseAuditor
@@ -9,7 +7,7 @@ from .base import BaseAuditor
 class TrackNamesAuditor(BaseAuditor):
     """Verifies track names match expectations when custom names or apply_track_name is enabled."""
 
-    def run(self, final_mkv_path: Path, final_mkvmerge_data: Dict, final_ffprobe_data=None) -> int:
+    def run(self, final_mkv_path: Path, final_mkvmerge_data: dict, final_ffprobe_data=None) -> int:
         """
         Audits track names.
         Returns the number of issues found.

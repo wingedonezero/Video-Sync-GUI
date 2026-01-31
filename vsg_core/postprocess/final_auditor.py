@@ -1,36 +1,34 @@
 # vsg_core/postprocess/final_auditor.py
-# -*- coding: utf-8 -*-
 """
 Final Audit Orchestrator - Coordinates all post-merge validation checks.
 Enhanced with drift correction and global shift auditors.
 """
 import json
 from pathlib import Path
-from typing import Dict, Optional
 
-from vsg_core.orchestrator.steps.context import Context
 from vsg_core.io.runner import CommandRunner
 from vsg_core.models.enums import TrackType
+from vsg_core.orchestrator.steps.context import Context
 
 from .auditors import (
-    TrackFlagsAuditor,
-    VideoMetadataAuditor,
-    DolbyVisionAuditor,
-    AudioObjectBasedAuditor,
-    CodecIntegrityAuditor,
+    AttachmentsAuditor,
     AudioChannelsAuditor,
+    AudioObjectBasedAuditor,
     AudioQualityAuditor,
     AudioSyncAuditor,
-    SubtitleFormatsAuditor,
     ChaptersAuditor,
-    TrackOrderAuditor,
-    LanguageTagsAuditor,
-    TrackNamesAuditor,
-    AttachmentsAuditor,
+    CodecIntegrityAuditor,
+    DolbyVisionAuditor,
     DriftCorrectionAuditor,
-    SteppingCorrectionAuditor,
     GlobalShiftAuditor,
+    LanguageTagsAuditor,
+    SteppingCorrectionAuditor,
     SubtitleClampingAuditor,
+    SubtitleFormatsAuditor,
+    TrackFlagsAuditor,
+    TrackNamesAuditor,
+    TrackOrderAuditor,
+    VideoMetadataAuditor,
 )
 
 
@@ -43,8 +41,8 @@ class FinalAuditor:
         self.ctx = ctx
         self.runner = runner
         self.log = runner._log_message
-        self._shared_ffprobe_cache: Dict[str, Optional[Dict]] = {}
-        self._shared_mkvmerge_cache: Dict[str, Optional[Dict]] = {}
+        self._shared_ffprobe_cache: dict[str, dict | None] = {}
+        self._shared_mkvmerge_cache: dict[str, dict | None] = {}
 
     def run(self, final_mkv_path: Path):
         """
@@ -290,21 +288,21 @@ class FinalAuditor:
             # Warn if durations were unexpectedly modified
             if final_duration_changed > 0:
                 self.log(f"[WARNING] {final_duration_changed} subtitle(s) had duration changes")
-                self.log(f"          This may indicate timing issues or intentional zero-duration effects becoming visible")
+                self.log("          This may indicate timing issues or intentional zero-duration effects becoming visible")
                 issues += 1
 
             # Warn if ends were adjusted beyond the global delay
             if final_end_adjusted > 0:
                 self.log(f"[WARNING] {final_end_adjusted} subtitle(s) had end times adjusted beyond delay")
-                self.log(f"          This may indicate duration modifications for frame visibility")
+                self.log("          This may indicate duration modifications for frame visibility")
                 issues += 1
 
             if final_duration_changed == 0 and final_end_adjusted == 0:
-                self.log(f"[OK] All durations preserved correctly (zero-duration effects stayed zero-duration)")
+                self.log("[OK] All durations preserved correctly (zero-duration effects stayed zero-duration)")
 
         return issues
 
-    def _get_metadata(self, file_path: str, tool: str) -> Optional[Dict]:
+    def _get_metadata(self, file_path: str, tool: str) -> dict | None:
         """Gets metadata using either mkvmerge or ffprobe with enhanced probing for large delays."""
         try:
             if tool == 'mkvmerge':

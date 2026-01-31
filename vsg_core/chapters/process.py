@@ -1,10 +1,11 @@
 # vsg_core/chapters/process.py
-# -*- coding: utf-8 -*-
-from lxml import etree as ET
 from pathlib import Path
-from typing import Optional, List, Dict
+
+from lxml import etree as ET
+
 from ..io.runner import CommandRunner
 from .keyframes import probe_keyframes_ns
+
 
 def _parse_ns(t: str) -> int:
     hh, mm, rest = t.strip().split(':')
@@ -71,14 +72,14 @@ def _fmt_delta_for_log(delta_ns: int) -> str:
         ms_value = abs_delta / 1_000_000.0
         return f"{sign}{ms_value:.3f}ms"
 
-def _get_xpath_and_nsmap(root: ET.Element) -> (Dict, str):
+def _get_xpath_and_nsmap(root: ET.Element) -> (dict, str):
     """Detects if a namespace is used and returns the appropriate xpath prefix and nsmap."""
     if root.nsmap and None in root.nsmap:
         ns_uri = root.nsmap[None]
         return {'def': ns_uri}, 'def:'
     return None, ''
 
-def _normalize_and_dedupe_chapters(root: ET.Element, runner: CommandRunner, nsmap: Dict, prefix: str):
+def _normalize_and_dedupe_chapters(root: ET.Element, runner: CommandRunner, nsmap: dict, prefix: str):
     parent_map = {c: p for p in root.iter() for c in p}
 
     all_atoms = root.xpath(f'//{prefix}ChapterAtom', namespaces=nsmap)
@@ -133,7 +134,7 @@ def _normalize_and_dedupe_chapters(root: ET.Element, runner: CommandRunner, nsma
             runner._log_message(f"  - Normalized '{chap['name']}' end time: ({original_display} -> {_fmt_ns_for_log(desired_en_ns)}){reason}")
             en_el.text = new_text
 
-def _extract_language_from_display(display_node: ET.Element, nsmap: Dict, prefix: str):
+def _extract_language_from_display(display_node: ET.Element, nsmap: dict, prefix: str):
     """Extract both language fields from a ChapterDisplay node, returning tuple (chapter_lang, ietf_lang)."""
     try:
         # Extract ChapterLanguage (legacy 3-letter code)
@@ -164,11 +165,11 @@ def _extract_language_from_display(display_node: ET.Element, nsmap: Dict, prefix
         # Always return a tuple of exactly 2 strings
         return chapter_lang, ietf_lang
 
-    except Exception as e:
+    except Exception:
         # Fallback on any error - always return a tuple
         return 'und', 'und'
 
-def _create_chapter_display(atom: ET.Element, chapter_name: str, language: str, ietf_language: str, nsmap: Dict, prefix: str):
+def _create_chapter_display(atom: ET.Element, chapter_name: str, language: str, ietf_language: str, nsmap: dict, prefix: str):
     """Create a new ChapterDisplay element with proper namespace handling and both language fields."""
     # Create the display element with proper namespace
     if prefix:
@@ -188,7 +189,7 @@ def _create_chapter_display(atom: ET.Element, chapter_name: str, language: str, 
     lang_elem.text = language
     ietf_elem.text = ietf_language
 
-def process_chapters(ref_mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: dict, config: dict, shift_ms: int) -> Optional[str]:
+def process_chapters(ref_mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: dict, config: dict, shift_ms: int) -> str | None:
     xml_content = runner.run(['mkvextract', str(ref_mkv), 'chapters', '-'], tool_paths)
     if not xml_content or not xml_content.strip():
         runner._log_message('No chapters found in reference file.')
@@ -263,7 +264,7 @@ def process_chapters(ref_mkv: str, temp_dir: Path, runner: CommandRunner, tool_p
         runner._log_message(f'[ERROR] Chapter processing failed: {e}')
         return None
 
-def _snap_chapter_times_inplace(root, keyframes_ns: list[int], config: dict, runner: CommandRunner, nsmap: Dict, prefix: str):
+def _snap_chapter_times_inplace(root, keyframes_ns: list[int], config: dict, runner: CommandRunner, nsmap: dict, prefix: str):
     import bisect
     mode = config.get('snap_mode', 'previous')
     threshold_ms = config.get('snap_threshold_ms', 250)

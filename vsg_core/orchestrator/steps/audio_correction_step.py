@@ -1,16 +1,15 @@
 # vsg_core/orchestrator/steps/audio_correction_step.py
-# -*- coding: utf-8 -*-
 """
 Audio correction step with proper error handling and validation.
 """
 from __future__ import annotations
 
-from vsg_core.orchestrator.steps.context import Context
-from vsg_core.io.runner import CommandRunner
-from vsg_core.correction.pal import run_pal_correction
 from vsg_core.correction.linear import run_linear_correction
+from vsg_core.correction.pal import run_pal_correction
 from vsg_core.correction.stepping import run_stepping_correction
+from vsg_core.io.runner import CommandRunner
 from vsg_core.models.enums import TrackType
+from vsg_core.orchestrator.steps.context import Context
 
 
 class AudioCorrectionStep:
@@ -162,7 +161,7 @@ class AudioCorrectionStep:
                     f"This is expected if the corrector determined no stepping exists after detailed analysis."
                 )
                 runner._log_message(
-                    f"[Validation] The globally-shifted delay from initial analysis will be used."
+                    "[Validation] The globally-shifted delay from initial analysis will be used."
                 )
                 # SAFEGUARD #3: Mark that this is intentional - stepping was a false positive
                 # Validation passes - this is not an error condition

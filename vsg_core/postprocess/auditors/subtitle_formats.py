@@ -1,17 +1,16 @@
 # vsg_core/postprocess/auditors/subtitle_formats.py
-# -*- coding: utf-8 -*-
 import re
-from typing import Dict
 from pathlib import Path
 
 from vsg_core.models.enums import TrackType
+
 from .base import BaseAuditor
 
 
 class SubtitleFormatsAuditor(BaseAuditor):
     """Validates subtitle conversions and all processing steps."""
 
-    def run(self, final_mkv_path: Path, final_mkvmerge_data: Dict, final_ffprobe_data=None) -> int:
+    def run(self, final_mkv_path: Path, final_mkvmerge_data: dict, final_ffprobe_data=None) -> int:
         """
         Comprehensive subtitle audit including:
         - Track count verification
@@ -42,7 +41,7 @@ class SubtitleFormatsAuditor(BaseAuditor):
         generated_count = sum(1 for item in subtitle_items if item.is_generated)
 
         if expected_count != actual_count:
-            self.log(f"[ERROR] Subtitle track count mismatch!")
+            self.log("[ERROR] Subtitle track count mismatch!")
             gen_info = f" (including {generated_count} generated)" if generated_count > 0 else ""
             self.log(f"        Expected: {expected_count} tracks{gen_info}")
             self.log(f"        Actual:   {actual_count} tracks in final output")
@@ -104,9 +103,9 @@ class SubtitleFormatsAuditor(BaseAuditor):
 
         # Check if any subtitle tracks used raw delay fallback due to no scene matches
         if getattr(self.ctx, 'correlation_snap_no_scenes_fallback', False):
-            self.log(f"[WARNING] One or more subtitle tracks used raw delay (no scene matches found)")
-            self.log(f"          → Frame verification was skipped, using correlation only")
-            self.log(f"          → Review logs to confirm timing is correct")
+            self.log("[WARNING] One or more subtitle tracks used raw delay (no scene matches found)")
+            self.log("          → Frame verification was skipped, using correlation only")
+            self.log("          → Review logs to confirm timing is correct")
             issues += 1
 
         if issues == 0:
@@ -114,25 +113,25 @@ class SubtitleFormatsAuditor(BaseAuditor):
 
         return issues
 
-    def _verify_ocr(self, final_track: Dict, track_name: str) -> int:
+    def _verify_ocr(self, final_track: dict, track_name: str) -> int:
         """Verify OCR was performed and resulted in text format."""
         codec_id = final_track.get('properties', {}).get('codec_id', '')
         if 'TEXT' not in codec_id.upper():
             self.log(f"[WARNING] OCR track '{track_name}' is not in text format!")
             self.log(f"          Codec: {codec_id}")
-            self.log(f"          → OCR conversion was enabled but not applied!")
+            self.log("          → OCR conversion was enabled but not applied!")
             return 1
         else:
             self.log(f"  ✓ OCR track '{track_name}' successfully converted to text")
             return 0
 
-    def _verify_ass_conversion(self, final_track: Dict, track_name: str) -> int:
+    def _verify_ass_conversion(self, final_track: dict, track_name: str) -> int:
         """Verify subtitle was converted to ASS/SSA format."""
         codec_id = final_track.get('properties', {}).get('codec_id', '')
         if 'ASS' not in codec_id.upper() and 'SSA' not in codec_id.upper():
             self.log(f"[WARNING] Track '{track_name}' was not converted to ASS/SSA!")
             self.log(f"          Codec: {codec_id}")
-            self.log(f"          → ASS conversion was enabled but not applied!")
+            self.log("          → ASS conversion was enabled but not applied!")
             return 1
         else:
             self.log(f"  ✓ Track '{track_name}' successfully converted to ASS")
@@ -190,7 +189,7 @@ class SubtitleFormatsAuditor(BaseAuditor):
                 self.log(f"[WARNING] Rescaling verification failed for '{track_name}'")
                 self.log(f"          Expected: {expected_width}x{expected_height}")
                 self.log(f"          Actual:   {actual_width}x{actual_height}")
-                self.log(f"          → Rescaling was enabled but not applied!")
+                self.log("          → Rescaling was enabled but not applied!")
                 issues += 1
             else:
                 self.log(f"  ✓ Subtitle '{track_name}' correctly rescaled to {actual_width}x{actual_height}")

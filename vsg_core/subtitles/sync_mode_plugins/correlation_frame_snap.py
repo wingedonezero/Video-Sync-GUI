@@ -1,5 +1,4 @@
 # vsg_core/subtitles/sync_mode_plugins/correlation_frame_snap.py
-# -*- coding: utf-8 -*-
 """
 Correlation + Frame Snap sync plugin for SubtitleData.
 
@@ -10,15 +9,14 @@ All timing is float ms internally - rounding happens only at final save.
 """
 from __future__ import annotations
 
-import math
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..sync_modes import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
-    from ..data import SubtitleData, OperationResult, OperationRecord, SyncEventData
+    from ..data import OperationResult, SubtitleData
 
 
 @register_sync_plugin
@@ -34,18 +32,18 @@ class CorrelationFrameSnapSync(SyncPlugin):
 
     def apply(
         self,
-        subtitle_data: 'SubtitleData',
+        subtitle_data: SubtitleData,
         total_delay_ms: float,
         global_shift_ms: float,
-        target_fps: Optional[float] = None,
-        source_video: Optional[str] = None,
-        target_video: Optional[str] = None,
+        target_fps: float | None = None,
+        source_video: str | None = None,
+        target_video: str | None = None,
         runner=None,
-        config: Optional[dict] = None,
-        temp_dir: Optional[Path] = None,
-        cached_frame_correction: Optional[Dict[str, Any]] = None,
+        config: dict | None = None,
+        temp_dir: Path | None = None,
+        cached_frame_correction: dict[str, Any] | None = None,
         **kwargs
-    ) -> 'OperationResult':
+    ) -> OperationResult:
         """
         Apply correlation + frame snap sync to subtitle data.
 
@@ -69,8 +67,8 @@ class CorrelationFrameSnapSync(SyncPlugin):
         Returns:
             OperationResult with statistics
         """
-        from ..data import OperationResult, OperationRecord, SyncEventData
-        from ..frame_utils import detect_video_fps, detect_scene_changes
+        from ..data import OperationRecord, OperationResult, SyncEventData
+        from ..frame_utils import detect_video_fps
         from ..frame_verification import verify_correlation_with_frame_snap
 
         config = config or {}
@@ -79,7 +77,7 @@ class CorrelationFrameSnapSync(SyncPlugin):
             if runner:
                 runner._log_message(msg)
 
-        log(f"[CorrFrameSnap] === Correlation + Frame Snap Sync ===")
+        log("[CorrFrameSnap] === Correlation + Frame Snap Sync ===")
         log(f"[CorrFrameSnap] Events: {len(subtitle_data.events)}")
 
         if not source_video or not target_video:
@@ -129,7 +127,7 @@ class CorrelationFrameSnapSync(SyncPlugin):
             use_scene_changes = config.get('correlation_snap_use_scene_changes', True)
 
             if use_scene_changes:
-                log(f"[CorrFrameSnap] Detecting scene changes...")
+                log("[CorrFrameSnap] Detecting scene changes...")
 
                 # Create event wrapper for verification function
                 class EventWrapper:
@@ -163,7 +161,7 @@ class CorrelationFrameSnapSync(SyncPlugin):
                         )
                     elif fallback_mode == 'use-raw':
                         frame_correction_ms = 0.0
-                        log(f"[CorrFrameSnap] Using raw correlation (no correction)")
+                        log("[CorrFrameSnap] Using raw correlation (no correction)")
                     else:  # snap-to-frame
                         frame_delta = verification_result.get('frame_delta', 0)
                         frame_correction_ms = frame_delta * frame_duration_ms
@@ -173,12 +171,12 @@ class CorrelationFrameSnapSync(SyncPlugin):
         # total_delay_ms already includes global_shift, just add frame correction
         final_offset_ms = total_delay_ms + frame_correction_ms
 
-        log(f"[CorrFrameSnap] ───────────────────────────────────────")
-        log(f"[CorrFrameSnap] Final offset calculation:")
+        log("[CorrFrameSnap] ───────────────────────────────────────")
+        log("[CorrFrameSnap] Final offset calculation:")
         log(f"[CorrFrameSnap]   Total delay:       {total_delay_ms:+.3f}ms")
         log(f"[CorrFrameSnap]   + Frame correction: {frame_correction_ms:+.3f}ms")
         log(f"[CorrFrameSnap]   = Final offset:    {final_offset_ms:+.3f}ms")
-        log(f"[CorrFrameSnap] ───────────────────────────────────────")
+        log("[CorrFrameSnap] ───────────────────────────────────────")
 
         # Apply offset to all events
         log(f"[CorrFrameSnap] Applying {final_offset_ms:+.3f}ms to {len(subtitle_data.events)} events")
@@ -232,7 +230,7 @@ class CorrelationFrameSnapSync(SyncPlugin):
         subtitle_data.operations.append(record)
 
         log(f"[CorrFrameSnap] Sync complete: {events_synced} events")
-        log(f"[CorrFrameSnap] ===================================")
+        log("[CorrFrameSnap] ===================================")
 
         return OperationResult(
             success=True,

@@ -1,5 +1,4 @@
 # vsg_core/subtitles/sync_mode_plugins/timebase_frame_locked.py
-# -*- coding: utf-8 -*-
 """
 TimeBase Frame-Locked Timestamps sync plugin for SubtitleData.
 
@@ -16,12 +15,12 @@ from __future__ import annotations
 from datetime import datetime
 from fractions import Fraction
 from pathlib import Path
-from typing import Dict, Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from ..sync_modes import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
-    from ..data import SubtitleData, OperationResult, OperationRecord, SyncEventData
+    from ..data import OperationResult, SubtitleData
 
 
 @register_sync_plugin
@@ -37,16 +36,16 @@ class TimebaseFrameLockedSync(SyncPlugin):
 
     def apply(
         self,
-        subtitle_data: 'SubtitleData',
+        subtitle_data: SubtitleData,
         total_delay_ms: float,
         global_shift_ms: float,
-        target_fps: Optional[float] = None,
-        source_video: Optional[str] = None,
-        target_video: Optional[str] = None,
+        target_fps: float | None = None,
+        source_video: str | None = None,
+        target_video: str | None = None,
         runner=None,
-        config: Optional[dict] = None,
+        config: dict | None = None,
         **kwargs
-    ) -> 'OperationResult':
+    ) -> OperationResult:
         """
         Apply frame-locked sync to subtitle data.
 
@@ -62,7 +61,7 @@ class TimebaseFrameLockedSync(SyncPlugin):
         Returns:
             OperationResult with statistics
         """
-        from ..data import OperationResult, OperationRecord, SyncEventData
+        from ..data import OperationRecord, OperationResult, SyncEventData
 
         config = config or {}
 
@@ -70,7 +69,7 @@ class TimebaseFrameLockedSync(SyncPlugin):
             if runner:
                 runner._log_message(msg)
 
-        log(f"[FrameLocked] === TimeBase Frame-Locked Timestamps Sync ===")
+        log("[FrameLocked] === TimeBase Frame-Locked Timestamps Sync ===")
         log(f"[FrameLocked] Events: {len(subtitle_data.events)}")
 
         if not target_video:
@@ -126,7 +125,7 @@ class TimebaseFrameLockedSync(SyncPlugin):
             stats['frame_aligned_delay_ms'] = frame_aligned_delay
             stats['alignment_delta_ms'] = frame_aligned_delay - total_delay_ms
         else:
-            log(f"[FrameLocked] VideoTimestamps unavailable, using raw delay")
+            log("[FrameLocked] VideoTimestamps unavailable, using raw delay")
             frame_aligned_delay = total_delay_ms
 
         # Step 2: Apply delay and frame-snap each event
@@ -255,14 +254,14 @@ class TimebaseFrameLockedSync(SyncPlugin):
         subtitle_data.operations.append(record)
 
         # Log summary
-        log(f"[FrameLocked] ───────────────────────────────────────")
-        log(f"[FrameLocked] Sync complete:")
+        log("[FrameLocked] ───────────────────────────────────────")
+        log("[FrameLocked] Sync complete:")
         log(f"[FrameLocked]   Events synced: {stats['events_synced']}/{stats['total_events']}")
         log(f"[FrameLocked]   Start times snapped: {stats['start_snapped']}")
         log(f"[FrameLocked]   Already aligned: {stats['start_already_aligned']}")
         log(f"[FrameLocked]   Duration adjustments: {stats['duration_adjusted']}")
         log(f"[FrameLocked]   Frame alignment delta: {stats['alignment_delta_ms']:+.3f}ms")
-        log(f"[FrameLocked] ===================================")
+        log("[FrameLocked] ===================================")
 
         return OperationResult(
             success=True,

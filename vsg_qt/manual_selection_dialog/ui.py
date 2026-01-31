@@ -1,36 +1,50 @@
 # vsg_qt/manual_selection_dialog/ui.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
+import json
+import re
 import shutil
 import sys
 import time
-import re
-import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Callable, Tuple
+from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QDialogButtonBox,
-    QGroupBox, QScrollArea, QWidget, QMessageBox, QPushButton, QCheckBox, QFileDialog, QMenu
+    QCheckBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
-from .logic import ManualLogic
-from .widgets import SourceList, FinalList
-from vsg_qt.track_widget import TrackWidget
-from vsg_qt.subtitle_editor import SubtitleEditorWindow
-from vsg_core.extraction.tracks import extract_tracks
 from vsg_core.extraction.attachments import extract_attachments
-from vsg_core.subtitles.convert import convert_srt_to_ass
+from vsg_core.extraction.tracks import extract_tracks
 from vsg_core.io.runner import CommandRunner
+from vsg_core.subtitles.convert import convert_srt_to_ass
 from vsg_core.subtitles.style_engine import StyleEngine
+from vsg_qt.subtitle_editor import SubtitleEditorWindow
+from vsg_qt.track_widget import TrackWidget
+
+from .logic import ManualLogic
+from .widgets import FinalList, SourceList
+
 
 class ManualSelectionDialog(QDialog):
-    def __init__(self, track_info: Dict[str, List[dict]], *, config: "AppConfig",
-                 log_callback: Optional[Callable[[str], None]] = None, parent=None,
-                 previous_layout: Optional[List[dict]] = None,
-                 previous_attachment_sources: Optional[List[str]] = None,
-                 previous_source_settings: Optional[Dict[str, Dict[str, Any]]] = None):
+    def __init__(self, track_info: dict[str, list[dict]], *, config: AppConfig,
+                 log_callback: Callable[[str], None] | None = None, parent=None,
+                 previous_layout: list[dict] | None = None,
+                 previous_attachment_sources: list[str] | None = None,
+                 previous_source_settings: dict[str, dict[str, Any]] | None = None):
         super().__init__(parent)
         self.setWindowTitle("Manual Track Selection")
         self.setMinimumSize(1200, 700)
@@ -38,18 +52,18 @@ class ManualSelectionDialog(QDialog):
         self.track_info = track_info
         self.config = config
         self.log_callback = log_callback or (lambda msg: print(f"[Dialog] {msg}"))
-        self.manual_layout: Optional[List[dict]] = None
-        self.attachment_sources: List[str] = []
-        self.source_settings: Dict[str, Dict[str, Any]] = previous_source_settings or {}
-        self._style_edit_clipboard: Optional[Dict[str, Any]] = None  # Stores style_patch and font_replacements
+        self.manual_layout: list[dict] | None = None
+        self.attachment_sources: list[str] = []
+        self.source_settings: dict[str, dict[str, Any]] = previous_source_settings or {}
+        self._style_edit_clipboard: dict[str, Any] | None = None  # Stores style_patch and font_replacements
         self.edited_widget = None
-        self._source_group_boxes: Dict[str, QGroupBox] = {}  # Track group boxes for context menu
+        self._source_group_boxes: dict[str, QGroupBox] = {}  # Track group boxes for context menu
 
         # FIX: Instantiate the logic controller
         self._logic = ManualLogic(self)
 
-        self.source_lists: Dict[str, SourceList] = {}
-        self.attachment_checkboxes: Dict[str, QCheckBox] = {}
+        self.source_lists: dict[str, SourceList] = {}
+        self.attachment_checkboxes: dict[str, QCheckBox] = {}
         self.available_sources = sorted(track_info.keys(), key=lambda k: int(re.search(r'\d+', k).group()))
 
         self._build_ui(previous_attachment_sources)
@@ -62,7 +76,7 @@ class ManualSelectionDialog(QDialog):
             # FIX: Call the prepopulate method on the logic instance
             self._logic.prepopulate_from_layout(previous_layout)
 
-    def _build_ui(self, previous_attachment_sources: Optional[List[str]] = None):
+    def _build_ui(self, previous_attachment_sources: list[str] | None = None):
         root = QVBoxLayout(self)
         self.info_label = QLabel()
         self.info_label.setVisible(False)
@@ -153,7 +167,7 @@ class ManualSelectionDialog(QDialog):
         if td and not self._logic.is_blocked_video(td):
             self.final_list.add_track_widget(td, preset=('style_patch' in td))
 
-    def get_manual_layout_and_attachment_sources(self) -> Tuple[List[Dict], List[str], Dict[str, Dict[str, Any]]]:
+    def get_manual_layout_and_attachment_sources(self) -> tuple[list[dict], list[str], dict[str, dict[str, Any]]]:
         """Returns (manual_layout, attachment_sources, source_settings)."""
         return self.manual_layout, self.attachment_sources, self.source_settings
 
@@ -312,7 +326,7 @@ class ManualSelectionDialog(QDialog):
         if self.external_list.count() > 0:
             self.ext_group.setVisible(True)
 
-    def _ensure_editable_subtitle_path(self, widget: TrackWidget) -> Optional[str]:
+    def _ensure_editable_subtitle_path(self, widget: TrackWidget) -> str | None:
         track_data = widget.track_data
         if track_data.get('user_modified_path'):
             return track_data['user_modified_path']
@@ -351,7 +365,7 @@ class ManualSelectionDialog(QDialog):
             self.log_callback(f"[ERROR] Exception during subtitle preparation: {e}")
             return None
 
-    def _prepare_ocr_preview(self, widget: TrackWidget) -> Optional[Tuple[str, str]]:
+    def _prepare_ocr_preview(self, widget: TrackWidget) -> tuple[str, str] | None:
         """
         Run preview OCR on image-based subtitle for style editing.
 
@@ -418,7 +432,7 @@ class ManualSelectionDialog(QDialog):
 
         return json_path, ass_path
 
-    def _extract_image_subtitle(self, widget: TrackWidget) -> Optional[str]:
+    def _extract_image_subtitle(self, widget: TrackWidget) -> str | None:
         """
         Extract image-based subtitle (VobSub/PGS) from source file.
 
@@ -764,10 +778,10 @@ class ManualSelectionDialog(QDialog):
         widget: TrackWidget,
         subtitle_path: str,
         video_path: str,
-        fonts_dir: Optional[str],
-        existing_font_replacements: Optional[Dict],
-        existing_style_patch: Optional[Dict] = None,
-        existing_filter_config: Optional[Dict] = None
+        fonts_dir: str | None,
+        existing_font_replacements: dict | None,
+        existing_style_patch: dict | None = None,
+        existing_filter_config: dict | None = None
     ):
         """Launch subtitle editor as an in-process dialog."""
         self.log_callback("[INFO] Launching subtitle editor...")
@@ -814,7 +828,7 @@ class ManualSelectionDialog(QDialog):
             self.log_callback(f"[ERROR] Failed to run subtitle editor: {e}")
             QMessageBox.critical(self, "Error", f"Failed to launch subtitle editor:\n{e}")
 
-    def _prepare_ocr_preview_with_progress(self, widget: TrackWidget) -> Optional[Tuple[str, str]]:
+    def _prepare_ocr_preview_with_progress(self, widget: TrackWidget) -> tuple[str, str] | None:
         """
         Run preview OCR with a progress dialog.
 
@@ -824,10 +838,10 @@ class ManualSelectionDialog(QDialog):
         Returns:
             Tuple of (json_path, ass_path) on success, or None on failure.
         """
-        from PySide6.QtWidgets import QProgressDialog
-        from PySide6.QtCore import Qt, QProcess
         import json
-        import sys
+
+        from PySide6.QtCore import QProcess, Qt
+        from PySide6.QtWidgets import QProgressDialog
 
         track_data = widget.track_data
 

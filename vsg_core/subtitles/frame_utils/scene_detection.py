@@ -1,5 +1,4 @@
 # vsg_core/subtitles/frame_utils/scene_detection.py
-# -*- coding: utf-8 -*-
 """
 Scene change detection using PySceneDetect.
 
@@ -7,8 +6,8 @@ Contains:
 - Scene change detection for sync verification anchor points
 """
 from __future__ import annotations
+
 from pathlib import Path
-from typing import List
 
 
 def detect_scene_changes(
@@ -18,7 +17,7 @@ def detect_scene_changes(
     runner,
     max_scenes: int = 10,
     threshold: float = 27.0
-) -> List[int]:
+) -> list[int]:
     """
     Detect scene changes in a video using PySceneDetect.
 
@@ -43,7 +42,7 @@ def detect_scene_changes(
         List of frame numbers (the frame BEFORE each scene change)
     """
     try:
-        from scenedetect import detect, ContentDetector, open_video
+        from scenedetect import ContentDetector, detect, open_video
 
         runner._log_message(f"[SceneDetect] Detecting scene changes in {Path(video_path).name}")
         runner._log_message(f"[SceneDetect] Using PySceneDetect (ContentDetector, threshold={threshold})")
@@ -99,7 +98,7 @@ def detect_scene_changes(
 
         # If we didn't find enough scenes, try with lower threshold
         if len(scene_frames) < 2:
-            runner._log_message(f"[SceneDetect] Few scenes found, trying with lower threshold (15.0)")
+            runner._log_message("[SceneDetect] Few scenes found, trying with lower threshold (15.0)")
 
             scene_list = detect(
                 str(video_path),

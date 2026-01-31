@@ -1,5 +1,4 @@
 # vsg_core/audit/trail.py
-# -*- coding: utf-8 -*-
 """
 Pipeline audit trail for debugging timing issues.
 
@@ -21,7 +20,7 @@ import shutil
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
 
 
 class NumpyJSONEncoder(json.JSONEncoder):
@@ -64,7 +63,7 @@ class AuditTrail:
     VERSION = "1.0"
     FILENAME = "pipeline_audit_trail.json"
 
-    def __init__(self, temp_dir: Union[Path, str], job_name: str):
+    def __init__(self, temp_dir: Path | str, job_name: str):
         """
         Initialize audit trail.
 
@@ -77,7 +76,7 @@ class AuditTrail:
         self.file_path = self.temp_dir / self.FILENAME
 
         # Initialize structure
-        self._data: Dict[str, Any] = {
+        self._data: dict[str, Any] = {
             "_metadata": {
                 "version": self.VERSION,
                 "created_at": datetime.now().isoformat(),
@@ -175,7 +174,7 @@ class AuditTrail:
         target[final_key].append(value)
         self._write()
 
-    def append_event(self, event_type: str, message: str, data: Optional[Dict] = None) -> None:
+    def append_event(self, event_type: str, message: str, data: dict | None = None) -> None:
         """
         Append a timestamped event to the events log.
 
@@ -413,10 +412,10 @@ class AuditTrail:
         track_id: int,
         final_delay_ms: int,
         reason: str,
-        raw_delay_available_ms: Optional[float] = None,
+        raw_delay_available_ms: float | None = None,
         stepping_adjusted: bool = False,
         frame_adjusted: bool = False,
-        sync_key: Optional[str] = None
+        sync_key: str | None = None
     ) -> None:
         """
         Record the final delay calculation for a track in mux.
@@ -439,14 +438,14 @@ class AuditTrail:
 
         self.append("mux.track_delays", entry)
 
-    def record_mux_tokens(self, tokens: List[str]) -> None:
+    def record_mux_tokens(self, tokens: list[str]) -> None:
         """
         Record the final mkvmerge tokens.
         """
         self.record("mux.tokens", tokens)
         self.record("mux.command_preview", " ".join(tokens[:20]) + ("..." if len(tokens) > 20 else ""))
 
-    def _get_nested(self, path: str) -> Optional[Any]:
+    def _get_nested(self, path: str) -> Any | None:
         """Get value at nested path, or None if not found."""
         parts = path.split('.')
         target = self._data
@@ -496,7 +495,7 @@ class AuditTrail:
         """Return path to the audit trail file."""
         return self.file_path
 
-    def finalize(self, output_file: Optional[str] = None, success: bool = True) -> None:
+    def finalize(self, output_file: str | None = None, success: bool = True) -> None:
         """
         Finalize the audit trail.
 
@@ -510,6 +509,6 @@ class AuditTrail:
             self._data["_metadata"]["output_file"] = str(output_file)
         self._write()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Return copy of the audit data."""
         return dict(self._data)

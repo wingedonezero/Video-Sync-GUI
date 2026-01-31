@@ -1,5 +1,4 @@
 # vsg_core/subtitles/frame_utils/validation.py
-# -*- coding: utf-8 -*-
 """
 Frame alignment validation for video sync verification.
 
@@ -8,12 +7,13 @@ Contains:
 - Perceptual hash-based frame alignment validation
 """
 from __future__ import annotations
-from pathlib import Path
-from typing import Dict, Any, List, Optional
+
 import gc
+from pathlib import Path
+from typing import Any
 
 
-def extract_frame_as_image(video_path: str, frame_number: int, runner, temp_dir: Optional[Path] = None) -> Optional[bytes]:
+def extract_frame_as_image(video_path: str, frame_number: int, runner, temp_dir: Path | None = None) -> bytes | None:
     """
     Extract a single frame from video as PNG image data using VapourSynth.
 
@@ -27,10 +27,11 @@ def extract_frame_as_image(video_path: str, frame_number: int, runner, temp_dir:
         PNG image data as bytes, or None on error
     """
     try:
+        import io
+
+        import numpy as np
         import vapoursynth as vs
         from PIL import Image
-        import numpy as np
-        import io
 
         from .video_reader import _get_ffms2_cache_path
 
@@ -130,12 +131,12 @@ def extract_frame_as_image(video_path: str, frame_number: int, runner, temp_dir:
 def validate_frame_alignment(
     source_video: str,
     target_video: str,
-    subtitle_events: List,
+    subtitle_events: list,
     duration_offset_ms: float,
     runner,
     config: dict = None,
-    temp_dir: Optional[Path] = None
-) -> Dict[str, Any]:
+    temp_dir: Path | None = None
+) -> dict[str, Any]:
     """
     Validate that videos are frame-aligned by comparing perceptual hashes.
 
@@ -165,8 +166,8 @@ def validate_frame_alignment(
     Returns:
         Dict with validation results
     """
-    from .video_properties import detect_video_fps
     from .frame_hashing import compute_perceptual_hash
+    from .video_properties import detect_video_fps
 
     config = config or {}
 
@@ -175,8 +176,8 @@ def validate_frame_alignment(
         runner._log_message("[Frame Validation] Validation disabled in config")
         return {'enabled': False, 'valid': True}
 
-    runner._log_message(f"[Frame Validation] =========================================")
-    runner._log_message(f"[Frame Validation] Validating frame alignment...")
+    runner._log_message("[Frame Validation] =========================================")
+    runner._log_message("[Frame Validation] Validating frame alignment...")
 
     # Get number of checkpoints to validate
     # UI sends text like "1 point (fast)" or "3 points (thorough)", extract the number
@@ -221,7 +222,7 @@ def validate_frame_alignment(
         middle_event = valid_events[len(valid_events) // 2]
         last_event = valid_events[-1]
         checkpoints = [first_event, middle_event, last_event]
-        runner._log_message(f"[Frame Validation] Checking 3 points:")
+        runner._log_message("[Frame Validation] Checking 3 points:")
         runner._log_message(f"[Frame Validation]   - First subtitle @ {first_event.start}ms")
         runner._log_message(f"[Frame Validation]   - Middle subtitle @ {middle_event.start}ms")
         runner._log_message(f"[Frame Validation]   - Last subtitle @ {last_event.start}ms")
@@ -243,7 +244,7 @@ def validate_frame_alignment(
     for idx, event in enumerate(checkpoints, 1):
         checkpoint_name = ['First', 'Middle', 'Last'][idx - 1] if num_points == 3 else 'First'
 
-        runner._log_message(f"[Frame Validation] -----------------------------------------")
+        runner._log_message("[Frame Validation] -----------------------------------------")
         runner._log_message(f"[Frame Validation] Checkpoint {idx}/{len(checkpoints)}: {checkpoint_name} subtitle")
 
         # Get source frame for this subtitle
@@ -257,7 +258,7 @@ def validate_frame_alignment(
 
         runner._log_message(f"[Frame Validation] Source: frame {source_frame} @ {source_time_ms}ms")
         runner._log_message(f"[Frame Validation] Target: frame {target_frame} @ {target_time_ms:.1f}ms")
-        runner._log_message(f"[Frame Validation] Comparing 11 frames (center +/- 5)...")
+        runner._log_message("[Frame Validation] Comparing 11 frames (center +/- 5)...")
 
         checkpoint_result = {
             'checkpoint': checkpoint_name,
@@ -327,7 +328,7 @@ def validate_frame_alignment(
         validation_results['checkpoints'].append(checkpoint_result)
 
     # Final verdict
-    runner._log_message(f"[Frame Validation] =========================================")
+    runner._log_message("[Frame Validation] =========================================")
 
     if validation_results['total_frames_checked'] > 0:
         overall_match_pct = (validation_results['matched_frames'] / validation_results['total_frames_checked']) * 100
@@ -336,14 +337,14 @@ def validate_frame_alignment(
         runner._log_message(f"[Frame Validation] OVERALL: {validation_results['matched_frames']}/{validation_results['total_frames_checked']} frames matched ({overall_match_pct:.1f}%)")
 
         if validation_results['valid']:
-            runner._log_message(f"[Frame Validation] VALIDATION PASSED - Videos appear frame-aligned")
+            runner._log_message("[Frame Validation] VALIDATION PASSED - Videos appear frame-aligned")
         else:
-            runner._log_message(f"[Frame Validation] VALIDATION FAILED - Videos may NOT be frame-aligned!")
-            runner._log_message(f"[Frame Validation] Consider using audio-correlation mode instead")
+            runner._log_message("[Frame Validation] VALIDATION FAILED - Videos may NOT be frame-aligned!")
+            runner._log_message("[Frame Validation] Consider using audio-correlation mode instead")
     else:
-        runner._log_message(f"[Frame Validation] ERROR: No frames could be validated")
+        runner._log_message("[Frame Validation] ERROR: No frames could be validated")
         validation_results['valid'] = False
 
-    runner._log_message(f"[Frame Validation] =========================================")
+    runner._log_message("[Frame Validation] =========================================")
 
     return validation_results

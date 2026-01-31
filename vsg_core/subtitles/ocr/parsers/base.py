@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/parsers/base.py
-# -*- coding: utf-8 -*-
 """
 Base classes and dataclasses for subtitle image parsing.
 
@@ -10,7 +9,8 @@ Provides common interfaces and data structures used by all subtitle parsers
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Optional
+
 import numpy as np
 
 
@@ -44,7 +44,7 @@ class SubtitleImage:
     frame_width: int = 720  # Default DVD resolution
     frame_height: int = 480
     is_forced: bool = False
-    palette: Optional[List[Tuple[int, int, int, int]]] = None
+    palette: list[tuple[int, int, int, int]] | None = None
 
     def __post_init__(self):
         """Set width/height from image if not provided."""
@@ -118,8 +118,7 @@ class SubtitleImage:
     @staticmethod
     def _ms_to_timestamp(ms: int) -> str:
         """Convert milliseconds to HH:MM:SS.mmm format."""
-        if ms < 0:
-            ms = 0
+        ms = max(ms, 0)
         hours = ms // 3600000
         ms %= 3600000
         minutes = ms // 60000
@@ -140,10 +139,10 @@ class ParseResult:
         errors: Any errors encountered during parsing
         warnings: Any warnings generated during parsing
     """
-    subtitles: List[SubtitleImage] = field(default_factory=list)
+    subtitles: list[SubtitleImage] = field(default_factory=list)
     format_info: dict = field(default_factory=dict)
-    errors: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def success(self) -> bool:
@@ -166,7 +165,7 @@ class SubtitleImageParser(ABC):
     """
 
     @abstractmethod
-    def parse(self, file_path: Path, work_dir: Optional[Path] = None) -> ParseResult:
+    def parse(self, file_path: Path, work_dir: Path | None = None) -> ParseResult:
         """
         Parse a subtitle file and extract images.
 

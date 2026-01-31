@@ -1,14 +1,14 @@
 # vsg_core/correction/linear.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 import copy
 import json
-from typing import Tuple
 
-from ..orchestrator.steps.context import Context
 from ..io.runner import CommandRunner
 from ..models.enums import TrackType
 from ..models.media import StreamProps, Track
+from ..orchestrator.steps.context import Context
+
 
 def _get_sample_rate(file_path: str, runner: CommandRunner, tool_paths: dict) -> int:
     """Helper to get the sample rate of the first audio stream."""
@@ -59,7 +59,7 @@ def run_linear_correction(ctx: Context, runner: CommandRunner) -> Context:
             filter_chain = ''
 
             if resample_engine == 'rubberband':
-                runner._log_message(f"    - Using 'rubberband' engine for high-quality resampling.")
+                runner._log_message("    - Using 'rubberband' engine for high-quality resampling.")
                 rb_opts = [f'tempo={tempo_ratio}']
 
                 if not ctx.settings_dict.get('segment_rb_pitch_correct', False):
@@ -76,11 +76,11 @@ def run_linear_correction(ctx: Context, runner: CommandRunner) -> Context:
                 filter_chain = 'rubberband=' + ':'.join(rb_opts)
 
             elif resample_engine == 'atempo':
-                runner._log_message(f"    - Using 'atempo' engine for fast resampling.")
+                runner._log_message("    - Using 'atempo' engine for fast resampling.")
                 filter_chain = f'atempo={tempo_ratio}'
 
             else: # Default to aresample
-                runner._log_message(f"    - Using 'aresample' engine for high-quality resampling.")
+                runner._log_message("    - Using 'aresample' engine for high-quality resampling.")
                 new_sample_rate = sample_rate * tempo_ratio
                 filter_chain = f'asetrate={new_sample_rate},aresample={sample_rate}'
 

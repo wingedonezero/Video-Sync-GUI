@@ -1,5 +1,4 @@
 # vsg_core/pipeline.py
-# -*- coding: utf-8 -*-
 """
 Job pipeline orchestrator.
 
@@ -8,17 +7,18 @@ maintainability and testability.
 """
 
 import shutil
+from collections.abc import Callable
 from pathlib import Path
-from typing import List, Dict, Any, Callable, Optional
+from typing import Any
 
 from .io.runner import CommandRunner
 from .pipeline_components import (
-    ToolValidator,
     LogManager,
     OutputWriter,
+    ResultAuditor,
     SyncExecutor,
     SyncPlanner,
-    ResultAuditor,
+    ToolValidator,
 )
 
 
@@ -51,13 +51,13 @@ class JobPipeline:
 
     def run_job(
         self,
-        sources: Dict[str, str],
+        sources: dict[str, str],
         and_merge: bool,
         output_dir_str: str,
-        manual_layout: Optional[List[Dict]] = None,
-        attachment_sources: Optional[List[str]] = None,
-        source_settings: Optional[Dict[str, Dict[str, Any]]] = None
-    ) -> Dict[str, Any]:
+        manual_layout: list[dict] | None = None,
+        attachment_sources: list[str] | None = None,
+        source_settings: dict[str, dict[str, Any]] | None = None
+    ) -> dict[str, Any]:
         """
         Runs a complete sync job.
 
@@ -122,7 +122,7 @@ class JobPipeline:
                 'name': Path(source1_file).name
             }
 
-        ctx_temp_dir: Optional[Path] = None
+        ctx_temp_dir: Path | None = None
 
         try:
             # --- 5. Plan Sync ---

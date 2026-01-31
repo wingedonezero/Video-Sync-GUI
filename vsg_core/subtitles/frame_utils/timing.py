@@ -1,5 +1,4 @@
 # vsg_core/subtitles/frame_utils/timing.py
-# -*- coding: utf-8 -*-
 """
 Frame/time conversion functions for subtitle synchronization.
 
@@ -9,11 +8,10 @@ Contains:
 - VFR cache management
 """
 from __future__ import annotations
-from typing import Optional
-import math
-import gc
-import threading
 
+import gc
+import math
+import threading
 
 # ============================================================================
 # MODE 0: FRAME START (For Correlation-Frame-Snap - STABLE & DETERMINISTIC)
@@ -209,8 +207,14 @@ def get_vfr_timestamps(video_path: str, fps: float, runner, config: dict = None)
         config: Optional config dict with 'videotimestamps_rounding' setting
     """
     try:
-        from video_timestamps import FPSTimestamps, VideoTimestamps, TimeType, RoundingMethod
         from fractions import Fraction
+
+        from video_timestamps import (
+            FPSTimestamps,
+            RoundingMethod,
+            TimeType,
+            VideoTimestamps,
+        )
 
         # Get rounding method from config (default: ROUND)
         config = config or {}
@@ -265,7 +269,7 @@ def get_vfr_timestamps(video_path: str, fps: float, runner, config: dict = None)
         return None
 
 
-def frame_to_time_vfr(frame_num: int, video_path: str, fps: float, runner, config: dict = None) -> Optional[int]:
+def frame_to_time_vfr(frame_num: int, video_path: str, fps: float, runner, config: dict = None) -> int | None:
     """
     MODE: VFR (VideoTimestamps-based).
 
@@ -300,7 +304,7 @@ def frame_to_time_vfr(frame_num: int, video_path: str, fps: float, runner, confi
         return None
 
 
-def time_to_frame_vfr(time_ms: float, video_path: str, fps: float, runner, config: dict = None) -> Optional[int]:
+def time_to_frame_vfr(time_ms: float, video_path: str, fps: float, runner, config: dict = None) -> int | None:
     """
     MODE: VFR using VideoTimestamps.
 
@@ -317,8 +321,9 @@ def time_to_frame_vfr(time_ms: float, video_path: str, fps: float, runner, confi
         Frame number, or None if VideoTimestamps unavailable
     """
     try:
-        from video_timestamps import TimeType
         from fractions import Fraction
+
+        from video_timestamps import TimeType
 
         vts = get_vfr_timestamps(video_path, fps, runner, config)
         if vts is None:

@@ -1,6 +1,7 @@
-# -*- coding: utf-8 -*-
 import json
+
 from ..io.runner import CommandRunner
+
 
 def probe_keyframes_ns(ref_video_path: str, runner: CommandRunner, tool_paths: dict) -> list[int]:
     args = [

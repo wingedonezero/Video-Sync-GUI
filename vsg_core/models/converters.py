@@ -1,21 +1,20 @@
 # vsg_core/models/converters.py
-# -*- coding: utf-8 -*-
 from collections import Counter
-from typing import Dict, List
 
 from .enums import TrackType
-from .media import Track, StreamProps
 from .jobs import PlanItem
+from .media import StreamProps, Track
+
 
 def _type_from_str(s: str) -> TrackType:
     return TrackType(s.lower())
 
-def tracks_from_dialog_info(track_info: Dict[str, List[dict]]) -> Dict[str, List[Track]]:
+def tracks_from_dialog_info(track_info: dict[str, list[dict]]) -> dict[str, list[Track]]:
     """
     Converts the raw track info dictionary (keyed by "Source 1", etc.)
     into a dictionary of typed Track objects.
     """
-    out: Dict[str, List[Track]] = {key: [] for key in track_info}
+    out: dict[str, list[Track]] = {key: [] for key in track_info}
     for source_key, items in (track_info or {}).items():
         for t in items:
             out[source_key].append(
@@ -33,9 +32,9 @@ def tracks_from_dialog_info(track_info: Dict[str, List[dict]]) -> Dict[str, List
     return out
 
 def realize_plan_from_manual_layout(
-    manual_layout: List[dict],
-    track_info_by_source: Dict[str, List[Track]]
-) -> List[PlanItem]:
+    manual_layout: list[dict],
+    track_info_by_source: dict[str, list[Track]]
+) -> list[PlanItem]:
     """
     Binds the user's manual layout selections to the typed Track models for a job.
     """
@@ -45,7 +44,7 @@ def realize_plan_from_manual_layout(
         for tracks in track_info_by_source.values()
         for tr in tracks
     }
-    realized: List[PlanItem] = []
+    realized: list[PlanItem] = []
     for sel in manual_layout or []:
         source_key = sel['source']
         tid  = int(sel['id'])
@@ -74,7 +73,7 @@ def realize_plan_from_manual_layout(
         )
     return realized
 
-def signature_for_auto_apply(track_info: Dict[str, List[Track]], strict: bool = False) -> Counter:
+def signature_for_auto_apply(track_info: dict[str, list[Track]], strict: bool = False) -> Counter:
     """
     Generates a track signature for a job, used for auto-applying layouts.
     """

@@ -1,20 +1,25 @@
 # vsg_qt/track_widget/ui.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import Dict, List
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QCheckBox, QDoubleSpinBox, QComboBox
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt
+
+from vsg_qt.track_settings_dialog import TrackSettingsDialog
 
 from .logic import TrackWidgetLogic
-from vsg_qt.track_settings_dialog import TrackSettingsDialog
+
 
 class TrackWidget(QWidget):
     """A self-contained widget for a single track in the final layout."""
-    def __init__(self, track_data: Dict, available_sources: List[str], parent=None, source_settings: Dict = None):
+    def __init__(self, track_data: dict, available_sources: list[str], parent=None, source_settings: dict = None):
         super().__init__(parent)
         self.track_data = track_data
         self.track_type = track_data.get('type')
@@ -134,6 +139,6 @@ class TrackWidget(QWidget):
             self.logic.refresh_badges()
             self.logic.refresh_summary()
 
-    def get_config(self) -> Dict[str, Any]:
+    def get_config(self) -> dict[str, Any]:
         """Public method to get the final configuration from the widget's controls."""
         return self.logic.get_config()

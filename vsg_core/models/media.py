@@ -1,8 +1,9 @@
 # vsg_core/models/media.py
-# -*- coding: utf-8 -*-
 from dataclasses import dataclass
 from pathlib import Path
+
 from .enums import TrackType
+
 
 @dataclass(frozen=True)
 class StreamProps:

@@ -1,5 +1,4 @@
 # vsg_qt/subtitle_editor/tabs/filtering_tab.py
-# -*- coding: utf-8 -*-
 """
 Filtering tab for subtitle editor.
 
@@ -8,19 +7,21 @@ This is used when creating filtered subtitle tracks (e.g., "signs only").
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Set
-
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
-    QRadioButton, QButtonGroup, QListWidget, QListWidgetItem,
-    QPushButton, QCheckBox, QFrame
+    QButtonGroup,
+    QCheckBox,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QRadioButton,
+    QVBoxLayout,
+    QWidget,
 )
 
 from .base_tab import BaseTab
-
-if TYPE_CHECKING:
-    from ..state import EditorState
 
 
 class FilteringTab(BaseTab):

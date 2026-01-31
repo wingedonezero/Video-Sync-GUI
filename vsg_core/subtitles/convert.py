@@ -1,6 +1,7 @@
-# -*- coding: utf-8 -*-
 from pathlib import Path
+
 from ..io.runner import CommandRunner
+
 
 def convert_srt_to_ass(subtitle_path: str, runner: CommandRunner, tool_paths: dict) -> str:
     sub_path = Path(subtitle_path)

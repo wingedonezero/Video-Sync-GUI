@@ -1,5 +1,4 @@
 # vsg_core/analysis/source_separation.py
-# -*- coding: utf-8 -*-
 """
 Audio source separation using python-audio-separator for cross-language correlation.
 
@@ -10,7 +9,6 @@ by the OS - solving common PyTorch/ONNX memory leak issues.
 
 from __future__ import annotations
 
-import importlib.resources as resources
 import importlib.util
 import json
 import os
@@ -20,13 +18,14 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
+from importlib import resources
+from math import gcd
 from pathlib import Path
-from typing import Callable, Dict, Optional, Tuple, List
 
 import numpy as np
 from scipy.io import wavfile
 from scipy.signal import resample_poly
-from math import gcd
 
 # Import GPU environment support
 if importlib.util.find_spec('vsg_core.system.gpu_env'):
@@ -226,7 +225,7 @@ MODEL_QUALITY_DATABASE = {
 
 # Curated list of best-performing models for UI selection.
 # These are intentionally limited to avoid overwhelming users with large lists.
-CURATED_MODELS: List[Dict[str, str]] = [
+CURATED_MODELS: list[dict[str, str]] = [
     {
         'name': 'Demucs v4: htdemucs',
         'filename': 'htdemucs',
@@ -255,7 +254,7 @@ CURATED_MODELS: List[Dict[str, str]] = [
 ]
 
 
-def _extract_sdr_from_filename(filename: str) -> Tuple[Optional[float], Optional[float]]:
+def _extract_sdr_from_filename(filename: str) -> tuple[float | None, float | None]:
     """
     Extract SDR scores from model filename if embedded.
 
@@ -279,7 +278,7 @@ def _extract_sdr_from_filename(filename: str) -> Tuple[Optional[float], Optional
     return (None, None)
 
 
-def _enrich_model_with_quality_data(model: Dict) -> Dict:
+def _enrich_model_with_quality_data(model: dict) -> dict:
     """
     Enrich model metadata with quality database information.
 
@@ -355,7 +354,7 @@ def _get_venv_python() -> str:
     return sys.executable
 
 
-def _module_available_in_python(module: str, python_exe: Optional[str] = None) -> bool:
+def _module_available_in_python(module: str, python_exe: str | None = None) -> bool:
     if not python_exe or python_exe == sys.executable:
         return importlib.util.find_spec(module) is not None
 
@@ -379,7 +378,7 @@ def _module_available_in_python(module: str, python_exe: Optional[str] = None) -
     return result.returncode == 0
 
 
-def is_audio_separator_available() -> Tuple[bool, str]:
+def is_audio_separator_available() -> tuple[bool, str]:
     """
     Check if python-audio-separator is available.
 
@@ -447,7 +446,7 @@ def _load_model_data_via_cli() -> object:
         return None
 
 
-def _collect_models_from_dict(model_data: Dict, models: Dict[str, str]) -> None:
+def _collect_models_from_dict(model_data: dict, models: dict[str, str]) -> None:
     for key, value in model_data.items():
         if isinstance(value, dict):
             filename = value.get('filename') if isinstance(value.get('filename'), str) else None
@@ -470,7 +469,7 @@ def _collect_models_from_dict(model_data: Dict, models: Dict[str, str]) -> None:
                 models[key] = value
 
 
-def _collect_models_from_list(model_list: List, models: Dict[str, str]) -> None:
+def _collect_models_from_list(model_list: list, models: dict[str, str]) -> None:
     for item in model_list:
         if isinstance(item, dict):
             name = (
@@ -491,28 +490,28 @@ def _collect_models_from_list(model_list: List, models: Dict[str, str]) -> None:
             _collect_models_from_list(item, models)
 
 
-def _select_model_filename(file_map: Dict) -> Optional[str]:
+def _select_model_filename(file_map: dict) -> str | None:
     if not isinstance(file_map, dict):
         return None
 
     preferred_exts = ('.ckpt', '.onnx', '.pth', '.pt', '.th')
     for ext in preferred_exts:
-        for candidate in file_map.keys():
+        for candidate in file_map:
             if isinstance(candidate, str) and candidate.lower().endswith(ext):
                 return candidate
 
-    for candidate in file_map.keys():
+    for candidate in file_map:
         if isinstance(candidate, str) and candidate.lower().endswith(('.yaml', '.yml')):
             return candidate
 
-    for candidate in file_map.keys():
+    for candidate in file_map:
         if isinstance(candidate, str):
             return candidate
 
     return None
 
 
-def get_installed_models_json_path(model_dir: Optional[str] = None) -> Path:
+def get_installed_models_json_path(model_dir: str | None = None) -> Path:
     """Get path to installed_models.json file."""
     if model_dir:
         return Path(model_dir) / 'installed_models.json'
@@ -523,7 +522,7 @@ def get_installed_models_json_path(model_dir: Optional[str] = None) -> Path:
     return default_dir / 'installed_models.json'
 
 
-def get_installed_models(model_dir: Optional[str] = None) -> List[Dict[str, any]]:
+def get_installed_models(model_dir: str | None = None) -> list[dict[str, any]]:
     """
     Read installed models from local JSON cache.
 
@@ -538,14 +537,14 @@ def get_installed_models(model_dir: Optional[str] = None) -> List[Dict[str, any]
         return []
 
     try:
-        with open(json_path, 'r', encoding='utf-8') as f:
+        with open(json_path, encoding='utf-8') as f:
             data = json.load(f)
         return data.get('models', [])
     except (json.JSONDecodeError, OSError):
         return []
 
 
-def update_installed_models_json(models: List[Dict], model_dir: Optional[str] = None) -> bool:
+def update_installed_models_json(models: list[dict], model_dir: str | None = None) -> bool:
     """
     Write/update the installed_models.json file.
 
@@ -576,7 +575,7 @@ def update_installed_models_json(models: List[Dict], model_dir: Optional[str] = 
         return False
 
 
-def get_all_available_models_from_registry() -> List[Dict]:
+def get_all_available_models_from_registry() -> list[dict]:
     """
     Query audio-separator for the complete model list with metadata.
 
@@ -656,7 +655,7 @@ def get_all_available_models_from_registry() -> List[Dict]:
     return []
 
 
-def _extract_models_from_registry(data: any, models: List[Dict]) -> None:
+def _extract_models_from_registry(data: any, models: list[dict]) -> None:
     """Recursively extract model info from audio-separator's nested JSON structure."""
     if isinstance(data, dict):
         # Check if this looks like a model entry
@@ -720,7 +719,7 @@ def _extract_models_from_registry(data: any, models: List[Dict]) -> None:
 def download_model(
     model_filename: str,
     model_dir: str,
-    progress_callback: Optional[Callable[[int, str], None]] = None
+    progress_callback: Callable[[int, str], None] | None = None
 ) -> bool:
     """
     Download a model using audio-separator.
@@ -759,7 +758,7 @@ def download_model(
 
         # Use the Python API to download the model
         # The Separator class automatically downloads models on initialization
-        print(f"[download_model] Importing audio_separator...")
+        print("[download_model] Importing audio_separator...")
 
         # Build a Python script to run in subprocess
         download_script = f'''
@@ -781,7 +780,7 @@ print("[download_model] Model downloaded successfully")
 sys.exit(0)
 '''
 
-        print(f"[download_model] Running download script...")
+        print("[download_model] Running download script...")
         # Redirect stderr to stdout to prevent deadlock from filled stderr buffer
         process = subprocess.Popen(
             [python_exe, '-c', download_script],
@@ -824,11 +823,11 @@ sys.exit(0)
         import traceback
         traceback.print_exc()
         if progress_callback:
-            progress_callback(0, f"Download failed: {str(e)}")
+            progress_callback(0, f"Download failed: {e!s}")
         return False
 
 
-def list_available_models() -> List[Tuple[str, str]]:
+def list_available_models() -> list[tuple[str, str]]:
     """
     Get installed models from local JSON cache.
     Falls back to curated list if no local cache exists.
@@ -862,7 +861,7 @@ def list_available_models() -> List[Tuple[str, str]]:
     return result
 
 
-def _fallback_models() -> Dict[str, str]:
+def _fallback_models() -> dict[str, str]:
     return {model['name']: model['filename'] for model in CURATED_MODELS}
 
 
@@ -1070,7 +1069,7 @@ if __name__ == '__main__':
 '''
 
 
-def _read_audio_file(path: Path) -> Tuple[int, np.ndarray]:
+def _read_audio_file(path: Path) -> tuple[int, np.ndarray]:
     """Read audio file and return (sample_rate, mono float32 array).
 
     Returns a contiguous copy of the data to ensure no references to
@@ -1091,7 +1090,7 @@ def _read_audio_file(path: Path) -> Tuple[int, np.ndarray]:
     return sample_rate, np.ascontiguousarray(data)
 
 
-def _resolve_separation_settings(config: Dict) -> Tuple[str, str]:
+def _resolve_separation_settings(config: dict) -> tuple[str, str]:
     mode = config.get('source_separation_mode')
     model_filename = config.get('source_separation_model', DEFAULT_MODEL)
 
@@ -1142,7 +1141,7 @@ def _log_separator_stderr(log: Callable[[str], None], stderr: str) -> None:
         log(f"[SOURCE SEPARATION] {line}")
 
 
-def is_separation_enabled(config: Dict) -> bool:
+def is_separation_enabled(config: dict) -> bool:
     mode, _ = _resolve_separation_settings(config)
     return SEPARATION_MODES.get(mode) is not None
 
@@ -1152,11 +1151,11 @@ def separate_audio(
     sample_rate: int,
     mode: str,
     model_filename: str,
-    log_func: Optional[Callable[[str], None]] = None,
+    log_func: Callable[[str], None] | None = None,
     device: str = 'auto',
     timeout_seconds: int = 900,
-    model_dir: Optional[str] = None,
-) -> Optional[np.ndarray]:
+    model_dir: str | None = None,
+) -> np.ndarray | None:
     """
     Separate audio using python-audio-separator in an isolated subprocess.
 
@@ -1279,7 +1278,7 @@ def separate_audio(
             # 0 or negative means "use max timeout" (2 hours), not "no timeout"
             if timeout_seconds <= 0:
                 timeout = 7200  # 2 hours max
-                log(f"[SOURCE SEPARATION] Using maximum timeout of 2 hours")
+                log("[SOURCE SEPARATION] Using maximum timeout of 2 hours")
             else:
                 timeout = min(timeout_seconds, 7200)  # Cap at 2 hours
 
@@ -1336,7 +1335,7 @@ def separate_audio(
                 return None
 
             if output_sr is None or separated is None:
-                log(f"[SOURCE SEPARATION] Invalid audio data from output file")
+                log("[SOURCE SEPARATION] Invalid audio data from output file")
                 return None
 
             if not isinstance(output_sr, (int, float)) or output_sr <= 0:
@@ -1353,12 +1352,12 @@ def separate_audio(
             log(f"[SOURCE SEPARATION] Separation complete. Output length: {len(separated)} samples")
             return separated
 
-        except subprocess.TimeoutExpired as e:
+        except subprocess.TimeoutExpired:
             log(f"[SOURCE SEPARATION] Timeout after {timeout}s (high-quality models may need more time)")
-            log(f"[SOURCE SEPARATION] Consider using a faster model or increasing the timeout in settings")
+            log("[SOURCE SEPARATION] Consider using a faster model or increasing the timeout in settings")
             # subprocess.run() automatically kills the process on timeout
             # Log that the process was terminated
-            log(f"[SOURCE SEPARATION] Subprocess was terminated due to timeout")
+            log("[SOURCE SEPARATION] Subprocess was terminated due to timeout")
             return None
         except Exception as e:
             log(f"[SOURCE SEPARATION] Error: {e}")
@@ -1369,10 +1368,10 @@ def apply_source_separation(
     ref_pcm: np.ndarray,
     tgt_pcm: np.ndarray,
     sample_rate: int,
-    config: Dict,
-    log_func: Optional[Callable[[str], None]] = None,
+    config: dict,
+    log_func: Callable[[str], None] | None = None,
     role_tag: str = "Source 2"
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Apply source separation to both reference and target audio, or neither.
 

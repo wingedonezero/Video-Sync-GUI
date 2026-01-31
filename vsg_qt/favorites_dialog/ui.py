@@ -1,17 +1,24 @@
 # vsg_qt/favorites_dialog/ui.py
-# -*- coding: utf-8 -*-
 """
 Favorites Manager Dialog
 
 A dialog for managing saved favorite colors - view, edit names, delete.
 """
-from typing import Optional, Callable
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
-    QPushButton, QLabel, QLineEdit, QMessageBox, QColorDialog, QWidget
+    QColorDialog,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
 
 from vsg_core.favorite_colors import FavoriteColorsManager
@@ -111,7 +118,7 @@ class FavoritesManagerDialog(QDialog):
         layout.addLayout(button_layout)
 
         # Track currently selected favorite
-        self._current_favorite_id: Optional[str] = None
+        self._current_favorite_id: str | None = None
         self._current_hex: str = "#FFFFFFFF"
 
     def _connect_signals(self):

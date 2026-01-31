@@ -1,14 +1,19 @@
 # vsg_qt/source_settings_dialog/dialog.py
-# -*- coding: utf-8 -*-
 """Dialog for configuring per-source correlation settings."""
 from __future__ import annotations
-from typing import Dict, List, Any, Optional
+
+from typing import Any
 
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QFormLayout, QGroupBox,
-    QComboBox, QCheckBox, QDialogButtonBox, QLabel
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QGroupBox,
+    QLabel,
+    QVBoxLayout,
 )
-from PySide6.QtCore import Qt
 
 
 class SourceSettingsDialog(QDialog):
@@ -26,9 +31,9 @@ class SourceSettingsDialog(QDialog):
     def __init__(
         self,
         source_key: str,
-        source_audio_tracks: List[Dict[str, Any]],
-        source1_audio_tracks: List[Dict[str, Any]],  # Kept for backwards compatibility
-        current_settings: Optional[Dict[str, Any]] = None,
+        source_audio_tracks: list[dict[str, Any]],
+        source1_audio_tracks: list[dict[str, Any]],  # Kept for backwards compatibility
+        current_settings: dict[str, Any] | None = None,
         parent=None
     ):
         """
@@ -194,7 +199,7 @@ class SourceSettingsDialog(QDialog):
         if not self.is_source1:
             self.use_separation_cb.setChecked(False)
 
-    def get_settings(self) -> Dict[str, Any]:
+    def get_settings(self) -> dict[str, Any]:
         """
         Get the configured settings.
 

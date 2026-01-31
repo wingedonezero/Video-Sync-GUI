@@ -1,9 +1,8 @@
 # vsg_core/extraction/tracks.py
-# -*- coding: utf-8 -*-
 import json
 import re
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Any
 
 from ..io.runner import CommandRunner
 
@@ -36,7 +35,7 @@ _CODEC_ID_MAP = {
     'S_VOBSUB': 'VobSub',
 }
 
-def _get_channel_layout_str(props: Dict) -> Optional[str]:
+def _get_channel_layout_str(props: dict) -> str | None:
     """Gets a friendly channel layout string."""
     if 'channel_layout' in props:
         return props['channel_layout']
@@ -45,7 +44,7 @@ def _get_channel_layout_str(props: Dict) -> Optional[str]:
         return {1: 'Mono', 2: 'Stereo', 6: '5.1', 8: '7.1'}.get(channels)
     return None
 
-def _parse_pcm_codec_name(name: str) -> Optional[str]:
+def _parse_pcm_codec_name(name: str) -> str | None:
     """Parses an ffprobe pcm codec name like 'pcm_s24le' into a readable string."""
     match = re.match(r"pcm_([suf])(\d+)([bl]e)?", name)
     if not match:
@@ -66,7 +65,7 @@ def _parse_pcm_codec_name(name: str) -> Optional[str]:
     return " ".join(parts) if parts else None
 
 
-def _build_track_description(track: Dict) -> str:
+def _build_track_description(track: dict) -> str:
     """Builds a rich, MediaInfo-like description string from combined track info."""
     props = track.get('properties', {})
     ttype = track.get('type')
@@ -82,11 +81,10 @@ def _build_track_description(track: Dict) -> str:
         friendly_codec = 'DTS-HD HRA'
     elif 'Atmos' in ffprobe_info.get('codec_long_name', ''):
         friendly_codec = 'TrueHD / Atmos'
+    elif codec_id.startswith('V_MPEG') and codec_id not in _CODEC_ID_MAP:
+        friendly_codec = 'MPEG'
     else:
-        if codec_id.startswith('V_MPEG') and codec_id not in _CODEC_ID_MAP:
-            friendly_codec = 'MPEG'
-        else:
-            friendly_codec = _CODEC_ID_MAP.get(codec_id, codec_id)
+        friendly_codec = _CODEC_ID_MAP.get(codec_id, codec_id)
 
     lang = props.get('language', 'und')
     name = f" '{props.get('track_name')}'" if props.get('track_name') else ""
@@ -171,7 +169,7 @@ def _pcm_codec_from_bit_depth(bit_depth):
     if bd >= 24: return 'pcm_s24le'
     return 'pcm_s16le'
 
-def get_stream_info(mkv_path: str, runner: CommandRunner, tool_paths: dict) -> Optional[Dict[str, Any]]:
+def get_stream_info(mkv_path: str, runner: CommandRunner, tool_paths: dict) -> dict[str, Any] | None:
     out = runner.run(['mkvmerge', '-J', str(mkv_path)], tool_paths)
     if not out or not isinstance(out, str): return None
     try:
@@ -180,7 +178,7 @@ def get_stream_info(mkv_path: str, runner: CommandRunner, tool_paths: dict) -> O
         runner._log_message('[ERROR] Failed to parse mkvmerge -J JSON output.')
         return None
 
-def get_stream_info_with_delays(mkv_path: str, runner: CommandRunner, tool_paths: dict) -> Optional[Dict[str, Any]]:
+def get_stream_info_with_delays(mkv_path: str, runner: CommandRunner, tool_paths: dict) -> dict[str, Any] | None:
     """Get stream info including container delays from mkvmerge -J output."""
     out = runner.run(['mkvmerge', '-J', str(mkv_path)], tool_paths)
     if not out or not isinstance(out, str): return None
@@ -213,7 +211,7 @@ def get_stream_info_with_delays(mkv_path: str, runner: CommandRunner, tool_paths
         runner._log_message('[ERROR] Failed to parse mkvmerge -J JSON output.')
         return None
 
-def _get_detailed_stream_info(filepath: str, runner: CommandRunner, tool_paths: dict) -> Dict[int, Dict]:
+def _get_detailed_stream_info(filepath: str, runner: CommandRunner, tool_paths: dict) -> dict[int, dict]:
     cmd = ['ffprobe', '-v', 'error', '-show_streams', '-of', 'json', str(filepath)]
     out = runner.run(cmd, tool_paths)
     if not out: return {}
@@ -254,7 +252,7 @@ def _ext_for_codec(ttype: str, codec_id: str) -> str:
     return 'bin'
 
 def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: dict, role: str,
-                   specific_tracks: Optional[List[int]] = None) -> List[Dict[str, Any]]:
+                   specific_tracks: list[int] | None = None) -> list[dict[str, Any]]:
     """
     Extract tracks from MKV with enhanced error detection.
     NOW REPORTS: Which source, which specific track failed, with full details.
@@ -334,7 +332,7 @@ def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: 
 
             # Build detailed error message
             error_msg = f"\n{'='*80}\n"
-            error_msg += f"EXTRACTION FAILED\n"
+            error_msg += "EXTRACTION FAILED\n"
             error_msg += f"{'='*80}\n"
             error_msg += f"Source: {role}\n"
             error_msg += f"File: {Path(mkv).name}\n"
@@ -364,14 +362,14 @@ def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: 
 
             error_msg += "Troubleshooting:\n"
             error_msg += f"  1. Verify source integrity: mkvmerge -i \"{mkv}\"\n\n"
-            error_msg += f"  2. Try extracting failed track(s) manually:\n"
+            error_msg += "  2. Try extracting failed track(s) manually:\n"
             if failed_tracks:
                 for track_line in failed_tracks[:3]:
                     tid = track_line.split('ID ')[1].split(',')[0]
                     error_msg += f"     mkvextract \"{mkv}\" tracks {tid}:test_track_{tid}.bin\n"
             error_msg += f"\n  3. Check disk space in: {temp_dir}\n\n"
-            error_msg += f"  4. Try playing source file to check for corruption\n\n"
-            error_msg += f"  5. Check log file for detailed mkvextract error messages\n"
+            error_msg += "  4. Try playing source file to check for corruption\n\n"
+            error_msg += "  5. Check log file for detailed mkvextract error messages\n"
             error_msg += f"{'='*80}\n"
 
             raise RuntimeError(error_msg)
@@ -394,7 +392,7 @@ def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: 
 
         if verification_failed:
             error_msg = f"\n{'='*80}\n"
-            error_msg += f"POST-EXTRACTION VERIFICATION FAILED\n"
+            error_msg += "POST-EXTRACTION VERIFICATION FAILED\n"
             error_msg += f"{'='*80}\n"
             error_msg += f"Source: {role}\n"
             error_msg += f"File: {Path(mkv).name}\n"
@@ -425,12 +423,12 @@ def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: 
                        '-map', f"0:a:{job['idx']}", '-vn', '-sn', '-acodec', job['pcm'], job['out']]
             if runner.run(pcm_cmd, tool_paths) is None:
                 error_msg = f"\n{'='*80}\n"
-                error_msg += f"A_MS/ACM AUDIO EXTRACTION FAILED\n"
+                error_msg += "A_MS/ACM AUDIO EXTRACTION FAILED\n"
                 error_msg += f"{'='*80}\n"
                 error_msg += f"Source: {role}\n"
                 error_msg += f"File: {Path(mkv).name}\n"
                 error_msg += f"Track: {track_name} (ID {job['tid']})\n"
-                error_msg += f"Codec: A_MS/ACM\n"
+                error_msg += "Codec: A_MS/ACM\n"
                 error_msg += f"{'='*80}\n\n"
                 error_msg += "Both stream copy and PCM conversion failed.\n\n"
                 error_msg += "This track may:\n"
@@ -438,9 +436,9 @@ def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: 
                 error_msg += "  • Be corrupted or have malformed headers\n"
                 error_msg += "  • Require specific codec drivers\n\n"
                 error_msg += "Troubleshooting:\n"
-                error_msg += f"  1. Try playing this audio track in VLC\n"
+                error_msg += "  1. Try playing this audio track in VLC\n"
                 error_msg += f"  2. Try: mkvextract \"{mkv}\" tracks {job['tid']}:test.wav\n"
-                error_msg += f"  3. Consider remuxing the source file\n"
+                error_msg += "  3. Consider remuxing the source file\n"
                 error_msg += f"{'='*80}\n"
                 raise RuntimeError(error_msg)
 
@@ -450,8 +448,8 @@ def extract_tracks(mkv: str, temp_dir: Path, runner: CommandRunner, tool_paths: 
 
     return tracks_to_extract
 
-def get_track_info_for_dialog(sources: Dict[str, str], runner: CommandRunner, tool_paths: dict) -> Dict[str, List[Dict]]:
-    all_tracks: Dict[str, List[Dict]] = {key: [] for key in sources}
+def get_track_info_for_dialog(sources: dict[str, str], runner: CommandRunner, tool_paths: dict) -> dict[str, list[dict]]:
+    all_tracks: dict[str, list[dict]] = {key: [] for key in sources}
     for source_key, filepath in sources.items():
         if not filepath or not Path(filepath).exists():
             continue

@@ -1,5 +1,4 @@
 # vsg_core/subtitles/style_engine.py
-# -*- coding: utf-8 -*-
 """
 Style engine using SubtitleData for subtitle manipulation.
 
@@ -10,11 +9,11 @@ import hashlib
 import re
 import time
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any
 
-from .data import SubtitleData, SubtitleStyle
 from vsg_core.config import AppConfig
 
+from .data import SubtitleData, SubtitleStyle
 
 # =============================================================================
 # Color Conversion Helpers
@@ -82,7 +81,7 @@ class StyleEngine:
     using the SubtitleData system.
     """
 
-    def __init__(self, subtitle_path: str, temp_dir: Optional[Path] = None):
+    def __init__(self, subtitle_path: str, temp_dir: Path | None = None):
         """
         Initialize the style engine.
 
@@ -92,8 +91,8 @@ class StyleEngine:
                       If not provided, uses config's style_editor_temp directory.
         """
         self.path = Path(subtitle_path)
-        self.data: Optional[SubtitleData] = None
-        self._temp_file: Optional[Path] = None
+        self.data: SubtitleData | None = None
+        self._temp_file: Path | None = None
 
         # Use provided temp_dir or get from config
         if temp_dir:
@@ -142,11 +141,11 @@ class StyleEngine:
         # Release SubtitleData to free memory
         self.data = None
 
-    def get_style_names(self) -> List[str]:
+    def get_style_names(self) -> list[str]:
         """Returns a list of all style names defined in the file."""
         return list(self.data.styles.keys()) if self.data else []
 
-    def get_style_attributes(self, style_name: str) -> Dict[str, Any]:
+    def get_style_attributes(self, style_name: str) -> dict[str, Any]:
         """Returns a dictionary of attributes for a given style."""
         if not self.data or style_name not in self.data.styles:
             return {}
@@ -171,7 +170,7 @@ class StyleEngine:
             "marginv": style.margin_v,
         }
 
-    def update_style_attributes(self, style_name: str, attributes: Dict[str, Any]):
+    def update_style_attributes(self, style_name: str, attributes: dict[str, Any]):
         """Updates attributes for a given style."""
         if not self.data or style_name not in self.data.styles:
             return
@@ -213,7 +212,7 @@ class StyleEngine:
             elif key == "marginv":
                 style.margin_v = int(value)
 
-    def get_events(self) -> List[Dict[str, Any]]:
+    def get_events(self) -> list[dict[str, Any]]:
         """Returns all subtitle events."""
         if not self.data:
             return []
@@ -233,7 +232,7 @@ class StyleEngine:
             if not event.is_comment
         ]
 
-    def get_raw_style_block(self) -> Optional[List[str]]:
+    def get_raw_style_block(self) -> list[str] | None:
         """Extracts the raw [V4+ Styles] block as a list of strings."""
         try:
             content = self.path.read_text(encoding='utf-8-sig')
@@ -251,7 +250,7 @@ class StyleEngine:
         except Exception:
             return None
 
-    def set_raw_style_block(self, style_lines: List[str]):
+    def set_raw_style_block(self, style_lines: list[str]):
         """Overwrites the [V4+ Styles] block with the provided lines."""
         if not self.data or not style_lines:
             return
@@ -309,7 +308,7 @@ class StyleEngine:
     # =========================================================================
 
     @property
-    def info(self) -> Dict[str, Any]:
+    def info(self) -> dict[str, Any]:
         """Access to script info for compatibility."""
         if self.data:
             return self.data.script_info
@@ -350,7 +349,7 @@ class StyleEngine:
             return False
 
     @staticmethod
-    def get_content_signature(subtitle_path: str) -> Optional[str]:
+    def get_content_signature(subtitle_path: str) -> str | None:
         """Generates a unique hash of the [V4+ Styles] block for content matching."""
         try:
             content = Path(subtitle_path).read_text(encoding='utf-8-sig')
@@ -371,7 +370,7 @@ class StyleEngine:
             return None
 
     @staticmethod
-    def get_name_signature(track_name: str) -> Optional[str]:
+    def get_name_signature(track_name: str) -> str | None:
         """Generates a fallback signature from the track name (e.g., 'Signs [LostYears]')."""
         if not track_name:
             return None

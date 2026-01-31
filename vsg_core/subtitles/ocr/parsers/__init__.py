@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/parsers/__init__.py
-# -*- coding: utf-8 -*-
 """
 Subtitle Image Parsers
 

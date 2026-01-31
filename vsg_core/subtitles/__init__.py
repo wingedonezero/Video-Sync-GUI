@@ -1,5 +1,4 @@
 # vsg_core/subtitles/__init__.py
-# -*- coding: utf-8 -*-
 """
 Unified subtitle processing system.
 
@@ -12,28 +11,27 @@ This package provides:
 """
 
 from .data import (
+    EmbeddedFont,
+    EmbeddedGraphic,
+    OCREventData,
+    OCRMetadata,
+    OperationRecord,
+    OperationResult,
+    SteppingEventData,
     SubtitleData,
     SubtitleEvent,
     SubtitleStyle,
-    OCREventData,
-    OCRMetadata,
     SyncEventData,
-    SteppingEventData,
-    OperationRecord,
-    OperationResult,
-    EmbeddedFont,
-    EmbeddedGraphic,
 )
-
 from .edit_plan import (
-    SubtitleEditPlan,
+    ApplyResult,
     EventEdit,
-    StyleEdit,
+    EventGroup,
+    GroupDefinition,
     NewEventSpec,
     NewStyleSpec,
-    GroupDefinition,
-    EventGroup,
-    ApplyResult,
+    StyleEdit,
+    SubtitleEditPlan,
 )
 
 __all__ = [

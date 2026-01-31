@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/romaji_dictionary.py
-# -*- coding: utf-8 -*-
 """
 Romaji Dictionary Support
 
@@ -18,14 +17,12 @@ Features:
 import gzip
 import logging
 import os
-import re
-import tempfile
 import shutil
+import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple, Iterator
-from urllib.request import urlopen, Request
-from urllib.error import URLError, HTTPError
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 logger = logging.getLogger(__name__)
 
@@ -257,7 +254,7 @@ class JMdictParser:
         </entry>
     """
 
-    def __init__(self, converter: Optional[KanaToRomaji] = None):
+    def __init__(self, converter: KanaToRomaji | None = None):
         """
         Initialize parser.
 
@@ -266,7 +263,7 @@ class JMdictParser:
         """
         self.converter = converter or KanaToRomaji()
 
-    def parse_file(self, file_path: Path, progress_callback=None) -> Set[str]:
+    def parse_file(self, file_path: Path, progress_callback=None) -> set[str]:
         """
         Parse a JMdict XML file and extract romaji readings.
 
@@ -283,7 +280,7 @@ class JMdictParser:
         if str(file_path).endswith('.gz'):
             open_func = lambda p: gzip.open(p, 'rt', encoding='utf-8')
         else:
-            open_func = lambda p: open(p, 'r', encoding='utf-8')
+            open_func = lambda p: open(p, encoding='utf-8')
 
         try:
             # Use iterparse for memory efficiency
@@ -322,7 +319,7 @@ class JMdictParser:
         logger.info(f"Extracted {len(romaji_words)} romaji words from {entry_count} entries")
         return romaji_words
 
-    def parse_stream(self, stream, progress_callback=None) -> Set[str]:
+    def parse_stream(self, stream, progress_callback=None) -> set[str]:
         """
         Parse JMdict from a file-like stream.
 
@@ -388,11 +385,11 @@ class RomajiDictionary:
         self.dict_path = self.config_dir / self.DICT_FILENAME
         self.jmdict_path = self.config_dir / self.JMDICT_CACHE
 
-        self._words: Optional[Set[str]] = None
+        self._words: set[str] | None = None
         self._words_mtime: float = 0  # Track file modification time
         self._converter = KanaToRomaji()
 
-    def load(self) -> Set[str]:
+    def load(self) -> set[str]:
         """
         Load romaji dictionary from file.
 
@@ -422,7 +419,7 @@ class RomajiDictionary:
         # Load the file (first time or file changed)
         try:
             words = set()
-            with open(self.dict_path, 'r', encoding='utf-8') as f:
+            with open(self.dict_path, encoding='utf-8') as f:
                 for line in f:
                     word = line.strip()
                     if word and not word.startswith('#'):
@@ -439,7 +436,7 @@ class RomajiDictionary:
             self._words_mtime = 0
             return self._words
 
-    def save(self, words: Set[str]) -> bool:
+    def save(self, words: set[str]) -> bool:
         """
         Save romaji dictionary to file.
 
@@ -552,7 +549,7 @@ class RomajiDictionary:
         logger.error("Failed to download JMdict from all mirrors")
         return False
 
-    def build_dictionary(self, progress_callback=None) -> Tuple[bool, str]:
+    def build_dictionary(self, progress_callback=None) -> tuple[bool, str]:
         """
         Build romaji dictionary from JMdict.
 
@@ -603,9 +600,9 @@ class RomajiDictionary:
 
         except Exception as e:
             logger.error(f"Error building romaji dictionary: {e}")
-            return False, f"Error: {str(e)}"
+            return False, f"Error: {e!s}"
 
-    def _get_common_particles(self) -> Set[str]:
+    def _get_common_particles(self) -> set[str]:
         """Get common Japanese particles and suffixes in romaji."""
         return {
             # Particles
@@ -618,8 +615,7 @@ class RomajiDictionary:
             'hai', 'iie', 'nani', 'dou', 'naze', 'dare', 'doko', 'itsu',
             'kore', 'sore', 'are', 'dore',
             'kono', 'sono', 'ano', 'dono',
-            'kou', 'sou', 'aa', 'dou',
-            'sugoi', 'kawaii', 'kakkoii', 'kirei', 'utsukushii',
+            'kou', 'sou', 'aa', 'sugoi', 'kawaii', 'kakkoii', 'kirei', 'utsukushii',
             'baka', 'aho', 'uso', 'hontou', 'maji',
             'gomen', 'sumimasen', 'arigatou', 'doumo',
             'ohayou', 'konnichiwa', 'konbanwa', 'sayonara', 'oyasumi',
@@ -629,16 +625,16 @@ class RomajiDictionary:
             'onegai', 'kudasai', 'choudai',
             'chotto', 'matte', 'yamete', 'dame',
             'yatta', 'yosh', 'ganbare', 'ganbatte',
-            'nee', 'ano', 'eto', 'maa', 'hora',
+            'nee', 'eto', 'maa', 'hora',
             # Common anime/otaku terms
             'anime', 'manga', 'otaku', 'waifu', 'husbando',
-            'senpai', 'kouhai', 'sensei', 'shonen', 'shoujo',
+            'shonen', 'shoujo',
             'mecha', 'isekai', 'ecchi', 'hentai', 'yaoi', 'yuri',
             'chibi', 'moe', 'tsundere', 'yandere', 'kuudere', 'dandere',
             'nakama', 'tomodachi', 'koibito', 'kareshi', 'kanojo',
         }
 
-    def get_stats(self) -> Dict[str, any]:
+    def get_stats(self) -> dict[str, any]:
         """Get dictionary statistics."""
         words = self.load()
         return {
@@ -650,10 +646,10 @@ class RomajiDictionary:
 
 
 # Global instance
-_romaji_dict: Optional[RomajiDictionary] = None
+_romaji_dict: RomajiDictionary | None = None
 
 
-def get_romaji_dictionary(config_dir: Optional[Path] = None) -> RomajiDictionary:
+def get_romaji_dictionary(config_dir: Path | None = None) -> RomajiDictionary:
     """
     Get or create the global romaji dictionary instance.
 
@@ -675,7 +671,7 @@ def get_romaji_dictionary(config_dir: Optional[Path] = None) -> RomajiDictionary
     return _romaji_dict
 
 
-def is_romaji_word(word: str, config_dir: Optional[Path] = None) -> bool:
+def is_romaji_word(word: str, config_dir: Path | None = None) -> bool:
     """
     Check if a word is a valid romaji word.
 

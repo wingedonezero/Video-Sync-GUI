@@ -1,16 +1,15 @@
 # vsg_core/postprocess/auditors/dolby_vision.py
-# -*- coding: utf-8 -*-
-from typing import Dict
 from pathlib import Path
 
 from vsg_core.models.enums import TrackType
+
 from .base import BaseAuditor
 
 
 class DolbyVisionAuditor(BaseAuditor):
     """Detailed Dolby Vision metadata check."""
 
-    def run(self, final_mkv_path: Path, final_mkvmerge_data: Dict, final_ffprobe_data=None) -> int:
+    def run(self, final_mkv_path: Path, final_mkvmerge_data: dict, final_ffprobe_data=None) -> int:
         """
         Audits Dolby Vision metadata.
         Returns the number of issues found.

@@ -1,5 +1,4 @@
 # vsg_core/audit/__init__.py
-# -*- coding: utf-8 -*-
 """
 Pipeline audit trail system for debugging timing issues.
 

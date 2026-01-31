@@ -1,13 +1,27 @@
 # vsg_qt/options_dialog/tabs.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import Dict
+
 from PySide6.QtWidgets import (
-    QWidget, QFormLayout, QCheckBox, QComboBox, QSpinBox, QDoubleSpinBox,
-    QHBoxLayout, QLineEdit, QPushButton, QFileDialog, QLabel, QGroupBox, QVBoxLayout
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QSpinBox,
+    QVBoxLayout,
+    QWidget,
 )
 
-from vsg_core.analysis.source_separation import get_installed_models, get_installed_models_json_path
+from vsg_core.analysis.source_separation import (
+    get_installed_models,
+    get_installed_models_json_path,
+)
+
 
 # --- Helper functions ---
 def _dir_input() -> QWidget:
@@ -43,7 +57,7 @@ def _browse_for_file(line_edit: QLineEdit, nameFilter: str = "All Files (*)"):
 class StorageTab(QWidget):
     def __init__(self):
         super().__init__()
-        self.widgets: Dict[str, QWidget] = {}
+        self.widgets: dict[str, QWidget] = {}
         main_layout = QVBoxLayout(self)
 
         # Paths section
@@ -92,7 +106,7 @@ class OCRTab(QWidget):
     """
     def __init__(self):
         super().__init__()
-        self.widgets: Dict[str, QWidget] = {}
+        self.widgets: dict[str, QWidget] = {}
         main_layout = QVBoxLayout(self)
 
         # --- OCR Settings Group ---
@@ -309,7 +323,7 @@ class OCRTab(QWidget):
 class AnalysisTab(QWidget):
     def __init__(self):
         super().__init__()
-        self.widgets: Dict[str, QWidget] = {}
+        self.widgets: dict[str, QWidget] = {}
         main_layout = QVBoxLayout(self)
 
         prep_group = QGroupBox("Step 1: Audio Pre-Processing")
@@ -596,7 +610,7 @@ class AnalysisTab(QWidget):
 class SteppingTab(QWidget):
     def __init__(self):
         super().__init__()
-        self.widgets: Dict[str, QWidget] = {}
+        self.widgets: dict[str, QWidget] = {}
         main_layout = QVBoxLayout(self)
 
         segment_group = QGroupBox("🔧 Stepping Correction (Audio with Mid-File Timing Changes)")
@@ -1289,7 +1303,7 @@ class SteppingTab(QWidget):
 class SubtitleSyncTab(QWidget):
     def __init__(self):
         super().__init__()
-        self.widgets: Dict[str, QWidget] = {}
+        self.widgets: dict[str, QWidget] = {}
         main_layout = QVBoxLayout(self)
 
         # ===== SYNC MODE SELECTION =====
@@ -1888,7 +1902,7 @@ class SubtitleSyncTab(QWidget):
 class ChaptersTab(QWidget):
     def __init__(self):
         super().__init__()
-        self.widgets: Dict[str, QWidget] = {}
+        self.widgets: dict[str, QWidget] = {}
         f = QFormLayout(self)
         self.widgets['rename_chapters'] = QCheckBox('Rename to "Chapter NN"'); self.widgets['rename_chapters'].setToolTip("Automatically rename all chapters to a standard format (e.g., 'Chapter 01', 'Chapter 02').")
         self.widgets['snap_chapters'] = QCheckBox('Snap chapter timestamps to nearest keyframe'); self.widgets['snap_chapters'].setToolTip("Adjust chapter timestamps to align with the nearest video keyframe, which can improve seeking performance.")
@@ -1906,7 +1920,7 @@ class ChaptersTab(QWidget):
 class MergeBehaviorTab(QWidget):
     def __init__(self):
         super().__init__()
-        self.widgets: Dict[str, QWidget] = {}
+        self.widgets: dict[str, QWidget] = {}
         main_layout = QVBoxLayout(self)
         general_group = QGroupBox("General")
         form1 = QFormLayout(general_group)
@@ -1930,7 +1944,7 @@ class MergeBehaviorTab(QWidget):
 class LoggingTab(QWidget):
     def __init__(self):
         super().__init__()
-        self.widgets: Dict[str, QWidget] = {}
+        self.widgets: dict[str, QWidget] = {}
         main_layout = QVBoxLayout(self)
 
         # --- Logging Options ---

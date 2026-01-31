@@ -1,11 +1,10 @@
 # vsg_core/postprocess/auditors/audio_sync.py
-# -*- coding: utf-8 -*-
 import json
 import math
-from typing import Dict, Optional
 from pathlib import Path
 
 from vsg_core.models.enums import TrackType
+
 from .base import BaseAuditor
 
 
@@ -15,7 +14,7 @@ class AudioSyncAuditor(BaseAuditor):
     Uses dual verification: codec_delay metadata AND first packet timestamp.
     """
 
-    def run(self, final_mkv_path: Path, final_mkvmerge_data: Dict, final_ffprobe_data=None) -> int:
+    def run(self, final_mkv_path: Path, final_mkvmerge_data: dict, final_ffprobe_data=None) -> int:
         """
         Comprehensive audio sync audit with dual verification.
         This is CRITICAL because sync issues are very noticeable.
@@ -34,7 +33,7 @@ class AudioSyncAuditor(BaseAuditor):
 
         # In allow_negative mode, negative delays are expected and correct
         if sync_mode == 'allow_negative':
-            self.log(f"[SYNC MODE] Negative delays are allowed in this mode - validation adjusted accordingly.")
+            self.log("[SYNC MODE] Negative delays are allowed in this mode - validation adjusted accordingly.")
 
         # Build a mapping of track index to plan item
         audio_plan_items = [item for item in self.ctx.extracted_items if item.track.type == TrackType.AUDIO]
@@ -62,7 +61,7 @@ class AudioSyncAuditor(BaseAuditor):
 
         return issues
 
-    def _verify_codec_delay(self, plan_item, final_track: Dict, expected_delay_ms: float, track_index: int) -> int:
+    def _verify_codec_delay(self, plan_item, final_track: dict, expected_delay_ms: float, track_index: int) -> int:
         """
         Primary verification: Check codec_delay in container metadata.
         This is what mkvmerge's --sync option sets.
@@ -104,7 +103,7 @@ class AudioSyncAuditor(BaseAuditor):
                 if frame_size_ms == 0:
                     # Sample-accurate codecs (PCM, FLAC) - no frame cutting math needed
                     self.log(f"  ⓘ '{name}' ({source}) is sample-accurate codec ({codec_id})")
-                    self.log(f"     No frame boundary constraints - delay should be exact")
+                    self.log("     No frame boundary constraints - delay should be exact")
                     tolerance_ms = 1.0
                 else:
                     # Calculate what mkvmerge will actually do:
@@ -166,8 +165,8 @@ class AudioSyncAuditor(BaseAuditor):
 
             # Provide helpful context based on sync mode
             if sync_mode == 'allow_negative' and expected_delay_ms < 0 and actual_delay_ms >= 0:
-                self.log(f"          NOTE: Expected negative delay in allow_negative mode, but got positive.")
-                self.log(f"          This may indicate a muxing issue or chain correction problem.")
+                self.log("          NOTE: Expected negative delay in allow_negative mode, but got positive.")
+                self.log("          This may indicate a muxing issue or chain correction problem.")
 
             issues += 1
         else:
@@ -256,7 +255,7 @@ class AudioSyncAuditor(BaseAuditor):
                             self.log(f"          Difference:              {diff_ms:.1f}ms")
                             self.log(f"          Tolerance used:          ±{tolerance_ms:.0f}ms")
                             self.log(f"          Sync mode:               {sync_mode}")
-                            self.log(f"          → Stream data may not be properly delayed!")
+                            self.log("          → Stream data may not be properly delayed!")
                             return 1
                 else:
                     # Unknown codec frame size
@@ -271,12 +270,12 @@ class AudioSyncAuditor(BaseAuditor):
                 self.log(f"          Difference:              {diff_ms:.1f}ms")
                 self.log(f"          Tolerance used:          ±{tolerance_ms:.0f}ms")
                 self.log(f"          Sync mode:               {sync_mode}")
-                self.log(f"          → Stream data may not be properly delayed!")
+                self.log("          → Stream data may not be properly delayed!")
 
                 # Provide helpful context based on sync mode
                 if sync_mode == 'allow_negative' and expected_delay_ms < 0 and first_pts_ms >= 0:
-                    self.log(f"          NOTE: Expected negative delay in allow_negative mode, but got positive.")
-                    self.log(f"          This may indicate a muxing issue or chain correction problem.")
+                    self.log("          NOTE: Expected negative delay in allow_negative mode, but got positive.")
+                    self.log("          This may indicate a muxing issue or chain correction problem.")
 
                 issues += 1
             else:
@@ -288,7 +287,7 @@ class AudioSyncAuditor(BaseAuditor):
 
         return issues
 
-    def _get_codec_frame_size_ms(self, codec_id: str) -> Optional[float]:
+    def _get_codec_frame_size_ms(self, codec_id: str) -> float | None:
         """
         Returns the frame size in milliseconds for a given codec, or None if unknown.
 
@@ -319,7 +318,7 @@ class AudioSyncAuditor(BaseAuditor):
             # HE-AAC uses 2048 samples but we use conservative value
             return 21.33
 
-        if 'MP3' in codec_upper or 'MPEG' in codec_upper and 'L3' in codec_upper:
+        if 'MP3' in codec_upper or ('MPEG' in codec_upper and 'L3' in codec_upper):
             # MP3: 1152 samples, ~24ms @ 48kHz, ~26ms @ 44.1kHz
             # Use conservative value for 44.1kHz which is more common
             return 26.0

@@ -1,20 +1,19 @@
 # vsg_core/postprocess/auditors/global_shift.py
-# -*- coding: utf-8 -*-
 """
 Auditor for verifying global shift was applied correctly.
 """
-from typing import Dict, Optional
 from pathlib import Path
 
 from vsg_core.models.enums import TrackType
+
 from .base import BaseAuditor
 
 
 class GlobalShiftAuditor(BaseAuditor):
     """Verifies global shift was applied correctly to all tracks."""
 
-    def run(self, final_mkv_path: Path, final_mkvmerge_data: Dict,
-            final_ffprobe_data: Optional[Dict] = None) -> int:
+    def run(self, final_mkv_path: Path, final_mkvmerge_data: dict,
+            final_ffprobe_data: dict | None = None) -> int:
         """
         Audits global shift application.
         Returns the number of issues found.
@@ -47,7 +46,7 @@ class GlobalShiftAuditor(BaseAuditor):
                         f"has negative delay after global shift!")
                 self.log(f"          Expected delay: {expected_delay}ms")
                 self.log(f"          Global shift:   +{global_shift}ms")
-                self.log(f"          → Global shift calculation may be incorrect.")
+                self.log("          → Global shift calculation may be incorrect.")
                 issues += 1
 
         if issues == 0:

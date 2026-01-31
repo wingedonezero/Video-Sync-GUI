@@ -1,16 +1,17 @@
 # vsg_core/orchestrator/steps/extract_step.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 import shutil
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Any
 
-from vsg_core.io.runner import CommandRunner
-from vsg_core.orchestrator.steps.context import Context
-from vsg_core.models.jobs import PlanItem
-from vsg_core.models.media import Track, StreamProps
-from vsg_core.models.enums import TrackType
 from vsg_core.extraction.tracks import extract_tracks, get_stream_info_with_delays
+from vsg_core.io.runner import CommandRunner
+from vsg_core.models.enums import TrackType
+from vsg_core.models.jobs import PlanItem
+from vsg_core.models.media import StreamProps, Track
+from vsg_core.orchestrator.steps.context import Context
+
 
 class ExtractStep:
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
@@ -86,11 +87,11 @@ class ExtractStep:
                 # Check if all delays are zero
                 non_zero_delays = [d for d in delays_for_source.values() if d != 0]
                 if not non_zero_delays:
-                    runner._log_message(f"  All tracks have zero container delay")
+                    runner._log_message("  All tracks have zero container delay")
 
         # --- Read aspect ratios from ffprobe for all sources ---
         runner._log_message("--- Reading Aspect Ratios from Source Files ---")
-        source_aspect_ratios: Dict[str, Dict[int, str]] = {}
+        source_aspect_ratios: dict[str, dict[int, str]] = {}
 
         for source_key, source_path in ctx.sources.items():
             # Use ffprobe to get display_aspect_ratio
@@ -133,13 +134,13 @@ class ExtractStep:
                 )
                 all_extracted_tracks.extend(extracted_for_source)
 
-        extracted_map: Dict[str, Dict[str, Any]] = {
+        extracted_map: dict[str, dict[str, Any]] = {
             f"{t['source']}_{t['id']}": t
             for t in all_extracted_tracks
         }
 
         # --- Part 2: Build the final PlanItem list ---
-        items: List[PlanItem] = []
+        items: list[PlanItem] = []
         for sel in ctx.manual_layout:
             source = sel.get('source', '')
 
@@ -241,7 +242,7 @@ class ExtractStep:
         ctx.extracted_items = items
         return ctx
 
-    def _process_generated_tracks(self, items: List[PlanItem], runner: CommandRunner, temp_dir: Path) -> List[PlanItem]:
+    def _process_generated_tracks(self, items: list[PlanItem], runner: CommandRunner, temp_dir: Path) -> list[PlanItem]:
         """
         Prepare generated tracks by copying source files.
 
@@ -277,7 +278,7 @@ class ExtractStep:
 
             # Support standalone generated tracks (source track not in pipeline)
             if not source_item:
-                runner._log_message(f"  Source track not in pipeline - using generated track's own extraction")
+                runner._log_message("  Source track not in pipeline - using generated track's own extraction")
                 source_path = item.extracted_path
             else:
                 # INHERIT source file properties (container delay, sync settings, etc.)
@@ -306,7 +307,7 @@ class ExtractStep:
                 item.extracted_path = generated_path
 
                 runner._log_message(f"  ✓ Copied source to: {generated_path.name}")
-                runner._log_message(f"  Style filtering will be applied in subtitles step")
+                runner._log_message("  Style filtering will be applied in subtitles step")
 
             except Exception as e:
                 runner._log_message(f"[ERROR] Failed to prepare generated track: {e}")

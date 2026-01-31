@@ -1,14 +1,12 @@
 # vsg_core/subtitles/checkpoint_selection.py
-# -*- coding: utf-8 -*-
 """
 Smart checkpoint selection for subtitle sync verification.
 
 Selects representative dialogue events while avoiding OP/ED sequences.
 """
-from typing import List
 
 
-def select_smart_checkpoints(subtitle_events: List, runner) -> List:
+def select_smart_checkpoints(subtitle_events: list, runner) -> list:
     """
     Smart checkpoint selection: avoid OP/ED, prefer dialogue events.
 
@@ -54,7 +52,7 @@ def select_smart_checkpoints(subtitle_events: List, runner) -> List:
         start_idx = total_events // 3
         end_idx = 2 * total_events // 3
         safe_events = subtitle_events[start_idx:end_idx]
-        runner._log_message(f"[Checkpoint Selection] Using middle third (not enough events in safe zone)")
+        runner._log_message("[Checkpoint Selection] Using middle third (not enough events in safe zone)")
 
     if len(safe_events) == 0:
         # Last resort: use first/mid/last of all events

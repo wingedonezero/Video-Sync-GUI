@@ -1,5 +1,4 @@
 # vsg_core/subtitles/parsers/srt_parser.py
-# -*- coding: utf-8 -*-
 """
 SRT and VTT subtitle file parsers.
 
@@ -11,10 +10,8 @@ from __future__ import annotations
 import codecs
 import re
 from pathlib import Path
-from typing import List, Tuple
 
 from ..data import SubtitleData, SubtitleEvent, SubtitleStyle
-
 
 # Encodings to try
 ENCODINGS_TO_TRY = [
@@ -26,7 +23,7 @@ ENCODINGS_TO_TRY = [
 ]
 
 
-def detect_encoding(path: Path) -> Tuple[str, bool]:
+def detect_encoding(path: Path) -> tuple[str, bool]:
     """Detect file encoding."""
     with open(path, 'rb') as f:
         raw = f.read(4)
@@ -38,7 +35,7 @@ def detect_encoding(path: Path) -> Tuple[str, bool]:
 
     for encoding in ENCODINGS_TO_TRY:
         try:
-            with open(path, 'r', encoding=encoding) as f:
+            with open(path, encoding=encoding) as f:
                 f.read()
             return (encoding, encoding == 'utf-8-sig')
         except (UnicodeDecodeError, LookupError):
@@ -60,7 +57,7 @@ def parse_srt_file(path: Path) -> SubtitleData:
     path = Path(path)
     encoding, has_bom = detect_encoding(path)
 
-    with open(path, 'r', encoding=encoding) as f:
+    with open(path, encoding=encoding) as f:
         content = f.read()
 
     data = SubtitleData(
@@ -151,7 +148,7 @@ def parse_vtt_file(path: Path) -> SubtitleData:
     path = Path(path)
     encoding, has_bom = detect_encoding(path)
 
-    with open(path, 'r', encoding=encoding) as f:
+    with open(path, encoding=encoding) as f:
         content = f.read()
 
     data = SubtitleData(

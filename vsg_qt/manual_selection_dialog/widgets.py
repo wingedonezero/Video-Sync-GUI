@@ -1,18 +1,15 @@
 # vsg_qt/manual_selection_dialog/widgets.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import Optional
-from PySide6.QtCore import Qt, QPoint
-from PySide6.QtWidgets import (
-    QListWidget, QAbstractItemView, QListWidgetItem, QMenu
-)
+
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QColor
+from PySide6.QtWidgets import QAbstractItemView, QListWidget, QListWidgetItem, QMenu
 
 from vsg_qt.track_widget import TrackWidget
-from .logic import ManualLogic
+
 
 class SourceList(QListWidget):
-    def __init__(self, dialog: "ManualSelectionDialog" = None, parent=None):
+    def __init__(self, dialog: ManualSelectionDialog = None, parent=None):
         super().__init__(parent)
         self.dialog = dialog
         self.setDragEnabled(True)
@@ -68,7 +65,7 @@ class SourceList(QListWidget):
 
 class FinalList(QListWidget):
     """Final output list that accepts drops and renders TrackWidget rows."""
-    def __init__(self, dialog: "ManualSelectionDialog", parent=None):
+    def __init__(self, dialog: ManualSelectionDialog, parent=None):
         super().__init__(parent)
         self.dialog = dialog
         self.setDragEnabled(True)

@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/word_lists.py
-# -*- coding: utf-8 -*-
 """
 Unified Word List Management System
 
@@ -14,10 +13,9 @@ Config stored in .config/ocr/ocr_config.json
 
 import json
 import logging
-from dataclasses import dataclass, field, asdict
-from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from dataclasses import asdict, dataclass, field
 from enum import Enum
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +44,7 @@ class WordListConfig:
     order: int = 100
 
     # File reference (for file-backed lists)
-    file_path: Optional[str] = None
+    file_path: str | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -80,7 +78,7 @@ class WordListConfig:
 class WordList:
     """A word list with its configuration and loaded words."""
     config: WordListConfig
-    words: Set[str] = field(default_factory=set)
+    words: set[str] = field(default_factory=set)
 
     @property
     def name(self) -> str:
@@ -184,7 +182,7 @@ DEFAULT_WORD_LISTS = [
 class ValidationResult:
     """Result of a word validation check."""
     is_known: bool
-    source_name: Optional[str] = None  # Which list it was found in
+    source_name: str | None = None  # Which list it was found in
     is_protected: bool = False         # Should not be "fixed"
 
 
@@ -192,8 +190,8 @@ class ValidationResult:
 class ValidationStats:
     """Statistics for logging."""
     total_validated: int = 0
-    by_source: Dict[str, int] = field(default_factory=dict)
-    unknown_words: List[str] = field(default_factory=list)
+    by_source: dict[str, int] = field(default_factory=dict)
+    unknown_words: list[str] = field(default_factory=list)
 
     def add_validated(self, source_name: str):
         self.total_validated += 1
@@ -240,7 +238,7 @@ class ValidationManager:
         self.config_dir = Path(config_dir)
         self.config_path = self.config_dir / "ocr_config.json"
 
-        self.word_lists: List[WordList] = []
+        self.word_lists: list[WordList] = []
         self.spell_checker = None  # Enchant dictionary, set externally
 
         self._stats = ValidationStats()
@@ -249,14 +247,14 @@ class ValidationManager:
         """Set the system spell checker (Enchant/Hunspell)."""
         self.spell_checker = spell_checker
 
-    def load_config(self) -> List[WordListConfig]:
+    def load_config(self) -> list[WordListConfig]:
         """Load word list configurations from JSON."""
         if not self.config_path.exists():
-            logger.info(f"[WordLists] No config found, using defaults")
+            logger.info("[WordLists] No config found, using defaults")
             return [WordListConfig(**asdict(c)) for c in DEFAULT_WORD_LISTS]
 
         try:
-            with open(self.config_path, 'r', encoding='utf-8') as f:
+            with open(self.config_path, encoding='utf-8') as f:
                 data = json.load(f)
 
             configs = []
@@ -287,17 +285,17 @@ class ValidationManager:
         except Exception as e:
             logger.error(f"[WordLists] Error saving config: {e}")
 
-    def get_word_lists(self) -> List[WordList]:
+    def get_word_lists(self) -> list[WordList]:
         """Get all word lists sorted by order."""
         return sorted(self.word_lists, key=lambda wl: wl.config.order)
 
-    def add_word_list(self, config: WordListConfig, words: Set[str]):
+    def add_word_list(self, config: WordListConfig, words: set[str]):
         """Add a word list."""
         word_list = WordList(config=config, words=words)
         self.word_lists.append(word_list)
         logger.debug(f"[WordLists] Added '{config.name}' with {len(words)} words")
 
-    def get_word_list_by_name(self, name: str) -> Optional[WordList]:
+    def get_word_list_by_name(self, name: str) -> WordList | None:
         """Get a word list by name."""
         for wl in self.word_lists:
             if wl.name == name:
@@ -473,10 +471,10 @@ class ValidationManager:
 
 
 # Global instance
-_validation_manager: Optional[ValidationManager] = None
+_validation_manager: ValidationManager | None = None
 
 
-def get_validation_manager(config_dir: Optional[Path] = None) -> ValidationManager:
+def get_validation_manager(config_dir: Path | None = None) -> ValidationManager:
     """Get or create the global ValidationManager instance."""
     global _validation_manager
 
@@ -493,7 +491,7 @@ def get_validation_manager(config_dir: Optional[Path] = None) -> ValidationManag
 # Word List Loaders
 # =============================================================================
 
-def load_text_wordlist(path: Path) -> Set[str]:
+def load_text_wordlist(path: Path) -> set[str]:
     """
     Load words from a text file (one word per line).
 
@@ -508,7 +506,7 @@ def load_text_wordlist(path: Path) -> Set[str]:
         return words
 
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, encoding='utf-8') as f:
             for line in f:
                 word = line.strip()
                 if word and not word.startswith('#'):
@@ -520,7 +518,7 @@ def load_text_wordlist(path: Path) -> Set[str]:
     return words
 
 
-def load_se_xml_wordlist(path: Path, element_name: str = "word") -> Set[str]:
+def load_se_xml_wordlist(path: Path, element_name: str = "word") -> set[str]:
     """
     Load words from a SubtitleEdit XML file.
 
@@ -550,7 +548,7 @@ def load_se_xml_wordlist(path: Path, element_name: str = "word") -> Set[str]:
     return words
 
 
-def load_se_names_xml(path: Path) -> Tuple[Set[str], Set[str]]:
+def load_se_names_xml(path: Path) -> tuple[set[str], set[str]]:
     """
     Load names from SubtitleEdit names XML file.
 

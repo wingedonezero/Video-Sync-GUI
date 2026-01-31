@@ -1,5 +1,4 @@
 # vsg_core/subtitles/sync_modes/__init__.py
-# -*- coding: utf-8 -*-
 """
 Subtitle synchronization modes - Plugin system.
 
@@ -16,10 +15,10 @@ Plugins are located in: vsg_core/subtitles/sync_mode_plugins/
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Dict, Optional, Type, TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict, Optional, Type
 
 if TYPE_CHECKING:
-    from ..data import SubtitleData, OperationResult
+    from ..data import OperationResult, SubtitleData
 
 
 # =============================================================================
@@ -42,16 +41,16 @@ class SyncPlugin(ABC):
     @abstractmethod
     def apply(
         self,
-        subtitle_data: 'SubtitleData',
+        subtitle_data: SubtitleData,
         total_delay_ms: float,
         global_shift_ms: float,
-        target_fps: Optional[float] = None,
-        source_video: Optional[str] = None,
-        target_video: Optional[str] = None,
+        target_fps: float | None = None,
+        source_video: str | None = None,
+        target_video: str | None = None,
         runner=None,
-        config: Optional[dict] = None,
+        config: dict | None = None,
         **kwargs
-    ) -> 'OperationResult':
+    ) -> OperationResult:
         """
         Apply sync to subtitle data.
 
@@ -75,11 +74,11 @@ class SyncPlugin(ABC):
 
 
 # Plugin registry
-_sync_plugins: Dict[str, Type[SyncPlugin]] = {}
+_sync_plugins: dict[str, type[SyncPlugin]] = {}
 _plugins_loaded = False
 
 
-def register_sync_plugin(plugin_class: Type[SyncPlugin]) -> Type[SyncPlugin]:
+def register_sync_plugin(plugin_class: type[SyncPlugin]) -> type[SyncPlugin]:
     """
     Register a sync plugin.
 
@@ -114,7 +113,7 @@ def _ensure_plugins_loaded():
         _plugins_loaded = True
 
 
-def get_sync_plugin(name: str) -> Optional[SyncPlugin]:
+def get_sync_plugin(name: str) -> SyncPlugin | None:
     """
     Get a sync plugin instance by name.
 
@@ -131,7 +130,7 @@ def get_sync_plugin(name: str) -> Optional[SyncPlugin]:
     return None
 
 
-def list_sync_plugins() -> Dict[str, str]:
+def list_sync_plugins() -> dict[str, str]:
     """
     List all registered sync plugins.
 
@@ -144,7 +143,7 @@ def list_sync_plugins() -> Dict[str, str]:
 
 __all__ = [
     'SyncPlugin',
-    'register_sync_plugin',
     'get_sync_plugin',
     'list_sync_plugins',
+    'register_sync_plugin',
 ]

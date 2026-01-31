@@ -1,5 +1,4 @@
 # vsg_core/subtitles/sync_mode_plugins/correlation_guided_frame_anchor.py
-# -*- coding: utf-8 -*-
 """
 Correlation-Guided Frame Anchor sync plugin for SubtitleData.
 
@@ -10,15 +9,14 @@ All timing is float ms internally - rounding happens only at final save.
 """
 from __future__ import annotations
 
-import math
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from ..sync_modes import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
-    from ..data import SubtitleData, OperationResult, OperationRecord, SyncEventData
+    from ..data import OperationResult, SubtitleData
 
 
 @register_sync_plugin
@@ -34,19 +32,19 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
 
     def apply(
         self,
-        subtitle_data: 'SubtitleData',
+        subtitle_data: SubtitleData,
         total_delay_ms: float,
         global_shift_ms: float,
-        target_fps: Optional[float] = None,
-        source_video: Optional[str] = None,
-        target_video: Optional[str] = None,
+        target_fps: float | None = None,
+        source_video: str | None = None,
+        target_video: str | None = None,
         runner=None,
-        config: Optional[dict] = None,
-        temp_dir: Optional[Path] = None,
-        sync_exclusion_styles: Optional[List[str]] = None,
+        config: dict | None = None,
+        temp_dir: Path | None = None,
+        sync_exclusion_styles: list[str] | None = None,
         sync_exclusion_mode: str = 'exclude',
         **kwargs
-    ) -> 'OperationResult':
+    ) -> OperationResult:
         """
         Apply correlation-guided frame anchor sync to subtitle data.
 
@@ -73,7 +71,7 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
         Returns:
             OperationResult with statistics
         """
-        from ..data import OperationResult, OperationRecord, SyncEventData
+        from ..data import OperationResult
         from ..frame_utils import detect_video_fps, get_video_duration_ms
 
         config = config or {}
@@ -82,7 +80,7 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
             if runner:
                 runner._log_message(msg)
 
-        log(f"[CorrGuided] === Correlation-Guided Frame Anchor Sync ===")
+        log("[CorrGuided] === Correlation-Guided Frame Anchor Sync ===")
         log(f"[CorrGuided] Events: {len(subtitle_data.events)}")
 
         if not source_video or not target_video:
@@ -138,11 +136,15 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
 
         # Try to import frame utilities
         try:
-            from ..frame_utils import VideoReader, compute_frame_hash, compute_hamming_distance
+            from ..frame_utils import (
+                VideoReader,
+                compute_frame_hash,
+                compute_hamming_distance,
+            )
         except ImportError as e:
             # Fall back to just correlation
             log(f"[CorrGuided] Frame utilities unavailable: {e}")
-            log(f"[CorrGuided] Falling back to correlation-only offset")
+            log("[CorrGuided] Falling back to correlation-only offset")
             return self._apply_correlation_only(
                 subtitle_data, total_delay_ms, global_shift_ms, sync_exclusion_styles, sync_exclusion_mode, runner
             )
@@ -154,7 +156,7 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
             target_reader = VideoReader(target_video, runner, use_vapoursynth=use_vs, temp_dir=temp_dir)
         except Exception as e:
             log(f"[CorrGuided] Failed to open videos: {e}")
-            log(f"[CorrGuided] Falling back to correlation-only offset")
+            log("[CorrGuided] Falling back to correlation-only offset")
             return self._apply_correlation_only(
                 subtitle_data, total_delay_ms, global_shift_ms, sync_exclusion_styles, sync_exclusion_mode, runner
             )
@@ -181,7 +183,7 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
                         source_hashes.append((offset, h))
 
             if len(source_hashes) < 3:
-                log(f"[CorrGuided]   WARNING: Not enough source frames")
+                log("[CorrGuided]   WARNING: Not enough source frames")
                 continue
 
             # Predicted target time based on correlation
@@ -267,7 +269,7 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
                     frame_correction_ms = median_offset - pure_correlation_ms
                     log(f"[CorrGuided] Using median anyway: {median_offset:+.1f}ms")
                 else:  # use-correlation
-                    log(f"[CorrGuided] Using correlation only (no frame correction)")
+                    log("[CorrGuided] Using correlation only (no frame correction)")
         else:
             log(f"[CorrGuided] Not enough anchor matches ({len(measurements)}/2)")
             if fallback_mode == 'abort':
@@ -276,17 +278,17 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
                     operation='sync',
                     error=f'Not enough anchor matches ({len(measurements)}/2 minimum)'
                 )
-            log(f"[CorrGuided] Using correlation only")
+            log("[CorrGuided] Using correlation only")
 
         # Calculate final offset
         final_offset_ms = total_delay_ms + frame_correction_ms
 
-        log(f"[CorrGuided] ───────────────────────────────────────")
-        log(f"[CorrGuided] Final calculation:")
+        log("[CorrGuided] ───────────────────────────────────────")
+        log("[CorrGuided] Final calculation:")
         log(f"[CorrGuided]   Total delay:       {total_delay_ms:+.3f}ms")
         log(f"[CorrGuided]   + Frame correction: {frame_correction_ms:+.3f}ms")
         log(f"[CorrGuided]   = Final offset:    {final_offset_ms:+.3f}ms")
-        log(f"[CorrGuided] ───────────────────────────────────────")
+        log("[CorrGuided] ───────────────────────────────────────")
 
         # Apply offset to all events
         return self._apply_offset(
@@ -297,13 +299,13 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
 
     def _apply_correlation_only(
         self,
-        subtitle_data: 'SubtitleData',
+        subtitle_data: SubtitleData,
         total_delay_ms: float,
         global_shift_ms: float,
-        sync_exclusion_styles: Optional[List[str]],
+        sync_exclusion_styles: list[str] | None,
         sync_exclusion_mode: str,
         runner
-    ) -> 'OperationResult':
+    ) -> OperationResult:
         """Apply correlation-only offset when frame matching unavailable."""
         return self._apply_offset(
             subtitle_data, total_delay_ms, total_delay_ms, global_shift_ms,
@@ -312,18 +314,18 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
 
     def _apply_offset(
         self,
-        subtitle_data: 'SubtitleData',
+        subtitle_data: SubtitleData,
         final_offset_ms: float,
         total_delay_ms: float,
         global_shift_ms: float,
         frame_correction_ms: float,
-        checkpoint_details: List[Dict],
-        sync_exclusion_styles: Optional[List[str]],
+        checkpoint_details: list[dict],
+        sync_exclusion_styles: list[str] | None,
         sync_exclusion_mode: str,
         runner
-    ) -> 'OperationResult':
+    ) -> OperationResult:
         """Apply the calculated offset to all events."""
-        from ..data import OperationResult, OperationRecord, SyncEventData
+        from ..data import OperationRecord, OperationResult, SyncEventData
 
         def log(msg: str):
             if runner:
@@ -404,7 +406,7 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
         log(f"[CorrGuided] Sync complete: {events_synced} events")
         if events_excluded > 0:
             log(f"[CorrGuided] ({events_excluded} styles excluded from frame correction)")
-        log(f"[CorrGuided] ===================================")
+        log("[CorrGuided] ===================================")
 
         return OperationResult(
             success=True,

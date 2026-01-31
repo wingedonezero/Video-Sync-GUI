@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/pipeline.py
-# -*- coding: utf-8 -*-
 """
 OCR Pipeline - Main Entry Point
 
@@ -17,23 +16,28 @@ Usage:
 """
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from ..data import SubtitleData
 
-from .parsers import SubtitleImageParser, SubtitleImage
-from .preprocessing import ImagePreprocessor, PreprocessingConfig, create_preprocessor
-from .engine import OCREngine, OCRConfig, create_ocr_engine
-from .postprocess import OCRPostProcessor, PostProcessConfig, create_postprocessor
-from .output import (
-    SubtitleWriter, OutputConfig, SubtitleEntry, create_writer,
-    OCRSubtitleResult, create_subtitle_data_from_ocr
-)
-from .report import OCRReport, SubtitleOCRResult, create_report
 from .debug import OCRDebugger, create_debugger
+from .engine import OCREngine, create_ocr_engine
+from .output import (
+    OCRSubtitleResult,
+    OutputConfig,
+    SubtitleEntry,
+    SubtitleWriter,
+    create_subtitle_data_from_ocr,
+    create_writer,
+)
+from .parsers import SubtitleImage, SubtitleImageParser
+from .postprocess import OCRPostProcessor, create_postprocessor
+from .preprocessing import ImagePreprocessor, create_preprocessor
+from .report import OCRReport, SubtitleOCRResult, create_report
 
 
 @dataclass
@@ -65,12 +69,12 @@ class PipelineConfig:
 class PipelineResult:
     """Result of OCR pipeline execution."""
     success: bool = False
-    output_path: Optional[Path] = None
-    report_path: Optional[Path] = None
+    output_path: Path | None = None
+    report_path: Path | None = None
     report_summary: dict = field(default_factory=dict)
     subtitle_count: int = 0
     duration_seconds: float = 0.0
-    error: Optional[str] = None
+    error: str | None = None
 
     # Unified SubtitleData (when return_subtitle_data=True)
     subtitle_data: Optional['SubtitleData'] = None
@@ -88,7 +92,7 @@ class OCRPipeline:
         settings_dict: dict,
         work_dir: Path,
         logs_dir: Path,
-        progress_callback: Optional[Callable[[str, float], None]] = None
+        progress_callback: Callable[[str, float], None] | None = None
     ):
         """
         Initialize OCR pipeline.
@@ -113,10 +117,10 @@ class OCRPipeline:
         self.config = self._create_config()
 
         # Initialize components (lazily)
-        self._preprocessor: Optional[ImagePreprocessor] = None
-        self._engine: Optional[OCREngine] = None
-        self._postprocessor: Optional[OCRPostProcessor] = None
-        self._writer: Optional[SubtitleWriter] = None
+        self._preprocessor: ImagePreprocessor | None = None
+        self._engine: OCREngine | None = None
+        self._postprocessor: OCRPostProcessor | None = None
+        self._writer: SubtitleWriter | None = None
 
     def _create_config(self) -> PipelineConfig:
         """Create pipeline config from settings."""
@@ -180,7 +184,7 @@ class OCRPipeline:
     def process(
         self,
         input_path: Path,
-        output_path: Optional[Path] = None,
+        output_path: Path | None = None,
         track_id: int = 0,
         return_subtitle_data: bool = False
     ) -> PipelineResult:
@@ -261,8 +265,8 @@ class OCRPipeline:
 
             # Step 4: Process each subtitle
             # Use OCRSubtitleResult for unified pipeline, SubtitleEntry for legacy
-            ocr_results: List[OCRSubtitleResult] = []
-            output_entries: List[SubtitleEntry] = []
+            ocr_results: list[OCRSubtitleResult] = []
+            output_entries: list[SubtitleEntry] = []
             last_logged_percent = -1
 
             for i, sub_image in enumerate(subtitle_images):
@@ -283,7 +287,7 @@ class OCRPipeline:
                         output_entries.append(entry)
                     if sub_result is not None:
                         report.add_subtitle_result(sub_result)
-                except Exception as e:
+                except Exception:
                     report.add_subtitle_result(SubtitleOCRResult(
                         index=sub_image.index,
                         timestamp_start=sub_image.start_time,
@@ -385,7 +389,7 @@ class OCRPipeline:
         sub_image: SubtitleImage,
         report: OCRReport,
         debugger: OCRDebugger
-    ) -> tuple[Optional[SubtitleEntry], SubtitleOCRResult]:
+    ) -> tuple[SubtitleEntry | None, SubtitleOCRResult]:
         """
         Process a single subtitle through the pipeline.
 
@@ -503,7 +507,7 @@ class OCRPipeline:
         sub_image: SubtitleImage,
         report: OCRReport,
         debugger: OCRDebugger
-    ) -> tuple[Optional[OCRSubtitleResult], Optional[SubtitleEntry], Optional[SubtitleOCRResult]]:
+    ) -> tuple[OCRSubtitleResult | None, SubtitleEntry | None, SubtitleOCRResult | None]:
         """
         Process a single subtitle through the pipeline.
 
@@ -588,8 +592,8 @@ class OCRPipeline:
         )
 
         # Extract palette colors if available
-        subtitle_colors: List[List[int]] = []
-        dominant_color: List[int] = []
+        subtitle_colors: list[list[int]] = []
+        dominant_color: list[int] = []
         if sub_image.palette:
             # Convert palette tuples to lists for JSON serialization
             for color in sub_image.palette:
@@ -666,12 +670,12 @@ class OCRPipeline:
 
 def run_ocr_pipeline(
     input_path: Path,
-    output_path: Optional[Path],
+    output_path: Path | None,
     settings_dict: dict,
     work_dir: Path,
     logs_dir: Path,
     track_id: int = 0,
-    progress_callback: Optional[Callable[[str, float], None]] = None
+    progress_callback: Callable[[str, float], None] | None = None
 ) -> PipelineResult:
     """
     Convenience function to run the OCR pipeline.

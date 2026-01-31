@@ -1,11 +1,10 @@
-# -*- coding: utf-8 -*-
-from pathlib import Path
 import re
-from typing import Tuple
+from pathlib import Path
 
 from ..io.runner import CommandRunner
 
-def run_videodiff(ref_file: str, target_file: str, config: dict, runner: CommandRunner, tool_paths: dict) -> Tuple[int, float]:
+
+def run_videodiff(ref_file: str, target_file: str, config: dict, runner: CommandRunner, tool_paths: dict) -> tuple[int, float]:
     """
     Prefer an explicit config path if it exists; otherwise allow PATH/tool_paths resolution.
     Do not hard-fail just because a literal path doesn't exist—let runner.resolve/PATH try it.
@@ -34,7 +33,7 @@ def run_videodiff(ref_file: str, target_file: str, config: dict, runner: Command
             break
 
     if not last_line:
-        raise RuntimeError(f"Could not find a valid '[Result]' line in videodiff output.")
+        raise RuntimeError("Could not find a valid '[Result]' line in videodiff output.")
 
     m = re.search(r'(itsoffset|ss)\s*:\s*(-?\d+(?:\.\d+)?)s.*?error:\s*([0-9.]+)', last_line, flags=re.IGNORECASE)
     if not m:

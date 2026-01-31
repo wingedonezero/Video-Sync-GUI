@@ -1,5 +1,4 @@
 # vsg_core/subtitles/writers/srt_writer.py
-# -*- coding: utf-8 -*-
 """
 SRT subtitle file writer.
 
@@ -17,7 +16,7 @@ if TYPE_CHECKING:
     from ..data import SubtitleData
 
 
-def write_srt_file(data: 'SubtitleData', path: Path, rounding: str = 'round') -> None:
+def write_srt_file(data: SubtitleData, path: Path, rounding: str = 'round') -> None:
     """
     Write SubtitleData to SRT file.
 
@@ -78,8 +77,7 @@ def _format_srt_time(ms: float, rounding: str) -> str:
     # Round to integer ms
     total_ms = _round_ms(ms, rounding)
 
-    if total_ms < 0:
-        total_ms = 0
+    total_ms = max(total_ms, 0)
 
     milliseconds = total_ms % 1000
     total_seconds = total_ms // 1000

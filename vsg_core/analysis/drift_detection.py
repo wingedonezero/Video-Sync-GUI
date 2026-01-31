@@ -1,23 +1,23 @@
 # vsg_core/analysis/drift_detection.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
-import json
+
 import warnings
-from typing import List, Dict, Any, Tuple
+from typing import Any
 
 import numpy as np
 from sklearn.cluster import DBSCAN
 
 from ..io.runner import CommandRunner
 
+
 def _build_cluster_diagnostics(
-    accepted_chunks: List[Dict[str, Any]],
+    accepted_chunks: list[dict[str, Any]],
     labels: np.ndarray,
-    cluster_members: Dict[int, List[int]],
+    cluster_members: dict[int, list[int]],
     delays: np.ndarray,
     runner: CommandRunner,
-    config: Dict
-) -> List[Dict[str, Any]]:
+    config: dict
+) -> list[dict[str, Any]]:
     """
     Builds detailed cluster composition and transition analysis.
     Returns a list of cluster info dictionaries.
@@ -91,7 +91,7 @@ def _build_cluster_diagnostics(
 
     return cluster_info
 
-def _format_chunk_range(chunk_numbers: List[int]) -> str:
+def _format_chunk_range(chunk_numbers: list[int]) -> str:
     """Formats chunk numbers as ranges (e.g., '1-3,5-25,30-48')"""
     if not chunk_numbers:
         return ""
@@ -111,7 +111,7 @@ def _format_chunk_range(chunk_numbers: List[int]) -> str:
     ranges.append(f"{start}-{end}" if start != end else f"{start}")
     return ",".join(ranges)
 
-def _analyze_transition_patterns(cluster_info: List[Dict[str, Any]], runner: CommandRunner):
+def _analyze_transition_patterns(cluster_info: list[dict[str, Any]], runner: CommandRunner):
     """Analyzes and reports patterns in delay transitions"""
     if len(cluster_info) < 2:
         return
@@ -138,18 +138,18 @@ def _analyze_transition_patterns(cluster_info: List[Dict[str, Any]], runner: Com
     runner._log_message("[Transition Analysis]:")
 
     if all_positive:
-        runner._log_message(f"  → All delays INCREASE (accumulating lag = missing content)")
+        runner._log_message("  → All delays INCREASE (accumulating lag = missing content)")
     elif all_negative:
-        runner._log_message(f"  → All delays DECREASE (accumulating lead = extra content)")
+        runner._log_message("  → All delays DECREASE (accumulating lead = extra content)")
     else:
-        runner._log_message(f"  → Mixed pattern (some increases, some decreases)")
+        runner._log_message("  → Mixed pattern (some increases, some decreases)")
 
     if consistent_jumps and len(jumps) > 1:
         runner._log_message(f"  → Consistent jump size: ~{mean_jump:.0f}ms per transition")
-        runner._log_message(f"  → Likely cause: Regular reel changes or commercial breaks")
+        runner._log_message("  → Likely cause: Regular reel changes or commercial breaks")
     else:
         runner._log_message(f"  → Variable jump sizes: {', '.join(f'{j:+.0f}ms' for j in jumps)}")
-        runner._log_message(f"  → Likely cause: Scene-specific edits or variable content changes")
+        runner._log_message("  → Likely cause: Scene-specific edits or variable content changes")
 
     # Check for low match scores that might indicate content mismatches
     # 70% threshold: Match scores below this suggest silence or mismatched content
@@ -157,7 +157,7 @@ def _analyze_transition_patterns(cluster_info: List[Dict[str, Any]], runner: Com
     low_match_clusters = [c for c in cluster_info if c['min_match_pct'] < 70]
     if low_match_clusters:
         runner._log_message(f"  ⚠ {len(low_match_clusters)} clusters have chunks with match < 70%")
-        runner._log_message(f"  → Possible silence sections or content mismatches at transitions")
+        runner._log_message("  → Possible silence sections or content mismatches at transitions")
 
 def _get_video_framerate(video_path: str, runner: CommandRunner, tool_paths: dict) -> float:
     """Uses ffprobe to get the video's average frame rate."""
@@ -176,7 +176,7 @@ def _get_video_framerate(video_path: str, runner: CommandRunner, tool_paths: dic
     except (ValueError, ZeroDivisionError):
         return 0.0
 
-def _get_quality_thresholds(config: Dict) -> Dict[str, Any]:
+def _get_quality_thresholds(config: dict) -> dict[str, Any]:
     """
     Returns quality validation thresholds based on the selected quality mode.
     Modes: 'strict', 'normal', 'lenient', 'custom'
@@ -223,12 +223,12 @@ def _get_quality_thresholds(config: Dict) -> Dict[str, Any]:
 
 def _validate_cluster(
     cluster_label: int,
-    cluster_members: List[int],
-    accepted_chunks: List[Dict[str, Any]],
+    cluster_members: list[int],
+    accepted_chunks: list[dict[str, Any]],
     total_chunks: int,
-    thresholds: Dict[str, Any],
+    thresholds: dict[str, Any],
     chunk_duration: float = 15.0
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Validates a single cluster against quality thresholds.
     Returns a dict with validation results and reasons.
@@ -299,12 +299,12 @@ def _validate_cluster(
     }
 
 def _filter_clusters(
-    cluster_members: Dict[int, List[int]],
-    accepted_chunks: List[Dict[str, Any]],
+    cluster_members: dict[int, list[int]],
+    accepted_chunks: list[dict[str, Any]],
     delays: np.ndarray,
-    thresholds: Dict[str, Any],
+    thresholds: dict[str, Any],
     runner: CommandRunner,
-    config: Dict
+    config: dict
 ) -> tuple:
     """
     Filters clusters based on quality validation.
@@ -331,12 +331,12 @@ def _filter_clusters(
 
 def diagnose_audio_issue(
     video_path: str,
-    chunks: List[Dict[str, Any]],
-    config: Dict,
+    chunks: list[dict[str, Any]],
+    config: dict,
     runner: CommandRunner,
     tool_paths: dict,
     codec_id: str
-) -> Tuple[str, Dict]:
+) -> tuple[str, dict]:
     """
     Analyzes correlation chunks to diagnose the type of sync issue.
     Returns:
@@ -467,7 +467,7 @@ def diagnose_audio_issue(
                     f"[Stepping Rejected] {len(invalid_clusters)}/{len(cluster_members)} clusters failed validation in '{correction_mode}' mode."
                 )
                 runner._log_message(
-                    f"  → Treating as uniform delay. Switch to 'filtered' mode to use valid clusters only."
+                    "  → Treating as uniform delay. Switch to 'filtered' mode to use valid clusters only."
                 )
                 return "UNIFORM", {}
 

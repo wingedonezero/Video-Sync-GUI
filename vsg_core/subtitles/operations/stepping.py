@@ -1,5 +1,4 @@
 # vsg_core/subtitles/operations/stepping.py
-# -*- coding: utf-8 -*-
 """
 Stepping operation for SubtitleData.
 
@@ -14,18 +13,18 @@ for reference implementation details.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, List, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..data import SubtitleData, OperationResult, OperationRecord
+    from ..data import OperationResult, SubtitleData
 
 
 def apply_stepping(
-    data: 'SubtitleData',
-    edl_segments: List[Any],
+    data: SubtitleData,
+    edl_segments: list[Any],
     boundary_mode: str = 'start',
     runner=None
-) -> 'OperationResult':
+) -> OperationResult:
     """
     Apply stepping correction EDL to subtitle timestamps.
 
@@ -41,7 +40,7 @@ def apply_stepping(
     Returns:
         OperationResult with statistics
     """
-    from ..data import OperationResult, OperationRecord
+    from ..data import OperationRecord, OperationResult
 
     def log(msg: str):
         if runner:
@@ -115,7 +114,7 @@ def apply_stepping(
     )
 
 
-def _spans_boundary(start_s: float, end_s: float, edl: List) -> bool:
+def _spans_boundary(start_s: float, end_s: float, edl: list) -> bool:
     """Check if subtitle spans a stepping boundary."""
     if len(edl) <= 1:
         return False
@@ -126,7 +125,7 @@ def _spans_boundary(start_s: float, end_s: float, edl: List) -> bool:
     return False
 
 
-def _get_offset_at_time(start_s: float, end_s: float, edl: List, mode: str = 'start') -> float:
+def _get_offset_at_time(start_s: float, end_s: float, edl: list, mode: str = 'start') -> float:
     """
     Calculate cumulative offset (in float ms) for a subtitle.
 

@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/backends.py
-# -*- coding: utf-8 -*-
 """
 OCR Engine Backends
 
@@ -11,11 +10,11 @@ Provides abstract interface and implementations for different OCR engines:
 This abstraction allows easy switching between engines for comparison.
 """
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+
 import numpy as np
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +24,7 @@ class OCRLineResult:
     """Result for a single OCR line."""
     text: str
     confidence: float  # 0-100 scale
-    word_confidences: List[Tuple[str, float]] = field(default_factory=list)
+    word_confidences: list[tuple[str, float]] = field(default_factory=list)
     backend: str = "unknown"
 
 
@@ -33,11 +32,11 @@ class OCRLineResult:
 class OCRResult:
     """Complete OCR result for a subtitle image."""
     text: str  # Full recognized text
-    lines: List[OCRLineResult] = field(default_factory=list)
+    lines: list[OCRLineResult] = field(default_factory=list)
     average_confidence: float = 0.0
     min_confidence: float = 0.0
     low_confidence: bool = False
-    error: Optional[str] = None
+    error: str | None = None
     backend: str = "unknown"
 
     @property
@@ -96,7 +95,7 @@ class OCRBackend(ABC):
     def ocr_lines_separately(
         self,
         image: np.ndarray,
-        line_images: Optional[List[np.ndarray]] = None
+        line_images: list[np.ndarray] | None = None
     ) -> OCRResult:
         """
         OCR each line separately for better accuracy.
@@ -147,7 +146,7 @@ class OCRBackend(ABC):
 
         return result
 
-    def _split_into_lines(self, image: np.ndarray) -> List[np.ndarray]:
+    def _split_into_lines(self, image: np.ndarray) -> list[np.ndarray]:
         """
         Split a multi-line subtitle image into separate line images.
         Uses horizontal projection to find line boundaries.
@@ -274,7 +273,7 @@ class TesseractBackend(OCRBackend):
 
         return result
 
-    def _process_data(self, data: dict) -> List[OCRLineResult]:
+    def _process_data(self, data: dict) -> list[OCRLineResult]:
         """Process Tesseract output into line results."""
         lines = []
         current_line = None
@@ -323,7 +322,7 @@ class EasyOCRBackend(OCRBackend):
 
     name = "easyocr"
 
-    def __init__(self, languages: List[str] = None, model_storage_directory: str = None):
+    def __init__(self, languages: list[str] = None, model_storage_directory: str = None):
         self.languages = languages or ['en']
         self._reader = None
         # Use custom model directory if specified, otherwise use app's .config/ocr/easyocr_models
@@ -342,8 +341,9 @@ class EasyOCRBackend(OCRBackend):
         """Lazy initialization of EasyOCR reader."""
         if self._reader is None:
             try:
-                import easyocr
                 from pathlib import Path
+
+                import easyocr
 
                 # Auto-detect GPU (CUDA or ROCm)
                 use_gpu = False
@@ -393,7 +393,7 @@ class EasyOCRBackend(OCRBackend):
     def ocr_lines_separately(
         self,
         image: np.ndarray,
-        line_images: Optional[List[np.ndarray]] = None
+        line_images: list[np.ndarray] | None = None
     ) -> OCRResult:
         """
         Override base class to skip manual line splitting for EasyOCR.
@@ -655,7 +655,7 @@ class PaddleOCRBackend(OCRBackend):
     def ocr_lines_separately(
         self,
         image: np.ndarray,
-        line_images: Optional[List[np.ndarray]] = None
+        line_images: list[np.ndarray] | None = None
     ) -> OCRResult:
         """
         Override base class to skip manual line splitting for PaddleOCR.
@@ -968,7 +968,7 @@ LANGUAGE_MAP = {
 }
 
 
-def get_available_backends() -> List[str]:
+def get_available_backends() -> list[str]:
     """Get list of available OCR backends."""
     available = []
 

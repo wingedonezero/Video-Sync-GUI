@@ -1,5 +1,4 @@
 # vsg_core/job_layouts/manager.py
-# -*- coding: utf-8 -*-
 """
 Job Layout Manager Module
 
@@ -22,20 +21,23 @@ Key Features:
 Job IDs are MD5 hashes of source file names, ensuring consistency across runs.
 """
 from __future__ import annotations
-import hashlib
-from pathlib import Path
-from typing import Dict, List, Any, Optional, Callable
-from collections import defaultdict
 
-from .signature import EnhancedSignatureGenerator
+import hashlib
+from collections import defaultdict
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
 from .persistence import LayoutPersistence
+from .signature import EnhancedSignatureGenerator
 from .validation import LayoutValidator
+
 
 class JobLayoutManager:
     """
     Main orchestrator for handling job layout persistence, copying, and validation.
     """
-    def __init__(self, temp_root: str, log_callback: Optional[Callable[[str], None]] = None):
+    def __init__(self, temp_root: str, log_callback: Callable[[str], None] | None = None):
         self.log = log_callback or (lambda msg: print(msg))
         self.layouts_dir = Path(temp_root) / "job_layouts"
 
@@ -43,16 +45,16 @@ class JobLayoutManager:
         self.persistence = LayoutPersistence(self.layouts_dir, self.log)
         self.validator = LayoutValidator()
 
-    def generate_job_id(self, sources: Dict[str, str]) -> str:
+    def generate_job_id(self, sources: dict[str, str]) -> str:
         """Generates a consistent and unique job ID from source file paths."""
         sorted_sources = sorted(sources.items())
         source_string = "|".join(f"{key}:{Path(path).name}" for key, path in sorted_sources if path)
         return hashlib.md5(source_string.encode()).hexdigest()[:16]
 
-    def save_job_layout(self, job_id: str, layout: List[Dict[str, Any]],
-                        attachment_sources: List[str], sources: Dict[str, str],
-                        track_info: Dict[str, List[Dict]],
-                        source_settings: Optional[Dict[str, Dict[str, Any]]] = None):
+    def save_job_layout(self, job_id: str, layout: list[dict[str, Any]],
+                        attachment_sources: list[str], sources: dict[str, str],
+                        track_info: dict[str, list[dict]],
+                        source_settings: dict[str, dict[str, Any]] | None = None):
         """
         Saves a job layout, generating fresh signatures and enhancing the layout data.
 
@@ -82,7 +84,7 @@ class JobLayoutManager:
             self.log(f"[LayoutManager] CRITICAL: Failed to save layout for {job_id}: {e}")
         return False
 
-    def load_job_layout(self, job_id: str) -> Optional[Dict[str, Any]]:
+    def load_job_layout(self, job_id: str) -> dict[str, Any] | None:
         """Loads and validates a job layout."""
         layout_data = self.persistence.load_layout(job_id)
         if layout_data:
@@ -94,8 +96,8 @@ class JobLayoutManager:
         return None
 
     def copy_layout_between_jobs(self, source_job_id: str, target_job_id: str,
-                                 target_sources: Dict[str, str],
-                                 target_track_info: Dict[str, List[Dict]]) -> bool:
+                                 target_sources: dict[str, str],
+                                 target_track_info: dict[str, list[dict]]) -> bool:
         """Copies a layout if the source and target files are structurally compatible."""
         source_data = self.load_job_layout(source_job_id)
         if not source_data:
@@ -125,7 +127,7 @@ class JobLayoutManager:
 
         return self.persistence.save_layout(target_job_id, target_layout_data)
 
-    def _create_enhanced_layout(self, layout: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _create_enhanced_layout(self, layout: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Adds positional metadata to a layout for robust ordering."""
         enhanced = []
         source_type_positions = defaultdict(int)

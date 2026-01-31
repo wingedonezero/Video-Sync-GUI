@@ -1,19 +1,19 @@
 # vsg_core/orchestrator/steps/analysis_step.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import Optional, List, Dict, Any
-from collections import Counter
 
-from vsg_core.io.runner import CommandRunner
-from vsg_core.orchestrator.steps.context import Context
-from vsg_core.models.jobs import Delays
+from collections import Counter
+from typing import Any
+
 from vsg_core.analysis.audio_corr import run_audio_correlation, run_multi_correlation
 from vsg_core.analysis.drift_detection import diagnose_audio_issue
 from vsg_core.analysis.sync_stability import analyze_sync_stability
 from vsg_core.extraction.tracks import get_stream_info, get_stream_info_with_delays
+from vsg_core.io.runner import CommandRunner
+from vsg_core.models.jobs import Delays
+from vsg_core.orchestrator.steps.context import Context
 
 
-def _format_track_details(track: Dict[str, Any], index: int) -> str:
+def _format_track_details(track: dict[str, Any], index: int) -> str:
     """
     Format audio track details for logging.
 
@@ -71,7 +71,7 @@ def _format_track_details(track: Dict[str, Any], index: int) -> str:
     return ", ".join(parts)
 
 
-def _should_use_source_separated_mode(source_key: str, config: Dict, source_settings: Dict[str, Dict[str, Any]]) -> bool:
+def _should_use_source_separated_mode(source_key: str, config: dict, source_settings: dict[str, dict[str, Any]]) -> bool:
     """
     Check if this source should use source separation during correlation.
 
@@ -95,7 +95,7 @@ def _should_use_source_separated_mode(source_key: str, config: Dict, source_sett
     per_source = source_settings.get(source_key, {})
     return per_source.get('use_source_separation', False)
 
-def _find_first_stable_segment_delay(results: List[Dict[str, Any]], runner: CommandRunner, config: Dict, return_raw: bool = False) -> Optional[int | float]:
+def _find_first_stable_segment_delay(results: list[dict[str, Any]], runner: CommandRunner, config: dict, return_raw: bool = False) -> int | float | None:
     """
     Find the delay from the first stable segment of chunks.
 
@@ -173,27 +173,26 @@ def _find_first_stable_segment_delay(results: List[Dict[str, Any]], runner: Comm
             f"Largest segment: {max((s['count'] for s in segments), default=0)} chunks"
         )
         return None
-    else:
-        # Use the first segment regardless of chunk count
-        if segments:
-            first_segment = segments[0]
-            raw_avg = get_segment_raw(first_segment)
-            # CRITICAL: Round the raw average, don't use first chunk's delay!
-            rounded_avg = round(raw_avg)
-            if first_segment['count'] < min_chunks:
-                runner._log_message(
-                    f"[First Stable] Warning: First segment has only {first_segment['count']} chunks "
-                    f"(minimum: {min_chunks}), but using it anyway (skip_unstable=False)"
-                )
+    # Use the first segment regardless of chunk count
+    elif segments:
+        first_segment = segments[0]
+        raw_avg = get_segment_raw(first_segment)
+        # CRITICAL: Round the raw average, don't use first chunk's delay!
+        rounded_avg = round(raw_avg)
+        if first_segment['count'] < min_chunks:
             runner._log_message(
-                f"[First Stable] Using first segment: {first_segment['count']} chunks at {rounded_avg:+d}ms "
-                f"(raw avg: {raw_avg:.3f}ms, starting at {first_segment['start_time']:.1f}s)"
+                f"[First Stable] Warning: First segment has only {first_segment['count']} chunks "
+                f"(minimum: {min_chunks}), but using it anyway (skip_unstable=False)"
             )
-            return raw_avg if return_raw else rounded_avg
+        runner._log_message(
+            f"[First Stable] Using first segment: {first_segment['count']} chunks at {rounded_avg:+d}ms "
+            f"(raw avg: {raw_avg:.3f}ms, starting at {first_segment['start_time']:.1f}s)"
+        )
+        return raw_avg if return_raw else rounded_avg
 
     return None
 
-def _choose_final_delay(results: List[Dict[str, Any]], config: Dict, runner: CommandRunner, role_tag: str) -> Optional[int]:
+def _choose_final_delay(results: list[dict[str, Any]], config: dict, runner: CommandRunner, role_tag: str) -> int | None:
     """
     Select final delay from correlation results using configured mode.
     Returns rounded integer for mkvmerge compatibility.
@@ -214,7 +213,7 @@ def _choose_final_delay(results: List[Dict[str, Any]], config: Dict, runner: Com
         winner = _find_first_stable_segment_delay(results, runner, config, return_raw=False)
         if winner is None:
             # Fallback to mode if no stable segment found
-            runner._log_message(f"[WARNING] No stable segment found, falling back to mode.")
+            runner._log_message("[WARNING] No stable segment found, falling back to mode.")
             counts = Counter(delays)
             winner = counts.most_common(1)[0][0]
             method_label = "mode (fallback)"
@@ -339,7 +338,7 @@ def _choose_final_delay(results: List[Dict[str, Any]], config: Dict, runner: Com
     return winner
 
 
-def _choose_final_delay_raw(results: List[Dict[str, Any]], config: Dict, runner: CommandRunner, role_tag: str) -> Optional[float]:
+def _choose_final_delay_raw(results: list[dict[str, Any]], config: dict, runner: CommandRunner, role_tag: str) -> float | None:
     """
     Select final delay from correlation results, returning raw float value.
     Used for subtitle sync modes that need precision (defers rounding to final application).
@@ -465,7 +464,7 @@ def _choose_final_delay_raw(results: List[Dict[str, Any]], config: Dict, runner:
                 )
                 return raw_avg
             else:
-                runner._log_message(f"[Delay Selection Raw] Mode (Early Cluster): fallback to simple mode")
+                runner._log_message("[Delay Selection Raw] Mode (Early Cluster): fallback to simple mode")
                 return float(mode_winner)
 
     else:  # Mode (Most Common) - default
@@ -509,18 +508,18 @@ class AnalysisStep:
         if sync_mode == 'allow_negative':
             # Mode 2: Force allow negatives even with secondary audio
             ctx.global_shift_is_required = False
-            runner._log_message(f"[SYNC MODE] Negative delays are ALLOWED (no global shift).")
-            runner._log_message(f"[SYNC MODE] Source 1 remains reference (delay = 0).")
-            runner._log_message(f"[SYNC MODE] Secondary sources can have negative delays.")
+            runner._log_message("[SYNC MODE] Negative delays are ALLOWED (no global shift).")
+            runner._log_message("[SYNC MODE] Source 1 remains reference (delay = 0).")
+            runner._log_message("[SYNC MODE] Secondary sources can have negative delays.")
         elif sync_mode == 'positive_only':
             # Mode 1: Default behavior - only apply global shift if secondary audio exists
             ctx.global_shift_is_required = has_secondary_audio
             if ctx.global_shift_is_required:
-                runner._log_message(f"[SYNC MODE] Positive-only mode - global shift will eliminate negative delays.")
-                runner._log_message(f"[SYNC MODE] All tracks will be shifted to be non-negative.")
+                runner._log_message("[SYNC MODE] Positive-only mode - global shift will eliminate negative delays.")
+                runner._log_message("[SYNC MODE] All tracks will be shifted to be non-negative.")
             else:
-                runner._log_message(f"[SYNC MODE] Positive-only mode (but no secondary audio detected).")
-                runner._log_message(f"[SYNC MODE] Global shift will not be applied (subtitle-only exception).")
+                runner._log_message("[SYNC MODE] Positive-only mode (but no secondary audio detected).")
+                runner._log_message("[SYNC MODE] Global shift will not be applied (subtitle-only exception).")
         else:
             # Unknown mode - fallback to default (positive_only)
             runner._log_message(f"[WARNING] Unknown sync_mode '{sync_mode}', falling back to 'positive_only'.")
@@ -532,8 +531,8 @@ class AnalysisStep:
             ctx.delays = Delays(source_delays_ms={}, raw_source_delays_ms={}, global_shift_ms=0, raw_global_shift_ms=0.0)
             return ctx
 
-        source_delays: Dict[str, int] = {}
-        raw_source_delays: Dict[str, float] = {}  # Unrounded delays for VideoTimestamps precision
+        source_delays: dict[str, int] = {}
+        raw_source_delays: dict[str, float] = {}  # Unrounded delays for VideoTimestamps precision
 
         # --- Step 1: Get Source 1's container delays for chain calculation ---
         runner._log_message("--- Getting Source 1 Container Delays for Analysis ---")
@@ -653,13 +652,13 @@ class AnalysisStep:
                     'correlation_method': config.get('correlation_method_source_separated', 'Phase Correlation (GCC-PHAT)'),
                     'delay_selection_mode': config.get('delay_selection_mode_source_separated', 'Mode (Clustered)')
                 }
-                runner._log_message(f"[Analysis Config] Source separation enabled - using:")
+                runner._log_message("[Analysis Config] Source separation enabled - using:")
                 runner._log_message(f"  Correlation: {source_config['correlation_method']}")
                 runner._log_message(f"  Delay Mode: {source_config['delay_selection_mode']}")
             else:
                 # Use original config as-is (no source separation)
                 source_config = config
-                runner._log_message(f"[Analysis Config] Standard mode - using:")
+                runner._log_message("[Analysis Config] Standard mode - using:")
                 runner._log_message(f"  Correlation: {source_config.get('correlation_method', 'SCC (Sliding Cross-Correlation)')}")
                 runner._log_message(f"  Delay Mode: {source_config.get('delay_selection_mode', 'Mode (Most Common)')}")
 
@@ -810,13 +809,13 @@ class AnalysisStep:
                             runner._log_message(f"[Stepping Detected] Found stepping in {source_key}")
                             runner._log_message(f"[Stepping Override] Using first segment's delay: {stepping_override_delay:+d}ms (raw: {stepping_override_delay_raw:.3f}ms)")
                             runner._log_message(f"[Stepping Override] This delay will be used for ALL tracks (audio + subtitles) from {source_key}")
-                            runner._log_message(f"[Stepping Override] Stepping correction will be applied to audio tracks during processing")
+                            runner._log_message("[Stepping Override] Stepping correction will be applied to audio tracks during processing")
                     else:
                         # No audio tracks from this source - stepping correction won't run
                         # Use normal delay selection mode instead
                         delay_mode = source_config.get('delay_selection_mode', 'Mode (Most Common)')
                         runner._log_message(f"[Stepping Detected] Found stepping in {source_key}")
-                        runner._log_message(f"[Stepping] No audio tracks from this source are being merged")
+                        runner._log_message("[Stepping] No audio tracks from this source are being merged")
                         runner._log_message(f"[Stepping] Using delay_selection_mode='{delay_mode}' instead of first segment (stepping correction won't run)")
                         # Don't set stepping_override_delay - let normal flow handle it
                 elif use_source_separated_settings:
@@ -825,17 +824,17 @@ class AnalysisStep:
                     ctx.stepping_detected_separated.append(source_key)
                     delay_mode = source_config.get('delay_selection_mode', 'Mode (Clustered)')
                     runner._log_message(f"[Stepping Detected] Found stepping in {source_key}")
-                    runner._log_message(f"[Stepping Disabled] Source separation is enabled - stepping correction is unreliable on separated stems")
-                    runner._log_message(f"[Stepping Disabled] Separated stems have different waveform characteristics that break stepping detection")
+                    runner._log_message("[Stepping Disabled] Source separation is enabled - stepping correction is unreliable on separated stems")
+                    runner._log_message("[Stepping Disabled] Separated stems have different waveform characteristics that break stepping detection")
                     runner._log_message(f"[Stepping Disabled] Using delay_selection_mode='{delay_mode}' instead")
                     # Don't set stepping_override_delay - let normal flow handle it with source-separated delay mode
                 else:
                     # Stepping correction is DISABLED globally - just warn the user
                     ctx.stepping_detected_disabled.append(source_key)  # Track for warning
                     runner._log_message(f"⚠️  [Stepping Detected] Found stepping in {source_key}")
-                    runner._log_message(f"⚠️  [Stepping Disabled] Stepping correction is disabled - timing may be inconsistent")
-                    runner._log_message(f"⚠️  [Recommendation] Enable 'Stepping Correction' in settings if you want automatic correction")
-                    runner._log_message(f"⚠️  [Manual Review] You should manually review this file's sync quality")
+                    runner._log_message("⚠️  [Stepping Disabled] Stepping correction is disabled - timing may be inconsistent")
+                    runner._log_message("⚠️  [Recommendation] Enable 'Stepping Correction' in settings if you want automatic correction")
+                    runner._log_message("⚠️  [Manual Review] You should manually review this file's sync quality")
                     # Use normal delay selection mode
                     # Don't set stepping_override_delay - let normal flow handle it
 
@@ -1058,7 +1057,7 @@ class AnalysisStep:
                                 'subs_only': True  # Flag to indicate no audio application needed
                             }
                             runner._log_message(
-                                f"[Stepping] Full stepping analysis will run for verified subtitle EDL."
+                                "[Stepping] Full stepping analysis will run for verified subtitle EDL."
                             )
                         else:
                             # No audio and no subs (or setting disabled)
@@ -1116,7 +1115,7 @@ class AnalysisStep:
 
             runner._log_message(f"[Delay] Most negative relevant delay: {most_negative}ms (rounded), {most_negative_raw:.3f}ms (raw)")
             runner._log_message(f"[Delay] Applying lossless global shift: +{global_shift_ms}ms (rounded), +{raw_global_shift_ms:.3f}ms (raw)")
-            runner._log_message(f"[Delay] Adjusted delays after global shift:")
+            runner._log_message("[Delay] Adjusted delays after global shift:")
             for source_key in sorted(source_delays.keys()):
                 original_delay = source_delays[source_key]
                 original_raw_delay = raw_source_delays[source_key]
@@ -1136,7 +1135,7 @@ class AnalysisStep:
                         note = " (will be ignored - video defines timeline)" if track_type == 'video' else ""
                         runner._log_message(f"  - Track {tid} ({track_type}): {delay:+.1f}ms → {final_delay:+.1f}ms{note}")
         else:
-            runner._log_message(f"[Delay] All relevant delays are non-negative. No global shift needed.")
+            runner._log_message("[Delay] All relevant delays are non-negative. No global shift needed.")
 
         # === AUDIT: Record global shift calculation ===
         if ctx.audit:
@@ -1170,7 +1169,7 @@ class AnalysisStep:
             runner._log_message(f"  - {source_key}: {delay_ms:+d}ms")
 
         if sync_mode == 'allow_negative' and global_shift_ms == 0:
-            runner._log_message(f"\n[INFO] Negative delays retained (allow_negative mode). Secondary sources may have negative delays.")
+            runner._log_message("\n[INFO] Negative delays retained (allow_negative mode). Secondary sources may have negative delays.")
         elif global_shift_ms > 0:
             runner._log_message(f"\n[INFO] All delays shifted by +{global_shift_ms}ms to eliminate negatives.")
 

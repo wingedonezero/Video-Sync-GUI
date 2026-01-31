@@ -1,5 +1,4 @@
 # vsg_core/subtitles/frame_utils/video_reader.py
-# -*- coding: utf-8 -*-
 """
 Video reader with multi-backend support for efficient frame extraction.
 
@@ -9,13 +8,13 @@ Contains:
 - VapourSynth frame indexing utilities
 """
 from __future__ import annotations
-from pathlib import Path
-from typing import Optional, Tuple
+
 import gc
 import tempfile
+from pathlib import Path
 
 
-def _get_ffms2_cache_path(video_path: str, temp_dir: Optional[Path]) -> Path:
+def _get_ffms2_cache_path(video_path: str, temp_dir: Path | None) -> Path:
     """
     Generate cache path for FFMS2 index in job's temp directory.
 
@@ -28,8 +27,8 @@ def _get_ffms2_cache_path(video_path: str, temp_dir: Optional[Path]) -> Path:
     3. Cleaned up automatically when job completes
     4. Avoid collisions when different sources have same episode numbers
     """
-    import os
     import hashlib
+    import os
 
     video_path_obj = Path(video_path)
 
@@ -61,7 +60,7 @@ def _get_ffms2_cache_path(video_path: str, temp_dir: Optional[Path]) -> Path:
     return cache_dir / f"{cache_key}.ffindex"
 
 
-def get_vapoursynth_frame_info(video_path: str, runner, temp_dir: Optional[Path] = None) -> Optional[Tuple[int, float]]:
+def get_vapoursynth_frame_info(video_path: str, runner, temp_dir: Path | None = None) -> tuple[int, float] | None:
     """
     Get frame count and last frame timestamp using VapourSynth indexing.
 
@@ -108,10 +107,10 @@ def get_vapoursynth_frame_info(video_path: str, runner, temp_dir: Optional[Path]
         clip = None
         try:
             clip = core.lsmas.LWLibavSource(str(video_path))
-            runner._log_message(f"[VapourSynth] Using LWLibavSource (L-SMASH)")
+            runner._log_message("[VapourSynth] Using LWLibavSource (L-SMASH)")
         except AttributeError:
             # L-SMASH plugin not installed
-            runner._log_message(f"[VapourSynth] L-SMASH plugin not found, using FFmpegSource2")
+            runner._log_message("[VapourSynth] L-SMASH plugin not found, using FFmpegSource2")
         except Exception as e:
             runner._log_message(f"[VapourSynth] L-SMASH failed: {e}, trying FFmpegSource2")
 
@@ -122,14 +121,14 @@ def get_vapoursynth_frame_info(video_path: str, runner, temp_dir: Optional[Path]
                     runner._log_message(f"[VapourSynth] Reusing existing index from: {location_msg}")
                 else:
                     runner._log_message(f"[VapourSynth] Creating new index at: {location_msg}")
-                    runner._log_message(f"[VapourSynth] This may take 1-2 minutes...")
+                    runner._log_message("[VapourSynth] This may take 1-2 minutes...")
 
                 # Use FFMS2 with custom cache path
                 clip = core.ffms2.Source(
                     source=str(video_path),
                     cachefile=str(index_path)
                 )
-                runner._log_message(f"[VapourSynth] Using FFmpegSource2")
+                runner._log_message("[VapourSynth] Using FFmpegSource2")
             except Exception as e:
                 runner._log_message(f"[VapourSynth] ERROR: FFmpegSource2 also failed: {e}")
                 del core
@@ -163,7 +162,7 @@ def get_vapoursynth_frame_info(video_path: str, runner, temp_dir: Optional[Path]
         del core
         gc.collect()  # Force garbage collection
 
-        runner._log_message(f"[VapourSynth] Index loaded, memory freed")
+        runner._log_message("[VapourSynth] Index loaded, memory freed")
 
         return (frame_count, last_frame_timestamp_ms)
 
@@ -235,8 +234,8 @@ class VideoReader:
 
             # Note: The pyffms2 Python bindings don't reliably support loading cached indexes
             # We create the index on-demand each time (still faster than OpenCV fallback)
-            runner._log_message(f"[FrameUtils] Creating FFMS2 index...")
-            runner._log_message(f"[FrameUtils] This may take 1-2 minutes on first access...")
+            runner._log_message("[FrameUtils] Creating FFMS2 index...")
+            runner._log_message("[FrameUtils] This may take 1-2 minutes on first access...")
 
             # Create indexer and generate index
             indexer = ffms2.Indexer(str(video_path))
@@ -256,8 +255,8 @@ class VideoReader:
             return
 
         except ImportError:
-            runner._log_message(f"[FrameUtils] FFMS2 not installed, trying opencv...")
-            runner._log_message(f"[FrameUtils] Install FFMS2 for 100x speedup: pip install ffms2")
+            runner._log_message("[FrameUtils] FFMS2 not installed, trying opencv...")
+            runner._log_message("[FrameUtils] Install FFMS2 for 100x speedup: pip install ffms2")
         except Exception as e:
             runner._log_message(f"[FrameUtils] WARNING: FFMS2 failed ({e}), trying opencv...")
 
@@ -272,11 +271,11 @@ class VideoReader:
                 self.fps = self.cap.get(cv2.CAP_PROP_FPS)
                 runner._log_message(f"[FrameUtils] Using opencv for frame access (FPS: {self.fps:.3f})")
             else:
-                runner._log_message(f"[FrameUtils] WARNING: opencv couldn't open video, falling back to ffmpeg")
+                runner._log_message("[FrameUtils] WARNING: opencv couldn't open video, falling back to ffmpeg")
                 self.cap = None
         except ImportError:
-            runner._log_message(f"[FrameUtils] WARNING: opencv not installed, using slower ffmpeg fallback")
-            runner._log_message(f"[FrameUtils] Install opencv for better performance: pip install opencv-python")
+            runner._log_message("[FrameUtils] WARNING: opencv not installed, using slower ffmpeg fallback")
+            runner._log_message("[FrameUtils] Install opencv for better performance: pip install opencv-python")
 
     def _detect_interlacing(self):
         """Detect if video is interlaced using ffprobe."""
@@ -371,7 +370,7 @@ class VideoReader:
                 return self._apply_deinterlace_filter_method(clip, core, 'yadif', tff)
 
             self.deinterlace_applied = True
-            self.runner._log_message(f"[FrameUtils] Deinterlace filter applied successfully")
+            self.runner._log_message("[FrameUtils] Deinterlace filter applied successfully")
             return clip
 
         except Exception as e:
@@ -404,8 +403,8 @@ class VideoReader:
         3. Cleaned up automatically when job completes
         4. Avoid collisions when different sources have same episode numbers
         """
-        import os
         import hashlib
+        import os
 
         video_path_obj = Path(video_path)
 
@@ -433,7 +432,7 @@ class VideoReader:
             # Fallback: use system temp (but warn - won't be cleaned up)
             cache_dir = Path(tempfile.gettempdir()) / "vsg_ffindex"
             cache_dir.mkdir(parents=True, exist_ok=True)
-            self.runner._log_message(f"[FrameUtils] WARNING: No job temp_dir provided, index won't be auto-cleaned")
+            self.runner._log_message("[FrameUtils] WARNING: No job temp_dir provided, index won't be auto-cleaned")
 
         index_path = cache_dir / f"{cache_key}.ffindex"
         return index_path
@@ -478,7 +477,7 @@ class VideoReader:
                 self.runner._log_message(f"[FrameUtils] Reusing existing index from: {location_msg}")
             else:
                 self.runner._log_message(f"[FrameUtils] Creating new index at: {location_msg}")
-                self.runner._log_message(f"[FrameUtils] This may take 1-2 minutes...")
+                self.runner._log_message("[FrameUtils] This may take 1-2 minutes...")
 
             clip = core.ffms2.Source(
                 source=str(self.video_path),
@@ -504,7 +503,7 @@ class VideoReader:
                 deinterlace_status = ", interlaced (deinterlace disabled)"
 
             self.runner._log_message(f"[FrameUtils] VapourSynth ready! Using persistent index cache (FPS: {self.fps:.3f}{deinterlace_status})")
-            self.runner._log_message(f"[FrameUtils] Index will be shared across all workers (no re-indexing!)")
+            self.runner._log_message("[FrameUtils] Index will be shared across all workers (no re-indexing!)")
 
             return True
 
@@ -520,7 +519,7 @@ class VideoReader:
             self.runner._log_message(f"[FrameUtils] VapourSynth initialization failed: {e}")
             return False
 
-    def get_frame_at_time(self, time_ms: int) -> Optional['Image.Image']:
+    def get_frame_at_time(self, time_ms: int) -> Image.Image | None:
         """
         Extract frame at specified timestamp.
 
@@ -539,7 +538,7 @@ class VideoReader:
         else:
             return self._get_frame_ffmpeg(time_ms)
 
-    def get_frame_pts(self, frame_num: int) -> Optional[float]:
+    def get_frame_pts(self, frame_num: int) -> float | None:
         """
         Get the Presentation Time Stamp (PTS) of a frame in milliseconds.
 
@@ -565,7 +564,7 @@ class VideoReader:
             return (frame_num * 1000.0) / self.fps
         return None
 
-    def _get_pts_vapoursynth(self, frame_num: int) -> Optional[float]:
+    def _get_pts_vapoursynth(self, frame_num: int) -> float | None:
         """Get PTS using VapourSynth frame properties."""
         try:
             # Clamp to valid range
@@ -591,7 +590,7 @@ class VideoReader:
                 return (frame_num * 1000.0) / self.fps
             return None
 
-    def _get_pts_ffms2(self, frame_num: int) -> Optional[float]:
+    def _get_pts_ffms2(self, frame_num: int) -> float | None:
         """Get PTS using FFMS2 track info."""
         try:
             # Clamp to valid range
@@ -625,7 +624,7 @@ class VideoReader:
             return int(self.cap.get(self.cv2.CAP_PROP_FRAME_COUNT))
         return 0
 
-    def get_frame_at_index(self, frame_num: int) -> Optional['Image.Image']:
+    def get_frame_at_index(self, frame_num: int) -> Image.Image | None:
         """
         Extract frame by frame number directly (avoids time-to-frame conversion precision issues).
 
@@ -653,11 +652,11 @@ class VideoReader:
             time_ms = int(frame_num * 1000.0 / self.fps) if self.fps else 0
             return self._get_frame_ffmpeg(time_ms)
 
-    def _get_frame_vapoursynth_by_index(self, frame_num: int) -> Optional['Image.Image']:
+    def _get_frame_vapoursynth_by_index(self, frame_num: int) -> Image.Image | None:
         """Extract frame by index using VapourSynth (frame-accurate)."""
         try:
-            from PIL import Image
             import numpy as np
+            from PIL import Image
 
             # Clamp to valid range
             frame_num = max(0, min(frame_num, len(self.vs_clip) - 1))
@@ -691,11 +690,11 @@ class VideoReader:
             self.runner._log_message(f"[FrameUtils] ERROR: VapourSynth frame extraction by index failed: {e}")
             return None
 
-    def _get_frame_ffms2_by_index(self, frame_num: int) -> Optional['Image.Image']:
+    def _get_frame_ffms2_by_index(self, frame_num: int) -> Image.Image | None:
         """Extract frame by index using FFMS2 (frame-accurate)."""
         try:
-            from PIL import Image
             import numpy as np
+            from PIL import Image
 
             # Clamp to valid range
             frame_num = max(0, min(frame_num, self.source.properties.NumFrames - 1))
@@ -723,7 +722,7 @@ class VideoReader:
             self.runner._log_message(f"[FrameUtils] ERROR: FFMS2 frame extraction by index failed: {e}")
             return None
 
-    def _get_frame_vapoursynth(self, time_ms: int) -> Optional['Image.Image']:
+    def _get_frame_vapoursynth(self, time_ms: int) -> Image.Image | None:
         """
         Extract frame using VapourSynth (instant indexed seeking with persistent cache).
 
@@ -731,8 +730,8 @@ class VideoReader:
         Luma contains most of the perceptual information and avoids color conversion artifacts.
         """
         try:
-            from PIL import Image
             import numpy as np
+            from PIL import Image
 
             # Convert time to frame number
             frame_num = int((time_ms / 1000.0) * self.fps)
@@ -771,11 +770,11 @@ class VideoReader:
             self.runner._log_message(f"[FrameUtils] ERROR: VapourSynth frame extraction failed: {e}")
             return None
 
-    def _get_frame_ffms2(self, time_ms: int) -> Optional['Image.Image']:
+    def _get_frame_ffms2(self, time_ms: int) -> Image.Image | None:
         """Extract frame using FFMS2 (instant indexed seeking)."""
         try:
-            from PIL import Image
             import numpy as np
+            from PIL import Image
 
             # Convert time to frame number
             frame_num = int((time_ms / 1000.0) * self.fps)
@@ -807,7 +806,7 @@ class VideoReader:
             self.runner._log_message(f"[FrameUtils] ERROR: FFMS2 frame extraction failed: {e}")
             return None
 
-    def _get_frame_opencv(self, time_ms: int) -> Optional['Image.Image']:
+    def _get_frame_opencv(self, time_ms: int) -> Image.Image | None:
         """Extract frame using opencv (fast)."""
         try:
             from PIL import Image
@@ -831,11 +830,12 @@ class VideoReader:
             self.runner._log_message(f"[FrameUtils] ERROR: opencv frame extraction failed: {e}")
             return None
 
-    def _get_frame_ffmpeg(self, time_ms: int) -> Optional['Image.Image']:
+    def _get_frame_ffmpeg(self, time_ms: int) -> Image.Image | None:
         """Extract frame using ffmpeg (slow fallback)."""
-        from PIL import Image
-        import subprocess
         import os
+        import subprocess
+
+        from PIL import Image
 
         tmp_path = None
         try:

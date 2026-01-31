@@ -1,5 +1,4 @@
 # vsg_core/subtitles/frame_utils/frame_hashing.py
-# -*- coding: utf-8 -*-
 """
 Frame hashing and comparison functions for video sync verification.
 
@@ -10,12 +9,13 @@ Contains:
 - Unified frame comparison interface
 """
 from __future__ import annotations
-from typing import Any, Optional
+
 import gc
 import io
+from typing import Any
 
 
-def compute_perceptual_hash(image_data: bytes, runner, algorithm: str = 'dhash', hash_size: int = 8) -> Optional[str]:
+def compute_perceptual_hash(image_data: bytes, runner, algorithm: str = 'dhash', hash_size: int = 8) -> str | None:
     """
     Compute perceptual hash from image data.
 
@@ -35,8 +35,8 @@ def compute_perceptual_hash(image_data: bytes, runner, algorithm: str = 'dhash',
         Hexadecimal hash string, or None on error
     """
     try:
-        from PIL import Image
         import imagehash
+        from PIL import Image
 
         img = Image.open(io.BytesIO(image_data))
 
@@ -64,7 +64,7 @@ def compute_perceptual_hash(image_data: bytes, runner, algorithm: str = 'dhash',
         return None
 
 
-def compute_frame_hash(frame: 'Image.Image', hash_size: int = 8, method: str = 'phash') -> Optional[Any]:
+def compute_frame_hash(frame: Image.Image, hash_size: int = 8, method: str = 'phash') -> Any | None:
     """
     Compute perceptual hash of a frame.
 
@@ -111,7 +111,7 @@ def compute_hamming_distance(hash1, hash2) -> int:
     return hash1 - hash2
 
 
-def compute_ssim(frame1: 'Image.Image', frame2: 'Image.Image') -> float:
+def compute_ssim(frame1: Image.Image, frame2: Image.Image) -> float:
     """
     Compute Structural Similarity Index (SSIM) between two frames.
 
@@ -168,7 +168,7 @@ def compute_ssim(frame1: 'Image.Image', frame2: 'Image.Image') -> float:
         return 0.0
 
 
-def compute_mse(frame1: 'Image.Image', frame2: 'Image.Image') -> float:
+def compute_mse(frame1: Image.Image, frame2: Image.Image) -> float:
     """
     Compute Mean Squared Error between two frames.
 
@@ -201,8 +201,8 @@ def compute_mse(frame1: 'Image.Image', frame2: 'Image.Image') -> float:
 
 
 def compare_frames(
-    frame1: 'Image.Image',
-    frame2: 'Image.Image',
+    frame1: Image.Image,
+    frame2: Image.Image,
     method: str = 'hash',
     hash_algorithm: str = 'dhash',
     hash_size: int = 8

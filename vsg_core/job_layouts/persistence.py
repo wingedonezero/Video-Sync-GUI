@@ -1,11 +1,12 @@
 # vsg_core/job_layouts/persistence.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 import json
 import shutil
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, Callable
+
 
 class LayoutPersistence:
     """Handles saving and loading job layouts to/from JSON files."""
@@ -15,7 +16,7 @@ class LayoutPersistence:
         self.log = log_callback
         self.layouts_dir.mkdir(parents=True, exist_ok=True)
 
-    def save_layout(self, job_id: str, layout_data: Dict) -> bool:
+    def save_layout(self, job_id: str, layout_data: dict) -> bool:
         """Saves a job layout using a temporary file to prevent corruption."""
         try:
             # *** THE FIX IS HERE ***
@@ -36,14 +37,14 @@ class LayoutPersistence:
             self.log(f"[LayoutPersistence] Error saving layout for {job_id}: {e}")
             return False
 
-    def load_layout(self, job_id: str) -> Optional[Dict]:
+    def load_layout(self, job_id: str) -> dict | None:
         """Loads a job layout from a JSON file."""
         try:
             layout_file = self.layouts_dir / f"{job_id}.json"
             if not layout_file.exists():
                 return None
 
-            with open(layout_file, 'r', encoding='utf-8') as f:
+            with open(layout_file, encoding='utf-8') as f:
                 return json.load(f)
         except Exception as e:
             self.log(f"[LayoutPersistence] Error loading layout for {job_id}: {e}")

@@ -1,5 +1,4 @@
 # vsg_core/config.py
-# -*- coding: utf-8 -*-
 """
 Application Configuration Module
 
@@ -25,10 +24,12 @@ the config file is loaded.
 
 Validation ensures type safety and catches configuration errors early.
 """
+import builtins
 import json
 import warnings
 from pathlib import Path
-from typing import Any, Optional, Set
+from typing import Any
+
 
 class AppConfig:
     def __init__(self, settings_filename='settings.json'):
@@ -340,13 +341,13 @@ class AppConfig:
             'sync_stability_outlier_threshold': 1.0,  # Custom outlier threshold in ms (when mode='threshold')
         }
         self.settings = self.defaults.copy()
-        self._accessed_keys: Set[str] = set()  # Track accessed keys for typo detection
+        self._accessed_keys: set[str] = set()  # Track accessed keys for typo detection
         self._validation_enabled = True  # Can be disabled for backwards compatibility
         self.load()
         self._ensure_types_coerced()  # Additional safety: ensure all values have correct types
         self.ensure_dirs_exist()
 
-    def _validate_value(self, key: str, value: Any) -> tuple[bool, Optional[str]]:
+    def _validate_value(self, key: str, value: Any) -> tuple[bool, str | None]:
         """
         Validates a config value against expected type and range.
 
@@ -357,7 +358,7 @@ class AppConfig:
             return True, None
 
         # Type and range validation based on key patterns
-        if key.endswith('_enabled') or key.startswith('log_') and not key.endswith(('_lines', '_step', '_tail')):
+        if key.endswith('_enabled') or (key.startswith('log_') and not key.endswith(('_lines', '_step', '_tail'))):
             if not isinstance(value, bool):
                 return False, f"{key} must be bool, got {type(value).__name__}"
 
@@ -367,13 +368,7 @@ class AppConfig:
             if not (0.0 <= value <= 100.0):
                 return False, f"{key} must be 0-100, got {value}"
 
-        elif key.endswith(('_ms', '_duration_ms', '_gap_ms', '_window_ms', '_tolerance_ms')):
-            if not isinstance(value, (int, float)):
-                return False, f"{key} must be numeric, got {type(value).__name__}"
-            if value < 0:
-                return False, f"{key} cannot be negative, got {value}"
-
-        elif key.endswith(('_hz', '_lowcut_hz', '_highcut_hz', '_bandlimit_hz')):
+        elif key.endswith(('_ms', '_duration_ms', '_gap_ms', '_window_ms', '_tolerance_ms')) or key.endswith(('_hz', '_lowcut_hz', '_highcut_hz', '_bandlimit_hz')):
             if not isinstance(value, (int, float)):
                 return False, f"{key} must be numeric, got {type(value).__name__}"
             if value < 0:
@@ -508,7 +503,7 @@ class AppConfig:
         changed = False
         if self.settings_path.exists():
             try:
-                with open(self.settings_path, 'r', encoding='utf-8') as f:
+                with open(self.settings_path, encoding='utf-8') as f:
                     loaded_settings = json.load(f)
 
                 if 'post_mux_validate_metadata' in loaded_settings:
@@ -564,7 +559,7 @@ class AppConfig:
                             (f"\n  ... and {len(validation_errors) - 5} more" if len(validation_errors) > 5 else ""),
                             UserWarning
                         )
-            except (json.JSONDecodeError, IOError):
+            except (OSError, json.JSONDecodeError):
                 self.settings = self.defaults.copy()
                 changed = True
         else:
@@ -580,7 +575,7 @@ class AppConfig:
             settings_to_save = {k: self.settings.get(k) for k in keys_to_save if k in self.settings}
             with open(self.settings_path, 'w', encoding='utf-8') as f:
                 json.dump(settings_to_save, f, indent=4)
-        except IOError as e:
+        except OSError as e:
             print(f"Error saving settings: {e}")
 
     def get(self, key: str, default: Any = None) -> Any:
@@ -624,7 +619,7 @@ class AppConfig:
 
         self.settings[key] = value
 
-    def get_unrecognized_keys(self) -> Set[str]:
+    def get_unrecognized_keys(self) -> builtins.set[str]:
         """
         Returns set of accessed keys that are not in defaults.
 
@@ -632,7 +627,7 @@ class AppConfig:
         """
         return self._accessed_keys - set(self.defaults.keys())
 
-    def get_orphaned_keys(self) -> Set[str]:
+    def get_orphaned_keys(self) -> builtins.set[str]:
         """
         Returns set of keys in settings that are not in defaults.
 
@@ -640,7 +635,7 @@ class AppConfig:
         """
         return set(self.settings.keys()) - set(self.defaults.keys())
 
-    def remove_orphaned_keys(self) -> Set[str]:
+    def remove_orphaned_keys(self) -> builtins.set[str]:
         """
         Removes orphaned keys from settings and saves.
 

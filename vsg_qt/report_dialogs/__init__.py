@@ -1,5 +1,4 @@
 # vsg_qt/report_dialogs/__init__.py
-# -*- coding: utf-8 -*-
 """Batch report dialogs for displaying job results."""
 
 from .batch_completion_dialog import BatchCompletionDialog

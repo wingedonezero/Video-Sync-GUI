@@ -1,16 +1,15 @@
 # vsg_core/postprocess/auditors/video_metadata.py
-# -*- coding: utf-8 -*-
-from typing import Dict, Optional
 from pathlib import Path
 
 from vsg_core.models.enums import TrackType
+
 from .base import BaseAuditor
 
 
 class VideoMetadataAuditor(BaseAuditor):
     """Comprehensive check of video metadata preservation."""
 
-    def run(self, final_mkv_path: Path, final_mkvmerge_data: Dict, final_ffprobe_data=None) -> int:
+    def run(self, final_mkv_path: Path, final_mkvmerge_data: dict, final_ffprobe_data=None) -> int:
         """
         Audits video core metadata (HDR, 3D, Color).
         Returns the number of issues found.
@@ -109,7 +108,7 @@ class VideoMetadataAuditor(BaseAuditor):
             actual_chroma = self._get_chroma_subsampling(actual_video.get('pix_fmt', ''))
 
             if source_chroma and actual_chroma and source_chroma != actual_chroma:
-                self.log(f"[WARNING] Chroma subsampling mismatch!")
+                self.log("[WARNING] Chroma subsampling mismatch!")
                 self.log(f"          Source: {source_chroma}")
                 self.log(f"          Output: {actual_chroma}")
 
@@ -119,7 +118,7 @@ class VideoMetadataAuditor(BaseAuditor):
                 actual_quality = chroma_quality.get(actual_chroma, 0)
 
                 if actual_quality < source_quality:
-                    self.log(f"         CRITICAL: Chroma subsampling was downgraded (quality loss)!")
+                    self.log("         CRITICAL: Chroma subsampling was downgraded (quality loss)!")
 
                 issues += 1
             elif source_chroma and actual_chroma:
@@ -176,7 +175,7 @@ class VideoMetadataAuditor(BaseAuditor):
 
         return issues
 
-    def _get_chroma_subsampling(self, pix_fmt: str) -> Optional[str]:
+    def _get_chroma_subsampling(self, pix_fmt: str) -> str | None:
         """
         Extract chroma subsampling pattern from pixel format string.
 

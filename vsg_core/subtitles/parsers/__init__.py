@@ -1,5 +1,4 @@
 # vsg_core/subtitles/parsers/__init__.py
-# -*- coding: utf-8 -*-
 """Subtitle file parsers."""
 
 from .ass_parser import parse_ass_file

@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/postprocess.py
-# -*- coding: utf-8 -*-
 """
 OCR Post-Processing and Text Correction
 
@@ -29,12 +28,12 @@ import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
 
-from .dictionaries import OCRDictionaries, ReplacementRule, get_dictionaries
+from .dictionaries import get_dictionaries
 from .subtitle_edit import (
-    SubtitleEditParser, SubtitleEditCorrector, SEDictionaries, SEDictionaryConfig,
-    load_se_config, save_se_config
+    SubtitleEditCorrector,
+    SubtitleEditParser,
+    load_se_config,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,7 +71,7 @@ class PostProcessConfig:
     fix_spacing: bool = True  # Fix common spacing issues
 
     # Custom wordlist
-    custom_wordlist_path: Optional[Path] = None
+    custom_wordlist_path: Path | None = None
 
 
 @dataclass
@@ -80,8 +79,8 @@ class ProcessResult:
     """Result of post-processing."""
     text: str
     original_text: str
-    unknown_words: List[str] = field(default_factory=list)
-    fixes_applied: Dict[str, int] = field(default_factory=dict)
+    unknown_words: list[str] = field(default_factory=list)
+    fixes_applied: dict[str, int] = field(default_factory=dict)
     was_modified: bool = False
 
 
@@ -91,7 +90,7 @@ class UnknownWordInfo:
     word: str
     context: str  # Surrounding text
     confidence: float
-    suggestions: List[str] = field(default_factory=list)
+    suggestions: list[str] = field(default_factory=list)
 
 
 class OCRPostProcessor:
@@ -159,7 +158,7 @@ class OCRPostProcessor:
         'bye', 'hi', 'nope', 'yep', 'nah', 'duh',
     }
 
-    def __init__(self, config: Optional[PostProcessConfig] = None):
+    def __init__(self, config: PostProcessConfig | None = None):
         self.config = config or PostProcessConfig()
         self._init_dictionaries()
         self._init_spell_checker()
@@ -664,7 +663,7 @@ class OCRPostProcessor:
     def _is_likely_exclamation(
         self,
         word: str,
-        words: List[str],
+        words: list[str],
         position: int
     ) -> bool:
         """
@@ -746,7 +745,7 @@ class OCRPostProcessor:
 
         return text
 
-    def _find_unknown_words(self, text: str, track_stats: bool = True) -> List[str]:
+    def _find_unknown_words(self, text: str, track_stats: bool = True) -> list[str]:
         """
         Find words not in dictionary.
 
@@ -838,10 +837,9 @@ class OCRPostProcessor:
             result = self.validation_manager.is_known_word(word)
             if result.is_known:
                 return True
-        else:
-            # Fallback to legacy checking
-            if self.ocr_dicts.is_known_word(word, check_romaji=True):
-                return True
+        # Fallback to legacy checking
+        elif self.ocr_dicts.is_known_word(word, check_romaji=True):
+            return True
 
         # Dictionary check
         if self.dictionary and self._is_valid_word(word):
@@ -912,7 +910,7 @@ class OCRPostProcessor:
         self,
         text: str,
         result: ProcessResult,
-        line_confidences: Optional[List[float]] = None
+        line_confidences: list[float] | None = None
     ) -> str:
         """
         Remove garbage segments from multi-line text.

@@ -1,5 +1,4 @@
 # vsg_core/subtitles/sync_mode_plugins/subtitle_anchored_frame_snap.py
-# -*- coding: utf-8 -*-
 """
 Subtitle-Anchored Frame Snap sync plugin for SubtitleData.
 
@@ -10,15 +9,14 @@ All timing is float ms internally - rounding happens only at final save.
 """
 from __future__ import annotations
 
-import math
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from ..sync_modes import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
-    from ..data import SubtitleData, OperationResult, OperationRecord, SyncEventData
+    from ..data import OperationResult, SubtitleData
 
 
 @register_sync_plugin
@@ -34,17 +32,17 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
 
     def apply(
         self,
-        subtitle_data: 'SubtitleData',
+        subtitle_data: SubtitleData,
         total_delay_ms: float,
         global_shift_ms: float,
-        target_fps: Optional[float] = None,
-        source_video: Optional[str] = None,
-        target_video: Optional[str] = None,
+        target_fps: float | None = None,
+        source_video: str | None = None,
+        target_video: str | None = None,
         runner=None,
-        config: Optional[dict] = None,
-        temp_dir: Optional[Path] = None,
+        config: dict | None = None,
+        temp_dir: Path | None = None,
         **kwargs
-    ) -> 'OperationResult':
+    ) -> OperationResult:
         """
         Apply subtitle-anchored frame snap sync to subtitle data.
 
@@ -68,9 +66,9 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
         Returns:
             OperationResult with statistics
         """
-        from ..data import OperationResult, OperationRecord, SyncEventData
-        from ..frame_utils import detect_video_fps
         from ..checkpoint_selection import select_smart_checkpoints
+        from ..data import OperationRecord, OperationResult, SyncEventData
+        from ..frame_utils import detect_video_fps
 
         config = config or {}
 
@@ -78,7 +76,7 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
             if runner:
                 runner._log_message(msg)
 
-        log(f"[SubAnchor] === Subtitle-Anchored Frame Snap Sync ===")
+        log("[SubAnchor] === Subtitle-Anchored Frame Snap Sync ===")
         log(f"[SubAnchor] Events: {len(subtitle_data.events)}")
 
         if not source_video or not target_video:
@@ -146,7 +144,11 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
 
         # Try to import frame utilities
         try:
-            from ..frame_utils import VideoReader, compute_frame_hash, compute_hamming_distance
+            from ..frame_utils import (
+                VideoReader,
+                compute_frame_hash,
+                compute_hamming_distance,
+            )
         except ImportError as e:
             return OperationResult(
                 success=False,
@@ -181,7 +183,7 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
 
             source_hash = compute_frame_hash(source_frame, hash_size=hash_size, method=hash_algorithm)
             if source_hash is None:
-                log(f"[SubAnchor] WARNING: Failed to compute source hash")
+                log("[SubAnchor] WARNING: Failed to compute source hash")
                 continue
 
             # Search in target
@@ -261,19 +263,19 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
                     operation='sync',
                     error=f'Checkpoint offsets disagree: range {offset_range:.1f}ms exceeds {tolerance_ms}ms tolerance'
                 )
-            log(f"[SubAnchor] Using median offset anyway")
+            log("[SubAnchor] Using median offset anyway")
 
         # Calculate final offset (median + global shift)
         sorted_offsets = sorted(checkpoint_offsets)
         median_offset = sorted_offsets[len(sorted_offsets) // 2]
         final_offset_ms = median_offset + global_shift_ms
 
-        log(f"[SubAnchor] ───────────────────────────────────────")
+        log("[SubAnchor] ───────────────────────────────────────")
         log(f"[SubAnchor] Checkpoint offsets: {[f'{o:+.1f}' for o in checkpoint_offsets]}")
         log(f"[SubAnchor] Median offset: {median_offset:+.3f}ms")
         log(f"[SubAnchor] + Global shift: {global_shift_ms:+.3f}ms")
         log(f"[SubAnchor] = Final offset: {final_offset_ms:+.3f}ms")
-        log(f"[SubAnchor] ───────────────────────────────────────")
+        log("[SubAnchor] ───────────────────────────────────────")
 
         # Apply offset to all events
         log(f"[SubAnchor] Applying {final_offset_ms:+.3f}ms to {len(subtitle_data.events)} events")
@@ -326,7 +328,7 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
         subtitle_data.operations.append(record)
 
         log(f"[SubAnchor] Sync complete: {events_synced} events")
-        log(f"[SubAnchor] ===================================")
+        log("[SubAnchor] ===================================")
 
         return OperationResult(
             success=True,

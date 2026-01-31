@@ -1,5 +1,4 @@
 # vsg_qt/subtitle_editor/tabs/fonts_tab.py
-# -*- coding: utf-8 -*-
 """
 Fonts tab for subtitle editor.
 
@@ -9,20 +8,26 @@ Uses FontScanner from vsg_core for proper font scanning.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Dict, Any, List
+from typing import Any
 
-from PySide6.QtCore import Qt, Signal, QSize
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel,
-    QTableWidget, QTableWidgetItem, QAbstractItemView, QHeaderView,
-    QPushButton, QComboBox, QStyledItemDelegate, QStyle
+    QAbstractItemView,
+    QComboBox,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QPushButton,
+    QStyle,
+    QStyledItemDelegate,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
 )
 
 from .base_tab import BaseTab
-
-if TYPE_CHECKING:
-    from ..state import EditorState
 
 
 class FontPreviewDelegate(QStyledItemDelegate):
@@ -30,7 +35,7 @@ class FontPreviewDelegate(QStyledItemDelegate):
     Delegate that renders each font name in its own typeface.
     """
 
-    def __init__(self, loaded_fonts: Dict[str, str], parent=None):
+    def __init__(self, loaded_fonts: dict[str, str], parent=None):
         super().__init__(parent)
         self._loaded_fonts = loaded_fonts  # file_path -> qt_family_name
 
@@ -77,7 +82,7 @@ class FontPreviewComboBox(QComboBox):
     # Custom role for storing font data
     FontDataRole = Qt.UserRole + 1
 
-    def __init__(self, loaded_fonts: Dict[str, str], parent=None):
+    def __init__(self, loaded_fonts: dict[str, str], parent=None):
         super().__init__(parent)
         self._loaded_fonts = loaded_fonts
         self._delegate = FontPreviewDelegate(loaded_fonts, self)
@@ -85,8 +90,8 @@ class FontPreviewComboBox(QComboBox):
         self.setMinimumWidth(200)
         self.view().setMinimumWidth(300)
 
-    def add_font(self, font_name: str, font_path: Optional[str] = None,
-                 family_name: Optional[str] = None):
+    def add_font(self, font_name: str, font_path: str | None = None,
+                 family_name: str | None = None):
         """Add a font to the dropdown.
 
         Args:
@@ -121,11 +126,11 @@ class FontsTab(BaseTab):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._fonts_dir: Optional[Path] = None
-        self._replacements: Dict[str, Dict[str, Any]] = {}
-        self._available_fonts: List[Any] = []  # List of FontInfo objects
-        self._font_combos: Dict[str, FontPreviewComboBox] = {}
-        self._loaded_fonts: Dict[str, str] = {}  # file_path -> qt_family_name
+        self._fonts_dir: Path | None = None
+        self._replacements: dict[str, dict[str, Any]] = {}
+        self._available_fonts: list[Any] = []  # List of FontInfo objects
+        self._font_combos: dict[str, FontPreviewComboBox] = {}
+        self._loaded_fonts: dict[str, str] = {}  # file_path -> qt_family_name
         self._scanner = None
 
         self._build_ui()
@@ -200,7 +205,7 @@ class FontsTab(BaseTab):
 
         layout.addStretch()
 
-    def set_fonts_dir(self, fonts_dir: Optional[Path]):
+    def set_fonts_dir(self, fonts_dir: Path | None):
         """Set the fonts directory for preview."""
         from vsg_core.config import AppConfig
         config = AppConfig()
@@ -229,7 +234,7 @@ class FontsTab(BaseTab):
 
         self._scan_available_fonts()
 
-    def set_replacements(self, replacements: Dict[str, Dict[str, Any]]):
+    def set_replacements(self, replacements: dict[str, dict[str, Any]]):
         """Set existing font replacements."""
         self._replacements = replacements.copy() if replacements else {}
         self._populate_fonts()
@@ -244,7 +249,7 @@ class FontsTab(BaseTab):
         # Only scan user's fonts directory (not attached fonts from subtitle)
         # This matches the old working behavior
         if not hasattr(self, '_user_fonts_dir') or not self._user_fonts_dir or not self._user_fonts_dir.exists():
-            print(f"[FontsTab] No user fonts directory found")
+            print("[FontsTab] No user fonts directory found")
             return
 
         print(f"[FontsTab] Scanning fonts from: {self._user_fonts_dir}")
@@ -436,11 +441,11 @@ class FontsTab(BaseTab):
         """Get font replacements as result."""
         return {'font_replacements': self._replacements.copy()}
 
-    def get_replacements(self) -> Dict[str, Dict[str, Any]]:
+    def get_replacements(self) -> dict[str, dict[str, Any]]:
         """Get the current font replacements."""
         return self._replacements.copy()
 
-    def get_fonts_dir(self) -> Optional[Path]:
+    def get_fonts_dir(self) -> Path | None:
         """Get the fonts directory where replacement fonts are copied.
 
         This returns the directory that should be passed to libass for

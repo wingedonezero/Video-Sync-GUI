@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/report.py
-# -*- coding: utf-8 -*-
 """
 OCR Report Generation
 
@@ -14,11 +13,9 @@ summarized for inclusion in the main job report.
 """
 
 import json
-from collections import defaultdict
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 try:
     import enchant
@@ -45,7 +42,7 @@ class UnknownWord:
     timestamp: str = ""
     confidence: float = 0.0
     occurrences: int = 1
-    suggestions: List[str] = field(default_factory=list)
+    suggestions: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -63,7 +60,7 @@ class LowConfidenceLine:
     timestamp: str
     confidence: float
     subtitle_index: int
-    potential_issues: List[str] = field(default_factory=list)
+    potential_issues: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -79,8 +76,8 @@ class SubtitleOCRResult:
     text: str
     confidence: float
     was_modified: bool = False
-    fixes_applied: Dict[str, int] = field(default_factory=dict)
-    unknown_words: List[str] = field(default_factory=list)
+    fixes_applied: dict[str, int] = field(default_factory=dict)
+    unknown_words: list[str] = field(default_factory=list)
     position_x: int = 0
     position_y: int = 0
     is_positioned: bool = False  # True if not at default bottom
@@ -113,17 +110,17 @@ class OCRReport:
     max_confidence: float = 0.0
 
     # Per-subtitle results
-    subtitles: List[SubtitleOCRResult] = field(default_factory=list)
+    subtitles: list[SubtitleOCRResult] = field(default_factory=list)
 
     # Aggregated unknown words (deduplicated)
-    unknown_words: List[UnknownWord] = field(default_factory=list)
+    unknown_words: list[UnknownWord] = field(default_factory=list)
 
     # Lines flagged for review
-    low_confidence_lines: List[LowConfidenceLine] = field(default_factory=list)
+    low_confidence_lines: list[LowConfidenceLine] = field(default_factory=list)
 
     # Fix statistics
     total_fixes_applied: int = 0
-    fixes_by_type: Dict[str, int] = field(default_factory=dict)
+    fixes_by_type: dict[str, int] = field(default_factory=dict)
 
     # Position statistics
     positioned_subtitles: int = 0  # Non-bottom positioned
@@ -184,7 +181,7 @@ class OCRReport:
         timestamp: str,
         confidence: float,
         subtitle_index: int,
-        potential_issues: Optional[List[str]] = None
+        potential_issues: list[str] | None = None
     ):
         """Flag a line for manual review."""
         self.low_confidence_lines.append(LowConfidenceLine(
@@ -209,7 +206,7 @@ class OCRReport:
         # Sort low confidence lines by confidence (lowest first)
         self.low_confidence_lines.sort(key=lambda l: l.confidence)
 
-    def _get_suggestions(self, word: str) -> List[str]:
+    def _get_suggestions(self, word: str) -> list[str]:
         """Get dictionary suggestions for a word."""
         if not ENCHANT_AVAILABLE:
             return []
@@ -271,7 +268,7 @@ class OCRReport:
     @classmethod
     def load(cls, path: Path) -> 'OCRReport':
         """Load report from JSON file."""
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, encoding='utf-8') as f:
             data = json.load(f)
 
         report = cls()

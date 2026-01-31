@@ -1,5 +1,4 @@
 # vsg_core/subtitles/writers/__init__.py
-# -*- coding: utf-8 -*-
 """Subtitle file writers."""
 
 from .ass_writer import write_ass_file

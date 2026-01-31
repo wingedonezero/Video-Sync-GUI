@@ -1,5 +1,4 @@
 # vsg_qt/font_manager_dialog/ui.py
-# -*- coding: utf-8 -*-
 """
 Font Manager Dialog
 
@@ -8,20 +7,32 @@ Shows fonts used in the file, available user fonts, and allows
 setting up font replacements.
 """
 from pathlib import Path
-from typing import Optional, Dict, List, Any, Callable
+from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QSplitter, QGroupBox,
-    QTreeWidget, QTreeWidgetItem, QPushButton, QLabel, QComboBox,
-    QMessageBox, QHeaderView, QFrame
+    QComboBox,
+    QDialog,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QSplitter,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QVBoxLayout,
 )
 
-from vsg_core.font_manager import (
-    FontScanner, SubtitleFontAnalyzer, FontReplacementManager, FontInfo
-)
 from vsg_core.config import AppConfig
+from vsg_core.font_manager import (
+    FontReplacementManager,
+    FontScanner,
+    SubtitleFontAnalyzer,
+)
 
 
 class FontManagerDialog(QDialog):
@@ -37,7 +48,7 @@ class FontManagerDialog(QDialog):
     def __init__(
         self,
         subtitle_path: str,
-        current_replacements: Optional[Dict[str, Dict[str, Any]]] = None,
+        current_replacements: dict[str, dict[str, Any]] | None = None,
         parent=None
     ):
         super().__init__(parent)
@@ -223,7 +234,7 @@ class FontManagerDialog(QDialog):
         else:
             self.inline_fonts_label.setVisible(False)
 
-    def _get_styles_from_subtitle(self) -> Dict[str, str]:
+    def _get_styles_from_subtitle(self) -> dict[str, str]:
         """Get style names and their fonts from the subtitle file."""
         from vsg_core.subtitles.data import SubtitleData
 
@@ -461,6 +472,6 @@ class FontManagerDialog(QDialog):
 
         self.accept()
 
-    def get_replacements(self) -> Dict[str, Dict[str, Any]]:
+    def get_replacements(self) -> dict[str, dict[str, Any]]:
         """Get the configured font replacements."""
         return self.replacement_manager.get_replacements()

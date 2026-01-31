@@ -1,5 +1,4 @@
 # vsg_core/favorite_colors.py
-# -*- coding: utf-8 -*-
 """
 Favorite Colors Manager
 
@@ -10,7 +9,7 @@ import json
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import List, Dict, Optional, Any
+from typing import Any
 
 
 class FavoriteColorsManager:
@@ -35,7 +34,7 @@ class FavoriteColorsManager:
         """
         self.config_dir = Path(config_dir)
         self.config_file = self.config_dir / 'favorite_colors.json'
-        self._favorites: List[Dict[str, Any]] = []
+        self._favorites: list[dict[str, Any]] = []
         self._load()
 
     def _load(self):
@@ -45,7 +44,7 @@ class FavoriteColorsManager:
             return
 
         try:
-            with open(self.config_file, 'r', encoding='utf-8') as f:
+            with open(self.config_file, encoding='utf-8') as f:
                 data = json.load(f)
 
             # Handle version migrations if needed in the future
@@ -59,13 +58,13 @@ class FavoriteColorsManager:
                     valid_favorites.append(fav)
             self._favorites = valid_favorites
 
-        except (json.JSONDecodeError, IOError, KeyError) as e:
+        except (OSError, json.JSONDecodeError, KeyError) as e:
             # If file is corrupt, start fresh but don't delete the file
             # (user can manually recover if needed)
             print(f"Warning: Could not load favorite colors: {e}")
             self._favorites = []
 
-    def _validate_favorite(self, fav: Dict) -> bool:
+    def _validate_favorite(self, fav: dict) -> bool:
         """Validate a favorite color entry."""
         required_keys = ['id', 'name', 'hex']
         if not all(key in fav for key in required_keys):
@@ -87,10 +86,10 @@ class FavoriteColorsManager:
         try:
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-        except IOError as e:
+        except OSError as e:
             print(f"Error saving favorite colors: {e}")
 
-    def get_all(self) -> List[Dict[str, Any]]:
+    def get_all(self) -> list[dict[str, Any]]:
         """
         Get all favorite colors.
 
@@ -126,7 +125,7 @@ class FavoriteColorsManager:
         self._save()
         return favorite['id']
 
-    def update(self, favorite_id: str, name: Optional[str] = None, hex_color: Optional[str] = None) -> bool:
+    def update(self, favorite_id: str, name: str | None = None, hex_color: str | None = None) -> bool:
         """
         Update an existing favorite color.
 
@@ -169,7 +168,7 @@ class FavoriteColorsManager:
             return True
         return False
 
-    def get_by_id(self, favorite_id: str) -> Optional[Dict[str, Any]]:
+    def get_by_id(self, favorite_id: str) -> dict[str, Any] | None:
         """
         Get a favorite by its ID.
 
@@ -184,7 +183,7 @@ class FavoriteColorsManager:
                 return fav.copy()
         return None
 
-    def reorder(self, favorite_ids: List[str]):
+    def reorder(self, favorite_ids: list[str]):
         """
         Reorder favorites to match the given ID list.
 

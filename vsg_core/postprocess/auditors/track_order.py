@@ -1,6 +1,4 @@
 # vsg_core/postprocess/auditors/track_order.py
-# -*- coding: utf-8 -*-
-from typing import Dict, List
 from pathlib import Path
 
 from .base import BaseAuditor
@@ -9,7 +7,7 @@ from .base import BaseAuditor
 class TrackOrderAuditor(BaseAuditor):
     """Ensures tracks appear in the expected order (video → audio → subtitles)."""
 
-    def run(self, final_mkv_path: Path, final_mkvmerge_data: Dict, final_ffprobe_data=None) -> int:
+    def run(self, final_mkv_path: Path, final_mkvmerge_data: dict, final_ffprobe_data=None) -> int:
         """
         Audits track order.
         Returns the number of issues found.

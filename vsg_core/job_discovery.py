@@ -1,5 +1,4 @@
 # vsg_core/job_discovery.py
-# -*- coding: utf-8 -*-
 """
 Job Discovery Module
 
@@ -15,10 +14,11 @@ Returns a list of job dictionaries, each containing a 'sources' dict mapping
 source names to file paths.
 """
 from __future__ import annotations
-from pathlib import Path
-from typing import List, Dict
 
-def discover_jobs(sources: Dict[str, str]) -> List[Dict[str, Dict[str, str]]]:
+from pathlib import Path
+
+
+def discover_jobs(sources: dict[str, str]) -> list[dict[str, dict[str, str]]]:
     """
     Discovers jobs based on a dictionary of source paths.
     'Source 1' is the reference for filename matching.
@@ -53,7 +53,7 @@ def discover_jobs(sources: Dict[str, str]) -> List[Dict[str, Dict[str, str]]]:
     if source1_path.is_dir():
         for key, path in other_source_paths.items():
             if path.is_file():
-                raise ValueError(f"If Source 1 is a folder, all other sources must also be folders or empty.")
+                raise ValueError("If Source 1 is a folder, all other sources must also be folders or empty.")
 
         jobs = []
         for ref_file in sorted(ref_file for ref_file in source1_path.iterdir() if ref_file.is_file() and ref_file.suffix.lower() in ['.mkv', '.mp4', '.m4v']):

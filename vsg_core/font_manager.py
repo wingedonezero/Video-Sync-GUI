@@ -1,15 +1,14 @@
 # vsg_core/font_manager.py
-# -*- coding: utf-8 -*-
 """
 Font Manager
 
 Handles font scanning, parsing, and replacement tracking for subtitle files.
 """
+import re
 import shutil
 import subprocess
 from pathlib import Path
-from typing import List, Dict, Optional, Set, Any
-import re
+from typing import Any
 
 try:
     from fontTools.ttLib import TTFont
@@ -18,7 +17,7 @@ except ImportError:
     FONTTOOLS_AVAILABLE = False
 
 
-def _get_fontconfig_info(font_path: Path) -> Dict[str, str]:
+def _get_fontconfig_info(font_path: Path) -> dict[str, str]:
     """Get font info using fontconfig's fc-query (what libass uses).
 
     Returns dict with 'family', 'fullname', 'style' keys.
@@ -43,7 +42,7 @@ def _get_fontconfig_info(font_path: Path) -> Dict[str, str]:
     return result
 
 
-def _get_fontconfig_family(font_path: Path) -> Optional[str]:
+def _get_fontconfig_family(font_path: Path) -> str | None:
     """Get font family name using fontconfig's fc-query (what libass uses)."""
     info = _get_fontconfig_info(font_path)
     return info['family'] if info['family'] else None
@@ -60,7 +59,7 @@ class FontInfo:
         self.full_name: str = ""
         self.postscript_name: str = ""
         self.is_valid: bool = False
-        self.error: Optional[str] = None
+        self.error: str | None = None
 
         self._parse_font()
 
@@ -132,9 +131,9 @@ class FontScanner:
 
     def __init__(self, fonts_dir: Path):
         self.fonts_dir = Path(fonts_dir)
-        self._font_cache: Dict[str, FontInfo] = {}
+        self._font_cache: dict[str, FontInfo] = {}
 
-    def scan(self, include_subdirs: bool = True) -> List[FontInfo]:
+    def scan(self, include_subdirs: bool = True) -> list[FontInfo]:
         """
         Scan the fonts directory for font files.
 
@@ -177,15 +176,15 @@ class FontScanner:
 
         return fonts
 
-    def get_font_by_family(self, family_name: str) -> List[FontInfo]:
+    def get_font_by_family(self, family_name: str) -> list[FontInfo]:
         """Get all fonts matching a family name."""
         fonts = self.scan()
         return [f for f in fonts if f.family_name.lower() == family_name.lower()]
 
-    def get_font_families(self) -> Dict[str, List[FontInfo]]:
+    def get_font_families(self) -> dict[str, list[FontInfo]]:
         """Get fonts grouped by family name."""
         fonts = self.scan()
-        families: Dict[str, List[FontInfo]] = {}
+        families: dict[str, list[FontInfo]] = {}
 
         for font in fonts:
             family = font.family_name
@@ -205,10 +204,10 @@ class SubtitleFontAnalyzer:
 
     def __init__(self, subtitle_path: str):
         self.subtitle_path = Path(subtitle_path)
-        self._fonts_by_style: Dict[str, Set[str]] = {}
-        self._inline_fonts: Set[str] = set()
+        self._fonts_by_style: dict[str, set[str]] = {}
+        self._inline_fonts: set[str] = set()
 
-    def analyze(self) -> Dict[str, Any]:
+    def analyze(self) -> dict[str, Any]:
         """
         Analyze the subtitle file to find all fonts used.
 
@@ -224,7 +223,7 @@ class SubtitleFontAnalyzer:
 
         # Analyze style fonts
         self._fonts_by_style.clear()
-        fonts_to_styles: Dict[str, List[str]] = {}
+        fonts_to_styles: dict[str, list[str]] = {}
 
         for style_name, style in data.styles.items():
             font_name = style.fontname
@@ -267,7 +266,7 @@ class SubtitleFontAnalyzer:
             'total_events': len(data.events),
         }
 
-    def get_styles_using_font(self, font_name: str) -> List[str]:
+    def get_styles_using_font(self, font_name: str) -> list[str]:
         """Get list of styles that use a specific font."""
         styles = []
         for style_name, fonts in self._fonts_by_style.items():
@@ -282,14 +281,14 @@ class FontReplacementManager:
     def __init__(self, fonts_dir: Path):
         self.fonts_dir = Path(fonts_dir)
         self.scanner = FontScanner(fonts_dir)
-        self._replacements: Dict[str, Dict[str, Any]] = {}
+        self._replacements: dict[str, dict[str, Any]] = {}
 
     def add_replacement(
         self,
         style_name: str,
         original_font: str,
         new_font_name: str,
-        font_file_path: Optional[Path]
+        font_file_path: Path | None
     ) -> str:
         """
         Add a font replacement for a specific style.
@@ -317,7 +316,7 @@ class FontReplacementManager:
             return True
         return False
 
-    def get_replacements(self) -> Dict[str, Dict[str, Any]]:
+    def get_replacements(self) -> dict[str, dict[str, Any]]:
         """Get all current replacements."""
         return self._replacements.copy()
 
@@ -325,7 +324,7 @@ class FontReplacementManager:
         """Clear all replacements."""
         self._replacements.clear()
 
-    def apply_to_track_data(self, track_data: Dict) -> Dict:
+    def apply_to_track_data(self, track_data: dict) -> dict:
         """
         Apply font replacements to track data for job processing.
 
@@ -339,7 +338,7 @@ class FontReplacementManager:
             track_data['font_replacements'] = self._replacements.copy()
         return track_data
 
-    def validate_replacement_files(self) -> List[str]:
+    def validate_replacement_files(self) -> list[str]:
         """
         Validate that all replacement font files exist.
 
@@ -355,7 +354,7 @@ class FontReplacementManager:
                 )
         return errors
 
-    def copy_fonts_to_temp(self, temp_dir: Path) -> List[Path]:
+    def copy_fonts_to_temp(self, temp_dir: Path) -> list[Path]:
         """
         Copy all replacement font files to a temp directory.
 
@@ -382,9 +381,9 @@ class FontReplacementManager:
 
 
 def validate_font_replacements(
-    replacements: Dict[str, Dict[str, Any]],
-    subtitle_path: Optional[str] = None
-) -> Dict[str, Any]:
+    replacements: dict[str, dict[str, Any]],
+    subtitle_path: str | None = None
+) -> dict[str, Any]:
     """
     Validate font replacements (keyed by style name).
 
@@ -427,7 +426,7 @@ def validate_font_replacements(
             data = SubtitleData.from_file(subtitle_path)
             existing_styles = set(data.styles.keys())
 
-            for style_name in replacements.keys():
+            for style_name in replacements:
                 if style_name not in existing_styles:
                     result['missing_styles'].append(style_name)
                     result['warnings'].append(
@@ -441,7 +440,7 @@ def validate_font_replacements(
 
 def apply_font_replacements_to_subtitle(
     subtitle_path: str,
-    replacements: Dict[str, Dict[str, Any]]
+    replacements: dict[str, dict[str, Any]]
 ) -> int:
     """
     Apply font replacements to a subtitle file.

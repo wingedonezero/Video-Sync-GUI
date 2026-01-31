@@ -1,7 +1,8 @@
 # vsg_core/models/settings.py
-# -*- coding: utf-8 -*-
 from dataclasses import dataclass
+
 from .enums import AnalysisMode, SnapMode
+
 
 @dataclass
 class AppSettings:

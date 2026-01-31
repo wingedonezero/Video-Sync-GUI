@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/__init__.py
-# -*- coding: utf-8 -*-
 """
 Integrated OCR System for VOB and PGS Subtitles
 
@@ -24,8 +23,9 @@ The pipeline is designed to:
 """
 
 from __future__ import annotations
+
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from vsg_core.io.runner import CommandRunner
@@ -33,41 +33,41 @@ if TYPE_CHECKING:
 
 from .engine import OCREngine
 from .pipeline import OCRPipeline
-from .report import OCRReport, UnknownWord, LowConfidenceLine
+from .report import LowConfidenceLine, OCRReport, UnknownWord
 from .romaji_dictionary import (
-    RomajiDictionary,
     KanaToRomaji,
+    RomajiDictionary,
     get_romaji_dictionary,
     is_romaji_word,
 )
 
 __all__ = [
+    'KanaToRomaji',
+    'LowConfidenceLine',
     'OCREngine',
     'OCRPipeline',
     'OCRReport',
-    'UnknownWord',
-    'LowConfidenceLine',
     'RomajiDictionary',
-    'KanaToRomaji',
+    'UnknownWord',
+    'check_ocr_available',
     'get_romaji_dictionary',
     'is_romaji_word',
     'run_ocr',
     'run_ocr_unified',
     'run_preview_ocr',
-    'check_ocr_available',
 ]
 
 
 def run_ocr(
     subtitle_path: str,
     lang: str,
-    runner: 'CommandRunner',
+    runner: CommandRunner,
     tool_paths: dict,
     config: dict,
-    work_dir: Optional[Path] = None,
-    logs_dir: Optional[Path] = None,
+    work_dir: Path | None = None,
+    logs_dir: Path | None = None,
     track_id: int = 0,
-) -> Optional[str]:
+) -> str | None:
     """
     Runs OCR on an image-based subtitle file (VobSub IDX/SUB or PGS SUP).
 
@@ -267,13 +267,13 @@ def check_ocr_available() -> tuple[bool, str]:
 def run_ocr_unified(
     subtitle_path: str,
     lang: str,
-    runner: 'CommandRunner',
+    runner: CommandRunner,
     tool_paths: dict,
     config: dict,
-    work_dir: Optional[Path] = None,
-    logs_dir: Optional[Path] = None,
+    work_dir: Path | None = None,
+    logs_dir: Path | None = None,
     track_id: int = 0,
-) -> Optional['SubtitleData']:
+) -> SubtitleData | None:
     """
     Run OCR and return SubtitleData with all OCR metadata preserved.
 
@@ -385,7 +385,7 @@ def run_preview_ocr(
     lang: str,
     output_dir: Path,
     log_callback=None,
-) -> Optional[tuple[str, str]]:
+) -> tuple[str, str] | None:
     """
     Run fast preview OCR for style editor.
 
@@ -404,6 +404,7 @@ def run_preview_ocr(
         - ass_path: ASS file for visual editing in style editor
     """
     import time
+
     from .backends import get_available_backends
 
     sub_path = Path(subtitle_path)
@@ -424,7 +425,7 @@ def run_preview_ocr(
             log(f"[Preview OCR] ERROR: IDX file not found: {input_path}")
             return None
     elif suffix == '.sup':
-        log(f"[Preview OCR] WARNING: PGS (.sup) support not yet implemented.")
+        log("[Preview OCR] WARNING: PGS (.sup) support not yet implemented.")
         return None
     else:
         log(f"[Preview OCR] ERROR: Unsupported format: {suffix}")

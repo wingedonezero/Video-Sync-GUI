@@ -1,5 +1,4 @@
 # vsg_core/pipeline_components/log_manager.py
-# -*- coding: utf-8 -*-
 """
 Log management component.
 
@@ -7,8 +6,8 @@ Handles logger setup, file handlers, and log output routing.
 """
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Tuple
 
 
 class LogManager:
@@ -19,7 +18,7 @@ class LogManager:
         job_name: str,
         log_dir: Path,
         gui_log_callback: Callable[[str], None]
-    ) -> Tuple[logging.Logger, logging.FileHandler, Callable[[str], None]]:
+    ) -> tuple[logging.Logger, logging.FileHandler, Callable[[str], None]]:
         """
         Sets up logging for a job.
 

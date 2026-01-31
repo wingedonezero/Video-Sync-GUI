@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/engine.py
-# -*- coding: utf-8 -*-
 """
 Tesseract OCR Engine Wrapper
 
@@ -13,10 +12,8 @@ Uses pytesseract as the interface to Tesseract 5.x
 """
 
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import List, Optional, Tuple
+
 import numpy as np
-import re
 
 try:
     import pytesseract
@@ -49,7 +46,7 @@ class OCRLineResult:
     """Result for a single OCR line."""
     text: str
     confidence: float  # 0-100 scale
-    word_confidences: List[Tuple[str, float]] = field(default_factory=list)
+    word_confidences: list[tuple[str, float]] = field(default_factory=list)
     psm_used: int = 7
     was_retry: bool = False
 
@@ -58,11 +55,11 @@ class OCRLineResult:
 class OCRResult:
     """Complete OCR result for a subtitle image."""
     text: str  # Full recognized text
-    lines: List[OCRLineResult] = field(default_factory=list)
+    lines: list[OCRLineResult] = field(default_factory=list)
     average_confidence: float = 0.0
     min_confidence: float = 0.0
     low_confidence: bool = False
-    error: Optional[str] = None
+    error: str | None = None
 
     @property
     def success(self) -> bool:
@@ -77,7 +74,7 @@ class OCREngine:
     Provides line-by-line OCR with detailed confidence information.
     """
 
-    def __init__(self, config: Optional[OCRConfig] = None):
+    def __init__(self, config: OCRConfig | None = None):
         if not PYTESSERACT_AVAILABLE:
             raise ImportError(
                 "pytesseract is not installed. "
@@ -98,7 +95,7 @@ class OCREngine:
                 "Install Tesseract: apt install tesseract-ocr tesseract-ocr-eng"
             )
 
-    def _build_config(self, psm: Optional[int] = None) -> str:
+    def _build_config(self, psm: int | None = None) -> str:
         """
         Build Tesseract configuration string.
 
@@ -190,14 +187,14 @@ class OCREngine:
         self,
         data: dict,
         psm_used: int
-    ) -> List[OCRLineResult]:
+    ) -> list[OCRLineResult]:
         """
         Process Tesseract output data into structured results.
 
         Tesseract returns data at word level with block/line/word hierarchy.
         """
-        lines: List[OCRLineResult] = []
-        current_line: Optional[OCRLineResult] = None
+        lines: list[OCRLineResult] = []
+        current_line: OCRLineResult | None = None
         current_line_num = -1
 
         n_boxes = len(data['text'])
@@ -244,7 +241,7 @@ class OCREngine:
 
         return lines
 
-    def _build_text_from_lines(self, lines: List[OCRLineResult]) -> str:
+    def _build_text_from_lines(self, lines: list[OCRLineResult]) -> str:
         """Build full text from line results."""
         return '\n'.join(line.text for line in lines if line.text.strip())
 
@@ -291,7 +288,7 @@ class OCREngine:
     def ocr_lines_separately(
         self,
         image: np.ndarray,
-        line_images: Optional[List[np.ndarray]] = None
+        line_images: list[np.ndarray] | None = None
     ) -> OCRResult:
         """
         OCR each line separately for better accuracy.
@@ -374,7 +371,7 @@ class OCREngine:
 
         return result
 
-    def _split_into_lines(self, image: np.ndarray) -> List[np.ndarray]:
+    def _split_into_lines(self, image: np.ndarray) -> list[np.ndarray]:
         """
         Split a multi-line subtitle image into separate line images.
 
@@ -433,7 +430,7 @@ class OCREngine:
         return lines
 
 
-def get_available_languages() -> List[str]:
+def get_available_languages() -> list[str]:
     """
     Get list of available Tesseract languages.
 

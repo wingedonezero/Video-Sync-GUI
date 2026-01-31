@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/dictionaries.py
-# -*- coding: utf-8 -*-
 """
 OCR Dictionary Management
 
@@ -25,10 +24,9 @@ import logging
 import os
 import shutil
 import tempfile
-from dataclasses import dataclass, field, asdict
-from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +127,7 @@ class OCRDictionaries:
         logger.info(f"[OCR] Creating new config dir at: {cwd_config}")
         return cwd_config
 
-    def __init__(self, config_dir: Optional[Path] = None):
+    def __init__(self, config_dir: Path | None = None):
         """
         Initialize dictionary manager.
 
@@ -150,9 +148,9 @@ class OCRDictionaries:
         self.names_path = self.config_dir / "names.txt"
 
         # Cached data
-        self._replacements: List[ReplacementRule] = []
-        self._user_words: Set[str] = set()
-        self._names: Set[str] = set()
+        self._replacements: list[ReplacementRule] = []
+        self._user_words: set[str] = set()
+        self._names: set[str] = set()
         self._romaji_dict = None  # Lazy-loaded romaji dictionary
 
         # ValidationManager integration (lazy loaded)
@@ -179,7 +177,7 @@ class OCRDictionaries:
     # Replacements
     # =========================================================================
 
-    def load_replacements(self) -> List[ReplacementRule]:
+    def load_replacements(self) -> list[ReplacementRule]:
         """Load replacement rules from JSON file."""
         if self._replacements:
             return self._replacements
@@ -198,7 +196,7 @@ class OCRDictionaries:
 
         return self._replacements
 
-    def save_replacements(self, rules: List[ReplacementRule]) -> bool:
+    def save_replacements(self, rules: list[ReplacementRule]) -> bool:
         """
         Save replacement rules to JSON file.
 
@@ -214,7 +212,7 @@ class OCRDictionaries:
 
         return success
 
-    def _save_replacements_internal(self, rules: List[ReplacementRule]) -> bool:
+    def _save_replacements_internal(self, rules: list[ReplacementRule]) -> bool:
         """Internal save without backup (for initial creation)."""
         try:
             data = {
@@ -239,7 +237,7 @@ class OCRDictionaries:
             logger.error(f"Error saving replacements: {e}")
             return False
 
-    def add_replacement(self, rule: ReplacementRule) -> Tuple[bool, str]:
+    def add_replacement(self, rule: ReplacementRule) -> tuple[bool, str]:
         """
         Add a replacement rule.
 
@@ -258,7 +256,7 @@ class OCRDictionaries:
             return True, "Rule added successfully"
         return False, "Failed to save rules"
 
-    def remove_replacement(self, pattern: str, rule_type: str = None) -> Tuple[bool, str]:
+    def remove_replacement(self, pattern: str, rule_type: str = None) -> tuple[bool, str]:
         """Remove a replacement rule by pattern."""
         rules = self.load_replacements()
         original_count = len(rules)
@@ -275,7 +273,7 @@ class OCRDictionaries:
             return True, "Rule removed successfully"
         return False, "Failed to save rules"
 
-    def update_replacement(self, old_pattern: str, new_rule: ReplacementRule) -> Tuple[bool, str]:
+    def update_replacement(self, old_pattern: str, new_rule: ReplacementRule) -> tuple[bool, str]:
         """Update an existing replacement rule."""
         rules = self.load_replacements()
 
@@ -292,7 +290,7 @@ class OCRDictionaries:
     # User Dictionary
     # =========================================================================
 
-    def load_user_dictionary(self) -> Set[str]:
+    def load_user_dictionary(self) -> set[str]:
         """Load user dictionary words."""
         if self._user_words:
             return self._user_words
@@ -300,7 +298,7 @@ class OCRDictionaries:
         self._user_words = self._load_wordlist(self.user_dict_path)
         return self._user_words
 
-    def save_user_dictionary(self, words: Set[str]) -> bool:
+    def save_user_dictionary(self, words: set[str]) -> bool:
         """Save user dictionary."""
         self._backup_file(self.user_dict_path)
         success = self._save_wordlist(self.user_dict_path, words, "User Dictionary")
@@ -308,7 +306,7 @@ class OCRDictionaries:
             self._user_words = words
         return success
 
-    def add_user_word(self, word: str) -> Tuple[bool, str]:
+    def add_user_word(self, word: str) -> tuple[bool, str]:
         """Add a word to user dictionary."""
         word = word.strip()
         if not word:
@@ -323,7 +321,7 @@ class OCRDictionaries:
             return True, f"Added '{word}'"
         return False, "Failed to save dictionary"
 
-    def remove_user_word(self, word: str) -> Tuple[bool, str]:
+    def remove_user_word(self, word: str) -> tuple[bool, str]:
         """Remove a word from user dictionary."""
         words = self.load_user_dictionary()
         word_lower = word.lower()
@@ -347,7 +345,7 @@ class OCRDictionaries:
     # Names Dictionary
     # =========================================================================
 
-    def load_names(self) -> Set[str]:
+    def load_names(self) -> set[str]:
         """Load names dictionary."""
         if self._names:
             return self._names
@@ -355,7 +353,7 @@ class OCRDictionaries:
         self._names = self._load_wordlist(self.names_path)
         return self._names
 
-    def save_names(self, names: Set[str]) -> bool:
+    def save_names(self, names: set[str]) -> bool:
         """Save names dictionary."""
         self._backup_file(self.names_path)
         success = self._save_wordlist(self.names_path, names, "Names Dictionary")
@@ -363,7 +361,7 @@ class OCRDictionaries:
             self._names = names
         return success
 
-    def add_name(self, name: str) -> Tuple[bool, str]:
+    def add_name(self, name: str) -> tuple[bool, str]:
         """Add a name to names dictionary."""
         name = name.strip()
         if not name:
@@ -378,7 +376,7 @@ class OCRDictionaries:
             return True, f"Added '{name}'"
         return False, "Failed to save names"
 
-    def remove_name(self, name: str) -> Tuple[bool, str]:
+    def remove_name(self, name: str) -> tuple[bool, str]:
         """Remove a name from names dictionary."""
         names = self.load_names()
         name_lower = name.lower()
@@ -401,7 +399,7 @@ class OCRDictionaries:
     # Import/Export
     # =========================================================================
 
-    def import_replacements(self, file_path: Path) -> Tuple[int, int, List[str]]:
+    def import_replacements(self, file_path: Path) -> tuple[int, int, list[str]]:
         """
         Import replacement rules from a text file.
 
@@ -473,7 +471,7 @@ class OCRDictionaries:
             logger.error(f"Error exporting replacements: {e}")
             return False
 
-    def import_wordlist(self, file_path: Path, target: str = "user") -> Tuple[int, int]:
+    def import_wordlist(self, file_path: Path, target: str = "user") -> tuple[int, int]:
         """
         Import words from a text file (one word per line).
 
@@ -533,7 +531,7 @@ class OCRDictionaries:
     # Utility Methods
     # =========================================================================
 
-    def _load_wordlist(self, path: Path) -> Set[str]:
+    def _load_wordlist(self, path: Path) -> set[str]:
         """Load a wordlist from file."""
         words = set()
         try:
@@ -546,7 +544,7 @@ class OCRDictionaries:
             logger.error(f"Error loading wordlist {path}: {e}")
         return words
 
-    def _save_wordlist(self, path: Path, words: Set[str], header: str) -> bool:
+    def _save_wordlist(self, path: Path, words: set[str], header: str) -> bool:
         """Save a wordlist to file with atomic write."""
         try:
             lines = [f"# {header} - one word per line", ""]
@@ -722,7 +720,7 @@ class OCRDictionaries:
             self._romaji_dict = RomajiDictionary(self.config_dir)
         return self._romaji_dict
 
-    def load_romaji_dictionary(self) -> Set[str]:
+    def load_romaji_dictionary(self) -> set[str]:
         """Load romaji dictionary words."""
         return self._get_romaji_dictionary().load()
 
@@ -738,7 +736,7 @@ class OCRDictionaries:
         """
         return self._get_romaji_dictionary().is_valid_word(word)
 
-    def build_romaji_dictionary(self, progress_callback=None) -> Tuple[bool, str]:
+    def build_romaji_dictionary(self, progress_callback=None) -> tuple[bool, str]:
         """
         Build romaji dictionary from JMdict.
 
@@ -752,16 +750,16 @@ class OCRDictionaries:
         """
         return self._get_romaji_dictionary().build_dictionary(progress_callback)
 
-    def get_romaji_stats(self) -> Dict:
+    def get_romaji_stats(self) -> dict:
         """Get romaji dictionary statistics."""
         return self._get_romaji_dictionary().get_stats()
 
 
 # Global instance for convenience
-_dictionaries: Optional[OCRDictionaries] = None
+_dictionaries: OCRDictionaries | None = None
 
 
-def get_dictionaries(config_dir: Optional[Path] = None) -> OCRDictionaries:
+def get_dictionaries(config_dir: Path | None = None) -> OCRDictionaries:
     """Get or create the global dictionaries instance."""
     global _dictionaries
     if _dictionaries is None or config_dir is not None:

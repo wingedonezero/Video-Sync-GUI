@@ -1,5 +1,4 @@
 # vsg_core/analysis/audio_corr.py
-# -*- coding: utf-8 -*-
 """
 In-memory audio cross-correlation for delay detection.
 Implements a decode-once strategy for improved accuracy and consistency.
@@ -8,11 +7,11 @@ Implements a decode-once strategy for improved accuracy and consistency.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
-from scipy.signal import correlate, butter, lfilter, firwin
+from scipy.signal import butter, correlate, firwin, lfilter
 
 from ..io.runner import CommandRunner
 
@@ -25,7 +24,7 @@ _LANG2TO3 = {
     'uk': 'ukr', 'ro': 'ron', 'bg': 'bul', 'sr': 'srp', 'hr': 'hrv', 'ms': 'msa', 'bn': 'ben', 'ta': 'tam',
     'te': 'tel'
 }
-def _normalize_lang(lang: Optional[str]) -> Optional[str]:
+def _normalize_lang(lang: str | None) -> str | None:
     if not lang: return None
     s = lang.strip().lower()
     if not s or s == 'und': return None
@@ -33,7 +32,7 @@ def _normalize_lang(lang: Optional[str]) -> Optional[str]:
 
 
 # --- DSP & IO Helpers ---
-def get_audio_stream_info(mkv_path: str, lang: Optional[str], runner: CommandRunner, tool_paths: dict) -> Tuple[Optional[int], Optional[int]]:
+def get_audio_stream_info(mkv_path: str, lang: str | None, runner: CommandRunner, tool_paths: dict) -> tuple[int | None, int | None]:
     """
     Finds the best audio stream and returns its 0-based index and mkvmerge track ID.
     Returns: A tuple of (stream_index, track_id) or (None, None).
@@ -80,7 +79,7 @@ def _decode_to_memory(file_path: str, a_index: int, out_sr: int, use_soxr: bool,
         # Check if first bytes look like ASCII text (would indicate stderr mixed in)
         try:
             text_check = first_bytes[:50].decode('ascii', errors='strict')
-            runner._log_message(f"[DECODE RAW] WARNING: First bytes decode as ASCII: {repr(text_check)}")
+            runner._log_message(f"[DECODE RAW] WARNING: First bytes decode as ASCII: {text_check!r}")
         except UnicodeDecodeError:
             pass  # Good - binary data as expected
 
@@ -101,7 +100,7 @@ def _decode_to_memory(file_path: str, a_index: int, out_sr: int, use_soxr: bool,
     # The extra memory copy is worth the safety guarantee.
     return np.frombuffer(pcm_bytes, dtype=np.float32).copy()
 
-def _apply_bandpass(waveform: np.ndarray, sr: int, lowcut: float, highcut: float, order: int, log: Optional[Callable] = None) -> np.ndarray:
+def _apply_bandpass(waveform: np.ndarray, sr: int, lowcut: float, highcut: float, order: int, log: Callable | None = None) -> np.ndarray:
     """Applies a Butterworth band-pass filter to isolate dialogue frequencies."""
     try:
         nyquist = 0.5 * sr
@@ -114,7 +113,7 @@ def _apply_bandpass(waveform: np.ndarray, sr: int, lowcut: float, highcut: float
             log(f"[FILTER WARNING] Band-pass filter failed ({e}), using unfiltered waveform")
         return waveform
 
-def _apply_lowpass(waveform: np.ndarray, sr: int, cutoff_hz: int, num_taps: int, log: Optional[Callable] = None) -> np.ndarray:
+def _apply_lowpass(waveform: np.ndarray, sr: int, cutoff_hz: int, num_taps: int, log: Callable | None = None) -> np.ndarray:
     """Applies a simple FIR low-pass filter."""
     if cutoff_hz <= 0: return waveform
     try:
@@ -183,7 +182,7 @@ def _normalize_peak_confidence(correlation_array: np.ndarray, peak_idx: int) -> 
 
     return min(100.0, max(0.0, confidence))
 
-def _find_delay_gcc_phat(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> Tuple[float, float]:
+def _find_delay_gcc_phat(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> tuple[float, float]:
     """Calculates delay using Generalized Cross-Correlation with Phase Transform."""
     n = len(ref_chunk) + len(tgt_chunk) - 1
     R = np.fft.fft(ref_chunk, n)
@@ -197,7 +196,7 @@ def _find_delay_gcc_phat(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) 
     match_confidence = _normalize_peak_confidence(r_phat, k)
     return delay_ms, match_confidence
 
-def _find_delay_scc(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int, peak_fit: bool) -> Tuple[float, float]:
+def _find_delay_scc(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int, peak_fit: bool) -> tuple[float, float]:
     """Calculates delay and match percentage using standard cross-correlation."""
     r = (ref_chunk - np.mean(ref_chunk)) / (np.std(ref_chunk) + 1e-9)
     t = (tgt_chunk - np.mean(tgt_chunk)) / (np.std(tgt_chunk) + 1e-9)
@@ -214,7 +213,7 @@ def _find_delay_scc(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int, peak_
     return raw_delay_s * 1000.0, match_pct
 
 
-def _find_delay_onset(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> Tuple[float, float]:
+def _find_delay_onset(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> tuple[float, float]:
     """
     Calculates delay using onset detection envelope correlation.
 
@@ -264,7 +263,7 @@ def _find_delay_onset(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> 
     return delay_ms, match_confidence
 
 
-def _find_delay_gcc_scot(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> Tuple[float, float]:
+def _find_delay_gcc_scot(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> tuple[float, float]:
     """
     Calculates delay using GCC-SCOT (Smoothed Coherence Transform).
 
@@ -299,7 +298,7 @@ def _find_delay_gcc_scot(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) 
     return delay_ms, match_confidence
 
 
-def _find_delay_gcc_whiten(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> Tuple[float, float]:
+def _find_delay_gcc_whiten(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> tuple[float, float]:
     """
     Calculates delay using GCC with Spectral Whitening (Whitened Cross-Correlation).
 
@@ -341,7 +340,7 @@ def _find_delay_gcc_whiten(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int
     return delay_ms, match_confidence
 
 
-def _find_delay_dtw(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> Tuple[float, float]:
+def _find_delay_dtw(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> tuple[float, float]:
     """
     Calculates delay using Dynamic Time Warping on MFCC features.
 
@@ -391,7 +390,7 @@ def _find_delay_dtw(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> Tu
     return delay_ms, match_confidence
 
 
-def _find_delay_spectrogram(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> Tuple[float, float]:
+def _find_delay_spectrogram(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> tuple[float, float]:
     """
     Calculates delay using spectrogram cross-correlation.
 
@@ -448,16 +447,16 @@ def _find_delay_spectrogram(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: in
 def run_audio_correlation(
     ref_file: str,
     target_file: str,
-    config: Dict,
+    config: dict,
     runner: CommandRunner,
-    tool_paths: Dict[str, str],
-    ref_lang: Optional[str],
-    target_lang: Optional[str],
+    tool_paths: dict[str, str],
+    ref_lang: str | None,
+    target_lang: str | None,
     role_tag: str,
-    ref_track_index: Optional[int] = None,
-    target_track_index: Optional[int] = None,
+    ref_track_index: int | None = None,
+    target_track_index: int | None = None,
     use_source_separation: bool = False
-) -> List[Dict]:
+) -> list[dict]:
     """
     Runs audio correlation analysis between reference and target files.
 
@@ -550,12 +549,12 @@ def run_audio_correlation(
                 ref_pcm, tgt_pcm, DEFAULT_SR, config, log, role_tag
             )
         except ImportError as e:
-            log(f"⚠️  WARNING: Source separation was enabled but dependencies are not available!")
+            log("⚠️  WARNING: Source separation was enabled but dependencies are not available!")
             log(f"[SOURCE SEPARATION] Error: {e}")
             log("[SOURCE SEPARATION] Falling back to standard correlation without separation.")
             log("[SOURCE SEPARATION] To fix: Install dependencies with 'pip install demucs torch'")
         except Exception as e:
-            log(f"⚠️  WARNING: Source separation failed with an error!")
+            log("⚠️  WARNING: Source separation failed with an error!")
             log(f"[SOURCE SEPARATION] Error: {e}")
             log("[SOURCE SEPARATION] Falling back to standard correlation without separation.")
 
@@ -661,12 +660,12 @@ MULTI_CORR_METHODS = [
 
 def _run_method_on_chunks(
     method_name: str,
-    chunks: List[Tuple[int, float, np.ndarray, np.ndarray]],
+    chunks: list[tuple[int, float, np.ndarray, np.ndarray]],
     sr: int,
     min_match: float,
     peak_fit: bool,
     log: Callable
-) -> List[Dict]:
+) -> list[dict]:
     """
     Runs a specific correlation method on pre-extracted chunks.
 
@@ -714,16 +713,16 @@ def _run_method_on_chunks(
 def run_multi_correlation(
     ref_file: str,
     target_file: str,
-    config: Dict,
+    config: dict,
     runner: CommandRunner,
-    tool_paths: Dict[str, str],
-    ref_lang: Optional[str],
-    target_lang: Optional[str],
+    tool_paths: dict[str, str],
+    ref_lang: str | None,
+    target_lang: str | None,
     role_tag: str,
-    ref_track_index: Optional[int] = None,
-    target_track_index: Optional[int] = None,
+    ref_track_index: int | None = None,
+    target_track_index: int | None = None,
     use_source_separation: bool = False
-) -> Dict[str, List[Dict]]:
+) -> dict[str, list[dict]]:
     """
     Runs multiple correlation methods on the same audio chunks for comparison.
 
@@ -820,12 +819,12 @@ def run_multi_correlation(
                 ref_pcm, tgt_pcm, DEFAULT_SR, config, log, role_tag
             )
         except ImportError as e:
-            log(f"⚠️  WARNING: Source separation was enabled but dependencies are not available!")
+            log("⚠️  WARNING: Source separation was enabled but dependencies are not available!")
             log(f"[SOURCE SEPARATION] Error: {e}")
             log("[SOURCE SEPARATION] Falling back to standard correlation without separation.")
             log("[SOURCE SEPARATION] To fix: Install dependencies with 'pip install demucs torch'")
         except Exception as e:
-            log(f"⚠️  WARNING: Source separation failed with an error!")
+            log("⚠️  WARNING: Source separation failed with an error!")
             log(f"[SOURCE SEPARATION] Error: {e}")
             log("[SOURCE SEPARATION] Falling back to standard correlation without separation.")
 

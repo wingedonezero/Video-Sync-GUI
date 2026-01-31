@@ -1,16 +1,15 @@
 # vsg_core/postprocess/auditors/audio_channels.py
-# -*- coding: utf-8 -*-
-from typing import Dict, Optional
 from pathlib import Path
 
 from vsg_core.models.enums import TrackType
+
 from .base import BaseAuditor
 
 
 class AudioChannelsAuditor(BaseAuditor):
     """Verifies channel counts and layouts weren't altered during muxing."""
 
-    def run(self, final_mkv_path: Path, final_mkvmerge_data: Dict, final_ffprobe_data=None) -> int:
+    def run(self, final_mkv_path: Path, final_mkvmerge_data: dict, final_ffprobe_data=None) -> int:
         """
         Audits audio channel layouts to detect downmixing.
         Returns the number of issues found.
@@ -73,7 +72,7 @@ class AudioChannelsAuditor(BaseAuditor):
                 self.log(f"          Output: {actual_channels} channels")
 
                 if actual_channels < source_channels:
-                    self.log(f"          CRITICAL: Audio was downmixed!")
+                    self.log("          CRITICAL: Audio was downmixed!")
                 issues += 1
             else:
                 # Also check channel layout if available
@@ -92,7 +91,7 @@ class AudioChannelsAuditor(BaseAuditor):
 
         return issues
 
-    def _get_audio_stream_index_from_track_id(self, mkv_data: Dict, track_id: int) -> Optional[int]:
+    def _get_audio_stream_index_from_track_id(self, mkv_data: dict, track_id: int) -> int | None:
         """
         Maps an mkvmerge track ID to the corresponding audio stream index in ffprobe output.
 

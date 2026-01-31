@@ -1,11 +1,10 @@
 # vsg_core/io/runner.py
-# -*- coding: utf-8 -*-
 """
 Wrapper for running external command-line processes.
 """
-import subprocess
 import shlex
-from typing import List, Callable, Optional, Union
+import subprocess
+from collections.abc import Callable
 from datetime import datetime
 
 # Import GPU environment support
@@ -32,7 +31,7 @@ class CommandRunner:
         line = f'[{ts}] {message}'
         self.log(line)
 
-    def run(self, cmd: List[str], tool_paths: dict, is_binary: bool = False, input_data: Optional[bytes] = None) -> Optional[Union[str, bytes]]:
+    def run(self, cmd: list[str], tool_paths: dict, is_binary: bool = False, input_data: bytes | None = None) -> str | bytes | None:
         """
         Executes a command and handles logging based on configuration.
         Can optionally pass binary `input_data` to the process's stdin.

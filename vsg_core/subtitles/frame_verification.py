@@ -1,5 +1,4 @@
 # vsg_core/subtitles/frame_verification.py
-# -*- coding: utf-8 -*-
 """
 Frame verification utilities for subtitle synchronization.
 
@@ -7,19 +6,20 @@ Contains verification functions used by sync mode plugins for
 validating frame alignment between source and target videos.
 """
 from __future__ import annotations
-from typing import List, Dict, Any
+
 import gc
+from typing import Any
 
 
 def verify_correlation_with_frame_snap(
     source_video: str,
     target_video: str,
-    subtitle_events: List,
+    subtitle_events: list,
     pure_correlation_delay_ms: float,
     fps: float,
     runner,
     config: dict = None
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Verify frame alignment and calculate precise ms refinement from anchor frames.
 
@@ -45,8 +45,8 @@ def verify_correlation_with_frame_snap(
 
     config = config or {}
 
-    runner._log_message(f"[Correlation+FrameSnap] ═══════════════════════════════════════")
-    runner._log_message(f"[Correlation+FrameSnap] Verifying frame alignment...")
+    runner._log_message("[Correlation+FrameSnap] ═══════════════════════════════════════")
+    runner._log_message("[Correlation+FrameSnap] Verifying frame alignment...")
     runner._log_message(f"[Correlation+FrameSnap] Pure correlation delay: {pure_correlation_delay_ms:+.3f}ms")
 
     frame_duration_ms = 1000.0 / fps
@@ -62,7 +62,7 @@ def verify_correlation_with_frame_snap(
     runner._log_message(f"[Correlation+FrameSnap] Hash: {hash_algorithm}, size={hash_size}, threshold={hash_threshold}")
 
     if not subtitle_events:
-        runner._log_message(f"[Correlation+FrameSnap] ERROR: No subtitle events provided")
+        runner._log_message("[Correlation+FrameSnap] ERROR: No subtitle events provided")
         return {
             'valid': False,
             'error': 'No subtitle events',
@@ -81,7 +81,7 @@ def verify_correlation_with_frame_snap(
     try:
         from .frame_utils import VideoReader, compute_frame_hash
     except ImportError:
-        runner._log_message(f"[Correlation+FrameSnap] ERROR: frame_utils module not available")
+        runner._log_message("[Correlation+FrameSnap] ERROR: frame_utils module not available")
         return {
             'valid': False,
             'error': 'frame_utils module not available',
@@ -93,13 +93,13 @@ def verify_correlation_with_frame_snap(
     refinements_ms = []
 
     if use_scene_checkpoints:
-        runner._log_message(f"[Correlation+FrameSnap] Sliding Window Scene Alignment")
+        runner._log_message("[Correlation+FrameSnap] Sliding Window Scene Alignment")
         runner._log_message(f"[Correlation+FrameSnap] Window: {window_radius*2+1} frames, Search: ±{search_range_frames} frames")
 
         start_frame = int(min_sub_time * fps / 1000.0)
         end_frame = int(max_sub_time * fps / 1000.0)
 
-        runner._log_message(f"[Correlation+FrameSnap] Detecting scene changes in SOURCE video...")
+        runner._log_message("[Correlation+FrameSnap] Detecting scene changes in SOURCE video...")
         source_scene_frames = detect_scene_changes(source_video, start_frame, end_frame, runner, max_scenes=5)
 
         if source_scene_frames:
@@ -198,7 +198,7 @@ def verify_correlation_with_frame_snap(
                     refinements_ms.append(refinement_ms)
                     runner._log_message(f"[Correlation+FrameSnap]   Refinement: {refinement_ms:+.3f}ms (GOOD)")
                 else:
-                    runner._log_message(f"[Correlation+FrameSnap]   Match quality POOR - skipping")
+                    runner._log_message("[Correlation+FrameSnap]   Match quality POOR - skipping")
 
             source_reader.close()
             target_reader.close()
@@ -206,7 +206,7 @@ def verify_correlation_with_frame_snap(
             del target_reader
             gc.collect()
         else:
-            runner._log_message(f"[Correlation+FrameSnap] No scene changes detected")
+            runner._log_message("[Correlation+FrameSnap] No scene changes detected")
 
     # Calculate final correction
     if refinements_ms and len(refinements_ms) >= 2:
@@ -229,7 +229,7 @@ def verify_correlation_with_frame_snap(
         valid = False
     else:
         frame_correction_ms = 0.0
-        runner._log_message(f"[Correlation+FrameSnap] No matches, trusting correlation")
+        runner._log_message("[Correlation+FrameSnap] No matches, trusting correlation")
         valid = False
 
     frame_delta = round(frame_correction_ms / frame_duration_ms) if frame_duration_ms > 0 else 0
@@ -246,11 +246,11 @@ def verify_correlation_with_frame_snap(
 def verify_alignment_with_sliding_window(
     source_video: str,
     target_video: str,
-    subtitle_events: List,
+    subtitle_events: list,
     duration_offset_ms: float,
     runner,
     config: dict = None
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Hybrid verification with TEMPORAL CONSISTENCY: Use duration offset as starting
     point, then verify with sliding window matching of MULTIPLE adjacent frames.
@@ -275,8 +275,8 @@ def verify_alignment_with_sliding_window(
 
     config = config or {}
 
-    runner._log_message(f"[Hybrid Verification] ═══════════════════════════════════════")
-    runner._log_message(f"[Hybrid Verification] Running TEMPORAL CONSISTENCY verification...")
+    runner._log_message("[Hybrid Verification] ═══════════════════════════════════════")
+    runner._log_message("[Hybrid Verification] Running TEMPORAL CONSISTENCY verification...")
     runner._log_message(f"[Hybrid Verification] Duration offset (rough): {duration_offset_ms:+.3f}ms")
 
     # Get unified config parameters
@@ -293,7 +293,7 @@ def verify_alignment_with_sliding_window(
     checkpoints = select_smart_checkpoints(subtitle_events, runner)
 
     if len(checkpoints) == 0:
-        runner._log_message(f"[Hybrid Verification] ERROR: No valid checkpoints found")
+        runner._log_message("[Hybrid Verification] ERROR: No valid checkpoints found")
         return {
             'enabled': True,
             'valid': False,
@@ -305,7 +305,7 @@ def verify_alignment_with_sliding_window(
     try:
         from .frame_utils import VideoReader, compute_frame_hash
     except ImportError:
-        runner._log_message(f"[Hybrid Verification] ERROR: frame_utils module not available")
+        runner._log_message("[Hybrid Verification] ERROR: frame_utils module not available")
         return {
             'enabled': True,
             'valid': False,
