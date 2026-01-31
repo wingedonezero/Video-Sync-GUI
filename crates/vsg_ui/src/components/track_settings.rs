@@ -3,6 +3,7 @@
 //! Dialog for configuring individual track settings.
 
 use gtk::prelude::*;
+use libadwaita::prelude::*;
 use relm4::prelude::*;
 use relm4::{Component, ComponentParts, ComponentSender};
 

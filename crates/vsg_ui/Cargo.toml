@@ -21,7 +21,7 @@ relm4-components = "0.10"
 libadwaita = { version = "0.8", features = ["v1_4"] }
 
 # Async runtime
-tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "sync"] }
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "sync", "time"] }
 
 # Serialization
 serde = { workspace = true }
