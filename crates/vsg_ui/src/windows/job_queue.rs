@@ -387,7 +387,11 @@ impl Component for JobQueueDialog {
             }
 
             JobQueueMsg::AddJobs => {
-                let _ = sender.output(JobQueueOutput::OpenAddJob);
+                // Defer output because parent closes this dialog when it receives OpenAddJob
+                let output_sender = sender.output_sender().clone();
+                glib::idle_add_local_once(move || {
+                    let _ = output_sender.send(JobQueueOutput::OpenAddJob);
+                });
             }
 
             JobQueueMsg::RemoveSelected => {
