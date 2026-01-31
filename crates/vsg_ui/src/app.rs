@@ -19,7 +19,7 @@ use vsg_core::jobs::{JobQueue, JobQueueEntry, LayoutManager};
 
 use crate::components::{
     add_job::{AddJobDialog, AddJobOutput},
-    job_queue::{JobQueueDialog, JobQueueOutput},
+    job_queue::{JobQueueDialog, JobQueueMsg, JobQueueOutput},
     manual_selection::{ManualSelectionDialog, ManualSelectionOutput},
     settings::{SettingsDialog, SettingsOutput},
     track_settings::{TrackSettingsDialog, TrackSettingsOutput},
@@ -907,15 +907,23 @@ impl Component for App {
             }
 
             AppMsg::JobQueueClosed(output) => {
-                self.job_queue_dialog = None;
                 match output {
                     JobQueueOutput::StartProcessing(jobs) => {
+                        self.job_queue_dialog = None;
                         sender.input(AppMsg::StartBatchProcessing(jobs));
                     }
                     JobQueueOutput::OpenManualSelection(idx) => {
+                        // Keep job queue open while configuring
                         sender.input(AppMsg::OpenManualSelection(idx));
                     }
-                    JobQueueOutput::Closed => {}
+                    JobQueueOutput::OpenAddJob => {
+                        // Close job queue, open add job, then reopen job queue after
+                        self.job_queue_dialog = None;
+                        sender.input(AppMsg::OpenAddJob);
+                    }
+                    JobQueueOutput::Closed => {
+                        self.job_queue_dialog = None;
+                    }
                 }
             }
 
@@ -937,6 +945,9 @@ impl Component for App {
                 self.add_job_dialog = None;
                 if let AddJobOutput::JobsAdded(count) = output {
                     self.job_queue_status = format!("Added {} job(s)", count);
+                    self.append_log(&format!("Added {} job(s) to queue.", count));
+                    // Reopen job queue to show new jobs
+                    sender.input(AppMsg::OpenJobQueue);
                 }
             }
 
