@@ -29,36 +29,133 @@
 
 ## 5) Code style and tooling (Python)
 - Python code MUST be:
-  - formatted with **Black** (line length 88),
-  - linted with **Ruff** (including import sorting).
-- Do not hand-format or bikeshed formatting; rely on Black/Ruff outputs.
-- Follow the repository’s `pyproject.toml` settings.
+  - formatted with **Ruff** (`ruff format`, line length 88),
+  - linted with **Ruff** (`ruff check`, including import sorting),
+  - type-checked with **Pyright**.
+- Do not hand-format or bikeshed formatting; rely on Ruff outputs.
+- Follow the repository's `pyproject.toml` settings.
+- Commands:
+  - `ruff format .` - format code
+  - `ruff check --fix .` - lint and auto-fix
+  - `pyright` - type check
 
-## 6) Gradual formatting policy (avoid giant diffs)
-- Do NOT run mass reformat/lint across the entire repo unless explicitly requested.
-- Default behavior:
-  - format/lint only the files you touch,
-  - keep diffs focused on the intended change.
-- If a file is already being edited, it’s OK to format/lint that file as part of the change.
+## 6) Rust-like Python philosophy
+Core principles (explicit, typed, structured):
+- **Explicit over implicit**: No magic, no stringly-typed APIs, no `**kwargs` soup.
+- **Structs over dicts**: Prefer dataclasses over `Dict[str, Any]`.
+- **Types everywhere**: All functions get type hints, no exceptions.
+- **No `Any` without justification**: If you write `Any`, add a comment explaining why.
+- **Fail fast**: Validate at boundaries, trust internal code.
 
-## 7) Type hints and readability
-- Add type hints for all public functions and any non-trivial internal functions you modify/create.
+## 7) Data structures policy
+
+### 7a) Dataclass standards
+- Use `@dataclass(slots=True)` for all new dataclasses (Python 3.10+).
+- Use `frozen=True` for immutable value objects (results, flags, computed data).
+- Keep mutable for builder/accumulator patterns (Context, editor state).
+
+```python
+# Immutable result (frozen):
+@dataclass(frozen=True, slots=True)
+class AnalysisResult:
+    confidence: float
+    offset_ms: int
+
+# Mutable builder (not frozen):
+@dataclass(slots=True)
+class PipelineContext:
+    current_step: str
+    results: list[AnalysisResult] = field(default_factory=list)
+```
+
+### 7b) Dict vs dataclass decision tree
+- **New code**: Always dataclass for structured data, never raw dicts.
+- **Existing dicts**: Convert to dataclass when modifying that code (gradual).
+- **External JSON/API data**: Use TypedDict at parse boundary, convert to dataclass internally.
+- **Config**: Use `AppSettings` dataclass throughout, not `Dict[str, Any]`.
+- **Simple key-value mappings**: Plain `dict[str, SpecificType]` is fine (e.g., `dict[str, Path]`).
+
+### 7c) TypedDict for external boundaries
+Use TypedDict to document the shape of external data (JSON files, tool output):
+
+```python
+class MKVTrackDict(TypedDict):
+    id: int
+    type: str
+    codec: str
+    properties: MKVPropertiesDict
+
+# Parse external → convert to internal dataclass
+def parse_track(raw: MKVTrackDict) -> Track:
+    return Track(id=raw["id"], track_type=TrackType(raw["type"]), ...)
+```
+
+### 7d) Pydantic for validated external input
+Use Pydantic models for:
+- Config file loading (user input needs validation)
+- External tool output parsing (mkvmerge, ffprobe JSON)
+- API boundaries where data needs coercion/validation
+
+Use stdlib dataclasses for:
+- Internal domain models
+- Hot paths (performance-sensitive code)
+- Simple value objects
+
+## 8) Type organization (hybrid model)
+
+### Shared types (cross-module): `vsg_core/models/`
+Types imported by 2+ unrelated modules belong here:
+- `enums.py` - All enums (TrackType, AnalysisMode, etc.)
+- `media.py` - Track, StreamProps, Attachment
+- `jobs.py` - JobSpec, PlanItem, MergePlan, Delays
+- `settings.py` - AppSettings
+- `results.py` - StepResult, CorrectionResult
+- `context_types.py` - Types for Context fields (SegmentFlags, QualityIssue, etc.)
+
+### Local types (single module/subpackage): stays in module
+Types used only within a subpackage stay there:
+- `vsg_core/subtitles/data.py` - SubtitleData, SubtitleEvent, SubtitleStyle
+- `vsg_core/subtitles/edit_plan.py` - EditPlan types
+- `vsg_core/subtitles/ocr/*.py` - OCR-specific types
+
+### Rule of thumb
+If you need to import a type into an unrelated module, move it to `models/`.
+
+## 9) Type hints and readability
+- Add type hints for ALL functions (public and private).
 - Prefer small functions, clear naming, and predictable structure.
 - Add comments/docstrings when intent is not obvious (explain WHY more than WHAT).
 
-## 8) Tests / validation expectations
+### Banned patterns (fix when encountered):
+| Bad | Good |
+|-----|------|
+| `Dict[str, Any]` | Dataclass or TypedDict |
+| `List[Dict[str, Any]]` | `list[SpecificDataclass]` |
+| `Dict[str, dict]` | Fully type the inner dict |
+| `config: dict` | `config: AppSettings` |
+| `**kwargs` passthrough | Explicit parameters |
+
+## 10) Gradual migration policy (avoid giant diffs)
+- Do NOT run mass reformat/lint/refactor across the entire repo unless explicitly requested.
+- Default behavior:
+  - Format/lint only the files you touch.
+  - Convert dicts to dataclasses only in code you're modifying.
+  - Keep diffs focused on the intended change.
+- If a file is already being edited, it's OK to format/lint/modernize that file as part of the change.
+
+## 11) Tests / validation expectations
 - For risky changes (parsing, timing, IO, concurrency, data transforms):
   - add/extend tests OR provide a clear validation plan (commands + expected output).
-- Prefer preventing regressions over “looks correct”.
+- Prefer preventing regressions over "looks correct".
 
-## 9) Rewrite/refactor quality rules
+## 12) Rewrite/refactor quality rules
 - If asked to rewrite/refactor:
   - keep feature parity unless approved otherwise,
   - remove single points of failure where feasible,
   - improve architecture without changing external behavior,
   - prefer incremental refactors over big rewrites unless requested.
 
-## 10) Output requirements
+## 13) Output requirements
 - When producing code changes:
   - summarize what changed and why,
   - note any behavior changes,
