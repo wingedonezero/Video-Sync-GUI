@@ -2,6 +2,7 @@
 //!
 //! Multi-tab settings dialog with all configuration options.
 
+use gtk::glib;
 use gtk::prelude::*;
 use libadwaita::prelude::*;
 use relm4::prelude::*;
@@ -907,10 +908,19 @@ impl Component for SettingsDialog {
 
             // Dialog actions
             SettingsMsg::Save => {
-                let _ = sender.output(SettingsOutput::Saved(self.settings.clone()));
+                // Defer output to avoid panic when controller is dropped while in click handler
+                let settings = self.settings.clone();
+                let output_sender = sender.output_sender().clone();
+                glib::idle_add_local_once(move || {
+                    let _ = output_sender.send(SettingsOutput::Saved(settings));
+                });
             }
             SettingsMsg::Cancel => {
-                let _ = sender.output(SettingsOutput::Cancelled);
+                // Defer output to avoid panic when controller is dropped while in click handler
+                let output_sender = sender.output_sender().clone();
+                glib::idle_add_local_once(move || {
+                    let _ = output_sender.send(SettingsOutput::Cancelled);
+                });
             }
         }
     }
@@ -919,6 +929,8 @@ impl Component for SettingsDialog {
 impl SettingsDialog {
     fn browse_folder(&self, root: &adw::Window, folder_type: FolderType, sender: ComponentSender<Self>) {
         let root = root.clone();
+        // Use input_sender which won't panic if component is destroyed
+        let input_sender = sender.input_sender().clone();
         relm4::spawn_local(async move {
             let dialog = gtk::FileDialog::builder()
                 .title("Select Folder")
@@ -926,7 +938,7 @@ impl SettingsDialog {
                 .build();
 
             if let Ok(file) = dialog.select_folder_future(Some(&root)).await {
-                sender.input(SettingsMsg::FolderSelected(folder_type, file.path()));
+                let _ = input_sender.send(SettingsMsg::FolderSelected(folder_type, file.path()));
             }
         });
     }

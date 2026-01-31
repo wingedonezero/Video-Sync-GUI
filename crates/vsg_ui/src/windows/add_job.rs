@@ -5,6 +5,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use gtk::glib;
 use gtk::prelude::*;
 use libadwaita::prelude::*;
 use relm4::prelude::*;
@@ -45,6 +46,7 @@ pub struct AddJobDialog {
     sources: Vec<String>,
     error_text: String,
     is_finding: bool,
+    sources_changed: bool,
 }
 
 #[relm4::component(pub)]
@@ -148,9 +150,11 @@ impl Component for AddJobDialog {
     ) -> ComponentParts<Self> {
         let model = AddJobDialog {
             job_queue: init,
-            sources: vec![String::new(), String::new()],
+            // Initialize with 3 sources (Source 1, Source 2, Source 3)
+            sources: vec![String::new(), String::new(), String::new()],
             error_text: String::new(),
             is_finding: false,
+            sources_changed: true, // trigger initial build
         };
 
         let widgets = view_output!();
@@ -161,7 +165,17 @@ impl Component for AddJobDialog {
         ComponentParts { model, widgets }
     }
 
+    fn update_view(&self, widgets: &mut Self::Widgets, sender: &ComponentSender<Self>) {
+        // Rebuild sources list when sources have changed
+        if self.sources_changed {
+            Self::rebuild_sources(self, &widgets.sources_box, sender);
+        }
+    }
+
     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, root: &Self::Root) {
+        // Reset sources_changed flag at start of each update
+        self.sources_changed = false;
+
         match msg {
             AddJobMsg::SourceChanged(idx, path) => {
                 if idx < self.sources.len() {
@@ -170,7 +184,7 @@ impl Component for AddJobDialog {
             }
 
             AddJobMsg::BrowseSource(idx) => {
-                let sender = sender.clone();
+                let input_sender = sender.input_sender().clone();
                 let root = root.clone();
                 relm4::spawn_local(async move {
                     let dialog = gtk::FileDialog::builder()
@@ -179,7 +193,8 @@ impl Component for AddJobDialog {
                         .build();
 
                     if let Ok(file) = dialog.open_future(Some(&root)).await {
-                        sender.input(AddJobMsg::FileSelected(idx, file.path()));
+                        // Use send() which returns Result instead of panicking
+                        let _ = input_sender.send(AddJobMsg::FileSelected(idx, file.path()));
                     }
                 });
             }
@@ -188,6 +203,8 @@ impl Component for AddJobDialog {
                 if let Some(p) = path {
                     if idx < self.sources.len() {
                         self.sources[idx] = p.to_string_lossy().to_string();
+                        // Rebuild to update entry text
+                        self.sources_changed = true;
                     }
                 }
             }
@@ -195,12 +212,14 @@ impl Component for AddJobDialog {
             AddJobMsg::AddSource => {
                 if self.sources.len() < 10 {
                     self.sources.push(String::new());
+                    self.sources_changed = true;
                 }
             }
 
             AddJobMsg::RemoveSource(idx) => {
                 if self.sources.len() > 2 && idx < self.sources.len() {
                     self.sources.remove(idx);
+                    self.sources_changed = true;
                 }
             }
 
@@ -218,9 +237,8 @@ impl Component for AddJobDialog {
 
                 self.is_finding = true;
 
-                // TODO: Implement actual job discovery using vsg_core
-                // For now, simulate adding jobs
-                let sender = sender.clone();
+                // Get input sender for async use (won't panic if component is destroyed)
+                let input_sender = sender.input_sender().clone();
                 let sources = self.sources.clone();
                 let job_queue = self.job_queue.clone();
 
@@ -253,9 +271,10 @@ impl Component for AddJobDialog {
                         let id = uuid::Uuid::new_v4().to_string();
                         let entry = JobQueueEntry::new(id, name, sources_map);
                         queue.add(entry);
-                        sender.input(AddJobMsg::JobsDiscovered(1));
+                        // Use send() which returns Result instead of panicking
+                        let _ = input_sender.send(AddJobMsg::JobsDiscovered(1));
                     } else {
-                        sender.input(AddJobMsg::DiscoveryFailed(
+                        let _ = input_sender.send(AddJobMsg::DiscoveryFailed(
                             "No valid source files.".to_string(),
                         ));
                     }
@@ -273,7 +292,11 @@ impl Component for AddJobDialog {
             }
 
             AddJobMsg::Cancel => {
-                let _ = sender.output(AddJobOutput::Cancelled);
+                // Defer the output to avoid panic when controller is dropped while still in click handler
+                let output_sender = sender.output_sender().clone();
+                glib::idle_add_local_once(move || {
+                    let _ = output_sender.send(AddJobOutput::Cancelled);
+                });
             }
         }
     }

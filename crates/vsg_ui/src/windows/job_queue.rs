@@ -4,6 +4,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use gtk::glib;
 use gtk::prelude::*;
 use libadwaita::prelude::*;
 use relm4::prelude::*;
@@ -483,13 +484,19 @@ impl Component for JobQueueDialog {
 
                 // All jobs configured - collect and start processing
                 let configured_jobs: Vec<JobQueueEntry> = jobs.to_vec();
-                // Just send output - parent will drop controller which closes window
-                let _ = sender.output(JobQueueOutput::StartProcessing(configured_jobs));
+                // Defer output to avoid panic when controller is dropped while in click handler
+                let output_sender = sender.output_sender().clone();
+                glib::idle_add_local_once(move || {
+                    let _ = output_sender.send(JobQueueOutput::StartProcessing(configured_jobs));
+                });
             }
 
             JobQueueMsg::Close => {
-                // Just send output - parent will drop controller which closes window
-                let _ = sender.output(JobQueueOutput::Closed);
+                // Defer output to avoid panic when controller is dropped while in click handler
+                let output_sender = sender.output_sender().clone();
+                glib::idle_add_local_once(move || {
+                    let _ = output_sender.send(JobQueueOutput::Closed);
+                });
             }
 
             JobQueueMsg::RefreshList => {
