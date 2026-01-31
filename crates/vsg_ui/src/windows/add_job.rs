@@ -171,18 +171,21 @@ impl Component for AddJobDialog {
         // Add Another Source button
         let input_sender = sender.input_sender().clone();
         widgets.add_source_btn.connect_clicked(move |_| {
+            eprintln!("[AddJob] Add Source button clicked");
             let _ = input_sender.send(AddJobMsg::AddSource);
         });
 
         // Find & Add Jobs button
         let input_sender = sender.input_sender().clone();
         widgets.find_btn.connect_clicked(move |_| {
+            eprintln!("[AddJob] Find & Add Jobs button clicked");
             let _ = input_sender.send(AddJobMsg::FindAndAddJobs);
         });
 
         // Cancel button - sends output directly
         let output_sender = sender.output_sender().clone();
         widgets.cancel_btn.connect_clicked(move |_| {
+            eprintln!("[AddJob] Cancel button clicked");
             let _ = output_sender.send(AddJobOutput::Cancelled);
         });
 
@@ -354,17 +357,18 @@ impl AddJobDialog {
                 .placeholder_text("Drop file here or browse...")
                 .build();
 
-            let sender_clone = sender.clone();
+            let input_sender = sender.input_sender().clone();
             let idx_clone = idx;
             entry.connect_changed(move |e| {
-                sender_clone.input(AddJobMsg::SourceChanged(idx_clone, e.text().to_string()));
+                let _ = input_sender.send(AddJobMsg::SourceChanged(idx_clone, e.text().to_string()));
             });
 
             let browse_btn = gtk::Button::builder().label("Browse...").build();
 
-            let sender_clone = sender.clone();
+            let input_sender = sender.input_sender().clone();
             browse_btn.connect_clicked(move |_| {
-                sender_clone.input(AddJobMsg::BrowseSource(idx));
+                eprintln!("[AddJob] Browse button clicked for source {}", idx);
+                let _ = input_sender.send(AddJobMsg::BrowseSource(idx));
             });
 
             row.append(&label);
@@ -377,9 +381,10 @@ impl AddJobDialog {
                     .icon_name("list-remove-symbolic")
                     .build();
 
-                let sender_clone = sender.clone();
+                let input_sender = sender.input_sender().clone();
                 remove_btn.connect_clicked(move |_| {
-                    sender_clone.input(AddJobMsg::RemoveSource(idx));
+                    eprintln!("[AddJob] Remove button clicked for source {}", idx);
+                    let _ = input_sender.send(AddJobMsg::RemoveSource(idx));
                 });
 
                 row.append(&remove_btn);

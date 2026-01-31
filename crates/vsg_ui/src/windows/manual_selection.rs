@@ -317,18 +317,21 @@ impl Component for ManualSelectionDialog {
         // Add External Subtitles button
         let input_sender = sender.input_sender().clone();
         widgets.add_external_btn.connect_clicked(move |_| {
+            eprintln!("[ManualSelection] Add External Subtitles button clicked");
             let _ = input_sender.send(ManualSelectionMsg::AddExternalSubtitles);
         });
 
         // Accept button - needs to go through message for layout saving logic
         let input_sender = sender.input_sender().clone();
         widgets.accept_btn.connect_clicked(move |_| {
+            eprintln!("[ManualSelection] Accept button clicked");
             let _ = input_sender.send(ManualSelectionMsg::Accept);
         });
 
         // Cancel button - sends output directly
         let output_sender = sender.output_sender().clone();
         widgets.cancel_btn.connect_clicked(move |_| {
+            eprintln!("[ManualSelection] Cancel button clicked");
             let _ = output_sender.send(ManualSelectionOutput::Cancelled);
         });
 
@@ -657,24 +660,26 @@ impl ManualSelectionDialog {
                             .valign(gtk::Align::Center)
                             .build();
 
-                        let sender_add = sender.clone();
+                        let input_sender = sender.input_sender().clone();
                         let track_id = track.id;
                         let source_key = group.source_key.clone();
                         add_btn.connect_clicked(move |_| {
-                            sender_add.input(ManualSelectionMsg::AddTrackToFinal(track_id, source_key.clone()));
+                            eprintln!("[ManualSelection] Add track button clicked: {} from {}", track_id, source_key);
+                            let _ = input_sender.send(ManualSelectionMsg::AddTrackToFinal(track_id, source_key.clone()));
                         });
                         row.add_suffix(&add_btn);
 
                         // Also add double-click to add via gesture
                         let gesture = gtk::GestureClick::new();
                         gesture.set_button(1); // Left mouse button
-                        let sender_dbl = sender.clone();
+                        let input_sender = sender.input_sender().clone();
                         let track_id_dbl = track.id;
                         let source_key_dbl = group.source_key.clone();
                         gesture.connect_released(move |gesture, n_press, _x, _y| {
                             if n_press == 2 {
                                 // Double-click
-                                sender_dbl.input(ManualSelectionMsg::AddTrackToFinal(track_id_dbl, source_key_dbl.clone()));
+                                eprintln!("[ManualSelection] Double-click to add track: {} from {}", track_id_dbl, source_key_dbl);
+                                let _ = input_sender.send(ManualSelectionMsg::AddTrackToFinal(track_id_dbl, source_key_dbl.clone()));
                                 gesture.set_state(gtk::EventSequenceState::Claimed);
                             }
                         });
@@ -719,10 +724,10 @@ impl ManualSelectionDialog {
                 let drag_source = gtk::DragSource::new();
                 drag_source.set_actions(gdk::DragAction::MOVE);
 
-                let sender_drag = sender.clone();
+                let input_sender = sender.input_sender().clone();
                 let drag_idx = idx;
                 drag_source.connect_prepare(move |_source, _x, _y| {
-                    sender_drag.input(ManualSelectionMsg::DragStart(drag_idx));
+                    let _ = input_sender.send(ManualSelectionMsg::DragStart(drag_idx));
                     // Use a simple string content provider with the index
                     Some(gdk::ContentProvider::for_value(&glib::Value::from(&format!("{}", drag_idx))))
                 });
@@ -739,12 +744,12 @@ impl ManualSelectionDialog {
                 // Add drop target for receiving dragged tracks
                 let drop_target = gtk::DropTarget::new(glib::Type::STRING, gdk::DragAction::MOVE);
 
-                let sender_drop = sender.clone();
+                let input_sender = sender.input_sender().clone();
                 let drop_idx = idx;
                 drop_target.connect_drop(move |_target, value, _x, _y| {
                     if let Ok(from_str) = value.get::<String>() {
                         if let Ok(from_idx) = from_str.parse::<usize>() {
-                            sender_drop.input(ManualSelectionMsg::DragDrop(from_idx, drop_idx));
+                            let _ = input_sender.send(ManualSelectionMsg::DragDrop(from_idx, drop_idx));
                             return true;
                         }
                     }
@@ -760,10 +765,11 @@ impl ManualSelectionDialog {
                     .tooltip_text("Move up")
                     .build();
 
-                let sender_clone = sender.clone();
+                let input_sender = sender.input_sender().clone();
                 let idx_clone = idx;
                 up_btn.connect_clicked(move |_| {
-                    sender_clone.input(ManualSelectionMsg::MoveTrackUp(idx_clone));
+                    eprintln!("[ManualSelection] Move up button clicked for index {}", idx_clone);
+                    let _ = input_sender.send(ManualSelectionMsg::MoveTrackUp(idx_clone));
                 });
 
                 let down_btn = gtk::Button::builder()
@@ -772,10 +778,11 @@ impl ManualSelectionDialog {
                     .tooltip_text("Move down")
                     .build();
 
-                let sender_clone = sender.clone();
+                let input_sender = sender.input_sender().clone();
                 let idx_clone = idx;
                 down_btn.connect_clicked(move |_| {
-                    sender_clone.input(ManualSelectionMsg::MoveTrackDown(idx_clone));
+                    eprintln!("[ManualSelection] Move down button clicked for index {}", idx_clone);
+                    let _ = input_sender.send(ManualSelectionMsg::MoveTrackDown(idx_clone));
                 });
 
                 // Remove button
@@ -785,10 +792,11 @@ impl ManualSelectionDialog {
                     .tooltip_text("Remove track")
                     .build();
 
-                let sender_clone = sender.clone();
+                let input_sender = sender.input_sender().clone();
                 let idx_clone = idx;
                 remove_btn.connect_clicked(move |_| {
-                    sender_clone.input(ManualSelectionMsg::RemoveFromFinal(idx_clone));
+                    eprintln!("[ManualSelection] Remove button clicked for index {}", idx_clone);
+                    let _ = input_sender.send(ManualSelectionMsg::RemoveFromFinal(idx_clone));
                 });
 
                 // Settings button
@@ -798,10 +806,11 @@ impl ManualSelectionDialog {
                     .tooltip_text("Track settings")
                     .build();
 
-                let sender_clone = sender.clone();
+                let input_sender = sender.input_sender().clone();
                 let idx_clone = idx;
                 settings_btn.connect_clicked(move |_| {
-                    sender_clone.input(ManualSelectionMsg::OpenTrackSettings(idx_clone));
+                    eprintln!("[ManualSelection] Settings button clicked for index {}", idx_clone);
+                    let _ = input_sender.send(ManualSelectionMsg::OpenTrackSettings(idx_clone));
                 });
 
                 row.add_suffix(&up_btn);
@@ -830,10 +839,10 @@ impl ManualSelectionDialog {
                 .active(*checked)
                 .build();
 
-            let sender_clone = sender.clone();
+            let input_sender = sender.input_sender().clone();
             let source_clone = source.clone();
             check.connect_toggled(move |btn| {
-                sender_clone.input(ManualSelectionMsg::ToggleAttachment(
+                let _ = input_sender.send(ManualSelectionMsg::ToggleAttachment(
                     source_clone.clone(),
                     btn.is_active(),
                 ));
