@@ -4,6 +4,7 @@ Styles tab for subtitle editor.
 
 Provides style editing functionality migrated from StyleEditorDialog.
 """
+
 from __future__ import annotations
 
 import re
@@ -53,7 +54,7 @@ class StylesTab(BaseTab):
         self._favorite_save_btns: dict[str, QPushButton] = {}
         self._favorite_load_btns: dict[str, QToolButton] = {}
 
-        self._tag_pattern = re.compile(r'{[^}]+}')
+        self._tag_pattern = re.compile(r"{[^}]+}")
 
         self._build_ui()
 
@@ -103,14 +104,16 @@ class StylesTab(BaseTab):
         font_group = QGroupBox("Font")
         font_layout = QFormLayout(font_group)
 
-        self._style_widgets['fontname'] = QLineEdit()
-        self._style_widgets['fontname'].editingFinished.connect(self._update_style)
-        font_layout.addRow("Name:", self._style_widgets['fontname'])
+        self._style_widgets["fontname"] = QLineEdit()
+        self._style_widgets["fontname"].editingFinished.connect(self._update_style)
+        font_layout.addRow("Name:", self._style_widgets["fontname"])
 
-        self._style_widgets['fontsize'] = QDoubleSpinBox()
-        self._style_widgets['fontsize'].setRange(1, 500)
-        self._style_widgets['fontsize'].valueChanged.connect(lambda _: self._update_style())
-        font_layout.addRow("Size:", self._style_widgets['fontsize'])
+        self._style_widgets["fontsize"] = QDoubleSpinBox()
+        self._style_widgets["fontsize"].setRange(1, 500)
+        self._style_widgets["fontsize"].valueChanged.connect(
+            lambda _: self._update_style()
+        )
+        font_layout.addRow("Size:", self._style_widgets["fontsize"])
 
         layout.addWidget(font_group)
 
@@ -119,10 +122,10 @@ class StylesTab(BaseTab):
         colors_layout = QFormLayout(colors_group)
 
         for color_key, label in [
-            ('primarycolor', "Primary:"),
-            ('secondarycolor', "Secondary:"),
-            ('outlinecolor', "Outline:"),
-            ('backcolor', "Shadow:")
+            ("primarycolor", "Primary:"),
+            ("secondarycolor", "Secondary:"),
+            ("outlinecolor", "Outline:"),
+            ("backcolor", "Shadow:"),
         ]:
             btn = QPushButton("Pick...")
             btn.clicked.connect(lambda checked, k=color_key: self._pick_color(k))
@@ -132,15 +135,19 @@ class StylesTab(BaseTab):
             save_btn = QPushButton("\u2606")  # Star outline
             save_btn.setFixedSize(28, 28)
             save_btn.setToolTip("Save to favorites")
-            save_btn.clicked.connect(lambda checked, k=color_key: self._save_to_favorites(k))
+            save_btn.clicked.connect(
+                lambda checked, k=color_key: self._save_to_favorites(k)
+            )
             self._favorite_save_btns[color_key] = save_btn
 
             load_btn = QToolButton()
-            load_btn.setText("\u25BC")  # Down triangle
+            load_btn.setText("\u25bc")  # Down triangle
             load_btn.setFixedSize(28, 28)
             load_btn.setToolTip("Load from favorites")
             load_btn.setPopupMode(QToolButton.InstantPopup)
-            load_btn.clicked.connect(lambda checked, k=color_key: self._show_favorites_menu(k))
+            load_btn.clicked.connect(
+                lambda checked, k=color_key: self._show_favorites_menu(k)
+            )
             self._favorite_load_btns[color_key] = load_btn
 
             row = QHBoxLayout()
@@ -155,7 +162,7 @@ class StylesTab(BaseTab):
         text_group = QGroupBox("Text Style")
         text_layout = QFormLayout(text_group)
 
-        for key in ['bold', 'italic', 'underline', 'strikeout']:
+        for key in ["bold", "italic", "underline", "strikeout"]:
             cb = QCheckBox()
             cb.stateChanged.connect(lambda _: self._update_style())
             self._style_widgets[key] = cb
@@ -167,15 +174,19 @@ class StylesTab(BaseTab):
         border_group = QGroupBox("Border")
         border_layout = QFormLayout(border_group)
 
-        self._style_widgets['outline'] = QDoubleSpinBox()
-        self._style_widgets['outline'].setRange(0, 20)
-        self._style_widgets['outline'].valueChanged.connect(lambda _: self._update_style())
-        border_layout.addRow("Outline:", self._style_widgets['outline'])
+        self._style_widgets["outline"] = QDoubleSpinBox()
+        self._style_widgets["outline"].setRange(0, 20)
+        self._style_widgets["outline"].valueChanged.connect(
+            lambda _: self._update_style()
+        )
+        border_layout.addRow("Outline:", self._style_widgets["outline"])
 
-        self._style_widgets['shadow'] = QDoubleSpinBox()
-        self._style_widgets['shadow'].setRange(0, 20)
-        self._style_widgets['shadow'].valueChanged.connect(lambda _: self._update_style())
-        border_layout.addRow("Shadow:", self._style_widgets['shadow'])
+        self._style_widgets["shadow"] = QDoubleSpinBox()
+        self._style_widgets["shadow"].setRange(0, 20)
+        self._style_widgets["shadow"].valueChanged.connect(
+            lambda _: self._update_style()
+        )
+        border_layout.addRow("Shadow:", self._style_widgets["shadow"])
 
         layout.addWidget(border_group)
 
@@ -183,7 +194,11 @@ class StylesTab(BaseTab):
         margins_group = QGroupBox("Margins")
         margins_layout = QFormLayout(margins_group)
 
-        for key, label in [('marginl', 'Left:'), ('marginr', 'Right:'), ('marginv', 'Vertical:')]:
+        for key, label in [
+            ("marginl", "Left:"),
+            ("marginr", "Right:"),
+            ("marginv", "Vertical:"),
+        ]:
             spin = QSpinBox()
             spin.setRange(0, 9999)
             spin.valueChanged.connect(lambda _: self._update_style())
@@ -202,6 +217,7 @@ class StylesTab(BaseTab):
         # Initialize favorites manager
         from vsg_core.config import AppConfig
         from vsg_core.favorite_colors import FavoriteColorsManager
+
         config = AppConfig()
         self._favorites_manager = FavoriteColorsManager(config.get_config_dir())
 
@@ -222,7 +238,10 @@ class StylesTab(BaseTab):
         style_names = self._state.style_names
         if style_names:
             self._style_selector.addItems(style_names)
-            if not self._current_style_name or self._current_style_name not in style_names:
+            if (
+                not self._current_style_name
+                or self._current_style_name not in style_names
+            ):
                 self._current_style_name = style_names[0]
             self._style_selector.setCurrentText(self._current_style_name)
             self._load_style_attributes(self._current_style_name)
@@ -272,33 +291,38 @@ class StylesTab(BaseTab):
         for widget in self._style_widgets.values():
             widget.blockSignals(True)
 
-        self._style_widgets['fontname'].setText(attrs.get('fontname', ''))
-        self._style_widgets['fontsize'].setValue(attrs.get('fontsize', 0))
+        self._style_widgets["fontname"].setText(attrs.get("fontname", ""))
+        self._style_widgets["fontsize"].setValue(attrs.get("fontsize", 0))
 
         # Colors (now in Qt format)
-        self._set_color_button(self._style_widgets['primarycolor'],
-                               attrs.get('primarycolor', '#FFFFFFFF'))
-        self._set_color_button(self._style_widgets['secondarycolor'],
-                               attrs.get('secondarycolor', '#FFFFFFFF'))
-        self._set_color_button(self._style_widgets['outlinecolor'],
-                               attrs.get('outlinecolor', '#FF000000'))
-        self._set_color_button(self._style_widgets['backcolor'],
-                               attrs.get('backcolor', '#FF000000'))
+        self._set_color_button(
+            self._style_widgets["primarycolor"], attrs.get("primarycolor", "#FFFFFFFF")
+        )
+        self._set_color_button(
+            self._style_widgets["secondarycolor"],
+            attrs.get("secondarycolor", "#FFFFFFFF"),
+        )
+        self._set_color_button(
+            self._style_widgets["outlinecolor"], attrs.get("outlinecolor", "#FF000000")
+        )
+        self._set_color_button(
+            self._style_widgets["backcolor"], attrs.get("backcolor", "#FF000000")
+        )
 
         # Text style (now bool)
-        self._style_widgets['bold'].setChecked(attrs.get('bold', False))
-        self._style_widgets['italic'].setChecked(attrs.get('italic', False))
-        self._style_widgets['underline'].setChecked(attrs.get('underline', False))
-        self._style_widgets['strikeout'].setChecked(attrs.get('strikeout', False))
+        self._style_widgets["bold"].setChecked(attrs.get("bold", False))
+        self._style_widgets["italic"].setChecked(attrs.get("italic", False))
+        self._style_widgets["underline"].setChecked(attrs.get("underline", False))
+        self._style_widgets["strikeout"].setChecked(attrs.get("strikeout", False))
 
         # Border
-        self._style_widgets['outline'].setValue(attrs.get('outline', 0))
-        self._style_widgets['shadow'].setValue(attrs.get('shadow', 0))
+        self._style_widgets["outline"].setValue(attrs.get("outline", 0))
+        self._style_widgets["shadow"].setValue(attrs.get("shadow", 0))
 
         # Margins
-        self._style_widgets['marginl'].setValue(attrs.get('marginl', 0))
-        self._style_widgets['marginr'].setValue(attrs.get('marginr', 0))
-        self._style_widgets['marginv'].setValue(attrs.get('marginv', 0))
+        self._style_widgets["marginl"].setValue(attrs.get("marginl", 0))
+        self._style_widgets["marginr"].setValue(attrs.get("marginr", 0))
+        self._style_widgets["marginv"].setValue(attrs.get("marginv", 0))
 
         for widget in self._style_widgets.values():
             widget.blockSignals(False)
@@ -308,15 +332,15 @@ class StylesTab(BaseTab):
         color = QColor(hex_color)
         button.setStyleSheet(f"background-color: {color.name()};")
         # Store the color as a property so we can read it back
-        button.setProperty('hex_color', hex_color)
+        button.setProperty("hex_color", hex_color)
 
     def _get_color_from_button(self, button: QPushButton) -> str:
         """Get hex color from button property."""
-        stored = button.property('hex_color')
+        stored = button.property("hex_color")
         if stored:
             return stored
         # Fallback - shouldn't happen if set_color_button was called
-        return '#FFFFFFFF'
+        return "#FFFFFFFF"
 
     def _update_style(self):
         """Update style from UI values."""
@@ -333,29 +357,29 @@ class StylesTab(BaseTab):
         style = self._state.styles.get(self._current_style_name)
         if style:
             # Font
-            style.fontname = attrs['fontname']
-            style.fontsize = float(attrs['fontsize'])
+            style.fontname = attrs["fontname"]
+            style.fontsize = float(attrs["fontsize"])
 
             # Colors (convert Qt #AARRGGBB to ASS &HAABBGGRR)
-            style.primary_color = qt_color_to_ass(attrs['primarycolor'])
-            style.secondary_color = qt_color_to_ass(attrs['secondarycolor'])
-            style.outline_color = qt_color_to_ass(attrs['outlinecolor'])
-            style.back_color = qt_color_to_ass(attrs['backcolor'])
+            style.primary_color = qt_color_to_ass(attrs["primarycolor"])
+            style.secondary_color = qt_color_to_ass(attrs["secondarycolor"])
+            style.outline_color = qt_color_to_ass(attrs["outlinecolor"])
+            style.back_color = qt_color_to_ass(attrs["backcolor"])
 
             # Text style (ASS uses -1 for enabled, 0 for disabled)
-            style.bold = -1 if attrs['bold'] else 0
-            style.italic = -1 if attrs['italic'] else 0
-            style.underline = -1 if attrs['underline'] else 0
-            style.strike_out = -1 if attrs['strikeout'] else 0
+            style.bold = -1 if attrs["bold"] else 0
+            style.italic = -1 if attrs["italic"] else 0
+            style.underline = -1 if attrs["underline"] else 0
+            style.strike_out = -1 if attrs["strikeout"] else 0
 
             # Border
-            style.outline = float(attrs['outline'])
-            style.shadow = float(attrs['shadow'])
+            style.outline = float(attrs["outline"])
+            style.shadow = float(attrs["shadow"])
 
             # Margins
-            style.margin_l = int(attrs['marginl'])
-            style.margin_r = int(attrs['marginr'])
-            style.margin_v = int(attrs['marginv'])
+            style.margin_l = int(attrs["marginl"])
+            style.margin_r = int(attrs["marginr"])
+            style.margin_v = int(attrs["marginv"])
 
             # Mark modified and save preview
             self._state.mark_modified()
@@ -365,21 +389,27 @@ class StylesTab(BaseTab):
     def _get_ui_attrs(self) -> dict[str, Any]:
         """Get all style attributes from UI."""
         return {
-            'fontname': self._style_widgets['fontname'].text(),
-            'fontsize': self._style_widgets['fontsize'].value(),
-            'primarycolor': self._get_color_from_button(self._style_widgets['primarycolor']),
-            'secondarycolor': self._get_color_from_button(self._style_widgets['secondarycolor']),
-            'outlinecolor': self._get_color_from_button(self._style_widgets['outlinecolor']),
-            'backcolor': self._get_color_from_button(self._style_widgets['backcolor']),
-            'bold': self._style_widgets['bold'].isChecked(),
-            'italic': self._style_widgets['italic'].isChecked(),
-            'underline': self._style_widgets['underline'].isChecked(),
-            'strikeout': self._style_widgets['strikeout'].isChecked(),
-            'outline': self._style_widgets['outline'].value(),
-            'shadow': self._style_widgets['shadow'].value(),
-            'marginl': self._style_widgets['marginl'].value(),
-            'marginr': self._style_widgets['marginr'].value(),
-            'marginv': self._style_widgets['marginv'].value(),
+            "fontname": self._style_widgets["fontname"].text(),
+            "fontsize": self._style_widgets["fontsize"].value(),
+            "primarycolor": self._get_color_from_button(
+                self._style_widgets["primarycolor"]
+            ),
+            "secondarycolor": self._get_color_from_button(
+                self._style_widgets["secondarycolor"]
+            ),
+            "outlinecolor": self._get_color_from_button(
+                self._style_widgets["outlinecolor"]
+            ),
+            "backcolor": self._get_color_from_button(self._style_widgets["backcolor"]),
+            "bold": self._style_widgets["bold"].isChecked(),
+            "italic": self._style_widgets["italic"].isChecked(),
+            "underline": self._style_widgets["underline"].isChecked(),
+            "strikeout": self._style_widgets["strikeout"].isChecked(),
+            "outline": self._style_widgets["outline"].value(),
+            "shadow": self._style_widgets["shadow"].value(),
+            "marginl": self._style_widgets["marginl"].value(),
+            "marginr": self._style_widgets["marginr"].value(),
+            "marginv": self._style_widgets["marginv"].value(),
         }
 
     def _reset_current_style(self):
@@ -395,11 +425,12 @@ class StylesTab(BaseTab):
         """Open color picker for a color attribute."""
         button = self._style_widgets[color_key]
         # Get initial color from stored property
-        stored_hex = button.property('hex_color') or '#FFFFFFFF'
+        stored_hex = button.property("hex_color") or "#FFFFFFFF"
         initial = QColor(stored_hex)
 
-        color = QColorDialog.getColor(initial, self, "Select Color",
-                                       QColorDialog.ShowAlphaChannel)
+        color = QColorDialog.getColor(
+            initial, self, "Select Color", QColorDialog.ShowAlphaChannel
+        )
         if color.isValid():
             self._set_color_button(button, color.name(QColor.HexArgb))
             self._update_style()
@@ -413,9 +444,10 @@ class StylesTab(BaseTab):
         hex_color = self._get_color_from_button(button)
 
         name, ok = QInputDialog.getText(
-            self, "Save to Favorites",
+            self,
+            "Save to Favorites",
             "Enter a name for this color:",
-            text=color_key.replace('color', '').title()
+            text=color_key.replace("color", "").title(),
         )
 
         if ok and name:
@@ -437,11 +469,11 @@ class StylesTab(BaseTab):
             action.setEnabled(False)
         else:
             for fav in favorites:
-                hex_display = fav['hex']
+                hex_display = fav["hex"]
                 if len(hex_display) == 9:
-                    hex_display = '#' + hex_display[3:]
+                    hex_display = "#" + hex_display[3:]
                 action = menu.addAction(f"{fav['name']} ({hex_display})")
-                action.setData(fav['hex'])
+                action.setData(fav["hex"])
 
         menu.addSeparator()
         manage_action = menu.addAction("Manage Favorites...")
@@ -459,6 +491,7 @@ class StylesTab(BaseTab):
     def _open_favorites_manager(self):
         """Open the favorites manager dialog."""
         from vsg_qt.favorites_dialog import FavoritesManagerDialog
+
         dialog = FavoritesManagerDialog(self._favorites_manager, self)
         dialog.exec()
 
@@ -505,8 +538,8 @@ class StylesTab(BaseTab):
 
         # Get current resolution from subtitle
         info = self._state.subtitle_data.info
-        current_x = int(info.get('PlayResX', 0) or 0)
-        current_y = int(info.get('PlayResY', 0) or 0)
+        current_x = int(info.get("PlayResX", 0) or 0)
+        current_y = int(info.get("PlayResY", 0) or 0)
 
         # Get video path for "From Video" button
         video_path = str(self._state.video_path) if self._state.video_path else ""
@@ -535,12 +568,16 @@ class StylesTab(BaseTab):
 
         selected_indices = self._state.selected_indices
         if not selected_indices:
-            self._tag_warning.setText("No lines selected. Select lines in the Events table first.")
+            self._tag_warning.setText(
+                "No lines selected. Select lines in the Events table first."
+            )
             self._tag_warning.setVisible(True)
             return
 
         # Pattern for style override tags (colors, font, size, border, shadow, bold, etc.)
-        style_tags_pattern = re.compile(r'\\(c|1c|2c|3c|4c|fn|fs|bord|shad|b|i|u|s|an|pos|move|fad|fade|org|clip|frx|fry|frz|fax|fay|fscx|fscy|fsp|fe|q|r|t|p)[^\\}]*')
+        style_tags_pattern = re.compile(
+            r"\\(c|1c|2c|3c|4c|fn|fs|bord|shad|b|i|u|s|an|pos|move|fad|fade|org|clip|frx|fry|frz|fax|fay|fscx|fscy|fsp|fe|q|r|t|p)[^\\}]*"
+        )
 
         modified_count = 0
         events = self._state.events
@@ -557,9 +594,9 @@ class StylesTab(BaseTab):
                 continue
 
             # Remove style tags
-            cleaned_text = style_tags_pattern.sub('', original_text)
+            cleaned_text = style_tags_pattern.sub("", original_text)
             # Remove empty tag blocks {}
-            cleaned_text = cleaned_text.replace('{}', '')
+            cleaned_text = cleaned_text.replace("{}", "")
 
             if cleaned_text != original_text:
                 event.text = cleaned_text
@@ -587,4 +624,4 @@ class StylesTab(BaseTab):
         """Get style patch as result."""
         if not self._state:
             return {}
-        return {'style_patch': self._state.generate_style_patch()}
+        return {"style_patch": self._state.generate_style_patch()}

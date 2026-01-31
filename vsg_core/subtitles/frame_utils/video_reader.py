@@ -7,6 +7,7 @@ Contains:
 - Automatic deinterlacing support
 - VapourSynth frame indexing utilities
 """
+
 from __future__ import annotations
 
 import gc
@@ -42,7 +43,7 @@ def _get_ffms2_cache_path(video_path: str, temp_dir: Path | None) -> Path:
     parent_dir = video_path_obj.parent.name
 
     # If parent is empty/root, use path hash instead
-    if not parent_dir or parent_dir == '.':
+    if not parent_dir or parent_dir == ".":
         path_hash = hashlib.md5(str(video_path_obj.resolve()).encode()).hexdigest()[:8]
         cache_key = f"{video_path_obj.stem}_{path_hash}_{file_size}_{mtime}"
     else:
@@ -60,7 +61,9 @@ def _get_ffms2_cache_path(video_path: str, temp_dir: Path | None) -> Path:
     return cache_dir / f"{cache_key}.ffindex"
 
 
-def get_vapoursynth_frame_info(video_path: str, runner, temp_dir: Path | None = None) -> tuple[int, float] | None:
+def get_vapoursynth_frame_info(
+    video_path: str, runner, temp_dir: Path | None = None
+) -> tuple[int, float] | None:
     """
     Get frame count and last frame timestamp using VapourSynth indexing.
 
@@ -110,27 +113,36 @@ def get_vapoursynth_frame_info(video_path: str, runner, temp_dir: Path | None = 
             runner._log_message("[VapourSynth] Using LWLibavSource (L-SMASH)")
         except AttributeError:
             # L-SMASH plugin not installed
-            runner._log_message("[VapourSynth] L-SMASH plugin not found, using FFmpegSource2")
+            runner._log_message(
+                "[VapourSynth] L-SMASH plugin not found, using FFmpegSource2"
+            )
         except Exception as e:
-            runner._log_message(f"[VapourSynth] L-SMASH failed: {e}, trying FFmpegSource2")
+            runner._log_message(
+                f"[VapourSynth] L-SMASH failed: {e}, trying FFmpegSource2"
+            )
 
         if clip is None:
             try:
                 # Log whether index already exists
                 if index_path.exists():
-                    runner._log_message(f"[VapourSynth] Reusing existing index from: {location_msg}")
+                    runner._log_message(
+                        f"[VapourSynth] Reusing existing index from: {location_msg}"
+                    )
                 else:
-                    runner._log_message(f"[VapourSynth] Creating new index at: {location_msg}")
+                    runner._log_message(
+                        f"[VapourSynth] Creating new index at: {location_msg}"
+                    )
                     runner._log_message("[VapourSynth] This may take 1-2 minutes...")
 
                 # Use FFMS2 with custom cache path
                 clip = core.ffms2.Source(
-                    source=str(video_path),
-                    cachefile=str(index_path)
+                    source=str(video_path), cachefile=str(index_path)
                 )
                 runner._log_message("[VapourSynth] Using FFmpegSource2")
             except Exception as e:
-                runner._log_message(f"[VapourSynth] ERROR: FFmpegSource2 also failed: {e}")
+                runner._log_message(
+                    f"[VapourSynth] ERROR: FFmpegSource2 also failed: {e}"
+                )
                 del core
                 gc.collect()
                 return None
@@ -152,8 +164,12 @@ def get_vapoursynth_frame_info(video_path: str, runner, temp_dir: Path | None = 
         # Last frame timestamp = (frame_index / fps) * 1000
         last_frame_timestamp_ms = (last_frame_idx * fps_den * 1000.0) / fps_num
 
-        runner._log_message(f"[VapourSynth] Last frame (#{last_frame_idx}) timestamp: {last_frame_timestamp_ms:.3f}ms")
-        runner._log_message(f"[VapourSynth] FPS: {fps_num}/{fps_den} ({fps_num/fps_den:.3f})")
+        runner._log_message(
+            f"[VapourSynth] Last frame (#{last_frame_idx}) timestamp: {last_frame_timestamp_ms:.3f}ms"
+        )
+        runner._log_message(
+            f"[VapourSynth] FPS: {fps_num}/{fps_den} ({fps_num / fps_den:.3f})"
+        )
 
         # CRITICAL: Free memory immediately
         # VapourSynth can hold large amounts of RAM if not freed
@@ -167,7 +183,9 @@ def get_vapoursynth_frame_info(video_path: str, runner, temp_dir: Path | None = 
         return (frame_count, last_frame_timestamp_ms)
 
     except ImportError:
-        runner._log_message("[VapourSynth] WARNING: VapourSynth not installed, falling back to ffprobe")
+        runner._log_message(
+            "[VapourSynth] WARNING: VapourSynth not installed, falling back to ffprobe"
+        )
         return None
     except Exception as e:
         runner._log_message(f"[VapourSynth] ERROR: Failed to index video: {e}")
@@ -201,15 +219,22 @@ class VideoReader:
     """
 
     # Available deinterlace methods
-    DEINTERLACE_METHODS = ['auto', 'none', 'yadif', 'yadifmod', 'bob', 'bwdif']
+    DEINTERLACE_METHODS = ["auto", "none", "yadif", "yadifmod", "bob", "bwdif"]
 
-    def __init__(self, video_path: str, runner, temp_dir: Path = None,
-                 deinterlace: str = 'auto', config: dict = None, **kwargs):
+    def __init__(
+        self,
+        video_path: str,
+        runner,
+        temp_dir: Path = None,
+        deinterlace: str = "auto",
+        config: dict = None,
+        **kwargs,
+    ):
         self.video_path = video_path
         self.runner = runner
         self.vs_clip = None  # VapourSynth clip
-        self.source = None   # FFMS2 source
-        self.cap = None      # OpenCV capture
+        self.source = None  # FFMS2 source
+        self.cap = None  # OpenCV capture
         self.use_vapoursynth = False
         self.use_ffms2 = False
         self.use_opencv = False
@@ -218,7 +243,7 @@ class VideoReader:
         self.deinterlace_method = deinterlace
         self.config = config or {}
         self.is_interlaced = False
-        self.field_order = 'progressive'
+        self.field_order = "progressive"
         self.deinterlace_applied = False
 
         # Detect video properties for interlacing info
@@ -235,7 +260,9 @@ class VideoReader:
             # Note: The pyffms2 Python bindings don't reliably support loading cached indexes
             # We create the index on-demand each time (still faster than OpenCV fallback)
             runner._log_message("[FrameUtils] Creating FFMS2 index...")
-            runner._log_message("[FrameUtils] This may take 1-2 minutes on first access...")
+            runner._log_message(
+                "[FrameUtils] This may take 1-2 minutes on first access..."
+            )
 
             # Create indexer and generate index
             indexer = ffms2.Indexer(str(video_path))
@@ -249,41 +276,59 @@ class VideoReader:
             self.use_ffms2 = True
 
             # Get video properties
-            self.fps = self.source.properties.FPSNumerator / self.source.properties.FPSDenominator
+            self.fps = (
+                self.source.properties.FPSNumerator
+                / self.source.properties.FPSDenominator
+            )
 
-            runner._log_message(f"[FrameUtils] FFMS2 ready! Using instant frame seeking (FPS: {self.fps:.3f})")
+            runner._log_message(
+                f"[FrameUtils] FFMS2 ready! Using instant frame seeking (FPS: {self.fps:.3f})"
+            )
             return
 
         except ImportError:
             runner._log_message("[FrameUtils] FFMS2 not installed, trying opencv...")
-            runner._log_message("[FrameUtils] Install FFMS2 for 100x speedup: pip install ffms2")
+            runner._log_message(
+                "[FrameUtils] Install FFMS2 for 100x speedup: pip install ffms2"
+            )
         except Exception as e:
-            runner._log_message(f"[FrameUtils] WARNING: FFMS2 failed ({e}), trying opencv...")
-
+            runner._log_message(
+                f"[FrameUtils] WARNING: FFMS2 failed ({e}), trying opencv..."
+            )
 
         # Fallback to opencv if FFMS2 unavailable
         try:
             import cv2
+
             self.cv2 = cv2
             self.cap = cv2.VideoCapture(str(video_path))
             if self.cap.isOpened():
                 self.use_opencv = True
                 self.fps = self.cap.get(cv2.CAP_PROP_FPS)
-                runner._log_message(f"[FrameUtils] Using opencv for frame access (FPS: {self.fps:.3f})")
+                runner._log_message(
+                    f"[FrameUtils] Using opencv for frame access (FPS: {self.fps:.3f})"
+                )
             else:
-                runner._log_message("[FrameUtils] WARNING: opencv couldn't open video, falling back to ffmpeg")
+                runner._log_message(
+                    "[FrameUtils] WARNING: opencv couldn't open video, falling back to ffmpeg"
+                )
                 self.cap = None
         except ImportError:
-            runner._log_message("[FrameUtils] WARNING: opencv not installed, using slower ffmpeg fallback")
-            runner._log_message("[FrameUtils] Install opencv for better performance: pip install opencv-python")
+            runner._log_message(
+                "[FrameUtils] WARNING: opencv not installed, using slower ffmpeg fallback"
+            )
+            runner._log_message(
+                "[FrameUtils] Install opencv for better performance: pip install opencv-python"
+            )
 
     def _detect_interlacing(self):
         """Detect if video is interlaced using ffprobe."""
         try:
             from .video_properties import detect_video_properties
+
             props = detect_video_properties(self.video_path, self.runner)
-            self.is_interlaced = props.get('interlaced', False)
-            self.field_order = props.get('field_order', 'progressive')
+            self.is_interlaced = props.get("interlaced", False)
+            self.field_order = props.get("field_order", "progressive")
 
             if self.is_interlaced:
                 self.runner._log_message(
@@ -292,22 +337,22 @@ class VideoReader:
         except Exception as e:
             self.runner._log_message(f"[FrameUtils] Could not detect interlacing: {e}")
             self.is_interlaced = False
-            self.field_order = 'progressive'
+            self.field_order = "progressive"
 
     def _should_deinterlace(self) -> bool:
         """Determine if deinterlacing should be applied."""
-        if self.deinterlace_method == 'none':
+        if self.deinterlace_method == "none":
             return False
-        if self.deinterlace_method == 'auto':
+        if self.deinterlace_method == "auto":
             return self.is_interlaced
         # Explicit method selected - always deinterlace
         return True
 
     def _get_deinterlace_method(self) -> str:
         """Get the actual deinterlace method to use."""
-        if self.deinterlace_method == 'auto':
+        if self.deinterlace_method == "auto":
             # Use interlaced deinterlace method setting, default to bwdif
-            return self.config.get('interlaced_deinterlace_method', 'bwdif')
+            return self.config.get("interlaced_deinterlace_method", "bwdif")
         return self.deinterlace_method
 
     def _apply_deinterlace_filter(self, clip, core):
@@ -322,59 +367,75 @@ class VideoReader:
             Deinterlaced clip
         """
         method = self._get_deinterlace_method()
-        tff = self.field_order == 'tff'  # True = Top Field First
+        tff = self.field_order == "tff"  # True = Top Field First
 
         self.runner._log_message(
             f"[FrameUtils] Applying deinterlace: {method} (field order: {'TFF' if tff else 'BFF'})"
         )
 
         try:
-            if method == 'yadif':
+            if method == "yadif":
                 # YADIF - Yet Another DeInterlacing Filter
                 # Mode 0 = output one frame per frame (not bob)
                 # Order: 1 = TFF, 0 = BFF
-                if hasattr(core, 'yadifmod'):
+                if hasattr(core, "yadifmod"):
                     # Prefer yadifmod if available (better edge handling)
                     clip = core.yadifmod.Yadifmod(clip, order=1 if tff else 0, mode=0)
-                elif hasattr(core, 'yadif'):
+                elif hasattr(core, "yadif"):
                     clip = core.yadif.Yadif(clip, order=1 if tff else 0, mode=0)
                 else:
                     # Fallback to znedi3-based yadif alternative
-                    self.runner._log_message("[FrameUtils] YADIF plugin not found, using std.SeparateFields + DoubleWeave")
+                    self.runner._log_message(
+                        "[FrameUtils] YADIF plugin not found, using std.SeparateFields + DoubleWeave"
+                    )
                     clip = self._deinterlace_fallback(clip, core, tff)
 
-            elif method == 'yadifmod':
+            elif method == "yadifmod":
                 # YADIFmod - improved edge handling
-                if hasattr(core, 'yadifmod'):
+                if hasattr(core, "yadifmod"):
                     clip = core.yadifmod.Yadifmod(clip, order=1 if tff else 0, mode=0)
                 else:
-                    self.runner._log_message("[FrameUtils] YADIFmod not available, falling back to YADIF")
-                    return self._apply_deinterlace_filter_method(clip, core, 'yadif', tff)
+                    self.runner._log_message(
+                        "[FrameUtils] YADIFmod not available, falling back to YADIF"
+                    )
+                    return self._apply_deinterlace_filter_method(
+                        clip, core, "yadif", tff
+                    )
 
-            elif method == 'bob':
+            elif method == "bob":
                 # Bob - doubles framerate by outputting each field as frame
                 # Simple and fast, good for frame matching
                 clip = core.std.SeparateFields(clip, tff=tff)
                 clip = core.resize.Spline36(clip, height=clip.height * 2)
 
-            elif method == 'bwdif':
+            elif method == "bwdif":
                 # BWDIF - motion adaptive deinterlacer
-                if hasattr(core, 'bwdif'):
+                if hasattr(core, "bwdif"):
                     clip = core.bwdif.Bwdif(clip, field=1 if tff else 0)
                 else:
-                    self.runner._log_message("[FrameUtils] BWDIF not available, falling back to YADIF")
-                    return self._apply_deinterlace_filter_method(clip, core, 'yadif', tff)
+                    self.runner._log_message(
+                        "[FrameUtils] BWDIF not available, falling back to YADIF"
+                    )
+                    return self._apply_deinterlace_filter_method(
+                        clip, core, "yadif", tff
+                    )
 
             else:
-                self.runner._log_message(f"[FrameUtils] Unknown deinterlace method: {method}, using YADIF")
-                return self._apply_deinterlace_filter_method(clip, core, 'yadif', tff)
+                self.runner._log_message(
+                    f"[FrameUtils] Unknown deinterlace method: {method}, using YADIF"
+                )
+                return self._apply_deinterlace_filter_method(clip, core, "yadif", tff)
 
             self.deinterlace_applied = True
-            self.runner._log_message("[FrameUtils] Deinterlace filter applied successfully")
+            self.runner._log_message(
+                "[FrameUtils] Deinterlace filter applied successfully"
+            )
             return clip
 
         except Exception as e:
-            self.runner._log_message(f"[FrameUtils] Deinterlace failed: {e}, using raw frames")
+            self.runner._log_message(
+                f"[FrameUtils] Deinterlace failed: {e}, using raw frames"
+            )
             return clip
 
     def _apply_deinterlace_filter_method(self, clip, core, method: str, tff: bool):
@@ -418,8 +479,10 @@ class VideoReader:
         parent_dir = video_path_obj.parent.name
 
         # If parent is empty/root, use path hash instead
-        if not parent_dir or parent_dir == '.':
-            path_hash = hashlib.md5(str(video_path_obj.resolve()).encode()).hexdigest()[:8]
+        if not parent_dir or parent_dir == ".":
+            path_hash = hashlib.md5(str(video_path_obj.resolve()).encode()).hexdigest()[
+                :8
+            ]
             cache_key = f"{video_path_obj.stem}_{path_hash}_{file_size}_{mtime}"
         else:
             cache_key = f"{parent_dir}_{video_path_obj.stem}_{file_size}_{mtime}"
@@ -432,7 +495,9 @@ class VideoReader:
             # Fallback: use system temp (but warn - won't be cleaned up)
             cache_dir = Path(tempfile.gettempdir()) / "vsg_ffindex"
             cache_dir.mkdir(parents=True, exist_ok=True)
-            self.runner._log_message("[FrameUtils] WARNING: No job temp_dir provided, index won't be auto-cleaned")
+            self.runner._log_message(
+                "[FrameUtils] WARNING: No job temp_dir provided, index won't be auto-cleaned"
+            )
 
         index_path = cache_dir / f"{cache_key}.ffindex"
         return index_path
@@ -447,15 +512,21 @@ class VideoReader:
         try:
             import vapoursynth as vs
 
-            self.runner._log_message("[FrameUtils] Attempting VapourSynth with FFMS2 plugin...")
+            self.runner._log_message(
+                "[FrameUtils] Attempting VapourSynth with FFMS2 plugin..."
+            )
 
             # Get VapourSynth core instance
             core = vs.core
 
             # Check if ffms2 plugin is available
-            if not hasattr(core, 'ffms2'):
-                self.runner._log_message("[FrameUtils] VapourSynth installed but ffms2 plugin missing")
-                self.runner._log_message("[FrameUtils] Install FFMS2 plugin for VapourSynth")
+            if not hasattr(core, "ffms2"):
+                self.runner._log_message(
+                    "[FrameUtils] VapourSynth installed but ffms2 plugin missing"
+                )
+                self.runner._log_message(
+                    "[FrameUtils] Install FFMS2 plugin for VapourSynth"
+                )
                 return False
 
             # Generate cache path
@@ -474,14 +545,17 @@ class VideoReader:
 
             # Load video with index caching
             if index_path.exists():
-                self.runner._log_message(f"[FrameUtils] Reusing existing index from: {location_msg}")
+                self.runner._log_message(
+                    f"[FrameUtils] Reusing existing index from: {location_msg}"
+                )
             else:
-                self.runner._log_message(f"[FrameUtils] Creating new index at: {location_msg}")
+                self.runner._log_message(
+                    f"[FrameUtils] Creating new index at: {location_msg}"
+                )
                 self.runner._log_message("[FrameUtils] This may take 1-2 minutes...")
 
             clip = core.ffms2.Source(
-                source=str(self.video_path),
-                cachefile=str(index_path)
+                source=str(self.video_path), cachefile=str(index_path)
             )
 
             # Apply deinterlacing if needed
@@ -498,25 +572,41 @@ class VideoReader:
 
             deinterlace_status = ""
             if self.deinterlace_applied:
-                deinterlace_status = f", deinterlaced with {self._get_deinterlace_method()}"
-            elif self.is_interlaced and self.deinterlace_method == 'none':
+                deinterlace_status = (
+                    f", deinterlaced with {self._get_deinterlace_method()}"
+                )
+            elif self.is_interlaced and self.deinterlace_method == "none":
                 deinterlace_status = ", interlaced (deinterlace disabled)"
 
-            self.runner._log_message(f"[FrameUtils] VapourSynth ready! Using persistent index cache (FPS: {self.fps:.3f}{deinterlace_status})")
-            self.runner._log_message("[FrameUtils] Index will be shared across all workers (no re-indexing!)")
+            self.runner._log_message(
+                f"[FrameUtils] VapourSynth ready! Using persistent index cache (FPS: {self.fps:.3f}{deinterlace_status})"
+            )
+            self.runner._log_message(
+                "[FrameUtils] Index will be shared across all workers (no re-indexing!)"
+            )
 
             return True
 
         except ImportError:
-            self.runner._log_message("[FrameUtils] VapourSynth not installed, trying pyffms2...")
-            self.runner._log_message("[FrameUtils] Install VapourSynth for persistent index caching: pip install VapourSynth")
+            self.runner._log_message(
+                "[FrameUtils] VapourSynth not installed, trying pyffms2..."
+            )
+            self.runner._log_message(
+                "[FrameUtils] Install VapourSynth for persistent index caching: pip install VapourSynth"
+            )
             return False
         except AttributeError as e:
-            self.runner._log_message(f"[FrameUtils] VapourSynth ffms2 plugin not found: {e}")
-            self.runner._log_message("[FrameUtils] Install FFMS2 plugin for VapourSynth")
+            self.runner._log_message(
+                f"[FrameUtils] VapourSynth ffms2 plugin not found: {e}"
+            )
+            self.runner._log_message(
+                "[FrameUtils] Install FFMS2 plugin for VapourSynth"
+            )
             return False
         except Exception as e:
-            self.runner._log_message(f"[FrameUtils] VapourSynth initialization failed: {e}")
+            self.runner._log_message(
+                f"[FrameUtils] VapourSynth initialization failed: {e}"
+            )
             return False
 
     def get_frame_at_time(self, time_ms: int) -> Image.Image | None:
@@ -575,8 +665,8 @@ class VideoReader:
 
             # Try VFR timestamp first (_AbsoluteTime in seconds)
             props = frame.props
-            if '_AbsoluteTime' in props:
-                return props['_AbsoluteTime'] * 1000.0
+            if "_AbsoluteTime" in props:
+                return props["_AbsoluteTime"] * 1000.0
 
             # Fall back to CFR calculation
             fps_num = self.vs_clip.fps_num
@@ -684,10 +774,12 @@ class VideoReader:
                 # Ensure we have uint8
                 y_plane = y_plane.astype(np.uint8)
 
-            return Image.fromarray(y_plane, 'L')
+            return Image.fromarray(y_plane, "L")
 
         except Exception as e:
-            self.runner._log_message(f"[FrameUtils] ERROR: VapourSynth frame extraction by index failed: {e}")
+            self.runner._log_message(
+                f"[FrameUtils] ERROR: VapourSynth frame extraction by index failed: {e}"
+            )
             return None
 
     def _get_frame_ffms2_by_index(self, frame_num: int) -> Image.Image | None:
@@ -719,7 +811,9 @@ class VideoReader:
             return Image.fromarray(frame_array)
 
         except Exception as e:
-            self.runner._log_message(f"[FrameUtils] ERROR: FFMS2 frame extraction by index failed: {e}")
+            self.runner._log_message(
+                f"[FrameUtils] ERROR: FFMS2 frame extraction by index failed: {e}"
+            )
             return None
 
     def _get_frame_vapoursynth(self, time_ms: int) -> Image.Image | None:
@@ -764,10 +858,12 @@ class VideoReader:
                 y_plane = y_plane.astype(np.uint8)
 
             # Convert to PIL Image (grayscale mode 'L')
-            return Image.fromarray(y_plane, 'L')
+            return Image.fromarray(y_plane, "L")
 
         except Exception as e:
-            self.runner._log_message(f"[FrameUtils] ERROR: VapourSynth frame extraction failed: {e}")
+            self.runner._log_message(
+                f"[FrameUtils] ERROR: VapourSynth frame extraction failed: {e}"
+            )
             return None
 
     def _get_frame_ffms2(self, time_ms: int) -> Image.Image | None:
@@ -803,7 +899,9 @@ class VideoReader:
             return Image.fromarray(frame_array)
 
         except Exception as e:
-            self.runner._log_message(f"[FrameUtils] ERROR: FFMS2 frame extraction failed: {e}")
+            self.runner._log_message(
+                f"[FrameUtils] ERROR: FFMS2 frame extraction failed: {e}"
+            )
             return None
 
     def _get_frame_opencv(self, time_ms: int) -> Image.Image | None:
@@ -827,7 +925,9 @@ class VideoReader:
             return Image.fromarray(frame_rgb)
 
         except Exception as e:
-            self.runner._log_message(f"[FrameUtils] ERROR: opencv frame extraction failed: {e}")
+            self.runner._log_message(
+                f"[FrameUtils] ERROR: opencv frame extraction failed: {e}"
+            )
             return None
 
     def _get_frame_ffmpeg(self, time_ms: int) -> Image.Image | None:
@@ -841,32 +941,33 @@ class VideoReader:
         try:
             time_sec = time_ms / 1000.0
 
-            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
                 tmp_path = tmp.name
 
             cmd = [
-                'ffmpeg',
-                '-ss', f'{time_sec:.3f}',
-                '-i', str(self.video_path),
-                '-vframes', '1',
-                '-q:v', '2',
-                '-y',
-                tmp_path
+                "ffmpeg",
+                "-ss",
+                f"{time_sec:.3f}",
+                "-i",
+                str(self.video_path),
+                "-vframes",
+                "1",
+                "-q:v",
+                "2",
+                "-y",
+                tmp_path,
             ]
 
             # Import GPU environment support
             try:
                 from vsg_core.system.gpu_env import get_subprocess_environment
+
                 env = get_subprocess_environment()
             except ImportError:
                 env = os.environ.copy()
 
             result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=30,
-                env=env
+                cmd, capture_output=True, text=True, timeout=30, env=env
             )
 
             if result.returncode != 0:

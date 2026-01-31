@@ -4,6 +4,7 @@ Undo/Redo manager for the subtitle editor.
 
 Currently a stub - will be expanded in Phase 3.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -15,6 +16,7 @@ from PySide6.QtCore import QObject, Signal
 @dataclass
 class UndoAction:
     """Represents a single undoable action."""
+
     description: str
     undo_func: Callable[[], None]
     redo_func: Callable[[], None]

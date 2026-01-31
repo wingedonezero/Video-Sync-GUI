@@ -17,9 +17,7 @@ class SyncExecutor:
 
     @staticmethod
     def execute_merge(
-        mkvmerge_options_path: str,
-        tool_paths: dict[str, str],
-        runner: CommandRunner
+        mkvmerge_options_path: str, tool_paths: dict[str, str], runner: CommandRunner
     ) -> bool:
         """
         Executes mkvmerge with the provided options file.
@@ -32,7 +30,7 @@ class SyncExecutor:
         Returns:
             True if merge succeeded, False otherwise
         """
-        result = runner.run(['mkvmerge', f'@{mkvmerge_options_path}'], tool_paths)
+        result = runner.run(["mkvmerge", f"@{mkvmerge_options_path}"], tool_paths)
         return result is not None
 
     @staticmethod
@@ -41,7 +39,7 @@ class SyncExecutor:
         final_output_path: Path,
         config: dict,
         tool_paths: dict[str, str],
-        runner: CommandRunner
+        runner: CommandRunner,
     ):
         """
         Finalizes the merged output file.
@@ -56,9 +54,13 @@ class SyncExecutor:
             tool_paths: Dictionary of tool paths
             runner: CommandRunner for execution
         """
-        normalize_enabled = config.get('post_mux_normalize_timestamps', False)
+        normalize_enabled = config.get("post_mux_normalize_timestamps", False)
 
-        if normalize_enabled and check_if_rebasing_is_needed(temp_output_path, runner, tool_paths):
-            finalize_merged_file(temp_output_path, final_output_path, runner, config, tool_paths)
+        if normalize_enabled and check_if_rebasing_is_needed(
+            temp_output_path, runner, tool_paths
+        ):
+            finalize_merged_file(
+                temp_output_path, final_output_path, runner, config, tool_paths
+            )
         else:
             shutil.move(temp_output_path, final_output_path)

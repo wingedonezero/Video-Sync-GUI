@@ -10,6 +10,7 @@ This mode applies delay + frame-snapping using VideoTimestamps:
 
 All operations work with float ms - rounding happens only at save_ass().
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -31,8 +32,8 @@ class TimebaseFrameLockedSync(SyncPlugin):
     Uses TARGET video to ensure frame-accurate alignment.
     """
 
-    name = 'timebase-frame-locked-timestamps'
-    description = 'Time-based delay with VideoTimestamps frame-accurate alignment'
+    name = "timebase-frame-locked-timestamps"
+    description = "Time-based delay with VideoTimestamps frame-accurate alignment"
 
     def apply(
         self,
@@ -44,7 +45,7 @@ class TimebaseFrameLockedSync(SyncPlugin):
         target_video: str | None = None,
         runner=None,
         config: dict | None = None,
-        **kwargs
+        **kwargs,
     ) -> OperationResult:
         """
         Apply frame-locked sync to subtitle data.
@@ -75,55 +76,64 @@ class TimebaseFrameLockedSync(SyncPlugin):
         if not target_video:
             return OperationResult(
                 success=False,
-                operation='sync',
-                error='Target video required for frame-locked mode'
+                operation="sync",
+                error="Target video required for frame-locked mode",
             )
 
         if not target_fps or target_fps <= 0:
             return OperationResult(
                 success=False,
-                operation='sync',
-                error='Valid target FPS required for frame-locked mode'
+                operation="sync",
+                error="Valid target FPS required for frame-locked mode",
             )
 
         log(f"[FrameLocked] Target: {Path(target_video).name} ({target_fps:.3f} fps)")
-        log(f"[FrameLocked] Raw delay: {total_delay_ms:+.3f}ms (global shift: {global_shift_ms:+.3f}ms)")
+        log(
+            f"[FrameLocked] Raw delay: {total_delay_ms:+.3f}ms (global shift: {global_shift_ms:+.3f}ms)"
+        )
 
         # Try to get VideoTimestamps for precise frame alignment
         vts = self._get_video_timestamps(target_video, target_fps, runner, config)
 
         # Statistics tracking
         stats = {
-            'total_events': len(subtitle_data.events),
-            'events_synced': 0,
-            'start_snapped': 0,
-            'start_already_aligned': 0,
-            'duration_adjusted': 0,
-            'raw_delay_ms': total_delay_ms,
-            'frame_aligned_delay_ms': total_delay_ms,
-            'alignment_delta_ms': 0.0,
+            "total_events": len(subtitle_data.events),
+            "events_synced": 0,
+            "start_snapped": 0,
+            "start_already_aligned": 0,
+            "duration_adjusted": 0,
+            "raw_delay_ms": total_delay_ms,
+            "frame_aligned_delay_ms": total_delay_ms,
+            "alignment_delta_ms": 0.0,
         }
 
         # Step 1: Frame-align the global delay
         # Config option: frame_lock_submillisecond_precision (default: False)
         # When True, preserves sub-ms precision in frame calculations
-        use_submillisecond = config.get('frame_lock_submillisecond_precision', False)
+        use_submillisecond = config.get("frame_lock_submillisecond_precision", False)
 
-        snap_mode = (config.get('videotimestamps_snap_mode', 'start') or 'start').upper()
-        snap_time_type = 'EXACT' if snap_mode == 'EXACT' else 'START'
+        snap_mode = (
+            config.get("videotimestamps_snap_mode", "start") or "start"
+        ).upper()
+        snap_time_type = "EXACT" if snap_mode == "EXACT" else "START"
         log(f"[FrameLocked] Frame snap mode: {snap_time_type}")
 
         if vts:
             frame_aligned_delay = self._frame_align_delay(
-                total_delay_ms, vts, target_fps, log,
+                total_delay_ms,
+                vts,
+                target_fps,
+                log,
                 use_submillisecond=use_submillisecond,
                 snap_time_type=snap_time_type,
             )
             if not use_submillisecond:
                 frame_aligned_delay = float(int(frame_aligned_delay))
-                log(f"[FrameLocked] Truncated frame-aligned delay to integer ms: {frame_aligned_delay:+.3f}ms")
-            stats['frame_aligned_delay_ms'] = frame_aligned_delay
-            stats['alignment_delta_ms'] = frame_aligned_delay - total_delay_ms
+                log(
+                    f"[FrameLocked] Truncated frame-aligned delay to integer ms: {frame_aligned_delay:+.3f}ms"
+                )
+            stats["frame_aligned_delay_ms"] = frame_aligned_delay
+            stats["alignment_delta_ms"] = frame_aligned_delay - total_delay_ms
         else:
             log("[FrameLocked] VideoTimestamps unavailable, using raw delay")
             frame_aligned_delay = total_delay_ms
@@ -165,10 +175,10 @@ class TimebaseFrameLockedSync(SyncPlugin):
                 start_delta = snapped_start - delayed_start
 
                 if abs(start_delta) > 0.5:
-                    stats['start_snapped'] += 1
+                    stats["start_snapped"] += 1
                     snapped = True
                 else:
-                    stats['start_already_aligned'] += 1
+                    stats["start_already_aligned"] += 1
 
                 # Preserve duration
                 snapped_end = delayed_end + start_delta
@@ -189,7 +199,7 @@ class TimebaseFrameLockedSync(SyncPlugin):
                             target_fps,
                             snap_time_type=snap_time_type,
                         )
-                        stats['duration_adjusted'] += 1
+                        stats["duration_adjusted"] += 1
 
                 event.start_ms = snapped_start
                 event.end_ms = snapped_end
@@ -217,68 +227,77 @@ class TimebaseFrameLockedSync(SyncPlugin):
                 target_frame_end=end_frame,
             )
 
-            stats['events_synced'] += 1
+            stats["events_synced"] += 1
 
         # Calculate adjustment statistics
         if start_adjustments:
-            stats['min_adjustment_ms'] = min(start_adjustments)
-            stats['max_adjustment_ms'] = max(start_adjustments)
-            stats['avg_adjustment_ms'] = sum(start_adjustments) / len(start_adjustments)
+            stats["min_adjustment_ms"] = min(start_adjustments)
+            stats["max_adjustment_ms"] = max(start_adjustments)
+            stats["avg_adjustment_ms"] = sum(start_adjustments) / len(start_adjustments)
         else:
-            stats['min_adjustment_ms'] = 0.0
-            stats['max_adjustment_ms'] = 0.0
-            stats['avg_adjustment_ms'] = 0.0
+            stats["min_adjustment_ms"] = 0.0
+            stats["max_adjustment_ms"] = 0.0
+            stats["avg_adjustment_ms"] = 0.0
 
         # Build summary with adjustment range if varied
-        if stats['min_adjustment_ms'] != stats['max_adjustment_ms']:
-            summary = (f"Frame-locked sync: {stats['events_synced']} events, "
-                      f"avg {stats['avg_adjustment_ms']:+.1f}ms "
-                      f"(range: {stats['min_adjustment_ms']:+.1f} to {stats['max_adjustment_ms']:+.1f})")
+        if stats["min_adjustment_ms"] != stats["max_adjustment_ms"]:
+            summary = (
+                f"Frame-locked sync: {stats['events_synced']} events, "
+                f"avg {stats['avg_adjustment_ms']:+.1f}ms "
+                f"(range: {stats['min_adjustment_ms']:+.1f} to {stats['max_adjustment_ms']:+.1f})"
+            )
         else:
             summary = f"Frame-locked sync: {stats['events_synced']} events, delay {frame_aligned_delay:+.1f}ms"
 
         # Record operation
         record = OperationRecord(
-            operation='sync',
+            operation="sync",
             timestamp=datetime.now(),
             parameters={
-                'mode': self.name,
-                'input_delay_ms': total_delay_ms,
-                'frame_aligned_delay_ms': frame_aligned_delay,
-                'target_fps': target_fps,
-                'global_shift_ms': global_shift_ms,
+                "mode": self.name,
+                "input_delay_ms": total_delay_ms,
+                "frame_aligned_delay_ms": frame_aligned_delay,
+                "target_fps": target_fps,
+                "global_shift_ms": global_shift_ms,
             },
-            events_affected=stats['events_synced'],
-            summary=summary
+            events_affected=stats["events_synced"],
+            summary=summary,
         )
         subtitle_data.operations.append(record)
 
         # Log summary
         log("[FrameLocked] ───────────────────────────────────────")
         log("[FrameLocked] Sync complete:")
-        log(f"[FrameLocked]   Events synced: {stats['events_synced']}/{stats['total_events']}")
+        log(
+            f"[FrameLocked]   Events synced: {stats['events_synced']}/{stats['total_events']}"
+        )
         log(f"[FrameLocked]   Start times snapped: {stats['start_snapped']}")
         log(f"[FrameLocked]   Already aligned: {stats['start_already_aligned']}")
         log(f"[FrameLocked]   Duration adjustments: {stats['duration_adjusted']}")
-        log(f"[FrameLocked]   Frame alignment delta: {stats['alignment_delta_ms']:+.3f}ms")
+        log(
+            f"[FrameLocked]   Frame alignment delta: {stats['alignment_delta_ms']:+.3f}ms"
+        )
         log("[FrameLocked] ===================================")
 
         return OperationResult(
             success=True,
-            operation='sync',
-            events_affected=stats['events_synced'],
+            operation="sync",
+            events_affected=stats["events_synced"],
             summary=record.summary,
-            details=stats
+            details=stats,
         )
 
     def _get_video_timestamps(self, video_path: str, fps: float, runner, config: dict):
         """Get VideoTimestamps handler for the video."""
         try:
             from ..frame_utils import get_vfr_timestamps
+
             return get_vfr_timestamps(video_path, fps, runner, config)
         except Exception as e:
             if runner:
-                runner._log_message(f"[FrameLocked] WARNING: Could not get VideoTimestamps: {e}")
+                runner._log_message(
+                    f"[FrameLocked] WARNING: Could not get VideoTimestamps: {e}"
+                )
             return None
 
     def _frame_align_delay(
@@ -288,7 +307,7 @@ class TimebaseFrameLockedSync(SyncPlugin):
         fps: float,
         log,
         use_submillisecond: bool = False,
-        snap_time_type: str = 'START',
+        snap_time_type: str = "START",
     ) -> float:
         """
         Align delay to nearest frame boundary.
@@ -319,7 +338,9 @@ class TimebaseFrameLockedSync(SyncPlugin):
             if use_submillisecond:
                 # Preserve sub-millisecond precision (e.g., 1234.567 -> Fraction(1234567, 1000))
                 delay_frac = Fraction(int(delay_ms * 1000), 1000)
-                log(f"[FrameLocked] Using sub-millisecond precision: {float(delay_frac):.3f}ms")
+                log(
+                    f"[FrameLocked] Using sub-millisecond precision: {float(delay_frac):.3f}ms"
+                )
             else:
                 # Truncate to integer milliseconds (historical default behavior)
                 # e.g., 1234.567 -> Fraction(1234, 1)
@@ -331,7 +352,9 @@ class TimebaseFrameLockedSync(SyncPlugin):
             frame_start = vts.frame_to_time(frame, getattr(TimeType, snap_time_type))
             aligned_ms = float(frame_start)
 
-            log(f"[FrameLocked] Frame alignment: {delay_ms:.3f}ms -> frame {frame} -> {aligned_ms:.3f}ms")
+            log(
+                f"[FrameLocked] Frame alignment: {delay_ms:.3f}ms -> frame {frame} -> {aligned_ms:.3f}ms"
+            )
             log(f"[FrameLocked] Alignment delta: {aligned_ms - delay_ms:+.3f}ms")
 
             return aligned_ms
@@ -346,7 +369,7 @@ class TimebaseFrameLockedSync(SyncPlugin):
         vts,
         fps: float,
         use_submillisecond: bool = False,
-        snap_time_type: str = 'START',
+        snap_time_type: str = "START",
     ) -> tuple:
         """
         Snap time to frame start boundary.
@@ -370,23 +393,25 @@ class TimebaseFrameLockedSync(SyncPlugin):
             return (snapped, frame)
 
     def _time_to_frame(
-        self,
-        time_ms: float,
-        vts,
-        fps: float,
-        use_submillisecond: bool = False
+        self, time_ms: float, vts, fps: float, use_submillisecond: bool = False
     ) -> int:
         """Convert time to frame number."""
         try:
             from video_timestamps import TimeType
-            return vts.time_to_frame(self._time_to_fraction(time_ms, use_submillisecond), TimeType.EXACT)
+
+            return vts.time_to_frame(
+                self._time_to_fraction(time_ms, use_submillisecond), TimeType.EXACT
+            )
         except Exception:
             return int(time_ms / (1000.0 / fps))
 
-    def _frame_to_time(self, frame: int, vts, fps: float, snap_time_type: str = 'START') -> float:
+    def _frame_to_time(
+        self, frame: int, vts, fps: float, snap_time_type: str = "START"
+    ) -> float:
         """Convert frame number to time (frame start)."""
         try:
             from video_timestamps import TimeType
+
             return float(vts.frame_to_time(frame, getattr(TimeType, snap_time_type)))
         except Exception:
             return frame * (1000.0 / fps)

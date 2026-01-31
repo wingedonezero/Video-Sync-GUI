@@ -6,12 +6,15 @@ from vsg_qt.track_widget.ui import TrackWidget
 
 class ManualLogic:
     """A controller instance for the ManualSelectionDialog."""
+
     def __init__(self, view: ManualSelectionDialog):
         self.v = view
 
     def is_blocked_video(self, track_data: dict) -> bool:
         """Video is only allowed from Source 1."""
-        return track_data.get('type') == 'video' and track_data.get('source') != 'Source 1'
+        return (
+            track_data.get("type") == "video" and track_data.get("source") != "Source 1"
+        )
 
     def prepopulate_from_layout(self, layout: list[dict]):
         """Populates the final list using a previously configured layout."""
@@ -22,25 +25,27 @@ class ManualLogic:
         counters = {}
         for src_key, track_list in self.v.track_info.items():
             for t in track_list:
-                key = (src_key, t['type'], counters.get((src_key, t['type']), 0))
+                key = (src_key, t["type"], counters.get((src_key, t["type"]), 0))
                 pools[key] = t
-                counters[(src_key, t['type'])] = counters.get((src_key, t['type']), 0) + 1
+                counters[(src_key, t["type"])] = (
+                    counters.get((src_key, t["type"]), 0) + 1
+                )
 
         realized_layout = []
         counters.clear()
         for prev_item in layout:
-            src, ttype = prev_item.get('source'), prev_item.get('type')
+            src, ttype = prev_item.get("source"), prev_item.get("type")
 
             # CRITICAL FIX: Generated tracks don't exist in source files
             # They're created from other tracks, so preserve them from layout without pool matching
-            if prev_item.get('is_generated'):
+            if prev_item.get("is_generated"):
                 # Generated tracks use their settings from the saved layout
                 # Just verify the source track they reference actually exists
-                source_track_id = prev_item.get('source_track_id')
+                source_track_id = prev_item.get("source_track_id")
                 if source_track_id is not None:
                     # Find the source track in track_info to validate it exists
                     source_exists = any(
-                        t.get('id') == source_track_id
+                        t.get("id") == source_track_id
                         for t in self.v.track_info.get(src, [])
                     )
                     if source_exists:
@@ -69,12 +74,18 @@ class ManualLogic:
         for i in range(self.v.final_list.count()):
             widgets.append(self.v.final_list.itemWidget(self.v.final_list.item(i)))
 
-        self.normalize_single_default_for_type(widgets, 'audio', force_default_if_none=True)
-        self.normalize_single_default_for_type(widgets, 'subtitles', force_default_if_none=False)
+        self.normalize_single_default_for_type(
+            widgets, "audio", force_default_if_none=True
+        )
+        self.normalize_single_default_for_type(
+            widgets, "subtitles", force_default_if_none=False
+        )
         self.normalize_forced_subtitles(widgets)
 
         layout = self.build_layout_from_widgets(widgets)
-        attachment_sources = [key for key, cb in self.v.attachment_checkboxes.items() if cb.isChecked()]
+        attachment_sources = [
+            key for key, cb in self.v.attachment_checkboxes.items() if cb.isChecked()
+        ]
 
         return layout, attachment_sources
 
@@ -88,7 +99,13 @@ class ManualLogic:
             out.append(td)
         return out
 
-    def normalize_single_default_for_type(self, widgets: list[TrackWidget], ttype: str, force_default_if_none: bool, prefer_widget=None):
+    def normalize_single_default_for_type(
+        self,
+        widgets: list[TrackWidget],
+        ttype: str,
+        force_default_if_none: bool,
+        prefer_widget=None,
+    ):
         """Ensures only one 'Default' flag is set per track type."""
         first_default = None
 
@@ -118,12 +135,12 @@ class ManualLogic:
         """Ensures at most one 'Forced' flag is set for subtitles."""
         first_forced = None
         for w in widgets:
-            if w.track_type == 'subtitles':
+            if w.track_type == "subtitles":
                 if w.cb_forced.isChecked():
                     if not first_forced:
                         first_forced = w
                     else:
                         w.cb_forced.setChecked(False)
         for w in widgets:
-            if w.track_type == 'subtitles':
+            if w.track_type == "subtitles":
                 w.logic.refresh_badges()

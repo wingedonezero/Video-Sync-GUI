@@ -7,6 +7,7 @@ Contains:
 - VFR (VideoTimestamps-based) timing
 - VFR cache management
 """
+
 from __future__ import annotations
 
 import gc
@@ -16,6 +17,7 @@ import threading
 # ============================================================================
 # MODE 0: FRAME START (For Correlation-Frame-Snap - STABLE & DETERMINISTIC)
 # ============================================================================
+
 
 def time_to_frame_floor(time_ms: float, fps: float) -> int:
     """
@@ -81,6 +83,7 @@ def frame_to_time_floor(frame_num: int, fps: float) -> float:
 # MODE 1: MIDDLE OF FRAME (Current Implementation)
 # ============================================================================
 
+
 def time_to_frame_middle(time_ms: float, fps: float) -> int:
     """
     MODE: Middle of frame window.
@@ -123,6 +126,7 @@ def frame_to_time_middle(frame_num: int, fps: float) -> int:
 # ============================================================================
 # MODE 2: AEGISUB-STYLE (Ceil to Centisecond)
 # ============================================================================
+
 
 def time_to_frame_aegisub(time_ms: float, fps: float) -> int:
     """
@@ -218,9 +222,9 @@ def get_vfr_timestamps(video_path: str, fps: float, runner, config: dict = None)
 
         # Get rounding method from config (default: ROUND)
         config = config or {}
-        rounding_str = config.get('videotimestamps_rounding', 'round').upper()
+        rounding_str = config.get("videotimestamps_rounding", "round").upper()
 
-        if rounding_str == 'FLOOR':
+        if rounding_str == "FLOOR":
             rounding_method = RoundingMethod.FLOOR
         else:  # 'ROUND' or default
             rounding_method = RoundingMethod.ROUND
@@ -240,11 +244,17 @@ def get_vfr_timestamps(video_path: str, fps: float, runner, config: dict = None)
         # Convert FPS to exact fraction for NTSC drop-frame rates
         # NTSC standards use fractional rates (N*1000/1001) to avoid color/audio drift
         if abs(fps - 23.976) < 0.001:
-            fps_frac = Fraction(24000, 1001)  # 23.976fps - NTSC film (24fps slowed down)
+            fps_frac = Fraction(
+                24000, 1001
+            )  # 23.976fps - NTSC film (24fps slowed down)
         elif abs(fps - 29.97) < 0.01:
-            fps_frac = Fraction(30000, 1001)  # 29.97fps - NTSC video (30fps slowed down)
+            fps_frac = Fraction(
+                30000, 1001
+            )  # 29.97fps - NTSC video (30fps slowed down)
         elif abs(fps - 59.94) < 0.01:
-            fps_frac = Fraction(60000, 1001)  # 59.94fps - NTSC high fps (60fps slowed down)
+            fps_frac = Fraction(
+                60000, 1001
+            )  # 59.94fps - NTSC high fps (60fps slowed down)
         else:
             # Use decimal FPS as fraction for non-NTSC rates (PAL, web video, etc.)
             fps_frac = Fraction(int(fps * 1000), 1000).limit_denominator(10000)
@@ -253,7 +263,9 @@ def get_vfr_timestamps(video_path: str, fps: float, runner, config: dict = None)
         time_scale = Fraction(1000)  # milliseconds
         vts = FPSTimestamps(rounding_method, time_scale, fps_frac)
 
-        runner._log_message(f"[VideoTimestamps] Using FPSTimestamps for CFR video at {fps:.3f} fps")
+        runner._log_message(
+            f"[VideoTimestamps] Using FPSTimestamps for CFR video at {fps:.3f} fps"
+        )
         runner._log_message(f"[VideoTimestamps] RoundingMethod: {rounding_str}")
 
         # Thread-safe cache write
@@ -262,14 +274,20 @@ def get_vfr_timestamps(video_path: str, fps: float, runner, config: dict = None)
         return vts
 
     except ImportError:
-        runner._log_message("[VideoTimestamps] WARNING: VideoTimestamps not installed. Install with: pip install VideoTimestamps")
+        runner._log_message(
+            "[VideoTimestamps] WARNING: VideoTimestamps not installed. Install with: pip install VideoTimestamps"
+        )
         return None
     except Exception as e:
-        runner._log_message(f"[VideoTimestamps] WARNING: Failed to create timestamps handler: {e}")
+        runner._log_message(
+            f"[VideoTimestamps] WARNING: Failed to create timestamps handler: {e}"
+        )
         return None
 
 
-def frame_to_time_vfr(frame_num: int, video_path: str, fps: float, runner, config: dict = None) -> int | None:
+def frame_to_time_vfr(
+    frame_num: int, video_path: str, fps: float, runner, config: dict = None
+) -> int | None:
     """
     MODE: VFR (VideoTimestamps-based).
 
@@ -304,7 +322,9 @@ def frame_to_time_vfr(frame_num: int, video_path: str, fps: float, runner, confi
         return None
 
 
-def time_to_frame_vfr(time_ms: float, video_path: str, fps: float, runner, config: dict = None) -> int | None:
+def time_to_frame_vfr(
+    time_ms: float, video_path: str, fps: float, runner, config: dict = None
+) -> int | None:
     """
     MODE: VFR using VideoTimestamps.
 

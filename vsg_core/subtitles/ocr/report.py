@@ -19,6 +19,7 @@ from pathlib import Path
 
 try:
     import enchant
+
     ENCHANT_AVAILABLE = True
 except ImportError:
     ENCHANT_AVAILABLE = False
@@ -37,6 +38,7 @@ class UnknownWord:
         occurrences: Number of times this word appears
         suggestions: Dictionary suggestions for correction
     """
+
     word: str
     context: str = ""
     timestamp: str = ""
@@ -56,6 +58,7 @@ class LowConfidenceLine:
 
     Flagged for potential manual review.
     """
+
     text: str
     timestamp: str
     confidence: float
@@ -70,6 +73,7 @@ class LowConfidenceLine:
 @dataclass
 class SubtitleOCRResult:
     """OCR result for a single subtitle."""
+
     index: int
     timestamp_start: str
     timestamp_end: str
@@ -94,6 +98,7 @@ class OCRReport:
 
     Contains all metrics, unknown words, and flagged issues.
     """
+
     # Metadata
     source_file: str = ""
     output_file: str = ""
@@ -152,11 +157,7 @@ class OCRReport:
             self.positioned_subtitles += 1
 
     def add_unknown_word(
-        self,
-        word: str,
-        context: str = "",
-        timestamp: str = "",
-        confidence: float = 0.0
+        self, word: str, context: str = "", timestamp: str = "", confidence: float = 0.0
     ):
         """Add or update an unknown word entry."""
         # Check if word already exists
@@ -181,16 +182,18 @@ class OCRReport:
         timestamp: str,
         confidence: float,
         subtitle_index: int,
-        potential_issues: list[str] | None = None
+        potential_issues: list[str] | None = None,
     ):
         """Flag a line for manual review."""
-        self.low_confidence_lines.append(LowConfidenceLine(
-            text=text,
-            timestamp=timestamp,
-            confidence=confidence,
-            subtitle_index=subtitle_index,
-            potential_issues=potential_issues or [],
-        ))
+        self.low_confidence_lines.append(
+            LowConfidenceLine(
+                text=text,
+                timestamp=timestamp,
+                confidence=confidence,
+                subtitle_index=subtitle_index,
+                potential_issues=potential_issues or [],
+            )
+        )
 
     def finalize(self):
         """Calculate final statistics."""
@@ -219,27 +222,27 @@ class OCRReport:
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return {
-            'metadata': {
-                'source_file': self.source_file,
-                'output_file': self.output_file,
-                'timestamp': self.timestamp,
-                'language': self.language,
-                'duration_seconds': self.duration_seconds,
+            "metadata": {
+                "source_file": self.source_file,
+                "output_file": self.output_file,
+                "timestamp": self.timestamp,
+                "language": self.language,
+                "duration_seconds": self.duration_seconds,
             },
-            'statistics': {
-                'total_subtitles': self.total_subtitles,
-                'successful_subtitles': self.successful_subtitles,
-                'failed_subtitles': self.failed_subtitles,
-                'average_confidence': round(self.average_confidence, 2),
-                'min_confidence': round(self.min_confidence, 2),
-                'max_confidence': round(self.max_confidence, 2),
-                'total_fixes_applied': self.total_fixes_applied,
-                'positioned_subtitles': self.positioned_subtitles,
+            "statistics": {
+                "total_subtitles": self.total_subtitles,
+                "successful_subtitles": self.successful_subtitles,
+                "failed_subtitles": self.failed_subtitles,
+                "average_confidence": round(self.average_confidence, 2),
+                "min_confidence": round(self.min_confidence, 2),
+                "max_confidence": round(self.max_confidence, 2),
+                "total_fixes_applied": self.total_fixes_applied,
+                "positioned_subtitles": self.positioned_subtitles,
             },
-            'fixes_by_type': self.fixes_by_type,
-            'unknown_words': [w.to_dict() for w in self.unknown_words],
-            'low_confidence_lines': [l.to_dict() for l in self.low_confidence_lines],
-            'subtitles': [s.to_dict() for s in self.subtitles],
+            "fixes_by_type": self.fixes_by_type,
+            "unknown_words": [w.to_dict() for w in self.unknown_words],
+            "low_confidence_lines": [l.to_dict() for l in self.low_confidence_lines],
+            "subtitles": [s.to_dict() for s in self.subtitles],
         }
 
     def to_summary(self) -> dict:
@@ -249,62 +252,60 @@ class OCRReport:
         Contains key metrics without full subtitle details.
         """
         return {
-            'total_subtitles': self.total_subtitles,
-            'successful': self.successful_subtitles,
-            'failed': self.failed_subtitles,
-            'average_confidence': round(self.average_confidence, 2),
-            'total_fixes': self.total_fixes_applied,
-            'unknown_word_count': len(self.unknown_words),
-            'low_confidence_count': len(self.low_confidence_lines),
-            'positioned_subtitles': self.positioned_subtitles,
-            'top_unknown_words': [w.word for w in self.unknown_words[:10]],
+            "total_subtitles": self.total_subtitles,
+            "successful": self.successful_subtitles,
+            "failed": self.failed_subtitles,
+            "average_confidence": round(self.average_confidence, 2),
+            "total_fixes": self.total_fixes_applied,
+            "unknown_word_count": len(self.unknown_words),
+            "low_confidence_count": len(self.low_confidence_lines),
+            "positioned_subtitles": self.positioned_subtitles,
+            "top_unknown_words": [w.word for w in self.unknown_words[:10]],
         }
 
     def save(self, output_path: Path):
         """Save report to JSON file."""
-        with open(output_path, 'w', encoding='utf-8') as f:
+        with open(output_path, "w", encoding="utf-8") as f:
             json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
 
     @classmethod
-    def load(cls, path: Path) -> 'OCRReport':
+    def load(cls, path: Path) -> "OCRReport":
         """Load report from JSON file."""
-        with open(path, encoding='utf-8') as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
 
         report = cls()
-        report.source_file = data.get('metadata', {}).get('source_file', '')
-        report.output_file = data.get('metadata', {}).get('output_file', '')
-        report.timestamp = data.get('metadata', {}).get('timestamp', '')
-        report.language = data.get('metadata', {}).get('language', 'eng')
+        report.source_file = data.get("metadata", {}).get("source_file", "")
+        report.output_file = data.get("metadata", {}).get("output_file", "")
+        report.timestamp = data.get("metadata", {}).get("timestamp", "")
+        report.language = data.get("metadata", {}).get("language", "eng")
 
-        stats = data.get('statistics', {})
-        report.total_subtitles = stats.get('total_subtitles', 0)
-        report.successful_subtitles = stats.get('successful_subtitles', 0)
-        report.failed_subtitles = stats.get('failed_subtitles', 0)
-        report.average_confidence = stats.get('average_confidence', 0.0)
-        report.min_confidence = stats.get('min_confidence', 100.0)
-        report.max_confidence = stats.get('max_confidence', 0.0)
-        report.total_fixes_applied = stats.get('total_fixes_applied', 0)
-        report.positioned_subtitles = stats.get('positioned_subtitles', 0)
+        stats = data.get("statistics", {})
+        report.total_subtitles = stats.get("total_subtitles", 0)
+        report.successful_subtitles = stats.get("successful_subtitles", 0)
+        report.failed_subtitles = stats.get("failed_subtitles", 0)
+        report.average_confidence = stats.get("average_confidence", 0.0)
+        report.min_confidence = stats.get("min_confidence", 100.0)
+        report.max_confidence = stats.get("max_confidence", 0.0)
+        report.total_fixes_applied = stats.get("total_fixes_applied", 0)
+        report.positioned_subtitles = stats.get("positioned_subtitles", 0)
 
-        report.fixes_by_type = data.get('fixes_by_type', {})
+        report.fixes_by_type = data.get("fixes_by_type", {})
 
-        for w_data in data.get('unknown_words', []):
+        for w_data in data.get("unknown_words", []):
             report.unknown_words.append(UnknownWord(**w_data))
 
-        for l_data in data.get('low_confidence_lines', []):
+        for l_data in data.get("low_confidence_lines", []):
             report.low_confidence_lines.append(LowConfidenceLine(**l_data))
 
-        for s_data in data.get('subtitles', []):
+        for s_data in data.get("subtitles", []):
             report.subtitles.append(SubtitleOCRResult(**s_data))
 
         return report
 
 
 def create_report(
-    source_file: str,
-    output_file: str,
-    language: str = 'eng'
+    source_file: str, output_file: str, language: str = "eng"
 ) -> OCRReport:
     """
     Create a new OCR report.

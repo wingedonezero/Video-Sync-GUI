@@ -5,6 +5,7 @@ Style engine using SubtitleData for subtitle manipulation.
 Provides style modification operations (font replacement, size scaling,
 rescaling, color changes) using the unified SubtitleData system.
 """
+
 import hashlib
 import re
 import time
@@ -19,6 +20,7 @@ from .data import SubtitleData, SubtitleStyle
 # Color Conversion Helpers
 # =============================================================================
 
+
 def ass_color_to_qt(ass_color: str) -> str:
     """
     Convert ASS color format to Qt hex format.
@@ -30,7 +32,7 @@ def ass_color_to_qt(ass_color: str) -> str:
           Qt alpha is normal (FF = opaque, 00 = transparent)
     """
     # Remove &H prefix and ensure 8 characters
-    color = ass_color.lstrip('&Hh').upper()
+    color = ass_color.lstrip("&Hh").upper()
     color = color.zfill(8)
 
     # Parse AABBGGRR
@@ -56,7 +58,7 @@ def qt_color_to_ass(qt_color: str) -> str:
           ASS alpha is inverted (00 = opaque, FF = transparent)
     """
     # Remove # prefix
-    color = qt_color.lstrip('#').upper()
+    color = qt_color.lstrip("#").upper()
     color = color.zfill(8)
 
     # Parse AARRGGBB
@@ -74,6 +76,7 @@ def qt_color_to_ass(qt_color: str) -> str:
 # =============================================================================
 # Style Engine
 # =============================================================================
+
 
 class StyleEngine:
     """
@@ -115,7 +118,9 @@ class StyleEngine:
             if self._temp_file is None:
                 source_stem = self.path.stem
                 unique_id = int(time.time() * 1000) % 1000000
-                self._temp_file = self._temp_dir / f"preview_{source_stem}_{unique_id}.ass"
+                self._temp_file = (
+                    self._temp_dir / f"preview_{source_stem}_{unique_id}.ass"
+                )
             self.data.save_ass(self._temp_file)
 
     def save_to_original(self):
@@ -217,7 +222,7 @@ class StyleEngine:
         if not self.data:
             return []
 
-        tag_pattern = re.compile(r'{[^}]+}')
+        tag_pattern = re.compile(r"{[^}]+}")
 
         return [
             {
@@ -226,7 +231,7 @@ class StyleEngine:
                 "end": int(event.end_ms),
                 "style": event.style,
                 "text": event.text,
-                "plaintext": tag_pattern.sub('', event.text),
+                "plaintext": tag_pattern.sub("", event.text),
             }
             for i, event in enumerate(self.data.events)
             if not event.is_comment
@@ -235,16 +240,16 @@ class StyleEngine:
     def get_raw_style_block(self) -> list[str] | None:
         """Extracts the raw [V4+ Styles] block as a list of strings."""
         try:
-            content = self.path.read_text(encoding='utf-8-sig')
+            content = self.path.read_text(encoding="utf-8-sig")
             in_styles_block = False
             style_lines = []
             for line in content.splitlines():
                 line_strip = line.strip()
-                if line_strip.lower() in ('[v4+ styles]', '[v4 styles]'):
+                if line_strip.lower() in ("[v4+ styles]", "[v4 styles]"):
                     in_styles_block = True
-                elif in_styles_block and line_strip.startswith(('Format:', 'Style:')):
+                elif in_styles_block and line_strip.startswith(("Format:", "Style:")):
                     style_lines.append(line)
-                elif in_styles_block and line_strip.startswith('['):
+                elif in_styles_block and line_strip.startswith("["):
                     break
             return style_lines if style_lines else None
         except Exception:
@@ -261,10 +266,10 @@ class StyleEngine:
 
         for line in style_lines:
             line = line.strip()
-            if line.startswith('Format:'):
-                format_line = [f.strip() for f in line[7:].split(',')]
-            elif line.startswith('Style:'):
-                values = line[6:].split(',')
+            if line.startswith("Format:"):
+                format_line = [f.strip() for f in line[7:].split(",")]
+            elif line.startswith("Style:"):
+                values = line[6:].split(",")
                 if format_line:
                     style = SubtitleStyle.from_format_line(format_line, values)
                     styles.append(style)
@@ -330,6 +335,7 @@ class StyleEngine:
         Only styles with matching names are updated; unique styles in the target are preserved.
         """
         from copy import deepcopy  # Local import - only needed here
+
         try:
             target_data = SubtitleData.from_file(target_path)
             template_data = SubtitleData.from_file(template_path)
@@ -337,7 +343,9 @@ class StyleEngine:
             updated_count = 0
             for style_name in target_data.styles:
                 if style_name in template_data.styles:
-                    target_data.styles[style_name] = deepcopy(template_data.styles[style_name])
+                    target_data.styles[style_name] = deepcopy(
+                        template_data.styles[style_name]
+                    )
                     updated_count += 1
 
             if updated_count > 0:
@@ -352,20 +360,22 @@ class StyleEngine:
     def get_content_signature(subtitle_path: str) -> str | None:
         """Generates a unique hash of the [V4+ Styles] block for content matching."""
         try:
-            content = Path(subtitle_path).read_text(encoding='utf-8-sig')
+            content = Path(subtitle_path).read_text(encoding="utf-8-sig")
             in_styles_block = False
             style_lines = []
             for line in content.splitlines():
                 line_strip = line.strip()
-                if line_strip.lower() in ('[v4+ styles]', '[v4 styles]'):
+                if line_strip.lower() in ("[v4+ styles]", "[v4 styles]"):
                     in_styles_block = True
-                elif in_styles_block and line_strip.startswith('Style:'):
+                elif in_styles_block and line_strip.startswith("Style:"):
                     style_lines.append(line_strip)
                 elif in_styles_block and not line_strip:
                     break
             if not style_lines:
                 return None
-            return hashlib.sha256('\n'.join(sorted(style_lines)).encode('utf-8')).hexdigest()
+            return hashlib.sha256(
+                "\n".join(sorted(style_lines)).encode("utf-8")
+            ).hexdigest()
         except Exception:
             return None
 

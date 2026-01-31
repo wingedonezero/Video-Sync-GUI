@@ -12,6 +12,7 @@ Registry pattern allows easy addition of new sync modes.
 
 Plugins are located in: vsg_core/subtitles/sync_mode_plugins/
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
 # Plugin System
 # =============================================================================
 
+
 class SyncPlugin(ABC):
     """
     Base class for sync mode plugins.
@@ -33,10 +35,10 @@ class SyncPlugin(ABC):
     """
 
     # Plugin name (must match what's used in settings)
-    name: str = ''
+    name: str = ""
 
     # Human-readable description
-    description: str = ''
+    description: str = ""
 
     @abstractmethod
     def apply(
@@ -49,7 +51,7 @@ class SyncPlugin(ABC):
         target_video: str | None = None,
         runner=None,
         config: dict | None = None,
-        **kwargs
+        **kwargs,
     ) -> OperationResult:
         """
         Apply sync to subtitle data.
@@ -99,14 +101,15 @@ def _ensure_plugins_loaded():
     global _plugins_loaded
     if not _plugins_loaded:
         import importlib
+
         plugins_to_load = [
-            'vsg_core.subtitles.sync_mode_plugins.time_based',
-            'vsg_core.subtitles.sync_mode_plugins.timebase_frame_locked',
-            'vsg_core.subtitles.sync_mode_plugins.duration_align',
-            'vsg_core.subtitles.sync_mode_plugins.correlation_frame_snap',
-            'vsg_core.subtitles.sync_mode_plugins.subtitle_anchored_frame_snap',
-            'vsg_core.subtitles.sync_mode_plugins.correlation_guided_frame_anchor',
-            'vsg_core.subtitles.sync_mode_plugins.video_verified',
+            "vsg_core.subtitles.sync_mode_plugins.time_based",
+            "vsg_core.subtitles.sync_mode_plugins.timebase_frame_locked",
+            "vsg_core.subtitles.sync_mode_plugins.duration_align",
+            "vsg_core.subtitles.sync_mode_plugins.correlation_frame_snap",
+            "vsg_core.subtitles.sync_mode_plugins.subtitle_anchored_frame_snap",
+            "vsg_core.subtitles.sync_mode_plugins.correlation_guided_frame_anchor",
+            "vsg_core.subtitles.sync_mode_plugins.video_verified",
         ]
         for module_name in plugins_to_load:
             importlib.import_module(module_name)
@@ -142,8 +145,8 @@ def list_sync_plugins() -> dict[str, str]:
 
 
 __all__ = [
-    'SyncPlugin',
-    'get_sync_plugin',
-    'list_sync_plugins',
-    'register_sync_plugin',
+    "SyncPlugin",
+    "get_sync_plugin",
+    "list_sync_plugins",
+    "register_sync_plugin",
 ]

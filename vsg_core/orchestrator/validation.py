@@ -3,6 +3,7 @@
 Validation helpers for pipeline steps.
 Ensures each step completed successfully before proceeding.
 """
+
 from pathlib import Path
 
 from vsg_core.models.enums import TrackType
@@ -11,6 +12,7 @@ from vsg_core.orchestrator.steps.context import Context
 
 class PipelineValidationError(Exception):
     """Raised when a pipeline step validation fails."""
+
     pass
 
 
@@ -86,13 +88,16 @@ class StepValidator:
         errors = []
 
         for analysis_key in ctx.pal_drift_flags:
-            source_key = analysis_key.split('_')[0]
+            source_key = analysis_key.split("_")[0]
             corrected_items = [
-                item for item in ctx.extracted_items
-                if (item.track.source == source_key and
-                    item.track.type == TrackType.AUDIO and
-                    item.is_corrected and
-                    not item.is_preserved)
+                item
+                for item in ctx.extracted_items
+                if (
+                    item.track.source == source_key
+                    and item.track.type == TrackType.AUDIO
+                    and item.is_corrected
+                    and not item.is_preserved
+                )
             ]
             if not corrected_items:
                 errors.append(
@@ -112,13 +117,16 @@ class StepValidator:
                         )
 
         for analysis_key in ctx.linear_drift_flags:
-            source_key = analysis_key.split('_')[0]
+            source_key = analysis_key.split("_")[0]
             corrected_items = [
-                item for item in ctx.extracted_items
-                if (item.track.source == source_key and
-                    item.track.type == TrackType.AUDIO and
-                    item.is_corrected and
-                    not item.is_preserved)
+                item
+                for item in ctx.extracted_items
+                if (
+                    item.track.source == source_key
+                    and item.track.type == TrackType.AUDIO
+                    and item.is_corrected
+                    and not item.is_preserved
+                )
             ]
             if not corrected_items:
                 errors.append(
@@ -138,10 +146,10 @@ class StepValidator:
                         )
 
         for analysis_key, flag_info in ctx.segment_flags.items():
-            source_key = analysis_key.split('_')[0]
+            source_key = analysis_key.split("_")[0]
 
             # Skip audio validation for subs-only stepping (no audio to correct)
-            if flag_info.get('subs_only', False):
+            if flag_info.get("subs_only", False):
                 # For subs-only, just verify EDL was stored
                 if source_key not in ctx.stepping_edls:
                     errors.append(
@@ -151,11 +159,14 @@ class StepValidator:
                 continue
 
             corrected_items = [
-                item for item in ctx.extracted_items
-                if (item.track.source == source_key and
-                    item.track.type == TrackType.AUDIO and
-                    item.is_corrected and
-                    not item.is_preserved)
+                item
+                for item in ctx.extracted_items
+                if (
+                    item.track.source == source_key
+                    and item.track.type == TrackType.AUDIO
+                    and item.is_corrected
+                    and not item.is_preserved
+                )
             ]
             if not corrected_items:
                 errors.append(
@@ -176,7 +187,8 @@ class StepValidator:
 
         if errors:
             raise PipelineValidationError(
-                "Audio correction validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
+                "Audio correction validation failed:\n"
+                + "\n".join(f"  - {e}" for e in errors)
             )
 
     @staticmethod
@@ -188,7 +200,8 @@ class StepValidator:
         errors = []
 
         subtitle_items = [
-            item for item in ctx.extracted_items
+            item
+            for item in ctx.extracted_items
             if item.track.type == TrackType.SUBTITLES
         ]
 
@@ -203,7 +216,7 @@ class StepValidator:
             if item.perform_ocr:
                 if item.extracted_path:
                     ext = item.extracted_path.suffix.lower()
-                    if ext not in ['.srt', '.ass', '.ssa']:
+                    if ext not in [".srt", ".ass", ".ssa"]:
                         errors.append(
                             f"OCR track '{item.track.props.name}' has wrong extension: {ext}"
                         )
@@ -211,21 +224,19 @@ class StepValidator:
             if item.convert_to_ass:
                 if item.extracted_path:
                     ext = item.extracted_path.suffix.lower()
-                    if ext not in ['.ass', '.ssa']:
+                    if ext not in [".ass", ".ssa"]:
                         errors.append(
                             f"ASS conversion failed for '{item.track.props.name}': "
                             f"file is {ext}"
                         )
 
             if item.extracted_path and not item.extracted_path.exists():
-                errors.append(
-                    f"Subtitle file missing: {item.extracted_path}"
-                )
+                errors.append(f"Subtitle file missing: {item.extracted_path}")
 
         if errors:
             raise PipelineValidationError(
-                "Subtitle processing validation failed:\n" +
-                "\n".join(f"  - {e}" for e in errors)
+                "Subtitle processing validation failed:\n"
+                + "\n".join(f"  - {e}" for e in errors)
             )
 
     @staticmethod
@@ -240,18 +251,18 @@ class StepValidator:
             )
 
         errors = []
-        path_flags = {'--chapters', '--attach-file'}
+        path_flags = {"--chapters", "--attach-file"}
         in_parens = False
 
         for i, token in enumerate(ctx.tokens):
-            if token == '(':
+            if token == "(":
                 in_parens = True
                 continue
-            if token == ')':
+            if token == ")":
                 in_parens = False
                 continue
 
-            prev_token = ctx.tokens[i - 1] if i > 0 else ''
+            prev_token = ctx.tokens[i - 1] if i > 0 else ""
 
             is_path_argument = prev_token in path_flags
             is_input_file = in_parens
@@ -262,6 +273,6 @@ class StepValidator:
 
         if errors:
             raise PipelineValidationError(
-                "Merge planning validation failed:\n" +
-                "\n".join(f"  - {e}" for e in errors)
+                "Merge planning validation failed:\n"
+                + "\n".join(f"  - {e}" for e in errors)
             )

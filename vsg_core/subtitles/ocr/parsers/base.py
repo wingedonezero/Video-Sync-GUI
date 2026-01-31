@@ -33,6 +33,7 @@ class SubtitleImage:
         is_forced: Whether this is a forced subtitle
         palette: Color palette if applicable (for indexed color images)
     """
+
     index: int
     start_ms: int
     end_ms: int
@@ -139,6 +140,7 @@ class ParseResult:
         errors: Any errors encountered during parsing
         warnings: Any warnings generated during parsing
     """
+
     subtitles: list[SubtitleImage] = field(default_factory=list)
     format_info: dict = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
@@ -192,7 +194,7 @@ class SubtitleImageParser(ABC):
         pass
 
     @staticmethod
-    def detect_parser(file_path: Path) -> Optional['SubtitleImageParser']:
+    def detect_parser(file_path: Path) -> Optional["SubtitleImageParser"]:
         """
         Detect the appropriate parser for a file based on extension.
 
@@ -207,7 +209,7 @@ class SubtitleImageParser(ABC):
 
         suffix = file_path.suffix.lower()
 
-        if suffix in ('.idx', '.sub'):
+        if suffix in (".idx", ".sub"):
             return VobSubParser()
         # Future: elif suffix == '.sup':
         #     return PGSParser()

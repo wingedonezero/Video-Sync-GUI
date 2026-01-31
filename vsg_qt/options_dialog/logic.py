@@ -33,6 +33,7 @@ class OptionsLogic:
             QSpinBox,
             QWidget,
         )
+
         if isinstance(widget, QCheckBox):
             return widget.isChecked()
         if isinstance(widget, (QSpinBox, QDoubleSpinBox)):
@@ -44,7 +45,11 @@ class OptionsLogic:
                 return data
             return widget.currentText()
         # Composite [QWidget] with (QLineEdit, QPushButton) for file/dir pickers
-        if isinstance(widget, QWidget) and widget.layout() and isinstance(widget.layout().itemAt(0).widget(), QLineEdit):
+        if (
+            isinstance(widget, QWidget)
+            and widget.layout()
+            and isinstance(widget.layout().itemAt(0).widget(), QLineEdit)
+        ):
             return widget.layout().itemAt(0).widget().text()
         return widget.text() if isinstance(widget, QLineEdit) else None
 
@@ -57,6 +62,7 @@ class OptionsLogic:
             QSpinBox,
             QWidget,
         )
+
         # Skip if value is None (config key doesn't exist yet)
         if value is None:
             return
@@ -65,7 +71,9 @@ class OptionsLogic:
         elif isinstance(widget, QSpinBox):
             # QSpinBox requires int - coerce if value is string
             try:
-                widget.setValue(int(float(value)) if isinstance(value, str) else int(value))
+                widget.setValue(
+                    int(float(value)) if isinstance(value, str) else int(value)
+                )
             except (ValueError, TypeError):
                 pass  # Keep current value if coercion fails
         elif isinstance(widget, QDoubleSpinBox):
@@ -84,5 +92,9 @@ class OptionsLogic:
                 widget.setCurrentText(str(value))
         elif isinstance(widget, QLineEdit):
             widget.setText(str(value))
-        elif isinstance(widget, QWidget) and widget.layout() and isinstance(widget.layout().itemAt(0).widget(), QLineEdit):
+        elif (
+            isinstance(widget, QWidget)
+            and widget.layout()
+            and isinstance(widget.layout().itemAt(0).widget(), QLineEdit)
+        ):
             widget.layout().itemAt(0).widget().setText(str(value))

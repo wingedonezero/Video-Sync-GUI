@@ -4,6 +4,7 @@ Tab panel with dropdown selector for subtitle editor.
 
 Uses a dropdown (QComboBox) instead of traditional tabs to save vertical space.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

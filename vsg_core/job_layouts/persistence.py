@@ -24,11 +24,11 @@ class LayoutPersistence:
             self.layouts_dir.mkdir(parents=True, exist_ok=True)
 
             layout_file = self.layouts_dir / f"{job_id}.json"
-            temp_file = layout_file.with_suffix('.tmp')
+            temp_file = layout_file.with_suffix(".tmp")
 
-            layout_data['saved_timestamp'] = datetime.now().isoformat()
+            layout_data["saved_timestamp"] = datetime.now().isoformat()
 
-            with open(temp_file, 'w', encoding='utf-8') as f:
+            with open(temp_file, "w", encoding="utf-8") as f:
                 json.dump(layout_data, f, indent=2, ensure_ascii=False)
 
             temp_file.replace(layout_file)
@@ -44,7 +44,7 @@ class LayoutPersistence:
             if not layout_file.exists():
                 return None
 
-            with open(layout_file, encoding='utf-8') as f:
+            with open(layout_file, encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
             self.log(f"[LayoutPersistence] Error loading layout for {job_id}: {e}")

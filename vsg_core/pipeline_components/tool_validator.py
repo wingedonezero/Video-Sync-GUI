@@ -11,8 +11,8 @@ import shutil
 class ToolValidator:
     """Validates and locates required external tools."""
 
-    REQUIRED_TOOLS = ['ffmpeg', 'ffprobe', 'mkvmerge', 'mkvextract', 'mkvpropedit']
-    OPTIONAL_TOOLS = ['videodiff']
+    REQUIRED_TOOLS = ["ffmpeg", "ffprobe", "mkvmerge", "mkvextract", "mkvpropedit"]
+    OPTIONAL_TOOLS = ["videodiff"]
 
     @staticmethod
     def validate_tools() -> dict[str, str]:

@@ -7,6 +7,7 @@ Combines correlation baseline with subtitle-anchor's sliding window matching.
 
 All timing is float ms internally - rounding happens only at final save.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -27,8 +28,8 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
     Uses correlation to guide frame matching with time-based anchors.
     """
 
-    name = 'correlation-guided-frame-anchor'
-    description = 'Correlation-guided frame matching with time-based anchors'
+    name = "correlation-guided-frame-anchor"
+    description = "Correlation-guided frame matching with time-based anchors"
 
     def apply(
         self,
@@ -42,8 +43,8 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
         config: dict | None = None,
         temp_dir: Path | None = None,
         sync_exclusion_styles: list[str] | None = None,
-        sync_exclusion_mode: str = 'exclude',
-        **kwargs
+        sync_exclusion_mode: str = "exclude",
+        **kwargs,
     ) -> OperationResult:
         """
         Apply correlation-guided frame anchor sync to subtitle data.
@@ -86,8 +87,8 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
         if not source_video or not target_video:
             return OperationResult(
                 success=False,
-                operation='sync',
-                error='Both source and target videos required for correlation-guided-frame-anchor'
+                operation="sync",
+                error="Both source and target videos required for correlation-guided-frame-anchor",
             )
 
         # Calculate pure correlation (correlation only, without global shift)
@@ -109,17 +110,19 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
         log(f"[CorrGuided] FPS: {fps:.3f} (frame: {frame_duration_ms:.3f}ms)")
 
         # Get unified config parameters
-        search_range_ms = config.get('frame_search_range_ms', 2000)
-        hash_algorithm = config.get('frame_hash_algorithm', 'dhash')
-        hash_size = int(config.get('frame_hash_size', 8))
-        hash_threshold = int(config.get('frame_hash_threshold', 5))
-        window_radius = int(config.get('frame_window_radius', 5))
-        tolerance_ms = config.get('frame_agreement_tolerance_ms', 100)
-        fallback_mode = config.get('corr_anchor_fallback_mode', 'use-correlation')
-        anchor_positions = config.get('corr_anchor_anchor_positions', [10, 50, 90])
+        search_range_ms = config.get("frame_search_range_ms", 2000)
+        hash_algorithm = config.get("frame_hash_algorithm", "dhash")
+        hash_size = int(config.get("frame_hash_size", 8))
+        hash_threshold = int(config.get("frame_hash_threshold", 5))
+        window_radius = int(config.get("frame_window_radius", 5))
+        tolerance_ms = config.get("frame_agreement_tolerance_ms", 100)
+        fallback_mode = config.get("corr_anchor_fallback_mode", "use-correlation")
+        anchor_positions = config.get("corr_anchor_anchor_positions", [10, 50, 90])
 
         log(f"[CorrGuided] Search range: ±{search_range_ms}ms")
-        log(f"[CorrGuided] Hash: {hash_algorithm}, size={hash_size}, threshold={hash_threshold}")
+        log(
+            f"[CorrGuided] Hash: {hash_algorithm}, size={hash_size}, threshold={hash_threshold}"
+        )
         log(f"[CorrGuided] Anchor positions: {anchor_positions}%")
 
         # Try to get video duration for anchor calculation
@@ -132,7 +135,7 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
             else:
                 source_duration = 1200000  # 20 minutes default
 
-        log(f"[CorrGuided] Source duration: ~{source_duration/1000:.1f}s")
+        log(f"[CorrGuided] Source duration: ~{source_duration / 1000:.1f}s")
 
         # Try to import frame utilities
         try:
@@ -146,19 +149,33 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
             log(f"[CorrGuided] Frame utilities unavailable: {e}")
             log("[CorrGuided] Falling back to correlation-only offset")
             return self._apply_correlation_only(
-                subtitle_data, total_delay_ms, global_shift_ms, sync_exclusion_styles, sync_exclusion_mode, runner
+                subtitle_data,
+                total_delay_ms,
+                global_shift_ms,
+                sync_exclusion_styles,
+                sync_exclusion_mode,
+                runner,
             )
 
         # Open video readers
         try:
-            use_vs = config.get('frame_use_vapoursynth', True)
-            source_reader = VideoReader(source_video, runner, use_vapoursynth=use_vs, temp_dir=temp_dir)
-            target_reader = VideoReader(target_video, runner, use_vapoursynth=use_vs, temp_dir=temp_dir)
+            use_vs = config.get("frame_use_vapoursynth", True)
+            source_reader = VideoReader(
+                source_video, runner, use_vapoursynth=use_vs, temp_dir=temp_dir
+            )
+            target_reader = VideoReader(
+                target_video, runner, use_vapoursynth=use_vs, temp_dir=temp_dir
+            )
         except Exception as e:
             log(f"[CorrGuided] Failed to open videos: {e}")
             log("[CorrGuided] Falling back to correlation-only offset")
             return self._apply_correlation_only(
-                subtitle_data, total_delay_ms, global_shift_ms, sync_exclusion_styles, sync_exclusion_mode, runner
+                subtitle_data,
+                total_delay_ms,
+                global_shift_ms,
+                sync_exclusion_styles,
+                sync_exclusion_mode,
+                runner,
             )
 
         # Calculate anchor times from positions
@@ -170,7 +187,7 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
         checkpoint_details = []
 
         for i, anchor_time in enumerate(anchor_times):
-            log(f"[CorrGuided] Anchor {i+1}/{len(anchor_times)}: {anchor_time}ms")
+            log(f"[CorrGuided] Anchor {i + 1}/{len(anchor_times)}: {anchor_time}ms")
 
             # Get source frames for window
             source_hashes = []
@@ -178,7 +195,9 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
                 frame_time = anchor_time + int(offset * frame_duration_ms)
                 frame = source_reader.get_frame_at_time(frame_time)
                 if frame is not None:
-                    h = compute_frame_hash(frame, hash_size=hash_size, method=hash_algorithm)
+                    h = compute_frame_hash(
+                        frame, hash_size=hash_size, method=hash_algorithm
+                    )
                     if h is not None:
                         source_hashes.append((offset, h))
 
@@ -191,7 +210,7 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
 
             # Search around prediction
             best_match_offset = None
-            best_match_score = float('inf')
+            best_match_score = float("inf")
 
             search_start = predicted_target - search_range_ms
             search_end = predicted_target + search_range_ms
@@ -207,7 +226,9 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
                     target_time = int(search_time + src_offset * frame_duration_ms)
                     target_frame = target_reader.get_frame_at_time(target_time)
                     if target_frame is not None:
-                        target_hash = compute_frame_hash(target_frame, hash_size=hash_size, method=hash_algorithm)
+                        target_hash = compute_frame_hash(
+                            target_frame, hash_size=hash_size, method=hash_algorithm
+                        )
                         if target_hash is not None:
                             dist = compute_hamming_distance(src_hash, target_hash)
                             total_distance += dist
@@ -223,16 +244,24 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
 
             if best_match_offset is not None and best_match_score <= hash_threshold * 2:
                 measurements.append(best_match_offset)
-                checkpoint_details.append({
-                    'anchor': i + 1,
-                    'anchor_time_ms': anchor_time,
-                    'offset_ms': best_match_offset,
-                    'score': best_match_score,
-                    'quality': 'good' if best_match_score <= hash_threshold else 'marginal'
-                })
-                log(f"[CorrGuided]   Match: offset={best_match_offset:+.1f}ms, score={best_match_score:.1f}")
+                checkpoint_details.append(
+                    {
+                        "anchor": i + 1,
+                        "anchor_time_ms": anchor_time,
+                        "offset_ms": best_match_offset,
+                        "score": best_match_score,
+                        "quality": "good"
+                        if best_match_score <= hash_threshold
+                        else "marginal",
+                    }
+                )
+                log(
+                    f"[CorrGuided]   Match: offset={best_match_offset:+.1f}ms, score={best_match_score:.1f}"
+                )
             else:
-                log(f"[CorrGuided]   No good match (best score: {best_match_score:.1f})")
+                log(
+                    f"[CorrGuided]   No good match (best score: {best_match_score:.1f})"
+                )
 
         # Close readers
         try:
@@ -254,16 +283,20 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
                 sorted_m = sorted(measurements)
                 median_offset = sorted_m[len(sorted_m) // 2]
                 frame_correction_ms = median_offset - pure_correlation_ms
-                log(f"[CorrGuided] ✓ Anchors agree: median={median_offset:+.1f}ms, correction={frame_correction_ms:+.3f}ms")
+                log(
+                    f"[CorrGuided] ✓ Anchors agree: median={median_offset:+.1f}ms, correction={frame_correction_ms:+.3f}ms"
+                )
             else:
-                log(f"[CorrGuided] WARNING: Anchors disagree (range: {offset_range:.1f}ms)")
-                if fallback_mode == 'abort':
+                log(
+                    f"[CorrGuided] WARNING: Anchors disagree (range: {offset_range:.1f}ms)"
+                )
+                if fallback_mode == "abort":
                     return OperationResult(
                         success=False,
-                        operation='sync',
-                        error=f'Anchor offsets disagree: range {offset_range:.1f}ms exceeds {tolerance_ms}ms'
+                        operation="sync",
+                        error=f"Anchor offsets disagree: range {offset_range:.1f}ms exceeds {tolerance_ms}ms",
                     )
-                elif fallback_mode == 'use-median':
+                elif fallback_mode == "use-median":
                     sorted_m = sorted(measurements)
                     median_offset = sorted_m[len(sorted_m) // 2]
                     frame_correction_ms = median_offset - pure_correlation_ms
@@ -272,11 +305,11 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
                     log("[CorrGuided] Using correlation only (no frame correction)")
         else:
             log(f"[CorrGuided] Not enough anchor matches ({len(measurements)}/2)")
-            if fallback_mode == 'abort':
+            if fallback_mode == "abort":
                 return OperationResult(
                     success=False,
-                    operation='sync',
-                    error=f'Not enough anchor matches ({len(measurements)}/2 minimum)'
+                    operation="sync",
+                    error=f"Not enough anchor matches ({len(measurements)}/2 minimum)",
                 )
             log("[CorrGuided] Using correlation only")
 
@@ -292,9 +325,15 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
 
         # Apply offset to all events
         return self._apply_offset(
-            subtitle_data, final_offset_ms, total_delay_ms, global_shift_ms,
-            frame_correction_ms, checkpoint_details, sync_exclusion_styles,
-            sync_exclusion_mode, runner
+            subtitle_data,
+            final_offset_ms,
+            total_delay_ms,
+            global_shift_ms,
+            frame_correction_ms,
+            checkpoint_details,
+            sync_exclusion_styles,
+            sync_exclusion_mode,
+            runner,
         )
 
     def _apply_correlation_only(
@@ -304,12 +343,19 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
         global_shift_ms: float,
         sync_exclusion_styles: list[str] | None,
         sync_exclusion_mode: str,
-        runner
+        runner,
     ) -> OperationResult:
         """Apply correlation-only offset when frame matching unavailable."""
         return self._apply_offset(
-            subtitle_data, total_delay_ms, total_delay_ms, global_shift_ms,
-            0.0, [], sync_exclusion_styles, sync_exclusion_mode, runner
+            subtitle_data,
+            total_delay_ms,
+            total_delay_ms,
+            global_shift_ms,
+            0.0,
+            [],
+            sync_exclusion_styles,
+            sync_exclusion_mode,
+            runner,
         )
 
     def _apply_offset(
@@ -322,7 +368,7 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
         checkpoint_details: list[dict],
         sync_exclusion_styles: list[str] | None,
         sync_exclusion_mode: str,
-        runner
+        runner,
     ) -> OperationResult:
         """Apply the calculated offset to all events."""
         from ..data import OperationRecord, OperationResult, SyncEventData
@@ -331,7 +377,9 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
             if runner:
                 runner._log_message(msg)
 
-        log(f"[CorrGuided] Applying {final_offset_ms:+.3f}ms to {len(subtitle_data.events)} events")
+        log(
+            f"[CorrGuided] Applying {final_offset_ms:+.3f}ms to {len(subtitle_data.events)} events"
+        )
 
         events_synced = 0
         events_excluded = 0
@@ -343,7 +391,7 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
             # Check sync exclusion
             should_exclude = False
             if sync_exclusion_styles:
-                if sync_exclusion_mode == 'exclude':
+                if sync_exclusion_mode == "exclude":
                     should_exclude = event.style in sync_exclusion_styles
                 else:  # include mode
                     should_exclude = event.style not in sync_exclusion_styles
@@ -388,35 +436,37 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
 
         # Record operation
         record = OperationRecord(
-            operation='sync',
+            operation="sync",
             timestamp=datetime.now(),
             parameters={
-                'mode': self.name,
-                'total_delay_ms': total_delay_ms,
-                'global_shift_ms': global_shift_ms,
-                'frame_correction_ms': frame_correction_ms,
-                'final_offset_ms': final_offset_ms,
-                'num_anchors': len(checkpoint_details),
+                "mode": self.name,
+                "total_delay_ms": total_delay_ms,
+                "global_shift_ms": global_shift_ms,
+                "frame_correction_ms": frame_correction_ms,
+                "final_offset_ms": final_offset_ms,
+                "num_anchors": len(checkpoint_details),
             },
             events_affected=events_synced,
-            summary=summary
+            summary=summary,
         )
         subtitle_data.operations.append(record)
 
         log(f"[CorrGuided] Sync complete: {events_synced} events")
         if events_excluded > 0:
-            log(f"[CorrGuided] ({events_excluded} styles excluded from frame correction)")
+            log(
+                f"[CorrGuided] ({events_excluded} styles excluded from frame correction)"
+            )
         log("[CorrGuided] ===================================")
 
         return OperationResult(
             success=True,
-            operation='sync',
+            operation="sync",
             events_affected=events_synced,
             summary=summary,
             details={
-                'frame_correction_ms': frame_correction_ms,
-                'final_offset_ms': final_offset_ms,
-                'checkpoints': checkpoint_details,
-                'events_excluded': events_excluded,
-            }
+                "frame_correction_ms": frame_correction_ms,
+                "final_offset_ms": final_offset_ms,
+                "checkpoints": checkpoint_details,
+                "events_excluded": events_excluded,
+            },
         )

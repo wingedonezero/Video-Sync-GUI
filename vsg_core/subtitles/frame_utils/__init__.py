@@ -14,6 +14,7 @@ All public functions and classes are re-exported here for backwards compatibilit
 Existing imports will continue to work:
     from vsg_core.subtitles.frame_utils import VideoReader, detect_video_fps
 """
+
 from __future__ import annotations
 
 # ============================================================================
@@ -88,35 +89,35 @@ from .video_reader import (
 # ============================================================================
 __all__ = [
     # Timing
-    'time_to_frame_floor',
-    'frame_to_time_floor',
-    'time_to_frame_middle',
-    'frame_to_time_middle',
-    'time_to_frame_aegisub',
-    'frame_to_time_aegisub',
-    'clear_vfr_cache',
-    'get_vfr_timestamps',
-    'frame_to_time_vfr',
-    'time_to_frame_vfr',
+    "time_to_frame_floor",
+    "frame_to_time_floor",
+    "time_to_frame_middle",
+    "frame_to_time_middle",
+    "time_to_frame_aegisub",
+    "frame_to_time_aegisub",
+    "clear_vfr_cache",
+    "get_vfr_timestamps",
+    "frame_to_time_vfr",
+    "time_to_frame_vfr",
     # Video properties
-    'detect_video_fps',
-    'detect_video_properties',
-    'get_video_properties',
-    'get_video_duration_ms',
-    'compare_video_properties',
+    "detect_video_fps",
+    "detect_video_properties",
+    "get_video_properties",
+    "get_video_duration_ms",
+    "compare_video_properties",
     # Scene detection
-    'detect_scene_changes',
+    "detect_scene_changes",
     # Video reader
-    'VideoReader',
-    'get_vapoursynth_frame_info',
+    "VideoReader",
+    "get_vapoursynth_frame_info",
     # Frame hashing
-    'compute_perceptual_hash',
-    'compute_frame_hash',
-    'compute_hamming_distance',
-    'compute_ssim',
-    'compute_mse',
-    'compare_frames',
+    "compute_perceptual_hash",
+    "compute_frame_hash",
+    "compute_hamming_distance",
+    "compute_ssim",
+    "compute_mse",
+    "compare_frames",
     # Validation
-    'extract_frame_as_image',
-    'validate_frame_alignment',
+    "extract_frame_as_image",
+    "validate_frame_alignment",
 ]

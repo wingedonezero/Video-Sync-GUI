@@ -19,11 +19,18 @@ from .logic import TrackWidgetLogic
 
 class TrackWidget(QWidget):
     """A self-contained widget for a single track in the final layout."""
-    def __init__(self, track_data: dict, available_sources: list[str], parent=None, source_settings: dict = None):
+
+    def __init__(
+        self,
+        track_data: dict,
+        available_sources: list[str],
+        parent=None,
+        source_settings: dict = None,
+    ):
         super().__init__(parent)
         self.track_data = track_data
-        self.track_type = track_data.get('type')
-        self.codec_id = track_data.get('codec_id')
+        self.track_type = track_data.get("type")
+        self.codec_id = track_data.get("codec_id")
         self.source_settings = source_settings or {}
 
         # --- UI Elements ---
@@ -99,42 +106,46 @@ class TrackWidget(QWidget):
             track_type=self.track_type,
             codec_id=self.codec_id,
             track_data=self.track_data,
-            **current_config
+            **current_config,
         )
 
         if dialog.exec():
             new_config = dialog.read_values()
             # Update the hidden controls on this widget
-            self.cb_ocr.setChecked(new_config.get('perform_ocr', False))
-            self.cb_convert.setChecked(new_config.get('convert_to_ass', False))
-            self.cb_rescale.setChecked(new_config.get('rescale', False))
-            self.size_multiplier.setValue(new_config.get('size_multiplier', 1.0))
+            self.cb_ocr.setChecked(new_config.get("perform_ocr", False))
+            self.cb_convert.setChecked(new_config.get("convert_to_ass", False))
+            self.cb_rescale.setChecked(new_config.get("rescale", False))
+            self.size_multiplier.setValue(new_config.get("size_multiplier", 1.0))
 
             # NEW: Store custom language in track_data
-            custom_lang = new_config.get('custom_lang', '')
+            custom_lang = new_config.get("custom_lang", "")
             if custom_lang:
-                self.track_data['custom_lang'] = custom_lang
-            elif 'custom_lang' in self.track_data:
-                del self.track_data['custom_lang']
+                self.track_data["custom_lang"] = custom_lang
+            elif "custom_lang" in self.track_data:
+                del self.track_data["custom_lang"]
 
             # NEW: Store custom name in track_data
-            custom_name = new_config.get('custom_name', '')
+            custom_name = new_config.get("custom_name", "")
             if custom_name:
-                self.track_data['custom_name'] = custom_name
-            elif 'custom_name' in self.track_data:
-                del self.track_data['custom_name']
+                self.track_data["custom_name"] = custom_name
+            elif "custom_name" in self.track_data:
+                del self.track_data["custom_name"]
 
             # NEW: Store sync exclusion config in track_data
-            sync_exclusion_styles = new_config.get('sync_exclusion_styles', [])
+            sync_exclusion_styles = new_config.get("sync_exclusion_styles", [])
             if sync_exclusion_styles:
-                self.track_data['sync_exclusion_styles'] = sync_exclusion_styles
-                self.track_data['sync_exclusion_mode'] = new_config.get('sync_exclusion_mode', 'exclude')
-                self.track_data['sync_exclusion_original_style_list'] = new_config.get('sync_exclusion_original_style_list', [])
+                self.track_data["sync_exclusion_styles"] = sync_exclusion_styles
+                self.track_data["sync_exclusion_mode"] = new_config.get(
+                    "sync_exclusion_mode", "exclude"
+                )
+                self.track_data["sync_exclusion_original_style_list"] = new_config.get(
+                    "sync_exclusion_original_style_list", []
+                )
             else:
                 # Clear sync exclusion fields if no styles selected
-                self.track_data.pop('sync_exclusion_styles', None)
-                self.track_data.pop('sync_exclusion_mode', None)
-                self.track_data.pop('sync_exclusion_original_style_list', None)
+                self.track_data.pop("sync_exclusion_styles", None)
+                self.track_data.pop("sync_exclusion_mode", None)
+                self.track_data.pop("sync_exclusion_original_style_list", None)
 
             self.logic.refresh_badges()
             self.logic.refresh_summary()

@@ -13,12 +13,13 @@ class MuxStep:
     """
     Builds mkvmerge tokens and stores them on the context.
     """
+
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
         plan = MergePlan(
             items=ctx.extracted_items or [],
             delays=ctx.delays or Delays(),
             chapters_xml=Path(ctx.chapters_xml) if ctx.chapters_xml else None,
-            attachments=[Path(a) for a in (ctx.attachments or [])]
+            attachments=[Path(a) for a in (ctx.attachments or [])],
         )
 
         builder = MkvmergeOptionsBuilder()

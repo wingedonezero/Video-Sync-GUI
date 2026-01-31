@@ -40,9 +40,9 @@ from .tab_panel import TabPanel
 from .video_panel import VideoPanel
 
 __all__ = [
-    'EditorState',
-    'EventsTable',
-    'SubtitleEditorWindow',
-    'TabPanel',
-    'VideoPanel',
+    "EditorState",
+    "EventsTable",
+    "SubtitleEditorWindow",
+    "TabPanel",
+    "VideoPanel",
 ]

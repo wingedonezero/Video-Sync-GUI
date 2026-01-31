@@ -12,6 +12,7 @@ from vsg_core.models.settings import AppSettings
 if TYPE_CHECKING:
     from vsg_core.audit import AuditTrail
 
+
 @dataclass
 class Context:
     # Provided by Orchestrator entry
@@ -59,7 +60,7 @@ class Context:
     global_shift_is_required: bool = False
 
     # Timing sync mode ('positive_only', 'allow_negative', or 'preserve_existing')
-    sync_mode: str = 'positive_only'
+    sync_mode: str = "positive_only"
 
     # NEW: Track which sources had stepping detected (for final report)
     stepping_sources: list[str] = field(default_factory=list)

@@ -33,6 +33,7 @@ LANGUAGE_CODES = [
     ("Hindi (hin)", "hin"),
 ]
 
+
 class TrackSettingsLogic:
     """Logic layer for TrackSettingsDialog."""
 
@@ -51,7 +52,7 @@ class TrackSettingsLogic:
 
     def init_for_type_and_codec(self, track_type: str, codec_id: str):
         """Shows or hides widgets based on the track type."""
-        is_subs = (track_type == "subtitles")
+        is_subs = track_type == "subtitles"
 
         # Show subtitle group only for subtitles
         self.v.subtitle_group.setVisible(is_subs)
@@ -60,14 +61,14 @@ class TrackSettingsLogic:
             codec_upper = (codec_id or "").upper()
 
             # Enable OCR only for image-based subtitles
-            is_ocr_compatible = 'VOBSUB' in codec_upper or 'PGS' in codec_upper
+            is_ocr_compatible = "VOBSUB" in codec_upper or "PGS" in codec_upper
             self.v.cb_ocr.setEnabled(is_ocr_compatible)
 
             # Enable convert-to-ASS only for SRT tracks
             self.v.cb_convert.setEnabled("S_TEXT/UTF8" in codec_upper)
 
             # Show sync exclusion button only for ASS/SSA tracks (they have styles)
-            is_ass_or_ssa = 'S_TEXT/ASS' in codec_upper or 'S_TEXT/SSA' in codec_upper
+            is_ass_or_ssa = "S_TEXT/ASS" in codec_upper or "S_TEXT/SSA" in codec_upper
             self.v.sync_exclusion_btn.setVisible(is_ass_or_ssa)
         else:
             # Hide sync exclusion button for non-subtitle tracks
@@ -82,7 +83,7 @@ class TrackSettingsLogic:
         convert_to_ass: bool = False,
         rescale: bool = False,
         size_multiplier: float = 1.0,
-        **kwargs  # Accept and ignore any other arguments
+        **kwargs,  # Accept and ignore any other arguments
     ):
         """Applies the starting values to the widgets."""
         # Set language

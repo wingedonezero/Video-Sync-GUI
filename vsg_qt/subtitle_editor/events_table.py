@@ -17,6 +17,7 @@ Features:
 - Highlight overlapping events
 - Word wrap for text column
 """
+
 from __future__ import annotations
 
 import re
@@ -38,19 +39,19 @@ from PySide6.QtWidgets import (
 # Regex patterns for detecting effect/positioning tags that suggest non-dialogue content
 # These are override tags typically used for signs, karaoke, and effects
 EFFECT_TAG_PATTERNS = [
-    r'\\pos\s*\(',       # Positioning
-    r'\\move\s*\(',      # Movement animation
-    r'\\org\s*\(',       # Transform origin
-    r'\\k[fo]?\d',       # Karaoke timing (\k, \kf, \ko)
-    r'\\an[1-9]',        # Alignment (non-default positioning)
-    r'\\fad\s*\(',       # Fade in/out
-    r'\\fade\s*\(',      # Advanced fade
-    r'\\t\s*\(',         # Animation/transform
-    r'\\clip\s*\(',      # Clipping (often used for signs)
-    r'\\iclip\s*\(',     # Inverse clipping
-    r'\\p[1-9]',         # Drawing mode (vector graphics)
+    r"\\pos\s*\(",  # Positioning
+    r"\\move\s*\(",  # Movement animation
+    r"\\org\s*\(",  # Transform origin
+    r"\\k[fo]?\d",  # Karaoke timing (\k, \kf, \ko)
+    r"\\an[1-9]",  # Alignment (non-default positioning)
+    r"\\fad\s*\(",  # Fade in/out
+    r"\\fade\s*\(",  # Advanced fade
+    r"\\t\s*\(",  # Animation/transform
+    r"\\clip\s*\(",  # Clipping (often used for signs)
+    r"\\iclip\s*\(",  # Inverse clipping
+    r"\\p[1-9]",  # Drawing mode (vector graphics)
 ]
-EFFECT_TAG_REGEX = re.compile('|'.join(EFFECT_TAG_PATTERNS), re.IGNORECASE)
+EFFECT_TAG_REGEX = re.compile("|".join(EFFECT_TAG_PATTERNS), re.IGNORECASE)
 
 from .utils import calculate_cps, cps_color, cps_tooltip, ms_to_ass_time
 
@@ -83,9 +84,9 @@ class EventsTable(QWidget):
     COL_TEXT = 7
 
     # Highlight colors
-    COLOR_SELECTED = QColor(60, 100, 160)      # Blue for selected row
-    COLOR_OVERLAP = QColor(80, 80, 50)         # Yellow-ish for overlapping
-    COLOR_FILTERED_OUT = QColor(60, 60, 60)    # Dimmed for filtered out
+    COLOR_SELECTED = QColor(60, 100, 160)  # Blue for selected row
+    COLOR_OVERLAP = QColor(80, 80, 50)  # Yellow-ish for overlapping
+    COLOR_FILTERED_OUT = QColor(60, 60, 60)  # Dimmed for filtered out
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -94,7 +95,9 @@ class EventsTable(QWidget):
         self._filter_preview_mode: bool = False
         self._flag_effects_mode: bool = False
         self._cached_kept_indices: set[int] | None = None  # Cache to avoid O(N²)
-        self._flagged_effect_indices: list[int] = []  # Cached list of flagged row indices
+        self._flagged_effect_indices: list[
+            int
+        ] = []  # Cached list of flagged row indices
 
         self._setup_ui()
 
@@ -105,9 +108,9 @@ class EventsTable(QWidget):
 
         self._table = QTableWidget()
         self._table.setColumnCount(8)
-        self._table.setHorizontalHeaderLabels([
-            '#', 'L', 'Start', 'End', 'CPS', 'Style', 'Actor', 'Text'
-        ])
+        self._table.setHorizontalHeaderLabels(
+            ["#", "L", "Start", "End", "CPS", "Style", "Actor", "Text"]
+        )
 
         # Selection behavior
         self._table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -179,7 +182,9 @@ class EventsTable(QWidget):
         # Add ⚠️ warning if this is an excluded line with effect tags
         row_text = str(row + 1)
         if self._flag_effects_mode and self._cached_kept_indices is not None:
-            if row not in self._cached_kept_indices and self._has_effect_tags(event.text):
+            if row not in self._cached_kept_indices and self._has_effect_tags(
+                event.text
+            ):
                 row_text = f"⚠️ {row + 1}"
 
         num_item = QTableWidgetItem(row_text)
@@ -229,7 +234,7 @@ class EventsTable(QWidget):
 
         # Text (with * prefix if contains override tags)
         text = event.text
-        has_tags = '{' in text and '}' in text
+        has_tags = "{" in text and "}" in text
         display_text = f"* {text}" if has_tags else text
         text_item = QTableWidgetItem(display_text)
         self._table.setItem(row, self.COL_TEXT, text_item)
@@ -305,14 +310,16 @@ class EventsTable(QWidget):
             return
 
         current_style = events[row].style
-        current_index = style_names.index(current_style) if current_style in style_names else 0
+        current_index = (
+            style_names.index(current_style) if current_style in style_names else 0
+        )
         new_style, ok = QInputDialog.getItem(
             self,
             "Change Style",
             "Select a new style:",
             style_names,
             current_index,
-            False
+            False,
         )
         if ok and new_style:
             self._state.update_event_style(row, new_style)
@@ -395,7 +402,11 @@ class EventsTable(QWidget):
             return
 
         events = self._state.events
-        kept_indices = self._state.get_filtered_event_indices() if self._flag_effects_mode else set()
+        kept_indices = (
+            self._state.get_filtered_event_indices()
+            if self._flag_effects_mode
+            else set()
+        )
 
         # Build list of flagged indices
         new_flagged = []
@@ -409,9 +420,11 @@ class EventsTable(QWidget):
                 continue
 
             # Determine if this row should have a warning
-            is_flagged = (self._flag_effects_mode and
-                          row not in kept_indices and
-                          self._has_effect_tags(events[row].text))
+            is_flagged = (
+                self._flag_effects_mode
+                and row not in kept_indices
+                and self._has_effect_tags(events[row].text)
+            )
 
             if is_flagged:
                 new_flagged.append(row)

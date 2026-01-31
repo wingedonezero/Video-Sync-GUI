@@ -28,198 +28,195 @@ from scipy.io import wavfile
 from scipy.signal import resample_poly
 
 # Import GPU environment support
-if importlib.util.find_spec('vsg_core.system.gpu_env'):
+if importlib.util.find_spec("vsg_core.system.gpu_env"):
     from vsg_core.system.gpu_env import get_subprocess_environment
 else:
+
     def get_subprocess_environment():
         return os.environ.copy()
 
 
 # Separation modes available in the UI
 SEPARATION_MODES = {
-    'none': None,
-    'instrumental': 'Instrumental',
-    'vocals': 'Vocals',
+    "none": None,
+    "instrumental": "Instrumental",
+    "vocals": "Vocals",
 }
 
-DEFAULT_MODEL = 'default'
+DEFAULT_MODEL = "default"
 
 # Model quality database with SDR scores, rankings, and use-case recommendations
 # Based on the audio-separator project recommendations and community testing
 MODEL_QUALITY_DATABASE = {
     # BS-Roformer models - Best for vocals/instrumental separation
-    'model_bs_roformer_ep_317_sdr_12.9755.ckpt': {
-        'quality_tier': 'S-Tier',
-        'rank': 1,
-        'sdr_vocals': 12.9,
-        'sdr_instrumental': 17.0,
-        'use_cases': ['Instrumental', 'Vocals', 'General Purpose'],
-        'recommended': True,
-        'description_override': 'Highest quality vocals/instrumental separation. Best overall performance. SLOW: 2-5 min for 3-min audio.',
+    "model_bs_roformer_ep_317_sdr_12.9755.ckpt": {
+        "quality_tier": "S-Tier",
+        "rank": 1,
+        "sdr_vocals": 12.9,
+        "sdr_instrumental": 17.0,
+        "use_cases": ["Instrumental", "Vocals", "General Purpose"],
+        "recommended": True,
+        "description_override": "Highest quality vocals/instrumental separation. Best overall performance. SLOW: 2-5 min for 3-min audio.",
     },
-    'model_bs_roformer_ep_368_sdr_12.9628.ckpt': {
-        'quality_tier': 'S-Tier',
-        'rank': 2,
-        'sdr_vocals': 12.9,
-        'sdr_instrumental': 17.0,
-        'use_cases': ['Instrumental', 'Vocals', 'General Purpose'],
-        'recommended': True,
-        'description_override': 'Excellent vocals/instrumental separation. Very close to ep_317. SLOW: 2-5 min for 3-min audio.',
+    "model_bs_roformer_ep_368_sdr_12.9628.ckpt": {
+        "quality_tier": "S-Tier",
+        "rank": 2,
+        "sdr_vocals": 12.9,
+        "sdr_instrumental": 17.0,
+        "use_cases": ["Instrumental", "Vocals", "General Purpose"],
+        "recommended": True,
+        "description_override": "Excellent vocals/instrumental separation. Very close to ep_317. SLOW: 2-5 min for 3-min audio.",
     },
-    'deverb_bs_roformer_8_384dim_10depth.ckpt': {
-        'quality_tier': 'A-Tier',
-        'rank': 10,
-        'use_cases': ['Reverb Removal', 'Cleanup'],
-        'description_override': 'Specialized model for removing reverb from audio.',
+    "deverb_bs_roformer_8_384dim_10depth.ckpt": {
+        "quality_tier": "A-Tier",
+        "rank": 10,
+        "use_cases": ["Reverb Removal", "Cleanup"],
+        "description_override": "Specialized model for removing reverb from audio.",
     },
-
     # MelBand Roformer models
-    'mel_band_roformer_kim_ft_unwa.ckpt': {
-        'quality_tier': 'A-Tier',
-        'rank': 5,
-        'sdr_vocals': 12.4,
-        'use_cases': ['Vocals'],
-        'description_override': 'Excellent vocals extraction with good instrumental preservation.',
+    "mel_band_roformer_kim_ft_unwa.ckpt": {
+        "quality_tier": "A-Tier",
+        "rank": 5,
+        "sdr_vocals": 12.4,
+        "use_cases": ["Vocals"],
+        "description_override": "Excellent vocals extraction with good instrumental preservation.",
     },
-    'vocals_mel_band_roformer.ckpt': {
-        'quality_tier': 'A-Tier',
-        'rank': 6,
-        'sdr_vocals': 12.6,
-        'use_cases': ['Vocals'],
-        'description_override': 'Strong vocals separation model.',
+    "vocals_mel_band_roformer.ckpt": {
+        "quality_tier": "A-Tier",
+        "rank": 6,
+        "sdr_vocals": 12.6,
+        "use_cases": ["Vocals"],
+        "description_override": "Strong vocals separation model.",
     },
-    'mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt': {
-        'quality_tier': 'A-Tier',
-        'rank': 11,
-        'sdr_vocals': 10.1,
-        'use_cases': ['Karaoke', 'Backing Vocals'],
-        'description_override': 'Specialized for karaoke - separates lead vocals from backing vocals.',
+    "mel_band_roformer_karaoke_aufr33_viperx_sdr_10.1956.ckpt": {
+        "quality_tier": "A-Tier",
+        "rank": 11,
+        "sdr_vocals": 10.1,
+        "use_cases": ["Karaoke", "Backing Vocals"],
+        "description_override": "Specialized for karaoke - separates lead vocals from backing vocals.",
     },
-    'model_mel_band_roformer_ep_3005_sdr_11.4360.ckpt': {
-        'quality_tier': 'A-Tier',
-        'rank': 4,
-        'sdr_vocals': 11.4,
-        'use_cases': ['Vocals', 'Dialogue'],
-        'description_override': 'High-quality separation, good for dialogue extraction.',
+    "model_mel_band_roformer_ep_3005_sdr_11.4360.ckpt": {
+        "quality_tier": "A-Tier",
+        "rank": 4,
+        "sdr_vocals": 11.4,
+        "use_cases": ["Vocals", "Dialogue"],
+        "description_override": "High-quality separation, good for dialogue extraction.",
     },
-    'denoise_mel_band_roformer_aufr33_sdr_27.9959.ckpt': {
-        'quality_tier': 'S-Tier',
-        'rank': 9,
-        'sdr_vocals': 27.9,
-        'use_cases': ['Denoise', 'Cleanup'],
-        'description_override': 'Exceptional denoise model with very high SDR.',
+    "denoise_mel_band_roformer_aufr33_sdr_27.9959.ckpt": {
+        "quality_tier": "S-Tier",
+        "rank": 9,
+        "sdr_vocals": 27.9,
+        "use_cases": ["Denoise", "Cleanup"],
+        "description_override": "Exceptional denoise model with very high SDR.",
     },
-
     # MDX-Net models
-    'MDX23C-8KFFT-InstVoc_HQ_2.ckpt': {
-        'quality_tier': 'A-Tier',
-        'rank': 3,
-        'use_cases': ['Instrumental', 'General Purpose'],
-        'recommended': True,
-        'description_override': 'High-quality MDX model for instrumental/vocals separation.',
+    "MDX23C-8KFFT-InstVoc_HQ_2.ckpt": {
+        "quality_tier": "A-Tier",
+        "rank": 3,
+        "use_cases": ["Instrumental", "General Purpose"],
+        "recommended": True,
+        "description_override": "High-quality MDX model for instrumental/vocals separation.",
     },
-    'UVR-MDX-NET-Inst_HQ_4.onnx': {
-        'quality_tier': 'A-Tier',
-        'rank': 7,
-        'use_cases': ['Instrumental'],
-        'description_override': 'Reliable instrumental separation with good performance.',
+    "UVR-MDX-NET-Inst_HQ_4.onnx": {
+        "quality_tier": "A-Tier",
+        "rank": 7,
+        "use_cases": ["Instrumental"],
+        "description_override": "Reliable instrumental separation with good performance.",
     },
-    'UVR_MDXNET_KARA_2.onnx': {
-        'quality_tier': 'B-Tier',
-        'rank': 12,
-        'use_cases': ['Karaoke'],
-        'description_override': 'Karaoke-specific model for backing track creation.',
+    "UVR_MDXNET_KARA_2.onnx": {
+        "quality_tier": "B-Tier",
+        "rank": 12,
+        "use_cases": ["Karaoke"],
+        "description_override": "Karaoke-specific model for backing track creation.",
     },
-
     # VR Architecture models - Fast but lower quality
-    'Kim_Vocal_2.onnx': {
-        'quality_tier': 'B-Tier',
-        'rank': 13,
-        'use_cases': ['Vocals', 'Fast Processing'],
-        'description_override': 'Fast vocals extraction, lower quality than Roformer models.',
+    "Kim_Vocal_2.onnx": {
+        "quality_tier": "B-Tier",
+        "rank": 13,
+        "use_cases": ["Vocals", "Fast Processing"],
+        "description_override": "Fast vocals extraction, lower quality than Roformer models.",
     },
-    'kuielab_a_vocals.onnx': {
-        'quality_tier': 'B-Tier',
-        'rank': 14,
-        'use_cases': ['Vocals', 'Fast Processing'],
-        'description_override': 'Quick vocals separation, suitable for batch processing.',
+    "kuielab_a_vocals.onnx": {
+        "quality_tier": "B-Tier",
+        "rank": 14,
+        "use_cases": ["Vocals", "Fast Processing"],
+        "description_override": "Quick vocals separation, suitable for batch processing.",
     },
-    '4_HP-Vocal-UVR.pth': {
-        'quality_tier': 'B-Tier',
-        'rank': 15,
-        'use_cases': ['Vocals', 'Fast Processing'],
-        'description_override': 'Fast VR model for vocals extraction.',
+    "4_HP-Vocal-UVR.pth": {
+        "quality_tier": "B-Tier",
+        "rank": 15,
+        "use_cases": ["Vocals", "Fast Processing"],
+        "description_override": "Fast VR model for vocals extraction.",
     },
-    '2_HP-UVR.pth': {
-        'quality_tier': 'B-Tier',
-        'rank': 8,
-        'use_cases': ['Instrumental', 'Fast Processing'],
-        'recommended': True,
-        'description_override': 'Fastest instrumental separation. FAST: ~20 sec for 3-min audio. Good speed/quality balance.',
+    "2_HP-UVR.pth": {
+        "quality_tier": "B-Tier",
+        "rank": 8,
+        "use_cases": ["Instrumental", "Fast Processing"],
+        "recommended": True,
+        "description_override": "Fastest instrumental separation. FAST: ~20 sec for 3-min audio. Good speed/quality balance.",
     },
-    '6_HP-Karaoke-UVR.pth': {
-        'quality_tier': 'B-Tier',
-        'rank': 16,
-        'use_cases': ['Karaoke', 'Fast Processing'],
-        'description_override': 'Fast karaoke model for quick backing track creation.',
+    "6_HP-Karaoke-UVR.pth": {
+        "quality_tier": "B-Tier",
+        "rank": 16,
+        "use_cases": ["Karaoke", "Fast Processing"],
+        "description_override": "Fast karaoke model for quick backing track creation.",
     },
-    'kuielab_a_bass.onnx': {
-        'quality_tier': 'B-Tier',
-        'rank': 17,
-        'use_cases': ['Bass', 'Multi-Instrument'],
-        'description_override': 'Specialized bass extraction model.',
+    "kuielab_a_bass.onnx": {
+        "quality_tier": "B-Tier",
+        "rank": 17,
+        "use_cases": ["Bass", "Multi-Instrument"],
+        "description_override": "Specialized bass extraction model.",
     },
-    'kuielab_a_drums.onnx': {
-        'quality_tier': 'B-Tier',
-        'rank': 18,
-        'use_cases': ['Drums', 'Multi-Instrument'],
-        'description_override': 'Specialized drums extraction model.',
+    "kuielab_a_drums.onnx": {
+        "quality_tier": "B-Tier",
+        "rank": 18,
+        "use_cases": ["Drums", "Multi-Instrument"],
+        "description_override": "Specialized drums extraction model.",
     },
-
     # Demucs models - Multi-stem separation
-    'htdemucs': {
-        'quality_tier': 'A-Tier',
-        'rank': 19,
-        'use_cases': ['Multi-Instrument', '4-Stem', 'General Purpose'],
-        'recommended': True,
-        'sdr_vocals': 7.0,  # Approximate, varies by stem
-        'description_override': 'Best all-around 4-stem separation (drums/bass/other/vocals). MEDIUM: ~30-60 sec for 3-min audio.',
+    "htdemucs": {
+        "quality_tier": "A-Tier",
+        "rank": 19,
+        "use_cases": ["Multi-Instrument", "4-Stem", "General Purpose"],
+        "recommended": True,
+        "sdr_vocals": 7.0,  # Approximate, varies by stem
+        "description_override": "Best all-around 4-stem separation (drums/bass/other/vocals). MEDIUM: ~30-60 sec for 3-min audio.",
     },
-    'htdemucs_ft': {
-        'quality_tier': 'A-Tier',
-        'rank': 20,
-        'use_cases': ['Multi-Instrument', '4-Stem'],
-        'sdr_vocals': 7.2,  # Approximate, fine-tuned version
-        'description_override': 'Fine-tuned version of htdemucs with slightly better performance. MEDIUM: ~30-60 sec for 3-min audio.',
+    "htdemucs_ft": {
+        "quality_tier": "A-Tier",
+        "rank": 20,
+        "use_cases": ["Multi-Instrument", "4-Stem"],
+        "sdr_vocals": 7.2,  # Approximate, fine-tuned version
+        "description_override": "Fine-tuned version of htdemucs with slightly better performance. MEDIUM: ~30-60 sec for 3-min audio.",
     },
-    'htdemucs_6s': {
-        'quality_tier': 'A-Tier',
-        'rank': 21,
-        'use_cases': ['Multi-Instrument', '6-Stem', 'Advanced'],
-        'sdr_vocals': 6.8,  # Approximate
-        'description_override': '6-stem separation including drums/bass/other/vocals/guitar/piano. MEDIUM: ~30-60 sec for 3-min audio.',
+    "htdemucs_6s": {
+        "quality_tier": "A-Tier",
+        "rank": 21,
+        "use_cases": ["Multi-Instrument", "6-Stem", "Advanced"],
+        "sdr_vocals": 6.8,  # Approximate
+        "description_override": "6-stem separation including drums/bass/other/vocals/guitar/piano. MEDIUM: ~30-60 sec for 3-min audio.",
     },
-    'htdemucs.yaml': {
-        'quality_tier': 'A-Tier',
-        'rank': 19,
-        'use_cases': ['Multi-Instrument', '4-Stem', 'General Purpose'],
-        'recommended': True,
-        'sdr_vocals': 7.0,
-        'description_override': 'Best all-around 4-stem separation (drums/bass/other/vocals). MEDIUM: ~30-60 sec for 3-min audio.',
+    "htdemucs.yaml": {
+        "quality_tier": "A-Tier",
+        "rank": 19,
+        "use_cases": ["Multi-Instrument", "4-Stem", "General Purpose"],
+        "recommended": True,
+        "sdr_vocals": 7.0,
+        "description_override": "Best all-around 4-stem separation (drums/bass/other/vocals). MEDIUM: ~30-60 sec for 3-min audio.",
     },
-    'htdemucs_ft.yaml': {
-        'quality_tier': 'A-Tier',
-        'rank': 20,
-        'use_cases': ['Multi-Instrument', '4-Stem'],
-        'sdr_vocals': 7.2,
-        'description_override': 'Fine-tuned version of htdemucs with slightly better performance. MEDIUM: ~30-60 sec for 3-min audio.',
+    "htdemucs_ft.yaml": {
+        "quality_tier": "A-Tier",
+        "rank": 20,
+        "use_cases": ["Multi-Instrument", "4-Stem"],
+        "sdr_vocals": 7.2,
+        "description_override": "Fine-tuned version of htdemucs with slightly better performance. MEDIUM: ~30-60 sec for 3-min audio.",
     },
-    'htdemucs_6s.yaml': {
-        'quality_tier': 'A-Tier',
-        'rank': 21,
-        'use_cases': ['Multi-Instrument', '6-Stem', 'Advanced'],
-        'sdr_vocals': 6.8,
-        'description_override': '6-stem separation including drums/bass/other/vocals/guitar/piano. MEDIUM: ~30-60 sec for 3-min audio.',
+    "htdemucs_6s.yaml": {
+        "quality_tier": "A-Tier",
+        "rank": 21,
+        "use_cases": ["Multi-Instrument", "6-Stem", "Advanced"],
+        "sdr_vocals": 6.8,
+        "description_override": "6-stem separation including drums/bass/other/vocals/guitar/piano. MEDIUM: ~30-60 sec for 3-min audio.",
     },
 }
 
@@ -227,29 +224,29 @@ MODEL_QUALITY_DATABASE = {
 # These are intentionally limited to avoid overwhelming users with large lists.
 CURATED_MODELS: list[dict[str, str]] = [
     {
-        'name': 'Demucs v4: htdemucs',
-        'filename': 'htdemucs',
-        'description': 'Best all-round 4-stem separation (drums/bass/other/vocals) with strong balance.',
+        "name": "Demucs v4: htdemucs",
+        "filename": "htdemucs",
+        "description": "Best all-round 4-stem separation (drums/bass/other/vocals) with strong balance.",
     },
     {
-        'name': 'BS-Roformer Viperx 1297 (Highest Quality)',
-        'filename': 'model_bs_roformer_ep_317_sdr_12.9755.ckpt',
-        'description': 'Top quality 2-stem (vocals SDR 12.9, instrumental SDR 17.0). Best overall performance.',
+        "name": "BS-Roformer Viperx 1297 (Highest Quality)",
+        "filename": "model_bs_roformer_ep_317_sdr_12.9755.ckpt",
+        "description": "Top quality 2-stem (vocals SDR 12.9, instrumental SDR 17.0). Best overall performance.",
     },
     {
-        'name': 'BS-Roformer Viperx 1296',
-        'filename': 'model_bs_roformer_ep_368_sdr_12.9628.ckpt',
-        'description': 'High quality 2-stem (vocals SDR 12.9, instrumental SDR 17.0). Alternative to 1297.',
+        "name": "BS-Roformer Viperx 1296",
+        "filename": "model_bs_roformer_ep_368_sdr_12.9628.ckpt",
+        "description": "High quality 2-stem (vocals SDR 12.9, instrumental SDR 17.0). Alternative to 1297.",
     },
     {
-        'name': 'MDX23C: InstVoc HQ',
-        'filename': 'model_mel_band_roformer_ep_3005_sdr_11.4360.ckpt',
-        'description': 'High-quality 2-stem instrumental/vocals separation. Good for dialogue extraction.',
+        "name": "MDX23C: InstVoc HQ",
+        "filename": "model_mel_band_roformer_ep_3005_sdr_11.4360.ckpt",
+        "description": "High-quality 2-stem instrumental/vocals separation. Good for dialogue extraction.",
     },
     {
-        'name': 'MelBand Roformer Kim',
-        'filename': 'mel_band_roformer_kim_ft_unwa.ckpt',
-        'description': 'Reliable vocals extraction with good instrumental preservation (SDR 12.4).',
+        "name": "MelBand Roformer Kim",
+        "filename": "mel_band_roformer_kim_ft_unwa.ckpt",
+        "description": "Reliable vocals extraction with good instrumental preservation (SDR 12.4).",
     },
 ]
 
@@ -266,7 +263,7 @@ def _extract_sdr_from_filename(filename: str) -> tuple[float | None, float | Non
         Tuple of (sdr_vocals, sdr_instrumental) if found, (None, None) otherwise.
     """
     # Look for "sdr_XX.XXXX" pattern in filename
-    sdr_pattern = r'sdr[_-]?(\d+\.?\d*)'
+    sdr_pattern = r"sdr[_-]?(\d+\.?\d*)"
     match = re.search(sdr_pattern, filename.lower())
 
     if match:
@@ -295,7 +292,7 @@ def _enrich_model_with_quality_data(model: dict) -> dict:
     Returns:
         Enhanced model dict with quality metadata
     """
-    filename = model.get('filename', '')
+    filename = model.get("filename", "")
 
     # Check if we have quality data for this model
     quality_data = MODEL_QUALITY_DATABASE.get(filename, {})
@@ -303,33 +300,33 @@ def _enrich_model_with_quality_data(model: dict) -> dict:
     # If we have quality data, merge it
     if quality_data:
         # Override SDR if provided in quality database
-        if 'sdr_vocals' in quality_data:
-            model['sdr_vocals'] = quality_data['sdr_vocals']
-        if 'sdr_instrumental' in quality_data:
-            model['sdr_instrumental'] = quality_data['sdr_instrumental']
+        if "sdr_vocals" in quality_data:
+            model["sdr_vocals"] = quality_data["sdr_vocals"]
+        if "sdr_instrumental" in quality_data:
+            model["sdr_instrumental"] = quality_data["sdr_instrumental"]
 
         # Add quality metadata
-        model['quality_tier'] = quality_data.get('quality_tier', 'C-Tier')
-        model['rank'] = quality_data.get('rank', 999)
-        model['use_cases'] = quality_data.get('use_cases', [])
-        model['recommended'] = quality_data.get('recommended', False)
+        model["quality_tier"] = quality_data.get("quality_tier", "C-Tier")
+        model["rank"] = quality_data.get("rank", 999)
+        model["use_cases"] = quality_data.get("use_cases", [])
+        model["recommended"] = quality_data.get("recommended", False)
 
         # Override description if provided
-        if 'description_override' in quality_data:
-            model['description'] = quality_data['description_override']
+        if "description_override" in quality_data:
+            model["description"] = quality_data["description_override"]
 
     # If no SDR data yet, try to extract from filename
-    if not model.get('sdr_vocals'):
+    if not model.get("sdr_vocals"):
         sdr_vocals, sdr_instrumental = _extract_sdr_from_filename(filename)
         if sdr_vocals:
-            model['sdr_vocals'] = sdr_vocals
-        if sdr_instrumental and not model.get('sdr_instrumental'):
-            model['sdr_instrumental'] = sdr_instrumental
+            model["sdr_vocals"] = sdr_vocals
+        if sdr_instrumental and not model.get("sdr_instrumental"):
+            model["sdr_instrumental"] = sdr_instrumental
 
     # Set default quality tier if not set
-    if 'quality_tier' not in model:
-        model['quality_tier'] = 'C-Tier'
-        model['rank'] = 999
+    if "quality_tier" not in model:
+        model["quality_tier"] = "C-Tier"
+        model["rank"] = 999
 
     return model
 
@@ -343,11 +340,13 @@ def _get_venv_python() -> str:
 
     As a backup, we also check for a .venv directory in the project root.
     """
-    if hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
+    if hasattr(sys, "real_prefix") or (
+        hasattr(sys, "base_prefix") and sys.base_prefix != sys.prefix
+    ):
         return sys.executable
 
     project_root = Path(__file__).resolve().parent.parent.parent
-    venv_python = project_root / '.venv' / 'bin' / 'python'
+    venv_python = project_root / ".venv" / "bin" / "python"
     if venv_python.is_file():
         return str(venv_python)
 
@@ -362,7 +361,7 @@ def _module_available_in_python(module: str, python_exe: str | None = None) -> b
         result = subprocess.run(
             [
                 python_exe,
-                '-c',
+                "-c",
                 (
                     "import importlib.util, sys; "
                     f"sys.exit(0 if importlib.util.find_spec('{module}') else 1)"
@@ -385,26 +384,29 @@ def is_audio_separator_available() -> tuple[bool, str]:
     Returns:
         Tuple of (available: bool, message: str)
     """
-    if _module_available_in_python('audio_separator'):
+    if _module_available_in_python("audio_separator"):
         return True, "audio-separator available"
 
     venv_python = _get_venv_python()
-    if _module_available_in_python('audio_separator', venv_python):
+    if _module_available_in_python("audio_separator", venv_python):
         return True, f"audio-separator available via {venv_python}"
 
-    return False, "audio-separator not installed. Install with: pip install \"audio-separator[gpu]\""
+    return (
+        False,
+        'audio-separator not installed. Install with: pip install "audio-separator[gpu]"',
+    )
 
 
 def _load_model_data() -> object:
     try:
-        root = resources.files('audio_separator')
+        root = resources.files("audio_separator")
     except Exception:
         return None
 
     candidates = []
     try:
-        candidates.append(root / 'models.json')
-        candidates.extend(root.rglob('models.json'))
+        candidates.append(root / "models.json")
+        candidates.extend(root.rglob("models.json"))
     except Exception:
         candidates = candidates or []
 
@@ -412,7 +414,7 @@ def _load_model_data() -> object:
         try:
             if not candidate.is_file():
                 continue
-            return json.loads(candidate.read_text(encoding='utf-8'))
+            return json.loads(candidate.read_text(encoding="utf-8"))
         except Exception:
             continue
 
@@ -420,11 +422,17 @@ def _load_model_data() -> object:
 
 
 def _load_model_data_via_cli() -> object:
-    cli_path = shutil.which('audio-separator')
+    cli_path = shutil.which("audio-separator")
     if cli_path:
-        command = [cli_path, '-l', '--list_format=json']
+        command = [cli_path, "-l", "--list_format=json"]
     else:
-        command = [_get_venv_python(), '-m', 'audio_separator', '-l', '--list_format=json']
+        command = [
+            _get_venv_python(),
+            "-m",
+            "audio_separator",
+            "-l",
+            "--list_format=json",
+        ]
 
     try:
         result = subprocess.run(
@@ -449,12 +457,18 @@ def _load_model_data_via_cli() -> object:
 def _collect_models_from_dict(model_data: dict, models: dict[str, str]) -> None:
     for key, value in model_data.items():
         if isinstance(value, dict):
-            filename = value.get('filename') if isinstance(value.get('filename'), str) else None
+            filename = (
+                value.get("filename")
+                if isinstance(value.get("filename"), str)
+                else None
+            )
             if filename and isinstance(key, str):
                 models[key] = filename
                 continue
 
-            is_file_map = all(isinstance(k, str) and isinstance(v, str) for k, v in value.items())
+            is_file_map = all(
+                isinstance(k, str) and isinstance(v, str) for k, v in value.items()
+            )
             if is_file_map and isinstance(key, str):
                 selected = _select_model_filename(value)
                 if selected:
@@ -473,14 +487,10 @@ def _collect_models_from_list(model_list: list, models: dict[str, str]) -> None:
     for item in model_list:
         if isinstance(item, dict):
             name = (
-                item.get('name')
-                or item.get('display_name')
-                or item.get('model_name')
+                item.get("name") or item.get("display_name") or item.get("model_name")
             )
             filename = (
-                item.get('filename')
-                or item.get('model_filename')
-                or item.get('file')
+                item.get("filename") or item.get("model_filename") or item.get("file")
             )
             if name and filename:
                 models[name] = filename
@@ -494,14 +504,14 @@ def _select_model_filename(file_map: dict) -> str | None:
     if not isinstance(file_map, dict):
         return None
 
-    preferred_exts = ('.ckpt', '.onnx', '.pth', '.pt', '.th')
+    preferred_exts = (".ckpt", ".onnx", ".pth", ".pt", ".th")
     for ext in preferred_exts:
         for candidate in file_map:
             if isinstance(candidate, str) and candidate.lower().endswith(ext):
                 return candidate
 
     for candidate in file_map:
-        if isinstance(candidate, str) and candidate.lower().endswith(('.yaml', '.yml')):
+        if isinstance(candidate, str) and candidate.lower().endswith((".yaml", ".yml")):
             return candidate
 
     for candidate in file_map:
@@ -514,12 +524,12 @@ def _select_model_filename(file_map: dict) -> str | None:
 def get_installed_models_json_path(model_dir: str | None = None) -> Path:
     """Get path to installed_models.json file."""
     if model_dir:
-        return Path(model_dir) / 'installed_models.json'
+        return Path(model_dir) / "installed_models.json"
 
     # Default to project .config/audio_separator_models directory
     project_root = Path(__file__).resolve().parent.parent.parent
-    default_dir = project_root / '.config' / 'audio_separator_models'
-    return default_dir / 'installed_models.json'
+    default_dir = project_root / ".config" / "audio_separator_models"
+    return default_dir / "installed_models.json"
 
 
 def get_installed_models(model_dir: str | None = None) -> list[dict[str, any]]:
@@ -537,14 +547,16 @@ def get_installed_models(model_dir: str | None = None) -> list[dict[str, any]]:
         return []
 
     try:
-        with open(json_path, encoding='utf-8') as f:
+        with open(json_path, encoding="utf-8") as f:
             data = json.load(f)
-        return data.get('models', [])
+        return data.get("models", [])
     except (json.JSONDecodeError, OSError):
         return []
 
 
-def update_installed_models_json(models: list[dict], model_dir: str | None = None) -> bool:
+def update_installed_models_json(
+    models: list[dict], model_dir: str | None = None
+) -> bool:
     """
     Write/update the installed_models.json file.
 
@@ -562,12 +574,12 @@ def update_installed_models_json(models: list[dict], model_dir: str | None = Non
 
     try:
         data = {
-            'version': '1.0',
-            'last_updated': json.dumps(None),  # Will be timestamp
-            'models': models
+            "version": "1.0",
+            "last_updated": json.dumps(None),  # Will be timestamp
+            "models": models,
         }
 
-        with open(json_path, 'w', encoding='utf-8') as f:
+        with open(json_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
 
         return True
@@ -584,10 +596,10 @@ def get_all_available_models_from_registry() -> list[dict]:
         Returns empty list if query fails.
     """
     # Method 1: Try using audio-separator CLI
-    cli_path = shutil.which('audio-separator')
+    cli_path = shutil.which("audio-separator")
     if cli_path:
         print(f"[get_all_available_models] Using audio-separator CLI: {cli_path}")
-        command = [cli_path, '--list_models', '--list_format=json']
+        command = [cli_path, "--list_models", "--list_format=json"]
 
         try:
             result = subprocess.run(
@@ -598,14 +610,18 @@ def get_all_available_models_from_registry() -> list[dict]:
                 timeout=30,
             )
 
-            print(f"[get_all_available_models] Command completed with return code: {result.returncode}")
+            print(
+                f"[get_all_available_models] Command completed with return code: {result.returncode}"
+            )
             output = result.stdout.strip()
 
             if output:
                 model_data = json.loads(output)
                 models = []
                 _extract_models_from_registry(model_data, models)
-                print(f"[get_all_available_models] Extracted {len(models)} models from CLI")
+                print(
+                    f"[get_all_available_models] Extracted {len(models)} models from CLI"
+                )
                 return models
 
         except Exception as e:
@@ -619,17 +635,21 @@ def get_all_available_models_from_registry() -> list[dict]:
             print("[get_all_available_models] Loaded models.json from library")
             models = []
             _extract_models_from_registry(model_data, models)
-            print(f"[get_all_available_models] Extracted {len(models)} models from library")
+            print(
+                f"[get_all_available_models] Extracted {len(models)} models from library"
+            )
             return models
     except Exception as e:
         print(f"[get_all_available_models] Library import method failed: {e}")
 
     # Method 3: Try using the CLI via the venv Python's Scripts directory
     python_exe = _get_venv_python()
-    venv_scripts = Path(python_exe).parent / 'audio-separator'
+    venv_scripts = Path(python_exe).parent / "audio-separator"
     if venv_scripts.exists():
-        print(f"[get_all_available_models] Found audio-separator in venv scripts: {venv_scripts}")
-        command = [str(venv_scripts), '--list_models', '--list_format=json']
+        print(
+            f"[get_all_available_models] Found audio-separator in venv scripts: {venv_scripts}"
+        )
+        command = [str(venv_scripts), "--list_models", "--list_format=json"]
 
         try:
             result = subprocess.run(
@@ -645,7 +665,9 @@ def get_all_available_models_from_registry() -> list[dict]:
                 model_data = json.loads(output)
                 models = []
                 _extract_models_from_registry(model_data, models)
-                print(f"[get_all_available_models] Extracted {len(models)} models from venv script")
+                print(
+                    f"[get_all_available_models] Extracted {len(models)} models from venv script"
+                )
                 return models
 
         except Exception as e:
@@ -659,48 +681,57 @@ def _extract_models_from_registry(data: any, models: list[dict]) -> None:
     """Recursively extract model info from audio-separator's nested JSON structure."""
     if isinstance(data, dict):
         # Check if this looks like a model entry
-        if 'filename' in data or 'model_filename' in data:
-            filename = data.get('filename') or data.get('model_filename')
-            name = data.get('name') or data.get('display_name') or data.get('model_name') or filename
+        if "filename" in data or "model_filename" in data:
+            filename = data.get("filename") or data.get("model_filename")
+            name = (
+                data.get("name")
+                or data.get("display_name")
+                or data.get("model_name")
+                or filename
+            )
 
             # Extract SDR scores if available
             sdr_vocals = None
             sdr_instrumental = None
-            if 'sdr' in data:
-                if isinstance(data['sdr'], dict):
-                    sdr_vocals = data['sdr'].get('vocals')
-                    sdr_instrumental = data['sdr'].get('instrumental') or data['sdr'].get('other')
-                elif isinstance(data['sdr'], (int, float)):
-                    sdr_vocals = data['sdr']
+            if "sdr" in data:
+                if isinstance(data["sdr"], dict):
+                    sdr_vocals = data["sdr"].get("vocals")
+                    sdr_instrumental = data["sdr"].get("instrumental") or data[
+                        "sdr"
+                    ].get("other")
+                elif isinstance(data["sdr"], (int, float)):
+                    sdr_vocals = data["sdr"]
 
             # Determine model type from filename
-            model_type = 'Unknown'
-            stems = 'Unknown'
-            if 'demucs' in filename.lower() and 'htdemucs' in filename.lower():
-                model_type = 'Demucs v4'
-                stems = '4-stem (Drums/Bass/Other/Vocals)'
-            elif 'bs_roformer' in filename.lower() or 'bs-roformer' in filename.lower():
-                model_type = 'BS-Roformer'
-                stems = '2-stem (Vocals/Instrumental)'
-            elif 'mel_band_roformer' in filename.lower() or 'melband' in filename.lower():
-                model_type = 'MelBand Roformer'
-                stems = '2-stem (Vocals/Instrumental)'
-            elif 'mdx' in filename.lower():
-                model_type = 'MDX-Net'
-                stems = '2-stem (Vocals/Instrumental)'
-            elif 'vr' in filename.lower():
-                model_type = 'VR Arch'
-                stems = '2-stem'
+            model_type = "Unknown"
+            stems = "Unknown"
+            if "demucs" in filename.lower() and "htdemucs" in filename.lower():
+                model_type = "Demucs v4"
+                stems = "4-stem (Drums/Bass/Other/Vocals)"
+            elif "bs_roformer" in filename.lower() or "bs-roformer" in filename.lower():
+                model_type = "BS-Roformer"
+                stems = "2-stem (Vocals/Instrumental)"
+            elif (
+                "mel_band_roformer" in filename.lower() or "melband" in filename.lower()
+            ):
+                model_type = "MelBand Roformer"
+                stems = "2-stem (Vocals/Instrumental)"
+            elif "mdx" in filename.lower():
+                model_type = "MDX-Net"
+                stems = "2-stem (Vocals/Instrumental)"
+            elif "vr" in filename.lower():
+                model_type = "VR Arch"
+                stems = "2-stem"
 
             # Create base model dict
             model = {
-                'name': name,
-                'filename': filename,
-                'sdr_vocals': sdr_vocals,
-                'sdr_instrumental': sdr_instrumental,
-                'type': model_type,
-                'stems': stems,
-                'description': data.get('description', ''),
+                "name": name,
+                "filename": filename,
+                "sdr_vocals": sdr_vocals,
+                "sdr_instrumental": sdr_instrumental,
+                "type": model_type,
+                "stems": stems,
+                "description": data.get("description", ""),
             }
 
             # Enrich with quality database information and extract SDR from filename
@@ -719,7 +750,7 @@ def _extract_models_from_registry(data: any, models: list[dict]) -> None:
 def download_model(
     model_filename: str,
     model_dir: str,
-    progress_callback: Callable[[int, str], None] | None = None
+    progress_callback: Callable[[int, str], None] | None = None,
 ) -> bool:
     """
     Download a model using audio-separator.
@@ -736,7 +767,7 @@ def download_model(
 
     # Check if audio-separator is available
     python_exe = _get_venv_python()
-    if not _module_available_in_python('audio_separator', python_exe):
+    if not _module_available_in_python("audio_separator", python_exe):
         error_msg = (
             "audio-separator is not installed.\n\n"
             "To use model downloading, install it with:\n"
@@ -783,7 +814,7 @@ sys.exit(0)
         print("[download_model] Running download script...")
         # Redirect stderr to stdout to prevent deadlock from filled stderr buffer
         process = subprocess.Popen(
-            [python_exe, '-c', download_script],
+            [python_exe, "-c", download_script],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,  # Merge stderr into stdout to prevent deadlock
             text=True,
@@ -811,16 +842,19 @@ sys.exit(0)
             print(f"[download_model] SUCCESS: Model {model_filename} downloaded")
             return True
         else:
-            error_output = '\n'.join(output_lines[-10:])  # Last 10 lines
+            error_output = "\n".join(output_lines[-10:])  # Last 10 lines
             print(f"[download_model] FAILED with return code {process.returncode}")
             print(f"[download_model] Error output:\n{error_output}")
             if progress_callback:
-                progress_callback(0, f"Download failed (exit code {process.returncode})")
+                progress_callback(
+                    0, f"Download failed (exit code {process.returncode})"
+                )
             return False
 
     except Exception as e:
         print(f"[download_model] EXCEPTION: {e}")
         import traceback
+
         traceback.print_exc()
         if progress_callback:
             progress_callback(0, f"Download failed: {e!s}")
@@ -840,38 +874,42 @@ def list_available_models() -> list[tuple[str, str]]:
     if not installed:
         # Fallback to curated list
         return [
-            (f"{model['name']} — {model['description']}", model['filename'])
+            (f"{model['name']} — {model['description']}", model["filename"])
             for model in CURATED_MODELS
         ]
 
     # Build friendly names with metadata
     result = []
     for model in installed:
-        name_parts = [model['name']]
+        name_parts = [model["name"]]
 
         # Add SDR info if available
-        if model.get('sdr_vocals'):
+        if model.get("sdr_vocals"):
             name_parts.append(f"SDR {model['sdr_vocals']}")
 
         name_parts.append(f"({model['filename']})")
-        friendly_name = ' '.join(name_parts)
+        friendly_name = " ".join(name_parts)
 
-        result.append((friendly_name, model['filename']))
+        result.append((friendly_name, model["filename"]))
 
     return result
 
 
 def _fallback_models() -> dict[str, str]:
-    return {model['name']: model['filename'] for model in CURATED_MODELS}
+    return {model["name"]: model["filename"] for model in CURATED_MODELS}
 
 
 def resample_audio(audio_np: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
     """Resample audio using scipy (no torchaudio needed)."""
     if not isinstance(orig_sr, int) or not isinstance(target_sr, int):
-        raise TypeError(f"Sample rates must be integers, got orig_sr={type(orig_sr).__name__}, target_sr={type(target_sr).__name__}")
+        raise TypeError(
+            f"Sample rates must be integers, got orig_sr={type(orig_sr).__name__}, target_sr={type(target_sr).__name__}"
+        )
 
     if orig_sr <= 0 or target_sr <= 0:
-        raise ValueError(f"Sample rates must be positive, got orig_sr={orig_sr}, target_sr={target_sr}")
+        raise ValueError(
+            f"Sample rates must be positive, got orig_sr={orig_sr}, target_sr={target_sr}"
+        )
 
     if orig_sr == target_sr:
         return audio_np
@@ -1077,7 +1115,7 @@ def _read_audio_file(path: Path) -> tuple[int, np.ndarray]:
     """
     sample_rate, data = wavfile.read(path)
 
-    if data.dtype.kind in 'iu':
+    if data.dtype.kind in "iu":
         max_val = np.iinfo(data.dtype).max
         data = data.astype(np.float32) / max_val
     else:
@@ -1091,21 +1129,21 @@ def _read_audio_file(path: Path) -> tuple[int, np.ndarray]:
 
 
 def _resolve_separation_settings(config: dict) -> tuple[str, str]:
-    mode = config.get('source_separation_mode')
-    model_filename = config.get('source_separation_model', DEFAULT_MODEL)
+    mode = config.get("source_separation_mode")
+    model_filename = config.get("source_separation_model", DEFAULT_MODEL)
 
     if mode is None:
-        legacy_value = config.get('source_separation_model', '')
+        legacy_value = config.get("source_separation_model", "")
         legacy_map = {
-            'Demucs - Music/Effects (Strip Vocals)': 'instrumental',
-            'Demucs - Vocals Only': 'vocals',
+            "Demucs - Music/Effects (Strip Vocals)": "instrumental",
+            "Demucs - Vocals Only": "vocals",
         }
         if legacy_value in legacy_map:
             mode = legacy_map[legacy_value]
             model_filename = DEFAULT_MODEL
 
     if mode not in SEPARATION_MODES:
-        mode = 'none'
+        mode = "none"
 
     return mode, model_filename
 
@@ -1113,17 +1151,17 @@ def _resolve_separation_settings(config: dict) -> tuple[str, str]:
 def _log_separator_stderr(log: Callable[[str], None], stderr: str) -> None:
     last_progress = -10
     # Fixed regex pattern: single backslash to match pipe character
-    progress_pattern = re.compile(r'(\d{1,3})%\|')
-    info_pattern = re.compile(r'^\d{4}-\d{2}-\d{2} .* - INFO - ')
-    warning_pattern = re.compile(r'^\d{4}-\d{2}-\d{2} .* - (WARNING|ERROR|CRITICAL) - ')
-    miopen_pattern = re.compile(r'^MIOpen\(HIP\): Warning')
+    progress_pattern = re.compile(r"(\d{1,3})%\|")
+    info_pattern = re.compile(r"^\d{4}-\d{2}-\d{2} .* - INFO - ")
+    warning_pattern = re.compile(r"^\d{4}-\d{2}-\d{2} .* - (WARNING|ERROR|CRITICAL) - ")
+    miopen_pattern = re.compile(r"^MIOpen\(HIP\): Warning")
     for line in stderr.splitlines():
         if not line.strip():
             continue
-        if miopen_pattern.match(line) or 'MIOpen(HIP): Warning' in line:
+        if miopen_pattern.match(line) or "MIOpen(HIP): Warning" in line:
             continue
         # Always show DEBUG lines
-        if 'DEBUG:' in line:
+        if "DEBUG:" in line:
             log(f"[SOURCE SEPARATION] {line}")
             continue
         match = progress_pattern.search(line)
@@ -1134,7 +1172,9 @@ def _log_separator_stderr(log: Callable[[str], None], stderr: str) -> None:
                     last_progress = percent
                     log(f"[SOURCE SEPARATION] {line}")
             except (ValueError, TypeError) as e:
-                log(f"[SOURCE SEPARATION] Warning: Failed to parse progress from '{line}': {e}")
+                log(
+                    f"[SOURCE SEPARATION] Warning: Failed to parse progress from '{line}': {e}"
+                )
             continue
         if info_pattern.match(line) and not warning_pattern.match(line):
             continue
@@ -1152,7 +1192,7 @@ def separate_audio(
     mode: str,
     model_filename: str,
     log_func: Callable[[str], None] | None = None,
-    device: str = 'auto',
+    device: str = "auto",
     timeout_seconds: int = 900,
     model_dir: str | None = None,
 ) -> np.ndarray | None:
@@ -1182,6 +1222,7 @@ def separate_audio(
     # Flush outputs to ensure we see the log before any potential crash
     try:
         import sys
+
         sys.stdout.flush()
         sys.stderr.flush()
     except Exception:
@@ -1197,8 +1238,10 @@ def separate_audio(
     # Check type using string comparison first (safer than isinstance for corrupted objects)
     try:
         type_name = type(pcm_data).__name__
-        if type_name != 'ndarray':
-            log(f"[SOURCE SEPARATION] ERROR: pcm_data type is {type_name}, expected ndarray")
+        if type_name != "ndarray":
+            log(
+                f"[SOURCE SEPARATION] ERROR: pcm_data type is {type_name}, expected ndarray"
+            )
             return None
     except Exception as e:
         log(f"[SOURCE SEPARATION] ERROR: Failed to check type: {e}")
@@ -1207,20 +1250,24 @@ def separate_audio(
     # SAFETY: Validate array before accessing flags (which touches C memory)
     try:
         # First check basic attributes exist
-        if not hasattr(pcm_data, 'flags') or not hasattr(pcm_data, 'dtype'):
+        if not hasattr(pcm_data, "flags") or not hasattr(pcm_data, "dtype"):
             log("[SOURCE SEPARATION] ERROR: pcm_data missing required array attributes")
             return None
 
         # Check dtype before flags (dtype is safer to access)
         if pcm_data.dtype != np.float32:
-            log(f"[SOURCE SEPARATION] DEBUG: Converting dtype from {pcm_data.dtype} to float32")
+            log(
+                f"[SOURCE SEPARATION] DEBUG: Converting dtype from {pcm_data.dtype} to float32"
+            )
             pcm_data = pcm_data.astype(np.float32)
 
         # Now check contiguity and make a copy if needed
         # Making a copy is ALWAYS safer as it ensures we own the memory
         log("[SOURCE SEPARATION] DEBUG: Creating safe array copy...")
-        pcm_data = np.array(pcm_data, dtype=np.float32, copy=True, order='C')
-        log(f"[SOURCE SEPARATION] DEBUG: Array validated - shape={pcm_data.shape}, size={pcm_data.nbytes} bytes")
+        pcm_data = np.array(pcm_data, dtype=np.float32, copy=True, order="C")
+        log(
+            f"[SOURCE SEPARATION] DEBUG: Array validated - shape={pcm_data.shape}, size={pcm_data.nbytes} bytes"
+        )
     except Exception as e:
         log(f"[SOURCE SEPARATION] ERROR: Failed during array validation: {e}")
         return None
@@ -1234,44 +1281,48 @@ def separate_audio(
     try:
         available, msg = is_audio_separator_available()
     except Exception as e:
-        log(f"[SOURCE SEPARATION] ERROR: Failed to check audio-separator availability: {e}")
+        log(
+            f"[SOURCE SEPARATION] ERROR: Failed to check audio-separator availability: {e}"
+        )
         return None
 
     if not available:
         log(f"[SOURCE SEPARATION] Audio-separator not available: {msg}")
         return None
 
-    log(f"[SOURCE SEPARATION] Starting audio-separator (mode={mode}, model={model_filename})...")
+    log(
+        f"[SOURCE SEPARATION] Starting audio-separator (mode={mode}, model={model_filename})..."
+    )
     log(f"[SOURCE SEPARATION] {msg}")
     if model_dir:
         log(f"[SOURCE SEPARATION] Model directory: {model_dir}")
 
-    with tempfile.TemporaryDirectory(prefix='audio_sep_') as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="audio_sep_") as temp_dir:
         temp_path = Path(temp_dir)
-        input_path = temp_path / 'input.wav'
-        script_path = temp_path / 'worker.py'
-        output_dir = temp_path / 'output'
+        input_path = temp_path / "input.wav"
+        script_path = temp_path / "worker.py"
+        output_dir = temp_path / "output"
 
         wavfile.write(input_path, sample_rate, pcm_data.astype(np.float32))
         script_path.write_text(_WORKER_SCRIPT)
 
         args = {
-            'input_path': str(input_path),
-            'output_dir': str(output_dir),
-            'target_stem': target_stem,
-            'sample_rate': sample_rate,
-            'model_filename': model_filename,
-            'model_dir': model_dir,
+            "input_path": str(input_path),
+            "output_dir": str(output_dir),
+            "target_stem": target_stem,
+            "sample_rate": sample_rate,
+            "model_filename": model_filename,
+            "model_dir": model_dir,
         }
 
         python_exe = _get_venv_python()
         log(f"[SOURCE SEPARATION] Using Python: {python_exe}")
 
         env = get_subprocess_environment()
-        if device == 'cpu':
-            env['CUDA_VISIBLE_DEVICES'] = ''
-            env['ROCR_VISIBLE_DEVICES'] = ''
-            env['HIP_VISIBLE_DEVICES'] = ''
+        if device == "cpu":
+            env["CUDA_VISIBLE_DEVICES"] = ""
+            env["ROCR_VISIBLE_DEVICES"] = ""
+            env["HIP_VISIBLE_DEVICES"] = ""
 
         try:
             # Enforce reasonable timeout bounds to prevent infinite hangs
@@ -1293,7 +1344,9 @@ def separate_audio(
             if result.returncode != 0:
                 stderr = result.stderr.strip()
                 stdout = result.stdout.strip()
-                log(f"[SOURCE SEPARATION] Subprocess failed with code {result.returncode}")
+                log(
+                    f"[SOURCE SEPARATION] Subprocess failed with code {result.returncode}"
+                )
                 log(f"[SOURCE SEPARATION] Python executable: {python_exe}")
                 log(f"[SOURCE SEPARATION] sys.executable: {sys.executable}")
                 if stderr:
@@ -1308,17 +1361,19 @@ def separate_audio(
             try:
                 response = json.loads(result.stdout.strip())
             except json.JSONDecodeError:
-                log(f"[SOURCE SEPARATION] Invalid JSON from worker: {result.stdout[:200]}")
+                log(
+                    f"[SOURCE SEPARATION] Invalid JSON from worker: {result.stdout[:200]}"
+                )
                 return None
 
-            if not response.get('success'):
-                error_msg = response.get('error', 'unknown error')
+            if not response.get("success"):
+                error_msg = response.get("error", "unknown error")
                 log(f"[SOURCE SEPARATION] Separation failed: {error_msg}")
-                if 'traceback' in response:
+                if "traceback" in response:
                     log(f"[SOURCE SEPARATION] Traceback:\n{response['traceback']}")
                 return None
 
-            output_path = response.get('output_path')
+            output_path = response.get("output_path")
             if not output_path:
                 log("[SOURCE SEPARATION] No output path provided")
                 return None
@@ -1339,7 +1394,9 @@ def separate_audio(
                 return None
 
             if not isinstance(output_sr, (int, float)) or output_sr <= 0:
-                log(f"[SOURCE SEPARATION] Invalid sample rate from output file: {output_sr}")
+                log(
+                    f"[SOURCE SEPARATION] Invalid sample rate from output file: {output_sr}"
+                )
                 return None
 
             if output_sr != sample_rate:
@@ -1349,12 +1406,18 @@ def separate_audio(
                     log(f"[SOURCE SEPARATION] Resampling failed: {e}")
                     return None
 
-            log(f"[SOURCE SEPARATION] Separation complete. Output length: {len(separated)} samples")
+            log(
+                f"[SOURCE SEPARATION] Separation complete. Output length: {len(separated)} samples"
+            )
             return separated
 
         except subprocess.TimeoutExpired:
-            log(f"[SOURCE SEPARATION] Timeout after {timeout}s (high-quality models may need more time)")
-            log("[SOURCE SEPARATION] Consider using a faster model or increasing the timeout in settings")
+            log(
+                f"[SOURCE SEPARATION] Timeout after {timeout}s (high-quality models may need more time)"
+            )
+            log(
+                "[SOURCE SEPARATION] Consider using a faster model or increasing the timeout in settings"
+            )
             # subprocess.run() automatically kills the process on timeout
             # Log that the process was terminated
             log("[SOURCE SEPARATION] Subprocess was terminated due to timeout")
@@ -1370,7 +1433,7 @@ def apply_source_separation(
     sample_rate: int,
     config: dict,
     log_func: Callable[[str], None] | None = None,
-    role_tag: str = "Source 2"
+    role_tag: str = "Source 2",
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Apply source separation to both reference and target audio, or neither.
@@ -1409,9 +1472,9 @@ def apply_source_separation(
     if target_stem is None:
         return ref_pcm, tgt_pcm
 
-    device = config.get('source_separation_device', 'auto')
-    timeout = config.get('source_separation_timeout', 900)
-    model_dir = config.get('source_separation_model_dir') or None
+    device = config.get("source_separation_device", "auto")
+    timeout = config.get("source_separation_timeout", 900)
+    model_dir = config.get("source_separation_model_dir") or None
 
     log(f"[SOURCE SEPARATION] Mode: {mode}")
     log(f"[SOURCE SEPARATION] Model: {model_filename}")
@@ -1427,7 +1490,9 @@ def apply_source_separation(
         # Quick sanity check on shapes
         ref_shape = ref_pcm.shape
         tgt_shape = tgt_pcm.shape
-        log(f"[SOURCE SEPARATION] DEBUG: ref_pcm shape={ref_shape}, tgt_pcm shape={tgt_shape}")
+        log(
+            f"[SOURCE SEPARATION] DEBUG: ref_pcm shape={ref_shape}, tgt_pcm shape={tgt_shape}"
+        )
     except Exception as e:
         log(f"[SOURCE SEPARATION] ERROR: Failed to validate inputs: {e}")
         return ref_pcm, tgt_pcm
@@ -1436,9 +1501,11 @@ def apply_source_separation(
     # This ensures we have clean, owned memory before triggering any cleanup.
     log("[SOURCE SEPARATION] DEBUG: Creating defensive copies...")
     try:
-        ref_pcm_copy = np.array(ref_pcm, dtype=np.float32, copy=True, order='C')
-        tgt_pcm_copy = np.array(tgt_pcm, dtype=np.float32, copy=True, order='C')
-        log(f"[SOURCE SEPARATION] DEBUG: Copies created - ref={ref_pcm_copy.nbytes} bytes, tgt={tgt_pcm_copy.nbytes} bytes")
+        ref_pcm_copy = np.array(ref_pcm, dtype=np.float32, copy=True, order="C")
+        tgt_pcm_copy = np.array(tgt_pcm, dtype=np.float32, copy=True, order="C")
+        log(
+            f"[SOURCE SEPARATION] DEBUG: Copies created - ref={ref_pcm_copy.nbytes} bytes, tgt={tgt_pcm_copy.nbytes} bytes"
+        )
     except Exception as e:
         log(f"[SOURCE SEPARATION] ERROR: Failed to create copies: {e}")
         return ref_pcm, tgt_pcm
@@ -1455,9 +1522,13 @@ def apply_source_separation(
 
     # Separate reference (Source 1)
     log("[SOURCE SEPARATION] Processing reference audio (Source 1)...")
-    ref_separated = separate_audio(ref_pcm_copy, sample_rate, mode, model_filename, log, device, timeout, model_dir)
+    ref_separated = separate_audio(
+        ref_pcm_copy, sample_rate, mode, model_filename, log, device, timeout, model_dir
+    )
     if ref_separated is None:
-        log("[SOURCE SEPARATION] Reference separation failed, using original audio for both")
+        log(
+            "[SOURCE SEPARATION] Reference separation failed, using original audio for both"
+        )
         # Just return originals - let Python handle cleanup naturally
         return ref_pcm, tgt_pcm
 
@@ -1470,7 +1541,9 @@ def apply_source_separation(
 
     # Separate target
     log(f"[SOURCE SEPARATION] Processing target audio ({role_tag})...")
-    log(f"[SOURCE SEPARATION] DEBUG: tgt_pcm_copy shape={tgt_pcm_copy.shape}, dtype={tgt_pcm_copy.dtype}")
+    log(
+        f"[SOURCE SEPARATION] DEBUG: tgt_pcm_copy shape={tgt_pcm_copy.shape}, dtype={tgt_pcm_copy.dtype}"
+    )
 
     # Flush before second separation
     try:
@@ -1479,13 +1552,17 @@ def apply_source_separation(
     except Exception:
         pass
 
-    tgt_separated = separate_audio(tgt_pcm_copy, sample_rate, mode, model_filename, log, device, timeout, model_dir)
+    tgt_separated = separate_audio(
+        tgt_pcm_copy, sample_rate, mode, model_filename, log, device, timeout, model_dir
+    )
 
     # Release tgt copy memory
     del tgt_pcm_copy
 
     if tgt_separated is None:
-        log("[SOURCE SEPARATION] Target separation failed, using original audio for both")
+        log(
+            "[SOURCE SEPARATION] Target separation failed, using original audio for both"
+        )
         # Return originals - separation failed
         return ref_pcm, tgt_pcm
 

@@ -17,69 +17,131 @@ from ..io.runner import CommandRunner
 
 # --- Language Normalization ---
 _LANG2TO3 = {
-    'en': 'eng', 'ja': 'jpn', 'jp': 'jpn', 'zh': 'zho', 'cn': 'zho', 'es': 'spa', 'de': 'deu', 'fr': 'fra',
-    'it': 'ita', 'pt': 'por', 'ru': 'rus', 'ko': 'kor', 'ar': 'ara', 'tr': 'tur', 'pl': 'pol', 'nl': 'nld',
-    'sv': 'swe', 'no': 'nor', 'fi': 'fin', 'da': 'dan', 'cs': 'ces', 'sk': 'slk', 'sl': 'slv', 'hu': 'hun',
-    'el': 'ell', 'he': 'heb', 'id': 'ind', 'vi': 'vie', 'th': 'tha', 'hi': 'hin', 'ur': 'urd', 'fa': 'fas',
-    'uk': 'ukr', 'ro': 'ron', 'bg': 'bul', 'sr': 'srp', 'hr': 'hrv', 'ms': 'msa', 'bn': 'ben', 'ta': 'tam',
-    'te': 'tel'
+    "en": "eng",
+    "ja": "jpn",
+    "jp": "jpn",
+    "zh": "zho",
+    "cn": "zho",
+    "es": "spa",
+    "de": "deu",
+    "fr": "fra",
+    "it": "ita",
+    "pt": "por",
+    "ru": "rus",
+    "ko": "kor",
+    "ar": "ara",
+    "tr": "tur",
+    "pl": "pol",
+    "nl": "nld",
+    "sv": "swe",
+    "no": "nor",
+    "fi": "fin",
+    "da": "dan",
+    "cs": "ces",
+    "sk": "slk",
+    "sl": "slv",
+    "hu": "hun",
+    "el": "ell",
+    "he": "heb",
+    "id": "ind",
+    "vi": "vie",
+    "th": "tha",
+    "hi": "hin",
+    "ur": "urd",
+    "fa": "fas",
+    "uk": "ukr",
+    "ro": "ron",
+    "bg": "bul",
+    "sr": "srp",
+    "hr": "hrv",
+    "ms": "msa",
+    "bn": "ben",
+    "ta": "tam",
+    "te": "tel",
 }
+
+
 def _normalize_lang(lang: str | None) -> str | None:
-    if not lang: return None
+    if not lang:
+        return None
     s = lang.strip().lower()
-    if not s or s == 'und': return None
+    if not s or s == "und":
+        return None
     return _LANG2TO3.get(s, s) if len(s) == 2 else s
 
 
 # --- DSP & IO Helpers ---
-def get_audio_stream_info(mkv_path: str, lang: str | None, runner: CommandRunner, tool_paths: dict) -> tuple[int | None, int | None]:
+def get_audio_stream_info(
+    mkv_path: str, lang: str | None, runner: CommandRunner, tool_paths: dict
+) -> tuple[int | None, int | None]:
     """
     Finds the best audio stream and returns its 0-based index and mkvmerge track ID.
     Returns: A tuple of (stream_index, track_id) or (None, None).
     """
-    out = runner.run(['mkvmerge', '-J', str(mkv_path)], tool_paths)
-    if not out or not isinstance(out, str): return None, None
+    out = runner.run(["mkvmerge", "-J", str(mkv_path)], tool_paths)
+    if not out or not isinstance(out, str):
+        return None, None
     try:
         info = json.loads(out)
-        audio_tracks = [t for t in info.get('tracks', []) if t.get('type') == 'audio']
-        if not audio_tracks: return None, None
+        audio_tracks = [t for t in info.get("tracks", []) if t.get("type") == "audio"]
+        if not audio_tracks:
+            return None, None
         if lang:
             for i, t in enumerate(audio_tracks):
-                props = t.get('properties', {})
-                if (props.get('language') or '').strip().lower() == lang:
-                    return i, t.get('id')
+                props = t.get("properties", {})
+                if (props.get("language") or "").strip().lower() == lang:
+                    return i, t.get("id")
         # Fallback to the first audio track
         first_track = audio_tracks[0]
-        return 0, first_track.get('id')
+        return 0, first_track.get("id")
     except (json.JSONDecodeError, IndexError):
         return None, None
 
-def _decode_to_memory(file_path: str, a_index: int, out_sr: int, use_soxr: bool, runner: CommandRunner, tool_paths: dict) -> np.ndarray:
+
+def _decode_to_memory(
+    file_path: str,
+    a_index: int,
+    out_sr: int,
+    use_soxr: bool,
+    runner: CommandRunner,
+    tool_paths: dict,
+) -> np.ndarray:
     """Decodes one audio stream to a mono float32 NumPy array."""
     cmd = [
-        'ffmpeg', '-nostdin', '-v', 'error',
-        '-i', str(file_path), '-map', f'0:a:{a_index}']
+        "ffmpeg",
+        "-nostdin",
+        "-v",
+        "error",
+        "-i",
+        str(file_path),
+        "-map",
+        f"0:a:{a_index}",
+    ]
 
     if use_soxr:
-        cmd.extend(['-resampler', 'soxr'])
+        cmd.extend(["-resampler", "soxr"])
 
-    cmd.extend(['-ac', '1', '-ar', str(out_sr), '-f', 'f32le', '-'])
+    cmd.extend(["-ac", "1", "-ar", str(out_sr), "-f", "f32le", "-"])
 
     pcm_bytes = runner.run(cmd, tool_paths, is_binary=True)
     if not pcm_bytes or not isinstance(pcm_bytes, bytes):
-        raise RuntimeError(f'ffmpeg decode failed for {Path(file_path).name}')
+        raise RuntimeError(f"ffmpeg decode failed for {Path(file_path).name}")
 
     # DEBUG: Log raw bytes info to diagnose corruption
-    if hasattr(runner, '_log_message'):
-        runner._log_message(f"[DECODE RAW] Received {len(pcm_bytes)} bytes for {Path(file_path).name}")
+    if hasattr(runner, "_log_message"):
+        runner._log_message(
+            f"[DECODE RAW] Received {len(pcm_bytes)} bytes for {Path(file_path).name}"
+        )
         # Show first 100 bytes as hex to detect text/garbage
         first_bytes = pcm_bytes[:100]
-        hex_dump = ' '.join(f'{b:02x}' for b in first_bytes)
+        hex_dump = " ".join(f"{b:02x}" for b in first_bytes)
         runner._log_message(f"[DECODE RAW] First 100 bytes (hex): {hex_dump}")
         # Check if first bytes look like ASCII text (would indicate stderr mixed in)
         try:
-            text_check = first_bytes[:50].decode('ascii', errors='strict')
-            runner._log_message(f"[DECODE RAW] WARNING: First bytes decode as ASCII: {text_check!r}")
+            text_check = first_bytes[:50].decode("ascii", errors="strict")
+            runner._log_message(
+                f"[DECODE RAW] WARNING: First bytes decode as ASCII: {text_check!r}"
+            )
         except UnicodeDecodeError:
             pass  # Good - binary data as expected
 
@@ -89,8 +151,10 @@ def _decode_to_memory(file_path: str, a_index: int, out_sr: int, use_soxr: bool,
     aligned_size = (len(pcm_bytes) // element_size) * element_size
     if aligned_size != len(pcm_bytes):
         trimmed_bytes = len(pcm_bytes) - aligned_size
-        if hasattr(runner, '_log_message'):
-            runner._log_message(f"[BUFFER ALIGNMENT] Trimmed {trimmed_bytes} bytes from {Path(file_path).name} (likely Opus/other codec)")
+        if hasattr(runner, "_log_message"):
+            runner._log_message(
+                f"[BUFFER ALIGNMENT] Trimmed {trimmed_bytes} bytes from {Path(file_path).name} (likely Opus/other codec)"
+            )
         pcm_bytes = pcm_bytes[:aligned_size]
 
     # CRITICAL: Return a COPY, not a view over the buffer.
@@ -100,22 +164,40 @@ def _decode_to_memory(file_path: str, a_index: int, out_sr: int, use_soxr: bool,
     # The extra memory copy is worth the safety guarantee.
     return np.frombuffer(pcm_bytes, dtype=np.float32).copy()
 
-def _apply_bandpass(waveform: np.ndarray, sr: int, lowcut: float, highcut: float, order: int, log: Callable | None = None) -> np.ndarray:
+
+def _apply_bandpass(
+    waveform: np.ndarray,
+    sr: int,
+    lowcut: float,
+    highcut: float,
+    order: int,
+    log: Callable | None = None,
+) -> np.ndarray:
     """Applies a Butterworth band-pass filter to isolate dialogue frequencies."""
     try:
         nyquist = 0.5 * sr
         low = lowcut / nyquist
         high = highcut / nyquist
-        b, a = butter(order, [low, high], btype='band')
+        b, a = butter(order, [low, high], btype="band")
         return lfilter(b, a, waveform).astype(np.float32)
     except Exception as e:
         if log:
-            log(f"[FILTER WARNING] Band-pass filter failed ({e}), using unfiltered waveform")
+            log(
+                f"[FILTER WARNING] Band-pass filter failed ({e}), using unfiltered waveform"
+            )
         return waveform
 
-def _apply_lowpass(waveform: np.ndarray, sr: int, cutoff_hz: int, num_taps: int, log: Callable | None = None) -> np.ndarray:
+
+def _apply_lowpass(
+    waveform: np.ndarray,
+    sr: int,
+    cutoff_hz: int,
+    num_taps: int,
+    log: Callable | None = None,
+) -> np.ndarray:
     """Applies a simple FIR low-pass filter."""
-    if cutoff_hz <= 0: return waveform
+    if cutoff_hz <= 0:
+        return waveform
     try:
         nyquist = sr / 2
         hz = min(cutoff_hz, nyquist - 1)
@@ -123,8 +205,11 @@ def _apply_lowpass(waveform: np.ndarray, sr: int, cutoff_hz: int, num_taps: int,
         return lfilter(h, 1.0, waveform).astype(np.float32)
     except Exception as e:
         if log:
-            log(f"[FILTER WARNING] Low-pass filter failed ({e}), using unfiltered waveform")
+            log(
+                f"[FILTER WARNING] Low-pass filter failed ({e}), using unfiltered waveform"
+            )
         return waveform
+
 
 def _normalize_peak_confidence(correlation_array: np.ndarray, peak_idx: int) -> float:
     """
@@ -182,7 +267,10 @@ def _normalize_peak_confidence(correlation_array: np.ndarray, peak_idx: int) -> 
 
     return min(100.0, max(0.0, confidence))
 
-def _find_delay_gcc_phat(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> tuple[float, float]:
+
+def _find_delay_gcc_phat(
+    ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int
+) -> tuple[float, float]:
     """Calculates delay using Generalized Cross-Correlation with Phase Transform."""
     n = len(ref_chunk) + len(tgt_chunk) - 1
     R = np.fft.fft(ref_chunk, n)
@@ -196,16 +284,19 @@ def _find_delay_gcc_phat(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) 
     match_confidence = _normalize_peak_confidence(r_phat, k)
     return delay_ms, match_confidence
 
-def _find_delay_scc(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int, peak_fit: bool) -> tuple[float, float]:
+
+def _find_delay_scc(
+    ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int, peak_fit: bool
+) -> tuple[float, float]:
     """Calculates delay and match percentage using standard cross-correlation."""
     r = (ref_chunk - np.mean(ref_chunk)) / (np.std(ref_chunk) + 1e-9)
     t = (tgt_chunk - np.mean(tgt_chunk)) / (np.std(tgt_chunk) + 1e-9)
-    c = correlate(r, t, mode='full', method='fft')
+    c = correlate(r, t, mode="full", method="fft")
     k = np.argmax(np.abs(c))
     lag_samples = float(k - (len(t) - 1))
     if peak_fit and 0 < k < len(c) - 1:
-        y1, y2, y3 = np.abs(c[k-1:k+2])
-        delta = 0.5 * (y1 - y3) / (y1 - 2*y2 + y3)
+        y1, y2, y3 = np.abs(c[k - 1 : k + 2])
+        delta = 0.5 * (y1 - y3) / (y1 - 2 * y2 + y3)
         if -1 < delta < 1:
             lag_samples += delta
     raw_delay_s = lag_samples / float(sr)
@@ -213,7 +304,9 @@ def _find_delay_scc(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int, peak_
     return raw_delay_s * 1000.0, match_pct
 
 
-def _find_delay_onset(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> tuple[float, float]:
+def _find_delay_onset(
+    ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int
+) -> tuple[float, float]:
     """
     Calculates delay using onset detection envelope correlation.
 
@@ -226,7 +319,9 @@ def _find_delay_onset(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> 
     try:
         import librosa
     except ImportError:
-        raise ImportError("Onset Detection requires librosa. Install with: pip install librosa")
+        raise ImportError(
+            "Onset Detection requires librosa. Install with: pip install librosa"
+        )
 
     # Onset detection parameters
     # hop_length=512 at 48kHz gives ~10.7ms resolution per frame
@@ -263,7 +358,9 @@ def _find_delay_onset(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> 
     return delay_ms, match_confidence
 
 
-def _find_delay_gcc_scot(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> tuple[float, float]:
+def _find_delay_gcc_scot(
+    ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int
+) -> tuple[float, float]:
     """
     Calculates delay using GCC-SCOT (Smoothed Coherence Transform).
 
@@ -298,7 +395,9 @@ def _find_delay_gcc_scot(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) 
     return delay_ms, match_confidence
 
 
-def _find_delay_gcc_whiten(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> tuple[float, float]:
+def _find_delay_gcc_whiten(
+    ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int
+) -> tuple[float, float]:
     """
     Calculates delay using GCC with Spectral Whitening (Whitened Cross-Correlation).
 
@@ -340,7 +439,9 @@ def _find_delay_gcc_whiten(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int
     return delay_ms, match_confidence
 
 
-def _find_delay_dtw(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> tuple[float, float]:
+def _find_delay_dtw(
+    ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int
+) -> tuple[float, float]:
     """
     Calculates delay using Dynamic Time Warping on MFCC features.
 
@@ -360,12 +461,16 @@ def _find_delay_dtw(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> tu
     hop_length = 512
 
     # Extract MFCC features - robust to amplitude/timbre differences
-    ref_mfcc = librosa.feature.mfcc(y=ref_chunk, sr=sr, n_mfcc=13, hop_length=hop_length)
-    tgt_mfcc = librosa.feature.mfcc(y=tgt_chunk, sr=sr, n_mfcc=13, hop_length=hop_length)
+    ref_mfcc = librosa.feature.mfcc(
+        y=ref_chunk, sr=sr, n_mfcc=13, hop_length=hop_length
+    )
+    tgt_mfcc = librosa.feature.mfcc(
+        y=tgt_chunk, sr=sr, n_mfcc=13, hop_length=hop_length
+    )
 
     # Compute DTW alignment
     # D is the accumulated cost matrix, wp is the warping path
-    D, wp = librosa.sequence.dtw(X=ref_mfcc, Y=tgt_mfcc, metric='euclidean')
+    D, wp = librosa.sequence.dtw(X=ref_mfcc, Y=tgt_mfcc, metric="euclidean")
 
     # wp is array of (ref_frame, tgt_frame) pairs along optimal path
     # Calculate the offset at each point in the path
@@ -381,7 +486,9 @@ def _find_delay_dtw(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> tu
     # Match confidence based on normalized DTW distance
     # Lower distance = better match
     path_length = len(wp)
-    avg_cost = D[wp[-1, 0], wp[-1, 1]] / path_length if path_length > 0 else float('inf')
+    avg_cost = (
+        D[wp[-1, 0], wp[-1, 1]] / path_length if path_length > 0 else float("inf")
+    )
 
     # Convert to 0-100 scale (lower cost = higher confidence)
     # Empirically, good matches have avg_cost < 50, poor matches > 200
@@ -390,7 +497,9 @@ def _find_delay_dtw(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> tu
     return delay_ms, match_confidence
 
 
-def _find_delay_spectrogram(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int) -> tuple[float, float]:
+def _find_delay_spectrogram(
+    ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: int
+) -> tuple[float, float]:
     """
     Calculates delay using spectrogram cross-correlation.
 
@@ -401,14 +510,20 @@ def _find_delay_spectrogram(ref_chunk: np.ndarray, tgt_chunk: np.ndarray, sr: in
     try:
         import librosa
     except ImportError:
-        raise ImportError("Spectrogram correlation requires librosa. Install with: pip install librosa")
+        raise ImportError(
+            "Spectrogram correlation requires librosa. Install with: pip install librosa"
+        )
 
     hop_length = 512
     n_mels = 64  # Number of mel bands
 
     # Compute mel spectrograms (log-scaled for better dynamic range)
-    ref_mel = librosa.feature.melspectrogram(y=ref_chunk, sr=sr, hop_length=hop_length, n_mels=n_mels)
-    tgt_mel = librosa.feature.melspectrogram(y=tgt_chunk, sr=sr, hop_length=hop_length, n_mels=n_mels)
+    ref_mel = librosa.feature.melspectrogram(
+        y=ref_chunk, sr=sr, hop_length=hop_length, n_mels=n_mels
+    )
+    tgt_mel = librosa.feature.melspectrogram(
+        y=tgt_chunk, sr=sr, hop_length=hop_length, n_mels=n_mels
+    )
 
     # Convert to log scale (dB)
     ref_mel_db = librosa.power_to_db(ref_mel, ref=np.max)
@@ -455,7 +570,7 @@ def run_audio_correlation(
     role_tag: str,
     ref_track_index: int | None = None,
     target_track_index: int | None = None,
-    use_source_separation: bool = False
+    use_source_separation: bool = False,
 ) -> list[dict]:
     """
     Runs audio correlation analysis between reference and target files.
@@ -507,7 +622,9 @@ def run_audio_correlation(
     else:
         # Use language matching for target
         tgt_norm = _normalize_lang(target_lang)
-        idx_tgt, id_tgt = get_audio_stream_info(target_file, tgt_norm, runner, tool_paths)
+        idx_tgt, id_tgt = get_audio_stream_info(
+            target_file, tgt_norm, runner, tool_paths
+        )
 
     if idx_ref is None or idx_tgt is None:
         raise ValueError("Could not locate required audio streams for correlation.")
@@ -523,66 +640,89 @@ def run_audio_correlation(
     else:
         tgt_desc = f"lang='{_normalize_lang(target_lang) or 'first'}'"
 
-    log(f"Selected streams: REF ({ref_desc}, index={idx_ref}), "
-        f"{role_tag.upper()} ({tgt_desc}, index={idx_tgt}" + (f", track_id={id_tgt}" if id_tgt is not None else "") + ")")
+    log(
+        f"Selected streams: REF ({ref_desc}, index={idx_ref}), "
+        f"{role_tag.upper()} ({tgt_desc}, index={idx_tgt}"
+        + (f", track_id={id_tgt}" if id_tgt is not None else "")
+        + ")"
+    )
 
     # --- 2. Decode ---
     DEFAULT_SR = 48000
-    use_soxr = config.get('use_soxr', False)
+    use_soxr = config.get("use_soxr", False)
     log(f"[DECODE DEBUG] Decoding ref: -map 0:a:{idx_ref} from {Path(ref_file).name}")
-    ref_pcm = _decode_to_memory(ref_file, idx_ref, DEFAULT_SR, use_soxr, runner, tool_paths)
-    log(f"[DECODE DEBUG] Decoding tgt: -map 0:a:{idx_tgt} from {Path(target_file).name}")
-    tgt_pcm = _decode_to_memory(target_file, idx_tgt, DEFAULT_SR, use_soxr, runner, tool_paths)
+    ref_pcm = _decode_to_memory(
+        ref_file, idx_ref, DEFAULT_SR, use_soxr, runner, tool_paths
+    )
+    log(
+        f"[DECODE DEBUG] Decoding tgt: -map 0:a:{idx_tgt} from {Path(target_file).name}"
+    )
+    tgt_pcm = _decode_to_memory(
+        target_file, idx_tgt, DEFAULT_SR, use_soxr, runner, tool_paths
+    )
 
     # Log audio stats to help diagnose 0% correlation issues
-    log(f"[DECODE DEBUG] ref_pcm: shape={ref_pcm.shape}, min={ref_pcm.min():.6f}, max={ref_pcm.max():.6f}, std={ref_pcm.std():.6f}")
-    log(f"[DECODE DEBUG] tgt_pcm: shape={tgt_pcm.shape}, min={tgt_pcm.min():.6f}, max={tgt_pcm.max():.6f}, std={tgt_pcm.std():.6f}")
+    log(
+        f"[DECODE DEBUG] ref_pcm: shape={ref_pcm.shape}, min={ref_pcm.min():.6f}, max={ref_pcm.max():.6f}, std={ref_pcm.std():.6f}"
+    )
+    log(
+        f"[DECODE DEBUG] tgt_pcm: shape={tgt_pcm.shape}, min={tgt_pcm.min():.6f}, max={tgt_pcm.max():.6f}, std={tgt_pcm.std():.6f}"
+    )
 
     # --- 2b. Source Separation (Optional) ---
     # Only apply separation if explicitly requested via per-source settings
     # AND a separation mode is configured in global settings
-    separation_mode = config.get('source_separation_mode', 'none')
-    if use_source_separation and separation_mode and separation_mode != 'none':
+    separation_mode = config.get("source_separation_mode", "none")
+    if use_source_separation and separation_mode and separation_mode != "none":
         try:
             from .source_separation import apply_source_separation
+
             ref_pcm, tgt_pcm = apply_source_separation(
                 ref_pcm, tgt_pcm, DEFAULT_SR, config, log, role_tag
             )
         except ImportError as e:
-            log("⚠️  WARNING: Source separation was enabled but dependencies are not available!")
+            log(
+                "⚠️  WARNING: Source separation was enabled but dependencies are not available!"
+            )
             log(f"[SOURCE SEPARATION] Error: {e}")
-            log("[SOURCE SEPARATION] Falling back to standard correlation without separation.")
-            log("[SOURCE SEPARATION] To fix: Install dependencies with 'pip install demucs torch'")
+            log(
+                "[SOURCE SEPARATION] Falling back to standard correlation without separation."
+            )
+            log(
+                "[SOURCE SEPARATION] To fix: Install dependencies with 'pip install demucs torch'"
+            )
         except Exception as e:
             log("⚠️  WARNING: Source separation failed with an error!")
             log(f"[SOURCE SEPARATION] Error: {e}")
-            log("[SOURCE SEPARATION] Falling back to standard correlation without separation.")
+            log(
+                "[SOURCE SEPARATION] Falling back to standard correlation without separation."
+            )
 
     # --- 3. Pre-processing (Filtering) ---
-    filtering_method = config.get('filtering_method', 'None')
-    if filtering_method == 'Dialogue Band-Pass Filter':
+    filtering_method = config.get("filtering_method", "None")
+    if filtering_method == "Dialogue Band-Pass Filter":
         log("Applying Dialogue Band-Pass filter...")
-        lowcut = config.get('filter_bandpass_lowcut_hz', 300.0)
-        highcut = config.get('filter_bandpass_highcut_hz', 3400.0)
-        order = config.get('filter_bandpass_order', 5)
+        lowcut = config.get("filter_bandpass_lowcut_hz", 300.0)
+        highcut = config.get("filter_bandpass_highcut_hz", 3400.0)
+        order = config.get("filter_bandpass_order", 5)
         ref_pcm = _apply_bandpass(ref_pcm, DEFAULT_SR, lowcut, highcut, order, log)
         tgt_pcm = _apply_bandpass(tgt_pcm, DEFAULT_SR, lowcut, highcut, order, log)
-    elif filtering_method == 'Low-Pass Filter':
-        cutoff = int(config.get('audio_bandlimit_hz', 0))
+    elif filtering_method == "Low-Pass Filter":
+        cutoff = int(config.get("audio_bandlimit_hz", 0))
         if cutoff > 0:
             log(f"Applying Low-Pass filter at {cutoff} Hz...")
-            taps = config.get('filter_lowpass_taps', 101)
+            taps = config.get("filter_lowpass_taps", 101)
             ref_pcm = _apply_lowpass(ref_pcm, DEFAULT_SR, cutoff, taps, log)
             tgt_pcm = _apply_lowpass(tgt_pcm, DEFAULT_SR, cutoff, taps, log)
 
     # --- 4. Per-Chunk Correlation ---
     duration_s = len(ref_pcm) / float(DEFAULT_SR)
-    chunk_count = int(config.get('scan_chunk_count', 10))
-    chunk_dur = float(config.get('scan_chunk_duration', 15.0))
+    chunk_count = int(config.get("scan_chunk_count", 10))
+    chunk_dur = float(config.get("scan_chunk_duration", 15.0))
 
-    start_pct = config.get('scan_start_percentage', 5.0)
-    end_pct = config.get('scan_end_percentage', 95.0)
-    if not 0.0 <= start_pct < end_pct <= 100.0: # Sanity check
+    start_pct = config.get("scan_start_percentage", 5.0)
+    end_pct = config.get("scan_end_percentage", 95.0)
+    if not 0.0 <= start_pct < end_pct <= 100.0:  # Sanity check
         start_pct, end_pct = 5.0, 95.0
 
     scan_start_s = duration_s * (start_pct / 100.0)
@@ -592,13 +732,16 @@ def run_audio_correlation(
     scan_range = max(0.0, (scan_end_s - scan_start_s) - chunk_dur)
     start_offset = scan_start_s
 
-    starts = [start_offset + (scan_range / max(1, chunk_count - 1) * i) for i in range(chunk_count)]
+    starts = [
+        start_offset + (scan_range / max(1, chunk_count - 1) * i)
+        for i in range(chunk_count)
+    ]
     results = []
     chunk_samples = int(round(chunk_dur * DEFAULT_SR))
 
-    correlation_method = config.get('correlation_method', 'Standard Correlation (SCC)')
-    peak_fit = config.get('audio_peak_fit', False)
-    min_match = float(config.get('min_match_pct', 5.0))
+    correlation_method = config.get("correlation_method", "Standard Correlation (SCC)")
+    peak_fit = config.get("audio_peak_fit", False)
+    min_match = float(config.get("min_match_pct", 5.0))
 
     for i, t0 in enumerate(starts, 1):
         start_sample = int(round(t0 * DEFAULT_SR))
@@ -612,26 +755,33 @@ def run_audio_correlation(
         ref_chunk = ref_pcm[start_sample:end_sample].copy()
         tgt_chunk = tgt_pcm[start_sample:end_sample].copy()
 
-        if 'Phase Correlation (GCC-PHAT)' in correlation_method:
+        if "Phase Correlation (GCC-PHAT)" in correlation_method:
             raw_ms, match = _find_delay_gcc_phat(ref_chunk, tgt_chunk, DEFAULT_SR)
-        elif 'Onset Detection' in correlation_method:
+        elif "Onset Detection" in correlation_method:
             raw_ms, match = _find_delay_onset(ref_chunk, tgt_chunk, DEFAULT_SR)
-        elif 'GCC-SCOT' in correlation_method:
+        elif "GCC-SCOT" in correlation_method:
             raw_ms, match = _find_delay_gcc_scot(ref_chunk, tgt_chunk, DEFAULT_SR)
-        elif 'DTW' in correlation_method:
+        elif "DTW" in correlation_method:
             raw_ms, match = _find_delay_dtw(ref_chunk, tgt_chunk, DEFAULT_SR)
-        elif 'Spectrogram' in correlation_method:
+        elif "Spectrogram" in correlation_method:
             raw_ms, match = _find_delay_spectrogram(ref_chunk, tgt_chunk, DEFAULT_SR)
         else:
             raw_ms, match = _find_delay_scc(ref_chunk, tgt_chunk, DEFAULT_SR, peak_fit)
 
         accepted = match >= min_match
         status_str = "ACCEPTED" if accepted else f"REJECTED (below {min_match:.1f})"
-        log(f"  Chunk {i}/{chunk_count} (@{t0:.1f}s): delay = {int(round(raw_ms)):+d} ms (raw={raw_ms:+.3f}, match={match:.2f}) — {status_str}")
-        results.append({
-            'delay': int(round(raw_ms)), 'raw_delay': raw_ms,
-            'match': match, 'start': t0, 'accepted': accepted
-        })
+        log(
+            f"  Chunk {i}/{chunk_count} (@{t0:.1f}s): delay = {int(round(raw_ms)):+d} ms (raw={raw_ms:+.3f}, match={match:.2f}) — {status_str}"
+        )
+        results.append(
+            {
+                "delay": int(round(raw_ms)),
+                "raw_delay": raw_ms,
+                "match": match,
+                "start": t0,
+                "accepted": accepted,
+            }
+        )
 
     # Release audio arrays immediately after correlation completes
     # Explicit deletion helps prevent memory issues between jobs
@@ -641,6 +791,7 @@ def run_audio_correlation(
     # Force garbage collection to release large numpy arrays
     # This prevents memory accumulation between source separation jobs
     import gc
+
     gc.collect()
 
     return results
@@ -648,13 +799,13 @@ def run_audio_correlation(
 
 # --- Method name to config key mapping ---
 MULTI_CORR_METHODS = [
-    ('Standard Correlation (SCC)', 'multi_corr_scc'),
-    ('Phase Correlation (GCC-PHAT)', 'multi_corr_gcc_phat'),
-    ('Onset Detection', 'multi_corr_onset'),
-    ('GCC-SCOT', 'multi_corr_gcc_scot'),
-    ('Whitened Cross-Correlation', 'multi_corr_gcc_whiten'),
-    ('DTW (Dynamic Time Warping)', 'multi_corr_dtw'),
-    ('Spectrogram Correlation', 'multi_corr_spectrogram'),
+    ("Standard Correlation (SCC)", "multi_corr_scc"),
+    ("Phase Correlation (GCC-PHAT)", "multi_corr_gcc_phat"),
+    ("Onset Detection", "multi_corr_onset"),
+    ("GCC-SCOT", "multi_corr_gcc_scot"),
+    ("Whitened Cross-Correlation", "multi_corr_gcc_whiten"),
+    ("DTW (Dynamic Time Warping)", "multi_corr_dtw"),
+    ("Spectrogram Correlation", "multi_corr_spectrogram"),
 ]
 
 
@@ -664,7 +815,7 @@ def _run_method_on_chunks(
     sr: int,
     min_match: float,
     peak_fit: bool,
-    log: Callable
+    log: Callable,
 ) -> list[dict]:
     """
     Runs a specific correlation method on pre-extracted chunks.
@@ -684,28 +835,35 @@ def _run_method_on_chunks(
     chunk_count = len(chunks)
 
     for i, t0, ref_chunk, tgt_chunk in chunks:
-        if 'Phase Correlation (GCC-PHAT)' in method_name:
+        if "Phase Correlation (GCC-PHAT)" in method_name:
             raw_ms, match = _find_delay_gcc_phat(ref_chunk, tgt_chunk, sr)
-        elif 'Onset Detection' in method_name:
+        elif "Onset Detection" in method_name:
             raw_ms, match = _find_delay_onset(ref_chunk, tgt_chunk, sr)
-        elif 'GCC-SCOT' in method_name:
+        elif "GCC-SCOT" in method_name:
             raw_ms, match = _find_delay_gcc_scot(ref_chunk, tgt_chunk, sr)
-        elif 'Whitened Cross-Correlation' in method_name:
+        elif "Whitened Cross-Correlation" in method_name:
             raw_ms, match = _find_delay_gcc_whiten(ref_chunk, tgt_chunk, sr)
-        elif 'DTW' in method_name:
+        elif "DTW" in method_name:
             raw_ms, match = _find_delay_dtw(ref_chunk, tgt_chunk, sr)
-        elif 'Spectrogram' in method_name:
+        elif "Spectrogram" in method_name:
             raw_ms, match = _find_delay_spectrogram(ref_chunk, tgt_chunk, sr)
         else:
             raw_ms, match = _find_delay_scc(ref_chunk, tgt_chunk, sr, peak_fit)
 
         accepted = match >= min_match
         status_str = "ACCEPTED" if accepted else f"REJECTED (below {min_match:.1f})"
-        log(f"  Chunk {i}/{chunk_count} (@{t0:.1f}s): delay = {int(round(raw_ms)):+d} ms (raw={raw_ms:+.3f}, match={match:.2f}) — {status_str}")
-        results.append({
-            'delay': int(round(raw_ms)), 'raw_delay': raw_ms,
-            'match': match, 'start': t0, 'accepted': accepted
-        })
+        log(
+            f"  Chunk {i}/{chunk_count} (@{t0:.1f}s): delay = {int(round(raw_ms)):+d} ms (raw={raw_ms:+.3f}, match={match:.2f}) — {status_str}"
+        )
+        results.append(
+            {
+                "delay": int(round(raw_ms)),
+                "raw_delay": raw_ms,
+                "match": match,
+                "start": t0,
+                "accepted": accepted,
+            }
+        )
 
     return results
 
@@ -721,7 +879,7 @@ def run_multi_correlation(
     role_tag: str,
     ref_track_index: int | None = None,
     target_track_index: int | None = None,
-    use_source_separation: bool = False
+    use_source_separation: bool = False,
 ) -> dict[str, list[dict]]:
     """
     Runs multiple correlation methods on the same audio chunks for comparison.
@@ -749,10 +907,25 @@ def run_multi_correlation(
     log = runner._log_message
 
     # Safety check: if multi-correlation is disabled, fall back to single method immediately
-    if not config.get('multi_correlation_enabled', False):
+    if not config.get("multi_correlation_enabled", False):
         log("[MULTI-CORRELATION] Feature disabled, using single correlation method")
-        return {config.get('correlation_method', 'Standard Correlation (SCC)'):
-                run_audio_correlation(ref_file, target_file, config, runner, tool_paths, ref_lang, target_lang, role_tag, ref_track_index, target_track_index, use_source_separation)}
+        return {
+            config.get(
+                "correlation_method", "Standard Correlation (SCC)"
+            ): run_audio_correlation(
+                ref_file,
+                target_file,
+                config,
+                runner,
+                tool_paths,
+                ref_lang,
+                target_lang,
+                role_tag,
+                ref_track_index,
+                target_track_index,
+                use_source_separation,
+            )
+        }
 
     # Get enabled methods
     enabled_methods = []
@@ -762,8 +935,23 @@ def run_multi_correlation(
 
     if not enabled_methods:
         log("[MULTI-CORRELATION] No methods enabled, falling back to single method")
-        return {config.get('correlation_method', 'Standard Correlation (SCC)'):
-                run_audio_correlation(ref_file, target_file, config, runner, tool_paths, ref_lang, target_lang, role_tag, ref_track_index, target_track_index, use_source_separation)}
+        return {
+            config.get(
+                "correlation_method", "Standard Correlation (SCC)"
+            ): run_audio_correlation(
+                ref_file,
+                target_file,
+                config,
+                runner,
+                tool_paths,
+                ref_lang,
+                target_lang,
+                role_tag,
+                ref_track_index,
+                target_track_index,
+                use_source_separation,
+            )
+        }
 
     # --- 1. Select streams ---
     if ref_track_index is not None:
@@ -783,7 +971,9 @@ def run_multi_correlation(
     else:
         # Use language matching for target
         tgt_norm = _normalize_lang(target_lang)
-        idx_tgt, id_tgt = get_audio_stream_info(target_file, tgt_norm, runner, tool_paths)
+        idx_tgt, id_tgt = get_audio_stream_info(
+            target_file, tgt_norm, runner, tool_paths
+        )
 
     if idx_ref is None or idx_tgt is None:
         raise ValueError("Could not locate required audio streams for correlation.")
@@ -799,59 +989,76 @@ def run_multi_correlation(
     else:
         tgt_desc = f"lang='{_normalize_lang(target_lang) or 'first'}'"
 
-    log(f"Selected streams: REF ({ref_desc}, index={idx_ref}), "
-        f"{role_tag.upper()} ({tgt_desc}, index={idx_tgt}" + (f", track_id={id_tgt}" if id_tgt is not None else "") + ")")
+    log(
+        f"Selected streams: REF ({ref_desc}, index={idx_ref}), "
+        f"{role_tag.upper()} ({tgt_desc}, index={idx_tgt}"
+        + (f", track_id={id_tgt}" if id_tgt is not None else "")
+        + ")"
+    )
 
     # --- 2. Decode ---
     DEFAULT_SR = 48000
-    use_soxr = config.get('use_soxr', False)
-    ref_pcm = _decode_to_memory(ref_file, idx_ref, DEFAULT_SR, use_soxr, runner, tool_paths)
-    tgt_pcm = _decode_to_memory(target_file, idx_tgt, DEFAULT_SR, use_soxr, runner, tool_paths)
+    use_soxr = config.get("use_soxr", False)
+    ref_pcm = _decode_to_memory(
+        ref_file, idx_ref, DEFAULT_SR, use_soxr, runner, tool_paths
+    )
+    tgt_pcm = _decode_to_memory(
+        target_file, idx_tgt, DEFAULT_SR, use_soxr, runner, tool_paths
+    )
 
     # --- 2b. Source Separation (Optional) ---
     # Only apply separation if explicitly requested via per-source settings
     # AND a separation mode is configured in global settings
-    separation_mode = config.get('source_separation_mode', 'none')
-    if use_source_separation and separation_mode and separation_mode != 'none':
+    separation_mode = config.get("source_separation_mode", "none")
+    if use_source_separation and separation_mode and separation_mode != "none":
         try:
             from .source_separation import apply_source_separation
+
             ref_pcm, tgt_pcm = apply_source_separation(
                 ref_pcm, tgt_pcm, DEFAULT_SR, config, log, role_tag
             )
         except ImportError as e:
-            log("⚠️  WARNING: Source separation was enabled but dependencies are not available!")
+            log(
+                "⚠️  WARNING: Source separation was enabled but dependencies are not available!"
+            )
             log(f"[SOURCE SEPARATION] Error: {e}")
-            log("[SOURCE SEPARATION] Falling back to standard correlation without separation.")
-            log("[SOURCE SEPARATION] To fix: Install dependencies with 'pip install demucs torch'")
+            log(
+                "[SOURCE SEPARATION] Falling back to standard correlation without separation."
+            )
+            log(
+                "[SOURCE SEPARATION] To fix: Install dependencies with 'pip install demucs torch'"
+            )
         except Exception as e:
             log("⚠️  WARNING: Source separation failed with an error!")
             log(f"[SOURCE SEPARATION] Error: {e}")
-            log("[SOURCE SEPARATION] Falling back to standard correlation without separation.")
+            log(
+                "[SOURCE SEPARATION] Falling back to standard correlation without separation."
+            )
 
     # --- 3. Pre-processing (Filtering) ---
-    filtering_method = config.get('filtering_method', 'None')
-    if filtering_method == 'Dialogue Band-Pass Filter':
+    filtering_method = config.get("filtering_method", "None")
+    if filtering_method == "Dialogue Band-Pass Filter":
         log("Applying Dialogue Band-Pass filter...")
-        lowcut = config.get('filter_bandpass_lowcut_hz', 300.0)
-        highcut = config.get('filter_bandpass_highcut_hz', 3400.0)
-        order = config.get('filter_bandpass_order', 5)
+        lowcut = config.get("filter_bandpass_lowcut_hz", 300.0)
+        highcut = config.get("filter_bandpass_highcut_hz", 3400.0)
+        order = config.get("filter_bandpass_order", 5)
         ref_pcm = _apply_bandpass(ref_pcm, DEFAULT_SR, lowcut, highcut, order, log)
         tgt_pcm = _apply_bandpass(tgt_pcm, DEFAULT_SR, lowcut, highcut, order, log)
-    elif filtering_method == 'Low-Pass Filter':
-        cutoff = int(config.get('audio_bandlimit_hz', 0))
+    elif filtering_method == "Low-Pass Filter":
+        cutoff = int(config.get("audio_bandlimit_hz", 0))
         if cutoff > 0:
             log(f"Applying Low-Pass filter at {cutoff} Hz...")
-            taps = config.get('filter_lowpass_taps', 101)
+            taps = config.get("filter_lowpass_taps", 101)
             ref_pcm = _apply_lowpass(ref_pcm, DEFAULT_SR, cutoff, taps, log)
             tgt_pcm = _apply_lowpass(tgt_pcm, DEFAULT_SR, cutoff, taps, log)
 
     # --- 4. Extract chunks ONCE ---
     duration_s = len(ref_pcm) / float(DEFAULT_SR)
-    chunk_count = int(config.get('scan_chunk_count', 10))
-    chunk_dur = float(config.get('scan_chunk_duration', 15.0))
+    chunk_count = int(config.get("scan_chunk_count", 10))
+    chunk_dur = float(config.get("scan_chunk_duration", 15.0))
 
-    start_pct = config.get('scan_start_percentage', 5.0)
-    end_pct = config.get('scan_end_percentage', 95.0)
+    start_pct = config.get("scan_start_percentage", 5.0)
+    end_pct = config.get("scan_end_percentage", 95.0)
     if not 0.0 <= start_pct < end_pct <= 100.0:
         start_pct, end_pct = 5.0, 95.0
 
@@ -859,7 +1066,10 @@ def run_multi_correlation(
     scan_end_s = duration_s * (end_pct / 100.0)
     scan_range = max(0.0, (scan_end_s - scan_start_s) - chunk_dur)
     start_offset = scan_start_s
-    starts = [start_offset + (scan_range / max(1, chunk_count - 1) * i) for i in range(chunk_count)]
+    starts = [
+        start_offset + (scan_range / max(1, chunk_count - 1) * i)
+        for i in range(chunk_count)
+    ]
     chunk_samples = int(round(chunk_dur * DEFAULT_SR))
 
     # Extract all chunks
@@ -875,11 +1085,13 @@ def run_multi_correlation(
         tgt_chunk = tgt_pcm[start_sample:end_sample].copy()
         chunks.append((i, t0, ref_chunk, tgt_chunk))
 
-    log(f"\n[MULTI-CORRELATION] Running {len(enabled_methods)} methods on {len(chunks)} chunks")
+    log(
+        f"\n[MULTI-CORRELATION] Running {len(enabled_methods)} methods on {len(chunks)} chunks"
+    )
 
     # --- 5. Run each method on the same chunks ---
-    peak_fit = config.get('audio_peak_fit', False)
-    min_match = float(config.get('min_match_pct', 5.0))
+    peak_fit = config.get("audio_peak_fit", False)
+    min_match = float(config.get("min_match_pct", 5.0))
     all_results = {}
 
     for method_name in enabled_methods:
@@ -887,7 +1099,9 @@ def run_multi_correlation(
         log(f"  MULTI-CORRELATION: {method_name}")
         log(f"{'═' * 70}")
 
-        results = _run_method_on_chunks(method_name, chunks, DEFAULT_SR, min_match, peak_fit, log)
+        results = _run_method_on_chunks(
+            method_name, chunks, DEFAULT_SR, min_match, peak_fit, log
+        )
         all_results[method_name] = results
 
     return all_results

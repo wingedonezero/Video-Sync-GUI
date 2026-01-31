@@ -7,6 +7,7 @@ Contains:
 - Comprehensive video property detection (interlacing, duration, resolution)
 - Video property comparison for sync strategy selection
 """
+
 from __future__ import annotations
 
 import json
@@ -30,34 +31,44 @@ def detect_video_fps(video_path: str, runner) -> float:
 
     try:
         cmd = [
-            'ffprobe',
-            '-v', 'quiet',
-            '-select_streams', 'v:0',
-            '-show_entries', 'stream=r_frame_rate',
-            '-of', 'json',
-            str(video_path)
+            "ffprobe",
+            "-v",
+            "quiet",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=r_frame_rate",
+            "-of",
+            "json",
+            str(video_path),
         ]
 
         # Import GPU environment support
         try:
             from vsg_core.system.gpu_env import get_subprocess_environment
+
             env = get_subprocess_environment()
         except ImportError:
             import os
+
             env = os.environ.copy()
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10, env=env)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=10, env=env
+        )
 
         if result.returncode != 0:
-            runner._log_message("[FPS Detection] WARNING: ffprobe failed, using default 23.976 fps")
+            runner._log_message(
+                "[FPS Detection] WARNING: ffprobe failed, using default 23.976 fps"
+            )
             return 23.976
 
         data = json.loads(result.stdout)
-        r_frame_rate = data['streams'][0]['r_frame_rate']
+        r_frame_rate = data["streams"][0]["r_frame_rate"]
 
         # Parse fraction (e.g., "24000/1001" -> 23.976)
-        if '/' in r_frame_rate:
-            num, denom = r_frame_rate.split('/')
+        if "/" in r_frame_rate:
+            num, denom = r_frame_rate.split("/")
             fps = float(num) / float(denom)
         else:
             fps = float(r_frame_rate)
@@ -96,23 +107,25 @@ def detect_video_properties(video_path: str, runner) -> dict[str, Any]:
             - height: int (video height in pixels)
             - detection_source: str (what method was used)
     """
-    runner._log_message(f"[VideoProps] Detecting properties for: {Path(video_path).name}")
+    runner._log_message(
+        f"[VideoProps] Detecting properties for: {Path(video_path).name}"
+    )
 
     # Default/fallback values
     props = {
-        'fps': 23.976,
-        'fps_fraction': (24000, 1001),
-        'interlaced': False,
-        'field_order': 'progressive',
-        'scan_type': 'progressive',
-        'content_type': 'progressive',  # 'progressive', 'interlaced', 'telecine', 'unknown'
-        'is_sd': False,  # True if SD content (height <= 576)
-        'is_dvd': False,  # True if likely DVD content
-        'duration_ms': 0.0,
-        'frame_count': 0,
-        'width': 1920,
-        'height': 1080,
-        'detection_source': 'fallback',
+        "fps": 23.976,
+        "fps_fraction": (24000, 1001),
+        "interlaced": False,
+        "field_order": "progressive",
+        "scan_type": "progressive",
+        "content_type": "progressive",  # 'progressive', 'interlaced', 'telecine', 'unknown'
+        "is_sd": False,  # True if SD content (height <= 576)
+        "is_dvd": False,  # True if likely DVD content
+        "duration_ms": 0.0,
+        "frame_count": 0,
+        "width": 1920,
+        "height": 1080,
+        "detection_source": "fallback",
     }
 
     try:
@@ -120,25 +133,35 @@ def detect_video_properties(video_path: str, runner) -> dict[str, Any]:
         # Note: We query both stream AND format for duration since MKV often
         # only has duration at format level, not stream level
         cmd = [
-            'ffprobe',
-            '-v', 'quiet',
-            '-select_streams', 'v:0',
-            '-show_entries', 'stream=r_frame_rate,avg_frame_rate,field_order,nb_frames,duration,codec_name,width,height',
-            '-show_entries', 'format=duration',
-            '-show_entries', 'stream_side_data=',
-            '-of', 'json',
-            str(video_path)
+            "ffprobe",
+            "-v",
+            "quiet",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=r_frame_rate,avg_frame_rate,field_order,nb_frames,duration,codec_name,width,height",
+            "-show_entries",
+            "format=duration",
+            "-show_entries",
+            "stream_side_data=",
+            "-of",
+            "json",
+            str(video_path),
         ]
 
         # Import GPU environment support
         try:
             from vsg_core.system.gpu_env import get_subprocess_environment
+
             env = get_subprocess_environment()
         except ImportError:
             import os
+
             env = os.environ.copy()
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=30, env=env
+        )
 
         if result.returncode != 0:
             runner._log_message("[VideoProps] WARNING: ffprobe failed, using defaults")
@@ -146,112 +169,128 @@ def detect_video_properties(video_path: str, runner) -> dict[str, Any]:
 
         data = json.loads(result.stdout)
 
-        if not data.get('streams'):
+        if not data.get("streams"):
             runner._log_message("[VideoProps] WARNING: No video streams found")
             return props
 
-        stream = data['streams'][0]
-        props['detection_source'] = 'ffprobe'
+        stream = data["streams"][0]
+        props["detection_source"] = "ffprobe"
 
         # Parse FPS from r_frame_rate (more reliable than avg_frame_rate)
-        r_frame_rate = stream.get('r_frame_rate', '24000/1001')
-        if '/' in r_frame_rate:
-            num, denom = r_frame_rate.split('/')
+        r_frame_rate = stream.get("r_frame_rate", "24000/1001")
+        if "/" in r_frame_rate:
+            num, denom = r_frame_rate.split("/")
             num, denom = int(num), int(denom)
-            props['fps'] = num / denom
-            props['fps_fraction'] = (num, denom)
+            props["fps"] = num / denom
+            props["fps_fraction"] = (num, denom)
         else:
-            props['fps'] = float(r_frame_rate)
-            props['fps_fraction'] = (int(float(r_frame_rate) * 1000), 1000)
+            props["fps"] = float(r_frame_rate)
+            props["fps_fraction"] = (int(float(r_frame_rate) * 1000), 1000)
 
         # Parse resolution
-        props['width'] = stream.get('width', 1920)
-        props['height'] = stream.get('height', 1080)
+        props["width"] = stream.get("width", 1920)
+        props["height"] = stream.get("height", 1080)
 
         # Parse field_order for interlacing detection
-        field_order = stream.get('field_order', 'progressive')
+        field_order = stream.get("field_order", "progressive")
 
-        if field_order in ('tt', 'tb'):
-            props['interlaced'] = True
-            props['field_order'] = 'tff'  # Top Field First
-            props['scan_type'] = 'interlaced'
-        elif field_order in ('bb', 'bt'):
-            props['interlaced'] = True
-            props['field_order'] = 'bff'  # Bottom Field First
-            props['scan_type'] = 'interlaced'
-        elif field_order == 'progressive':
-            props['interlaced'] = False
-            props['field_order'] = 'progressive'
-            props['scan_type'] = 'progressive'
+        if field_order in ("tt", "tb"):
+            props["interlaced"] = True
+            props["field_order"] = "tff"  # Top Field First
+            props["scan_type"] = "interlaced"
+        elif field_order in ("bb", "bt"):
+            props["interlaced"] = True
+            props["field_order"] = "bff"  # Bottom Field First
+            props["scan_type"] = "interlaced"
+        elif field_order == "progressive":
+            props["interlaced"] = False
+            props["field_order"] = "progressive"
+            props["scan_type"] = "progressive"
         else:
             # Unknown - might need deeper analysis
-            props['field_order'] = 'unknown'
+            props["field_order"] = "unknown"
 
         # Parse duration - try stream first, then format (MKV often only has format duration)
-        duration_str = stream.get('duration')
-        if duration_str and duration_str != 'N/A':
-            props['duration_ms'] = float(duration_str) * 1000.0
+        duration_str = stream.get("duration")
+        if duration_str and duration_str != "N/A":
+            props["duration_ms"] = float(duration_str) * 1000.0
         else:
             # Try format-level duration (common for MKV files)
-            format_info = data.get('format', {})
-            format_duration = format_info.get('duration')
-            if format_duration and format_duration != 'N/A':
-                props['duration_ms'] = float(format_duration) * 1000.0
+            format_info = data.get("format", {})
+            format_duration = format_info.get("duration")
+            if format_duration and format_duration != "N/A":
+                props["duration_ms"] = float(format_duration) * 1000.0
 
         # Parse frame count (if available)
-        nb_frames = stream.get('nb_frames')
-        if nb_frames and nb_frames != 'N/A':
-            props['frame_count'] = int(nb_frames)
-        elif props['duration_ms'] > 0 and props['fps'] > 0:
+        nb_frames = stream.get("nb_frames")
+        if nb_frames and nb_frames != "N/A":
+            props["frame_count"] = int(nb_frames)
+        elif props["duration_ms"] > 0 and props["fps"] > 0:
             # Estimate frame count from duration
-            props['frame_count'] = int(props['duration_ms'] * props['fps'] / 1000.0)
+            props["frame_count"] = int(props["duration_ms"] * props["fps"] / 1000.0)
 
         # Detect SD content and DVD characteristics
-        height = props['height']
-        props['is_sd'] = height <= 576  # 480i, 480p, 576i, 576p
+        height = props["height"]
+        props["is_sd"] = height <= 576  # 480i, 480p, 576i, 576p
 
         # DVD detection heuristics
         # NTSC DVD: 720x480 or 704x480
         # PAL DVD: 720x576 or 704x576
-        is_ntsc_dvd = height in (480, 486) and props['width'] in (720, 704, 640)
-        is_pal_dvd = height in (576, 578) and props['width'] in (720, 704)
-        props['is_dvd'] = is_ntsc_dvd or is_pal_dvd
+        is_ntsc_dvd = height in (480, 486) and props["width"] in (720, 704, 640)
+        is_pal_dvd = height in (576, 578) and props["width"] in (720, 704)
+        props["is_dvd"] = is_ntsc_dvd or is_pal_dvd
 
         # Determine content_type based on multiple factors
         # This helps decide which settings to use
-        if props['interlaced']:
+        if props["interlaced"]:
             # Check for telecine characteristics
             # NTSC telecine: 29.97fps interlaced from 24fps film
-            if abs(props['fps'] - 29.97) < 0.1 and is_ntsc_dvd:
+            if abs(props["fps"] - 29.97) < 0.1 and is_ntsc_dvd:
                 # Likely telecine - NTSC DVD with 29.97i that was probably 24fps film
-                props['content_type'] = 'telecine'
+                props["content_type"] = "telecine"
             else:
-                props['content_type'] = 'interlaced'
-        elif abs(props['fps'] - 29.97) < 0.1 and props['is_sd']:
+                props["content_type"] = "interlaced"
+        elif abs(props["fps"] - 29.97) < 0.1 and props["is_sd"]:
             # 29.97p SD content - could be soft telecine or native
-            props['content_type'] = 'unknown'  # Need further analysis
+            props["content_type"] = "unknown"  # Need further analysis
         else:
-            props['content_type'] = 'progressive'
+            props["content_type"] = "progressive"
 
         # Log detected properties
-        runner._log_message(f"[VideoProps] FPS: {props['fps']:.3f} ({props['fps_fraction'][0]}/{props['fps_fraction'][1]})")
-        runner._log_message(f"[VideoProps] Resolution: {props['width']}x{props['height']}")
-        runner._log_message(f"[VideoProps] Scan type: {props['scan_type']}, Field order: {props['field_order']}")
-        runner._log_message(f"[VideoProps] Duration: {props['duration_ms']:.0f}ms, Frames: {props['frame_count']}")
+        runner._log_message(
+            f"[VideoProps] FPS: {props['fps']:.3f} ({props['fps_fraction'][0]}/{props['fps_fraction'][1]})"
+        )
+        runner._log_message(
+            f"[VideoProps] Resolution: {props['width']}x{props['height']}"
+        )
+        runner._log_message(
+            f"[VideoProps] Scan type: {props['scan_type']}, Field order: {props['field_order']}"
+        )
+        runner._log_message(
+            f"[VideoProps] Duration: {props['duration_ms']:.0f}ms, Frames: {props['frame_count']}"
+        )
 
         # Log content type detection
-        if props['is_dvd']:
-            runner._log_message(f"[VideoProps] Content type: {props['content_type']} (DVD detected)")
-        elif props['is_sd']:
-            runner._log_message(f"[VideoProps] Content type: {props['content_type']} (SD content)")
+        if props["is_dvd"]:
+            runner._log_message(
+                f"[VideoProps] Content type: {props['content_type']} (DVD detected)"
+            )
+        elif props["is_sd"]:
+            runner._log_message(
+                f"[VideoProps] Content type: {props['content_type']} (SD content)"
+            )
         else:
             runner._log_message(f"[VideoProps] Content type: {props['content_type']}")
 
         # Additional notes for specific content types
-        if props['content_type'] == 'telecine':
-            runner._log_message("[VideoProps] NOTE: Telecine detected - IVTC may improve frame matching")
-        elif props['content_type'] == 'interlaced':
-            runner._log_message("[VideoProps] NOTE: Interlaced content - deinterlacing required for frame matching")
+        if props["content_type"] == "telecine":
+            runner._log_message(
+                "[VideoProps] NOTE: Telecine detected - IVTC may improve frame matching"
+            )
+        elif props["content_type"] == "interlaced":
+            runner._log_message(
+                "[VideoProps] NOTE: Interlaced content - deinterlacing required for frame matching"
+            )
 
         return props
 
@@ -260,7 +299,9 @@ def detect_video_properties(video_path: str, runner) -> dict[str, Any]:
         return props
 
 
-def get_video_properties(video_path: str, runner, tool_paths: dict = None) -> dict[str, Any]:
+def get_video_properties(
+    video_path: str, runner, tool_paths: dict = None
+) -> dict[str, Any]:
     """
     Get video properties including resolution.
 
@@ -292,10 +333,12 @@ def get_video_duration_ms(video_path: str, runner) -> float:
         Duration in milliseconds, or 0.0 on failure
     """
     props = detect_video_properties(video_path, runner)
-    return props.get('duration_ms', 0.0)
+    return props.get("duration_ms", 0.0)
 
 
-def compare_video_properties(source_props: dict[str, Any], target_props: dict[str, Any], runner) -> dict[str, Any]:
+def compare_video_properties(
+    source_props: dict[str, Any], target_props: dict[str, Any], runner
+) -> dict[str, Any]:
     """
     Compare video properties between source and target to determine sync strategy.
 
@@ -319,70 +362,90 @@ def compare_video_properties(source_props: dict[str, Any], target_props: dict[st
     runner._log_message("[VideoProps] Comparing source vs target properties...")
 
     result = {
-        'strategy': 'frame-based',  # Default: current mode works
-        'fps_match': True,
-        'fps_ratio': 1.0,
-        'interlace_mismatch': False,
-        'needs_deinterlace': False,
-        'needs_scaling': False,
-        'scale_factor': 1.0,
-        'warnings': [],
+        "strategy": "frame-based",  # Default: current mode works
+        "fps_match": True,
+        "fps_ratio": 1.0,
+        "interlace_mismatch": False,
+        "needs_deinterlace": False,
+        "needs_scaling": False,
+        "scale_factor": 1.0,
+        "warnings": [],
     }
 
-    source_fps = source_props['fps']
-    target_fps = target_props['fps']
+    source_fps = source_props["fps"]
+    target_fps = target_props["fps"]
 
     # Check FPS match (within 0.1% tolerance)
     fps_diff_pct = abs(source_fps - target_fps) / target_fps * 100
-    result['fps_ratio'] = source_fps / target_fps
+    result["fps_ratio"] = source_fps / target_fps
 
     if fps_diff_pct < 0.1:
         # FPS matches
-        result['fps_match'] = True
-        runner._log_message(f"[VideoProps] FPS: MATCH ({source_fps:.3f} ~ {target_fps:.3f})")
+        result["fps_match"] = True
+        runner._log_message(
+            f"[VideoProps] FPS: MATCH ({source_fps:.3f} ~ {target_fps:.3f})"
+        )
     else:
-        result['fps_match'] = False
-        runner._log_message(f"[VideoProps] FPS: MISMATCH ({source_fps:.3f} vs {target_fps:.3f}, diff={fps_diff_pct:.2f}%)")
+        result["fps_match"] = False
+        runner._log_message(
+            f"[VideoProps] FPS: MISMATCH ({source_fps:.3f} vs {target_fps:.3f}, diff={fps_diff_pct:.2f}%)"
+        )
 
         # Check for PAL speedup (23.976 -> 25 = 4.17% faster)
-        if 1.04 < result['fps_ratio'] < 1.05:
-            result['needs_scaling'] = True
-            result['scale_factor'] = target_fps / source_fps  # e.g., 23.976/25 = 0.959
-            result['strategy'] = 'scale'
-            result['warnings'].append(f"PAL speedup detected (ratio={result['fps_ratio']:.4f}), subtitles need scaling")
-            runner._log_message("[VideoProps] PAL speedup detected - will need subtitle scaling")
-        elif 0.95 < 1/result['fps_ratio'] < 0.96:
+        if 1.04 < result["fps_ratio"] < 1.05:
+            result["needs_scaling"] = True
+            result["scale_factor"] = target_fps / source_fps  # e.g., 23.976/25 = 0.959
+            result["strategy"] = "scale"
+            result["warnings"].append(
+                f"PAL speedup detected (ratio={result['fps_ratio']:.4f}), subtitles need scaling"
+            )
+            runner._log_message(
+                "[VideoProps] PAL speedup detected - will need subtitle scaling"
+            )
+        elif 0.95 < 1 / result["fps_ratio"] < 0.96:
             # Reverse PAL (25 -> 23.976)
-            result['needs_scaling'] = True
-            result['scale_factor'] = target_fps / source_fps
-            result['strategy'] = 'scale'
-            result['warnings'].append("Reverse PAL detected, subtitles need scaling")
-            runner._log_message("[VideoProps] Reverse PAL detected - will need subtitle scaling")
+            result["needs_scaling"] = True
+            result["scale_factor"] = target_fps / source_fps
+            result["strategy"] = "scale"
+            result["warnings"].append("Reverse PAL detected, subtitles need scaling")
+            runner._log_message(
+                "[VideoProps] Reverse PAL detected - will need subtitle scaling"
+            )
         else:
             # Different framerates, use timestamp-based
-            result['strategy'] = 'timestamp-based'
-            result['warnings'].append("Different framerates - frame-based matching may be unreliable")
-            runner._log_message("[VideoProps] Different framerates - timestamp-based matching recommended")
+            result["strategy"] = "timestamp-based"
+            result["warnings"].append(
+                "Different framerates - frame-based matching may be unreliable"
+            )
+            runner._log_message(
+                "[VideoProps] Different framerates - timestamp-based matching recommended"
+            )
 
     # Check interlacing
-    source_interlaced = source_props['interlaced']
-    target_interlaced = target_props['interlaced']
+    source_interlaced = source_props["interlaced"]
+    target_interlaced = target_props["interlaced"]
 
     if source_interlaced != target_interlaced:
-        result['interlace_mismatch'] = True
-        runner._log_message(f"[VideoProps] Interlacing: MISMATCH (source={source_interlaced}, target={target_interlaced})")
+        result["interlace_mismatch"] = True
+        runner._log_message(
+            f"[VideoProps] Interlacing: MISMATCH (source={source_interlaced}, target={target_interlaced})"
+        )
 
     if source_interlaced or target_interlaced:
-        result['needs_deinterlace'] = True
-        if result['strategy'] == 'frame-based':
-            result['strategy'] = 'deinterlace'
-        result['warnings'].append("Interlaced content detected - frame hashing may be less reliable")
-        runner._log_message("[VideoProps] Interlaced content - will need deinterlace for frame matching")
+        result["needs_deinterlace"] = True
+        if result["strategy"] == "frame-based":
+            result["strategy"] = "deinterlace"
+        result["warnings"].append(
+            "Interlaced content detected - frame hashing may be less reliable"
+        )
+        runner._log_message(
+            "[VideoProps] Interlaced content - will need deinterlace for frame matching"
+        )
 
     # Summary
     runner._log_message(f"[VideoProps] Recommended strategy: {result['strategy']}")
-    if result['warnings']:
-        for warn in result['warnings']:
+    if result["warnings"]:
+        for warn in result["warnings"]:
             runner._log_message(f"[VideoProps] WARNING: {warn}")
     runner._log_message("[VideoProps] -----------------------------------------")
 

@@ -20,13 +20,18 @@ from vsg_core.job_discovery import discover_jobs
 
 class SourceInputWidget(QWidget):
     """A self-contained widget for a single source input row that handles drag-and-drop."""
+
     def __init__(self, source_num: int, parent=None):
         super().__init__(parent)
         self.setAcceptDrops(True)
 
         layout = QHBoxLayout(self)
 
-        label_text = f"Source {source_num} (Reference):" if source_num == 1 else f"Source {source_num}:"
+        label_text = (
+            f"Source {source_num} (Reference):"
+            if source_num == 1
+            else f"Source {source_num}:"
+        )
         label = QLabel(label_text)
         self.line_edit = QLineEdit()
         browse_btn = QPushButton("Browse…")
@@ -61,10 +66,12 @@ class SourceInputWidget(QWidget):
     def text(self) -> str:
         return self.line_edit.text()
 
+
 class AddJobDialog(QDialog):
     """
     A dialog for dynamically adding sources to discover jobs.
     """
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Add Job(s) to Queue")
@@ -134,16 +141,22 @@ class AddJobDialog(QDialog):
         for i, source_widget in enumerate(self.source_widgets):
             path = source_widget.text().strip()
             if path:
-                sources[f"Source {i+1}"] = path
+                sources[f"Source {i + 1}"] = path
 
         if "Source 1" not in sources:
-            QMessageBox.warning(self, "Input Required", "Source 1 (Reference) cannot be empty.")
+            QMessageBox.warning(
+                self, "Input Required", "Source 1 (Reference) cannot be empty."
+            )
             return
 
         try:
             self.discovered_jobs = discover_jobs(sources)
             if not self.discovered_jobs:
-                QMessageBox.information(self, "No Jobs Found", "No matching jobs could be discovered from the provided paths.")
+                QMessageBox.information(
+                    self,
+                    "No Jobs Found",
+                    "No matching jobs could be discovered from the provided paths.",
+                )
                 return
 
             self.accept()

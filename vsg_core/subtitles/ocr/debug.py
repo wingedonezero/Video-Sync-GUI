@@ -40,6 +40,7 @@ from PIL import Image
 @dataclass
 class DebugSubtitle:
     """Debug info for a single subtitle."""
+
     index: int
     start_time: str  # "HH:MM:SS.mmm"
     end_time: str
@@ -52,7 +53,9 @@ class DebugSubtitle:
 
     # Issue tracking
     unknown_words: list[str] = field(default_factory=list)
-    fixes_applied: dict[str, str] = field(default_factory=dict)  # fix_name -> description
+    fixes_applied: dict[str, str] = field(
+        default_factory=dict
+    )  # fix_name -> description
     original_text: str | None = None  # Before fixes (same as raw_ocr_text when set)
 
 
@@ -78,7 +81,7 @@ class OCRDebugger:
         base_name: str,
         timestamp: str,
         enabled: bool = False,
-        low_confidence_threshold: float = 60.0
+        low_confidence_threshold: float = 60.0,
     ):
         """
         Initialize debugger.
@@ -117,7 +120,7 @@ class OCRDebugger:
         text: str,
         confidence: float,
         image: np.ndarray | None = None,
-        raw_ocr_text: str | None = None
+        raw_ocr_text: str | None = None,
     ):
         """Add a subtitle for potential debug output.
 
@@ -140,7 +143,7 @@ class OCRDebugger:
             raw_text=text,
             confidence=confidence,
             image=image.copy() if image is not None else None,
-            raw_ocr_text=raw_ocr_text
+            raw_ocr_text=raw_ocr_text,
         )
 
         # Track low confidence
@@ -161,7 +164,7 @@ class OCRDebugger:
         index: int,
         fix_name: str,
         description: str,
-        original_text: str | None = None
+        original_text: str | None = None,
     ):
         """Record a fix applied to a subtitle."""
         if not self.enabled:
@@ -231,9 +234,11 @@ class OCRDebugger:
         if self.fix_indices:
             lines.append(f"  fixes_applied/ - {len(self.fix_indices)} images")
         if self.low_confidence_indices:
-            lines.append(f"  low_confidence/ - {len(self.low_confidence_indices)} images")
+            lines.append(
+                f"  low_confidence/ - {len(self.low_confidence_indices)} images"
+            )
 
-        summary_path.write_text("\n".join(lines), encoding='utf-8')
+        summary_path.write_text("\n".join(lines), encoding="utf-8")
 
     def _save_raw_ocr(self):
         """Save complete raw OCR output for all subtitles.
@@ -265,7 +270,7 @@ class OCRDebugger:
 
             # Format: [0001] 00:01:23.456 | 85.2% | The raw OCR text here
             # Handle multiline by replacing newlines
-            text_display = raw_text.replace('\n', '\\n').replace('\\N', '\\N')
+            text_display = raw_text.replace("\n", "\\n").replace("\\N", "\\N")
 
             lines.append(
                 f"[{sub.index:04d}] {sub.start_time} -> {sub.end_time} | "
@@ -273,40 +278,46 @@ class OCRDebugger:
             )
 
         # Add a separator and detailed view
-        lines.extend([
-            "",
-            "",
-            "=" * 50,
-            "Detailed View (with line breaks preserved)",
-            "=" * 50,
-            "",
-        ])
+        lines.extend(
+            [
+                "",
+                "",
+                "=" * 50,
+                "Detailed View (with line breaks preserved)",
+                "=" * 50,
+                "",
+            ]
+        )
 
         for idx in sorted(self.subtitles.keys()):
             sub = self.subtitles[idx]
             raw_text = sub.raw_ocr_text or sub.original_text or sub.raw_text
             final_text = sub.raw_text
 
-            lines.extend([
-                "-" * 50,
-                f"[{sub.index:04d}] {sub.start_time} -> {sub.end_time}",
-                f"Confidence: {sub.confidence:.1f}%",
-                "",
-                "Raw OCR:",
-                f"  {raw_text.replace(chr(10), chr(10) + '  ')}",
-            ])
+            lines.extend(
+                [
+                    "-" * 50,
+                    f"[{sub.index:04d}] {sub.start_time} -> {sub.end_time}",
+                    f"Confidence: {sub.confidence:.1f}%",
+                    "",
+                    "Raw OCR:",
+                    f"  {raw_text.replace(chr(10), chr(10) + '  ')}",
+                ]
+            )
 
             # Show final text if different
             if raw_text != final_text:
-                lines.extend([
-                    "",
-                    "After fixes:",
-                    f"  {final_text.replace(chr(10), chr(10) + '  ')}",
-                ])
+                lines.extend(
+                    [
+                        "",
+                        "After fixes:",
+                        f"  {final_text.replace(chr(10), chr(10) + '  ')}",
+                    ]
+                )
 
             lines.append("")
 
-        raw_ocr_path.write_text("\n".join(lines), encoding='utf-8')
+        raw_ocr_path.write_text("\n".join(lines), encoding="utf-8")
 
     def _save_all_subtitles(self):
         """Save all subtitle images for verification.
@@ -333,24 +344,28 @@ class OCRDebugger:
             raw_text = sub.raw_ocr_text or sub.original_text or sub.raw_text
             final_text = sub.raw_text
 
-            lines.extend([
-                "-" * 50,
-                f"Index: {sub.index}",
-                f"Time: {sub.start_time} -> {sub.end_time}",
-                f"Confidence: {sub.confidence:.1f}%",
-                f"Image: sub_{sub.index:04d}.png",
-                "",
-                "Raw OCR:",
-                f"  {raw_text.replace(chr(10), chr(10) + '  ')}",
-            ])
+            lines.extend(
+                [
+                    "-" * 50,
+                    f"Index: {sub.index}",
+                    f"Time: {sub.start_time} -> {sub.end_time}",
+                    f"Confidence: {sub.confidence:.1f}%",
+                    f"Image: sub_{sub.index:04d}.png",
+                    "",
+                    "Raw OCR:",
+                    f"  {raw_text.replace(chr(10), chr(10) + '  ')}",
+                ]
+            )
 
             # Show final text if different
             if raw_text != final_text:
-                lines.extend([
-                    "",
-                    "After fixes:",
-                    f"  {final_text.replace(chr(10), chr(10) + '  ')}",
-                ])
+                lines.extend(
+                    [
+                        "",
+                        "After fixes:",
+                        f"  {final_text.replace(chr(10), chr(10) + '  ')}",
+                    ]
+                )
 
             lines.append("")
 
@@ -358,7 +373,7 @@ class OCRDebugger:
             if sub.image is not None:
                 self._save_image(sub.image, folder / f"sub_{sub.index:04d}.png")
 
-        (folder / "all_subtitles.txt").write_text("\n".join(lines), encoding='utf-8')
+        (folder / "all_subtitles.txt").write_text("\n".join(lines), encoding="utf-8")
 
     def _save_unknown_words(self):
         """Save unknown words debug output."""
@@ -379,25 +394,27 @@ class OCRDebugger:
             if not sub:
                 continue
 
-            lines.extend([
-                "-" * 50,
-                f"Index: {sub.index}",
-                f"Time: {sub.start_time} -> {sub.end_time}",
-                f"Confidence: {sub.confidence:.1f}%",
-                f"Image: sub_{sub.index:04d}.png",
-                "",
-                "OCR Text:",
-                f"  {sub.raw_text.replace(chr(10), chr(10) + '  ')}",
-                "",
-                f"Unknown words: {', '.join(sub.unknown_words)}",
-                "",
-            ])
+            lines.extend(
+                [
+                    "-" * 50,
+                    f"Index: {sub.index}",
+                    f"Time: {sub.start_time} -> {sub.end_time}",
+                    f"Confidence: {sub.confidence:.1f}%",
+                    f"Image: sub_{sub.index:04d}.png",
+                    "",
+                    "OCR Text:",
+                    f"  {sub.raw_text.replace(chr(10), chr(10) + '  ')}",
+                    "",
+                    f"Unknown words: {', '.join(sub.unknown_words)}",
+                    "",
+                ]
+            )
 
             # Save image
             if sub.image is not None:
                 self._save_image(sub.image, folder / f"sub_{sub.index:04d}.png")
 
-        (folder / "unknown_words.txt").write_text("\n".join(lines), encoding='utf-8')
+        (folder / "unknown_words.txt").write_text("\n".join(lines), encoding="utf-8")
 
     def _save_fixes(self):
         """Save fixes applied debug output."""
@@ -418,28 +435,34 @@ class OCRDebugger:
             if not sub:
                 continue
 
-            lines.extend([
-                "-" * 50,
-                f"Index: {sub.index}",
-                f"Time: {sub.start_time} -> {sub.end_time}",
-                f"Confidence: {sub.confidence:.1f}%",
-                f"Image: sub_{sub.index:04d}.png",
-                "",
-            ])
+            lines.extend(
+                [
+                    "-" * 50,
+                    f"Index: {sub.index}",
+                    f"Time: {sub.start_time} -> {sub.end_time}",
+                    f"Confidence: {sub.confidence:.1f}%",
+                    f"Image: sub_{sub.index:04d}.png",
+                    "",
+                ]
+            )
 
             if sub.original_text:
-                lines.extend([
-                    "Original OCR:",
-                    f"  {sub.original_text.replace(chr(10), chr(10) + '  ')}",
-                    "",
-                ])
+                lines.extend(
+                    [
+                        "Original OCR:",
+                        f"  {sub.original_text.replace(chr(10), chr(10) + '  ')}",
+                        "",
+                    ]
+                )
 
-            lines.extend([
-                "After fixes:",
-                f"  {sub.raw_text.replace(chr(10), chr(10) + '  ')}",
-                "",
-                "Fixes applied:",
-            ])
+            lines.extend(
+                [
+                    "After fixes:",
+                    f"  {sub.raw_text.replace(chr(10), chr(10) + '  ')}",
+                    "",
+                    "Fixes applied:",
+                ]
+            )
 
             for fix_name, description in sub.fixes_applied.items():
                 lines.append(f"  - {fix_name}: {description}")
@@ -450,7 +473,7 @@ class OCRDebugger:
             if sub.image is not None:
                 self._save_image(sub.image, folder / f"sub_{sub.index:04d}.png")
 
-        (folder / "fixes_applied.txt").write_text("\n".join(lines), encoding='utf-8')
+        (folder / "fixes_applied.txt").write_text("\n".join(lines), encoding="utf-8")
 
     def _save_low_confidence(self):
         """Save low confidence debug output."""
@@ -469,7 +492,7 @@ class OCRDebugger:
         # Sort by confidence (lowest first)
         sorted_indices = sorted(
             self.low_confidence_indices,
-            key=lambda i: self.subtitles[i].confidence if i in self.subtitles else 100
+            key=lambda i: self.subtitles[i].confidence if i in self.subtitles else 100,
         )
 
         for idx in sorted_indices:
@@ -477,46 +500,45 @@ class OCRDebugger:
             if not sub:
                 continue
 
-            lines.extend([
-                "-" * 50,
-                f"Index: {sub.index}",
-                f"Time: {sub.start_time} -> {sub.end_time}",
-                f"Confidence: {sub.confidence:.1f}%",
-                f"Image: sub_{sub.index:04d}.png",
-                "",
-                "OCR Text:",
-                f"  {sub.raw_text.replace(chr(10), chr(10) + '  ')}",
-                "",
-            ])
+            lines.extend(
+                [
+                    "-" * 50,
+                    f"Index: {sub.index}",
+                    f"Time: {sub.start_time} -> {sub.end_time}",
+                    f"Confidence: {sub.confidence:.1f}%",
+                    f"Image: sub_{sub.index:04d}.png",
+                    "",
+                    "OCR Text:",
+                    f"  {sub.raw_text.replace(chr(10), chr(10) + '  ')}",
+                    "",
+                ]
+            )
 
             # Save image
             if sub.image is not None:
                 self._save_image(sub.image, folder / f"sub_{sub.index:04d}.png")
 
-        (folder / "low_confidence.txt").write_text("\n".join(lines), encoding='utf-8')
+        (folder / "low_confidence.txt").write_text("\n".join(lines), encoding="utf-8")
 
     def _save_image(self, image: np.ndarray, path: Path):
         """Save a numpy image array to disk."""
         try:
             if len(image.shape) == 2:
                 # Grayscale
-                img = Image.fromarray(image, mode='L')
+                img = Image.fromarray(image, mode="L")
             elif image.shape[2] == 4:
                 # RGBA
-                img = Image.fromarray(image, mode='RGBA')
+                img = Image.fromarray(image, mode="RGBA")
             else:
                 # RGB
-                img = Image.fromarray(image, mode='RGB')
+                img = Image.fromarray(image, mode="RGB")
             img.save(path)
         except Exception:
             pass  # Don't fail debug on image save errors
 
 
 def create_debugger(
-    logs_dir: Path,
-    base_name: str,
-    timestamp: str,
-    settings_dict: dict
+    logs_dir: Path, base_name: str, timestamp: str, settings_dict: dict
 ) -> OCRDebugger:
     """
     Create a debugger from settings.
@@ -534,6 +556,8 @@ def create_debugger(
         logs_dir=logs_dir,
         base_name=base_name,
         timestamp=timestamp,
-        enabled=settings_dict.get('ocr_debug_output', False),
-        low_confidence_threshold=settings_dict.get('ocr_low_confidence_threshold', 60.0)
+        enabled=settings_dict.get("ocr_debug_output", False),
+        low_confidence_threshold=settings_dict.get(
+            "ocr_low_confidence_threshold", 60.0
+        ),
     )

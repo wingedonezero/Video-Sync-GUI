@@ -30,6 +30,7 @@ def _wrap_scroll(widget: QWidget) -> QScrollArea:
     sa.setWidget(widget)
     return sa
 
+
 class OptionsDialog(QDialog):
     """
     Drop-in replacement preserving public API/behavior of the previous OptionsDialog.
@@ -42,9 +43,10 @@ class OptionsDialog(QDialog):
     Exposes:
         - self.sections: dict[str, dict[str, QWidget]] of all keyed widgets
     """
+
     def __init__(self, config: dict, parent=None):
         super().__init__(parent)
-        self.setWindowTitle('Application Settings')
+        self.setWindowTitle("Application Settings")
         self.setMinimumSize(900, 600)
         self.config = config
         self.sections: dict[str, dict[str, object]] = {}
@@ -64,24 +66,24 @@ class OptionsDialog(QDialog):
         self._logging_tab = LoggingTab()
 
         # Add tabs wrapped in scroll areas
-        self.tabs.addTab(_wrap_scroll(self._storage_tab), 'Storage & Tools')
-        self.tabs.addTab(_wrap_scroll(self._analysis_tab), 'Analysis')
-        self.tabs.addTab(_wrap_scroll(self._stepping_tab), 'Stepping Correction')
-        self.tabs.addTab(_wrap_scroll(self._subtitle_sync_tab), 'Subtitles')
-        self.tabs.addTab(_wrap_scroll(self._chapters_tab), 'Chapters')
-        self.tabs.addTab(_wrap_scroll(self._ocr_tab), 'OCR')
-        self.tabs.addTab(_wrap_scroll(self._merge_tab), 'Merge Behavior')
-        self.tabs.addTab(_wrap_scroll(self._logging_tab), 'Logging')
+        self.tabs.addTab(_wrap_scroll(self._storage_tab), "Storage & Tools")
+        self.tabs.addTab(_wrap_scroll(self._analysis_tab), "Analysis")
+        self.tabs.addTab(_wrap_scroll(self._stepping_tab), "Stepping Correction")
+        self.tabs.addTab(_wrap_scroll(self._subtitle_sync_tab), "Subtitles")
+        self.tabs.addTab(_wrap_scroll(self._chapters_tab), "Chapters")
+        self.tabs.addTab(_wrap_scroll(self._ocr_tab), "OCR")
+        self.tabs.addTab(_wrap_scroll(self._merge_tab), "Merge Behavior")
+        self.tabs.addTab(_wrap_scroll(self._logging_tab), "Logging")
 
         # Collect widget maps by logical section name
-        self.sections['storage'] = self._storage_tab.widgets
-        self.sections['analysis'] = self._analysis_tab.widgets
-        self.sections['stepping'] = self._stepping_tab.widgets
-        self.sections['subtitle_sync'] = self._subtitle_sync_tab.widgets
-        self.sections['chapters'] = self._chapters_tab.widgets
-        self.sections['ocr'] = self._ocr_tab.widgets
-        self.sections['merge'] = self._merge_tab.widgets
-        self.sections['logging'] = self._logging_tab.widgets
+        self.sections["storage"] = self._storage_tab.widgets
+        self.sections["analysis"] = self._analysis_tab.widgets
+        self.sections["stepping"] = self._stepping_tab.widgets
+        self.sections["subtitle_sync"] = self._subtitle_sync_tab.widgets
+        self.sections["chapters"] = self._chapters_tab.widgets
+        self.sections["ocr"] = self._ocr_tab.widgets
+        self.sections["merge"] = self._merge_tab.widgets
+        self.sections["logging"] = self._logging_tab.widgets
 
         # Save/Cancel
         btns = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
@@ -94,12 +96,16 @@ class OptionsDialog(QDialog):
         self.load_settings()
 
         # Connect storage tab maintenance button
-        self._storage_tab.remove_invalid_btn.clicked.connect(self._on_remove_invalid_config)
+        self._storage_tab.remove_invalid_btn.clicked.connect(
+            self._on_remove_invalid_config
+        )
 
     def _on_remove_invalid_config(self):
         """Handle remove invalid config entries button click."""
-        if not hasattr(self.config, 'get_orphaned_keys'):
-            QMessageBox.warning(self, "Not Supported", "Config object doesn't support orphan detection.")
+        if not hasattr(self.config, "get_orphaned_keys"):
+            QMessageBox.warning(
+                self, "Not Supported", "Config object doesn't support orphan detection."
+            )
             return
 
         orphaned = self.config.get_orphaned_keys()
@@ -107,7 +113,7 @@ class OptionsDialog(QDialog):
             QMessageBox.information(
                 self,
                 "Config Clean",
-                "No invalid config entries found.\nYour settings.json is clean!"
+                "No invalid config entries found.\nYour settings.json is clean!",
             )
             return
 
@@ -120,7 +126,7 @@ class OptionsDialog(QDialog):
             "These are old settings no longer used by the application.\n"
             "Remove them from settings.json?",
             QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
+            QMessageBox.No,
         )
 
         if reply == QMessageBox.Yes:
@@ -128,12 +134,14 @@ class OptionsDialog(QDialog):
             QMessageBox.information(
                 self,
                 "Cleanup Complete",
-                f"Removed {len(removed)} invalid entries from settings.json."
+                f"Removed {len(removed)} invalid entries from settings.json.",
             )
 
     # --- public (kept for compatibility) ---
     def load_settings(self):
-        self._logic.load_from_config(self.config.settings if hasattr(self.config, "settings") else self.config)
+        self._logic.load_from_config(
+            self.config.settings if hasattr(self.config, "settings") else self.config
+        )
         # Initialize font size preview after settings are loaded
         self._ocr_tab.initialize_font_preview()
 

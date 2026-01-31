@@ -15,9 +15,7 @@ class LogManager:
 
     @staticmethod
     def setup_job_log(
-        job_name: str,
-        log_dir: Path,
-        gui_log_callback: Callable[[str], None]
+        job_name: str, log_dir: Path, gui_log_callback: Callable[[str], None]
     ) -> tuple[logging.Logger, logging.FileHandler, Callable[[str], None]]:
         """
         Sets up logging for a job.
@@ -34,7 +32,7 @@ class LogManager:
             - log_to_all: Function to log to both file and GUI
         """
         log_path = log_dir / f"{job_name}.log"
-        logger = logging.getLogger(f'job_{job_name}')
+        logger = logging.getLogger(f"job_{job_name}")
         logger.setLevel(logging.INFO)
 
         # Remove any existing handlers
@@ -42,8 +40,8 @@ class LogManager:
             logger.removeHandler(handler)
 
         # Create file handler
-        handler = logging.FileHandler(log_path, mode='w', encoding='utf-8')
-        handler.setFormatter(logging.Formatter('%(message)s'))
+        handler = logging.FileHandler(log_path, mode="w", encoding="utf-8")
+        handler.setFormatter(logging.Formatter("%(message)s"))
         logger.addHandler(handler)
         logger.propagate = False
 

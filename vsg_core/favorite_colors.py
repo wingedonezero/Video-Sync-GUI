@@ -5,6 +5,7 @@ Favorite Colors Manager
 Manages a global list of favorite colors that can be saved and reused
 across subtitle style editing sessions.
 """
+
 import json
 import uuid
 from datetime import datetime
@@ -33,7 +34,7 @@ class FavoriteColorsManager:
             config_dir: Path to the .config directory
         """
         self.config_dir = Path(config_dir)
-        self.config_file = self.config_dir / 'favorite_colors.json'
+        self.config_file = self.config_dir / "favorite_colors.json"
         self._favorites: list[dict[str, Any]] = []
         self._load()
 
@@ -44,12 +45,12 @@ class FavoriteColorsManager:
             return
 
         try:
-            with open(self.config_file, encoding='utf-8') as f:
+            with open(self.config_file, encoding="utf-8") as f:
                 data = json.load(f)
 
             # Handle version migrations if needed in the future
-            version = data.get('version', 1)
-            self._favorites = data.get('favorites', [])
+            version = data.get("version", 1)
+            self._favorites = data.get("favorites", [])
 
             # Validate loaded data
             valid_favorites = []
@@ -66,10 +67,10 @@ class FavoriteColorsManager:
 
     def _validate_favorite(self, fav: dict) -> bool:
         """Validate a favorite color entry."""
-        required_keys = ['id', 'name', 'hex']
+        required_keys = ["id", "name", "hex"]
         if not all(key in fav for key in required_keys):
             return False
-        if not isinstance(fav['hex'], str) or not fav['hex'].startswith('#'):
+        if not isinstance(fav["hex"], str) or not fav["hex"].startswith("#"):
             return False
         return True
 
@@ -78,13 +79,10 @@ class FavoriteColorsManager:
         # Ensure config directory exists
         self.config_dir.mkdir(parents=True, exist_ok=True)
 
-        data = {
-            'version': self.VERSION,
-            'favorites': self._favorites
-        }
+        data = {"version": self.VERSION, "favorites": self._favorites}
 
         try:
-            with open(self.config_file, 'w', encoding='utf-8') as f:
+            with open(self.config_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
         except OSError as e:
             print(f"Error saving favorite colors: {e}")
@@ -111,21 +109,23 @@ class FavoriteColorsManager:
         """
         # Normalize hex color to uppercase
         hex_color = hex_color.upper()
-        if not hex_color.startswith('#'):
-            hex_color = '#' + hex_color
+        if not hex_color.startswith("#"):
+            hex_color = "#" + hex_color
 
         favorite = {
-            'id': str(uuid.uuid4()),
-            'name': name.strip() if name else 'Unnamed Color',
-            'hex': hex_color,
-            'created': datetime.now().isoformat()
+            "id": str(uuid.uuid4()),
+            "name": name.strip() if name else "Unnamed Color",
+            "hex": hex_color,
+            "created": datetime.now().isoformat(),
         }
 
         self._favorites.append(favorite)
         self._save()
-        return favorite['id']
+        return favorite["id"]
 
-    def update(self, favorite_id: str, name: str | None = None, hex_color: str | None = None) -> bool:
+    def update(
+        self, favorite_id: str, name: str | None = None, hex_color: str | None = None
+    ) -> bool:
         """
         Update an existing favorite color.
 
@@ -138,14 +138,14 @@ class FavoriteColorsManager:
             True if updated successfully, False if not found
         """
         for fav in self._favorites:
-            if fav['id'] == favorite_id:
+            if fav["id"] == favorite_id:
                 if name is not None:
-                    fav['name'] = name.strip() if name else 'Unnamed Color'
+                    fav["name"] = name.strip() if name else "Unnamed Color"
                 if hex_color is not None:
                     hex_color = hex_color.upper()
-                    if not hex_color.startswith('#'):
-                        hex_color = '#' + hex_color
-                    fav['hex'] = hex_color
+                    if not hex_color.startswith("#"):
+                        hex_color = "#" + hex_color
+                    fav["hex"] = hex_color
                 self._save()
                 return True
         return False
@@ -161,7 +161,7 @@ class FavoriteColorsManager:
             True if removed successfully, False if not found
         """
         original_count = len(self._favorites)
-        self._favorites = [f for f in self._favorites if f['id'] != favorite_id]
+        self._favorites = [f for f in self._favorites if f["id"] != favorite_id]
 
         if len(self._favorites) < original_count:
             self._save()
@@ -179,7 +179,7 @@ class FavoriteColorsManager:
             The favorite dict or None if not found
         """
         for fav in self._favorites:
-            if fav['id'] == favorite_id:
+            if fav["id"] == favorite_id:
                 return fav.copy()
         return None
 
@@ -190,7 +190,7 @@ class FavoriteColorsManager:
         Args:
             favorite_ids: List of IDs in desired order
         """
-        id_to_fav = {f['id']: f for f in self._favorites}
+        id_to_fav = {f["id"]: f for f in self._favorites}
         new_order = []
 
         for fid in favorite_ids:
@@ -199,7 +199,7 @@ class FavoriteColorsManager:
 
         # Add any favorites not in the list at the end
         for fav in self._favorites:
-            if fav['id'] not in favorite_ids:
+            if fav["id"] not in favorite_ids:
                 new_order.append(fav)
 
         self._favorites = new_order

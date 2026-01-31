@@ -5,4 +5,4 @@ from .filtering_tab import FilteringTab
 from .fonts_tab import FontsTab
 from .styles_tab import StylesTab
 
-__all__ = ['BaseTab', 'FilteringTab', 'FontsTab', 'StylesTab']
+__all__ = ["BaseTab", "FilteringTab", "FontsTab", "StylesTab"]

@@ -51,122 +51,314 @@ class KanaToRomaji:
     # Hiragana to romaji mapping
     HIRAGANA = {
         # Basic vowels
-        'あ': 'a', 'い': 'i', 'う': 'u', 'え': 'e', 'お': 'o',
+        "あ": "a",
+        "い": "i",
+        "う": "u",
+        "え": "e",
+        "お": "o",
         # K-row
-        'か': 'ka', 'き': 'ki', 'く': 'ku', 'け': 'ke', 'こ': 'ko',
+        "か": "ka",
+        "き": "ki",
+        "く": "ku",
+        "け": "ke",
+        "こ": "ko",
         # S-row
-        'さ': 'sa', 'し': 'shi', 'す': 'su', 'せ': 'se', 'そ': 'so',
+        "さ": "sa",
+        "し": "shi",
+        "す": "su",
+        "せ": "se",
+        "そ": "so",
         # T-row
-        'た': 'ta', 'ち': 'chi', 'つ': 'tsu', 'て': 'te', 'と': 'to',
+        "た": "ta",
+        "ち": "chi",
+        "つ": "tsu",
+        "て": "te",
+        "と": "to",
         # N-row
-        'な': 'na', 'に': 'ni', 'ぬ': 'nu', 'ね': 'ne', 'の': 'no',
+        "な": "na",
+        "に": "ni",
+        "ぬ": "nu",
+        "ね": "ne",
+        "の": "no",
         # H-row
-        'は': 'ha', 'ひ': 'hi', 'ふ': 'fu', 'へ': 'he', 'ほ': 'ho',
+        "は": "ha",
+        "ひ": "hi",
+        "ふ": "fu",
+        "へ": "he",
+        "ほ": "ho",
         # M-row
-        'ま': 'ma', 'み': 'mi', 'む': 'mu', 'め': 'me', 'も': 'mo',
+        "ま": "ma",
+        "み": "mi",
+        "む": "mu",
+        "め": "me",
+        "も": "mo",
         # Y-row
-        'や': 'ya', 'ゆ': 'yu', 'よ': 'yo',
+        "や": "ya",
+        "ゆ": "yu",
+        "よ": "yo",
         # R-row
-        'ら': 'ra', 'り': 'ri', 'る': 'ru', 'れ': 're', 'ろ': 'ro',
+        "ら": "ra",
+        "り": "ri",
+        "る": "ru",
+        "れ": "re",
+        "ろ": "ro",
         # W-row
-        'わ': 'wa', 'ゐ': 'wi', 'ゑ': 'we', 'を': 'wo',
+        "わ": "wa",
+        "ゐ": "wi",
+        "ゑ": "we",
+        "を": "wo",
         # N
-        'ん': 'n',
+        "ん": "n",
         # Voiced (dakuten)
-        'が': 'ga', 'ぎ': 'gi', 'ぐ': 'gu', 'げ': 'ge', 'ご': 'go',
-        'ざ': 'za', 'じ': 'ji', 'ず': 'zu', 'ぜ': 'ze', 'ぞ': 'zo',
-        'だ': 'da', 'ぢ': 'ji', 'づ': 'zu', 'で': 'de', 'ど': 'do',
-        'ば': 'ba', 'び': 'bi', 'ぶ': 'bu', 'べ': 'be', 'ぼ': 'bo',
+        "が": "ga",
+        "ぎ": "gi",
+        "ぐ": "gu",
+        "げ": "ge",
+        "ご": "go",
+        "ざ": "za",
+        "じ": "ji",
+        "ず": "zu",
+        "ぜ": "ze",
+        "ぞ": "zo",
+        "だ": "da",
+        "ぢ": "ji",
+        "づ": "zu",
+        "で": "de",
+        "ど": "do",
+        "ば": "ba",
+        "び": "bi",
+        "ぶ": "bu",
+        "べ": "be",
+        "ぼ": "bo",
         # Half-voiced (handakuten)
-        'ぱ': 'pa', 'ぴ': 'pi', 'ぷ': 'pu', 'ぺ': 'pe', 'ぽ': 'po',
+        "ぱ": "pa",
+        "ぴ": "pi",
+        "ぷ": "pu",
+        "ぺ": "pe",
+        "ぽ": "po",
         # Small kana
-        'ぁ': 'a', 'ぃ': 'i', 'ぅ': 'u', 'ぇ': 'e', 'ぉ': 'o',
-        'ゃ': 'ya', 'ゅ': 'yu', 'ょ': 'yo',
-        'ゎ': 'wa',
+        "ぁ": "a",
+        "ぃ": "i",
+        "ぅ": "u",
+        "ぇ": "e",
+        "ぉ": "o",
+        "ゃ": "ya",
+        "ゅ": "yu",
+        "ょ": "yo",
+        "ゎ": "wa",
         # Sokuon (small tsu) - handled specially
-        'っ': '',
+        "っ": "",
     }
 
     # Katakana to romaji mapping
     KATAKANA = {
         # Basic vowels
-        'ア': 'a', 'イ': 'i', 'ウ': 'u', 'エ': 'e', 'オ': 'o',
+        "ア": "a",
+        "イ": "i",
+        "ウ": "u",
+        "エ": "e",
+        "オ": "o",
         # K-row
-        'カ': 'ka', 'キ': 'ki', 'ク': 'ku', 'ケ': 'ke', 'コ': 'ko',
+        "カ": "ka",
+        "キ": "ki",
+        "ク": "ku",
+        "ケ": "ke",
+        "コ": "ko",
         # S-row
-        'サ': 'sa', 'シ': 'shi', 'ス': 'su', 'セ': 'se', 'ソ': 'so',
+        "サ": "sa",
+        "シ": "shi",
+        "ス": "su",
+        "セ": "se",
+        "ソ": "so",
         # T-row
-        'タ': 'ta', 'チ': 'chi', 'ツ': 'tsu', 'テ': 'te', 'ト': 'to',
+        "タ": "ta",
+        "チ": "chi",
+        "ツ": "tsu",
+        "テ": "te",
+        "ト": "to",
         # N-row
-        'ナ': 'na', 'ニ': 'ni', 'ヌ': 'nu', 'ネ': 'ne', 'ノ': 'no',
+        "ナ": "na",
+        "ニ": "ni",
+        "ヌ": "nu",
+        "ネ": "ne",
+        "ノ": "no",
         # H-row
-        'ハ': 'ha', 'ヒ': 'hi', 'フ': 'fu', 'ヘ': 'he', 'ホ': 'ho',
+        "ハ": "ha",
+        "ヒ": "hi",
+        "フ": "fu",
+        "ヘ": "he",
+        "ホ": "ho",
         # M-row
-        'マ': 'ma', 'ミ': 'mi', 'ム': 'mu', 'メ': 'me', 'モ': 'mo',
+        "マ": "ma",
+        "ミ": "mi",
+        "ム": "mu",
+        "メ": "me",
+        "モ": "mo",
         # Y-row
-        'ヤ': 'ya', 'ユ': 'yu', 'ヨ': 'yo',
+        "ヤ": "ya",
+        "ユ": "yu",
+        "ヨ": "yo",
         # R-row
-        'ラ': 'ra', 'リ': 'ri', 'ル': 'ru', 'レ': 're', 'ロ': 'ro',
+        "ラ": "ra",
+        "リ": "ri",
+        "ル": "ru",
+        "レ": "re",
+        "ロ": "ro",
         # W-row
-        'ワ': 'wa', 'ヰ': 'wi', 'ヱ': 'we', 'ヲ': 'wo',
+        "ワ": "wa",
+        "ヰ": "wi",
+        "ヱ": "we",
+        "ヲ": "wo",
         # N
-        'ン': 'n',
+        "ン": "n",
         # Voiced (dakuten)
-        'ガ': 'ga', 'ギ': 'gi', 'グ': 'gu', 'ゲ': 'ge', 'ゴ': 'go',
-        'ザ': 'za', 'ジ': 'ji', 'ズ': 'zu', 'ゼ': 'ze', 'ゾ': 'zo',
-        'ダ': 'da', 'ヂ': 'ji', 'ヅ': 'zu', 'デ': 'de', 'ド': 'do',
-        'バ': 'ba', 'ビ': 'bi', 'ブ': 'bu', 'ベ': 'be', 'ボ': 'bo',
+        "ガ": "ga",
+        "ギ": "gi",
+        "グ": "gu",
+        "ゲ": "ge",
+        "ゴ": "go",
+        "ザ": "za",
+        "ジ": "ji",
+        "ズ": "zu",
+        "ゼ": "ze",
+        "ゾ": "zo",
+        "ダ": "da",
+        "ヂ": "ji",
+        "ヅ": "zu",
+        "デ": "de",
+        "ド": "do",
+        "バ": "ba",
+        "ビ": "bi",
+        "ブ": "bu",
+        "ベ": "be",
+        "ボ": "bo",
         # Half-voiced (handakuten)
-        'パ': 'pa', 'ピ': 'pi', 'プ': 'pu', 'ペ': 'pe', 'ポ': 'po',
+        "パ": "pa",
+        "ピ": "pi",
+        "プ": "pu",
+        "ペ": "pe",
+        "ポ": "po",
         # Small kana
-        'ァ': 'a', 'ィ': 'i', 'ゥ': 'u', 'ェ': 'e', 'ォ': 'o',
-        'ャ': 'ya', 'ュ': 'yu', 'ョ': 'yo',
-        'ヮ': 'wa',
+        "ァ": "a",
+        "ィ": "i",
+        "ゥ": "u",
+        "ェ": "e",
+        "ォ": "o",
+        "ャ": "ya",
+        "ュ": "yu",
+        "ョ": "yo",
+        "ヮ": "wa",
         # Sokuon (small tsu) - handled specially
-        'ッ': '',
+        "ッ": "",
         # Long vowel mark
-        'ー': '',
+        "ー": "",
         # Additional katakana for foreign words
-        'ヴ': 'vu',
-        'ヷ': 'va', 'ヸ': 'vi', 'ヹ': 've', 'ヺ': 'vo',
+        "ヴ": "vu",
+        "ヷ": "va",
+        "ヸ": "vi",
+        "ヹ": "ve",
+        "ヺ": "vo",
     }
 
     # Digraphs (two kana combinations)
     DIGRAPHS = {
         # Hiragana y-compounds
-        'きゃ': 'kya', 'きゅ': 'kyu', 'きょ': 'kyo',
-        'しゃ': 'sha', 'しゅ': 'shu', 'しょ': 'sho',
-        'ちゃ': 'cha', 'ちゅ': 'chu', 'ちょ': 'cho',
-        'にゃ': 'nya', 'にゅ': 'nyu', 'にょ': 'nyo',
-        'ひゃ': 'hya', 'ひゅ': 'hyu', 'ひょ': 'hyo',
-        'みゃ': 'mya', 'みゅ': 'myu', 'みょ': 'myo',
-        'りゃ': 'rya', 'りゅ': 'ryu', 'りょ': 'ryo',
-        'ぎゃ': 'gya', 'ぎゅ': 'gyu', 'ぎょ': 'gyo',
-        'じゃ': 'ja', 'じゅ': 'ju', 'じょ': 'jo',
-        'ぢゃ': 'ja', 'ぢゅ': 'ju', 'ぢょ': 'jo',
-        'びゃ': 'bya', 'びゅ': 'byu', 'びょ': 'byo',
-        'ぴゃ': 'pya', 'ぴゅ': 'pyu', 'ぴょ': 'pyo',
+        "きゃ": "kya",
+        "きゅ": "kyu",
+        "きょ": "kyo",
+        "しゃ": "sha",
+        "しゅ": "shu",
+        "しょ": "sho",
+        "ちゃ": "cha",
+        "ちゅ": "chu",
+        "ちょ": "cho",
+        "にゃ": "nya",
+        "にゅ": "nyu",
+        "にょ": "nyo",
+        "ひゃ": "hya",
+        "ひゅ": "hyu",
+        "ひょ": "hyo",
+        "みゃ": "mya",
+        "みゅ": "myu",
+        "みょ": "myo",
+        "りゃ": "rya",
+        "りゅ": "ryu",
+        "りょ": "ryo",
+        "ぎゃ": "gya",
+        "ぎゅ": "gyu",
+        "ぎょ": "gyo",
+        "じゃ": "ja",
+        "じゅ": "ju",
+        "じょ": "jo",
+        "ぢゃ": "ja",
+        "ぢゅ": "ju",
+        "ぢょ": "jo",
+        "びゃ": "bya",
+        "びゅ": "byu",
+        "びょ": "byo",
+        "ぴゃ": "pya",
+        "ぴゅ": "pyu",
+        "ぴょ": "pyo",
         # Katakana y-compounds
-        'キャ': 'kya', 'キュ': 'kyu', 'キョ': 'kyo',
-        'シャ': 'sha', 'シュ': 'shu', 'ショ': 'sho',
-        'チャ': 'cha', 'チュ': 'chu', 'チョ': 'cho',
-        'ニャ': 'nya', 'ニュ': 'nyu', 'ニョ': 'nyo',
-        'ヒャ': 'hya', 'ヒュ': 'hyu', 'ヒョ': 'hyo',
-        'ミャ': 'mya', 'ミュ': 'myu', 'ミョ': 'myo',
-        'リャ': 'rya', 'リュ': 'ryu', 'リョ': 'ryo',
-        'ギャ': 'gya', 'ギュ': 'gyu', 'ギョ': 'gyo',
-        'ジャ': 'ja', 'ジュ': 'ju', 'ジョ': 'jo',
-        'ヂャ': 'ja', 'ヂュ': 'ju', 'ヂョ': 'jo',
-        'ビャ': 'bya', 'ビュ': 'byu', 'ビョ': 'byo',
-        'ピャ': 'pya', 'ピュ': 'pyu', 'ピョ': 'pyo',
+        "キャ": "kya",
+        "キュ": "kyu",
+        "キョ": "kyo",
+        "シャ": "sha",
+        "シュ": "shu",
+        "ショ": "sho",
+        "チャ": "cha",
+        "チュ": "chu",
+        "チョ": "cho",
+        "ニャ": "nya",
+        "ニュ": "nyu",
+        "ニョ": "nyo",
+        "ヒャ": "hya",
+        "ヒュ": "hyu",
+        "ヒョ": "hyo",
+        "ミャ": "mya",
+        "ミュ": "myu",
+        "ミョ": "myo",
+        "リャ": "rya",
+        "リュ": "ryu",
+        "リョ": "ryo",
+        "ギャ": "gya",
+        "ギュ": "gyu",
+        "ギョ": "gyo",
+        "ジャ": "ja",
+        "ジュ": "ju",
+        "ジョ": "jo",
+        "ヂャ": "ja",
+        "ヂュ": "ju",
+        "ヂョ": "jo",
+        "ビャ": "bya",
+        "ビュ": "byu",
+        "ビョ": "byo",
+        "ピャ": "pya",
+        "ピュ": "pyu",
+        "ピョ": "pyo",
         # Additional katakana combinations for foreign words
-        'ファ': 'fa', 'フィ': 'fi', 'フェ': 'fe', 'フォ': 'fo',
-        'ティ': 'ti', 'ディ': 'di',
-        'トゥ': 'tu', 'ドゥ': 'du',
-        'ウィ': 'wi', 'ウェ': 'we', 'ウォ': 'wo',
-        'ヴァ': 'va', 'ヴィ': 'vi', 'ヴェ': 've', 'ヴォ': 'vo',
-        'シェ': 'she', 'ジェ': 'je', 'チェ': 'che',
-        'ツァ': 'tsa', 'ツィ': 'tsi', 'ツェ': 'tse', 'ツォ': 'tso',
+        "ファ": "fa",
+        "フィ": "fi",
+        "フェ": "fe",
+        "フォ": "fo",
+        "ティ": "ti",
+        "ディ": "di",
+        "トゥ": "tu",
+        "ドゥ": "du",
+        "ウィ": "wi",
+        "ウェ": "we",
+        "ウォ": "wo",
+        "ヴァ": "va",
+        "ヴィ": "vi",
+        "ヴェ": "ve",
+        "ヴォ": "vo",
+        "シェ": "she",
+        "ジェ": "je",
+        "チェ": "che",
+        "ツァ": "tsa",
+        "ツィ": "tsi",
+        "ツェ": "tse",
+        "ツォ": "tso",
     }
 
     def __init__(self):
@@ -192,7 +384,7 @@ class KanaToRomaji:
         """
         result = []
         i = 0
-        prev_char = ''
+        prev_char = ""
 
         while i < len(text):
             matched = False
@@ -203,20 +395,20 @@ class KanaToRomaji:
                     romaji = self.kana_map[kana]
 
                     # Handle sokuon (small tsu) - doubles the next consonant
-                    if kana in ('っ', 'ッ') and i + len(kana) < len(text):
+                    if kana in ("っ", "ッ") and i + len(kana) < len(text):
                         next_char = text[i + len(kana)]
                         # Look ahead for the next kana's romaji
                         for next_kana in self.sorted_kana:
-                            if text[i + len(kana):].startswith(next_kana):
+                            if text[i + len(kana) :].startswith(next_kana):
                                 next_romaji = self.kana_map[next_kana]
                                 if next_romaji:
                                     # Double the first consonant
                                     result.append(next_romaji[0])
                                 break
                     # Handle long vowel mark (ー) - extends previous vowel
-                    elif kana == 'ー' and result:
-                        prev_result = result[-1] if result else ''
-                        if prev_result and prev_result[-1] in 'aeiou':
+                    elif kana == "ー" and result:
+                        prev_result = result[-1] if result else ""
+                        if prev_result and prev_result[-1] in "aeiou":
                             result.append(prev_result[-1])
                     else:
                         result.append(romaji)
@@ -230,14 +422,14 @@ class KanaToRomaji:
                 result.append(text[i])
                 i += 1
 
-        return ''.join(result)
+        return "".join(result)
 
     def is_kana(self, text: str) -> bool:
         """Check if text is entirely kana (hiragana/katakana)."""
         for char in text:
             if char not in self.kana_map:
                 # Allow some punctuation
-                if char not in '・ーっッ':
+                if char not in "・ーっッ":
                     return False
         return True
 
@@ -277,23 +469,23 @@ class JMdictParser:
         romaji_words = set()
 
         # Open file (handle gzip)
-        if str(file_path).endswith('.gz'):
-            open_func = lambda p: gzip.open(p, 'rt', encoding='utf-8')
+        if str(file_path).endswith(".gz"):
+            open_func = lambda p: gzip.open(p, "rt", encoding="utf-8")
         else:
-            open_func = lambda p: open(p, encoding='utf-8')
+            open_func = lambda p: open(p, encoding="utf-8")
 
         try:
             # Use iterparse for memory efficiency
             with open_func(file_path) as f:
                 entry_count = 0
 
-                for event, elem in ET.iterparse(f, events=('end',)):
-                    if elem.tag == 'entry':
+                for event, elem in ET.iterparse(f, events=("end",)):
+                    if elem.tag == "entry":
                         entry_count += 1
 
                         # Extract all readings from this entry
-                        for r_ele in elem.findall('.//r_ele'):
-                            reb = r_ele.find('reb')
+                        for r_ele in elem.findall(".//r_ele"):
+                            reb = r_ele.find("reb")
                             if reb is not None and reb.text:
                                 kana = reb.text.strip()
                                 romaji = self.converter.convert(kana)
@@ -316,7 +508,9 @@ class JMdictParser:
             logger.error(f"Error parsing JMdict file {file_path}: {e}")
             raise
 
-        logger.info(f"Extracted {len(romaji_words)} romaji words from {entry_count} entries")
+        logger.info(
+            f"Extracted {len(romaji_words)} romaji words from {entry_count} entries"
+        )
         return romaji_words
 
     def parse_stream(self, stream, progress_callback=None) -> set[str]:
@@ -334,12 +528,12 @@ class JMdictParser:
         entry_count = 0
 
         try:
-            for event, elem in ET.iterparse(stream, events=('end',)):
-                if elem.tag == 'entry':
+            for event, elem in ET.iterparse(stream, events=("end",)):
+                if elem.tag == "entry":
                     entry_count += 1
 
-                    for r_ele in elem.findall('.//r_ele'):
-                        reb = r_ele.find('reb')
+                    for r_ele in elem.findall(".//r_ele"):
+                        reb = r_ele.find("reb")
                         if reb is not None and reb.text:
                             kana = reb.text.strip()
                             romaji = self.converter.convert(kana)
@@ -355,7 +549,9 @@ class JMdictParser:
             logger.error(f"XML parse error: {e}")
             raise
 
-        logger.info(f"Extracted {len(romaji_words)} romaji words from {entry_count} entries")
+        logger.info(
+            f"Extracted {len(romaji_words)} romaji words from {entry_count} entries"
+        )
         return romaji_words
 
 
@@ -419,10 +615,10 @@ class RomajiDictionary:
         # Load the file (first time or file changed)
         try:
             words = set()
-            with open(self.dict_path, encoding='utf-8') as f:
+            with open(self.dict_path, encoding="utf-8") as f:
                 for line in f:
                     word = line.strip()
-                    if word and not word.startswith('#'):
+                    if word and not word.startswith("#"):
                         words.add(word.lower())
 
             self._words = words
@@ -450,13 +646,13 @@ class RomajiDictionary:
             # Atomic write
             fd, temp_path = tempfile.mkstemp(suffix=".txt", dir=self.config_dir)
             try:
-                with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
                     f.write("# Romaji Dictionary - Japanese words in romanized form\n")
                     f.write(f"# Generated from JMdict - {len(words)} words\n")
                     f.write("# https://www.edrdg.org/jmdict/j_jmdict.html\n\n")
 
                     for word in sorted(words):
-                        f.write(word + '\n')
+                        f.write(word + "\n")
 
                 shutil.move(temp_path, self.dict_path)
                 self._words = words
@@ -488,7 +684,9 @@ class RomajiDictionary:
 
         # Debug logging for troubleshooting
         if not is_valid and len(words) > 0:
-            logger.debug(f"Romaji check: '{word_lower}' not in dictionary ({len(words)} words loaded from {self.dict_path})")
+            logger.debug(
+                f"Romaji check: '{word_lower}' not in dictionary ({len(words)} words loaded from {self.dict_path})"
+            )
 
         return is_valid
 
@@ -506,10 +704,10 @@ class RomajiDictionary:
             try:
                 logger.info(f"Downloading JMdict from {url}...")
 
-                request = Request(url, headers={'User-Agent': 'Video-Sync-GUI/1.0'})
+                request = Request(url, headers={"User-Agent": "Video-Sync-GUI/1.0"})
 
                 with urlopen(request, timeout=60) as response:
-                    total_size = response.headers.get('Content-Length')
+                    total_size = response.headers.get("Content-Length")
                     total_size = int(total_size) if total_size else 0
 
                     # Download to temp file
@@ -518,7 +716,7 @@ class RomajiDictionary:
                         downloaded = 0
                         chunk_size = 8192
 
-                        with os.fdopen(fd, 'wb') as f:
+                        with os.fdopen(fd, "wb") as f:
                             while True:
                                 chunk = response.read(chunk_size)
                                 if not chunk:
@@ -606,42 +804,137 @@ class RomajiDictionary:
         """Get common Japanese particles and suffixes in romaji."""
         return {
             # Particles
-            'wa', 'wo', 'ga', 'no', 'ni', 'de', 'to', 'mo', 'ka', 'ne', 'yo', 'na',
-            'he', 'kara', 'made', 'yori', 'dake', 'shika', 'bakari', 'nado',
+            "wa",
+            "wo",
+            "ga",
+            "no",
+            "ni",
+            "de",
+            "to",
+            "mo",
+            "ka",
+            "ne",
+            "yo",
+            "na",
+            "he",
+            "kara",
+            "made",
+            "yori",
+            "dake",
+            "shika",
+            "bakari",
+            "nado",
             # Common suffixes
-            'san', 'sama', 'kun', 'chan', 'sensei', 'senpai', 'kouhai',
-            'shi', 'tachi', 'ra', 'domo',
+            "san",
+            "sama",
+            "kun",
+            "chan",
+            "sensei",
+            "senpai",
+            "kouhai",
+            "shi",
+            "tachi",
+            "ra",
+            "domo",
             # Common words often in anime
-            'hai', 'iie', 'nani', 'dou', 'naze', 'dare', 'doko', 'itsu',
-            'kore', 'sore', 'are', 'dore',
-            'kono', 'sono', 'ano', 'dono',
-            'kou', 'sou', 'aa', 'sugoi', 'kawaii', 'kakkoii', 'kirei', 'utsukushii',
-            'baka', 'aho', 'uso', 'hontou', 'maji',
-            'gomen', 'sumimasen', 'arigatou', 'doumo',
-            'ohayou', 'konnichiwa', 'konbanwa', 'sayonara', 'oyasumi',
-            'ittekimasu', 'itterasshai', 'tadaima', 'okaeri',
-            'itadakimasu', 'gochisousama',
-            'suki', 'daisuki', 'kirai', 'daikirai',
-            'onegai', 'kudasai', 'choudai',
-            'chotto', 'matte', 'yamete', 'dame',
-            'yatta', 'yosh', 'ganbare', 'ganbatte',
-            'nee', 'eto', 'maa', 'hora',
+            "hai",
+            "iie",
+            "nani",
+            "dou",
+            "naze",
+            "dare",
+            "doko",
+            "itsu",
+            "kore",
+            "sore",
+            "are",
+            "dore",
+            "kono",
+            "sono",
+            "ano",
+            "dono",
+            "kou",
+            "sou",
+            "aa",
+            "sugoi",
+            "kawaii",
+            "kakkoii",
+            "kirei",
+            "utsukushii",
+            "baka",
+            "aho",
+            "uso",
+            "hontou",
+            "maji",
+            "gomen",
+            "sumimasen",
+            "arigatou",
+            "doumo",
+            "ohayou",
+            "konnichiwa",
+            "konbanwa",
+            "sayonara",
+            "oyasumi",
+            "ittekimasu",
+            "itterasshai",
+            "tadaima",
+            "okaeri",
+            "itadakimasu",
+            "gochisousama",
+            "suki",
+            "daisuki",
+            "kirai",
+            "daikirai",
+            "onegai",
+            "kudasai",
+            "choudai",
+            "chotto",
+            "matte",
+            "yamete",
+            "dame",
+            "yatta",
+            "yosh",
+            "ganbare",
+            "ganbatte",
+            "nee",
+            "eto",
+            "maa",
+            "hora",
             # Common anime/otaku terms
-            'anime', 'manga', 'otaku', 'waifu', 'husbando',
-            'shonen', 'shoujo',
-            'mecha', 'isekai', 'ecchi', 'hentai', 'yaoi', 'yuri',
-            'chibi', 'moe', 'tsundere', 'yandere', 'kuudere', 'dandere',
-            'nakama', 'tomodachi', 'koibito', 'kareshi', 'kanojo',
+            "anime",
+            "manga",
+            "otaku",
+            "waifu",
+            "husbando",
+            "shonen",
+            "shoujo",
+            "mecha",
+            "isekai",
+            "ecchi",
+            "hentai",
+            "yaoi",
+            "yuri",
+            "chibi",
+            "moe",
+            "tsundere",
+            "yandere",
+            "kuudere",
+            "dandere",
+            "nakama",
+            "tomodachi",
+            "koibito",
+            "kareshi",
+            "kanojo",
         }
 
     def get_stats(self) -> dict[str, any]:
         """Get dictionary statistics."""
         words = self.load()
         return {
-            'word_count': len(words),
-            'dict_exists': self.dict_path.exists(),
-            'jmdict_cached': self.jmdict_path.exists(),
-            'dict_path': str(self.dict_path),
+            "word_count": len(words),
+            "dict_exists": self.dict_path.exists(),
+            "jmdict_cached": self.jmdict_path.exists(),
+            "dict_path": str(self.dict_path),
         }
 
 

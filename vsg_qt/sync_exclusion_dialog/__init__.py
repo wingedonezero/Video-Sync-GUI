@@ -2,6 +2,7 @@
 """
 Dialog for configuring frame sync style exclusions.
 """
+
 from .ui import SyncExclusionDialog
 
-__all__ = ['SyncExclusionDialog']
+__all__ = ["SyncExclusionDialog"]

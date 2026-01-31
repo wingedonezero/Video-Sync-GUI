@@ -36,17 +36,19 @@ _romaji_dict = None
 
 class RuleType(Enum):
     """Types of replacement rules."""
-    LITERAL = "literal"          # Exact match anywhere in text
-    WORD = "word"                # Match whole word only (word boundaries)
-    WORD_START = "word_start"    # Match at start of word
-    WORD_END = "word_end"        # Match at end of word
+
+    LITERAL = "literal"  # Exact match anywhere in text
+    WORD = "word"  # Match whole word only (word boundaries)
+    WORD_START = "word_start"  # Match at start of word
+    WORD_END = "word_end"  # Match at end of word
     WORD_MIDDLE = "word_middle"  # Match inside word only
-    REGEX = "regex"              # Full regex pattern
+    REGEX = "regex"  # Full regex pattern
 
 
 @dataclass
 class ReplacementRule:
     """A single replacement rule."""
+
     pattern: str
     replacement: str
     rule_type: str = "literal"  # RuleType value as string
@@ -117,9 +119,11 @@ class OCRDictionaries:
         for candidate in candidates:
             if candidate.exists():
                 # Check if it has any of our files
-                if (candidate / "replacements.json").exists() or \
-                   (candidate / "user_dictionary.txt").exists() or \
-                   (candidate / "romaji_dictionary.txt").exists():
+                if (
+                    (candidate / "replacements.json").exists()
+                    or (candidate / "user_dictionary.txt").exists()
+                    or (candidate / "romaji_dictionary.txt").exists()
+                ):
                     logger.info(f"[OCR] Found existing config at: {candidate}")
                     return candidate
 
@@ -164,14 +168,22 @@ class OCRDictionaries:
         # Create replacements.json with defaults if not exists
         if not self.replacements_path.exists():
             self._save_replacements_internal(DEFAULT_REPLACEMENT_RULES)
-            logger.info(f"Created default replacements.json with {len(DEFAULT_REPLACEMENT_RULES)} rules")
+            logger.info(
+                f"Created default replacements.json with {len(DEFAULT_REPLACEMENT_RULES)} rules"
+            )
 
         # Create empty dictionary files if not exist
         if not self.user_dict_path.exists():
-            self.user_dict_path.write_text("# User Dictionary - one word per line\n# Words here won't be flagged as unknown\n", encoding="utf-8")
+            self.user_dict_path.write_text(
+                "# User Dictionary - one word per line\n# Words here won't be flagged as unknown\n",
+                encoding="utf-8",
+            )
 
         if not self.names_path.exists():
-            self.names_path.write_text("# Names Dictionary - one name per line\n# Character names, places, etc.\n", encoding="utf-8")
+            self.names_path.write_text(
+                "# Names Dictionary - one name per line\n# Character names, places, etc.\n",
+                encoding="utf-8",
+            )
 
     # =========================================================================
     # Replacements
@@ -215,15 +227,12 @@ class OCRDictionaries:
     def _save_replacements_internal(self, rules: list[ReplacementRule]) -> bool:
         """Internal save without backup (for initial creation)."""
         try:
-            data = {
-                "version": 1,
-                "rules": [r.to_dict() for r in rules]
-            }
+            data = {"version": 1, "rules": [r.to_dict() for r in rules]}
 
             # Atomic write: write to temp, then rename
             fd, temp_path = tempfile.mkstemp(suffix=".json", dir=self.config_dir)
             try:
-                with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
                     json.dump(data, f, indent=2, ensure_ascii=False)
                 shutil.move(temp_path, self.replacements_path)
                 logger.debug(f"Saved {len(rules)} replacement rules")
@@ -248,7 +257,10 @@ class OCRDictionaries:
 
         # Check for duplicate pattern
         for existing in rules:
-            if existing.pattern == rule.pattern and existing.rule_type == rule.rule_type:
+            if (
+                existing.pattern == rule.pattern
+                and existing.rule_type == rule.rule_type
+            ):
                 return False, f"Rule for pattern '{rule.pattern}' already exists"
 
         rules.append(rule)
@@ -256,13 +268,19 @@ class OCRDictionaries:
             return True, "Rule added successfully"
         return False, "Failed to save rules"
 
-    def remove_replacement(self, pattern: str, rule_type: str = None) -> tuple[bool, str]:
+    def remove_replacement(
+        self, pattern: str, rule_type: str = None
+    ) -> tuple[bool, str]:
         """Remove a replacement rule by pattern."""
         rules = self.load_replacements()
         original_count = len(rules)
 
         if rule_type:
-            rules = [r for r in rules if not (r.pattern == pattern and r.rule_type == rule_type)]
+            rules = [
+                r
+                for r in rules
+                if not (r.pattern == pattern and r.rule_type == rule_type)
+            ]
         else:
             rules = [r for r in rules if r.pattern != pattern]
 
@@ -273,7 +291,9 @@ class OCRDictionaries:
             return True, "Rule removed successfully"
         return False, "Failed to save rules"
 
-    def update_replacement(self, old_pattern: str, new_rule: ReplacementRule) -> tuple[bool, str]:
+    def update_replacement(
+        self, old_pattern: str, new_rule: ReplacementRule
+    ) -> tuple[bool, str]:
         """Update an existing replacement rule."""
         rules = self.load_replacements()
 
@@ -423,18 +443,24 @@ class OCRDictionaries:
 
                 parts = line.split("|")
                 if len(parts) < 2:
-                    errors.append(f"Line {line_num}: Invalid format (need at least pattern|replacement)")
+                    errors.append(
+                        f"Line {line_num}: Invalid format (need at least pattern|replacement)"
+                    )
                     continue
 
                 pattern = parts[0]
                 replacement = parts[1]
                 rule_type = parts[2] if len(parts) > 2 else "literal"
-                confidence_gated = parts[3].lower() == "true" if len(parts) > 3 else False
+                confidence_gated = (
+                    parts[3].lower() == "true" if len(parts) > 3 else False
+                )
 
                 # Validate rule type
                 valid_types = [t.value for t in RuleType]
                 if rule_type not in valid_types:
-                    errors.append(f"Line {line_num}: Invalid type '{rule_type}' (use: {', '.join(valid_types)})")
+                    errors.append(
+                        f"Line {line_num}: Invalid type '{rule_type}' (use: {', '.join(valid_types)})"
+                    )
                     continue
 
                 rule = ReplacementRule(
@@ -459,11 +485,17 @@ class OCRDictionaries:
         """Export replacement rules to text file."""
         try:
             rules = self.load_replacements()
-            lines = ["# OCR Replacement Rules", "# Format: pattern|replacement|type|confidence_gated", ""]
+            lines = [
+                "# OCR Replacement Rules",
+                "# Format: pattern|replacement|type|confidence_gated",
+                "",
+            ]
 
             for rule in rules:
                 if rule.enabled:
-                    lines.append(f"{rule.pattern}|{rule.replacement}|{rule.rule_type}|{str(rule.confidence_gated).lower()}")
+                    lines.append(
+                        f"{rule.pattern}|{rule.replacement}|{rule.rule_type}|{str(rule.confidence_gated).lower()}"
+                    )
 
             Path(file_path).write_text("\n".join(lines), encoding="utf-8")
             return True
@@ -553,7 +585,7 @@ class OCRDictionaries:
             # Atomic write
             fd, temp_path = tempfile.mkstemp(suffix=".txt", dir=self.config_dir)
             try:
-                with os.fdopen(fd, 'w', encoding='utf-8') as f:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
                     f.write("\n".join(lines))
                 shutil.move(temp_path, path)
                 return True
@@ -589,7 +621,9 @@ class OCRDictionaries:
         self.load_names()
         logger.info(f"Reloaded all dictionaries from {self.config_dir}")
 
-    def is_known_word(self, word: str, check_romaji: bool = True, track_stats: bool = False) -> bool:
+    def is_known_word(
+        self, word: str, check_romaji: bool = True, track_stats: bool = False
+    ) -> bool:
         """
         Check if a word is known (in any dictionary).
 
@@ -606,7 +640,9 @@ class OCRDictionaries:
         """
         # Use ValidationManager if available
         if self._validation_manager is not None:
-            result = self._validation_manager.is_known_word(word, track_stats=track_stats)
+            result = self._validation_manager.is_known_word(
+                word, track_stats=track_stats
+            )
             return result.is_known
 
         # Fallback to direct checking (backward compatibility)
@@ -686,6 +722,7 @@ class OCRDictionaries:
         """Get the ValidationManager instance, initializing if needed."""
         if self._validation_manager is None:
             from .word_lists import initialize_validation_manager
+
             self._validation_manager = initialize_validation_manager(self.config_dir)
         return self._validation_manager
 
@@ -704,6 +741,7 @@ class OCRDictionaries:
             Initialized ValidationManager
         """
         from .word_lists import initialize_validation_manager
+
         self._validation_manager = initialize_validation_manager(
             self.config_dir, spell_checker=spell_checker
         )
@@ -717,6 +755,7 @@ class OCRDictionaries:
         """Get romaji dictionary instance (lazy loading)."""
         if self._romaji_dict is None:
             from .romaji_dictionary import RomajiDictionary
+
             self._romaji_dict = RomajiDictionary(self.config_dir)
         return self._romaji_dict
 

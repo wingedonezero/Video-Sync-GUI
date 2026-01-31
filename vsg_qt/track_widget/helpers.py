@@ -12,19 +12,19 @@ def compose_label_text(w) -> str:
         f"{w.codec_id} "
         f"({w.track_data.get('lang', 'und')})"
     )
-    name_part = f" '{w.track_data.get('name')}'" if w.track_data.get('name') else ""
+    name_part = f" '{w.track_data.get('name')}'" if w.track_data.get("name") else ""
 
     badges = []
     if w.cb_default.isChecked():
         badges.append("⭐")
-    if w.track_type == 'subtitles':
+    if w.track_type == "subtitles":
         if w.cb_forced.isChecked():
             badges.append("📌")
         if w.cb_rescale.isChecked():
             badges.append("📏")
         if abs(w.size_multiplier.value() - 1.0) > 1e-6:
             badges.append("🔤")
-        if w.track_data.get('user_modified_path'):
+        if w.track_data.get("user_modified_path"):
             badges.append("📝")
 
     badge_str = ("  " + " ".join(badges)) if badges else ""
@@ -39,13 +39,13 @@ def build_summary_text(w) -> str:
     if w.cb_default.isChecked():
         parts.append("⭐ Default")
 
-    if w.source == 'External' and hasattr(w, 'sync_to_combo'):
+    if w.source == "External" and hasattr(w, "sync_to_combo"):
         sync_target = w.sync_to_combo.currentText()
         if sync_target != "No Sync":
             parts.append(f"🔗 Sync to {sync_target}")
 
-    if w.track_type == 'subtitles':
-        if w.track_data.get('user_modified_path'):
+    if w.track_type == "subtitles":
+        if w.track_data.get("user_modified_path"):
             parts.append("📝 Styled")
         if w.cb_forced.isChecked():
             parts.append("📌 Forced Display")

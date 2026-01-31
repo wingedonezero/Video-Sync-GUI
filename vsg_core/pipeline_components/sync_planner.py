@@ -25,7 +25,7 @@ class SyncPlanner:
         output_dir: str,
         manual_layout: list[dict],
         attachment_sources: list[str],
-        source_settings: dict[str, dict[str, Any]] | None = None
+        source_settings: dict[str, dict[str, Any]] | None = None,
     ) -> Any:
         """
         Plans the sync operation by analyzing sources and preparing merge tokens.
@@ -64,5 +64,5 @@ class SyncPlanner:
             output_dir=output_dir,
             manual_layout=manual_layout,
             attachment_sources=attachment_sources,
-            source_settings=source_settings or {}
+            source_settings=source_settings or {},
         )

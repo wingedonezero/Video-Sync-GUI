@@ -45,23 +45,33 @@ def select_smart_checkpoints(subtitle_events: list, runner) -> list:
         safe_end_ms = last_end - (duration_ms // 3)
 
     # Filter events in safe zone
-    safe_events = [e for e in subtitle_events if safe_start_ms <= e.start <= safe_end_ms]
+    safe_events = [
+        e for e in subtitle_events if safe_start_ms <= e.start <= safe_end_ms
+    ]
 
     if len(safe_events) < 3:
         # Not enough safe events, fall back to middle third of all events
         start_idx = total_events // 3
         end_idx = 2 * total_events // 3
         safe_events = subtitle_events[start_idx:end_idx]
-        runner._log_message("[Checkpoint Selection] Using middle third (not enough events in safe zone)")
+        runner._log_message(
+            "[Checkpoint Selection] Using middle third (not enough events in safe zone)"
+        )
 
     if len(safe_events) == 0:
         # Last resort: use first/mid/last of all events
-        return [subtitle_events[0], subtitle_events[total_events // 2], subtitle_events[-1]]
+        return [
+            subtitle_events[0],
+            subtitle_events[total_events // 2],
+            subtitle_events[-1],
+        ]
 
     # Prefer longer duration events (dialogue over signs)
     # Sort by duration descending, take top 40%
-    sorted_by_duration = sorted(safe_events, key=lambda e: e.end - e.start, reverse=True)
-    top_events = sorted_by_duration[:max(3, len(sorted_by_duration) * 40 // 100)]
+    sorted_by_duration = sorted(
+        safe_events, key=lambda e: e.end - e.start, reverse=True
+    )
+    top_events = sorted_by_duration[: max(3, len(sorted_by_duration) * 40 // 100)]
 
     # Sort these back by start time for temporal ordering
     top_events_sorted = sorted(top_events, key=lambda e: e.start)
@@ -77,9 +87,11 @@ def select_smart_checkpoints(subtitle_events: list, runner) -> list:
     else:
         checkpoints = top_events_sorted
 
-    runner._log_message(f"[Checkpoint Selection] Selected {len(checkpoints)} dialogue events:")
+    runner._log_message(
+        f"[Checkpoint Selection] Selected {len(checkpoints)} dialogue events:"
+    )
     for i, e in enumerate(checkpoints):
         duration = e.end - e.start
-        runner._log_message(f"  {i+1}. Time: {e.start}ms, Duration: {duration}ms")
+        runner._log_message(f"  {i + 1}. Time: {e.start}ms, Duration: {duration}ms")
 
     return checkpoints

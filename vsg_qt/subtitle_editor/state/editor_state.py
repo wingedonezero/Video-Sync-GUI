@@ -9,6 +9,7 @@ Holds:
 - Filter configuration
 - Style patch data
 """
+
 from __future__ import annotations
 
 import shutil
@@ -31,16 +32,16 @@ class EditorState(QObject):
     # Signals
     subtitle_data_changed = Signal()  # SubtitleData was replaced/reloaded
     selection_changed = Signal(list)  # Selected event indices changed
-    style_changed = Signal(str)       # A style was modified
-    event_changed = Signal(int)       # An event was modified
-    filter_changed = Signal()         # Filter configuration changed
-    modified_changed = Signal(bool)   # Modified state changed
+    style_changed = Signal(str)  # A style was modified
+    event_changed = Signal(int)  # An event was modified
+    filter_changed = Signal()  # Filter configuration changed
+    modified_changed = Signal(bool)  # Modified state changed
 
     def __init__(
         self,
         parent=None,
         existing_style_patch: dict[str, dict[str, Any]] | None = None,
-        existing_filter_config: dict[str, Any] | None = None
+        existing_filter_config: dict[str, Any] | None = None,
     ):
         super().__init__(parent)
 
@@ -61,20 +62,30 @@ class EditorState(QObject):
         # Initialize from existing config if provided
         if existing_filter_config:
             # Support both old ('mode'/'styles') and new ('filter_mode'/'filter_styles') formats
-            self._filter_mode = existing_filter_config.get('filter_mode') or existing_filter_config.get('mode', 'exclude')
-            filter_styles = existing_filter_config.get('filter_styles') or existing_filter_config.get('styles', [])
+            self._filter_mode = existing_filter_config.get(
+                "filter_mode"
+            ) or existing_filter_config.get("mode", "exclude")
+            filter_styles = existing_filter_config.get(
+                "filter_styles"
+            ) or existing_filter_config.get("styles", [])
             self._filter_styles = set(filter_styles)
-            self._forced_include_indices = set(existing_filter_config.get('forced_include', []))
-            self._forced_exclude_indices = set(existing_filter_config.get('forced_exclude', []))
+            self._forced_include_indices = set(
+                existing_filter_config.get("forced_include", [])
+            )
+            self._forced_exclude_indices = set(
+                existing_filter_config.get("forced_exclude", [])
+            )
         else:
-            self._filter_mode = 'exclude'
+            self._filter_mode = "exclude"
             self._filter_styles = set()
             self._forced_include_indices = set()
             self._forced_exclude_indices = set()
 
         # Style patch data (changes to apply)
         # Initialize from existing patch if provided
-        self._style_patch: dict[str, dict[str, Any]] = dict(existing_style_patch) if existing_style_patch else {}
+        self._style_patch: dict[str, dict[str, Any]] = (
+            dict(existing_style_patch) if existing_style_patch else {}
+        )
 
         # Font replacements
         self._font_replacements: dict[str, str] = {}
@@ -83,7 +94,9 @@ class EditorState(QObject):
         self._video_path: Path | None = None
         self._video_fps: float = 23.976
 
-    def load_subtitle(self, subtitle_path: Path, video_path: Path | None = None) -> bool:
+    def load_subtitle(
+        self, subtitle_path: Path, video_path: Path | None = None
+    ) -> bool:
         """
         Load a subtitle file into the editor.
 
@@ -101,7 +114,9 @@ class EditorState(QObject):
             self._subtitle_data = SubtitleData.from_file(subtitle_path)
 
             # Create preview copy
-            self._preview_path = self._original_path.with_suffix('.preview' + self._original_path.suffix)
+            self._preview_path = self._original_path.with_suffix(
+                ".preview" + self._original_path.suffix
+            )
             shutil.copy(self._original_path, self._preview_path)
 
             # Store original style values for reset (BEFORE applying existing patches)
@@ -119,7 +134,12 @@ class EditorState(QObject):
                 self._video_path = Path(video_path)
 
             # If we have existing patches, mark as modified
-            if self._style_patch or self._filter_styles or self._forced_include_indices or self._forced_exclude_indices:
+            if (
+                self._style_patch
+                or self._filter_styles
+                or self._forced_include_indices
+                or self._forced_exclude_indices
+            ):
                 self._is_modified = True
                 self.modified_changed.emit(True)
             else:
@@ -148,7 +168,9 @@ class EditorState(QObject):
                     try:
                         setattr(style, attr, value)
                     except Exception as e:
-                        print(f"[EditorState] Failed to apply {attr}={value} to {style_name}: {e}")
+                        print(
+                            f"[EditorState] Failed to apply {attr}={value} to {style_name}: {e}"
+                        )
 
     @property
     def subtitle_data(self) -> SubtitleData | None:
@@ -239,7 +261,7 @@ class EditorState(QObject):
 
     def set_filter_mode(self, mode: str):
         """Set filter mode."""
-        if mode in ('include', 'exclude'):
+        if mode in ("include", "exclude"):
             self._filter_mode = mode
             self.filter_changed.emit()
 
@@ -314,7 +336,7 @@ class EditorState(QObject):
 
             style_match = event.style in self._filter_styles
 
-            if self._filter_mode == 'include':
+            if self._filter_mode == "include":
                 # Include mode: keep events whose style IS in the set
                 keep = style_match
             else:

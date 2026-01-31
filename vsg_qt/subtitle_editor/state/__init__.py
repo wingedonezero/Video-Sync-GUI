@@ -3,4 +3,4 @@
 from .editor_state import EditorState
 from .undo_manager import UndoManager
 
-__all__ = ['EditorState', 'UndoManager']
+__all__ = ["EditorState", "UndoManager"]

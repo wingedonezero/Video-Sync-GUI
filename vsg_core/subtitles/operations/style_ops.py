@@ -9,6 +9,7 @@ Operations:
 - apply_rescale: Rescale to target resolution (Aegisub "Add Borders" style)
 - apply_style_filter: Filter events by style name (include/exclude)
 """
+
 from __future__ import annotations
 
 import re
@@ -19,7 +20,9 @@ if TYPE_CHECKING:
     from ..data import OperationResult, SubtitleData
 
 
-def _scale_override_tags(text: str, scale: float, scale_h: float, offset_x: float, offset_y: float) -> str:
+def _scale_override_tags(
+    text: str, scale: float, scale_h: float, offset_x: float, offset_y: float
+) -> str:
     """
     Scales all ASS override tags using uniform scaling and adds border offsets.
     Maintains aspect ratio like Aegisub's "Add Borders" resampling.
@@ -40,7 +43,7 @@ def _scale_override_tags(text: str, scale: float, scale_h: float, offset_x: floa
         """Scale a numeric value, add offset, and format cleanly."""
         try:
             scaled = float(val) * scale_factor + offset
-            return f"{scaled:.3f}".rstrip('0').rstrip('.')
+            return f"{scaled:.3f}".rstrip("0").rstrip(".")
         except ValueError:
             return val
 
@@ -50,30 +53,30 @@ def _scale_override_tags(text: str, scale: float, scale_h: float, offset_x: floa
             return args
 
         tag_lower = tag_name.lower()
-        parts = [p.strip() for p in args.split(',')]
+        parts = [p.strip() for p in args.split(",")]
         scaled_parts = []
 
         for i, part in enumerate(parts):
             # Width/X measurements (no offset needed for size measurements)
-            if tag_lower in ('fscx', 'bord', 'xbord'):
+            if tag_lower in ("fscx", "bord", "xbord"):
                 scaled_parts.append(scale_value(part, scale))
 
             # Height/Y measurements and font size (use vertical scaling, no offset for size measurements)
-            elif tag_lower in ('fscy', 'ybord', 'yshad', 'fs', 'blur', 'pbo', 'shad'):
+            elif tag_lower in ("fscy", "ybord", "yshad", "fs", "blur", "pbo", "shad"):
                 scaled_parts.append(scale_value(part, scale_h))
 
             # Position tags (x, y) - need offsets
-            elif tag_lower in ('pos', 'org') and i < 2:
+            elif tag_lower in ("pos", "org") and i < 2:
                 pos_offset = offset_x if i == 0 else offset_y
                 scaled_parts.append(scale_value(part, scale, pos_offset))
 
             # Clip rectangles - need offsets
-            elif tag_lower == 'clip' and i < 4:
+            elif tag_lower == "clip" and i < 4:
                 clip_offset = offset_x if i in [0, 2] else offset_y
                 scaled_parts.append(scale_value(part, scale, clip_offset))
 
             # move tag: (x1, y1, x2, y2, t1, t2) - positions need offsets
-            elif tag_lower == 'move':
+            elif tag_lower == "move":
                 if i in [0, 2]:  # x coordinates
                     scaled_parts.append(scale_value(part, scale, offset_x))
                 elif i in [1, 3]:  # y coordinates
@@ -85,11 +88,11 @@ def _scale_override_tags(text: str, scale: float, scale_h: float, offset_x: floa
             else:
                 scaled_parts.append(part)
 
-        return ','.join(scaled_parts)
+        return ",".join(scaled_parts)
 
     def process_override_block(block_content: str) -> str:
         """Process all tags within a single {...} block."""
-        tag_pattern = re.compile(r'\\([a-zA-Z]+)(\([^)]*\)|(?:\-?\d+(?:\.\d+)?))?')
+        tag_pattern = re.compile(r"\\([a-zA-Z]+)(\([^)]*\)|(?:\-?\d+(?:\.\d+)?))?")
 
         def replace_tag(match):
             tag_name = match.group(1)
@@ -99,23 +102,23 @@ def _scale_override_tags(text: str, scale: float, scale_h: float, offset_x: floa
             if args_or_value is None:
                 return match.group(0)
 
-            elif args_or_value.startswith('('):
+            elif args_or_value.startswith("("):
                 # Tag with parentheses
                 args = args_or_value[1:-1]
                 scaled_args = scale_tag(tag_name, args)
-                return f'\\{tag_name}({scaled_args})'
+                return f"\\{tag_name}({scaled_args})"
 
             else:
                 # Shorthand format
                 value = args_or_value
 
                 # Scale size measurements (use vertical scaling for font/outline/shadow)
-                if tag_lower in ('fs', 'blur', 'fscy', 'ybord', 'yshad', 'pbo', 'shad'):
+                if tag_lower in ("fs", "blur", "fscy", "ybord", "yshad", "pbo", "shad"):
                     scaled = scale_value(value, scale_h)
-                    return f'\\{tag_name}{scaled}'
-                elif tag_lower in ('fscx', 'bord', 'xbord'):
+                    return f"\\{tag_name}{scaled}"
+                elif tag_lower in ("fscx", "bord", "xbord"):
                     scaled = scale_value(value, scale)
-                    return f'\\{tag_name}{scaled}'
+                    return f"\\{tag_name}{scaled}"
                 else:
                     return match.group(0)
 
@@ -124,20 +127,16 @@ def _scale_override_tags(text: str, scale: float, scale_h: float, offset_x: floa
     def replace_block(match):
         block_content = match.group(1)
         scaled_content = process_override_block(block_content)
-        return '{' + scaled_content + '}'
+        return "{" + scaled_content + "}"
 
-    return re.sub(r'\{([^}]*)\}', replace_block, text)
+    return re.sub(r"\{([^}]*)\}", replace_block, text)
 
 
 # Color attributes that need Qt->ASS conversion
-_COLOR_ATTRIBUTES = {
-    'primary_color', 'secondary_color', 'outline_color', 'back_color'
-}
+_COLOR_ATTRIBUTES = {"primary_color", "secondary_color", "outline_color", "back_color"}
 
 # Bool attributes that need bool->int conversion (-1 for True, 0 for False)
-_BOOL_ATTRIBUTES = {
-    'bold', 'italic', 'underline', 'strike_out'
-}
+_BOOL_ATTRIBUTES = {"bold", "italic", "underline", "strike_out"}
 
 
 def _convert_patch_value(attr_name: str, value: Any) -> Any:
@@ -151,7 +150,8 @@ def _convert_patch_value(attr_name: str, value: Any) -> Any:
     if attr_name in _COLOR_ATTRIBUTES:
         # Import here to avoid circular dependency
         from ..style_engine import qt_color_to_ass
-        if isinstance(value, str) and value.startswith('#'):
+
+        if isinstance(value, str) and value.startswith("#"):
             return qt_color_to_ass(value)
         return value
 
@@ -164,9 +164,7 @@ def _convert_patch_value(attr_name: str, value: Any) -> Any:
 
 
 def apply_style_patch(
-    data: SubtitleData,
-    patches: dict[str, dict[str, Any]],
-    runner=None
+    data: SubtitleData, patches: dict[str, dict[str, Any]], runner=None
 ) -> OperationResult:
     """
     Apply attribute patches to styles.
@@ -187,9 +185,7 @@ def apply_style_patch(
 
     if not patches:
         return OperationResult(
-            success=True,
-            operation='style_patch',
-            summary='No patches provided'
+            success=True, operation="style_patch", summary="No patches provided"
         )
 
     styles_affected = 0
@@ -211,19 +207,23 @@ def apply_style_patch(
                 # Convert value to SubtitleStyle-compatible format
                 converted_value = _convert_patch_value(attr_name, value)
                 setattr(style, attr_name, converted_value)
-                changes.append(f"{style_name}.{attr_name}: {old_value} -> {converted_value}")
+                changes.append(
+                    f"{style_name}.{attr_name}: {old_value} -> {converted_value}"
+                )
             else:
-                log(f"[StylePatch] WARNING: Unknown attribute '{attr}' for style '{style_name}'")
+                log(
+                    f"[StylePatch] WARNING: Unknown attribute '{attr}' for style '{style_name}'"
+                )
 
         styles_affected += 1
 
     # Record operation
     record = OperationRecord(
-        operation='style_patch',
+        operation="style_patch",
         timestamp=datetime.now(),
-        parameters={'patches': {k: list(v.keys()) for k, v in patches.items()}},
+        parameters={"patches": {k: list(v.keys()) for k, v in patches.items()}},
         styles_affected=styles_affected,
-        summary=f"Patched {styles_affected} style(s)"
+        summary=f"Patched {styles_affected} style(s)",
     )
     data.operations.append(record)
 
@@ -231,17 +231,15 @@ def apply_style_patch(
 
     return OperationResult(
         success=True,
-        operation='style_patch',
+        operation="style_patch",
         styles_affected=styles_affected,
         summary=record.summary,
-        details={'changes': changes}
+        details={"changes": changes},
     )
 
 
 def apply_font_replacement(
-    data: SubtitleData,
-    replacements: dict[str, str],
-    runner=None
+    data: SubtitleData, replacements: dict[str, str], runner=None
 ) -> OperationResult:
     """
     Replace font names in styles.
@@ -263,8 +261,8 @@ def apply_font_replacement(
     if not replacements:
         return OperationResult(
             success=True,
-            operation='font_replacement',
-            summary='No replacements provided'
+            operation="font_replacement",
+            summary="No replacements provided",
         )
 
     styles_affected = 0
@@ -280,11 +278,11 @@ def apply_font_replacement(
 
     # Record operation
     record = OperationRecord(
-        operation='font_replacement',
+        operation="font_replacement",
         timestamp=datetime.now(),
-        parameters={'replacements': replacements},
+        parameters={"replacements": replacements},
         styles_affected=styles_affected,
-        summary=f"Replaced fonts in {styles_affected} style(s)"
+        summary=f"Replaced fonts in {styles_affected} style(s)",
     )
     data.operations.append(record)
 
@@ -292,17 +290,15 @@ def apply_font_replacement(
 
     return OperationResult(
         success=True,
-        operation='font_replacement',
+        operation="font_replacement",
         styles_affected=styles_affected,
         summary=record.summary,
-        details={'changes': changes}
+        details={"changes": changes},
     )
 
 
 def apply_size_multiplier(
-    data: SubtitleData,
-    multiplier: float,
-    runner=None
+    data: SubtitleData, multiplier: float, runner=None
 ) -> OperationResult:
     """
     Apply font size multiplier to all styles.
@@ -325,16 +321,16 @@ def apply_size_multiplier(
     if abs(multiplier - 1.0) < 1e-6:
         return OperationResult(
             success=True,
-            operation='size_multiplier',
-            summary='Multiplier is 1.0, no changes'
+            operation="size_multiplier",
+            summary="Multiplier is 1.0, no changes",
         )
 
     # Validate range
     if not (0.1 <= multiplier <= 10.0):
         return OperationResult(
             success=False,
-            operation='size_multiplier',
-            error=f"Multiplier {multiplier} out of range (0.1-10.0)"
+            operation="size_multiplier",
+            error=f"Multiplier {multiplier} out of range (0.1-10.0)",
         )
 
     styles_affected = 0
@@ -349,11 +345,11 @@ def apply_size_multiplier(
 
     # Record operation
     record = OperationRecord(
-        operation='size_multiplier',
+        operation="size_multiplier",
         timestamp=datetime.now(),
-        parameters={'multiplier': multiplier},
+        parameters={"multiplier": multiplier},
         styles_affected=styles_affected,
-        summary=f"Scaled {styles_affected} style(s) by {multiplier}x"
+        summary=f"Scaled {styles_affected} style(s) by {multiplier}x",
     )
     data.operations.append(record)
 
@@ -361,17 +357,15 @@ def apply_size_multiplier(
 
     return OperationResult(
         success=True,
-        operation='size_multiplier',
+        operation="size_multiplier",
         styles_affected=styles_affected,
         summary=record.summary,
-        details={'changes': changes}
+        details={"changes": changes},
     )
 
 
 def apply_rescale(
-    data: SubtitleData,
-    target_resolution: tuple[int, int],
-    runner=None
+    data: SubtitleData, target_resolution: tuple[int, int], runner=None
 ) -> OperationResult:
     """
     Rescale subtitle to target resolution using Aegisub "Add Borders" style.
@@ -397,36 +391,32 @@ def apply_rescale(
     target_x, target_y = target_resolution
 
     # Get current resolution
-    current_x = int(data.script_info.get('PlayResX', 0))
-    current_y = int(data.script_info.get('PlayResY', 0))
+    current_x = int(data.script_info.get("PlayResX", 0))
+    current_y = int(data.script_info.get("PlayResY", 0))
 
     # If no resolution set, just set it
     if current_x == 0 or current_y == 0:
-        data.script_info['PlayResX'] = str(target_x)
-        data.script_info['PlayResY'] = str(target_y)
+        data.script_info["PlayResX"] = str(target_x)
+        data.script_info["PlayResY"] = str(target_y)
 
         record = OperationRecord(
-            operation='rescale',
+            operation="rescale",
             timestamp=datetime.now(),
-            parameters={'target': f'{target_x}x{target_y}'},
-            summary=f"Set resolution to {target_x}x{target_y}"
+            parameters={"target": f"{target_x}x{target_y}"},
+            summary=f"Set resolution to {target_x}x{target_y}",
         )
         data.operations.append(record)
         log(f"[Rescale] Set resolution to {target_x}x{target_y}")
 
         return OperationResult(
-            success=True,
-            operation='rescale',
-            summary=record.summary
+            success=True, operation="rescale", summary=record.summary
         )
 
     # If already at target, skip
     if (current_x, current_y) == (target_x, target_y):
         log(f"[Rescale] Already at target resolution {target_x}x{target_y}")
         return OperationResult(
-            success=True,
-            operation='rescale',
-            summary='Already at target resolution'
+            success=True, operation="rescale", summary="Already at target resolution"
         )
 
     # Calculate scale factors (Aegisub "Add Borders" style)
@@ -476,29 +466,31 @@ def apply_rescale(
             event.margin_v = int(event.margin_v * scale + 0.5)
 
         # Scale inline override tags (position tags get offsets)
-        if '{' in event.text:
-            event.text = _scale_override_tags(event.text, scale, scale_h, offset_x, offset_y)
+        if "{" in event.text:
+            event.text = _scale_override_tags(
+                event.text, scale, scale_h, offset_x, offset_y
+            )
             events_affected += 1
 
     # Update script info
-    data.script_info['PlayResX'] = str(target_x)
-    data.script_info['PlayResY'] = str(target_y)
+    data.script_info["PlayResX"] = str(target_x)
+    data.script_info["PlayResY"] = str(target_y)
 
     # Record operation
     record = OperationRecord(
-        operation='rescale',
+        operation="rescale",
         timestamp=datetime.now(),
         parameters={
-            'from': f'{current_x}x{current_y}',
-            'to': f'{target_x}x{target_y}',
-            'scale': scale,
-            'scale_h': scale_h,
-            'offset_x': offset_x,
-            'offset_y': offset_y,
+            "from": f"{current_x}x{current_y}",
+            "to": f"{target_x}x{target_y}",
+            "scale": scale,
+            "scale_h": scale_h,
+            "offset_x": offset_x,
+            "offset_y": offset_y,
         },
         styles_affected=styles_affected,
         events_affected=events_affected,
-        summary=f"Rescaled from {current_x}x{current_y} to {target_x}x{target_y}"
+        summary=f"Rescaled from {current_x}x{current_y} to {target_x}x{target_y}",
     )
     data.operations.append(record)
 
@@ -506,16 +498,16 @@ def apply_rescale(
 
     return OperationResult(
         success=True,
-        operation='rescale',
+        operation="rescale",
         styles_affected=styles_affected,
         events_affected=events_affected,
         summary=record.summary,
         details={
-            'scale': scale,
-            'scale_h': scale_h,
-            'offset_x': offset_x,
-            'offset_y': offset_y,
-        }
+            "scale": scale,
+            "scale_h": scale_h,
+            "offset_x": offset_x,
+            "offset_y": offset_y,
+        },
     )
 
 
@@ -523,44 +515,42 @@ def _map_style_attribute(attr: str) -> str:
     """Map common attribute names to SubtitleStyle field names."""
     mapping = {
         # Font
-        'font': 'fontname',
-        'font_name': 'fontname',
-        'size': 'fontsize',
-        'font_size': 'fontsize',
-
+        "font": "fontname",
+        "font_name": "fontname",
+        "size": "fontsize",
+        "font_size": "fontsize",
         # Colors - Style Editor uses no-underscore names
-        'primarycolor': 'primary_color',
-        'secondarycolor': 'secondary_color',
-        'outlinecolor': 'outline_color',
-        'backcolor': 'back_color',
+        "primarycolor": "primary_color",
+        "secondarycolor": "secondary_color",
+        "outlinecolor": "outline_color",
+        "backcolor": "back_color",
         # Alternative variations
-        'color': 'primary_color',
-        'colour': 'primary_color',
-        'primary': 'primary_color',
-        'secondary': 'secondary_color',
-        'outline_colour': 'outline_color',
-        'back_colour': 'back_color',
-
+        "color": "primary_color",
+        "colour": "primary_color",
+        "primary": "primary_color",
+        "secondary": "secondary_color",
+        "outline_colour": "outline_color",
+        "back_colour": "back_color",
         # Other attributes
-        'strikeout': 'strike_out',
-        'border': 'border_style',
-        'align': 'alignment',
-        'marginl': 'margin_l',
-        'marginr': 'margin_r',
-        'marginv': 'margin_v',
-        'scalex': 'scale_x',
-        'scaley': 'scale_y',
+        "strikeout": "strike_out",
+        "border": "border_style",
+        "align": "alignment",
+        "marginl": "margin_l",
+        "marginr": "margin_r",
+        "marginv": "margin_v",
+        "scalex": "scale_x",
+        "scaley": "scale_y",
     }
-    return mapping.get(attr.lower(), attr.lower().replace('-', '_'))
+    return mapping.get(attr.lower(), attr.lower().replace("-", "_"))
 
 
 def apply_style_filter(
     data: SubtitleData,
     styles: list,
-    mode: str = 'exclude',
+    mode: str = "exclude",
     forced_include: list[int] | None = None,
     forced_exclude: list[int] | None = None,
-    runner=None
+    runner=None,
 ) -> OperationResult:
     """
     Filter events by style name.
@@ -586,8 +576,8 @@ def apply_style_filter(
     if not styles and not forced_include_set and not forced_exclude_set:
         return OperationResult(
             success=True,
-            operation='style_filter',
-            summary='No styles specified for filtering'
+            operation="style_filter",
+            summary="No styles specified for filtering",
         )
 
     original_count = len(data.events)
@@ -601,7 +591,7 @@ def apply_style_filter(
 
     # Filter events
     original_events = list(data.events)
-    if mode == 'include':
+    if mode == "include":
         # Keep only events with styles in the list or forced includes.
         filtered_events = []
         for idx, event in enumerate(original_events):
@@ -610,7 +600,7 @@ def apply_style_filter(
             if idx in forced_include_set or event.style in styles_set:
                 filtered_events.append(event)
         data.events = filtered_events
-        mode_desc = 'included'
+        mode_desc = "included"
     else:  # mode == 'exclude'
         # Remove events with styles in the list unless forced to include.
         filtered_events = []
@@ -620,7 +610,7 @@ def apply_style_filter(
             if idx in forced_include_set or event.style not in styles_set:
                 filtered_events.append(event)
         data.events = filtered_events
-        mode_desc = 'excluded'
+        mode_desc = "excluded"
 
     filtered_count = len(data.events)
     removed_count = original_count - filtered_count
@@ -628,38 +618,42 @@ def apply_style_filter(
     # Check for missing styles
     missing_styles = styles_set - found_styles
 
-    log(f"[StyleFilter] {mode_desc.capitalize()} {len(found_styles)} style(s), "
-        f"removed {removed_count}/{original_count} events")
+    log(
+        f"[StyleFilter] {mode_desc.capitalize()} {len(found_styles)} style(s), "
+        f"removed {removed_count}/{original_count} events"
+    )
 
     if missing_styles:
-        log(f"[StyleFilter] WARNING: Styles not found in file: {', '.join(sorted(missing_styles))}")
+        log(
+            f"[StyleFilter] WARNING: Styles not found in file: {', '.join(sorted(missing_styles))}"
+        )
 
     # Record operation
     record = OperationRecord(
-        operation='style_filter',
+        operation="style_filter",
         timestamp=datetime.now(),
         parameters={
-            'styles': list(styles),
-            'mode': mode,
-            'forced_include': sorted(forced_include_set),
-            'forced_exclude': sorted(forced_exclude_set),
+            "styles": list(styles),
+            "mode": mode,
+            "forced_include": sorted(forced_include_set),
+            "forced_exclude": sorted(forced_exclude_set),
         },
         events_affected=removed_count,
         summary=f"{mode_desc.capitalize()} styles: {', '.join(sorted(found_styles)) or 'none'}, "
-                f"removed {removed_count} events"
+        f"removed {removed_count} events",
     )
     data.operations.append(record)
 
     return OperationResult(
         success=True,
-        operation='style_filter',
+        operation="style_filter",
         events_affected=removed_count,
         summary=record.summary,
         details={
-            'original_count': original_count,
-            'filtered_count': filtered_count,
-            'removed_count': removed_count,
-            'styles_found': list(found_styles),
-            'styles_missing': list(missing_styles),
-        }
+            "original_count": original_count,
+            "filtered_count": filtered_count,
+            "removed_count": removed_count,
+            "styles_found": list(found_styles),
+            "styles_missing": list(missing_styles),
+        },
     )

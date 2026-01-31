@@ -2,4 +2,4 @@
 
 from .player_thread import PlayerThread
 
-__all__ = ['PlayerThread']
+__all__ = ["PlayerThread"]

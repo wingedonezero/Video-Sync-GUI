@@ -4,4 +4,4 @@
 from .batch_completion_dialog import BatchCompletionDialog
 from .report_viewer import ReportViewer
 
-__all__ = ['BatchCompletionDialog', 'ReportViewer']
+__all__ = ["BatchCompletionDialog", "ReportViewer"]

@@ -16,6 +16,7 @@ from typing import Any
 
 try:
     import numpy as np
+
     HAS_NUMPY = True
 except ImportError:
     HAS_NUMPY = False
@@ -60,11 +61,7 @@ class ReportWriter:
         self.report_data: dict[str, Any] = {}
 
     def create_report(
-        self,
-        batch_name: str,
-        is_batch: bool,
-        output_dir: str,
-        total_jobs: int
+        self, batch_name: str, is_batch: bool, output_dir: str, total_jobs: int
     ) -> Path:
         """
         Initialize a new report file at batch start.
@@ -98,13 +95,8 @@ class ReportWriter:
             "is_batch": is_batch,
             "output_directory": output_dir,
             "total_jobs": total_jobs,
-            "summary": {
-                "successful": 0,
-                "warnings": 0,
-                "failed": 0,
-                "total_issues": 0
-            },
-            "jobs": []
+            "summary": {"successful": 0, "warnings": 0, "failed": 0, "total_issues": 0},
+            "jobs": [],
         }
 
         self._write_report()
@@ -127,32 +119,28 @@ class ReportWriter:
         # Build the job entry
         job_entry = {
             "index": job_index,
-            "name": job_result.get('name', 'Unknown'),
-            "status": job_result.get('status', 'Unknown'),
-            "output_path": job_result.get('output'),
+            "name": job_result.get("name", "Unknown"),
+            "status": job_result.get("status", "Unknown"),
+            "output_path": job_result.get("output"),
             "completed_at": datetime.now().isoformat(),
-            "delays": job_result.get('delays', {}),
-            "error": job_result.get('error'),
-
+            "delays": job_result.get("delays", {}),
+            "error": job_result.get("error"),
             # Stepping information
             "stepping": {
-                "applied_to": job_result.get('stepping_sources', []),
-                "detected_disabled": job_result.get('stepping_detected_disabled', []),
-                "detected_separated": job_result.get('stepping_detected_separated', []),
-                "quality_issues": job_result.get('stepping_quality_issues', [])
+                "applied_to": job_result.get("stepping_sources", []),
+                "detected_disabled": job_result.get("stepping_detected_disabled", []),
+                "detected_separated": job_result.get("stepping_detected_separated", []),
+                "quality_issues": job_result.get("stepping_quality_issues", []),
             },
-
             # Audit results
             "audit_results": {
-                "total_issues": job_result.get('issues', 0),
-                "details": job_result.get('audit_details', [])
+                "total_issues": job_result.get("issues", 0),
+                "details": job_result.get("audit_details", []),
             },
-
             # Sync stability (correlation variance)
-            "sync_stability": job_result.get('sync_stability_issues', []),
-
+            "sync_stability": job_result.get("sync_stability_issues", []),
             # Validator issues (for future expansion)
-            "validator_issues": job_result.get('validator_issues', [])
+            "validator_issues": job_result.get("validator_issues", []),
         }
 
         self.report_data["jobs"].append(job_entry)
@@ -197,26 +185,36 @@ class ReportWriter:
             # Track stepping jobs
             stepping = job.get("stepping", {})
             if stepping.get("applied_to"):
-                stepping_jobs.append({
-                    'name': job.get('name', 'Unknown'),
-                    'sources': stepping.get('applied_to', [])
-                })
+                stepping_jobs.append(
+                    {
+                        "name": job.get("name", "Unknown"),
+                        "sources": stepping.get("applied_to", []),
+                    }
+                )
 
             if stepping.get("detected_disabled"):
-                stepping_disabled_jobs.append({
-                    'name': job.get('name', 'Unknown'),
-                    'sources': stepping.get('detected_disabled', [])
-                })
+                stepping_disabled_jobs.append(
+                    {
+                        "name": job.get("name", "Unknown"),
+                        "sources": stepping.get("detected_disabled", []),
+                    }
+                )
 
             # Track sync stability issues
             sync_stability = job.get("sync_stability", [])
             if sync_stability:
-                affected_sources = [s.get('source', 'Unknown') for s in sync_stability if s.get('variance_detected')]
+                affected_sources = [
+                    s.get("source", "Unknown")
+                    for s in sync_stability
+                    if s.get("variance_detected")
+                ]
                 if affected_sources:
-                    sync_stability_jobs.append({
-                        'name': job.get('name', 'Unknown'),
-                        'sources': affected_sources
-                    })
+                    sync_stability_jobs.append(
+                        {
+                            "name": job.get("name", "Unknown"),
+                            "sources": affected_sources,
+                        }
+                    )
 
         self.report_data["summary"] = {
             "successful": successful,
@@ -225,7 +223,7 @@ class ReportWriter:
             "total_issues": total_issues,
             "stepping_jobs": stepping_jobs,
             "stepping_disabled_jobs": stepping_disabled_jobs,
-            "sync_stability_jobs": sync_stability_jobs
+            "sync_stability_jobs": sync_stability_jobs,
         }
 
         self.report_data["finalized_at"] = datetime.now().isoformat()
@@ -253,7 +251,7 @@ class ReportWriter:
             FileNotFoundError: If report file doesn't exist
             json.JSONDecodeError: If report file is corrupted
         """
-        with open(report_path, encoding='utf-8') as f:
+        with open(report_path, encoding="utf-8") as f:
             return json.load(f)
 
     def _write_report(self) -> None:
@@ -268,14 +266,14 @@ class ReportWriter:
 
         # Write to temp file in same directory (ensures same filesystem for rename)
         temp_fd, temp_path = tempfile.mkstemp(
-            suffix='.tmp',
-            prefix='report_',
-            dir=self.logs_folder
+            suffix=".tmp", prefix="report_", dir=self.logs_folder
         )
 
         try:
-            with open(temp_fd, 'w', encoding='utf-8') as f:
-                json.dump(self.report_data, f, indent=2, ensure_ascii=False, cls=NumpyEncoder)
+            with open(temp_fd, "w", encoding="utf-8") as f:
+                json.dump(
+                    self.report_data, f, indent=2, ensure_ascii=False, cls=NumpyEncoder
+                )
 
             # Atomic rename
             shutil.move(temp_path, self.current_report_path)
@@ -298,13 +296,13 @@ class ReportWriter:
         invalid_chars = '<>:"/\\|?*'
         result = name
         for char in invalid_chars:
-            result = result.replace(char, '_')
+            result = result.replace(char, "_")
 
         # Collapse multiple underscores and trim
-        while '__' in result:
-            result = result.replace('__', '_')
+        while "__" in result:
+            result = result.replace("__", "_")
 
-        result = result.strip('_. ')
+        result = result.strip("_. ")
 
         # Limit length
         if len(result) > 100:
@@ -402,14 +400,16 @@ class ReportWriter:
         if not stability_issues:
             return "-"
 
-        issues_with_variance = [s for s in stability_issues if s.get('variance_detected')]
+        issues_with_variance = [
+            s for s in stability_issues if s.get("variance_detected")
+        ]
         if not issues_with_variance:
             return "OK"
 
         parts = []
         for issue in issues_with_variance:
-            source = issue.get('source', 'Unknown').replace('Source ', 'S')
-            variance = issue.get('max_variance_ms', 0)
+            source = issue.get("source", "Unknown").replace("Source ", "S")
+            variance = issue.get("max_variance_ms", 0)
             parts.append(f"{source}: {variance:.3f}ms")
 
         return ", ".join(parts)

@@ -4,6 +4,7 @@ Base class for subtitle editor tabs.
 
 All tabs inherit from this and implement their specific functionality.
 """
+
 from __future__ import annotations
 
 from abc import abstractmethod

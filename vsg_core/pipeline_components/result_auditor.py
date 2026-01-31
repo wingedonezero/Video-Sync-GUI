@@ -20,7 +20,7 @@ class ResultAuditor:
         output_file: Path,
         context: object,
         runner: CommandRunner,
-        log_callback: Callable[[str], None]
+        log_callback: Callable[[str], None],
     ) -> int:
         """
         Audits the merged output file.

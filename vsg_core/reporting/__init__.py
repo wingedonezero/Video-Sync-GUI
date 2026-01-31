@@ -3,4 +3,4 @@
 
 from .report_writer import ReportWriter
 
-__all__ = ['ReportWriter']
+__all__ = ["ReportWriter"]

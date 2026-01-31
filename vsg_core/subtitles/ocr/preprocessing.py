@@ -28,6 +28,7 @@ from .parsers.base import SubtitleImage
 @dataclass
 class PreprocessingConfig:
     """Configuration for preprocessing pipeline."""
+
     # Auto-detect vs forced settings
     auto_detect: bool = True
 
@@ -42,7 +43,7 @@ class PreprocessingConfig:
     # Binarization - ALWAYS binarize for subtitle OCR
     # Pure black on white is optimal for Tesseract
     force_binarization: bool = True
-    binarization_method: str = 'otsu'  # 'otsu', 'adaptive', 'none'
+    binarization_method: str = "otsu"  # 'otsu', 'adaptive', 'none'
     adaptive_block_size: int = 11
     adaptive_c: int = 2
 
@@ -58,6 +59,7 @@ class PreprocessingConfig:
 @dataclass
 class PreprocessedImage:
     """Result of preprocessing a subtitle image."""
+
     image: np.ndarray  # Preprocessed image (grayscale or binary)
     original: np.ndarray  # Original image for reference
     subtitle_index: int
@@ -79,9 +81,7 @@ class ImagePreprocessor:
         self.config = config or PreprocessingConfig()
 
     def preprocess(
-        self,
-        subtitle: SubtitleImage,
-        work_dir: Path | None = None
+        self, subtitle: SubtitleImage, work_dir: Path | None = None
     ) -> PreprocessedImage:
         """
         Preprocess a subtitle image for OCR.
@@ -136,9 +136,7 @@ class ImagePreprocessor:
         return result
 
     def preprocess_batch(
-        self,
-        subtitles: list[SubtitleImage],
-        work_dir: Path | None = None
+        self, subtitles: list[SubtitleImage], work_dir: Path | None = None
     ) -> list[PreprocessedImage]:
         """
         Preprocess multiple subtitle images.
@@ -250,9 +248,7 @@ class ImagePreprocessor:
         new_height = self.config.target_height
 
         upscaled = cv2.resize(
-            gray,
-            (new_width, new_height),
-            interpolation=cv2.INTER_LANCZOS4
+            gray, (new_width, new_height), interpolation=cv2.INTER_LANCZOS4
         )
 
         return upscaled, scale
@@ -266,12 +262,10 @@ class ImagePreprocessor:
         """
         method = self.config.binarization_method
 
-        if method == 'otsu':
+        if method == "otsu":
             # Otsu's automatic thresholding
-            _, binary = cv2.threshold(
-                gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
-            )
-        elif method == 'adaptive':
+            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        elif method == "adaptive":
             # Adaptive thresholding (handles uneven lighting)
             binary = cv2.adaptiveThreshold(
                 gray,
@@ -279,7 +273,7 @@ class ImagePreprocessor:
                 cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                 cv2.THRESH_BINARY,
                 self.config.adaptive_block_size,
-                self.config.adaptive_c
+                self.config.adaptive_c,
             )
         else:
             # No binarization
@@ -304,7 +298,7 @@ class ImagePreprocessor:
             left=size,
             right=size,
             borderType=cv2.BORDER_CONSTANT,
-            value=255  # White border
+            value=255,  # White border
         )
 
         return bordered
@@ -325,17 +319,13 @@ class ImagePreprocessor:
 
         return denoised
 
-    def _save_debug(
-        self,
-        result: PreprocessedImage,
-        work_dir: Path
-    ) -> Path:
+    def _save_debug(self, result: PreprocessedImage, work_dir: Path) -> Path:
         """
         Save debug images for inspection.
 
         Creates side-by-side comparison of original and preprocessed.
         """
-        debug_dir = self.config.debug_dir or work_dir / 'preprocessed'
+        debug_dir = self.config.debug_dir or work_dir / "preprocessed"
         debug_dir.mkdir(parents=True, exist_ok=True)
 
         # Save preprocessed image
@@ -348,8 +338,7 @@ class ImagePreprocessor:
 
 
 def create_preprocessor(
-    settings_dict: dict,
-    work_dir: Path | None = None
+    settings_dict: dict, work_dir: Path | None = None
 ) -> ImagePreprocessor:
     """
     Create preprocessor from settings dictionary.
@@ -362,31 +351,31 @@ def create_preprocessor(
         Configured ImagePreprocessor
     """
     # Check which OCR engine is being used
-    ocr_engine = settings_dict.get('ocr_engine', 'tesseract')
+    ocr_engine = settings_dict.get("ocr_engine", "tesseract")
 
     # Deep learning OCR engines (EasyOCR, PaddleOCR) work better WITHOUT binarization
     # They're trained on natural images with anti-aliasing and grayscale gradients
     # Tesseract (traditional) works best WITH binarization (clean black on white)
-    if ocr_engine in ('easyocr', 'paddleocr'):
+    if ocr_engine in ("easyocr", "paddleocr"):
         # Skip binarization for deep learning engines
         force_binarization = False
         # Also use smaller border - deep learning handles edge text better
-        border_size = settings_dict.get('ocr_border_size', 5)
+        border_size = settings_dict.get("ocr_border_size", 5)
     else:
         # Tesseract: use binarization
-        force_binarization = settings_dict.get('ocr_force_binarization', True)
-        border_size = settings_dict.get('ocr_border_size', 10)
+        force_binarization = settings_dict.get("ocr_force_binarization", True)
+        border_size = settings_dict.get("ocr_border_size", 10)
 
     config = PreprocessingConfig(
-        auto_detect=settings_dict.get('ocr_preprocess_auto', True),
-        upscale_threshold_height=settings_dict.get('ocr_upscale_threshold', 40),
-        target_height=settings_dict.get('ocr_target_height', 80),
+        auto_detect=settings_dict.get("ocr_preprocess_auto", True),
+        upscale_threshold_height=settings_dict.get("ocr_upscale_threshold", 40),
+        target_height=settings_dict.get("ocr_target_height", 80),
         border_size=border_size,
         force_binarization=force_binarization,
-        binarization_method=settings_dict.get('ocr_binarization_method', 'otsu'),
-        denoise=settings_dict.get('ocr_denoise', False),
-        save_debug_images=settings_dict.get('ocr_save_debug_images', False),
-        debug_dir=work_dir / 'preprocessed' if work_dir else None,
+        binarization_method=settings_dict.get("ocr_binarization_method", "otsu"),
+        denoise=settings_dict.get("ocr_denoise", False),
+        save_debug_images=settings_dict.get("ocr_save_debug_images", False),
+        debug_dir=work_dir / "preprocessed" if work_dir else None,
     )
 
     return ImagePreprocessor(config)

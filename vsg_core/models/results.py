@@ -2,20 +2,23 @@
 """
 Result types for pipeline step validation and error reporting.
 """
+
 from dataclasses import dataclass, field
 from enum import Enum
 
 
 class StepStatus(Enum):
     """Status codes for pipeline steps."""
+
     SUCCESS = "success"
     WARNING = "warning"  # Non-fatal issues that were handled
-    FAILED = "failed"    # Fatal issues that should stop the job
+    FAILED = "failed"  # Fatal issues that should stop the job
 
 
 @dataclass
 class StepResult:
     """Result of a pipeline step execution."""
+
     status: StepStatus
     error: str | None = None
     warnings: list[str] = field(default_factory=list)
@@ -38,6 +41,7 @@ class StepResult:
 @dataclass
 class CorrectionResult:
     """Result of an audio correction operation."""
+
     success: bool
     error: str | None = None
     corrected_tracks: list[str] = field(default_factory=list)

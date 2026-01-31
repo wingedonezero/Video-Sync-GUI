@@ -8,6 +8,7 @@ CPS indicates reading speed:
 - 20-25 CPS: Fast (yellow)
 - > 25 CPS: Too fast (red)
 """
+
 import re
 
 
@@ -29,9 +30,9 @@ def calculate_cps(text: str, duration_ms: float) -> float:
     clean_text = strip_ass_tags(text)
 
     # Count visible characters (excluding \N newlines)
-    clean_text = clean_text.replace('\\N', ' ')
-    clean_text = clean_text.replace('\\n', ' ')
-    clean_text = clean_text.replace('\\h', ' ')
+    clean_text = clean_text.replace("\\N", " ")
+    clean_text = clean_text.replace("\\n", " ")
+    clean_text = clean_text.replace("\\h", " ")
 
     char_count = len(clean_text.strip())
     duration_seconds = duration_ms / 1000.0
@@ -50,7 +51,7 @@ def strip_ass_tags(text: str) -> str:
         Text with tags removed
     """
     # Remove {...} blocks
-    return re.sub(r'\{[^}]*\}', '', text)
+    return re.sub(r"\{[^}]*\}", "", text)
 
 
 def cps_color(cps: float) -> tuple[int, int, int]:
@@ -70,7 +71,7 @@ def cps_color(cps: float) -> tuple[int, int, int]:
     elif cps < 20:
         return (200, 200, 200)  # Light gray - normal
     elif cps < 25:
-        return (230, 180, 80)   # Yellow/orange - fast
+        return (230, 180, 80)  # Yellow/orange - fast
     else:
         return (230, 100, 100)  # Red - too fast
 

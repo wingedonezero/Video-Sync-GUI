@@ -11,10 +11,10 @@ from .style_ops import (
 )
 
 __all__ = [
-    'apply_font_replacement',
-    'apply_rescale',
-    'apply_size_multiplier',
-    'apply_stepping',
-    'apply_style_filter',
-    'apply_style_patch',
+    "apply_font_replacement",
+    "apply_rescale",
+    "apply_size_multiplier",
+    "apply_stepping",
+    "apply_style_filter",
+    "apply_style_patch",
 ]

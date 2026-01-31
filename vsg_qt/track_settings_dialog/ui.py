@@ -18,7 +18,10 @@ from .logic import TrackSettingsLogic
 
 class TrackSettingsDialog(QDialog):
     """Small popup dialog to edit per-track options."""
-    def __init__(self, track_type: str, codec_id: str, track_data: dict = None, **kwargs):
+
+    def __init__(
+        self, track_type: str, codec_id: str, track_data: dict = None, **kwargs
+    ):
         super().__init__()
         self.setWindowTitle("Track Settings")
         self.setMinimumWidth(400)
@@ -89,38 +92,44 @@ class TrackSettingsDialog(QDialog):
 
         # Get existing config if available
         existing_config = None
-        if self.track_data.get('sync_exclusion_styles'):
+        if self.track_data.get("sync_exclusion_styles"):
             existing_config = {
-                'mode': self.track_data.get('sync_exclusion_mode', 'exclude'),
-                'styles': self.track_data.get('sync_exclusion_styles', []),
+                "mode": self.track_data.get("sync_exclusion_mode", "exclude"),
+                "styles": self.track_data.get("sync_exclusion_styles", []),
             }
 
         dialog = SyncExclusionDialog(
-            track_data=self.track_data,
-            existing_config=existing_config,
-            parent=self
+            track_data=self.track_data, existing_config=existing_config, parent=self
         )
 
         if dialog.exec():
             config = dialog.get_exclusion_config()
             if config:
                 # Store in track_data temporarily (will be saved when main dialog is accepted)
-                self.track_data['sync_exclusion_styles'] = config['styles']
-                self.track_data['sync_exclusion_mode'] = config['mode']
-                self.track_data['sync_exclusion_original_style_list'] = config['original_style_list']
+                self.track_data["sync_exclusion_styles"] = config["styles"]
+                self.track_data["sync_exclusion_mode"] = config["mode"]
+                self.track_data["sync_exclusion_original_style_list"] = config[
+                    "original_style_list"
+                ]
             else:
                 # Clear exclusions if None returned
-                self.track_data.pop('sync_exclusion_styles', None)
-                self.track_data.pop('sync_exclusion_mode', None)
-                self.track_data.pop('sync_exclusion_original_style_list', None)
+                self.track_data.pop("sync_exclusion_styles", None)
+                self.track_data.pop("sync_exclusion_mode", None)
+                self.track_data.pop("sync_exclusion_original_style_list", None)
 
     def read_values(self) -> dict:
         """Public method to retrieve the dialog's current values."""
         values = self._logic.read_values()
 
         # Include sync exclusion config in the returned values
-        values['sync_exclusion_styles'] = self.track_data.get('sync_exclusion_styles', [])
-        values['sync_exclusion_mode'] = self.track_data.get('sync_exclusion_mode', 'exclude')
-        values['sync_exclusion_original_style_list'] = self.track_data.get('sync_exclusion_original_style_list', [])
+        values["sync_exclusion_styles"] = self.track_data.get(
+            "sync_exclusion_styles", []
+        )
+        values["sync_exclusion_mode"] = self.track_data.get(
+            "sync_exclusion_mode", "exclude"
+        )
+        values["sync_exclusion_original_style_list"] = self.track_data.get(
+            "sync_exclusion_original_style_list", []
+        )
 
         return values

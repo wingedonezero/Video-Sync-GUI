@@ -8,6 +8,7 @@ Contains:
 - MSE (Mean Squared Error) comparison
 - Unified frame comparison interface
 """
+
 from __future__ import annotations
 
 import gc
@@ -15,7 +16,9 @@ import io
 from typing import Any
 
 
-def compute_perceptual_hash(image_data: bytes, runner, algorithm: str = 'dhash', hash_size: int = 8) -> str | None:
+def compute_perceptual_hash(
+    image_data: bytes, runner, algorithm: str = "dhash", hash_size: int = 8
+) -> str | None:
     """
     Compute perceptual hash from image data.
 
@@ -41,11 +44,11 @@ def compute_perceptual_hash(image_data: bytes, runner, algorithm: str = 'dhash',
         img = Image.open(io.BytesIO(image_data))
 
         # Select hash algorithm
-        if algorithm == 'phash':
+        if algorithm == "phash":
             hash_obj = imagehash.phash(img, hash_size=hash_size)
-        elif algorithm == 'average_hash':
+        elif algorithm == "average_hash":
             hash_obj = imagehash.average_hash(img, hash_size=hash_size)
-        elif algorithm == 'whash':
+        elif algorithm == "whash":
             hash_obj = imagehash.whash(img, hash_size=hash_size)
         else:  # dhash (default)
             hash_obj = imagehash.dhash(img, hash_size=hash_size)
@@ -56,7 +59,9 @@ def compute_perceptual_hash(image_data: bytes, runner, algorithm: str = 'dhash',
         return str(hash_obj)
 
     except ImportError:
-        runner._log_message("[Perceptual Hash] WARNING: imagehash library not installed")
+        runner._log_message(
+            "[Perceptual Hash] WARNING: imagehash library not installed"
+        )
         runner._log_message("[Perceptual Hash] Install with: pip install imagehash")
         return None
     except Exception as e:
@@ -64,7 +69,9 @@ def compute_perceptual_hash(image_data: bytes, runner, algorithm: str = 'dhash',
         return None
 
 
-def compute_frame_hash(frame: Image.Image, hash_size: int = 8, method: str = 'phash') -> Any | None:
+def compute_frame_hash(
+    frame: Image.Image, hash_size: int = 8, method: str = "phash"
+) -> Any | None:
     """
     Compute perceptual hash of a frame.
 
@@ -79,11 +86,11 @@ def compute_frame_hash(frame: Image.Image, hash_size: int = 8, method: str = 'ph
     try:
         import imagehash
 
-        if method == 'dhash':
+        if method == "dhash":
             return imagehash.dhash(frame, hash_size=hash_size)
-        elif method == 'average_hash':
+        elif method == "average_hash":
             return imagehash.average_hash(frame, hash_size=hash_size)
-        elif method == 'whash':
+        elif method == "whash":
             return imagehash.whash(frame, hash_size=hash_size)
         else:  # 'phash' or default
             return imagehash.phash(frame, hash_size=hash_size)
@@ -130,19 +137,21 @@ def compute_ssim(frame1: Image.Image, frame2: Image.Image) -> float:
         import numpy as np
 
         # Convert to grayscale numpy arrays
-        arr1 = np.array(frame1.convert('L'))
-        arr2 = np.array(frame2.convert('L'))
+        arr1 = np.array(frame1.convert("L"))
+        arr2 = np.array(frame2.convert("L"))
 
         # Resize to match if needed
         if arr1.shape != arr2.shape:
             from PIL import Image as PILImage
+
             # Resize frame2 to match frame1
             frame2_resized = frame2.resize(frame1.size, PILImage.Resampling.LANCZOS)
-            arr2 = np.array(frame2_resized.convert('L'))
+            arr2 = np.array(frame2_resized.convert("L"))
 
         # Try scikit-image SSIM first (most accurate)
         try:
             from skimage.metrics import structural_similarity
+
             ssim_value = structural_similarity(arr1, arr2, data_range=255)
             return float(ssim_value)
         except ImportError:
@@ -159,8 +168,9 @@ def compute_ssim(frame1: Image.Image, frame2: Image.Image) -> float:
         sigma2_sq = arr2.var()
         sigma12 = ((arr1 - mu1) * (arr2 - mu2)).mean()
 
-        ssim = ((2 * mu1 * mu2 + C1) * (2 * sigma12 + C2)) / \
-               ((mu1 ** 2 + mu2 ** 2 + C1) * (sigma1_sq + sigma2_sq + C2))
+        ssim = ((2 * mu1 * mu2 + C1) * (2 * sigma12 + C2)) / (
+            (mu1**2 + mu2**2 + C1) * (sigma1_sq + sigma2_sq + C2)
+        )
 
         return float(ssim)
 
@@ -184,28 +194,29 @@ def compute_mse(frame1: Image.Image, frame2: Image.Image) -> float:
     try:
         import numpy as np
 
-        arr1 = np.array(frame1.convert('L'), dtype=np.float64)
-        arr2 = np.array(frame2.convert('L'), dtype=np.float64)
+        arr1 = np.array(frame1.convert("L"), dtype=np.float64)
+        arr2 = np.array(frame2.convert("L"), dtype=np.float64)
 
         # Resize to match if needed
         if arr1.shape != arr2.shape:
             from PIL import Image as PILImage
+
             frame2_resized = frame2.resize(frame1.size, PILImage.Resampling.LANCZOS)
-            arr2 = np.array(frame2_resized.convert('L'), dtype=np.float64)
+            arr2 = np.array(frame2_resized.convert("L"), dtype=np.float64)
 
         mse = np.mean((arr1 - arr2) ** 2)
         return float(mse)
 
     except Exception:
-        return float('inf')
+        return float("inf")
 
 
 def compare_frames(
     frame1: Image.Image,
     frame2: Image.Image,
-    method: str = 'hash',
-    hash_algorithm: str = 'dhash',
-    hash_size: int = 8
+    method: str = "hash",
+    hash_algorithm: str = "dhash",
+    hash_size: int = 8,
 ) -> tuple:
     """
     Compare two frames using the specified method.
@@ -227,14 +238,14 @@ def compare_frames(
     - ssim: 1.0 - SSIM (0=identical, <0.05=match, >0.2=different)
     - mse: Normalized MSE (0=identical, <100=match, >500=different)
     """
-    if method == 'ssim':
+    if method == "ssim":
         ssim = compute_ssim(frame1, frame2)
         # Convert to distance (0 = identical, higher = more different)
         distance = (1.0 - ssim) * 100  # Scale to ~0-100 range
         is_match = ssim > 0.90  # 90% similarity threshold
         return (distance, is_match)
 
-    elif method == 'mse':
+    elif method == "mse":
         mse = compute_mse(frame1, frame2)
         # Normalize to ~0-100 range (assuming 8-bit images)
         distance = min(mse / 100, 100)  # Cap at 100

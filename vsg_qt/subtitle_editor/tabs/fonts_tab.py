@@ -5,6 +5,7 @@ Fonts tab for subtitle editor.
 Provides font management functionality with visual font preview dropdown.
 Uses FontScanner from vsg_core for proper font scanning.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -90,8 +91,12 @@ class FontPreviewComboBox(QComboBox):
         self.setMinimumWidth(200)
         self.view().setMinimumWidth(300)
 
-    def add_font(self, font_name: str, font_path: str | None = None,
-                 family_name: str | None = None):
+    def add_font(
+        self,
+        font_name: str,
+        font_path: str | None = None,
+        family_name: str | None = None,
+    ):
         """Add a font to the dropdown.
 
         Args:
@@ -104,10 +109,11 @@ class FontPreviewComboBox(QComboBox):
         # Store path in UserRole for backward compatibility with delegate
         self.setItemData(index, font_path, Qt.UserRole)
         # Store full font data including family_name
-        self.setItemData(index, {
-            'path': font_path,
-            'family_name': family_name or font_name.split(' (')[0]
-        }, self.FontDataRole)
+        self.setItemData(
+            index,
+            {"path": font_path, "family_name": family_name or font_name.split(" (")[0]},
+            self.FontDataRole,
+        )
 
 
 class FontsTab(BaseTab):
@@ -158,9 +164,9 @@ class FontsTab(BaseTab):
 
         self._fonts_table = QTableWidget()
         self._fonts_table.setColumnCount(4)
-        self._fonts_table.setHorizontalHeaderLabels([
-            "#", "Style", "Original Font", "Replacement"
-        ])
+        self._fonts_table.setHorizontalHeaderLabels(
+            ["#", "Style", "Original Font", "Replacement"]
+        )
         self._fonts_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self._fonts_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
 
@@ -208,6 +214,7 @@ class FontsTab(BaseTab):
     def set_fonts_dir(self, fonts_dir: Path | None):
         """Set the fonts directory for preview."""
         from vsg_core.config import AppConfig
+
         config = AppConfig()
 
         # Store attached fonts dir (from subtitle) - this is where libass looks
@@ -216,7 +223,9 @@ class FontsTab(BaseTab):
         else:
             # Create a temp fonts directory if none provided
             # This ensures we have somewhere to copy replacement fonts
-            self._attached_fonts_dir = config.get_style_editor_temp_dir() / "vsg_replacement_fonts"
+            self._attached_fonts_dir = (
+                config.get_style_editor_temp_dir() / "vsg_replacement_fonts"
+            )
             self._attached_fonts_dir.mkdir(parents=True, exist_ok=True)
             print(f"[FontsTab] Created temp fonts dir: {self._attached_fonts_dir}")
 
@@ -248,7 +257,11 @@ class FontsTab(BaseTab):
 
         # Only scan user's fonts directory (not attached fonts from subtitle)
         # This matches the old working behavior
-        if not hasattr(self, '_user_fonts_dir') or not self._user_fonts_dir or not self._user_fonts_dir.exists():
+        if (
+            not hasattr(self, "_user_fonts_dir")
+            or not self._user_fonts_dir
+            or not self._user_fonts_dir.exists()
+        ):
             print("[FontsTab] No user fonts directory found")
             return
 
@@ -291,11 +304,11 @@ class FontsTab(BaseTab):
         fonts_by_style = {}
         for style_name, style in self._state.styles.items():
             # Try to get original fontname from state's original values
-            original_values = getattr(self._state, '_original_style_values', {})
+            original_values = getattr(self._state, "_original_style_values", {})
             if style_name in original_values:
-                font = original_values[style_name].get('fontname')
+                font = original_values[style_name].get("fontname")
             else:
-                font = getattr(style, 'fontname', None)
+                font = getattr(style, "fontname", None)
             if font:
                 fonts_by_style[style_name] = font
 
@@ -318,15 +331,17 @@ class FontsTab(BaseTab):
 
             # Replacement dropdown with font preview
             combo = FontPreviewComboBox(self._loaded_fonts)
-            combo.setProperty('style_name', style_name)
-            combo.setProperty('original_font', original_font)
+            combo.setProperty("style_name", style_name)
+            combo.setProperty("original_font", original_font)
 
             # Add "(none)" option first
             combo.addItem("(none)")
             combo.setItemData(0, None, Qt.UserRole)
 
             # Add available fonts from the fonts directory
-            for font_info in sorted(self._available_fonts, key=lambda f: f.family_name.lower()):
+            for font_info in sorted(
+                self._available_fonts, key=lambda f: f.family_name.lower()
+            ):
                 # Use full_name to distinguish variants (e.g., "Vesta Pro Bold" vs "Vesta Pro Bold Italic")
                 # Fall back to family_name + subfamily if full_name not available
                 if font_info.full_name and font_info.full_name != font_info.family_name:
@@ -334,16 +349,18 @@ class FontsTab(BaseTab):
                     font_name_for_libass = font_info.full_name
                 else:
                     display_name = font_info.family_name
-                    if font_info.subfamily and font_info.subfamily.lower() != 'regular':
+                    if font_info.subfamily and font_info.subfamily.lower() != "regular":
                         display_name += f" ({font_info.subfamily})"
                     font_name_for_libass = font_info.family_name
 
                 # Pass full_name so libass can find the specific font variant
-                combo.add_font(display_name, str(font_info.file_path), font_name_for_libass)
+                combo.add_font(
+                    display_name, str(font_info.file_path), font_name_for_libass
+                )
 
             # Set current selection if replacement exists
             replacement = self._replacements.get(style_name, {})
-            new_font = replacement.get('new_font_name', '')
+            new_font = replacement.get("new_font_name", "")
             if new_font:
                 # Find matching font in dropdown
                 for i in range(1, combo.count()):
@@ -365,12 +382,12 @@ class FontsTab(BaseTab):
         """Apply all selected font replacements - triggered by Apply button."""
         import shutil
 
-        fonts_dir = getattr(self, '_attached_fonts_dir', None) or self._fonts_dir
+        fonts_dir = getattr(self, "_attached_fonts_dir", None) or self._fonts_dir
         self._replacements.clear()
 
         # Go through all combos and apply their selections
         for style_name, combo in self._font_combos.items():
-            original_font = combo.property('original_font')
+            original_font = combo.property("original_font")
             selected_text = combo.currentText()
             selected_path = combo.currentData(Qt.UserRole)
 
@@ -381,10 +398,10 @@ class FontsTab(BaseTab):
             # Get font data including family_name (what libass actually uses)
             font_data = combo.currentData(FontPreviewComboBox.FontDataRole)
             if font_data and isinstance(font_data, dict):
-                font_name = font_data.get('family_name', selected_text.split(' (')[0])
+                font_name = font_data.get("family_name", selected_text.split(" (")[0])
             else:
                 # Fallback for items without FontDataRole
-                font_name = selected_text.split(' (')[0]
+                font_name = selected_text.split(" (")[0]
 
             font_path = Path(selected_path) if selected_path else None
 
@@ -399,13 +416,15 @@ class FontsTab(BaseTab):
                 except Exception as e:
                     print(f"[FontsTab] Could not copy font: {e}")
 
-            print(f"[FontsTab] Replacement: style='{style_name}' font='{font_name}' path='{selected_path}'")
+            print(
+                f"[FontsTab] Replacement: style='{style_name}' font='{font_name}' path='{selected_path}'"
+            )
 
             # Store replacement
             self._replacements[style_name] = {
-                'original_font': original_font,
-                'new_font_name': font_name,
-                'font_file_path': selected_path
+                "original_font": original_font,
+                "new_font_name": font_name,
+                "font_file_path": selected_path,
             }
 
         # Update state and emit signal
@@ -439,7 +458,7 @@ class FontsTab(BaseTab):
 
     def get_result(self) -> dict:
         """Get font replacements as result."""
-        return {'font_replacements': self._replacements.copy()}
+        return {"font_replacements": self._replacements.copy()}
 
     def get_replacements(self) -> dict[str, dict[str, Any]]:
         """Get the current font replacements."""

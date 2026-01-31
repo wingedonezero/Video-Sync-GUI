@@ -7,6 +7,7 @@ Contains:
 - Playback controls (play/pause, seek slider)
 - Time display
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -53,9 +54,7 @@ class VideoWidget(QWidget):
 
         # Scale pixmap to fit widget while maintaining aspect ratio
         scaled = self._pixmap.scaled(
-            self.size(),
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation
+            self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
         )
 
         # Center the scaled pixmap
@@ -124,8 +123,13 @@ class VideoPanel(QWidget):
         """Set the editor state."""
         self._state = state
 
-    def start_player(self, video_path: str, subtitle_path: str,
-                     index_dir: str | None = None, fonts_dir: str | None = None):
+    def start_player(
+        self,
+        video_path: str,
+        subtitle_path: str,
+        index_dir: str | None = None,
+        fonts_dir: str | None = None,
+    ):
         """
         Start the video player.
 
@@ -143,7 +147,7 @@ class VideoPanel(QWidget):
             subtitle_path=subtitle_path,
             widget_win_id=self._video_widget.winId(),
             fonts_dir=fonts_dir,
-            parent=self
+            parent=self,
         )
 
         # Connect signals

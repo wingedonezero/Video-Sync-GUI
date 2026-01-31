@@ -13,9 +13,13 @@ JSON_PREFIX = "__VSG_PREVIEW_JSON__ "
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run preview OCR in a subprocess.")
-    parser.add_argument("--subtitle-path", required=True, help="Path to subtitle (.idx/.sub/.sup)")
+    parser.add_argument(
+        "--subtitle-path", required=True, help="Path to subtitle (.idx/.sub/.sup)"
+    )
     parser.add_argument("--lang", required=True, help="OCR language code (e.g., eng)")
-    parser.add_argument("--output-dir", required=True, help="Output directory for preview OCR files")
+    parser.add_argument(
+        "--output-dir", required=True, help="Output directory for preview OCR files"
+    )
     args = parser.parse_args()
 
     subtitle_path = args.subtitle_path

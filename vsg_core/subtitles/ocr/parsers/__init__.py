@@ -17,7 +17,7 @@ from .base import SubtitleImage, SubtitleImageParser
 from .vobsub import VobSubParser
 
 __all__ = [
-    'SubtitleImage',
-    'SubtitleImageParser',
-    'VobSubParser',
+    "SubtitleImage",
+    "SubtitleImageParser",
+    "VobSubParser",
 ]
