@@ -159,11 +159,12 @@ impl Component for SettingsDialog {
                                     add_suffix = &gtk::Entry {
                                         set_hexpand: true,
                                         set_valign: gtk::Align::Center,
-                                        #[watch]
-                                        set_text: &model.settings.paths.output_folder,
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::OutputFolderChanged(e.text().to_string()));
-                                        },
+                                        } -> output_folder_signal,
+                                        #[watch]
+                                        #[block_signal(output_folder_signal)]
+                                        set_text: &model.settings.paths.output_folder,
                                     },
 
                                     add_suffix = &gtk::Button {
@@ -180,11 +181,12 @@ impl Component for SettingsDialog {
                                     add_suffix = &gtk::Entry {
                                         set_hexpand: true,
                                         set_valign: gtk::Align::Center,
-                                        #[watch]
-                                        set_text: &model.settings.paths.temp_root,
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::TempFolderChanged(e.text().to_string()));
-                                        },
+                                        } -> temp_folder_signal,
+                                        #[watch]
+                                        #[block_signal(temp_folder_signal)]
+                                        set_text: &model.settings.paths.temp_root,
                                     },
 
                                     add_suffix = &gtk::Button {
@@ -201,11 +203,12 @@ impl Component for SettingsDialog {
                                     add_suffix = &gtk::Entry {
                                         set_hexpand: true,
                                         set_valign: gtk::Align::Center,
-                                        #[watch]
-                                        set_text: &model.settings.paths.logs_folder,
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::LogsFolderChanged(e.text().to_string()));
-                                        },
+                                        } -> logs_folder_signal,
+                                        #[watch]
+                                        #[block_signal(logs_folder_signal)]
+                                        set_text: &model.settings.paths.logs_folder,
                                     },
 
                                     add_suffix = &gtk::Button {
@@ -263,20 +266,22 @@ impl Component for SettingsDialog {
 
                                     adw::EntryRow {
                                         set_title: "Source 1 Language",
-                                        #[watch]
-                                        set_text: model.settings.analysis.lang_source1.as_deref().unwrap_or(""),
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::LangSource1Changed(e.text().to_string()));
-                                        },
+                                        } -> lang_source1_signal,
+                                        #[watch]
+                                        #[block_signal(lang_source1_signal)]
+                                        set_text: model.settings.analysis.lang_source1.as_deref().unwrap_or(""),
                                     },
 
                                     adw::EntryRow {
                                         set_title: "Other Sources Language",
-                                        #[watch]
-                                        set_text: model.settings.analysis.lang_others.as_deref().unwrap_or(""),
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::LangOthersChanged(e.text().to_string()));
-                                        },
+                                        } -> lang_others_signal,
+                                        #[watch]
+                                        #[block_signal(lang_others_signal)]
+                                        set_text: model.settings.analysis.lang_others.as_deref().unwrap_or(""),
                                     },
                                 },
 
@@ -422,6 +427,7 @@ impl Component for SettingsDialog {
                                     adw::SwitchRow {
                                         set_title: "SCC",
                                         set_active: model.settings.analysis.multi_corr_scc,
+                                        #[watch]
                                         set_sensitive: model.settings.analysis.multi_correlation_enabled,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::MultiCorrSccChanged(row.is_active()));
@@ -431,6 +437,7 @@ impl Component for SettingsDialog {
                                     adw::SwitchRow {
                                         set_title: "GCC-PHAT",
                                         set_active: model.settings.analysis.multi_corr_gcc_phat,
+                                        #[watch]
                                         set_sensitive: model.settings.analysis.multi_correlation_enabled,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::MultiCorrPhatChanged(row.is_active()));
@@ -440,6 +447,7 @@ impl Component for SettingsDialog {
                                     adw::SwitchRow {
                                         set_title: "GCC-SCOT",
                                         set_active: model.settings.analysis.multi_corr_gcc_scot,
+                                        #[watch]
                                         set_sensitive: model.settings.analysis.multi_correlation_enabled,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::MultiCorrScotChanged(row.is_active()));
@@ -449,6 +457,7 @@ impl Component for SettingsDialog {
                                     adw::SwitchRow {
                                         set_title: "Whitened",
                                         set_active: model.settings.analysis.multi_corr_whitened,
+                                        #[watch]
                                         set_sensitive: model.settings.analysis.multi_correlation_enabled,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::MultiCorrWhitenedChanged(row.is_active()));
@@ -590,6 +599,7 @@ impl Component for SettingsDialog {
                                         set_title: "Snap Mode",
                                         set_model: Some(&gtk::StringList::new(SNAP_MODES)),
                                         set_selected: model.settings.chapters.snap_mode.to_index() as u32,
+                                        #[watch]
                                         set_sensitive: model.settings.chapters.snap_enabled,
                                         connect_selected_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::SnapModeChanged(row.selected()));
@@ -604,6 +614,7 @@ impl Component for SettingsDialog {
                                             model.settings.chapters.snap_threshold_ms as f64,
                                             50.0, 2000.0, 50.0, 100.0, 0.0
                                         ),
+                                        #[watch]
                                         set_sensitive: model.settings.chapters.snap_enabled,
                                         connect_value_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::SnapThresholdChanged(row.value().to_string()));
@@ -614,6 +625,7 @@ impl Component for SettingsDialog {
                                         set_title: "Snap Starts Only",
                                         set_subtitle: "Only snap chapter start times, not ends",
                                         set_active: model.settings.chapters.snap_starts_only,
+                                        #[watch]
                                         set_sensitive: model.settings.chapters.snap_enabled,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::SnapStartsOnlyChanged(row.is_active()));
