@@ -154,7 +154,7 @@ fn setup_drop_target(entry: &gtk::Entry, source_idx: usize, sender: ComponentSen
     let drop_target = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY);
 
     // Also accept text/uri-list format (used by some file managers like Dolphin)
-    drop_target.set_gtypes(&[gdk::FileList::static_type(), glib::GString::static_type()]);
+    drop_target.set_types(&[gdk::FileList::static_type(), glib::GString::static_type()]);
 
     let sender_clone = sender.clone();
     drop_target.connect_drop(move |_target, value, _x, _y| {
