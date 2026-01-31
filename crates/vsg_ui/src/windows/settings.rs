@@ -796,7 +796,7 @@ impl Component for SettingsDialog {
 
     fn init(
         init: Self::Init,
-        _root: Self::Root,
+        root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
         let model = SettingsDialog { settings: init };
@@ -804,20 +804,32 @@ impl Component for SettingsDialog {
 
         // Manually connect buttons to avoid panic if component is destroyed
         // Save button - needs to go through message to get current settings
-        let input_sender = sender.input_sender().clone();
+        let sender_clone = sender.clone();
         widgets.save_btn.connect_clicked(move |_| {
             eprintln!("[Settings] Save button clicked");
-            let _ = input_sender.send(SettingsMsg::Save);
+            sender_clone.input(SettingsMsg::Save);
         });
 
         // Cancel button - defer output to avoid panic when component is destroyed in handler
         let output_sender = sender.output_sender().clone();
+        let root_clone = root.clone();
         widgets.cancel_btn.connect_clicked(move |_| {
             eprintln!("[Settings] Cancel button clicked");
+            root_clone.close();
             let sender = output_sender.clone();
             glib::idle_add_local_once(move || {
                 let _ = sender.send(SettingsOutput::Cancelled);
             });
+        });
+
+        // Window close button
+        let output_sender = sender.output_sender().clone();
+        root.connect_close_request(move |_| {
+            let sender = output_sender.clone();
+            glib::idle_add_local_once(move || {
+                let _ = sender.send(SettingsOutput::Cancelled);
+            });
+            glib::Propagation::Proceed
         });
 
         ComponentParts { model, widgets }

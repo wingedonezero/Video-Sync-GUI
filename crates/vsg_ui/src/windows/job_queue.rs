@@ -265,70 +265,82 @@ impl Component for JobQueueDialog {
         // Using input_sender.send() which returns Result instead of panicking
 
         // Action buttons
-        let input_sender = sender.input_sender().clone();
+        let sender_clone = sender.clone();
         widgets.add_jobs_btn.connect_clicked(move |_| {
             eprintln!("[JobQueue] Add Jobs button clicked");
-            let _ = input_sender.send(JobQueueMsg::AddJobs);
+            sender_clone.input(JobQueueMsg::AddJobs);
         });
 
-        let input_sender = sender.input_sender().clone();
+        let sender_clone = sender.clone();
         widgets.remove_btn.connect_clicked(move |_| {
             eprintln!("[JobQueue] Remove Selected button clicked");
-            let _ = input_sender.send(JobQueueMsg::RemoveSelected);
+            sender_clone.input(JobQueueMsg::RemoveSelected);
         });
 
-        let input_sender = sender.input_sender().clone();
+        let sender_clone = sender.clone();
         widgets.move_up_btn.connect_clicked(move |_| {
             eprintln!("[JobQueue] Move Up button clicked");
-            let _ = input_sender.send(JobQueueMsg::MoveUp);
+            sender_clone.input(JobQueueMsg::MoveUp);
         });
 
-        let input_sender = sender.input_sender().clone();
+        let sender_clone = sender.clone();
         widgets.move_down_btn.connect_clicked(move |_| {
             eprintln!("[JobQueue] Move Down button clicked");
-            let _ = input_sender.send(JobQueueMsg::MoveDown);
+            sender_clone.input(JobQueueMsg::MoveDown);
         });
 
-        let input_sender = sender.input_sender().clone();
+        let sender_clone = sender.clone();
         widgets.copy_layout_btn.connect_clicked(move |_| {
             eprintln!("[JobQueue] Copy Layout button clicked");
-            let _ = input_sender.send(JobQueueMsg::CopySelectedLayout);
+            sender_clone.input(JobQueueMsg::CopySelectedLayout);
         });
 
-        let input_sender = sender.input_sender().clone();
+        let sender_clone = sender.clone();
         widgets.paste_layout_btn.connect_clicked(move |_| {
             eprintln!("[JobQueue] Paste Layout button clicked");
-            let _ = input_sender.send(JobQueueMsg::PasteLayout);
+            sender_clone.input(JobQueueMsg::PasteLayout);
         });
 
         // Start Processing button
-        let input_sender = sender.input_sender().clone();
+        let sender_clone = sender.clone();
         widgets.start_btn.connect_clicked(move |_| {
             eprintln!("[JobQueue] Start Processing button clicked");
-            let _ = input_sender.send(JobQueueMsg::StartProcessing);
+            sender_clone.input(JobQueueMsg::StartProcessing);
         });
 
         // Close button - defer output to avoid panic when component is destroyed in handler
         let output_sender = sender.output_sender().clone();
+        let root_clone = root.clone();
         widgets.close_btn.connect_clicked(move |_| {
             eprintln!("[JobQueue] Close button clicked");
+            root_clone.close();
             let sender = output_sender.clone();
             glib::idle_add_local_once(move || {
                 let _ = sender.send(JobQueueOutput::Closed);
             });
         });
 
+        // Window close button
+        let output_sender = sender.output_sender().clone();
+        root.connect_close_request(move |_| {
+            let sender = output_sender.clone();
+            glib::idle_add_local_once(move || {
+                let _ = sender.send(JobQueueOutput::Closed);
+            });
+            glib::Propagation::Proceed
+        });
+
         // ListBox row activation
-        let input_sender = sender.input_sender().clone();
+        let sender_clone = sender.clone();
         widgets.job_list.connect_row_activated(move |_, row| {
             let idx = row.index() as usize;
-            let _ = input_sender.send(JobQueueMsg::ConfigureJob(idx));
+            sender_clone.input(JobQueueMsg::ConfigureJob(idx));
         });
 
         ComponentParts { model, widgets }
     }
 
-    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, root: &Self::Root) {
+    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
         match msg {
             JobQueueMsg::SelectJob(idx, ctrl_pressed, shift_pressed) => {
                 let job_count = {
@@ -452,7 +464,10 @@ impl Component for JobQueueDialog {
             }
 
             JobQueueMsg::ConfigureJob(idx) => {
-                let _ = sender.output(JobQueueOutput::OpenManualSelection(idx));
+                let output_sender = sender.output_sender().clone();
+                glib::idle_add_local_once(move || {
+                    let _ = output_sender.send(JobQueueOutput::OpenManualSelection(idx));
+                });
             }
 
             JobQueueMsg::CopyLayout(idx) => {
@@ -616,13 +631,13 @@ impl JobQueueDialog {
 
                 // Add click gesture for selection with Ctrl/Shift support
                 let gesture = gtk::GestureClick::new();
-                let sender_click = sender.clone();
+                let sender_clone = sender.clone();
                 let job_idx = job.index;
                 gesture.connect_pressed(move |gesture, _n_press, _x, _y| {
                     let modifiers = gesture.current_event_state();
                     let ctrl = modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK);
                     let shift = modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK);
-                    sender_click.input(JobQueueMsg::SelectJob(job_idx, ctrl, shift));
+                    sender_clone.input(JobQueueMsg::SelectJob(job_idx, ctrl, shift));
                 });
                 row.add_controller(gesture);
 
@@ -632,10 +647,10 @@ impl JobQueueDialog {
                     .valign(gtk::Align::Center)
                     .build();
 
-                let sender_cfg = sender.clone();
+                let sender_clone = sender.clone();
                 let cfg_idx = job.index;
                 configure_btn.connect_clicked(move |_| {
-                    sender_cfg.input(JobQueueMsg::ConfigureJob(cfg_idx));
+                    sender_clone.input(JobQueueMsg::ConfigureJob(cfg_idx));
                 });
 
                 row.add_suffix(&configure_btn);

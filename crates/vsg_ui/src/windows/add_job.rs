@@ -145,7 +145,7 @@ impl Component for AddJobDialog {
 
     fn init(
         init: Self::Init,
-        _root: Self::Root,
+        root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
         let mut model = AddJobDialog {
@@ -169,27 +169,39 @@ impl Component for AddJobDialog {
         // Using input_sender.send() which returns Result instead of panicking
 
         // Add Another Source button
-        let input_sender = sender.input_sender().clone();
+        let sender_clone = sender.clone();
         widgets.add_source_btn.connect_clicked(move |_| {
             eprintln!("[AddJob] Add Source button clicked");
-            let _ = input_sender.send(AddJobMsg::AddSource);
+            sender_clone.input(AddJobMsg::AddSource);
         });
 
         // Find & Add Jobs button
-        let input_sender = sender.input_sender().clone();
+        let sender_clone = sender.clone();
         widgets.find_btn.connect_clicked(move |_| {
             eprintln!("[AddJob] Find & Add Jobs button clicked");
-            let _ = input_sender.send(AddJobMsg::FindAndAddJobs);
+            sender_clone.input(AddJobMsg::FindAndAddJobs);
         });
 
         // Cancel button - defer output to avoid panic when component is destroyed in handler
         let output_sender = sender.output_sender().clone();
+        let root_clone = root.clone();
         widgets.cancel_btn.connect_clicked(move |_| {
             eprintln!("[AddJob] Cancel button clicked");
+            root_clone.close();
             let sender = output_sender.clone();
             glib::idle_add_local_once(move || {
                 let _ = sender.send(AddJobOutput::Cancelled);
             });
+        });
+
+        // Window close button
+        let output_sender = sender.output_sender().clone();
+        root.connect_close_request(move |_| {
+            let sender = output_sender.clone();
+            glib::idle_add_local_once(move || {
+                let _ = sender.send(AddJobOutput::Cancelled);
+            });
+            glib::Propagation::Proceed
         });
 
         ComponentParts { model, widgets }
@@ -360,18 +372,18 @@ impl AddJobDialog {
                 .placeholder_text("Drop file here or browse...")
                 .build();
 
-            let input_sender = sender.input_sender().clone();
+            let sender_clone = sender.clone();
             let idx_clone = idx;
             entry.connect_changed(move |e| {
-                let _ = input_sender.send(AddJobMsg::SourceChanged(idx_clone, e.text().to_string()));
+                sender_clone.input(AddJobMsg::SourceChanged(idx_clone, e.text().to_string()));
             });
 
             let browse_btn = gtk::Button::builder().label("Browse...").build();
 
-            let input_sender = sender.input_sender().clone();
+            let sender_clone = sender.clone();
             browse_btn.connect_clicked(move |_| {
                 eprintln!("[AddJob] Browse button clicked for source {}", idx);
-                let _ = input_sender.send(AddJobMsg::BrowseSource(idx));
+                sender_clone.input(AddJobMsg::BrowseSource(idx));
             });
 
             row.append(&label);
@@ -384,10 +396,10 @@ impl AddJobDialog {
                     .icon_name("list-remove-symbolic")
                     .build();
 
-                let input_sender = sender.input_sender().clone();
+                let sender_clone = sender.clone();
                 remove_btn.connect_clicked(move |_| {
                     eprintln!("[AddJob] Remove button clicked for source {}", idx);
-                    let _ = input_sender.send(AddJobMsg::RemoveSource(idx));
+                    sender_clone.input(AddJobMsg::RemoveSource(idx));
                 });
 
                 row.append(&remove_btn);

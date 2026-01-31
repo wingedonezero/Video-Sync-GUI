@@ -8,7 +8,7 @@ use libadwaita::prelude::*;
 use relm4::prelude::*;
 use relm4::{Component, ComponentParts, ComponentSender};
 
-use crate::types::{FinalTrackState, SyncExclusionMode, LANGUAGE_CODES};
+use crate::types::{FinalTrackState, LANGUAGE_CODES};
 
 /// Output messages from the track settings dialog.
 #[derive(Debug)]
@@ -304,26 +304,38 @@ impl Component for TrackSettingsDialog {
 
         // Manually connect buttons to avoid panic if component is destroyed
         // Accept button - needs to go through message to get current track state
-        let input_sender = sender.input_sender().clone();
+        let sender_clone = sender.clone();
         widgets.accept_btn.connect_clicked(move |_| {
             eprintln!("[TrackSettings] Accept button clicked");
-            let _ = input_sender.send(TrackSettingsMsg::Accept);
+            sender_clone.input(TrackSettingsMsg::Accept);
         });
 
         // Cancel button - defer output to avoid panic when component is destroyed in handler
         let output_sender = sender.output_sender().clone();
+        let root_clone = root.clone();
         widgets.cancel_btn.connect_clicked(move |_| {
             eprintln!("[TrackSettings] Cancel button clicked");
+            root_clone.close();
             let sender = output_sender.clone();
             glib::idle_add_local_once(move || {
                 let _ = sender.send(TrackSettingsOutput::Cancelled);
             });
         });
 
+        // Window close button
+        let output_sender = sender.output_sender().clone();
+        root.connect_close_request(move |_| {
+            let sender = output_sender.clone();
+            glib::idle_add_local_once(move || {
+                let _ = sender.send(TrackSettingsOutput::Cancelled);
+            });
+            glib::Propagation::Proceed
+        });
+
         ComponentParts { model, widgets }
     }
 
-    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, root: &Self::Root) {
+    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
         match msg {
             TrackSettingsMsg::LanguageChanged(idx) => {
                 self.selected_lang_idx = idx;

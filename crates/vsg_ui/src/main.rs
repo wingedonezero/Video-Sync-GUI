@@ -9,7 +9,6 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use relm4::prelude::*;
 use relm4::RelmApp;
 
 use vsg_core::config::ConfigManager;

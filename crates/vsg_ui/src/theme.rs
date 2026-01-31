@@ -91,7 +91,6 @@ pub mod status {
 
 /// Initialize application-wide CSS.
 pub fn init_css() {
-    use gtk::prelude::*;
 
     let provider = gtk::CssProvider::new();
     provider.load_from_string(APP_CSS);
