@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use crate::analysis::Analyzer;
 use crate::extraction::probe_file;
-use crate::models::{Delays, SyncMode};
+use crate::models::{Delays, SourceIndex, SyncMode};
 use crate::orchestrator::errors::{StepError, StepResult};
 use crate::orchestrator::step::PipelineStep;
 use crate::orchestrator::types::{AnalysisOutput, Context, JobState, SourceStability, StepOutcome};
@@ -49,18 +49,18 @@ impl PipelineStep for AnalyzeStep {
 
     fn validate_input(&self, ctx: &Context) -> StepResult<()> {
         // Check that source files exist
-        for (name, path) in &ctx.job_spec.sources {
+        for (source, path) in &ctx.job_spec.sources {
             if !path.exists() {
                 return Err(StepError::file_not_found(format!(
                     "{}: {}",
-                    name,
+                    source.display_name(),
                     path.display()
                 )));
             }
         }
 
         // Check that Source 1 exists (it's the reference)
-        if !ctx.job_spec.sources.contains_key("Source 1") {
+        if !ctx.job_spec.sources.contains_key(&SourceIndex::source1()) {
             return Err(StepError::invalid_input(
                 "Source 1 (reference) is required",
             ));
@@ -81,12 +81,12 @@ impl PipelineStep for AnalyzeStep {
 
             // Create empty delays (Source 1 has 0 delay by definition)
             let mut delays = Delays::new();
-            delays.set_delay("Source 1", 0.0);
+            delays.set_delay(SourceIndex::source1(), 0.0);
 
             // Source 1 perfect stability (reference, no analysis needed)
             let mut source_stability = HashMap::new();
             source_stability.insert(
-                "Source 1".to_string(),
+                SourceIndex::source1(),
                 SourceStability {
                     accepted_chunks: 0,
                     total_chunks: 0,
@@ -112,7 +112,7 @@ impl PipelineStep for AnalyzeStep {
         let ref_path = ctx
             .job_spec
             .sources
-            .get("Source 1")
+            .get(&SourceIndex::source1())
             .ok_or_else(|| StepError::invalid_input("Source 1 not found"))?;
 
         ctx.logger.info(&format!(
@@ -255,13 +255,13 @@ impl PipelineStep for AnalyzeStep {
         let mut source_count = 0;
         let mut any_drift = false;
         let mut method_name = String::from("SCC");
-        let mut source_stability: HashMap<String, SourceStability> = HashMap::new();
+        let mut source_stability: HashMap<SourceIndex, SourceStability> = HashMap::new();
 
         // Source 1 always has 0 delay (it's the reference)
-        delays.set_delay("Source 1", 0.0);
+        delays.set_delay(SourceIndex::source1(), 0.0);
         // Source 1 has perfect stability (reference)
         source_stability.insert(
-            "Source 1".to_string(),
+            SourceIndex::source1(),
             SourceStability {
                 accepted_chunks: 0,
                 total_chunks: 0,
@@ -272,15 +272,16 @@ impl PipelineStep for AnalyzeStep {
             },
         );
 
-        // Get sources sorted by name for consistent order
+        // Get sources sorted by index for consistent order
         let mut sources: Vec<_> = ctx.job_spec.sources.iter().collect();
-        sources.sort_by_key(|(name, _)| *name);
+        sources.sort_by_key(|(source, _)| *source);
 
-        for (source_name, source_path) in sources {
-            if source_name == "Source 1" {
+        for (source_idx, source_path) in sources {
+            if *source_idx == SourceIndex::source1() {
                 continue; // Skip reference source
             }
 
+            let source_name = source_idx.display_name();
             ctx.logger.info(&format!(
                 "Analyzing {}: {}",
                 source_name,
@@ -290,7 +291,7 @@ impl PipelineStep for AnalyzeStep {
             // Check if multi-correlation mode is enabled
             if ctx.settings.analysis.multi_correlation_enabled {
                 // Multi-correlation: run all selected methods and compare
-                match analyzer.analyze_multi_correlation(ref_path, source_path, source_name) {
+                match analyzer.analyze_multi_correlation(ref_path, source_path, &source_name) {
                     Ok(results) => {
                         // Log summary of all methods
                         ctx.logger.info(&format!(
@@ -320,7 +321,7 @@ impl PipelineStep for AnalyzeStep {
 
                             // Apply container delay correction
                             let corrected_delay = first_result.delay_ms_raw() + source1_audio_container_delay;
-                            delays.set_delay(source_name, corrected_delay);
+                            delays.set_delay(*source_idx, corrected_delay);
                             total_confidence += first_result.avg_match_pct / 100.0;
                             source_count += 1;
                             method_name = format!("Multi ({})", first_method);
@@ -342,7 +343,7 @@ impl PipelineStep for AnalyzeStep {
                             };
 
                             source_stability.insert(
-                                source_name.to_string(),
+                                *source_idx,
                                 SourceStability {
                                     accepted_chunks: first_result.accepted_chunks,
                                     total_chunks: first_result.total_chunks,
@@ -359,10 +360,10 @@ impl PipelineStep for AnalyzeStep {
                             "{}: Multi-correlation analysis failed - {}",
                             source_name, e
                         ));
-                        delays.set_delay(source_name, 0.0);
+                        delays.set_delay(*source_idx, 0.0);
                         // Record failed analysis stability
                         source_stability.insert(
-                            source_name.to_string(),
+                            *source_idx,
                             SourceStability {
                                 accepted_chunks: 0,
                                 total_chunks: 0,
@@ -376,7 +377,7 @@ impl PipelineStep for AnalyzeStep {
                 }
             } else {
                 // Standard single-method analysis
-                match analyzer.analyze(ref_path, source_path, source_name) {
+                match analyzer.analyze(ref_path, source_path, &source_name) {
                     Ok(result) => {
                         ctx.logger.info(&format!(
                             "{}: delay={:+}ms, match={:.1}%, accepted={}/{}",
@@ -397,7 +398,7 @@ impl PipelineStep for AnalyzeStep {
 
                         // Apply container delay correction
                         let corrected_delay = result.delay_ms_raw() + source1_audio_container_delay;
-                        delays.set_delay(source_name, corrected_delay);
+                        delays.set_delay(*source_idx, corrected_delay);
                         total_confidence += result.avg_match_pct / 100.0;
                         source_count += 1;
                         method_name = result.correlation_method.clone();
@@ -427,7 +428,7 @@ impl PipelineStep for AnalyzeStep {
                         ));
 
                         source_stability.insert(
-                            source_name.to_string(),
+                            *source_idx,
                             SourceStability {
                                 accepted_chunks: result.accepted_chunks,
                                 total_chunks: result.total_chunks,
@@ -444,10 +445,10 @@ impl PipelineStep for AnalyzeStep {
                             source_name, e
                         ));
                         // Set zero delay for failed source
-                        delays.set_delay(source_name, 0.0);
+                        delays.set_delay(*source_idx, 0.0);
                         // Record failed analysis stability
                         source_stability.insert(
-                            source_name.to_string(),
+                            *source_idx,
                             SourceStability {
                                 accepted_chunks: 0,
                                 total_chunks: 0,
@@ -470,13 +471,14 @@ impl PipelineStep for AnalyzeStep {
 
         // Log pre-shift delays for debugging
         ctx.logger.info("Pre-shift delays (from correlation):");
-        for (source, delay) in delays.pre_shift_delays_ms.iter() {
-            ctx.logger.info(&format!("  {}: {:+.3}ms", source, delay));
+        for (source, delay) in delays.iter() {
+            ctx.logger.info(&format!("  {}: {:+.3}ms", source, delay.pre_shift_delay_ms));
         }
 
-        let most_negative_raw = delays.raw_source_delays_ms
+        let most_negative_raw = delays
+            .sources
             .values()
-            .cloned()
+            .map(|d| d.raw_delay_ms)
             .fold(0.0_f64, |min, val| min.min(val));
 
         if most_negative_raw < 0.0 && sync_mode == SyncMode::PositiveOnly {
@@ -497,21 +499,16 @@ impl PipelineStep for AnalyzeStep {
             delays.raw_global_shift_ms = raw_shift;
             delays.global_shift_ms = rounded_shift;
 
-            // Apply shift to all delays (but keep pre_shift_delays_ms unchanged)
+            // Apply shift to all delays (but keep pre_shift_delay_ms unchanged)
             ctx.logger.info("Adjusted delays after global shift:");
-            for (source, raw_delay) in delays.raw_source_delays_ms.iter_mut() {
-                let original = *raw_delay;
-                *raw_delay += raw_shift;
+            for (source, delay) in delays.sources.iter_mut() {
+                let original = delay.raw_delay_ms;
+                delay.raw_delay_ms += raw_shift;
+                delay.delay_ms = delay.raw_delay_ms.round() as i64;
                 ctx.logger.info(&format!(
                     "  {}: {:+.3}ms → {:+.3}ms (shift applied ONCE)",
-                    source, original, *raw_delay
+                    source, original, delay.raw_delay_ms
                 ));
-            }
-
-            // Update rounded delays too
-            for (source, rounded_delay) in delays.source_delays_ms.iter_mut() {
-                let raw = delays.raw_source_delays_ms.get(source).copied().unwrap_or(0.0);
-                *rounded_delay = raw.round() as i64;
             }
         } else if most_negative_raw < 0.0 && sync_mode == SyncMode::AllowNegative {
             ctx.logger.info(&format!(
@@ -537,14 +534,14 @@ impl PipelineStep for AnalyzeStep {
             sync_mode,
             delays.global_shift_ms
         ));
-        for (source, delay) in delays.source_delays_ms.iter() {
-            ctx.logger.info(&format!("  {}: {:+}ms", source, delay));
+        for (source, delay) in delays.iter() {
+            ctx.logger.info(&format!("  {}: {:+}ms", source, delay.delay_ms));
         }
 
         // Log stability summary
         ctx.logger.info("=== STABILITY SUMMARY ===");
         for (source, stability) in &source_stability {
-            if source == "Source 1" {
+            if *source == SourceIndex::source1() {
                 continue; // Skip reference
             }
             let status = if stability.drift_detected {

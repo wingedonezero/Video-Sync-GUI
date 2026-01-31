@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use iced::Task;
 
-use vsg_core::models::JobSpec;
+use vsg_core::models::{JobSpec, SourceIndex};
 
 use crate::app::{App, Message};
 use super::helpers::run_analyze_only;
@@ -31,10 +31,10 @@ impl App {
 
         // Build job spec
         let mut sources = HashMap::new();
-        sources.insert("Source 1".to_string(), PathBuf::from(&self.source1_path));
-        sources.insert("Source 2".to_string(), PathBuf::from(&self.source2_path));
+        sources.insert(SourceIndex::source1(), PathBuf::from(&self.source1_path));
+        sources.insert(SourceIndex::source2(), PathBuf::from(&self.source2_path));
         if !self.source3_path.is_empty() {
-            sources.insert("Source 3".to_string(), PathBuf::from(&self.source3_path));
+            sources.insert(SourceIndex::new(2), PathBuf::from(&self.source3_path));
         }
 
         let job_spec = JobSpec::new(sources);

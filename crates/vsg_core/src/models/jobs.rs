@@ -7,24 +7,25 @@ use serde::{Deserialize, Serialize};
 
 use super::enums::JobStatus;
 use super::media::Track;
+use super::source_index::SourceIndex;
 
 /// Specification for a sync/merge job.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobSpec {
-    /// Map of source names to file paths (e.g., "Source 1" -> "/path/to/file.mkv").
-    pub sources: HashMap<String, PathBuf>,
-    /// Optional manual track layout override.
+    /// Map of source indices to file paths.
+    pub sources: HashMap<SourceIndex, PathBuf>,
+    /// Optional manual track layout override (legacy format, will be migrated).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub manual_layout: Option<Vec<HashMap<String, serde_json::Value>>>,
-    /// Sources to extract attachments from (e.g., ["Source 1", "Source 2"]).
+    /// Sources to extract attachments from.
     /// If empty, defaults to Source 1 only.
     #[serde(default)]
-    pub attachment_sources: Vec<String>,
+    pub attachment_sources: Vec<SourceIndex>,
 }
 
 impl JobSpec {
     /// Create a new job spec with the given sources.
-    pub fn new(sources: HashMap<String, PathBuf>) -> Self {
+    pub fn new(sources: HashMap<SourceIndex, PathBuf>) -> Self {
         Self {
             sources,
             manual_layout: None,
@@ -35,9 +36,64 @@ impl JobSpec {
     /// Create a job spec for two sources (common case).
     pub fn two_sources(source1: PathBuf, source2: PathBuf) -> Self {
         let mut sources = HashMap::new();
-        sources.insert("Source 1".to_string(), source1);
-        sources.insert("Source 2".to_string(), source2);
+        sources.insert(SourceIndex::source1(), source1);
+        sources.insert(SourceIndex::source2(), source2);
         Self::new(sources)
+    }
+
+    /// Get the source path for a given index.
+    pub fn source_path(&self, index: SourceIndex) -> Option<&PathBuf> {
+        self.sources.get(&index)
+    }
+
+    /// Get Source 1 path (primary source).
+    pub fn source1_path(&self) -> Option<&PathBuf> {
+        self.source_path(SourceIndex::source1())
+    }
+
+    /// Get Source 2 path (secondary source).
+    pub fn source2_path(&self) -> Option<&PathBuf> {
+        self.source_path(SourceIndex::source2())
+    }
+}
+
+/// Delay values for a single source.
+///
+/// Stores multiple representations of the same delay for different purposes:
+/// - `delay_ms`: Rounded integer for mkvmerge (final output)
+/// - `raw_delay_ms`: Full precision for calculations (WITH global shift)
+/// - `pre_shift_delay_ms`: Original value before global shift (for logging)
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SourceDelay {
+    /// Rounded delay in milliseconds (WITH global_shift applied).
+    /// This is the value passed to mkvmerge.
+    #[serde(default)]
+    pub delay_ms: i64,
+    /// Raw (unrounded) delay for precision (WITH global_shift applied).
+    #[serde(default)]
+    pub raw_delay_ms: f64,
+    /// Original delay BEFORE global shift (for logging/debugging).
+    #[serde(default)]
+    pub pre_shift_delay_ms: f64,
+}
+
+impl SourceDelay {
+    /// Create a new source delay with all values set to the same raw value.
+    pub fn new(raw_ms: f64) -> Self {
+        Self {
+            delay_ms: raw_ms.round() as i64,
+            raw_delay_ms: raw_ms,
+            pre_shift_delay_ms: raw_ms,
+        }
+    }
+
+    /// Create a source delay with pre-shift and post-shift values.
+    pub fn with_shift(pre_shift_ms: f64, post_shift_ms: f64) -> Self {
+        Self {
+            delay_ms: post_shift_ms.round() as i64,
+            raw_delay_ms: post_shift_ms,
+            pre_shift_delay_ms: pre_shift_ms,
+        }
     }
 }
 
@@ -45,22 +101,16 @@ impl JobSpec {
 ///
 /// # Delay Storage
 ///
-/// Delays are stored in two forms:
-/// - `raw_source_delays_ms` / `source_delays_ms`: Final delays WITH global_shift applied
-/// - `pre_shift_delays_ms`: Original delays WITHOUT global_shift (for debugging/logging)
+/// Each source has a [`SourceDelay`] containing:
+/// - `delay_ms` / `raw_delay_ms`: Final delays WITH global_shift applied
+/// - `pre_shift_delay_ms`: Original delays WITHOUT global_shift (for debugging)
 ///
-/// The `raw_source_delays_ms` values are what get applied to tracks in mkvmerge.
+/// The `raw_delay_ms` values are what get applied to tracks in mkvmerge.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Delays {
-    /// Rounded delays per source in milliseconds (WITH global_shift applied).
+    /// Per-source delays indexed by SourceIndex.
     #[serde(default)]
-    pub source_delays_ms: HashMap<String, i64>,
-    /// Raw (unrounded) delays per source for precision (WITH global_shift applied).
-    #[serde(default)]
-    pub raw_source_delays_ms: HashMap<String, f64>,
-    /// Original delays BEFORE global shift (for logging/debugging).
-    #[serde(default)]
-    pub pre_shift_delays_ms: HashMap<String, f64>,
+    pub sources: HashMap<SourceIndex, SourceDelay>,
     /// Global shift applied to all tracks (rounded).
     #[serde(default)]
     pub global_shift_ms: i64,
@@ -76,22 +126,48 @@ impl Delays {
     }
 
     /// Set delay for a source (stores the raw delay BEFORE any global shift).
-    pub fn set_delay(&mut self, source: impl Into<String>, raw_ms: f64) {
-        let source = source.into();
-        // Store in both pre-shift and current (will be shifted later)
-        self.pre_shift_delays_ms.insert(source.clone(), raw_ms);
-        self.raw_source_delays_ms.insert(source.clone(), raw_ms);
-        self.source_delays_ms.insert(source, raw_ms.round() as i64);
+    pub fn set_delay(&mut self, source: SourceIndex, raw_ms: f64) {
+        self.sources.insert(source, SourceDelay::new(raw_ms));
+    }
+
+    /// Set delay for a source with both pre-shift and post-shift values.
+    pub fn set_delay_with_shift(&mut self, source: SourceIndex, pre_shift_ms: f64, post_shift_ms: f64) {
+        self.sources.insert(source, SourceDelay::with_shift(pre_shift_ms, post_shift_ms));
+    }
+
+    /// Get the source delay entry.
+    pub fn get(&self, source: SourceIndex) -> Option<&SourceDelay> {
+        self.sources.get(&source)
     }
 
     /// Get the final delay for a source (with global shift applied).
-    pub fn get_final_delay(&self, source: &str) -> Option<f64> {
-        self.raw_source_delays_ms.get(source).copied()
+    pub fn get_final_delay(&self, source: SourceIndex) -> Option<f64> {
+        self.sources.get(&source).map(|d| d.raw_delay_ms)
+    }
+
+    /// Get the rounded delay for a source (for mkvmerge).
+    pub fn get_delay_ms(&self, source: SourceIndex) -> Option<i64> {
+        self.sources.get(&source).map(|d| d.delay_ms)
     }
 
     /// Get the pre-shift delay for a source (without global shift).
-    pub fn get_pre_shift_delay(&self, source: &str) -> Option<f64> {
-        self.pre_shift_delays_ms.get(source).copied()
+    pub fn get_pre_shift_delay(&self, source: SourceIndex) -> Option<f64> {
+        self.sources.get(&source).map(|d| d.pre_shift_delay_ms)
+    }
+
+    /// Iterate over all source delays.
+    pub fn iter(&self) -> impl Iterator<Item = (&SourceIndex, &SourceDelay)> {
+        self.sources.iter()
+    }
+
+    /// Get the number of sources with delays.
+    pub fn len(&self) -> usize {
+        self.sources.len()
+    }
+
+    /// Check if there are no delays.
+    pub fn is_empty(&self) -> bool {
+        self.sources.is_empty()
     }
 }
 
@@ -226,7 +302,7 @@ pub struct JobResult {
     pub output: Option<PathBuf>,
     /// Calculated delays (if analyzed).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub delays: Option<HashMap<String, i64>>,
+    pub delays: Option<Delays>,
     /// Error message (if failed).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -245,7 +321,7 @@ impl JobResult {
     }
 
     /// Create an analysis-only result.
-    pub fn analyzed(name: impl Into<String>, delays: HashMap<String, i64>) -> Self {
+    pub fn analyzed(name: impl Into<String>, delays: Delays) -> Self {
         Self {
             status: JobStatus::Analyzed,
             name: name.into(),
@@ -275,16 +351,48 @@ mod tests {
     fn job_spec_two_sources() {
         let spec = JobSpec::two_sources("/path/a.mkv".into(), "/path/b.mkv".into());
         assert_eq!(spec.sources.len(), 2);
-        assert!(spec.sources.contains_key("Source 1"));
-        assert!(spec.sources.contains_key("Source 2"));
+        assert!(spec.sources.contains_key(&SourceIndex::source1()));
+        assert!(spec.sources.contains_key(&SourceIndex::source2()));
+        assert_eq!(spec.source1_path(), Some(&PathBuf::from("/path/a.mkv")));
+        assert_eq!(spec.source2_path(), Some(&PathBuf::from("/path/b.mkv")));
     }
 
     #[test]
     fn delays_set_and_round() {
         let mut delays = Delays::new();
-        delays.set_delay("Source 2", -178.555);
-        assert_eq!(delays.source_delays_ms.get("Source 2"), Some(&-179));
-        assert_eq!(delays.raw_source_delays_ms.get("Source 2"), Some(&-178.555));
+        delays.set_delay(SourceIndex::source2(), -178.555);
+
+        let delay = delays.get(SourceIndex::source2()).unwrap();
+        assert_eq!(delay.delay_ms, -179);
+        assert_eq!(delay.raw_delay_ms, -178.555);
+        assert_eq!(delay.pre_shift_delay_ms, -178.555);
+    }
+
+    #[test]
+    fn delays_with_shift() {
+        let mut delays = Delays::new();
+        delays.set_delay_with_shift(SourceIndex::source1(), 100.0, 50.0);
+
+        let delay = delays.get(SourceIndex::source1()).unwrap();
+        assert_eq!(delay.delay_ms, 50);
+        assert_eq!(delay.raw_delay_ms, 50.0);
+        assert_eq!(delay.pre_shift_delay_ms, 100.0);
+    }
+
+    #[test]
+    fn delays_serialization() {
+        let mut delays = Delays::new();
+        delays.set_delay(SourceIndex::source1(), 0.0);
+        delays.set_delay(SourceIndex::source2(), -178.5);
+
+        let json = serde_json::to_string(&delays).unwrap();
+        // SourceIndex serializes as "Source 1", "Source 2"
+        assert!(json.contains("Source 1"));
+        assert!(json.contains("Source 2"));
+
+        // Round-trip
+        let parsed: Delays = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.get_delay_ms(SourceIndex::source2()), Some(-179));
     }
 
     #[test]
@@ -293,5 +401,18 @@ mod tests {
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"status\":\"Failed\""));
         assert!(json.contains("\"error\":\"Something went wrong\""));
+    }
+
+    #[test]
+    fn job_result_analyzed() {
+        let mut delays = Delays::new();
+        delays.set_delay(SourceIndex::source2(), -100.0);
+
+        let result = JobResult::analyzed("test_job", delays);
+        assert_eq!(result.status, JobStatus::Analyzed);
+        assert!(result.delays.is_some());
+
+        let d = result.delays.unwrap();
+        assert_eq!(d.get_delay_ms(SourceIndex::source2()), Some(-100));
     }
 }

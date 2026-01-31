@@ -49,7 +49,7 @@ impl PipelineStep for AudioCorrectionStep {
         let has_delays = state
             .analysis
             .as_ref()
-            .map(|a| !a.delays.source_delays_ms.is_empty())
+            .map(|a| !a.delays.is_empty())
             .unwrap_or(false);
 
         if !has_delays {

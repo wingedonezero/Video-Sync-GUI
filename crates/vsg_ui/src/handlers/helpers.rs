@@ -8,7 +8,7 @@ use vsg_core::extraction::{
 };
 use vsg_core::jobs::ManualLayout;
 use vsg_core::logging::{JobLogger, LogConfig};
-use vsg_core::models::JobSpec;
+use vsg_core::models::{JobSpec, SourceIndex};
 use vsg_core::orchestrator::{create_standard_pipeline, AnalyzeStep, Context, JobState, Pipeline};
 
 /// Track info from probing.
@@ -187,7 +187,7 @@ pub async fn run_analyze_only(
     tokio::task::spawn_blocking(move || {
         let job_name = job_spec
             .sources
-            .get("Source 1")
+            .get(&SourceIndex::source1())
             .map(|p| {
                 p.file_stem()
                     .map(|s| s.to_string_lossy().to_string())
@@ -231,8 +231,8 @@ pub async fn run_analyze_only(
         match pipeline.run(&ctx, &mut state) {
             Ok(_) => {
                 let (delay2, delay3) = if let Some(ref analysis) = state.analysis {
-                    let d2 = analysis.delays.source_delays_ms.get("Source 2").copied();
-                    let d3 = analysis.delays.source_delays_ms.get("Source 3").copied();
+                    let d2 = analysis.delays.get_delay_ms(SourceIndex::source2());
+                    let d3 = analysis.delays.get_delay_ms(SourceIndex::new(2)); // Source 3
                     (d2, d3)
                 } else {
                     (None, None)
@@ -252,7 +252,7 @@ pub async fn run_analyze_only(
 /// Subtitles -> AudioCorrection -> Mux
 pub async fn run_job_pipeline(
     job_name: String,
-    sources: std::collections::HashMap<String, PathBuf>,
+    sources: std::collections::HashMap<SourceIndex, PathBuf>,
     layout: Option<ManualLayout>,
     settings: Settings,
 ) -> Result<PathBuf, String> {
@@ -268,7 +268,7 @@ pub async fn run_job_pipeline(
                 .map(|track| {
                     let mut map = std::collections::HashMap::new();
                     map.insert("id".to_string(), serde_json::json!(track.track_id));
-                    map.insert("source".to_string(), serde_json::json!(track.source_key));
+                    map.insert("source".to_string(), serde_json::json!(track.source_ref.display_name()));
                     map.insert(
                         "type".to_string(),
                         serde_json::json!(match track.track_type {

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::Settings;
 use crate::logging::JobLogger;
-use crate::models::{Delays, JobSpec, MergePlan};
+use crate::models::{Delays, JobSpec, MergePlan, SourceIndex, SourceRef};
 
 /// Progress callback type for reporting pipeline progress.
 ///
@@ -70,14 +70,24 @@ impl Context {
         }
     }
 
-    /// Get source file path by name.
-    pub fn source_path(&self, name: &str) -> Option<&PathBuf> {
-        self.job_spec.sources.get(name)
+    /// Get source file path by index.
+    pub fn source_path(&self, source: SourceIndex) -> Option<&PathBuf> {
+        self.job_spec.sources.get(&source)
+    }
+
+    /// Get source file path by SourceRef.
+    pub fn source_path_ref(&self, source_ref: &SourceRef) -> Option<&PathBuf> {
+        source_ref.as_index().and_then(|idx| self.source_path(idx))
     }
 
     /// Get the primary source (Source 1) path.
     pub fn primary_source(&self) -> Option<&PathBuf> {
-        self.source_path("Source 1")
+        self.source_path(SourceIndex::source1())
+    }
+
+    /// Get Source 2 path.
+    pub fn secondary_source(&self) -> Option<&PathBuf> {
+        self.source_path(SourceIndex::source2())
     }
 }
 
@@ -154,7 +164,7 @@ pub struct AnalysisOutput {
     pub method: String,
     /// Per-source stability metrics.
     #[serde(default)]
-    pub source_stability: HashMap<String, SourceStability>,
+    pub source_stability: HashMap<SourceIndex, SourceStability>,
 }
 
 /// Stability metrics for a single source analysis.

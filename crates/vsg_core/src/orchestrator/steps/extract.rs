@@ -16,6 +16,7 @@ use crate::extraction::{
     extract_audio_with_ffmpeg, extract_track, extension_for_codec, probe_file,
     requires_ffmpeg_extraction, ProbeResult, TrackType,
 };
+use crate::models::SourceIndex;
 use crate::orchestrator::errors::{StepError, StepResult};
 use crate::orchestrator::step::PipelineStep;
 use crate::orchestrator::types::{Context, ExtractOutput, JobState, StepOutcome};
@@ -264,7 +265,7 @@ impl PipelineStep for ExtractStep {
 
     fn validate_input(&self, ctx: &Context) -> StepResult<()> {
         // Check that we have Source 1
-        if !ctx.job_spec.sources.contains_key("Source 1") {
+        if !ctx.job_spec.sources.contains_key(&SourceIndex::source1()) {
             return Err(StepError::invalid_input("No primary source (Source 1)"));
         }
         Ok(())
@@ -315,8 +316,20 @@ impl PipelineStep for ExtractStep {
                     continue;
                 }
 
+                // Parse source key to SourceIndex for lookup
+                let source_idx = match SourceIndex::from_display_name(source_key) {
+                    Some(idx) => idx,
+                    None => {
+                        ctx.logger.warn(&format!(
+                            "Invalid source key format {}, skipping track {}",
+                            source_key, track_id
+                        ));
+                        continue;
+                    }
+                };
+
                 // Get source path
-                let source_path = match ctx.job_spec.sources.get(source_key) {
+                let source_path = match ctx.job_spec.sources.get(&source_idx) {
                     Some(p) => p.clone(),
                     None => {
                         ctx.logger.warn(&format!(

@@ -7,6 +7,7 @@
 use iced::widget::{button, column, container, row, scrollable, text, Space};
 use iced::{Alignment, Background, Border, Color, Element, Length, Theme};
 use iced_aw::ContextMenu;
+use vsg_core::models::SourceIndex;
 
 use crate::app::{App, Message};
 
@@ -29,7 +30,7 @@ pub fn view(app: &App) -> Element<'_, Message> {
                 };
                 // Get first source filename for display
                 let source1_name = job.sources
-                    .get("Source 1")
+                    .get(&SourceIndex::source1())
                     .and_then(|p| p.file_name())
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| "-".to_string());

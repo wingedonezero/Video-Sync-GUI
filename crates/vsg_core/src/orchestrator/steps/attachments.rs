@@ -4,6 +4,7 @@
 //! placing them in the work directory for inclusion in the final mux.
 
 use crate::extraction::{extract_all_attachments, has_attachments};
+use crate::models::SourceIndex;
 use crate::orchestrator::errors::StepResult;
 use crate::orchestrator::step::PipelineStep;
 use crate::orchestrator::types::{Context, JobState, StepOutcome};
@@ -45,13 +46,13 @@ impl PipelineStep for AttachmentsStep {
 
         // Get attachment sources from job spec
         // If not specified, default to Source 1 only
-        let attachment_sources: Vec<String> = if ctx.job_spec.attachment_sources.is_empty() {
+        let attachment_sources: Vec<SourceIndex> = if ctx.job_spec.attachment_sources.is_empty() {
             ctx.logger.info("No attachment sources specified - defaulting to Source 1");
-            vec!["Source 1".to_string()]
+            vec![SourceIndex::source1()]
         } else {
             ctx.logger.info(&format!(
                 "Using specified attachment sources: {:?}",
-                ctx.job_spec.attachment_sources
+                ctx.job_spec.attachment_sources.iter().map(|s| s.display_name()).collect::<Vec<_>>()
             ));
             ctx.job_spec.attachment_sources.clone()
         };
@@ -66,11 +67,12 @@ impl PipelineStep for AttachmentsStep {
 
         let mut total_attachments = 0;
 
-        for source_key in &attachment_sources {
-            if let Some(source_path) = ctx.job_spec.sources.get(source_key) {
+        for source in &attachment_sources {
+            if let Some(source_path) = ctx.job_spec.sources.get(source) {
                 ctx.logger
-                    .info(&format!("Processing attachments from {}...", source_key));
+                    .info(&format!("Processing attachments from {}...", source.display_name()));
 
+                let source_name = source.display_name();
                 // Check if source has attachments
                 match has_attachments(source_path) {
                     Ok(true) => {
@@ -80,7 +82,7 @@ impl PipelineStep for AttachmentsStep {
                                 let count = result.files.len();
                                 ctx.logger.info(&format!(
                                     "  Extracted {} attachment(s) from {}",
-                                    count, source_key
+                                    count, source_name
                                 ));
 
                                 // Add attachments to extract output
@@ -101,19 +103,19 @@ impl PipelineStep for AttachmentsStep {
                             Err(e) => {
                                 ctx.logger.warn(&format!(
                                     "  Failed to extract attachments from {}: {}",
-                                    source_key, e
+                                    source_name, e
                                 ));
                             }
                         }
                     }
                     Ok(false) => {
                         ctx.logger
-                            .info(&format!("  No attachments found in {}", source_key));
+                            .info(&format!("  No attachments found in {}", source_name));
                     }
                     Err(e) => {
                         ctx.logger.warn(&format!(
                             "  Failed to check attachments in {}: {}",
-                            source_key, e
+                            source_name, e
                         ));
                     }
                 }

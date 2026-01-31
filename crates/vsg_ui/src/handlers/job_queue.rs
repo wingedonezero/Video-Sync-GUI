@@ -8,6 +8,7 @@ use iced::window;
 use iced::Task;
 
 use vsg_core::jobs::{discover_jobs, JobQueueStatus};
+use vsg_core::models::SourceIndex;
 
 use crate::app::{App, Message};
 
@@ -252,12 +253,12 @@ impl App {
         self.add_job_error.clear();
 
         // Collect source paths
-        let sources: HashMap<String, PathBuf> = self
+        let sources: HashMap<SourceIndex, PathBuf> = self
             .add_job_sources
             .iter()
             .enumerate()
             .filter(|(_, path)| !path.is_empty())
-            .map(|(idx, path)| (format!("Source {}", idx + 1), PathBuf::from(path)))
+            .map(|(idx, path)| (SourceIndex::new(idx), PathBuf::from(path)))
             .collect();
 
         let job_queue = self.job_queue.clone();

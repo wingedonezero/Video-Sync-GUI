@@ -4,22 +4,22 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use vsg_core::jobs::{FinalTrackEntry, ManualLayout, generate_layout_id};
-use vsg_core::models::TrackType;
+use vsg_core::models::{SourceIndex, SourceRef, TrackType};
 
 use crate::app::{App, FinalTrackState, SourceGroupState, SyncExclusionMode, TrackWidgetState};
 use super::helpers::probe_tracks;
 
 impl App {
     /// Populate source groups from sources.
-    pub fn populate_source_groups(&mut self, sources: &HashMap<String, PathBuf>) {
+    pub fn populate_source_groups(&mut self, sources: &HashMap<SourceIndex, PathBuf>) {
         self.source_groups.clear();
 
-        let mut source_keys: Vec<&String> = sources.keys().collect();
-        source_keys.sort();
+        let mut source_entries: Vec<_> = sources.iter().collect();
+        source_entries.sort_by_key(|(idx, _)| *idx);
 
-        for source_key in source_keys {
-            let path = &sources[source_key];
-            let is_reference = source_key == "Source 1";
+        for (source_idx, path) in source_entries {
+            let source_key = source_idx.display_name();
+            let is_reference = *source_idx == SourceIndex::source1();
 
             let tracks = probe_tracks(path);
 
@@ -132,7 +132,10 @@ impl App {
                         let position = source_type_counters.get(&source_type_key).copied().unwrap_or(0);
                         source_type_counters.insert(source_type_key, position + 1);
 
-                        let mut entry = FinalTrackEntry::new(t.track_id, t.source_key.clone(), track_type);
+                        // Convert source_key string to SourceRef
+                        let source_ref = SourceRef::from_display_name(&t.source_key)
+                            .unwrap_or(SourceRef::Index(SourceIndex::source1()));
+                        let mut entry = FinalTrackEntry::new(t.track_id, source_ref, track_type);
 
                         // Enhanced metadata
                         entry.user_order_index = user_idx;
@@ -165,7 +168,7 @@ impl App {
                     .attachment_sources
                     .iter()
                     .filter(|(_, &checked)| checked)
-                    .map(|(k, _)| k.clone())
+                    .filter_map(|(k, _)| SourceIndex::from_display_name(k))
                     .collect(),
                 source_settings: HashMap::new(),
             };
@@ -218,7 +221,7 @@ impl App {
 
     /// Load an existing layout from disk and populate final_tracks.
     /// Returns true if a layout was loaded.
-    pub fn load_existing_layout(&mut self, sources: &HashMap<String, PathBuf>) -> bool {
+    pub fn load_existing_layout(&mut self, sources: &HashMap<SourceIndex, PathBuf>) -> bool {
         let layout_id = generate_layout_id(sources);
 
         // Try to load the layout from disk
@@ -245,9 +248,10 @@ impl App {
         // Convert FinalTrackEntry to FinalTrackState
         // We need to match tracks from the layout to tracks in source_groups
         for entry in layout.final_tracks {
+            let entry_source_name = entry.source_ref.display_name();
             // Find the matching track in source_groups
             let track_info = self.source_groups.iter()
-                .find(|sg| sg.source_key == entry.source_key)
+                .find(|sg| sg.source_key == entry_source_name)
                 .and_then(|sg| {
                     sg.tracks.iter().find(|t| t.id == entry.track_id)
                 });
@@ -268,7 +272,7 @@ impl App {
                 let state = FinalTrackState {
                     entry_id: uuid::Uuid::new_v4(),
                     track_id: entry.track_id,
-                    source_key: entry.source_key.clone(),
+                    source_key: entry_source_name.clone(),
                     track_type: track_type.to_string(),
                     codec_id: track.codec_id.clone(),
                     summary: track.summary.clone(),
@@ -296,14 +300,14 @@ impl App {
                 tracing::warn!(
                     "Track {} from source '{}' not found in current sources - skipping",
                     entry.track_id,
-                    entry.source_key
+                    entry_source_name
                 );
             }
         }
 
-        // Load attachment sources
+        // Load attachment sources (convert SourceIndex to display name)
         for source in layout.attachment_sources {
-            self.attachment_sources.insert(source, true);
+            self.attachment_sources.insert(source.display_name(), true);
         }
 
         !self.final_tracks.is_empty()
