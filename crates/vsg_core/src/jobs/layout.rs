@@ -7,14 +7,20 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::types::{ManualLayout, SavedLayoutData};
+use crate::models::SourceIndex;
 
 /// Generate a deterministic job ID from source file paths.
 /// Uses MD5 hash of sorted source filenames (matches Python implementation).
-pub fn generate_layout_id(sources: &HashMap<String, PathBuf>) -> String {
+pub fn generate_layout_id(sources: &HashMap<SourceIndex, PathBuf>) -> String {
     use std::collections::BTreeMap;
 
-    // Sort sources by key and build the hash input string
-    let sorted: BTreeMap<_, _> = sources.iter().collect();
+    // Sort sources by display name and build the hash input string
+    // Convert SourceIndex to display_name for sorting to maintain backward compatibility
+    let sorted: BTreeMap<String, &PathBuf> = sources
+        .iter()
+        .map(|(idx, path)| (idx.display_name(), path))
+        .collect();
+
     let source_string: String = sorted
         .iter()
         .filter_map(|(key, path)| {
@@ -59,7 +65,7 @@ impl LayoutManager {
     pub fn save_layout_with_metadata(
         &self,
         job_id: &str,
-        sources: &HashMap<String, PathBuf>,
+        sources: &HashMap<SourceIndex, PathBuf>,
         layout: &ManualLayout,
     ) -> Result<(), std::io::Error> {
         self.ensure_dir()?;
@@ -161,9 +167,9 @@ impl LayoutManager {
     pub fn save_layout_with_signatures(
         &self,
         job_id: &str,
-        sources: &HashMap<String, PathBuf>,
+        sources: &HashMap<SourceIndex, PathBuf>,
         layout: &ManualLayout,
-        track_info: &HashMap<String, Vec<super::signature::TrackSignatureInfo>>,
+        track_info: &HashMap<SourceIndex, Vec<super::signature::TrackSignatureInfo>>,
     ) -> Result<(), std::io::Error> {
         self.ensure_dir()?;
 
@@ -199,8 +205,8 @@ impl LayoutManager {
         &self,
         source_job_id: &str,
         target_job_id: &str,
-        target_sources: &HashMap<String, PathBuf>,
-        target_track_info: &HashMap<String, Vec<super::signature::TrackSignatureInfo>>,
+        target_sources: &HashMap<SourceIndex, PathBuf>,
+        target_track_info: &HashMap<SourceIndex, Vec<super::signature::TrackSignatureInfo>>,
     ) -> Result<bool, std::io::Error> {
         // Load source layout
         let source_data = match self.load_layout_data(source_job_id)? {
@@ -266,13 +272,8 @@ impl LayoutManager {
             return Err("Missing job_id".to_string());
         }
 
-        // Validate each track in the layout
-        for (i, track) in data.layout.final_tracks.iter().enumerate() {
-            if track.source_key.is_empty() {
-                return Err(format!("Track {} missing source_key", i));
-            }
-        }
-
+        // Layout is now validated by the type system with SourceRef
+        // All tracks have valid source references by construction
         Ok(())
     }
 
@@ -302,10 +303,10 @@ mod tests {
         let manager = LayoutManager::new(temp_dir.path());
 
         let mut layout = ManualLayout::new();
-        layout.attachment_sources.push("Source 1".to_string());
+        layout.attachment_sources.push(SourceIndex::source1());
 
         let mut sources = HashMap::new();
-        sources.insert("Source 1".to_string(), PathBuf::from("/path/to/file.mkv"));
+        sources.insert(SourceIndex::source1(), PathBuf::from("/path/to/file.mkv"));
 
         // Save with metadata
         manager.save_layout_with_metadata("test_job", &sources, &layout).unwrap();
@@ -315,13 +316,13 @@ mod tests {
         assert!(loaded_data.is_some());
         let data = loaded_data.unwrap();
         assert_eq!(data.job_id, "test_job");
-        assert_eq!(data.layout.attachment_sources, vec!["Source 1"]);
+        assert_eq!(data.layout.attachment_sources, vec![SourceIndex::source1()]);
         assert!(!data.saved_timestamp.is_empty());
 
         // Load just layout
         let loaded_layout = manager.load_layout("test_job").unwrap();
         assert!(loaded_layout.is_some());
-        assert_eq!(loaded_layout.unwrap().attachment_sources, vec!["Source 1"]);
+        assert_eq!(loaded_layout.unwrap().attachment_sources, vec![SourceIndex::source1()]);
     }
 
     #[test]

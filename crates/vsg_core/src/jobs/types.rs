@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 use super::style_types::{FontReplacements, StylePatches};
-use crate::models::TrackType;
+use crate::models::{SourceIndex, SourceRef, TrackType};
 
 /// Status of a job in the queue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -44,8 +44,8 @@ pub struct JobQueueEntry {
     pub id: String,
     /// Display name (usually derived from primary source filename).
     pub name: String,
-    /// Map of source keys to file paths ("Source 1" -> path).
-    pub sources: HashMap<String, PathBuf>,
+    /// Map of source indices to file paths.
+    pub sources: HashMap<SourceIndex, PathBuf>,
     /// Layout ID for referencing the layout file (MD5 hash of source filenames).
     /// This is calculated from sources and used to find the layout in job_layouts/{id}.json.
     pub layout_id: String,
@@ -62,7 +62,7 @@ pub struct JobQueueEntry {
 impl JobQueueEntry {
     /// Create a new pending job.
     /// The layout_id is automatically calculated from source filenames.
-    pub fn new(id: String, name: String, sources: HashMap<String, PathBuf>) -> Self {
+    pub fn new(id: String, name: String, sources: HashMap<SourceIndex, PathBuf>) -> Self {
         let layout_id = super::generate_layout_id(&sources);
         Self {
             id,
@@ -76,9 +76,9 @@ impl JobQueueEntry {
     }
 
     /// Get truncated source path for display.
-    pub fn source_display(&self, key: &str, max_len: usize) -> String {
+    pub fn source_display(&self, source: SourceIndex, max_len: usize) -> String {
         self.sources
-            .get(key)
+            .get(&source)
             .map(|p| {
                 let s = p.file_name()
                     .map(|n| n.to_string_lossy().to_string())
@@ -94,7 +94,8 @@ impl JobQueueEntry {
 
     /// Check if job has all required sources.
     pub fn has_required_sources(&self) -> bool {
-        self.sources.contains_key("Source 1") && self.sources.contains_key("Source 2")
+        self.sources.contains_key(&SourceIndex::source1())
+            && self.sources.contains_key(&SourceIndex::source2())
     }
 }
 
@@ -104,10 +105,10 @@ pub struct ManualLayout {
     /// Ordered list of tracks to include in final output.
     pub final_tracks: Vec<FinalTrackEntry>,
     /// Sources to include attachments from.
-    pub attachment_sources: Vec<String>,
+    pub attachment_sources: Vec<SourceIndex>,
     /// Per-source correlation settings.
     #[serde(default)]
-    pub source_settings: HashMap<String, SourceCorrelationSettings>,
+    pub source_settings: HashMap<SourceIndex, SourceCorrelationSettings>,
 }
 
 impl ManualLayout {
@@ -132,8 +133,8 @@ impl Default for ManualLayout {
 pub struct FinalTrackEntry {
     /// Track ID within the source file.
     pub track_id: usize,
-    /// Source key this track comes from.
-    pub source_key: String,
+    /// Source reference this track comes from (indexed source or external).
+    pub source_ref: SourceRef,
     /// Track type (video, audio, subtitles).
     pub track_type: TrackType,
     /// User configuration for this track.
@@ -179,10 +180,10 @@ fn default_true() -> bool {
 
 impl FinalTrackEntry {
     /// Create a new entry with default config.
-    pub fn new(track_id: usize, source_key: String, track_type: TrackType) -> Self {
+    pub fn new(track_id: usize, source_ref: SourceRef, track_type: TrackType) -> Self {
         Self {
             track_id,
-            source_key,
+            source_ref,
             track_type,
             config: TrackConfig::default(),
             user_order_index: 0,
@@ -195,6 +196,26 @@ impl FinalTrackEntry {
             generated_original_style_list: Vec::new(),
             generated_verify_only_lines_removed: true,
         }
+    }
+
+    /// Create a new entry from an indexed source.
+    pub fn from_source(track_id: usize, source: SourceIndex, track_type: TrackType) -> Self {
+        Self::new(track_id, SourceRef::Index(source), track_type)
+    }
+
+    /// Create a new entry from an external file.
+    pub fn external(track_id: usize, track_type: TrackType) -> Self {
+        Self::new(track_id, SourceRef::External, track_type)
+    }
+
+    /// Get the source index if this track comes from an indexed source.
+    pub fn source_index(&self) -> Option<SourceIndex> {
+        self.source_ref.as_index()
+    }
+
+    /// Check if this track comes from an external source.
+    pub fn is_external(&self) -> bool {
+        self.source_ref.is_external()
     }
 }
 
@@ -325,7 +346,7 @@ pub struct SavedLayoutData {
     /// Job identifier (MD5 hash of source filenames).
     pub job_id: String,
     /// Source file paths at time of saving.
-    pub sources: HashMap<String, PathBuf>,
+    pub sources: HashMap<SourceIndex, PathBuf>,
     /// The actual layout configuration.
     #[serde(flatten)]
     pub layout: ManualLayout,
@@ -344,7 +365,7 @@ pub struct SavedLayoutData {
 
 impl SavedLayoutData {
     /// Create a new SavedLayoutData with current timestamp.
-    pub fn new(job_id: String, sources: HashMap<String, PathBuf>, layout: ManualLayout) -> Self {
+    pub fn new(job_id: String, sources: HashMap<SourceIndex, PathBuf>, layout: ManualLayout) -> Self {
         Self {
             job_id,
             sources,
@@ -359,7 +380,7 @@ impl SavedLayoutData {
     /// Create with signatures for layout compatibility checking.
     pub fn with_signatures(
         job_id: String,
-        sources: HashMap<String, PathBuf>,
+        sources: HashMap<SourceIndex, PathBuf>,
         layout: ManualLayout,
         track_signature: super::signature::TrackSignature,
         structure_signature: super::signature::StructureSignature,
@@ -389,11 +410,11 @@ mod tests {
     #[test]
     fn job_entry_source_display() {
         let mut sources = HashMap::new();
-        sources.insert("Source 1".to_string(), PathBuf::from("/path/to/very_long_filename_movie.mkv"));
+        sources.insert(SourceIndex::source1(), PathBuf::from("/path/to/very_long_filename_movie.mkv"));
 
         let job = JobQueueEntry::new("test".to_string(), "test".to_string(), sources);
 
-        let display = job.source_display("Source 1", 20);
+        let display = job.source_display(SourceIndex::source1(), 20);
         assert!(display.len() <= 20);
     }
 

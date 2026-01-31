@@ -9,6 +9,7 @@ use crate::chapters::{
     process_chapters, shift_chapters, snap_chapters_with_threshold, write_chapter_file,
     SnapDetail, SnapMode as ChapterSnapMode,
 };
+use crate::models::SourceIndex;
 use crate::orchestrator::errors::{StepError, StepResult};
 use crate::orchestrator::step::PipelineStep;
 use crate::orchestrator::types::{ChaptersOutput, Context, JobState, StepOutcome};
@@ -42,7 +43,7 @@ impl PipelineStep for ChaptersStep {
 
     fn validate_input(&self, ctx: &Context) -> StepResult<()> {
         // Need Source 1 for chapters
-        if !ctx.job_spec.sources.contains_key("Source 1") {
+        if !ctx.job_spec.sources.contains_key(&SourceIndex::source1()) {
             return Err(StepError::invalid_input("No Source 1 for chapter extraction"));
         }
         Ok(())
@@ -51,7 +52,7 @@ impl PipelineStep for ChaptersStep {
     fn execute(&self, ctx: &Context, state: &mut JobState) -> StepResult<StepOutcome> {
         ctx.logger.info("Processing chapters...");
 
-        let source1 = match ctx.job_spec.sources.get("Source 1") {
+        let source1 = match ctx.job_spec.sources.get(&SourceIndex::source1()) {
             Some(p) => p,
             None => {
                 ctx.logger.info("No Source 1 - skipping chapters");

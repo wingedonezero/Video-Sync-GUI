@@ -187,7 +187,7 @@ pub async fn run_analyze_only(
     tokio::task::spawn_blocking(move || {
         let job_name = job_spec
             .sources
-            .get("Source 1")
+            .get(&SourceIndex::source1())
             .map(|p| {
                 p.file_stem()
                     .map(|s| s.to_string_lossy().to_string())
@@ -252,7 +252,7 @@ pub async fn run_analyze_only(
 /// Subtitles -> AudioCorrection -> Mux
 pub async fn run_job_pipeline(
     job_name: String,
-    sources: std::collections::HashMap<String, PathBuf>,
+    sources: std::collections::HashMap<SourceIndex, PathBuf>,
     layout: Option<ManualLayout>,
     settings: Settings,
 ) -> Result<PathBuf, String> {
@@ -268,7 +268,7 @@ pub async fn run_job_pipeline(
                 .map(|track| {
                     let mut map = std::collections::HashMap::new();
                     map.insert("id".to_string(), serde_json::json!(track.track_id));
-                    map.insert("source".to_string(), serde_json::json!(track.source_key));
+                    map.insert("source".to_string(), serde_json::json!(track.source_ref.display_name()));
                     map.insert(
                         "type".to_string(),
                         serde_json::json!(match track.track_type {

@@ -301,12 +301,13 @@ impl JobQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::SourceIndex;
     use std::collections::HashMap;
 
     fn make_job(id: &str) -> JobQueueEntry {
         let mut sources = HashMap::new();
-        sources.insert("Source 1".to_string(), PathBuf::from("/test/a.mkv"));
-        sources.insert("Source 2".to_string(), PathBuf::from("/test/b.mkv"));
+        sources.insert(SourceIndex::source1(), PathBuf::from("/test/a.mkv"));
+        sources.insert(SourceIndex::source2(), PathBuf::from("/test/b.mkv"));
         JobQueueEntry::new(id.to_string(), format!("Job {}", id), sources)
     }
 

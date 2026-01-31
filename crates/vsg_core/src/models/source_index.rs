@@ -22,7 +22,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// let parsed = SourceIndex::from_display_name("Source 2").unwrap();
 /// assert_eq!(parsed.index(), 1);
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct SourceIndex(usize);
 
 impl SourceIndex {
@@ -104,6 +104,105 @@ impl<'de> Deserialize<'de> for SourceIndex {
     }
 }
 
+/// Reference to a source, which can be either an indexed source or a special source.
+///
+/// This is used for track references where the source might not be from the
+/// standard indexed sources (e.g., external files).
+///
+/// # Examples
+///
+/// ```
+/// use vsg_core::models::{SourceIndex, SourceRef};
+///
+/// let indexed = SourceRef::Index(SourceIndex::source1());
+/// assert!(!indexed.is_external());
+/// assert_eq!(indexed.as_index(), Some(SourceIndex::source1()));
+///
+/// let external = SourceRef::External;
+/// assert!(external.is_external());
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SourceRef {
+    /// A regular indexed source (Source 1, Source 2, etc.)
+    Index(SourceIndex),
+    /// An external file (not from the sources HashMap).
+    External,
+}
+
+impl SourceRef {
+    /// Check if this is an external source reference.
+    pub fn is_external(&self) -> bool {
+        matches!(self, Self::External)
+    }
+
+    /// Get the source index if this is an indexed source.
+    pub fn as_index(&self) -> Option<SourceIndex> {
+        match self {
+            Self::Index(idx) => Some(*idx),
+            Self::External => None,
+        }
+    }
+
+    /// Create a SourceRef from a display string like "Source 1" or "External".
+    pub fn from_display_name(s: &str) -> Option<Self> {
+        if s.eq_ignore_ascii_case("External") {
+            Some(Self::External)
+        } else {
+            SourceIndex::from_display_name(s).map(Self::Index)
+        }
+    }
+
+    /// Get the display name.
+    pub fn display_name(&self) -> String {
+        match self {
+            Self::Index(idx) => idx.display_name(),
+            Self::External => "External".to_string(),
+        }
+    }
+}
+
+impl Default for SourceRef {
+    fn default() -> Self {
+        Self::Index(SourceIndex::source1())
+    }
+}
+
+impl fmt::Display for SourceRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.display_name())
+    }
+}
+
+impl From<SourceIndex> for SourceRef {
+    fn from(idx: SourceIndex) -> Self {
+        Self::Index(idx)
+    }
+}
+
+impl Serialize for SourceRef {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.display_name())
+    }
+}
+
+impl<'de> Deserialize<'de> for SourceRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Self::from_display_name(&s).ok_or_else(|| {
+            serde::de::Error::custom(format!(
+                "invalid source reference '{}', expected 'Source N' or 'External'",
+                s
+            ))
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,5 +250,63 @@ mod tests {
 
         assert_eq!(map.get(&SourceIndex::new(0)), Some(&100));
         assert_eq!(map.get(&SourceIndex::new(1)), Some(&-200));
+    }
+
+    #[test]
+    fn source_ref_indexed() {
+        let indexed = SourceRef::Index(SourceIndex::source1());
+        assert!(!indexed.is_external());
+        assert_eq!(indexed.as_index(), Some(SourceIndex::source1()));
+        assert_eq!(indexed.display_name(), "Source 1");
+    }
+
+    #[test]
+    fn source_ref_external() {
+        let external = SourceRef::External;
+        assert!(external.is_external());
+        assert_eq!(external.as_index(), None);
+        assert_eq!(external.display_name(), "External");
+    }
+
+    #[test]
+    fn source_ref_from_display_name() {
+        assert_eq!(
+            SourceRef::from_display_name("Source 1"),
+            Some(SourceRef::Index(SourceIndex::source1()))
+        );
+        assert_eq!(
+            SourceRef::from_display_name("External"),
+            Some(SourceRef::External)
+        );
+        assert_eq!(
+            SourceRef::from_display_name("external"),
+            Some(SourceRef::External)
+        );
+        assert_eq!(SourceRef::from_display_name("Unknown"), None);
+    }
+
+    #[test]
+    fn source_ref_serialization() {
+        let indexed = SourceRef::Index(SourceIndex::source2());
+        let json = serde_json::to_string(&indexed).unwrap();
+        assert_eq!(json, "\"Source 2\"");
+
+        let external = SourceRef::External;
+        let json = serde_json::to_string(&external).unwrap();
+        assert_eq!(json, "\"External\"");
+
+        // Round-trip
+        let parsed: SourceRef = serde_json::from_str("\"Source 3\"").unwrap();
+        assert_eq!(parsed, SourceRef::Index(SourceIndex::new(2)));
+
+        let parsed: SourceRef = serde_json::from_str("\"External\"").unwrap();
+        assert_eq!(parsed, SourceRef::External);
+    }
+
+    #[test]
+    fn source_ref_from_source_index() {
+        let idx = SourceIndex::source1();
+        let source_ref: SourceRef = idx.into();
+        assert_eq!(source_ref, SourceRef::Index(idx));
     }
 }

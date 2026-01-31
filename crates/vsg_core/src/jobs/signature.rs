@@ -8,6 +8,8 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::models::SourceIndex;
+
 /// Track information for signature generation.
 /// This is a simplified view of track data used for comparison.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,7 +53,7 @@ pub struct TrackStructureEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StructureSignature {
     /// Detailed structure per source
-    pub structure: HashMap<String, SourceStructure>,
+    pub structure: HashMap<SourceIndex, SourceStructure>,
     /// SHA256 hash of the structure for quick comparison
     pub hash: String,
 }
@@ -68,18 +70,18 @@ impl SignatureGenerator {
     /// Generate a track signature from track info.
     ///
     /// # Arguments
-    /// * `track_info` - Map of source key to list of tracks
+    /// * `track_info` - Map of source index to list of tracks
     /// * `strict` - If true, includes codec/lang/position for stricter matching
     pub fn generate_track_signature(
         &self,
-        track_info: &HashMap<String, Vec<TrackSignatureInfo>>,
+        track_info: &HashMap<SourceIndex, Vec<TrackSignatureInfo>>,
         strict: bool,
     ) -> TrackSignature {
         let mut signature: HashMap<String, usize> = HashMap::new();
 
         if !strict {
             // Non-strict: count tracks by source and type
-            for (_source_key, tracks) in track_info {
+            for (_source, tracks) in track_info {
                 for track in tracks {
                     let key = format!("{}_{}", track.track_type, track.track_type);
                     *signature.entry(key).or_insert(0) += 1;
@@ -89,14 +91,14 @@ impl SignatureGenerator {
             // Strict: include codec, language, and position
             let mut type_counters: HashMap<String, usize> = HashMap::new();
 
-            for (source_key, tracks) in track_info {
+            for (source, tracks) in track_info {
                 for track in tracks {
                     let position = *type_counters.get(&track.track_type).unwrap_or(&0);
                     type_counters.insert(track.track_type.clone(), position + 1);
 
                     let key = format!(
                         "{}_{}_{}_{}_{}",
-                        source_key,
+                        source.display_name(),
                         track.track_type,
                         track.codec_id.to_lowercase(),
                         track.language.to_lowercase(),
@@ -122,15 +124,15 @@ impl SignatureGenerator {
     /// to files where tracks are in different orders.
     pub fn generate_structure_signature(
         &self,
-        track_info: &HashMap<String, Vec<TrackSignatureInfo>>,
+        track_info: &HashMap<SourceIndex, Vec<TrackSignatureInfo>>,
     ) -> StructureSignature {
-        let mut structure: HashMap<String, SourceStructure> = HashMap::new();
+        let mut structure: HashMap<SourceIndex, SourceStructure> = HashMap::new();
 
         // Process sources in sorted order for consistent hashing
         let mut sorted_sources: Vec<_> = track_info.iter().collect();
-        sorted_sources.sort_by_key(|(k, _)| *k);
+        sorted_sources.sort_by_key(|(k, _)| k.index());
 
-        for (source_key, tracks) in sorted_sources {
+        for (source, tracks) in sorted_sources {
             let mut source_structure = SourceStructure {
                 video: Vec::new(),
                 audio: Vec::new(),
@@ -152,7 +154,7 @@ impl SignatureGenerator {
                 }
             }
 
-            structure.insert(source_key.clone(), source_structure);
+            structure.insert(*source, source_structure);
         }
 
         // Generate SHA256 hash of the structure
@@ -177,7 +179,7 @@ impl SignatureGenerator {
 
 /// Convert probe result tracks to signature info format.
 pub fn tracks_to_signature_info(
-    _source_key: &str,
+    _source: SourceIndex,
     tracks: &[crate::extraction::TrackInfo],
 ) -> Vec<TrackSignatureInfo> {
     tracks
@@ -205,9 +207,9 @@ mod tests {
     fn structure_signature_hash_matches() {
         let gen = SignatureGenerator::new();
 
-        let mut track_info1: HashMap<String, Vec<TrackSignatureInfo>> = HashMap::new();
+        let mut track_info1: HashMap<SourceIndex, Vec<TrackSignatureInfo>> = HashMap::new();
         track_info1.insert(
-            "Source 1".to_string(),
+            SourceIndex::source1(),
             vec![
                 TrackSignatureInfo {
                     id: 0,
@@ -237,7 +239,7 @@ mod tests {
         assert!(gen.structures_are_compatible(&sig1, &sig2));
 
         // Different structure (different track ID)
-        track_info2.get_mut("Source 1").unwrap()[1].id = 2;
+        track_info2.get_mut(&SourceIndex::source1()).unwrap()[1].id = 2;
         let sig3 = gen.generate_structure_signature(&track_info2);
 
         assert!(!gen.structures_are_compatible(&sig1, &sig3));

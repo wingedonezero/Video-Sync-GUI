@@ -49,18 +49,18 @@ impl PipelineStep for AnalyzeStep {
 
     fn validate_input(&self, ctx: &Context) -> StepResult<()> {
         // Check that source files exist
-        for (name, path) in &ctx.job_spec.sources {
+        for (source, path) in &ctx.job_spec.sources {
             if !path.exists() {
                 return Err(StepError::file_not_found(format!(
                     "{}: {}",
-                    name,
+                    source.display_name(),
                     path.display()
                 )));
             }
         }
 
         // Check that Source 1 exists (it's the reference)
-        if !ctx.job_spec.sources.contains_key("Source 1") {
+        if !ctx.job_spec.sources.contains_key(&SourceIndex::source1()) {
             return Err(StepError::invalid_input(
                 "Source 1 (reference) is required",
             ));
@@ -112,7 +112,7 @@ impl PipelineStep for AnalyzeStep {
         let ref_path = ctx
             .job_spec
             .sources
-            .get("Source 1")
+            .get(&SourceIndex::source1())
             .ok_or_else(|| StepError::invalid_input("Source 1 not found"))?;
 
         ctx.logger.info(&format!(
@@ -272,27 +272,16 @@ impl PipelineStep for AnalyzeStep {
             },
         );
 
-        // Get sources sorted by name for consistent order
+        // Get sources sorted by index for consistent order
         let mut sources: Vec<_> = ctx.job_spec.sources.iter().collect();
-        sources.sort_by_key(|(name, _)| *name);
+        sources.sort_by_key(|(source, _)| *source);
 
-        for (source_name, source_path) in sources {
-            if source_name == "Source 1" {
+        for (source_idx, source_path) in sources {
+            if *source_idx == SourceIndex::source1() {
                 continue; // Skip reference source
             }
 
-            // Parse source name to SourceIndex
-            let source_idx = match SourceIndex::from_display_name(source_name) {
-                Some(idx) => idx,
-                None => {
-                    ctx.logger.warn(&format!(
-                        "Skipping source with invalid name format: {}",
-                        source_name
-                    ));
-                    continue;
-                }
-            };
-
+            let source_name = source_idx.display_name();
             ctx.logger.info(&format!(
                 "Analyzing {}: {}",
                 source_name,
@@ -302,7 +291,7 @@ impl PipelineStep for AnalyzeStep {
             // Check if multi-correlation mode is enabled
             if ctx.settings.analysis.multi_correlation_enabled {
                 // Multi-correlation: run all selected methods and compare
-                match analyzer.analyze_multi_correlation(ref_path, source_path, source_name) {
+                match analyzer.analyze_multi_correlation(ref_path, source_path, &source_name) {
                     Ok(results) => {
                         // Log summary of all methods
                         ctx.logger.info(&format!(
@@ -332,7 +321,7 @@ impl PipelineStep for AnalyzeStep {
 
                             // Apply container delay correction
                             let corrected_delay = first_result.delay_ms_raw() + source1_audio_container_delay;
-                            delays.set_delay(source_idx, corrected_delay);
+                            delays.set_delay(*source_idx, corrected_delay);
                             total_confidence += first_result.avg_match_pct / 100.0;
                             source_count += 1;
                             method_name = format!("Multi ({})", first_method);
@@ -354,7 +343,7 @@ impl PipelineStep for AnalyzeStep {
                             };
 
                             source_stability.insert(
-                                source_idx,
+                                *source_idx,
                                 SourceStability {
                                     accepted_chunks: first_result.accepted_chunks,
                                     total_chunks: first_result.total_chunks,
@@ -371,10 +360,10 @@ impl PipelineStep for AnalyzeStep {
                             "{}: Multi-correlation analysis failed - {}",
                             source_name, e
                         ));
-                        delays.set_delay(source_idx, 0.0);
+                        delays.set_delay(*source_idx, 0.0);
                         // Record failed analysis stability
                         source_stability.insert(
-                            source_idx,
+                            *source_idx,
                             SourceStability {
                                 accepted_chunks: 0,
                                 total_chunks: 0,
@@ -388,7 +377,7 @@ impl PipelineStep for AnalyzeStep {
                 }
             } else {
                 // Standard single-method analysis
-                match analyzer.analyze(ref_path, source_path, source_name) {
+                match analyzer.analyze(ref_path, source_path, &source_name) {
                     Ok(result) => {
                         ctx.logger.info(&format!(
                             "{}: delay={:+}ms, match={:.1}%, accepted={}/{}",
@@ -409,7 +398,7 @@ impl PipelineStep for AnalyzeStep {
 
                         // Apply container delay correction
                         let corrected_delay = result.delay_ms_raw() + source1_audio_container_delay;
-                        delays.set_delay(source_idx, corrected_delay);
+                        delays.set_delay(*source_idx, corrected_delay);
                         total_confidence += result.avg_match_pct / 100.0;
                         source_count += 1;
                         method_name = result.correlation_method.clone();
@@ -439,7 +428,7 @@ impl PipelineStep for AnalyzeStep {
                         ));
 
                         source_stability.insert(
-                            source_idx,
+                            *source_idx,
                             SourceStability {
                                 accepted_chunks: result.accepted_chunks,
                                 total_chunks: result.total_chunks,
@@ -456,10 +445,10 @@ impl PipelineStep for AnalyzeStep {
                             source_name, e
                         ));
                         // Set zero delay for failed source
-                        delays.set_delay(source_idx, 0.0);
+                        delays.set_delay(*source_idx, 0.0);
                         // Record failed analysis stability
                         source_stability.insert(
-                            source_idx,
+                            *source_idx,
                             SourceStability {
                                 accepted_chunks: 0,
                                 total_chunks: 0,

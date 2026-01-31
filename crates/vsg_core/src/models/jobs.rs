@@ -12,20 +12,20 @@ use super::source_index::SourceIndex;
 /// Specification for a sync/merge job.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JobSpec {
-    /// Map of source names to file paths (e.g., "Source 1" -> "/path/to/file.mkv").
-    pub sources: HashMap<String, PathBuf>,
-    /// Optional manual track layout override.
+    /// Map of source indices to file paths.
+    pub sources: HashMap<SourceIndex, PathBuf>,
+    /// Optional manual track layout override (legacy format, will be migrated).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub manual_layout: Option<Vec<HashMap<String, serde_json::Value>>>,
-    /// Sources to extract attachments from (e.g., ["Source 1", "Source 2"]).
+    /// Sources to extract attachments from.
     /// If empty, defaults to Source 1 only.
     #[serde(default)]
-    pub attachment_sources: Vec<String>,
+    pub attachment_sources: Vec<SourceIndex>,
 }
 
 impl JobSpec {
     /// Create a new job spec with the given sources.
-    pub fn new(sources: HashMap<String, PathBuf>) -> Self {
+    pub fn new(sources: HashMap<SourceIndex, PathBuf>) -> Self {
         Self {
             sources,
             manual_layout: None,
@@ -36,9 +36,24 @@ impl JobSpec {
     /// Create a job spec for two sources (common case).
     pub fn two_sources(source1: PathBuf, source2: PathBuf) -> Self {
         let mut sources = HashMap::new();
-        sources.insert("Source 1".to_string(), source1);
-        sources.insert("Source 2".to_string(), source2);
+        sources.insert(SourceIndex::source1(), source1);
+        sources.insert(SourceIndex::source2(), source2);
         Self::new(sources)
+    }
+
+    /// Get the source path for a given index.
+    pub fn source_path(&self, index: SourceIndex) -> Option<&PathBuf> {
+        self.sources.get(&index)
+    }
+
+    /// Get Source 1 path (primary source).
+    pub fn source1_path(&self) -> Option<&PathBuf> {
+        self.source_path(SourceIndex::source1())
+    }
+
+    /// Get Source 2 path (secondary source).
+    pub fn source2_path(&self) -> Option<&PathBuf> {
+        self.source_path(SourceIndex::source2())
     }
 }
 
@@ -336,8 +351,10 @@ mod tests {
     fn job_spec_two_sources() {
         let spec = JobSpec::two_sources("/path/a.mkv".into(), "/path/b.mkv".into());
         assert_eq!(spec.sources.len(), 2);
-        assert!(spec.sources.contains_key("Source 1"));
-        assert!(spec.sources.contains_key("Source 2"));
+        assert!(spec.sources.contains_key(&SourceIndex::source1()));
+        assert!(spec.sources.contains_key(&SourceIndex::source2()));
+        assert_eq!(spec.source1_path(), Some(&PathBuf::from("/path/a.mkv")));
+        assert_eq!(spec.source2_path(), Some(&PathBuf::from("/path/b.mkv")));
     }
 
     #[test]

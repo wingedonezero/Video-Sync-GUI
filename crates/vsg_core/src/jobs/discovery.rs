@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::types::JobQueueEntry;
+use crate::models::SourceIndex;
 
 /// Generate a unique job ID.
 fn generate_job_id() -> String {
@@ -75,15 +76,15 @@ fn derive_job_name(source1: &Path) -> String {
 ///
 /// # Arguments
 ///
-/// * `sources` - Map of source keys ("Source 1", "Source 2", etc.) to file paths
+/// * `sources` - Map of source indices to file paths
 ///
 /// # Returns
 ///
 /// Vector of discovered jobs (currently always 1 job).
-pub fn discover_jobs(sources: &HashMap<String, PathBuf>) -> Result<Vec<JobQueueEntry>, String> {
+pub fn discover_jobs(sources: &HashMap<SourceIndex, PathBuf>) -> Result<Vec<JobQueueEntry>, String> {
     // Validate we have at least Source 1 and Source 2
-    let source1 = sources.get("Source 1").ok_or("Source 1 is required")?;
-    let source2 = sources.get("Source 2").ok_or("Source 2 is required")?;
+    let source1 = sources.get(&SourceIndex::source1()).ok_or("Source 1 is required")?;
+    let source2 = sources.get(&SourceIndex::source2()).ok_or("Source 2 is required")?;
 
     // Validate paths exist
     if !source1.exists() {
@@ -94,10 +95,10 @@ pub fn discover_jobs(sources: &HashMap<String, PathBuf>) -> Result<Vec<JobQueueE
     }
 
     // Check optional sources
-    for (key, path) in sources.iter() {
-        if key != "Source 1" && key != "Source 2" && !path.as_os_str().is_empty() {
+    for (source, path) in sources.iter() {
+        if *source != SourceIndex::source1() && *source != SourceIndex::source2() && !path.as_os_str().is_empty() {
             if !path.exists() {
-                return Err(format!("{} file not found: {}", key, path.display()));
+                return Err(format!("{} file not found: {}", source.display_name(), path.display()));
             }
         }
     }
@@ -138,19 +139,19 @@ mod tests {
 
     #[test]
     fn discover_jobs_requires_sources() {
-        let empty: HashMap<String, PathBuf> = HashMap::new();
+        let empty: HashMap<SourceIndex, PathBuf> = HashMap::new();
         assert!(discover_jobs(&empty).is_err());
 
         let mut only_source1 = HashMap::new();
-        only_source1.insert("Source 1".to_string(), PathBuf::from("/test.mkv"));
+        only_source1.insert(SourceIndex::source1(), PathBuf::from("/test.mkv"));
         assert!(discover_jobs(&only_source1).is_err());
     }
 
     #[test]
     fn discover_jobs_validates_files() {
         let mut sources = HashMap::new();
-        sources.insert("Source 1".to_string(), PathBuf::from("/nonexistent/a.mkv"));
-        sources.insert("Source 2".to_string(), PathBuf::from("/nonexistent/b.mkv"));
+        sources.insert(SourceIndex::source1(), PathBuf::from("/nonexistent/a.mkv"));
+        sources.insert(SourceIndex::source2(), PathBuf::from("/nonexistent/b.mkv"));
 
         let result = discover_jobs(&sources);
         assert!(result.is_err());
@@ -166,8 +167,8 @@ mod tests {
         writeln!(file2, "test").unwrap();
 
         let mut sources = HashMap::new();
-        sources.insert("Source 1".to_string(), file1.path().to_path_buf());
-        sources.insert("Source 2".to_string(), file2.path().to_path_buf());
+        sources.insert(SourceIndex::source1(), file1.path().to_path_buf());
+        sources.insert(SourceIndex::source2(), file2.path().to_path_buf());
 
         let result = discover_jobs(&sources).unwrap();
         assert_eq!(result.len(), 1);

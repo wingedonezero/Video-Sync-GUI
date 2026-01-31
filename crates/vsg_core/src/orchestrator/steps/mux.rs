@@ -146,9 +146,17 @@ impl MuxStep {
                             ))
                         })?
                 } else {
+                    // Parse source key to SourceIndex for lookup
+                    let source_idx = SourceIndex::from_display_name(source_key)
+                        .ok_or_else(|| {
+                            StepError::invalid_input(format!(
+                                "Invalid source key format {} for track {}",
+                                source_key, track_id
+                            ))
+                        })?;
                     ctx.job_spec
                         .sources
-                        .get(source_key)
+                        .get(&source_idx)
                         .cloned()
                         .ok_or_else(|| {
                             StepError::invalid_input(format!(
@@ -206,9 +214,9 @@ impl MuxStep {
             // No manual layout - create minimal plan with just Source 1 video
             ctx.logger.info("No manual layout - creating minimal plan from Source 1");
 
-            if let Some(source1_path) = ctx.job_spec.sources.get("Source 1") {
+            if let Some(source1_path) = ctx.job_spec.sources.get(&SourceIndex::source1()) {
                 let video_track = Track::new(
-                    "Source 1",
+                    &SourceIndex::source1().display_name(),
                     0,
                     TrackType::Video,
                     StreamProps::new("V_MPEG4/ISO/AVC"),

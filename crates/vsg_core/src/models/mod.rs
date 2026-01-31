@@ -18,4 +18,4 @@ pub use enums::{
 };
 pub use jobs::{Delays, JobResult, JobSpec, MergePlan, PlanItem, SourceDelay};
 pub use media::{Attachment, StreamProps, Track};
-pub use source_index::SourceIndex;
+pub use source_index::{SourceIndex, SourceRef};
