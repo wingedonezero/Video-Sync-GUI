@@ -15,7 +15,7 @@ use relm4::{Component, ComponentParts, ComponentSender};
 use vsg_core::extraction::{probe_file, build_track_description, get_detailed_stream_info, TrackType, FfprobeStreamInfo};
 use vsg_core::jobs::{JobQueue, JobQueueStatus, LayoutManager};
 
-use crate::app::{FinalTrackState, SourceGroupState, TrackWidgetState};
+use crate::types::{FinalTrackState, SourceGroupState, TrackWidgetState};
 
 /// Output messages from the manual selection dialog.
 #[derive(Debug)]
