@@ -5,6 +5,7 @@
 use std::sync::{Arc, Mutex};
 
 use gtk::prelude::*;
+use libadwaita::prelude::*;
 use relm4::prelude::*;
 use relm4::{Component, ComponentParts, ComponentSender};
 
@@ -34,6 +35,7 @@ pub enum JobQueueMsg {
     MoveDown,
     ConfigureJob(usize),
     CopyLayout(usize),
+    CopySelectedLayout,
     PasteLayout,
 
     // Processing
@@ -168,11 +170,7 @@ impl Component for JobQueueDialog {
                             set_label: "Copy Layout",
                             #[watch]
                             set_sensitive: model.selected_indices.len() == 1,
-                            connect_clicked[sender, model] => move |_| {
-                                if let Some(&idx) = model.selected_indices.first() {
-                                    sender.input(JobQueueMsg::CopyLayout(idx));
-                                }
-                            },
+                            connect_clicked => JobQueueMsg::CopySelectedLayout,
                         },
 
                         gtk::Button {
@@ -341,7 +339,7 @@ impl Component for JobQueueDialog {
                 if let Some(&idx) = self.selected_indices.first() {
                     if idx > 0 {
                         let mut queue = self.job_queue.lock().unwrap();
-                        queue.swap(idx, idx - 1);
+                        queue.move_up(&[idx]);
                         self.selected_indices = vec![idx - 1];
                     }
                 }
@@ -349,11 +347,13 @@ impl Component for JobQueueDialog {
 
             JobQueueMsg::MoveDown => {
                 if let Some(&idx) = self.selected_indices.first() {
-                    let queue = self.job_queue.lock().unwrap();
-                    if idx < queue.jobs().len() - 1 {
-                        drop(queue);
+                    let len = {
+                        let queue = self.job_queue.lock().unwrap();
+                        queue.jobs().len()
+                    };
+                    if idx < len.saturating_sub(1) {
                         let mut queue = self.job_queue.lock().unwrap();
-                        queue.swap(idx, idx + 1);
+                        queue.move_down(&[idx]);
                         self.selected_indices = vec![idx + 1];
                     }
                 }
@@ -374,13 +374,25 @@ impl Component for JobQueueDialog {
                 }
             }
 
+            JobQueueMsg::CopySelectedLayout => {
+                if let Some(&idx) = self.selected_indices.first() {
+                    let queue = self.job_queue.lock().unwrap();
+                    if let Some(job) = queue.jobs().get(idx) {
+                        if let Ok(json) = serde_json::to_string(&job.layout) {
+                            self.clipboard_layout = Some(json);
+                            self.status_text = "Layout copied.".to_string();
+                        }
+                    }
+                }
+            }
+
             JobQueueMsg::PasteLayout => {
                 if let Some(ref layout_json) = self.clipboard_layout {
-                    if let Ok(layout) = serde_json::from_str(layout_json) {
+                    if let Ok(layout) = serde_json::from_str::<Option<vsg_core::jobs::ManualLayout>>(layout_json) {
                         let mut queue = self.job_queue.lock().unwrap();
                         for &idx in &self.selected_indices {
-                            if let Some(job) = queue.jobs_mut().get_mut(idx) {
-                                job.layout = layout;
+                            if let Some(job) = queue.get_mut(idx) {
+                                job.layout = layout.clone();
                                 job.status = JobQueueStatus::Configured;
                             }
                         }
@@ -415,11 +427,6 @@ impl Component for JobQueueDialog {
                 // The list will be refreshed on update_view
             }
         }
-    }
-
-    fn update_view(&self, widgets: &mut Self::Widgets, sender: ComponentSender<Self>) {
-        // Clear and repopulate the list
-        Self::populate_list(self, &widgets.job_list, &sender);
     }
 }
 

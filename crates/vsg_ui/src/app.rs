@@ -7,7 +7,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use gtk::gdk;
+use gtk::glib;
 use gtk::prelude::*;
+use libadwaita::prelude::*;
 use relm4::prelude::*;
 use relm4::{Component, ComponentParts, ComponentSender};
 
@@ -700,8 +702,8 @@ impl Component for App {
                 });
             }
 
-            AppMsg::FileSelected(idx, path) | AppMsg::FileDropped(idx, path) => {
-                if let Some(p) = path.as_ref().or(None) {
+            AppMsg::FileSelected(idx, path) => {
+                if let Some(p) = path {
                     let path_str = p.to_string_lossy().to_string();
                     match idx {
                         1 => self.source1_path = path_str,
@@ -709,14 +711,16 @@ impl Component for App {
                         3 => self.source3_path = path_str,
                         _ => {}
                     }
-                } else if let AppMsg::FileDropped(idx, p) = &msg {
-                    let path_str = p.to_string_lossy().to_string();
-                    match idx {
-                        1 => self.source1_path = path_str,
-                        2 => self.source2_path = path_str,
-                        3 => self.source3_path = path_str,
-                        _ => {}
-                    }
+                }
+            }
+
+            AppMsg::FileDropped(idx, path) => {
+                let path_str = path.to_string_lossy().to_string();
+                match idx {
+                    1 => self.source1_path = path_str,
+                    2 => self.source2_path = path_str,
+                    3 => self.source3_path = path_str,
+                    _ => {}
                 }
             }
 
@@ -777,10 +781,10 @@ impl Component for App {
                         // Analyze Source 2
                         let delay2 = match analyzer.analyze(&source1, &source2, "Source 2") {
                             Ok(result) => {
-                                let delay_ms = result.final_delay_ms;
+                                let delay_ms = result.delay.delay_ms_rounded;
                                 sender.input(AppMsg::AnalysisProgress(
                                     50.0,
-                                    format!("Source 2: {} ms (confidence: {:.1}%)", delay_ms, result.confidence * 100.0),
+                                    format!("Source 2: {} ms (match: {:.1}%)", delay_ms, result.avg_match_pct),
                                 ));
                                 Some(delay_ms)
                             }
@@ -795,10 +799,10 @@ impl Component for App {
                             sender.input(AppMsg::AnalysisProgress(60.0, "Analyzing Source 3...".to_string()));
                             match analyzer.analyze(&source1, s3, "Source 3") {
                                 Ok(result) => {
-                                    let delay_ms = result.final_delay_ms;
+                                    let delay_ms = result.delay.delay_ms_rounded;
                                     sender.input(AppMsg::AnalysisProgress(
                                         90.0,
-                                        format!("Source 3: {} ms (confidence: {:.1}%)", delay_ms, result.confidence * 100.0),
+                                        format!("Source 3: {} ms (match: {:.1}%)", delay_ms, result.avg_match_pct),
                                     ));
                                     Some(delay_ms)
                                 }
@@ -878,9 +882,12 @@ impl Component for App {
             AppMsg::SettingsClosed(output) => {
                 self.settings_dialog = None;
                 if let SettingsOutput::Saved(settings) = output {
-                    let mut cfg = self.config.lock().unwrap();
-                    *cfg.settings_mut() = settings;
-                    if let Err(e) = cfg.save() {
+                    let save_result = {
+                        let mut cfg = self.config.lock().unwrap();
+                        *cfg.settings_mut() = settings;
+                        cfg.save()
+                    };
+                    if let Err(e) = save_result {
                         self.append_log(&format!("Failed to save settings: {}", e));
                     } else {
                         self.append_log("Settings saved.");
@@ -1055,16 +1062,6 @@ impl Component for App {
             AppMsg::Quit => {
                 relm4::main_application().quit();
             }
-        }
-    }
-
-    fn update_view(&self, widgets: &mut Self::Widgets, _sender: ComponentSender<Self>) {
-        // Update log text view
-        widgets.log_view.buffer().set_text(&self.log_text);
-
-        // Auto-scroll to bottom
-        if let Some(iter) = widgets.log_view.buffer().end_iter().into() {
-            widgets.log_view.scroll_to_iter(&mut iter.clone(), 0.0, false, 0.0, 1.0);
         }
     }
 }

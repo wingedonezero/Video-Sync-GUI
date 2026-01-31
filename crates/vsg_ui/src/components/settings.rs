@@ -3,6 +3,7 @@
 //! Multi-tab settings dialog with all configuration options.
 
 use gtk::prelude::*;
+use libadwaita::prelude::*;
 use relm4::prelude::*;
 use relm4::{Component, ComponentParts, ComponentSender};
 
@@ -812,8 +813,8 @@ impl Component for SettingsDialog {
 
     fn init(
         init: Self::Init,
-        root: Self::Root,
-        _sender: ComponentSender<Self>,
+        _root: Self::Root,
+        sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
         let model = SettingsDialog { settings: init };
         let widgets = view_output!();

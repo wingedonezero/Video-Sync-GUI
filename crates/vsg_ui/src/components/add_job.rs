@@ -6,10 +6,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use gtk::prelude::*;
+use libadwaita::prelude::*;
 use relm4::prelude::*;
 use relm4::{Component, ComponentParts, ComponentSender};
 
 use vsg_core::jobs::JobQueue;
+use vsg_core::jobs::JobQueueEntry;
 
 /// Output messages from the add job dialog.
 #[derive(Debug)]
@@ -247,13 +249,9 @@ impl Component for AddJobDialog {
                             sources_map.insert(vsg_core::models::SourceIndex::new(i + 1), path.clone());
                         }
 
-                        let entry = vsg_core::jobs::JobQueueEntry {
-                            name,
-                            sources: sources_map,
-                            status: vsg_core::jobs::JobQueueStatus::Pending,
-                            layout: None,
-                            error: None,
-                        };
+                        // Generate a unique ID for the job
+                        let id = uuid::Uuid::new_v4().to_string();
+                        let entry = JobQueueEntry::new(id, name, sources_map);
                         queue.add(entry);
                         sender.input(AddJobMsg::JobsDiscovered(1));
                     } else {
@@ -280,10 +278,6 @@ impl Component for AddJobDialog {
                 root.close();
             }
         }
-    }
-
-    fn update_view(&self, widgets: &mut Self::Widgets, sender: ComponentSender<Self>) {
-        Self::rebuild_sources(self, &widgets.sources_box, &sender);
     }
 }
 

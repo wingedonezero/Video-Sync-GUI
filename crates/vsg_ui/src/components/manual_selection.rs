@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use gtk::gdk;
 use gtk::glib;
 use gtk::prelude::*;
+use libadwaita::prelude::*;
 use relm4::prelude::*;
 use relm4::{Component, ComponentParts, ComponentSender};
 
@@ -373,7 +374,7 @@ impl Component for ManualSelectionDialog {
             ManualSelectionMsg::Accept => {
                 // Save the layout to the job
                 let mut queue = self.job_queue.lock().unwrap();
-                if let Some(job) = queue.jobs_mut().get_mut(self.job_idx) {
+                if let Some(job) = queue.get_mut(self.job_idx) {
                     // Convert final_tracks to ManualLayout
                     // TODO: Proper conversion when ManualLayout types are available
                     job.status = JobQueueStatus::Configured;
@@ -388,12 +389,6 @@ impl Component for ManualSelectionDialog {
                 root.close();
             }
         }
-    }
-
-    fn update_view(&self, widgets: &mut Self::Widgets, sender: ComponentSender<Self>) {
-        Self::populate_source_list(self, &widgets.source_list, &sender);
-        Self::populate_final_list(self, &widgets.final_list, &sender);
-        Self::populate_attachments(self, &widgets.attachments_box, &sender);
     }
 }
 
@@ -498,10 +493,11 @@ impl ManualSelectionDialog {
                     Some(gdk::ContentProvider::for_value(&glib::Value::from(&format!("{}", drag_idx))))
                 });
 
-                // Add icon for drag
+                // Add icon for drag using a widget paintable
                 drag_source.connect_drag_begin(|source, _drag| {
                     let icon = gtk::Image::from_icon_name("view-list-symbolic");
-                    source.set_icon(Some(&icon), 0, 0);
+                    let paintable = gtk::WidgetPaintable::new(Some(&icon));
+                    source.set_icon(Some(&paintable), 0, 0);
                 });
 
                 row.add_controller(drag_source);
