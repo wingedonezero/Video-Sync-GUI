@@ -13,9 +13,10 @@ use relm4::prelude::*;
 use relm4::{Component, ComponentParts, ComponentSender};
 
 use vsg_core::extraction::{probe_file, build_track_description, get_detailed_stream_info, TrackType, FfprobeStreamInfo};
-use vsg_core::jobs::{JobQueue, JobQueueStatus, LayoutManager};
+use vsg_core::jobs::{JobQueue, JobQueueStatus, LayoutManager, ManualLayout, FinalTrackEntry, TrackConfig};
+use vsg_core::models::{SourceIndex, SourceRef, TrackType as CoreTrackType};
 
-use crate::app::{FinalTrackState, SourceGroupState, TrackWidgetState};
+use crate::types::{FinalTrackState, SourceGroupState, TrackWidgetState};
 
 /// Output messages from the manual selection dialog.
 #[derive(Debug)]
@@ -451,12 +452,97 @@ impl Component for ManualSelectionDialog {
             }
 
             ManualSelectionMsg::Accept => {
-                // Save the layout to the job
+                // Convert UI FinalTrackState to core FinalTrackEntry
+                let final_tracks: Vec<FinalTrackEntry> = self.final_tracks
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, track)| {
+                        // Parse source_key like "Source 1" to SourceIndex
+                        let source_ref = SourceIndex::from_display_name(&track.source_key)
+                            .map(SourceRef::Index)
+                            .unwrap_or(SourceRef::External);
+
+                        // Parse track type
+                        let track_type = match track.track_type.to_lowercase().as_str() {
+                            "video" => CoreTrackType::Video,
+                            "audio" => CoreTrackType::Audio,
+                            _ => CoreTrackType::Subtitles,
+                        };
+
+                        // Build TrackConfig from UI state
+                        let config = TrackConfig {
+                            sync_to_source: if track.sync_to_source != "Source 1" {
+                                Some(track.sync_to_source.clone())
+                            } else {
+                                None
+                            },
+                            is_default: track.is_default,
+                            is_forced_display: track.is_forced_display,
+                            custom_name: track.custom_name.clone(),
+                            custom_lang: track.custom_lang.clone(),
+                            apply_track_name: false,
+                            perform_ocr: track.perform_ocr,
+                            convert_to_ass: track.convert_to_ass,
+                            rescale: track.rescale,
+                            size_multiplier_pct: track.size_multiplier_pct,
+                            style_patch: track.style_patch.clone(),
+                            font_replacements: track.font_replacements.clone(),
+                            sync_exclusion_styles: track.sync_exclusion_styles.clone(),
+                            sync_exclusion_mode: match track.sync_exclusion_mode {
+                                crate::types::SyncExclusionMode::Exclude => "exclude".to_string(),
+                                crate::types::SyncExclusionMode::Include => "include".to_string(),
+                            },
+                        };
+
+                        FinalTrackEntry {
+                            track_id: track.track_id,
+                            source_ref,
+                            track_type,
+                            config,
+                            user_order_index: idx,
+                            position_in_source_type: 0, // Will be computed by orchestrator
+                            is_generated: track.is_generated,
+                            generated_source_track_id: track.generated_from_entry_id.map(|_| track.track_id),
+                            generated_source_path: None,
+                            generated_filter_mode: "exclude".to_string(),
+                            generated_filter_styles: track.generated_filter_styles.clone(),
+                        }
+                    })
+                    .collect();
+
+                // Convert attachment_sources HashMap<String, bool> to Vec<SourceIndex>
+                let attachment_sources: Vec<SourceIndex> = self.attachment_sources
+                    .iter()
+                    .filter(|(_, &enabled)| enabled)
+                    .filter_map(|(key, _)| SourceIndex::from_display_name(key))
+                    .collect();
+
+                // Build ManualLayout
+                let layout = ManualLayout {
+                    final_tracks,
+                    attachment_sources,
+                    source_settings: std::collections::HashMap::new(),
+                };
+
+                // Save layout and update job
                 let mut queue = self.job_queue.lock().unwrap();
                 if let Some(job) = queue.get_mut(self.job_idx) {
-                    // Convert final_tracks to ManualLayout
-                    // TODO: Proper conversion when ManualLayout types are available
+                    // Save layout to disk via LayoutManager
+                    let lm = self.layout_manager.lock().unwrap();
+                    if let Err(e) = lm.save_layout_with_metadata(&job.layout_id, &job.sources, &layout) {
+                        tracing::error!("Failed to save layout: {}", e);
+                    } else {
+                        tracing::info!("Saved layout for job: {}", job.layout_id);
+                    }
+
+                    // Update job with layout and mark as configured
+                    job.layout = Some(layout);
                     job.status = JobQueueStatus::Configured;
+
+                    // Save queue to persist status change
+                    if let Err(e) = queue.save() {
+                        tracing::warn!("Failed to save queue: {}", e);
+                    }
                 }
 
                 let _ = sender.output(ManualSelectionOutput::LayoutAccepted);

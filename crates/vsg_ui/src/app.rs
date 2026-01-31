@@ -1,6 +1,6 @@
 //! Main application module for Video Sync GUI.
 //!
-//! This module contains the core Application component and shared types
+//! This module contains the core Application component
 //! following the Relm4 component pattern.
 
 use std::path::PathBuf;
@@ -17,7 +17,11 @@ use vsg_core::analysis::Analyzer;
 use vsg_core::config::{ConfigManager, Settings};
 use vsg_core::jobs::{JobQueue, JobQueueEntry, LayoutManager};
 
-use crate::components::{
+use crate::handlers::run_job_pipeline;
+use crate::types::{
+    FinalTrackState, SourceGroupState, SyncExclusionMode, TrackSettingsState,
+};
+use crate::windows::{
     add_job::{AddJobDialog, AddJobOutput},
     job_queue::{JobQueueDialog, JobQueueMsg, JobQueueOutput},
     manual_selection::{ManualSelectionDialog, ManualSelectionOutput},
@@ -25,192 +29,12 @@ use crate::components::{
     track_settings::{TrackSettingsDialog, TrackSettingsOutput},
 };
 
-/// Language codes matching the picker options.
-/// Index 0 = "und", 1 = "eng", 2 = "jpn", etc.
-pub const LANGUAGE_CODES: &[&str] = &[
-    "und", "eng", "jpn", "spa", "fre", "ger", "ita", "por", "rus", "chi", "kor", "ara",
-];
-
 /// Initialization data for the App component.
 pub struct AppInit {
     pub config: Arc<Mutex<ConfigManager>>,
     pub job_queue: Arc<Mutex<JobQueue>>,
     pub layouts_dir: PathBuf,
     pub version_info: String,
-}
-
-/// State for a source group in manual selection.
-#[derive(Debug, Clone)]
-pub struct SourceGroupState {
-    pub source_key: String,
-    pub title: String,
-    pub tracks: Vec<TrackWidgetState>,
-    pub is_expanded: bool,
-}
-
-/// State for a track widget.
-#[derive(Debug, Clone)]
-pub struct TrackWidgetState {
-    pub id: usize,
-    pub track_type: String,
-    pub codec_id: String,
-    pub language: Option<String>,
-    pub summary: String,
-    pub badges: String,
-    pub is_blocked: bool,
-}
-
-/// State for a final track in the layout.
-#[derive(Debug, Clone)]
-pub struct FinalTrackState {
-    pub entry_id: uuid::Uuid,
-    pub track_id: usize,
-    pub source_key: String,
-    pub track_type: String,
-    pub codec_id: String,
-    pub summary: String,
-    pub is_default: bool,
-    pub is_forced_display: bool,
-    pub sync_to_source: String,
-    pub original_lang: Option<String>,
-    pub custom_lang: Option<String>,
-    pub custom_name: Option<String>,
-    pub perform_ocr: bool,
-    pub convert_to_ass: bool,
-    pub rescale: bool,
-    pub size_multiplier_pct: i32,
-    pub style_patch: Option<String>,
-    pub font_replacements: Option<String>,
-    pub sync_exclusion_styles: Vec<String>,
-    pub sync_exclusion_mode: SyncExclusionMode,
-    pub is_generated: bool,
-    pub generated_filter_styles: Vec<String>,
-    pub generated_from_entry_id: Option<uuid::Uuid>,
-}
-
-impl FinalTrackState {
-    pub fn new(
-        track_id: usize,
-        source_key: String,
-        track_type: String,
-        codec_id: String,
-        summary: String,
-        original_lang: Option<String>,
-    ) -> Self {
-        Self {
-            entry_id: uuid::Uuid::new_v4(),
-            track_id,
-            source_key,
-            track_type,
-            codec_id,
-            summary,
-            is_default: false,
-            is_forced_display: false,
-            sync_to_source: "Source 1".to_string(),
-            original_lang,
-            custom_lang: None,
-            custom_name: None,
-            perform_ocr: false,
-            convert_to_ass: false,
-            rescale: false,
-            size_multiplier_pct: 100,
-            style_patch: None,
-            font_replacements: None,
-            sync_exclusion_styles: Vec::new(),
-            sync_exclusion_mode: SyncExclusionMode::Exclude,
-            is_generated: false,
-            generated_filter_styles: Vec::new(),
-            generated_from_entry_id: None,
-        }
-    }
-
-    pub fn is_ocr_compatible(&self) -> bool {
-        let codec_upper = self.codec_id.to_uppercase();
-        codec_upper.contains("VOBSUB") || codec_upper.contains("PGS")
-    }
-
-    pub fn is_convert_to_ass_compatible(&self) -> bool {
-        self.codec_id.to_uppercase().contains("S_TEXT/UTF8")
-    }
-
-    pub fn is_style_editable(&self) -> bool {
-        let codec_upper = self.codec_id.to_uppercase();
-        codec_upper.contains("S_TEXT/ASS") || codec_upper.contains("S_TEXT/SSA")
-    }
-
-    pub fn supports_sync_exclusion(&self) -> bool {
-        self.is_style_editable()
-    }
-
-    pub fn badges(&self) -> String {
-        let mut badges: Vec<String> = Vec::new();
-
-        if self.is_default {
-            badges.push("Default".to_string());
-        }
-        if self.is_forced_display {
-            badges.push("Forced".to_string());
-        }
-        if self.perform_ocr {
-            badges.push("OCR".to_string());
-        }
-        if self.convert_to_ass {
-            badges.push("→ASS".to_string());
-        }
-        if self.rescale {
-            badges.push("Rescale".to_string());
-        }
-        if self.size_multiplier_pct != 100 {
-            badges.push("Sized".to_string());
-        }
-        if self.style_patch.is_some() {
-            badges.push("Styled".to_string());
-        }
-        if self.font_replacements.is_some() {
-            badges.push("Fonts".to_string());
-        }
-        if !self.sync_exclusion_styles.is_empty() {
-            badges.push("SyncEx".to_string());
-        }
-        if self.is_generated {
-            badges.push("Generated".to_string());
-        }
-        if let Some(ref custom_lang) = self.custom_lang {
-            let original = self.original_lang.as_deref().unwrap_or("und");
-            if custom_lang != original {
-                badges.push(format!("Lang: {}", custom_lang));
-            }
-        }
-        if self.custom_name.is_some() {
-            badges.push("Named".to_string());
-        }
-
-        badges.join(" | ")
-    }
-}
-
-/// Sync exclusion mode for subtitle tracks.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SyncExclusionMode {
-    #[default]
-    Exclude,
-    Include,
-}
-
-/// State for track settings dialog.
-#[derive(Debug, Clone, Default)]
-pub struct TrackSettingsState {
-    pub track_type: String,
-    pub codec_id: String,
-    pub selected_language_idx: usize,
-    pub custom_lang: Option<String>,
-    pub custom_name: Option<String>,
-    pub perform_ocr: bool,
-    pub convert_to_ass: bool,
-    pub rescale: bool,
-    pub size_multiplier_pct: i32,
-    pub sync_exclusion_styles: Vec<String>,
-    pub sync_exclusion_mode: SyncExclusionMode,
 }
 
 /// All possible messages the application can receive.
@@ -904,7 +728,7 @@ impl Component for App {
                 if self.job_queue_dialog.is_none() {
                     let dialog = JobQueueDialog::builder()
                         .transient_for(root)
-                        .launch(self.job_queue.clone())
+                        .launch((self.job_queue.clone(), self.layout_manager.clone()))
                         .forward(sender.input_sender(), |output| {
                             AppMsg::JobQueueClosed(output)
                         });
@@ -1031,23 +855,76 @@ impl Component for App {
 
             AppMsg::ProcessNextJob => {
                 if self.current_job_index < self.total_jobs {
+                    let job = &self.processing_jobs[self.current_job_index];
+                    let job_name = job.name.clone();
+                    let job_idx = self.current_job_index;
+                    let layout_id = job.layout_id.clone();
+                    let sources = job.sources.clone();
+
                     self.batch_status = format!(
-                        "Processing job {} of {}",
+                        "Processing job {} of {}: {}",
                         self.current_job_index + 1,
-                        self.total_jobs
+                        self.total_jobs,
+                        job_name
                     );
+                    self.status_text = format!("Processing: {}", job_name);
+                    self.progress_value = 0.0;
                     self.append_log(&self.batch_status.clone());
 
-                    // TODO: Implement actual job processing using orchestrator
+                    // Load layout from disk
+                    let layout = {
+                        let lm = self.layout_manager.lock().unwrap();
+                        match lm.load_layout(&layout_id) {
+                            Ok(Some(layout)) => {
+                                tracing::debug!("Loaded layout for job: {}", layout_id);
+                                Some(layout)
+                            }
+                            Ok(None) => {
+                                tracing::warn!("No layout found for job: {}", layout_id);
+                                None
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to load layout: {}", e);
+                                None
+                            }
+                        }
+                    };
+
+                    // Get settings
+                    let settings = {
+                        let cfg = self.config.lock().unwrap();
+                        cfg.settings().clone()
+                    };
+
+                    // Log job info
+                    if let Some(ref layout) = layout {
+                        self.append_log(&format!(
+                            "  -> {} tracks configured",
+                            layout.final_tracks.len()
+                        ));
+                    } else {
+                        self.append_log("  -> Using default layout");
+                    }
+
+                    // Run job pipeline asynchronously
                     let sender = sender.clone();
-                    let job_idx = self.current_job_index;
                     relm4::spawn_local(async move {
-                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                        sender.input(AppMsg::JobCompleted {
-                            job_idx,
-                            success: true,
-                            error: None,
-                        });
+                        match run_job_pipeline(job_name.clone(), sources, layout, settings).await {
+                            Ok(output_path) => {
+                                sender.input(AppMsg::JobCompleted {
+                                    job_idx,
+                                    success: true,
+                                    error: Some(format!("Output: {}", output_path.display())),
+                                });
+                            }
+                            Err(e) => {
+                                sender.input(AppMsg::JobCompleted {
+                                    job_idx,
+                                    success: false,
+                                    error: Some(e),
+                                });
+                            }
+                        }
                     });
                 } else {
                     sender.input(AppMsg::BatchCompleted);

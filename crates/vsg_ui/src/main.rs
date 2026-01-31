@@ -17,8 +17,10 @@ use vsg_core::jobs::JobQueue;
 use vsg_core::logging::{init_tracing_with_file, LogLevel};
 
 mod app;
-mod components;
+mod handlers;
 mod theme;
+mod types;
+mod windows;
 
 use app::App;
 

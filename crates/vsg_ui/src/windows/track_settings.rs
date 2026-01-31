@@ -7,7 +7,7 @@ use libadwaita::prelude::*;
 use relm4::prelude::*;
 use relm4::{Component, ComponentParts, ComponentSender};
 
-use crate::app::{FinalTrackState, SyncExclusionMode, LANGUAGE_CODES};
+use crate::types::{FinalTrackState, SyncExclusionMode, LANGUAGE_CODES};
 
 /// Output messages from the track settings dialog.
 #[derive(Debug)]
