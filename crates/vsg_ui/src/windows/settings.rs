@@ -806,12 +806,14 @@ impl Component for SettingsDialog {
         // Save button - needs to go through message to get current settings
         let input_sender = sender.input_sender().clone();
         widgets.save_btn.connect_clicked(move |_| {
+            eprintln!("[Settings] Save button clicked");
             let _ = input_sender.send(SettingsMsg::Save);
         });
 
         // Cancel button - sends output directly
         let output_sender = sender.output_sender().clone();
         widgets.cancel_btn.connect_clicked(move |_| {
+            eprintln!("[Settings] Cancel button clicked");
             let _ = output_sender.send(SettingsOutput::Cancelled);
         });
 

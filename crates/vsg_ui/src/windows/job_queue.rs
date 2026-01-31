@@ -267,43 +267,51 @@ impl Component for JobQueueDialog {
         // Action buttons
         let input_sender = sender.input_sender().clone();
         widgets.add_jobs_btn.connect_clicked(move |_| {
+            eprintln!("[JobQueue] Add Jobs button clicked");
             let _ = input_sender.send(JobQueueMsg::AddJobs);
         });
 
         let input_sender = sender.input_sender().clone();
         widgets.remove_btn.connect_clicked(move |_| {
+            eprintln!("[JobQueue] Remove Selected button clicked");
             let _ = input_sender.send(JobQueueMsg::RemoveSelected);
         });
 
         let input_sender = sender.input_sender().clone();
         widgets.move_up_btn.connect_clicked(move |_| {
+            eprintln!("[JobQueue] Move Up button clicked");
             let _ = input_sender.send(JobQueueMsg::MoveUp);
         });
 
         let input_sender = sender.input_sender().clone();
         widgets.move_down_btn.connect_clicked(move |_| {
+            eprintln!("[JobQueue] Move Down button clicked");
             let _ = input_sender.send(JobQueueMsg::MoveDown);
         });
 
         let input_sender = sender.input_sender().clone();
         widgets.copy_layout_btn.connect_clicked(move |_| {
+            eprintln!("[JobQueue] Copy Layout button clicked");
             let _ = input_sender.send(JobQueueMsg::CopySelectedLayout);
         });
 
         let input_sender = sender.input_sender().clone();
         widgets.paste_layout_btn.connect_clicked(move |_| {
+            eprintln!("[JobQueue] Paste Layout button clicked");
             let _ = input_sender.send(JobQueueMsg::PasteLayout);
         });
 
         // Start Processing button
         let input_sender = sender.input_sender().clone();
         widgets.start_btn.connect_clicked(move |_| {
+            eprintln!("[JobQueue] Start Processing button clicked");
             let _ = input_sender.send(JobQueueMsg::StartProcessing);
         });
 
         // Close button - sends output directly
         let output_sender = sender.output_sender().clone();
         widgets.close_btn.connect_clicked(move |_| {
+            eprintln!("[JobQueue] Close button clicked");
             let _ = output_sender.send(JobQueueOutput::Closed);
         });
 

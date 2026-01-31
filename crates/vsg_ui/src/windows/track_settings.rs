@@ -306,12 +306,14 @@ impl Component for TrackSettingsDialog {
         // Accept button - needs to go through message to get current track state
         let input_sender = sender.input_sender().clone();
         widgets.accept_btn.connect_clicked(move |_| {
+            eprintln!("[TrackSettings] Accept button clicked");
             let _ = input_sender.send(TrackSettingsMsg::Accept);
         });
 
         // Cancel button - sends output directly
         let output_sender = sender.output_sender().clone();
         widgets.cancel_btn.connect_clicked(move |_| {
+            eprintln!("[TrackSettings] Cancel button clicked");
             let _ = output_sender.send(TrackSettingsOutput::Cancelled);
         });
 
