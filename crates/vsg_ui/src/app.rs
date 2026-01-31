@@ -150,55 +150,76 @@ impl App {
 
 /// Setup drag-drop for an entry widget
 ///
-/// Uses a single DropTarget with multiple types to avoid GTK assertion errors
-/// that occur when multiple DropTarget controllers are attached to the same widget.
-/// See: https://discourse.gnome.org/t/gtk-drop-target-async-handle-event-assertion-self-drop-drop-failed/25098
+/// Uses DropTargetAsync with explicit MIME types for cross-desktop compatibility.
+/// This properly handles:
+/// - text/uri-list: KDE Dolphin, many file managers
+/// - text/plain: Fallback for some apps
 fn setup_drop_target(entry: &gtk::Entry, source_idx: usize, sender: ComponentSender<App>) {
-    // Create a single drop target that accepts multiple types
-    // Using GType::INVALID as initial type, then setting types via set_types()
-    let drop_target = gtk::DropTarget::builder()
-        .actions(gdk::DragAction::COPY)
-        .build();
+    use gtk::gio::prelude::*;
 
-    // Accept both FileList (GNOME/GTK file managers) and GString (text/uri-list from KDE/Dolphin)
-    drop_target.set_types(&[gdk::FileList::static_type(), glib::GString::static_type()]);
+    // Create ContentFormats with MIME types that Dolphin and other file managers use
+    let formats = gdk::ContentFormats::new(&["text/uri-list", "text/plain"]);
 
-    drop_target.connect_drop(move |_target, value, _x, _y| {
-        // Try FileList first (most file managers)
-        if let Ok(file_list) = value.get::<gdk::FileList>() {
-            if let Some(file) = file_list.files().first() {
-                if let Some(path) = file.path() {
-                    sender.input(AppMsg::FileDropped(source_idx, path));
-                    return true;
+    let drop_target = gtk::DropTargetAsync::new(Some(formats), gdk::DragAction::COPY);
+
+    // Connect to the drop signal
+    let sender_clone = sender.clone();
+    drop_target.connect_drop(move |_target, drop, _x, _y| {
+        let sender = sender_clone.clone();
+        let drop = drop.clone();
+
+        // Spawn async task to read the drop data
+        relm4::spawn_local(async move {
+            eprintln!("[DnD] Drop received, reading data...");
+
+            // Try reading as text/uri-list first
+            match drop
+                .read_future(&["text/uri-list", "text/plain"], glib::Priority::DEFAULT)
+                .await
+            {
+                Ok((stream, mime_type)) => {
+                    eprintln!("[DnD] Got stream with MIME type: {}", mime_type);
+
+                    // Read all content from the stream using read_all_future
+                    // Buffer size of 8KB should be plenty for file URIs
+                    let buffer = vec![0u8; 8192];
+                    match stream
+                        .read_all_future(buffer, glib::Priority::DEFAULT)
+                        .await
+                    {
+                        Ok((buffer, bytes_read)) => {
+                            eprintln!("[DnD] Read {} bytes", bytes_read);
+                            if let Ok(text) = String::from_utf8(buffer[..bytes_read].to_vec()) {
+                                eprintln!("[DnD] Raw text: {:?}", text);
+                                let cleaned = clean_file_url(&text);
+                                eprintln!("[DnD] Cleaned path: {:?}", cleaned);
+                                if !cleaned.is_empty() {
+                                    let path = std::path::PathBuf::from(&cleaned);
+                                    if path.exists() {
+                                        eprintln!("[DnD] File exists, sending FileDropped");
+                                        sender.input(AppMsg::FileDropped(source_idx, path));
+                                        drop.finish(gdk::DragAction::COPY);
+                                        return;
+                                    } else {
+                                        eprintln!("[DnD] Path does not exist: {:?}", path);
+                                    }
+                                }
+                            }
+                        }
+                        Err((_, e)) => {
+                            eprintln!("[DnD] Error reading stream: {:?}", e);
+                        }
+                    }
+                    drop.finish(gdk::DragAction::empty());
+                }
+                Err(e) => {
+                    eprintln!("[DnD] Error reading drop: {:?}", e);
+                    drop.finish(gdk::DragAction::empty());
                 }
             }
-        }
+        });
 
-        // Try GString/text for text/uri-list format (Dolphin and some other file managers)
-        if let Ok(text) = value.get::<glib::GString>() {
-            let cleaned = clean_file_url(text.as_str());
-            if !cleaned.is_empty() {
-                let path = std::path::PathBuf::from(&cleaned);
-                if path.exists() {
-                    sender.input(AppMsg::FileDropped(source_idx, path));
-                    return true;
-                }
-            }
-        }
-
-        // Also try plain String
-        if let Ok(text) = value.get::<String>() {
-            let cleaned = clean_file_url(&text);
-            if !cleaned.is_empty() {
-                let path = std::path::PathBuf::from(&cleaned);
-                if path.exists() {
-                    sender.input(AppMsg::FileDropped(source_idx, path));
-                    return true;
-                }
-            }
-        }
-
-        false
+        true // We're handling it asynchronously
     });
 
     entry.add_controller(drop_target);
