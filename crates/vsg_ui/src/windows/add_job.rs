@@ -182,11 +182,14 @@ impl Component for AddJobDialog {
             let _ = input_sender.send(AddJobMsg::FindAndAddJobs);
         });
 
-        // Cancel button - sends output directly
+        // Cancel button - defer output to avoid panic when component is destroyed in handler
         let output_sender = sender.output_sender().clone();
         widgets.cancel_btn.connect_clicked(move |_| {
             eprintln!("[AddJob] Cancel button clicked");
-            let _ = output_sender.send(AddJobOutput::Cancelled);
+            let sender = output_sender.clone();
+            glib::idle_add_local_once(move || {
+                let _ = sender.send(AddJobOutput::Cancelled);
+            });
         });
 
         ComponentParts { model, widgets }

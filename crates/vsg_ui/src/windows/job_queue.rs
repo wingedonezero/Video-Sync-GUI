@@ -308,11 +308,14 @@ impl Component for JobQueueDialog {
             let _ = input_sender.send(JobQueueMsg::StartProcessing);
         });
 
-        // Close button - sends output directly
+        // Close button - defer output to avoid panic when component is destroyed in handler
         let output_sender = sender.output_sender().clone();
         widgets.close_btn.connect_clicked(move |_| {
             eprintln!("[JobQueue] Close button clicked");
-            let _ = output_sender.send(JobQueueOutput::Closed);
+            let sender = output_sender.clone();
+            glib::idle_add_local_once(move || {
+                let _ = sender.send(JobQueueOutput::Closed);
+            });
         });
 
         // ListBox row activation
