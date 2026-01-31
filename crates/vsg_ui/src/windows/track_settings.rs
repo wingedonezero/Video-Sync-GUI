@@ -146,9 +146,9 @@ impl Component for TrackSettingsDialog {
                                     set_placeholder_text: Some("Optional track name"),
                                     connect_changed[sender] => move |entry| {
                                         sender.input(TrackSettingsMsg::CustomNameChanged(entry.text().to_string()));
-                                    } -> custom_name_signal,
+                                    } @custom_name_handler,
                                     #[watch]
-                                    #[block_signal(custom_name_signal)]
+                                    #[block_signal(custom_name_handler)]
                                     set_text: model.track.custom_name.as_deref().unwrap_or(""),
                                 },
                             },
@@ -170,9 +170,9 @@ impl Component for TrackSettingsDialog {
                                 set_label: Some("Perform OCR (image-based subtitles)"),
                                 connect_toggled[sender] => move |btn| {
                                     sender.input(TrackSettingsMsg::PerformOcrChanged(btn.is_active()));
-                                } -> perform_ocr_signal,
+                                } @perform_ocr_handler,
                                 #[watch]
-                                #[block_signal(perform_ocr_signal)]
+                                #[block_signal(perform_ocr_handler)]
                                 set_active: model.track.perform_ocr,
                                 #[watch]
                                 set_sensitive: model.track.is_ocr_compatible(),
@@ -182,9 +182,9 @@ impl Component for TrackSettingsDialog {
                                 set_label: Some("Convert to ASS (SRT subtitles)"),
                                 connect_toggled[sender] => move |btn| {
                                     sender.input(TrackSettingsMsg::ConvertToAssChanged(btn.is_active()));
-                                } -> convert_to_ass_signal,
+                                } @convert_to_ass_handler,
                                 #[watch]
-                                #[block_signal(convert_to_ass_signal)]
+                                #[block_signal(convert_to_ass_handler)]
                                 set_active: model.track.convert_to_ass,
                                 #[watch]
                                 set_sensitive: model.track.is_convert_to_ass_compatible(),
@@ -194,9 +194,9 @@ impl Component for TrackSettingsDialog {
                                 set_label: Some("Rescale timing"),
                                 connect_toggled[sender] => move |btn| {
                                     sender.input(TrackSettingsMsg::RescaleChanged(btn.is_active()));
-                                } -> rescale_signal,
+                                } @rescale_handler,
                                 #[watch]
-                                #[block_signal(rescale_signal)]
+                                #[block_signal(rescale_handler)]
                                 set_active: model.track.rescale,
                             },
 
@@ -214,9 +214,9 @@ impl Component for TrackSettingsDialog {
                                     set_width_chars: 6,
                                     connect_changed[sender] => move |entry| {
                                         sender.input(TrackSettingsMsg::SizeMultiplierChanged(entry.text().to_string()));
-                                    } -> size_multiplier_signal,
+                                    } @size_multiplier_handler,
                                     #[watch]
-                                    #[block_signal(size_multiplier_signal)]
+                                    #[block_signal(size_multiplier_handler)]
                                     set_text: &model.track.size_multiplier_pct.to_string(),
                                 },
                             },

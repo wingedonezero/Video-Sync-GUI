@@ -161,9 +161,9 @@ impl Component for SettingsDialog {
                                         set_valign: gtk::Align::Center,
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::OutputFolderChanged(e.text().to_string()));
-                                        } -> output_folder_signal,
+                                        } @output_folder_handler,
                                         #[watch]
-                                        #[block_signal(output_folder_signal)]
+                                        #[block_signal(output_folder_handler)]
                                         set_text: &model.settings.paths.output_folder,
                                     },
 
@@ -183,9 +183,9 @@ impl Component for SettingsDialog {
                                         set_valign: gtk::Align::Center,
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::TempFolderChanged(e.text().to_string()));
-                                        } -> temp_folder_signal,
+                                        } @temp_folder_handler,
                                         #[watch]
-                                        #[block_signal(temp_folder_signal)]
+                                        #[block_signal(temp_folder_handler)]
                                         set_text: &model.settings.paths.temp_root,
                                     },
 
@@ -205,9 +205,9 @@ impl Component for SettingsDialog {
                                         set_valign: gtk::Align::Center,
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::LogsFolderChanged(e.text().to_string()));
-                                        } -> logs_folder_signal,
+                                        } @logs_folder_handler,
                                         #[watch]
-                                        #[block_signal(logs_folder_signal)]
+                                        #[block_signal(logs_folder_handler)]
                                         set_text: &model.settings.paths.logs_folder,
                                     },
 
@@ -268,9 +268,9 @@ impl Component for SettingsDialog {
                                         set_title: "Source 1 Language",
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::LangSource1Changed(e.text().to_string()));
-                                        } -> lang_source1_signal,
+                                        } @lang_source1_handler,
                                         #[watch]
-                                        #[block_signal(lang_source1_signal)]
+                                        #[block_signal(lang_source1_handler)]
                                         set_text: model.settings.analysis.lang_source1.as_deref().unwrap_or(""),
                                     },
 
@@ -278,9 +278,9 @@ impl Component for SettingsDialog {
                                         set_title: "Other Sources Language",
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::LangOthersChanged(e.text().to_string()));
-                                        } -> lang_others_signal,
+                                        } @lang_others_handler,
                                         #[watch]
-                                        #[block_signal(lang_others_signal)]
+                                        #[block_signal(lang_others_handler)]
                                         set_text: model.settings.analysis.lang_others.as_deref().unwrap_or(""),
                                     },
                                 },

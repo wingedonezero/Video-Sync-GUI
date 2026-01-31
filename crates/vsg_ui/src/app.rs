@@ -329,9 +329,9 @@ impl Component for App {
                                     set_placeholder_text: Some("Drop file or Ctrl+V to paste path..."),
                                     connect_changed[sender] => move |entry| {
                                         sender.input(AppMsg::SourcePathChanged(1, entry.text().to_string()));
-                                    } -> source1_signal,
+                                    } @source1_handler,
                                     #[watch]
-                                    #[block_signal(source1_signal)]
+                                    #[block_signal(source1_handler)]
                                     set_text: &model.source1_path,
                                 },
 
@@ -358,9 +358,9 @@ impl Component for App {
                                     set_placeholder_text: Some("Drop file or Ctrl+V to paste path..."),
                                     connect_changed[sender] => move |entry| {
                                         sender.input(AppMsg::SourcePathChanged(2, entry.text().to_string()));
-                                    } -> source2_signal,
+                                    } @source2_handler,
                                     #[watch]
-                                    #[block_signal(source2_signal)]
+                                    #[block_signal(source2_handler)]
                                     set_text: &model.source2_path,
                                 },
 
@@ -387,9 +387,9 @@ impl Component for App {
                                     set_placeholder_text: Some("Drop file or Ctrl+V to paste path..."),
                                     connect_changed[sender] => move |entry| {
                                         sender.input(AppMsg::SourcePathChanged(3, entry.text().to_string()));
-                                    } -> source3_signal,
+                                    } @source3_handler,
                                     #[watch]
-                                    #[block_signal(source3_signal)]
+                                    #[block_signal(source3_handler)]
                                     set_text: &model.source3_path,
                                 },
 
