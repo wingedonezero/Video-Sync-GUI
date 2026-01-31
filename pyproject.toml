@@ -65,6 +65,11 @@ dev = [
     "pyright",
     "pytest",
     "pytest-cov",
+    # Type stubs
+    "PySide6-stubs",
+    "numpy",           # numpy includes stubs in package
+    "types-Pillow",
+    "lxml-stubs",
 ]
 ocr-easyocr = ["easyocr"]
 ocr-paddle = ["paddleocr"]
@@ -137,7 +142,8 @@ exclude = [
 
 # Gradual strictness - enable these as codebase improves:
 reportMissingImports = true
-reportMissingTypeStubs = false          # Too noisy for external libs
+reportMissingTypeStubs = false          # Too noisy for external libs without stubs
+reportMissingModuleSource = false       # Don't complain about libs without source
 reportUnusedImport = true
 reportUnusedVariable = true
 reportUnnecessaryTypeIgnoreComment = true
