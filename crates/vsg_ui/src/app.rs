@@ -187,7 +187,7 @@ fn setup_drop_target(entry: &gtk::Entry, source_idx: usize, sender: ComponentSen
                         .read_all_future(buffer, glib::Priority::DEFAULT)
                         .await
                     {
-                        Ok((buffer, bytes_read)) => {
+                        Ok((buffer, bytes_read, _)) => {
                             eprintln!("[DnD] Read {} bytes", bytes_read);
                             if let Ok(text) = String::from_utf8(buffer[..bytes_read].to_vec()) {
                                 eprintln!("[DnD] Raw text: {:?}", text);
