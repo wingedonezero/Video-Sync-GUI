@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from vsg_core.analysis.source_separation import (
+from vsg_core.analysis.separation import (
     get_installed_models,
     get_installed_models_json_path,
 )

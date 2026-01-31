@@ -6,9 +6,14 @@ Analyzes per-chunk delay values to detect inconsistencies that may indicate
 sync issues, even when the final rounded delay appears correct.
 """
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from statistics import mean, stdev, variance
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from vsg_core.models import ChunkResult
 
 
 def _to_float(value) -> float:
@@ -17,7 +22,7 @@ def _to_float(value) -> float:
 
 
 def analyze_sync_stability(
-    chunk_results: list[dict[str, Any]],
+    chunk_results: list[ChunkResult],
     source_key: str,
     config: dict[str, Any],
     log: Callable[[str], None] | None = None,
@@ -30,7 +35,7 @@ def analyze_sync_stability(
     problems, even when results round to the same final delay.
 
     Args:
-        chunk_results: List of chunk dicts with 'raw_delay', 'delay', 'match', 'accepted'
+        chunk_results: List of ChunkResult with delay_ms, raw_delay_ms, confidence, accepted
         source_key: Source identifier (e.g., 'Source 2')
         config: Config dict with sync_stability_* settings
         log: Optional logging callback
@@ -50,7 +55,7 @@ def analyze_sync_stability(
     outlier_threshold = config.get("sync_stability_outlier_threshold", 1.0)
 
     # Get accepted chunks with raw delays
-    accepted = [r for r in chunk_results if r.get("accepted", False)]
+    accepted = [r for r in chunk_results if r.accepted]
 
     if len(accepted) < min_chunks:
         if log:
@@ -60,7 +65,7 @@ def analyze_sync_stability(
         return None
 
     # Extract raw delay values
-    raw_delays = [r.get("raw_delay", float(r.get("delay", 0))) for r in accepted]
+    raw_delays = [r.raw_delay_ms for r in accepted]
 
     # If stepping clusters provided, analyze each cluster separately
     # Otherwise analyze all chunks as one group
@@ -92,7 +97,7 @@ def analyze_sync_stability(
 
 
 def _analyze_uniform(
-    accepted: list[dict],
+    accepted: list[ChunkResult],
     raw_delays: list[float],
     source_key: str,
     config: dict[str, Any],
@@ -133,7 +138,7 @@ def _analyze_uniform(
                 outliers.append(
                     {
                         "chunk_index": i + 1,
-                        "time_s": _to_float(chunk.get("start", 0)),
+                        "time_s": _to_float(chunk.start_time),
                         "delay_ms": _to_float(raw),
                         "deviation_ms": _to_float(raw - reference),
                     }
@@ -146,7 +151,7 @@ def _analyze_uniform(
                 outliers.append(
                     {
                         "chunk_index": i + 1,
-                        "time_s": _to_float(chunk.get("start", 0)),
+                        "time_s": _to_float(chunk.start_time),
                         "delay_ms": _to_float(raw),
                         "deviation_ms": _to_float(raw - mean_delay),
                     }
@@ -202,7 +207,7 @@ def _analyze_uniform(
 
 
 def _analyze_with_clusters(
-    accepted: list[dict],
+    accepted: list[ChunkResult],
     raw_delays: list[float],
     source_key: str,
     config: dict[str, Any],

@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from vsg_core.analysis.source_separation import (
+from vsg_core.analysis.separation import (
     download_model,
     get_all_available_models_from_registry,
     get_installed_models,
@@ -416,7 +416,7 @@ class ModelManagerDialog(QDialog):
                 print(f"[Model Manager] Adding {model_filename} to installed list")
 
                 # Save to JSON
-                from vsg_core.analysis.source_separation import (
+                from vsg_core.analysis.separation import (
                     update_installed_models_json,
                 )
 
