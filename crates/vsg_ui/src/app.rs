@@ -17,6 +17,7 @@ use vsg_core::analysis::Analyzer;
 use vsg_core::config::{ConfigManager, Settings};
 use vsg_core::jobs::{JobQueue, JobQueueEntry, LayoutManager};
 
+use crate::handlers::run_job_pipeline;
 use crate::types::{
     FinalTrackState, SourceGroupState, SyncExclusionMode, TrackSettingsState,
 };
@@ -727,7 +728,7 @@ impl Component for App {
                 if self.job_queue_dialog.is_none() {
                     let dialog = JobQueueDialog::builder()
                         .transient_for(root)
-                        .launch(self.job_queue.clone())
+                        .launch((self.job_queue.clone(), self.layout_manager.clone()))
                         .forward(sender.input_sender(), |output| {
                             AppMsg::JobQueueClosed(output)
                         });
@@ -854,23 +855,76 @@ impl Component for App {
 
             AppMsg::ProcessNextJob => {
                 if self.current_job_index < self.total_jobs {
+                    let job = &self.processing_jobs[self.current_job_index];
+                    let job_name = job.name.clone();
+                    let job_idx = self.current_job_index;
+                    let layout_id = job.layout_id.clone();
+                    let sources = job.sources.clone();
+
                     self.batch_status = format!(
-                        "Processing job {} of {}",
+                        "Processing job {} of {}: {}",
                         self.current_job_index + 1,
-                        self.total_jobs
+                        self.total_jobs,
+                        job_name
                     );
+                    self.status_text = format!("Processing: {}", job_name);
+                    self.progress_value = 0.0;
                     self.append_log(&self.batch_status.clone());
 
-                    // TODO: Implement actual job processing using orchestrator
+                    // Load layout from disk
+                    let layout = {
+                        let lm = self.layout_manager.lock().unwrap();
+                        match lm.load_layout(&layout_id) {
+                            Ok(Some(layout)) => {
+                                tracing::debug!("Loaded layout for job: {}", layout_id);
+                                Some(layout)
+                            }
+                            Ok(None) => {
+                                tracing::warn!("No layout found for job: {}", layout_id);
+                                None
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to load layout: {}", e);
+                                None
+                            }
+                        }
+                    };
+
+                    // Get settings
+                    let settings = {
+                        let cfg = self.config.lock().unwrap();
+                        cfg.settings().clone()
+                    };
+
+                    // Log job info
+                    if let Some(ref layout) = layout {
+                        self.append_log(&format!(
+                            "  -> {} tracks configured",
+                            layout.final_tracks.len()
+                        ));
+                    } else {
+                        self.append_log("  -> Using default layout");
+                    }
+
+                    // Run job pipeline asynchronously
                     let sender = sender.clone();
-                    let job_idx = self.current_job_index;
                     relm4::spawn_local(async move {
-                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                        sender.input(AppMsg::JobCompleted {
-                            job_idx,
-                            success: true,
-                            error: None,
-                        });
+                        match run_job_pipeline(job_name.clone(), sources, layout, settings).await {
+                            Ok(output_path) => {
+                                sender.input(AppMsg::JobCompleted {
+                                    job_idx,
+                                    success: true,
+                                    error: Some(format!("Output: {}", output_path.display())),
+                                });
+                            }
+                            Err(e) => {
+                                sender.input(AppMsg::JobCompleted {
+                                    job_idx,
+                                    success: false,
+                                    error: Some(e),
+                                });
+                            }
+                        }
                     });
                 } else {
                     sender.input(AppMsg::BatchCompleted);

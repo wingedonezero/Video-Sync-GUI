@@ -9,7 +9,7 @@ use libadwaita::prelude::*;
 use relm4::prelude::*;
 use relm4::{Component, ComponentParts, ComponentSender};
 
-use vsg_core::jobs::{JobQueue, JobQueueEntry, JobQueueStatus};
+use vsg_core::jobs::{JobQueue, JobQueueEntry, JobQueueStatus, LayoutManager};
 use vsg_core::models::SourceIndex;
 
 /// Output messages from the job queue dialog.
@@ -52,10 +52,12 @@ pub enum JobQueueMsg {
 /// Job queue dialog state.
 pub struct JobQueueDialog {
     job_queue: Arc<Mutex<JobQueue>>,
+    layout_manager: Arc<Mutex<LayoutManager>>,
     selected_indices: Vec<usize>,
     last_selected_idx: Option<usize>, // For shift-select range
     clipboard_layout: Option<String>,
     status_text: String,
+    job_list: Option<gtk::ListBox>, // Stored for list refresh
 }
 
 /// A job row for display.
@@ -105,7 +107,7 @@ impl JobQueueDialog {
 
 #[relm4::component(pub)]
 impl Component for JobQueueDialog {
-    type Init = Arc<Mutex<JobQueue>>;
+    type Init = (Arc<Mutex<JobQueue>>, Arc<Mutex<LayoutManager>>);
     type Input = JobQueueMsg;
     type Output = JobQueueOutput;
     type CommandOutput = ();
@@ -241,15 +243,21 @@ impl Component for JobQueueDialog {
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
-        let model = JobQueueDialog {
-            job_queue: init,
+        let (job_queue, layout_manager) = init;
+        let mut model = JobQueueDialog {
+            job_queue,
+            layout_manager,
             selected_indices: Vec::new(),
             last_selected_idx: None,
             clipboard_layout: None,
             status_text: String::new(),
+            job_list: None,
         };
 
         let widgets = view_output!();
+
+        // Store job_list reference for refreshing
+        model.job_list = Some(widgets.job_list.clone());
 
         // Populate the list
         Self::populate_list(&model, &widgets.job_list, &sender);
@@ -321,25 +329,37 @@ impl Component for JobQueueDialog {
 
             JobQueueMsg::RemoveSelected => {
                 if !self.selected_indices.is_empty() {
-                    let mut queue = self.job_queue.lock().unwrap();
-                    // Remove in reverse order to maintain indices
-                    let mut indices: Vec<usize> = self.selected_indices.clone();
-                    indices.sort();
-                    indices.reverse();
-                    for idx in indices {
-                        queue.remove(idx);
+                    {
+                        let mut queue = self.job_queue.lock().unwrap();
+                        // Remove in reverse order to maintain indices
+                        let mut indices: Vec<usize> = self.selected_indices.clone();
+                        indices.sort();
+                        indices.reverse();
+                        for idx in indices {
+                            queue.remove(idx);
+                        }
                     }
                     self.selected_indices.clear();
                     self.status_text = "Jobs removed.".to_string();
+                    // Refresh the list
+                    if let Some(ref list_box) = self.job_list {
+                        Self::populate_list(self, list_box, &sender);
+                    }
                 }
             }
 
             JobQueueMsg::MoveUp => {
                 if let Some(&idx) = self.selected_indices.first() {
                     if idx > 0 {
-                        let mut queue = self.job_queue.lock().unwrap();
-                        queue.move_up(&[idx]);
+                        {
+                            let mut queue = self.job_queue.lock().unwrap();
+                            queue.move_up(&[idx]);
+                        }
                         self.selected_indices = vec![idx - 1];
+                        // Refresh the list
+                        if let Some(ref list_box) = self.job_list {
+                            Self::populate_list(self, list_box, &sender);
+                        }
                     }
                 }
             }
@@ -351,9 +371,15 @@ impl Component for JobQueueDialog {
                         queue.jobs().len()
                     };
                     if idx < len.saturating_sub(1) {
-                        let mut queue = self.job_queue.lock().unwrap();
-                        queue.move_down(&[idx]);
+                        {
+                            let mut queue = self.job_queue.lock().unwrap();
+                            queue.move_down(&[idx]);
+                        }
                         self.selected_indices = vec![idx + 1];
+                        // Refresh the list
+                        if let Some(ref list_box) = self.job_list {
+                            Self::populate_list(self, list_box, &sender);
+                        }
                     }
                 }
             }
@@ -388,33 +414,77 @@ impl Component for JobQueueDialog {
             JobQueueMsg::PasteLayout => {
                 if let Some(ref layout_json) = self.clipboard_layout {
                     if let Ok(layout) = serde_json::from_str::<Option<vsg_core::jobs::ManualLayout>>(layout_json) {
-                        let mut queue = self.job_queue.lock().unwrap();
-                        for &idx in &self.selected_indices {
-                            if let Some(job) = queue.get_mut(idx) {
-                                job.layout = layout.clone();
-                                job.status = JobQueueStatus::Configured;
+                        let mut pasted_count = 0;
+                        {
+                            let mut queue = self.job_queue.lock().unwrap();
+                            let lm = self.layout_manager.lock().unwrap();
+
+                            for &idx in &self.selected_indices {
+                                if let Some(job) = queue.get_mut(idx) {
+                                    // Save layout to disk
+                                    if let Some(ref layout) = layout {
+                                        if let Err(e) = lm.save_layout_with_metadata(
+                                            &job.layout_id,
+                                            &job.sources,
+                                            layout,
+                                        ) {
+                                            tracing::error!(
+                                                "Failed to save layout for job {}: {}",
+                                                job.name,
+                                                e
+                                            );
+                                        }
+                                    }
+                                    job.layout = layout.clone();
+                                    job.status = JobQueueStatus::Configured;
+                                    pasted_count += 1;
+                                }
+                            }
+
+                            // Save queue to persist status changes
+                            if let Err(e) = queue.save() {
+                                tracing::warn!("Failed to save queue: {}", e);
                             }
                         }
-                        self.status_text = "Layout pasted.".to_string();
+                        self.status_text = format!("Layout pasted to {} job(s).", pasted_count);
+                        // Refresh the list to show updated status
+                        if let Some(ref list_box) = self.job_list {
+                            Self::populate_list(self, list_box, &sender);
+                        }
                     }
                 }
             }
 
             JobQueueMsg::StartProcessing => {
                 let queue = self.job_queue.lock().unwrap();
-                let jobs: Vec<JobQueueEntry> = queue
-                    .jobs()
-                    .iter()
-                    .filter(|j| j.status == JobQueueStatus::Configured)
-                    .cloned()
-                    .collect();
+                let jobs = queue.jobs();
 
                 if jobs.is_empty() {
-                    self.status_text = "No configured jobs to process.".to_string();
-                } else {
-                    let _ = sender.output(JobQueueOutput::StartProcessing(jobs));
-                    root.close();
+                    self.status_text = "No jobs in queue.".to_string();
+                    return;
                 }
+
+                // Check that ALL jobs are configured - block if any aren't
+                let unconfigured: Vec<_> = jobs
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, job)| job.status != JobQueueStatus::Configured)
+                    .collect();
+
+                if !unconfigured.is_empty() {
+                    let count = unconfigured.len();
+                    let first_unconfigured = unconfigured.first().map(|(i, _)| i + 1).unwrap_or(1);
+                    self.status_text = format!(
+                        "Cannot process: {} job(s) not configured. First: Job #{}. Double-click to configure.",
+                        count, first_unconfigured
+                    );
+                    return;
+                }
+
+                // All jobs configured - collect and start processing
+                let configured_jobs: Vec<JobQueueEntry> = jobs.to_vec();
+                let _ = sender.output(JobQueueOutput::StartProcessing(configured_jobs));
+                root.close();
             }
 
             JobQueueMsg::Close => {
@@ -423,7 +493,10 @@ impl Component for JobQueueDialog {
             }
 
             JobQueueMsg::RefreshList => {
-                // The list will be refreshed on update_view
+                // Refresh the list
+                if let Some(ref list_box) = self.job_list {
+                    Self::populate_list(self, list_box, &sender);
+                }
             }
         }
     }
