@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+use super::style_types::{FontReplacements, StylePatches};
 use crate::models::TrackType;
 
 /// Status of a job in the queue.
@@ -246,12 +247,12 @@ pub struct TrackConfig {
     pub skip_frame_validation: bool,
 
     // === Style modification options ===
-    /// Style patch to apply (property -> value mappings).
+    /// Style patches to apply (style_name -> property overrides).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub style_patch: Option<HashMap<String, serde_json::Value>>,
+    pub style_patches: Option<StylePatches>,
     /// Font replacement mappings (old_font -> new_font).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub font_replacements: Option<HashMap<String, String>>,
+    pub font_replacements: Option<FontReplacements>,
 
     // === Video-specific options ===
     /// Original aspect ratio to preserve (e.g., "16:9", "109:60").
@@ -284,7 +285,7 @@ impl Default for TrackConfig {
             sync_exclusion_mode: "exclude".to_string(),
             sync_exclusion_original_style_list: Vec::new(),
             skip_frame_validation: false,
-            style_patch: None,
+            style_patches: None,
             font_replacements: None,
             aspect_ratio: None,
         }
@@ -292,7 +293,10 @@ impl Default for TrackConfig {
 }
 
 /// Per-source correlation settings.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Controls how audio correlation is performed for a specific source.
+/// All fields have sensible defaults if not specified.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SourceCorrelationSettings {
     /// Audio track index to use for correlation (this source).
     #[serde(default)]
@@ -300,10 +304,10 @@ pub struct SourceCorrelationSettings {
     /// Reference audio track index to use from Source 1.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub correlation_ref_track: Option<usize>,
-    /// Override start time for correlation window.
+    /// Override start time for correlation window (milliseconds).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window_start_ms: Option<i64>,
-    /// Override end time for correlation window.
+    /// Override end time for correlation window (milliseconds).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window_end_ms: Option<i64>,
     /// Enable source separation for this source.
@@ -312,23 +316,6 @@ pub struct SourceCorrelationSettings {
     /// Enable stepping correction for this source.
     #[serde(default)]
     pub stepping_enabled: bool,
-    /// Custom analysis settings (flexible key-value).
-    #[serde(default)]
-    pub custom_settings: HashMap<String, serde_json::Value>,
-}
-
-impl Default for SourceCorrelationSettings {
-    fn default() -> Self {
-        Self {
-            correlation_track: None,
-            correlation_ref_track: None,
-            window_start_ms: None,
-            window_end_ms: None,
-            use_source_separation: false,
-            stepping_enabled: false,
-            custom_settings: HashMap::new(),
-        }
-    }
 }
 
 /// Wrapper for saved layout files with metadata.
