@@ -18,7 +18,7 @@ This step coordinates the analysis workflow:
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from vsg_core.analysis import (
     # Diagnostics
@@ -51,9 +51,12 @@ from vsg_core.extraction.tracks import get_stream_info, get_stream_info_with_del
 from vsg_core.io.runner import CommandRunner
 from vsg_core.models import Context, Delays
 
+if TYPE_CHECKING:
+    from vsg_core.models import ChunkResult
+
 
 def _choose_delay(
-    results: list[dict[str, Any]],
+    results: list[ChunkResult],
     config: dict[str, Any],
     runner: CommandRunner,
     role_tag: str,
@@ -64,7 +67,7 @@ def _choose_delay(
     This is a thin wrapper around the modular delay_selection.select_delay() function.
 
     Args:
-        results: Correlation chunk results
+        results: List of ChunkResult from correlation
         config: Configuration with delay_selection_mode and related settings
         runner: CommandRunner for logging
         role_tag: Source identifier for log messages
