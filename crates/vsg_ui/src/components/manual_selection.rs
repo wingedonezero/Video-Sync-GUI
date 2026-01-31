@@ -12,6 +12,7 @@ use libadwaita::prelude::*;
 use relm4::prelude::*;
 use relm4::{Component, ComponentParts, ComponentSender};
 
+use vsg_core::extraction::{probe_file, build_track_description, get_detailed_stream_info, TrackType, FfprobeStreamInfo};
 use vsg_core::jobs::{JobQueue, JobQueueStatus, LayoutManager};
 
 use crate::app::{FinalTrackState, SourceGroupState, TrackWidgetState};
@@ -66,6 +67,10 @@ pub struct ManualSelectionDialog {
     external_subtitles: Vec<PathBuf>,
     info_text: String,
     dragging_idx: Option<usize>, // Currently dragged track index
+
+    // Widget references for refreshing lists
+    source_list: Option<gtk::ListBox>,
+    final_list: Option<gtk::ListBox>,
 }
 
 #[relm4::component(pub)]
@@ -208,26 +213,70 @@ impl Component for ManualSelectionDialog {
     ) -> ComponentParts<Self> {
         let (job_queue, layout_manager, job_idx) = init;
 
-        // Load job data
+        // Load job data and probe source files for tracks
         let (source_groups, final_tracks, attachment_sources) = {
             let queue = job_queue.lock().unwrap();
             if let Some(job) = queue.jobs().get(job_idx) {
                 // Build source groups from job sources
                 let mut groups = Vec::new();
-                for (source_idx, _path) in &job.sources {
+                let mut attachments = std::collections::HashMap::new();
+
+                // Sort sources by index for consistent ordering
+                let mut sources: Vec<_> = job.sources.iter().collect();
+                sources.sort_by_key(|(idx, _)| idx.index());
+
+                for (source_idx, path) in sources {
                     let source_key = format!("Source {}", source_idx.index());
+                    attachments.insert(source_key.clone(), true);
+
+                    // Probe the file to get tracks
+                    let mut tracks = Vec::new();
+                    if let Ok(probe_result) = probe_file(path) {
+                        // Optionally get detailed ffprobe info for richer descriptions
+                        let ffprobe_info = get_detailed_stream_info(path).ok();
+
+                        for track_info in &probe_result.tracks {
+                            // Build description
+                            let ffp_stream = ffprobe_info.as_ref().and_then(|fp: &std::collections::HashMap<usize, FfprobeStreamInfo>| fp.get(&track_info.id));
+                            let summary = build_track_description(track_info, ffp_stream);
+
+                            // Build badges
+                            let mut badge_parts = Vec::new();
+                            if track_info.is_default {
+                                badge_parts.push("Default");
+                            }
+                            if track_info.is_forced {
+                                badge_parts.push("Forced");
+                            }
+
+                            let track_type_str = match track_info.track_type {
+                                TrackType::Video => "Video",
+                                TrackType::Audio => "Audio",
+                                TrackType::Subtitles => "Subtitles",
+                            };
+
+                            tracks.push(TrackWidgetState {
+                                id: track_info.id,
+                                track_type: track_type_str.to_string(),
+                                codec_id: track_info.codec_id.clone(),
+                                language: track_info.language.clone(),
+                                summary,
+                                badges: badge_parts.join(", "),
+                                is_blocked: false,
+                            });
+                        }
+                    } else {
+                        tracing::warn!("Failed to probe file: {}", path.display());
+                    }
+
                     groups.push(SourceGroupState {
                         source_key: source_key.clone(),
-                        title: source_key,
-                        tracks: Vec::new(), // TODO: Probe tracks from file
+                        title: format!("{} ({})", source_key, path.file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "Unknown".to_string())),
+                        tracks,
                         is_expanded: true,
                     });
-                }
-
-                // Initialize attachment sources
-                let mut attachments = std::collections::HashMap::new();
-                for (source_idx, _) in &job.sources {
-                    attachments.insert(format!("Source {}", source_idx.index()), true);
                 }
 
                 (groups, Vec::new(), attachments)
@@ -236,7 +285,7 @@ impl Component for ManualSelectionDialog {
             }
         };
 
-        let model = ManualSelectionDialog {
+        let mut model = ManualSelectionDialog {
             job_queue,
             layout_manager,
             job_idx,
@@ -246,9 +295,15 @@ impl Component for ManualSelectionDialog {
             external_subtitles: Vec::new(),
             info_text: "Double-click a track to add it. Drag to reorder final tracks.".to_string(),
             dragging_idx: None,
+            source_list: None,
+            final_list: None,
         };
 
         let widgets = view_output!();
+
+        // Store widget references for later updates
+        model.source_list = Some(widgets.source_list.clone());
+        model.final_list = Some(widgets.final_list.clone());
 
         // Populate lists
         Self::populate_source_list(&model, &widgets.source_list, &sender);
@@ -274,27 +329,47 @@ impl Component for ManualSelectionDialog {
                                 track.language.clone(),
                             );
                             self.final_tracks.push(final_track);
+                            self.info_text = format!("Added track {} from {}", track_id, source_key);
                         }
                         break;
                     }
+                }
+                // Refresh final list
+                if let Some(ref list_box) = self.final_list {
+                    Self::populate_final_list(self, list_box, &sender);
                 }
             }
 
             ManualSelectionMsg::RemoveFromFinal(idx) => {
                 if idx < self.final_tracks.len() {
                     self.final_tracks.remove(idx);
+                    self.info_text = format!("Removed track at position {}", idx + 1);
+                }
+                // Refresh final list
+                if let Some(ref list_box) = self.final_list {
+                    Self::populate_final_list(self, list_box, &sender);
                 }
             }
 
             ManualSelectionMsg::MoveTrackUp(idx) => {
                 if idx > 0 && idx < self.final_tracks.len() {
                     self.final_tracks.swap(idx, idx - 1);
+                    self.info_text = format!("Moved track up to position {}", idx);
+                }
+                // Refresh final list
+                if let Some(ref list_box) = self.final_list {
+                    Self::populate_final_list(self, list_box, &sender);
                 }
             }
 
             ManualSelectionMsg::MoveTrackDown(idx) => {
                 if idx + 1 < self.final_tracks.len() {
                     self.final_tracks.swap(idx, idx + 1);
+                    self.info_text = format!("Moved track down to position {}", idx + 2);
+                }
+                // Refresh final list
+                if let Some(ref list_box) = self.final_list {
+                    Self::populate_final_list(self, list_box, &sender);
                 }
             }
 
@@ -311,6 +386,10 @@ impl Component for ManualSelectionDialog {
                     self.info_text = format!("Moved track from position {} to {}", from_idx + 1, adjusted_to + 1);
                 }
                 self.dragging_idx = None;
+                // Refresh final list
+                if let Some(ref list_box) = self.final_list {
+                    Self::populate_final_list(self, list_box, &sender);
+                }
             }
 
             ManualSelectionMsg::SetDefault(idx, value) => {
@@ -396,7 +475,7 @@ impl ManualSelectionDialog {
     fn populate_source_list(
         model: &ManualSelectionDialog,
         list_box: &gtk::ListBox,
-        _sender: &ComponentSender<Self>,
+        sender: &ComponentSender<Self>,
     ) {
         // Clear existing
         while let Some(child) = list_box.first_child() {
@@ -421,7 +500,7 @@ impl ManualSelectionDialog {
                 if group.tracks.is_empty() {
                     let empty_row = adw::ActionRow::builder()
                         .title("No tracks found")
-                        .subtitle("File may need to be probed")
+                        .subtitle("File could not be probed")
                         .build();
                     list_box.append(&empty_row);
                 } else {
@@ -439,12 +518,41 @@ impl ManualSelectionDialog {
                         let type_icon = match track.track_type.as_str() {
                             "Video" => "video-x-generic-symbolic",
                             "Audio" => "audio-x-generic-symbolic",
-                            "Subtitle" => "text-x-generic-symbolic",
+                            "Subtitles" => "text-x-generic-symbolic",
                             _ => "document-symbolic",
                         };
 
                         let icon = gtk::Image::from_icon_name(type_icon);
                         row.add_prefix(&icon);
+
+                        // Add "Add" button for quick adding
+                        let add_btn = gtk::Button::builder()
+                            .label("Add")
+                            .valign(gtk::Align::Center)
+                            .build();
+
+                        let sender_add = sender.clone();
+                        let track_id = track.id;
+                        let source_key = group.source_key.clone();
+                        add_btn.connect_clicked(move |_| {
+                            sender_add.input(ManualSelectionMsg::AddTrackToFinal(track_id, source_key.clone()));
+                        });
+                        row.add_suffix(&add_btn);
+
+                        // Also add double-click to add via gesture
+                        let gesture = gtk::GestureClick::new();
+                        gesture.set_button(1); // Left mouse button
+                        let sender_dbl = sender.clone();
+                        let track_id_dbl = track.id;
+                        let source_key_dbl = group.source_key.clone();
+                        gesture.connect_released(move |gesture, n_press, _x, _y| {
+                            if n_press == 2 {
+                                // Double-click
+                                sender_dbl.input(ManualSelectionMsg::AddTrackToFinal(track_id_dbl, source_key_dbl.clone()));
+                                gesture.set_state(gtk::EventSequenceState::Claimed);
+                            }
+                        });
+                        row.add_controller(gesture);
 
                         list_box.append(&row);
                     }

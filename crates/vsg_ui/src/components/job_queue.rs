@@ -17,6 +17,7 @@ use vsg_core::models::SourceIndex;
 pub enum JobQueueOutput {
     StartProcessing(Vec<JobQueueEntry>),
     OpenManualSelection(usize),
+    OpenAddJob,
     Closed,
 }
 
@@ -315,9 +316,7 @@ impl Component for JobQueueDialog {
             }
 
             JobQueueMsg::AddJobs => {
-                // This would typically open the AddJobDialog
-                // For now, we'll just note it in the status
-                self.status_text = "Add jobs dialog would open here.".to_string();
+                let _ = sender.output(JobQueueOutput::OpenAddJob);
             }
 
             JobQueueMsg::RemoveSelected => {
