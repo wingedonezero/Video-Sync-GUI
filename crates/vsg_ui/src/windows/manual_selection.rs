@@ -421,7 +421,8 @@ impl Component for ManualSelectionDialog {
             }
 
             ManualSelectionMsg::AddExternalSubtitles => {
-                let sender = sender.clone();
+                // Use input_sender which won't panic if component is destroyed
+                let input_sender = sender.input_sender().clone();
                 let root = root.clone();
                 relm4::spawn_local(async move {
                     let dialog = gtk::FileDialog::builder()
@@ -437,7 +438,7 @@ impl Component for ManualSelectionDialog {
                             .collect();
 
                         if !paths.is_empty() {
-                            sender.input(ManualSelectionMsg::ExternalFilesSelected(paths));
+                            let _ = input_sender.send(ManualSelectionMsg::ExternalFilesSelected(paths));
                         }
                     }
                 });
@@ -560,11 +561,19 @@ impl Component for ManualSelectionDialog {
                     }
                 }
 
-                let _ = sender.output(ManualSelectionOutput::LayoutAccepted);
+                // Defer output to avoid panic when controller is dropped while in click handler
+                let output_sender = sender.output_sender().clone();
+                glib::idle_add_local_once(move || {
+                    let _ = output_sender.send(ManualSelectionOutput::LayoutAccepted);
+                });
             }
 
             ManualSelectionMsg::Cancel => {
-                let _ = sender.output(ManualSelectionOutput::Cancelled);
+                // Defer output to avoid panic when controller is dropped while in click handler
+                let output_sender = sender.output_sender().clone();
+                glib::idle_add_local_once(move || {
+                    let _ = output_sender.send(ManualSelectionOutput::Cancelled);
+                });
             }
         }
     }

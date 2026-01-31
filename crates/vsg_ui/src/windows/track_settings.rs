@@ -2,6 +2,7 @@
 //!
 //! Dialog for configuring individual track settings.
 
+use gtk::glib;
 use gtk::prelude::*;
 use libadwaita::prelude::*;
 use relm4::prelude::*;
@@ -341,11 +342,20 @@ impl Component for TrackSettingsDialog {
             }
 
             TrackSettingsMsg::Accept => {
-                let _ = sender.output(TrackSettingsOutput::Accepted(self.track.clone()));
+                // Defer output to avoid panic when controller is dropped while in click handler
+                let track = self.track.clone();
+                let output_sender = sender.output_sender().clone();
+                glib::idle_add_local_once(move || {
+                    let _ = output_sender.send(TrackSettingsOutput::Accepted(track));
+                });
             }
 
             TrackSettingsMsg::Cancel => {
-                let _ = sender.output(TrackSettingsOutput::Cancelled);
+                // Defer output to avoid panic when controller is dropped while in click handler
+                let output_sender = sender.output_sender().clone();
+                glib::idle_add_local_once(move || {
+                    let _ = output_sender.send(TrackSettingsOutput::Cancelled);
+                });
             }
         }
     }
