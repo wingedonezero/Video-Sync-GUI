@@ -504,6 +504,7 @@ impl Component for ManualSelectionDialog {
                             skip_frame_validation: false,
                             style_patches,
                             font_replacements,
+                            aspect_ratio: None,
                         };
 
                         FinalTrackEntry {
