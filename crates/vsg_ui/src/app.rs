@@ -149,44 +149,59 @@ impl App {
 }
 
 /// Setup drag-drop for an entry widget
+///
+/// Uses a single DropTarget with multiple types to avoid GTK assertion errors
+/// that occur when multiple DropTarget controllers are attached to the same widget.
+/// See: https://discourse.gnome.org/t/gtk-drop-target-async-handle-event-assertion-self-drop-drop-failed/25098
 fn setup_drop_target(entry: &gtk::Entry, source_idx: usize, sender: ComponentSender<App>) {
-    // Create drop target for FileList (standard file drops from most file managers)
-    let drop_target = gtk::DropTarget::new(gdk::FileList::static_type(), gdk::DragAction::COPY);
+    // Create a single drop target that accepts multiple types
+    // Using GType::INVALID as initial type, then setting types via set_types()
+    let drop_target = gtk::DropTarget::builder()
+        .actions(gdk::DragAction::COPY)
+        .build();
 
-    let sender_clone = sender.clone();
+    // Accept both FileList (GNOME/GTK file managers) and GString (text/uri-list from KDE/Dolphin)
+    drop_target.set_types(&[gdk::FileList::static_type(), glib::GString::static_type()]);
+
     drop_target.connect_drop(move |_target, value, _x, _y| {
+        // Try FileList first (most file managers)
         if let Ok(file_list) = value.get::<gdk::FileList>() {
             if let Some(file) = file_list.files().first() {
                 if let Some(path) = file.path() {
-                    sender_clone.input(AppMsg::FileDropped(source_idx, path));
+                    sender.input(AppMsg::FileDropped(source_idx, path));
                     return true;
                 }
             }
         }
-        false
-    });
 
-    entry.add_controller(drop_target);
-
-    // Create separate drop target for text/uri-list (Dolphin and some other file managers)
-    let text_drop_target = gtk::DropTarget::new(glib::GString::static_type(), gdk::DragAction::COPY);
-
-    let sender_clone2 = sender.clone();
-    text_drop_target.connect_drop(move |_target, value, _x, _y| {
+        // Try GString/text for text/uri-list format (Dolphin and some other file managers)
         if let Ok(text) = value.get::<glib::GString>() {
             let cleaned = clean_file_url(text.as_str());
             if !cleaned.is_empty() {
                 let path = std::path::PathBuf::from(&cleaned);
                 if path.exists() {
-                    sender_clone2.input(AppMsg::FileDropped(source_idx, path));
+                    sender.input(AppMsg::FileDropped(source_idx, path));
                     return true;
                 }
             }
         }
+
+        // Also try plain String
+        if let Ok(text) = value.get::<String>() {
+            let cleaned = clean_file_url(&text);
+            if !cleaned.is_empty() {
+                let path = std::path::PathBuf::from(&cleaned);
+                if path.exists() {
+                    sender.input(AppMsg::FileDropped(source_idx, path));
+                    return true;
+                }
+            }
+        }
+
         false
     });
 
-    entry.add_controller(text_drop_target);
+    entry.add_controller(drop_target);
 }
 
 /// Setup clipboard paste for an entry widget
