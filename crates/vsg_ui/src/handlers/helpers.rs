@@ -8,7 +8,7 @@ use vsg_core::extraction::{
 };
 use vsg_core::jobs::ManualLayout;
 use vsg_core::logging::{JobLogger, LogConfig};
-use vsg_core::models::JobSpec;
+use vsg_core::models::{JobSpec, SourceIndex};
 use vsg_core::orchestrator::{create_standard_pipeline, AnalyzeStep, Context, JobState, Pipeline};
 
 /// Track info from probing.
@@ -231,8 +231,8 @@ pub async fn run_analyze_only(
         match pipeline.run(&ctx, &mut state) {
             Ok(_) => {
                 let (delay2, delay3) = if let Some(ref analysis) = state.analysis {
-                    let d2 = analysis.delays.source_delays_ms.get("Source 2").copied();
-                    let d3 = analysis.delays.source_delays_ms.get("Source 3").copied();
+                    let d2 = analysis.delays.get_delay_ms(SourceIndex::source2());
+                    let d3 = analysis.delays.get_delay_ms(SourceIndex::new(2)); // Source 3
                     (d2, d3)
                 } else {
                     (None, None)

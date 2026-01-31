@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-use crate::models::MergePlan;
+use crate::models::{MergePlan, SourceIndex};
 use crate::mux::MkvmergeOptionsBuilder;
 use crate::orchestrator::errors::{StepError, StepResult};
 use crate::orchestrator::step::PipelineStep;
@@ -178,25 +178,26 @@ impl MuxStep {
                     }
                 }
 
-                // Apply delay from raw_source_delays_ms (already includes global shift from AnalyzeStep)
+                // Apply delay from delays.sources (already includes global shift from AnalyzeStep)
                 // Use raw f64 for precision - only rounded at final mkvmerge command
                 //
-                // CRITICAL: The delay in raw_source_delays_ms ALREADY has global_shift applied.
+                // CRITICAL: The delay in SourceDelay.raw_delay_ms ALREADY has global_shift applied.
                 // Do NOT add global_shift again here or in options_builder.
                 //
                 // Expected values after analysis:
                 // - Source 1 = global_shift (since its raw delay was 0)
                 // - Source 2+ = correlation_delay + global_shift
-                if let Some(&delay_ms_raw) = delays.raw_source_delays_ms.get(source_key) {
-                    plan_item.container_delay_ms_raw = delay_ms_raw;
+                if let Some(source_idx) = SourceIndex::from_display_name(source_key) {
+                    if let Some(delay) = delays.get(source_idx) {
+                        plan_item.container_delay_ms_raw = delay.raw_delay_ms;
 
-                    // Log the delay being applied for debugging
-                    let pre_shift = delays.pre_shift_delays_ms.get(source_key).copied().unwrap_or(0.0);
-                    ctx.logger.debug(&format!(
-                        "Track {}:{} ({}): pre-shift={:+.1}ms, global_shift={:+}ms, final={:+.1}ms",
-                        source_key, track_id, track_type,
-                        pre_shift, delays.global_shift_ms, delay_ms_raw
-                    ));
+                        // Log the delay being applied for debugging
+                        ctx.logger.debug(&format!(
+                            "Track {}:{} ({}): pre-shift={:+.1}ms, global_shift={:+}ms, final={:+.1}ms",
+                            source_key, track_id, track_type,
+                            delay.pre_shift_delay_ms, delays.global_shift_ms, delay.raw_delay_ms
+                        ));
+                    }
                 }
 
                 items.push(plan_item);
@@ -347,9 +348,8 @@ impl PipelineStep for MuxStep {
 
         for item in &plan.items {
             let delay_rounded = item.container_delay_ms_raw.round() as i64;
-            let pre_shift = plan.delays.pre_shift_delays_ms
-                .get(&item.track.source)
-                .copied()
+            let pre_shift = SourceIndex::from_display_name(&item.track.source)
+                .and_then(|idx| plan.delays.get_pre_shift_delay(idx))
                 .unwrap_or(0.0);
 
             if item.container_delay_ms_raw.abs() > 0.001 {

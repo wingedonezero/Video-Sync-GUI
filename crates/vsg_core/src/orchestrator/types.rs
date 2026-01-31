@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::Settings;
 use crate::logging::JobLogger;
-use crate::models::{Delays, JobSpec, MergePlan};
+use crate::models::{Delays, JobSpec, MergePlan, SourceIndex};
 
 /// Progress callback type for reporting pipeline progress.
 ///
@@ -154,7 +154,7 @@ pub struct AnalysisOutput {
     pub method: String,
     /// Per-source stability metrics.
     #[serde(default)]
-    pub source_stability: HashMap<String, SourceStability>,
+    pub source_stability: HashMap<SourceIndex, SourceStability>,
 }
 
 /// Stability metrics for a single source analysis.
