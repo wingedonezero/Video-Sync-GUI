@@ -378,7 +378,7 @@ impl Component for App {
                     set_title_widget = &gtk::Label {
                         set_label: "Video Sync GUI",
                     },
-                    pack_end = &gtk::Button {
+                    pack_start = &gtk::Button {
                         set_label: "Settings...",
                         connect_clicked => AppMsg::OpenSettings,
                     },
@@ -875,6 +875,7 @@ impl Component for App {
                             AppMsg::SettingsClosed(output)
                         });
 
+                    dialog.widget().present();
                     self.settings_dialog = Some(dialog);
                 }
             }
@@ -904,6 +905,7 @@ impl Component for App {
                             AppMsg::JobQueueClosed(output)
                         });
 
+                    dialog.widget().present();
                     self.job_queue_dialog = Some(dialog);
                 }
             }
@@ -930,6 +932,7 @@ impl Component for App {
                             AppMsg::AddJobClosed(output)
                         });
 
+                    dialog.widget().present();
                     self.add_job_dialog = Some(dialog);
                 }
             }
@@ -952,6 +955,7 @@ impl Component for App {
                             AppMsg::ManualSelectionClosed(output)
                         });
 
+                    dialog.widget().present();
                     self.manual_selection_dialog = Some(dialog);
                 }
             }
@@ -979,6 +983,7 @@ impl Component for App {
                                 AppMsg::TrackSettingsClosed(output)
                             });
 
+                        dialog.widget().present();
                         self.track_settings_dialog = Some(dialog);
                     }
                 }
