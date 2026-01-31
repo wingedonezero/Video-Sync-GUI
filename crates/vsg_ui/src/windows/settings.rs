@@ -427,6 +427,7 @@ impl Component for SettingsDialog {
                                     adw::SwitchRow {
                                         set_title: "SCC",
                                         set_active: model.settings.analysis.multi_corr_scc,
+                                        #[watch]
                                         set_sensitive: model.settings.analysis.multi_correlation_enabled,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::MultiCorrSccChanged(row.is_active()));
@@ -436,6 +437,7 @@ impl Component for SettingsDialog {
                                     adw::SwitchRow {
                                         set_title: "GCC-PHAT",
                                         set_active: model.settings.analysis.multi_corr_gcc_phat,
+                                        #[watch]
                                         set_sensitive: model.settings.analysis.multi_correlation_enabled,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::MultiCorrPhatChanged(row.is_active()));
@@ -445,6 +447,7 @@ impl Component for SettingsDialog {
                                     adw::SwitchRow {
                                         set_title: "GCC-SCOT",
                                         set_active: model.settings.analysis.multi_corr_gcc_scot,
+                                        #[watch]
                                         set_sensitive: model.settings.analysis.multi_correlation_enabled,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::MultiCorrScotChanged(row.is_active()));
@@ -454,6 +457,7 @@ impl Component for SettingsDialog {
                                     adw::SwitchRow {
                                         set_title: "Whitened",
                                         set_active: model.settings.analysis.multi_corr_whitened,
+                                        #[watch]
                                         set_sensitive: model.settings.analysis.multi_correlation_enabled,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::MultiCorrWhitenedChanged(row.is_active()));
@@ -595,6 +599,7 @@ impl Component for SettingsDialog {
                                         set_title: "Snap Mode",
                                         set_model: Some(&gtk::StringList::new(SNAP_MODES)),
                                         set_selected: model.settings.chapters.snap_mode.to_index() as u32,
+                                        #[watch]
                                         set_sensitive: model.settings.chapters.snap_enabled,
                                         connect_selected_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::SnapModeChanged(row.selected()));
@@ -609,6 +614,7 @@ impl Component for SettingsDialog {
                                             model.settings.chapters.snap_threshold_ms as f64,
                                             50.0, 2000.0, 50.0, 100.0, 0.0
                                         ),
+                                        #[watch]
                                         set_sensitive: model.settings.chapters.snap_enabled,
                                         connect_value_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::SnapThresholdChanged(row.value().to_string()));
@@ -619,6 +625,7 @@ impl Component for SettingsDialog {
                                         set_title: "Snap Starts Only",
                                         set_subtitle: "Only snap chapter start times, not ends",
                                         set_active: model.settings.chapters.snap_starts_only,
+                                        #[watch]
                                         set_sensitive: model.settings.chapters.snap_enabled,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::SnapStartsOnlyChanged(row.is_active()));

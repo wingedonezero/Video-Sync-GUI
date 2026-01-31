@@ -168,33 +168,36 @@ impl Component for TrackSettingsDialog {
 
                             gtk::CheckButton {
                                 set_label: Some("Perform OCR (image-based subtitles)"),
+                                connect_toggled[sender] => move |btn| {
+                                    sender.input(TrackSettingsMsg::PerformOcrChanged(btn.is_active()));
+                                } -> perform_ocr_signal,
                                 #[watch]
+                                #[block_signal(perform_ocr_signal)]
                                 set_active: model.track.perform_ocr,
                                 #[watch]
                                 set_sensitive: model.track.is_ocr_compatible(),
-                                connect_toggled[sender] => move |btn| {
-                                    sender.input(TrackSettingsMsg::PerformOcrChanged(btn.is_active()));
-                                },
                             },
 
                             gtk::CheckButton {
                                 set_label: Some("Convert to ASS (SRT subtitles)"),
+                                connect_toggled[sender] => move |btn| {
+                                    sender.input(TrackSettingsMsg::ConvertToAssChanged(btn.is_active()));
+                                } -> convert_to_ass_signal,
                                 #[watch]
+                                #[block_signal(convert_to_ass_signal)]
                                 set_active: model.track.convert_to_ass,
                                 #[watch]
                                 set_sensitive: model.track.is_convert_to_ass_compatible(),
-                                connect_toggled[sender] => move |btn| {
-                                    sender.input(TrackSettingsMsg::ConvertToAssChanged(btn.is_active()));
-                                },
                             },
 
                             gtk::CheckButton {
                                 set_label: Some("Rescale timing"),
-                                #[watch]
-                                set_active: model.track.rescale,
                                 connect_toggled[sender] => move |btn| {
                                     sender.input(TrackSettingsMsg::RescaleChanged(btn.is_active()));
-                                },
+                                } -> rescale_signal,
+                                #[watch]
+                                #[block_signal(rescale_signal)]
+                                set_active: model.track.rescale,
                             },
 
                             gtk::Box {
