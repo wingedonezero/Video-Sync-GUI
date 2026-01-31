@@ -29,10 +29,15 @@
 
 ## 5) Code style and tooling (Python)
 - Python code MUST be:
-  - formatted with **Black** (line length 88),
-  - linted with **Ruff** (including import sorting).
-- Do not hand-format or bikeshed formatting; rely on Black/Ruff outputs.
+  - formatted with **Ruff** (`ruff format`, line length 88),
+  - linted with **Ruff** (`ruff check`, including import sorting),
+  - type-checked with **Pyright**.
+- Do not hand-format or bikeshed formatting; rely on Ruff outputs.
 - Follow the repository's `pyproject.toml` settings.
+- Commands:
+  - `ruff format .` - format code
+  - `ruff check --fix .` - lint and auto-fix
+  - `pyright` - type check
 
 ## 6) Rust-like Python philosophy
 Core principles (explicit, typed, structured):
