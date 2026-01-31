@@ -169,9 +169,9 @@ impl Component for ManualSelectionDialog {
                                     set_orientation: gtk::Orientation::Horizontal,
                                     set_spacing: 8,
 
+                                    #[name = "add_external_btn"]
                                     gtk::Button {
                                         set_label: "Add External Subtitles...",
-                                        connect_clicked => ManualSelectionMsg::AddExternalSubtitles,
                                     },
                                 },
                             },
@@ -314,6 +314,12 @@ impl Component for ManualSelectionDialog {
         Self::populate_attachments(&model, &widgets.attachments_box, &sender);
 
         // Manually connect buttons to avoid panic if component is destroyed
+        // Add External Subtitles button
+        let input_sender = sender.input_sender().clone();
+        widgets.add_external_btn.connect_clicked(move |_| {
+            let _ = input_sender.send(ManualSelectionMsg::AddExternalSubtitles);
+        });
+
         // Accept button - needs to go through message for layout saving logic
         let input_sender = sender.input_sender().clone();
         widgets.accept_btn.connect_clicked(move |_| {

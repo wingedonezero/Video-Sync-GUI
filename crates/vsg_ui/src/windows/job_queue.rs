@@ -142,46 +142,46 @@ impl Component for JobQueueDialog {
                         set_orientation: gtk::Orientation::Horizontal,
                         set_spacing: 8,
 
+                        #[name = "add_jobs_btn"]
                         gtk::Button {
                             set_label: "Add Job(s)...",
-                            connect_clicked => JobQueueMsg::AddJobs,
                         },
 
+                        #[name = "remove_btn"]
                         gtk::Button {
                             set_label: "Remove Selected",
-                            connect_clicked => JobQueueMsg::RemoveSelected,
                         },
 
                         gtk::Separator {
                             set_orientation: gtk::Orientation::Vertical,
                         },
 
+                        #[name = "move_up_btn"]
                         gtk::Button {
                             set_label: "Move Up",
-                            connect_clicked => JobQueueMsg::MoveUp,
                         },
 
+                        #[name = "move_down_btn"]
                         gtk::Button {
                             set_label: "Move Down",
-                            connect_clicked => JobQueueMsg::MoveDown,
                         },
 
                         gtk::Separator {
                             set_orientation: gtk::Orientation::Vertical,
                         },
 
+                        #[name = "copy_layout_btn"]
                         gtk::Button {
                             set_label: "Copy Layout",
                             #[watch]
                             set_sensitive: model.selected_indices.len() == 1,
-                            connect_clicked => JobQueueMsg::CopySelectedLayout,
                         },
 
+                        #[name = "paste_layout_btn"]
                         gtk::Button {
                             set_label: "Paste Layout",
                             #[watch]
                             set_sensitive: model.clipboard_layout.is_some() && !model.selected_indices.is_empty(),
-                            connect_clicked => JobQueueMsg::PasteLayout,
                         },
                     },
 
@@ -197,11 +197,7 @@ impl Component for JobQueueDialog {
                             gtk::ListBox {
                                 set_selection_mode: gtk::SelectionMode::Multiple,
                                 add_css_class: "boxed-list",
-
-                                connect_row_activated[sender] => move |_, row| {
-                                    let idx = row.index() as usize;
-                                    sender.input(JobQueueMsg::ConfigureJob(idx));
-                                },
+                                // connect_row_activated connected manually in init
                             },
                         },
                     },
@@ -265,17 +261,57 @@ impl Component for JobQueueDialog {
         // Populate the list
         Self::populate_list(&model, &widgets.job_list, &sender);
 
-        // Manually connect buttons to avoid panic if component is destroyed
+        // Manually connect ALL buttons to avoid panic if component is destroyed
+        // Using input_sender.send() which returns Result instead of panicking
+
+        // Action buttons
+        let input_sender = sender.input_sender().clone();
+        widgets.add_jobs_btn.connect_clicked(move |_| {
+            let _ = input_sender.send(JobQueueMsg::AddJobs);
+        });
+
+        let input_sender = sender.input_sender().clone();
+        widgets.remove_btn.connect_clicked(move |_| {
+            let _ = input_sender.send(JobQueueMsg::RemoveSelected);
+        });
+
+        let input_sender = sender.input_sender().clone();
+        widgets.move_up_btn.connect_clicked(move |_| {
+            let _ = input_sender.send(JobQueueMsg::MoveUp);
+        });
+
+        let input_sender = sender.input_sender().clone();
+        widgets.move_down_btn.connect_clicked(move |_| {
+            let _ = input_sender.send(JobQueueMsg::MoveDown);
+        });
+
+        let input_sender = sender.input_sender().clone();
+        widgets.copy_layout_btn.connect_clicked(move |_| {
+            let _ = input_sender.send(JobQueueMsg::CopySelectedLayout);
+        });
+
+        let input_sender = sender.input_sender().clone();
+        widgets.paste_layout_btn.connect_clicked(move |_| {
+            let _ = input_sender.send(JobQueueMsg::PasteLayout);
+        });
+
+        // Start Processing button
+        let input_sender = sender.input_sender().clone();
+        widgets.start_btn.connect_clicked(move |_| {
+            let _ = input_sender.send(JobQueueMsg::StartProcessing);
+        });
+
         // Close button - sends output directly
         let output_sender = sender.output_sender().clone();
         widgets.close_btn.connect_clicked(move |_| {
             let _ = output_sender.send(JobQueueOutput::Closed);
         });
 
-        // Start Processing button - needs to go through message for validation
+        // ListBox row activation
         let input_sender = sender.input_sender().clone();
-        widgets.start_btn.connect_clicked(move |_| {
-            let _ = input_sender.send(JobQueueMsg::StartProcessing);
+        widgets.job_list.connect_row_activated(move |_, row| {
+            let idx = row.index() as usize;
+            let _ = input_sender.send(JobQueueMsg::ConfigureJob(idx));
         });
 
         ComponentParts { model, widgets }
