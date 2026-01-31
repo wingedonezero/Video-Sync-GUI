@@ -272,6 +272,7 @@ pub struct App {
     pub delay_source2: String,
     pub delay_source3: String,
     pub log_text: String,
+    pub log_buffer: Option<gtk::TextBuffer>,
     pub is_analyzing: bool,
 
     // Settings Dialog
@@ -312,6 +313,10 @@ impl App {
     pub fn append_log(&mut self, message: &str) {
         self.log_text.push_str(message);
         self.log_text.push('\n');
+        // Update the TextBuffer if available
+        if let Some(ref buffer) = self.log_buffer {
+            buffer.set_text(&self.log_text);
+        }
     }
 
     pub fn source_keys(&self) -> Vec<String> {
@@ -608,7 +613,7 @@ impl Component for App {
         };
         let layout_manager = Arc::new(Mutex::new(LayoutManager::new(&init.layouts_dir)));
 
-        let model = App {
+        let mut model = App {
             config: init.config,
             job_queue: init.job_queue,
             layout_manager,
@@ -622,6 +627,7 @@ impl Component for App {
             delay_source2: String::new(),
             delay_source3: String::new(),
             log_text: init.version_info,
+            log_buffer: None,
             is_analyzing: false,
 
             settings_dialog: None,
@@ -654,8 +660,10 @@ impl Component for App {
 
         let widgets = view_output!();
 
-        // Set initial log text
-        widgets.log_view.buffer().set_text(&model.log_text);
+        // Store log buffer reference and set initial text
+        let log_buffer = widgets.log_view.buffer();
+        log_buffer.set_text(&model.log_text);
+        model.log_buffer = Some(log_buffer);
 
         // Setup drag-drop for source entries
         setup_drop_target(&widgets.source1_entry, 1, sender.clone());
