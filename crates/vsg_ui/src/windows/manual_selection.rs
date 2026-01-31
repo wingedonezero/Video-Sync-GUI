@@ -13,7 +13,7 @@ use relm4::prelude::*;
 use relm4::{Component, ComponentParts, ComponentSender};
 
 use vsg_core::extraction::{probe_file, build_track_description, get_detailed_stream_info, TrackType, FfprobeStreamInfo};
-use vsg_core::jobs::{JobQueue, JobQueueStatus, LayoutManager, ManualLayout, FinalTrackEntry, TrackConfig};
+use vsg_core::jobs::{JobQueue, JobQueueStatus, LayoutManager, ManualLayout, FinalTrackEntry, TrackConfig, StylePatches, FontReplacements};
 use vsg_core::models::{SourceIndex, SourceRef, TrackType as CoreTrackType};
 
 use crate::types::{FinalTrackState, SourceGroupState, TrackWidgetState};
@@ -469,6 +469,16 @@ impl Component for ManualSelectionDialog {
                             _ => CoreTrackType::Subtitles,
                         };
 
+                        // Parse style_patches from JSON string if present
+                        let style_patches: Option<StylePatches> = track.style_patch
+                            .as_ref()
+                            .and_then(|json| serde_json::from_str(json).ok());
+
+                        // Parse font_replacements from JSON string if present
+                        let font_replacements: Option<FontReplacements> = track.font_replacements
+                            .as_ref()
+                            .and_then(|json| serde_json::from_str(json).ok());
+
                         // Build TrackConfig from UI state
                         let config = TrackConfig {
                             sync_to_source: if track.sync_to_source != "Source 1" {
@@ -484,14 +494,16 @@ impl Component for ManualSelectionDialog {
                             perform_ocr: track.perform_ocr,
                             convert_to_ass: track.convert_to_ass,
                             rescale: track.rescale,
-                            size_multiplier_pct: track.size_multiplier_pct,
-                            style_patch: track.style_patch.clone(),
-                            font_replacements: track.font_replacements.clone(),
+                            size_multiplier: track.size_multiplier_pct as f32 / 100.0,
                             sync_exclusion_styles: track.sync_exclusion_styles.clone(),
                             sync_exclusion_mode: match track.sync_exclusion_mode {
                                 crate::types::SyncExclusionMode::Exclude => "exclude".to_string(),
                                 crate::types::SyncExclusionMode::Include => "include".to_string(),
                             },
+                            sync_exclusion_original_style_list: Vec::new(),
+                            skip_frame_validation: false,
+                            style_patches,
+                            font_replacements,
                         };
 
                         FinalTrackEntry {
@@ -506,6 +518,8 @@ impl Component for ManualSelectionDialog {
                             generated_source_path: None,
                             generated_filter_mode: "exclude".to_string(),
                             generated_filter_styles: track.generated_filter_styles.clone(),
+                            generated_original_style_list: Vec::new(),
+                            generated_verify_only_lines_removed: true,
                         }
                     })
                     .collect();
