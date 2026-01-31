@@ -158,7 +158,6 @@ impl Component for SettingsDialog {
                                     add_suffix = &gtk::Entry {
                                         set_hexpand: true,
                                         set_valign: gtk::Align::Center,
-                                        #[watch]
                                         set_text: &model.settings.paths.output_folder,
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::OutputFolderChanged(e.text().to_string()));
@@ -179,7 +178,6 @@ impl Component for SettingsDialog {
                                     add_suffix = &gtk::Entry {
                                         set_hexpand: true,
                                         set_valign: gtk::Align::Center,
-                                        #[watch]
                                         set_text: &model.settings.paths.temp_root,
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::TempFolderChanged(e.text().to_string()));
@@ -200,7 +198,6 @@ impl Component for SettingsDialog {
                                     add_suffix = &gtk::Entry {
                                         set_hexpand: true,
                                         set_valign: gtk::Align::Center,
-                                        #[watch]
                                         set_text: &model.settings.paths.logs_folder,
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::LogsFolderChanged(e.text().to_string()));
@@ -231,7 +228,6 @@ impl Component for SettingsDialog {
                                     adw::ComboRow {
                                         set_title: "Mode",
                                         set_model: Some(&gtk::StringList::new(ANALYSIS_MODES)),
-                                        #[watch]
                                         set_selected: model.settings.analysis.mode.to_index() as u32,
                                         connect_selected_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::AnalysisModeChanged(row.selected()));
@@ -241,7 +237,6 @@ impl Component for SettingsDialog {
                                     adw::ComboRow {
                                         set_title: "Correlation Method",
                                         set_model: Some(&gtk::StringList::new(CORRELATION_METHODS)),
-                                        #[watch]
                                         set_selected: model.settings.analysis.correlation_method.to_index() as u32,
                                         connect_selected_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::CorrelationMethodChanged(row.selected()));
@@ -252,7 +247,6 @@ impl Component for SettingsDialog {
                                         set_title: "Sync Mode",
                                         set_subtitle: "How to handle negative delays",
                                         set_model: Some(&gtk::StringList::new(SYNC_MODES)),
-                                        #[watch]
                                         set_selected: model.settings.analysis.sync_mode.to_index() as u32,
                                         connect_selected_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::SyncModeChanged(row.selected()));
@@ -265,7 +259,6 @@ impl Component for SettingsDialog {
 
                                     adw::EntryRow {
                                         set_title: "Source 1 Language",
-                                        #[watch]
                                         set_text: model.settings.analysis.lang_source1.as_deref().unwrap_or(""),
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::LangSource1Changed(e.text().to_string()));
@@ -274,7 +267,6 @@ impl Component for SettingsDialog {
 
                                     adw::EntryRow {
                                         set_title: "Other Sources Language",
-                                        #[watch]
                                         set_text: model.settings.analysis.lang_others.as_deref().unwrap_or(""),
                                         connect_changed[sender] => move |e| {
                                             sender.input(SettingsMsg::LangOthersChanged(e.text().to_string()));
@@ -358,7 +350,6 @@ impl Component for SettingsDialog {
                                     adw::ComboRow {
                                         set_title: "Filtering Method",
                                         set_model: Some(&gtk::StringList::new(FILTERING_METHODS)),
-                                        #[watch]
                                         set_selected: model.settings.analysis.filtering_method.to_index() as u32,
                                         connect_selected_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::FilteringMethodChanged(row.selected()));
@@ -394,7 +385,6 @@ impl Component for SettingsDialog {
                                     adw::SwitchRow {
                                         set_title: "Use SOXR Resampling",
                                         set_subtitle: "High-quality resampling via FFmpeg",
-                                        #[watch]
                                         set_active: model.settings.analysis.use_soxr,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::UseSoxrChanged(row.is_active()));
@@ -404,7 +394,6 @@ impl Component for SettingsDialog {
                                     adw::SwitchRow {
                                         set_title: "Peak Fitting",
                                         set_subtitle: "Sub-sample accuracy via quadratic interpolation",
-                                        #[watch]
                                         set_active: model.settings.analysis.audio_peak_fit,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::AudioPeakFitChanged(row.is_active()));
@@ -418,7 +407,6 @@ impl Component for SettingsDialog {
                                     adw::SwitchRow {
                                         set_title: "Enable Multi-Correlation",
                                         set_subtitle: "Compare multiple correlation methods",
-                                        #[watch]
                                         set_active: model.settings.analysis.multi_correlation_enabled,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::MultiCorrEnabledChanged(row.is_active()));
@@ -427,9 +415,7 @@ impl Component for SettingsDialog {
 
                                     adw::SwitchRow {
                                         set_title: "SCC",
-                                        #[watch]
                                         set_active: model.settings.analysis.multi_corr_scc,
-                                        #[watch]
                                         set_sensitive: model.settings.analysis.multi_correlation_enabled,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::MultiCorrSccChanged(row.is_active()));
@@ -438,9 +424,7 @@ impl Component for SettingsDialog {
 
                                     adw::SwitchRow {
                                         set_title: "GCC-PHAT",
-                                        #[watch]
                                         set_active: model.settings.analysis.multi_corr_gcc_phat,
-                                        #[watch]
                                         set_sensitive: model.settings.analysis.multi_correlation_enabled,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::MultiCorrPhatChanged(row.is_active()));
@@ -449,9 +433,7 @@ impl Component for SettingsDialog {
 
                                     adw::SwitchRow {
                                         set_title: "GCC-SCOT",
-                                        #[watch]
                                         set_active: model.settings.analysis.multi_corr_gcc_scot,
-                                        #[watch]
                                         set_sensitive: model.settings.analysis.multi_correlation_enabled,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::MultiCorrScotChanged(row.is_active()));
@@ -460,9 +442,7 @@ impl Component for SettingsDialog {
 
                                     adw::SwitchRow {
                                         set_title: "Whitened",
-                                        #[watch]
                                         set_active: model.settings.analysis.multi_corr_whitened,
-                                        #[watch]
                                         set_sensitive: model.settings.analysis.multi_correlation_enabled,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::MultiCorrWhitenedChanged(row.is_active()));
@@ -488,7 +468,6 @@ impl Component for SettingsDialog {
                                         set_title: "Selection Mode",
                                         set_subtitle: "How to pick final delay from chunks",
                                         set_model: Some(&gtk::StringList::new(DELAY_MODES)),
-                                        #[watch]
                                         set_selected: model.settings.analysis.delay_selection_mode.to_index() as u32,
                                         connect_selected_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::DelayModeChanged(row.selected()));
@@ -528,7 +507,6 @@ impl Component for SettingsDialog {
                                     adw::SwitchRow {
                                         set_title: "Skip Unstable Segments",
                                         set_subtitle: "Skip segments below threshold",
-                                        #[watch]
                                         set_active: model.settings.analysis.first_stable_skip_unstable,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::FirstStableSkipChanged(row.is_active()));
@@ -583,7 +561,6 @@ impl Component for SettingsDialog {
                                     adw::SwitchRow {
                                         set_title: "Rename Chapters",
                                         set_subtitle: "Rename chapters to 'Chapter 1', 'Chapter 2', etc.",
-                                        #[watch]
                                         set_active: model.settings.chapters.rename,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::ChapterRenameChanged(row.is_active()));
@@ -597,7 +574,6 @@ impl Component for SettingsDialog {
                                     adw::SwitchRow {
                                         set_title: "Snap to Keyframes",
                                         set_subtitle: "Adjust chapter times to nearest keyframe",
-                                        #[watch]
                                         set_active: model.settings.chapters.snap_enabled,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::ChapterSnapChanged(row.is_active()));
@@ -607,9 +583,7 @@ impl Component for SettingsDialog {
                                     adw::ComboRow {
                                         set_title: "Snap Mode",
                                         set_model: Some(&gtk::StringList::new(SNAP_MODES)),
-                                        #[watch]
                                         set_selected: model.settings.chapters.snap_mode.to_index() as u32,
-                                        #[watch]
                                         set_sensitive: model.settings.chapters.snap_enabled,
                                         connect_selected_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::SnapModeChanged(row.selected()));
@@ -624,7 +598,6 @@ impl Component for SettingsDialog {
                                             model.settings.chapters.snap_threshold_ms as f64,
                                             50.0, 2000.0, 50.0, 100.0, 0.0
                                         ),
-                                        #[watch]
                                         set_sensitive: model.settings.chapters.snap_enabled,
                                         connect_value_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::SnapThresholdChanged(row.value().to_string()));
@@ -634,9 +607,7 @@ impl Component for SettingsDialog {
                                     adw::SwitchRow {
                                         set_title: "Snap Starts Only",
                                         set_subtitle: "Only snap chapter start times, not ends",
-                                        #[watch]
                                         set_active: model.settings.chapters.snap_starts_only,
-                                        #[watch]
                                         set_sensitive: model.settings.chapters.snap_enabled,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::SnapStartsOnlyChanged(row.is_active()));
@@ -657,7 +628,6 @@ impl Component for SettingsDialog {
                                 adw::SwitchRow {
                                     set_title: "Disable Track Stats Tags",
                                     set_subtitle: "Don't write statistics tags to output",
-                                    #[watch]
                                     set_active: model.settings.postprocess.disable_track_stats_tags,
                                     connect_active_notify[sender] => move |row| {
                                         sender.input(SettingsMsg::DisableTrackStatsChanged(row.is_active()));
@@ -667,7 +637,6 @@ impl Component for SettingsDialog {
                                 adw::SwitchRow {
                                     set_title: "Disable Header Compression",
                                     set_subtitle: "Improves compatibility with some players",
-                                    #[watch]
                                     set_active: model.settings.postprocess.disable_header_compression,
                                     connect_active_notify[sender] => move |row| {
                                         sender.input(SettingsMsg::DisableHeaderCompressionChanged(row.is_active()));
@@ -677,7 +646,6 @@ impl Component for SettingsDialog {
                                 adw::SwitchRow {
                                     set_title: "Apply Dialog Normalization",
                                     set_subtitle: "Apply dialnorm gain from audio tracks",
-                                    #[watch]
                                     set_active: model.settings.postprocess.apply_dialog_norm,
                                     connect_active_notify[sender] => move |row| {
                                         sender.input(SettingsMsg::ApplyDialogNormChanged(row.is_active()));
@@ -701,7 +669,6 @@ impl Component for SettingsDialog {
                                     adw::SwitchRow {
                                         set_title: "Compact Logging",
                                         set_subtitle: "Use shorter log format",
-                                        #[watch]
                                         set_active: model.settings.logging.compact,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::CompactLoggingChanged(row.is_active()));
@@ -711,7 +678,6 @@ impl Component for SettingsDialog {
                                     adw::SwitchRow {
                                         set_title: "Autoscroll",
                                         set_subtitle: "Auto-scroll log to bottom",
-                                        #[watch]
                                         set_active: model.settings.logging.autoscroll,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::AutoscrollChanged(row.is_active()));
@@ -721,7 +687,6 @@ impl Component for SettingsDialog {
                                     adw::SwitchRow {
                                         set_title: "Archive Logs",
                                         set_subtitle: "Archive logs to zip after batch completion",
-                                        #[watch]
                                         set_active: model.settings.logging.archive_logs,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::ArchiveLogsChanged(row.is_active()));
@@ -761,7 +726,6 @@ impl Component for SettingsDialog {
                                     adw::SwitchRow {
                                         set_title: "Show Options (Pretty)",
                                         set_subtitle: "Log mkvmerge options in readable format",
-                                        #[watch]
                                         set_active: model.settings.logging.show_options_pretty,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::ShowOptionsPrettyChanged(row.is_active()));
@@ -771,7 +735,6 @@ impl Component for SettingsDialog {
                                     adw::SwitchRow {
                                         set_title: "Show Options (JSON)",
                                         set_subtitle: "Log mkvmerge options as raw JSON",
-                                        #[watch]
                                         set_active: model.settings.logging.show_options_json,
                                         connect_active_notify[sender] => move |row| {
                                             sender.input(SettingsMsg::ShowOptionsJsonChanged(row.is_active()));

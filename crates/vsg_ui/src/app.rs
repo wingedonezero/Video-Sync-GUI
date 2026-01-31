@@ -393,7 +393,6 @@ impl Component for App {
                     // Archive logs checkbox
                     gtk::CheckButton {
                         set_label: Some("Archive logs to zip on batch completion"),
-                        #[watch]
                         set_active: model.archive_logs,
                         connect_toggled[sender] => move |btn| {
                             sender.input(AppMsg::ArchiveLogsChanged(btn.is_active()));
@@ -441,7 +440,6 @@ impl Component for App {
                                 gtk::Entry {
                                     set_hexpand: true,
                                     set_placeholder_text: Some("Drop file or Ctrl+V to paste path..."),
-                                    #[watch]
                                     set_text: &model.source1_path,
                                     connect_changed[sender] => move |entry| {
                                         sender.input(AppMsg::SourcePathChanged(1, entry.text().to_string()));
@@ -469,7 +467,6 @@ impl Component for App {
                                 gtk::Entry {
                                     set_hexpand: true,
                                     set_placeholder_text: Some("Drop file or Ctrl+V to paste path..."),
-                                    #[watch]
                                     set_text: &model.source2_path,
                                     connect_changed[sender] => move |entry| {
                                         sender.input(AppMsg::SourcePathChanged(2, entry.text().to_string()));
@@ -497,7 +494,6 @@ impl Component for App {
                                 gtk::Entry {
                                     set_hexpand: true,
                                     set_placeholder_text: Some("Drop file or Ctrl+V to paste path..."),
-                                    #[watch]
                                     set_text: &model.source3_path,
                                     connect_changed[sender] => move |entry| {
                                         sender.input(AppMsg::SourcePathChanged(3, entry.text().to_string()));
