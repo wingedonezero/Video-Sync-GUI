@@ -145,7 +145,7 @@ impl Component for AddJobDialog {
 
     fn init(
         init: Self::Init,
-        _root: Self::Root,
+        root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
         let mut model = AddJobDialog {
@@ -190,6 +190,16 @@ impl Component for AddJobDialog {
             glib::idle_add_local_once(move || {
                 let _ = sender.send(AddJobOutput::Cancelled);
             });
+        });
+
+        // Window close button
+        let output_sender = sender.output_sender().clone();
+        root.connect_close_request(move |_| {
+            let sender = output_sender.clone();
+            glib::idle_add_local_once(move || {
+                let _ = sender.send(AddJobOutput::Cancelled);
+            });
+            glib::Propagation::Proceed
         });
 
         ComponentParts { model, widgets }

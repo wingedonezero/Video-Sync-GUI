@@ -318,6 +318,16 @@ impl Component for JobQueueDialog {
             });
         });
 
+        // Window close button
+        let output_sender = sender.output_sender().clone();
+        root.connect_close_request(move |_| {
+            let sender = output_sender.clone();
+            glib::idle_add_local_once(move || {
+                let _ = sender.send(JobQueueOutput::Closed);
+            });
+            glib::Propagation::Proceed
+        });
+
         // ListBox row activation
         let input_sender = sender.input_sender().clone();
         widgets.job_list.connect_row_activated(move |_, row| {
@@ -328,7 +338,7 @@ impl Component for JobQueueDialog {
         ComponentParts { model, widgets }
     }
 
-    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, root: &Self::Root) {
+    fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
         match msg {
             JobQueueMsg::SelectJob(idx, ctrl_pressed, shift_pressed) => {
                 let job_count = {
@@ -452,7 +462,10 @@ impl Component for JobQueueDialog {
             }
 
             JobQueueMsg::ConfigureJob(idx) => {
-                let _ = sender.output(JobQueueOutput::OpenManualSelection(idx));
+                let output_sender = sender.output_sender().clone();
+                glib::idle_add_local_once(move || {
+                    let _ = output_sender.send(JobQueueOutput::OpenManualSelection(idx));
+                });
             }
 
             JobQueueMsg::CopyLayout(idx) => {
@@ -616,13 +629,13 @@ impl JobQueueDialog {
 
                 // Add click gesture for selection with Ctrl/Shift support
                 let gesture = gtk::GestureClick::new();
-                let sender_click = sender.clone();
+                let input_sender = sender.input_sender().clone();
                 let job_idx = job.index;
                 gesture.connect_pressed(move |gesture, _n_press, _x, _y| {
                     let modifiers = gesture.current_event_state();
                     let ctrl = modifiers.contains(gtk::gdk::ModifierType::CONTROL_MASK);
                     let shift = modifiers.contains(gtk::gdk::ModifierType::SHIFT_MASK);
-                    sender_click.input(JobQueueMsg::SelectJob(job_idx, ctrl, shift));
+                    let _ = input_sender.send(JobQueueMsg::SelectJob(job_idx, ctrl, shift));
                 });
                 row.add_controller(gesture);
 
@@ -632,10 +645,10 @@ impl JobQueueDialog {
                     .valign(gtk::Align::Center)
                     .build();
 
-                let sender_cfg = sender.clone();
+                let input_sender = sender.input_sender().clone();
                 let cfg_idx = job.index;
                 configure_btn.connect_clicked(move |_| {
-                    sender_cfg.input(JobQueueMsg::ConfigureJob(cfg_idx));
+                    let _ = input_sender.send(JobQueueMsg::ConfigureJob(cfg_idx));
                 });
 
                 row.add_suffix(&configure_btn);
