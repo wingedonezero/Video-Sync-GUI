@@ -20,6 +20,7 @@ from ..models.media import StreamProps, Track
 
 if TYPE_CHECKING:
     from ..io.runner import CommandRunner
+    from ..models.settings import AppSettings
     from ..orchestrator.steps.context import Context
 
 
@@ -50,7 +51,7 @@ class AudioSegment:
 
 def generate_edl_from_correlation(
     chunks: list[dict],
-    config: dict,
+    settings: AppSettings,
     runner: CommandRunner,
     diagnosis_details: dict | None = None,
 ) -> list[AudioSegment]:
@@ -117,7 +118,7 @@ def generate_edl_from_correlation(
                     return []
 
     # Group consecutive chunks by delay (within tolerance)
-    tolerance_ms = config.get("segment_triage_std_dev_ms", 50)
+    tolerance_ms = settings.segment_triage_std_dev_ms
     edl = []
     current_delay_ms = accepted[0]["delay"]
     current_delay_raw = accepted[0].get("raw_delay", float(current_delay_ms))
@@ -190,10 +191,10 @@ def _get_audio_properties(
 
 
 class SteppingCorrector:
-    def __init__(self, runner: CommandRunner, tool_paths: dict, config: dict):
+    def __init__(self, runner: CommandRunner, tool_paths: dict, settings: AppSettings):
         self.runner = runner
         self.tool_paths = tool_paths
-        self.config = config
+        self.settings = settings
         self.log = runner._log_message
         self.audit_metadata = []  # Store audit metadata for quality checks
 
@@ -311,7 +312,7 @@ class SteppingCorrector:
         noise_floor = np.median(abs_c) + 1e-9
         confidence_ratio = peak_val / noise_floor
 
-        min_confidence = self.config.get("segment_min_confidence_ratio", 5.0)
+        min_confidence = self.settings.segment_min_confidence_ratio
         if confidence_ratio < min_confidence:
             return None
 
@@ -334,9 +335,9 @@ class SteppingCorrector:
         self.log(
             "  [SteppingCorrector] Stage 1: Performing coarse scan to find delay zones..."
         )
-        chunk_duration_s = self.config.get("segment_coarse_chunk_s", 15)
-        step_duration_s = self.config.get("segment_coarse_step_s", 60)
-        locality_s = self.config.get("segment_search_locality_s", 10)
+        chunk_duration_s = self.settings.segment_coarse_chunk_s
+        step_duration_s = self.settings.segment_coarse_step_s
+        locality_s = self.settings.segment_search_locality_s
 
         chunk_samples = int(chunk_duration_s * sample_rate)
         step_samples = int(step_duration_s * sample_rate)
@@ -346,8 +347,8 @@ class SteppingCorrector:
         duration_s = len(ref_pcm) / float(sample_rate)
 
         # Use stepping-specific scan ranges (independent from main analysis settings)
-        start_pct = self.config.get("stepping_scan_start_percentage", 5.0)
-        end_pct = self.config.get("stepping_scan_end_percentage", 99.0)
+        start_pct = self.settings.stepping_scan_start_percentage
+        end_pct = self.settings.stepping_scan_end_percentage
         scan_start_s = duration_s * (start_pct / 100.0)
         scan_end_s = duration_s * (end_pct / 100.0)
         start_offset_samples = int(scan_start_s * sample_rate)
@@ -409,9 +410,9 @@ class SteppingCorrector:
         )
 
         # Configuration for iterative binary search
-        fine_chunk_s = self.config.get("segment_fine_chunk_s", 2.0)
-        locality_s = self.config.get("segment_search_locality_s", 10)
-        iterations = self.config.get("segment_fine_iterations", 10)
+        fine_chunk_s = self.settings.segment_fine_chunk_s
+        locality_s = self.settings.segment_search_locality_s
+        iterations = self.settings.segment_fine_iterations
 
         chunk_samples = int(fine_chunk_s * sample_rate)
         locality_samples = int(locality_s * sample_rate)
@@ -723,7 +724,7 @@ class SteppingCorrector:
         Returns:
             List of tuples (start_s, end_s) for each speech region
         """
-        if not self.config.get("stepping_vad_enabled", True):
+        if not self.settings.stepping_vad_enabled:
             return []
 
         try:
@@ -733,8 +734,8 @@ class SteppingCorrector:
             self.log("    - [VAD] Install with: pip install webrtcvad-wheels")
             return []
 
-        aggressiveness = self.config.get("stepping_vad_aggressiveness", 2)
-        frame_duration_ms = self.config.get("stepping_vad_frame_duration_ms", 30)
+        aggressiveness = self.settings.stepping_vad_aggressiveness
+        frame_duration_ms = self.settings.stepping_vad_frame_duration_ms
 
         # VAD only works with specific sample rates
         vad_sample_rate = 16000 if sample_rate >= 16000 else 8000
@@ -805,10 +806,10 @@ class SteppingCorrector:
         Returns:
             List of timestamps where transients occur
         """
-        if not self.config.get("stepping_transient_detection_enabled", True):
+        if not self.settings.stepping_transient_detection_enabled:
             return []
 
-        threshold_db = self.config.get("stepping_transient_threshold", 8.0)
+        threshold_db = self.settings.stepping_transient_threshold
 
         start_sample = max(0, int(start_s * sample_rate))
         end_sample = min(len(pcm), int(end_s * sample_rate))
@@ -872,19 +873,17 @@ class SteppingCorrector:
         Returns:
             Tuple of (new_boundary_position, audit_metadata_dict) or (original_boundary, None)
         """
-        if not self.config.get("stepping_snap_to_silence", True):
+        if not self.settings.stepping_snap_to_silence:
             return boundary_s, None
 
         self.log(
             f"    - [Smart Boundary] Analyzing target audio near {boundary_s:.3f}s..."
         )
 
-        detection_method = self.config.get(
-            "stepping_silence_detection_method", "smart_fusion"
-        )
-        search_window_s = self.config.get("stepping_silence_search_window_s", 5.0)
-        threshold_db = self.config.get("stepping_silence_threshold_db", -40.0)
-        min_duration_ms = self.config.get("stepping_silence_min_duration_ms", 100.0)
+        detection_method = self.settings.stepping_silence_detection_method
+        search_window_s = self.settings.stepping_silence_search_window_s
+        threshold_db = self.settings.stepping_silence_threshold_db
+        min_duration_ms = self.settings.stepping_silence_min_duration_ms
 
         # Search for silence zones around the boundary
         search_start = max(0, boundary_s - search_window_s)
@@ -895,8 +894,8 @@ class SteppingCorrector:
 
         if detection_method == "ffmpeg_silencedetect" and analysis_file:
             # Use FFmpeg's silencedetect for frame-accurate detection
-            ffmpeg_threshold = self.config.get("stepping_ffmpeg_silence_noise", -40.0)
-            ffmpeg_duration = self.config.get("stepping_ffmpeg_silence_duration", 0.1)
+            ffmpeg_threshold = self.settings.stepping_ffmpeg_silence_noise
+            ffmpeg_duration = self.settings.stepping_ffmpeg_silence_duration
             silence_zones = self._find_silence_zones_ffmpeg(
                 analysis_file,
                 search_start,
@@ -918,12 +917,8 @@ class SteppingCorrector:
             # Use multi-signal fusion approach
             # Try FFmpeg first if available, fallback to RMS
             if analysis_file:
-                ffmpeg_threshold = self.config.get(
-                    "stepping_ffmpeg_silence_noise", -40.0
-                )
-                ffmpeg_duration = self.config.get(
-                    "stepping_ffmpeg_silence_duration", 0.1
-                )
+                ffmpeg_threshold = self.settings.stepping_ffmpeg_silence_noise
+                ffmpeg_duration = self.settings.stepping_ffmpeg_silence_duration
                 silence_zones = self._find_silence_zones_ffmpeg(
                     analysis_file,
                     search_start,
@@ -980,15 +975,16 @@ class SteppingCorrector:
 
         if detection_method == "smart_fusion":
             # Detect speech regions to avoid
-            if self.config.get("stepping_vad_enabled", True) and self.config.get(
-                "stepping_vad_avoid_speech", True
+            if (
+                self.settings.stepping_vad_enabled
+                and self.settings.stepping_vad_avoid_speech
             ):
                 speech_regions = self._detect_speech_regions_vad(
                     analysis_pcm, sample_rate, search_start, search_end
                 )
 
             # Detect transients to avoid
-            if self.config.get("stepping_transient_detection_enabled", True):
+            if self.settings.stepping_transient_detection_enabled:
                 transients = self._detect_transients(
                     analysis_pcm, sample_rate, search_start, search_end
                 )
@@ -998,12 +994,12 @@ class SteppingCorrector:
         best_score = -float("inf")  # Higher score is better
 
         # Get scoring weights
-        weight_silence = self.config.get("stepping_fusion_weight_silence", 10)
-        weight_no_speech = self.config.get("stepping_fusion_weight_no_speech", 8)
-        weight_duration = self.config.get("stepping_fusion_weight_duration", 2)
-        weight_no_transient = self.config.get("stepping_fusion_weight_no_transient", 3)
+        weight_silence = self.settings.stepping_fusion_weight_silence
+        weight_no_speech = self.settings.stepping_fusion_weight_no_speech
+        weight_duration = self.settings.stepping_fusion_weight_duration
+        weight_no_transient = self.settings.stepping_fusion_weight_no_transient
         transient_avoid_window_ms = (
-            self.config.get("stepping_transient_avoid_window_ms", 50) / 1000.0
+            self.settings.stepping_transient_avoid_window_ms / 1000.0
         )
 
         for zone_start, zone_end, avg_db in silence_zones:
@@ -1203,11 +1199,11 @@ class SteppingCorrector:
         Returns:
             New boundary position (or original if no suitable frame found)
         """
-        if not self.config.get("stepping_snap_to_video_frames", False):
+        if not self.settings.stepping_snap_to_video_frames:
             return boundary_s
 
-        snap_mode = self.config.get("stepping_video_snap_mode", "scenes")
-        max_offset = self.config.get("stepping_video_snap_max_offset_s", 2.0)
+        snap_mode = self.settings.stepping_video_snap_mode
+        max_offset = self.settings.stepping_video_snap_max_offset_s
 
         self.log(
             f"    - [Video Snap] Analyzing reference video near {boundary_s:.3f}s..."
@@ -1259,11 +1255,9 @@ class SteppingCorrector:
             Tuple of (extracted_pcm, correlation_score, fill_type)
             fill_type: 'content' if good match found, 'silence' otherwise
         """
-        fill_mode = self.config.get("stepping_fill_mode", "auto")
-        correlation_threshold = self.config.get(
-            "stepping_content_correlation_threshold", 0.5
-        )
-        search_window_s = self.config.get("stepping_content_search_window_s", 5.0)
+        fill_mode = self.settings.stepping_fill_mode
+        correlation_threshold = self.settings.stepping_content_correlation_threshold
+        search_window_s = self.settings.stepping_content_search_window_s
 
         # Force silence mode if configured
         if fill_mode == "silence":
@@ -1413,10 +1407,10 @@ class SteppingCorrector:
         )
         final_edl = []
 
-        r_squared_threshold = self.config.get("segment_drift_r2_threshold", 0.75)
-        slope_threshold = self.config.get("segment_drift_slope_threshold", 0.7)
-        outlier_sensitivity = self.config.get("segment_drift_outlier_sensitivity", 1.5)
-        scan_buffer_pct = self.config.get("segment_drift_scan_buffer_pct", 2.0)
+        r_squared_threshold = self.settings.segment_drift_r2_threshold
+        slope_threshold = self.settings.segment_drift_slope_threshold
+        outlier_sensitivity = self.settings.segment_drift_outlier_sensitivity
+        scan_buffer_pct = self.settings.segment_drift_scan_buffer_pct
         pcm_duration_s = len(analysis_pcm) / float(sample_rate)
 
         for i, current_segment in enumerate(edl):
@@ -1451,7 +1445,7 @@ class SteppingCorrector:
             )  # Min 5 scans, or ~1 per 20 seconds
             chunk_samples = int(scan_chunk_s * sample_rate)
             locality_samples = int(
-                self.config.get("segment_search_locality_s", 10) * sample_rate
+                self.settings.segment_search_locality_s * sample_rate
             )
 
             # Edge buffer to avoid scanning near segment boundaries where stepping transitions occur
@@ -1780,9 +1774,7 @@ class SteppingCorrector:
                     tempo_ratio = 1000.0 / (1000.0 + segment.drift_rate_ms_s)
                     corrected_file = assembly_dir / f"segment_{i:03d}_corrected.flac"
 
-                    resample_engine = self.config.get(
-                        "segment_resample_engine", "aresample"
-                    )
+                    resample_engine = self.settings.segment_resample_engine
                     filter_chain = ""
 
                     if resample_engine == "rubberband":
@@ -1791,17 +1783,17 @@ class SteppingCorrector:
                         )
                         rb_opts = [f"tempo={tempo_ratio}"]
 
-                        if not self.config.get("segment_rb_pitch_correct", False):
+                        if not self.settings.segment_rb_pitch_correct:
                             rb_opts.append(f"pitch={tempo_ratio}")
 
                         rb_opts.append(
-                            f"transients={self.config.get('segment_rb_transients', 'crisp')}"
+                            f"transients={self.settings.segment_rb_transients}"
                         )
 
-                        if self.config.get("segment_rb_smoother", True):
+                        if self.settings.segment_rb_smoother:
                             rb_opts.append("smoother=on")
 
-                        if self.config.get("segment_rb_pitchq", True):
+                        if self.settings.segment_rb_pitchq:
                             rb_opts.append("pitchq=on")
 
                         filter_chain = "rubberband=" + ":".join(rb_opts)
@@ -1999,17 +1991,18 @@ class SteppingCorrector:
                 )
 
         # Create QA config with overrides (use dict spread to avoid shallow copy issues)
-        qa_threshold = self.config.get("segmented_qa_threshold", 85.0)
-        qa_scan_chunks = self.config.get("segment_qa_chunk_count", 30)
-        qa_min_chunks = self.config.get("segment_qa_min_accepted_chunks", 28)
+        qa_threshold = self.settings.segmented_qa_threshold
+        qa_scan_chunks = self.settings.segment_qa_chunk_count
+        qa_min_chunks = self.settings.segment_qa_min_accepted_chunks
 
+        # Build QA config dict for run_audio_correlation (still uses dict interface)
         qa_config = {
-            **self.config,
+            **self.settings.to_dict(),
             "scan_chunk_count": qa_scan_chunks,
             "min_accepted_chunks": qa_min_chunks,
             "min_match_pct": qa_threshold,
-            "scan_start_percentage": self.config.get("scan_start_percentage", 5.0),
-            "scan_end_percentage": self.config.get("scan_end_percentage", 95.0),
+            "scan_start_percentage": self.settings.scan_start_percentage,
+            "scan_end_percentage": self.settings.scan_end_percentage,
         }
         self.log(
             f"  [QA] Using minimum match confidence of {qa_threshold:.1f}% within main scan window."
@@ -2017,7 +2010,7 @@ class SteppingCorrector:
 
         try:
             # Use analysis_lang_source1 to select correct Source 1 track for QA comparison
-            ref_lang = self.config.get("analysis_lang_source1")
+            ref_lang = self.settings.analysis_lang_source1
             results = run_audio_correlation(
                 ref_file=ref_file_path,
                 target_file=corrected_path,
@@ -2086,9 +2079,9 @@ class SteppingCorrector:
         analysis_pcm = None
 
         try:
-            # Use analysis_lang_source1 from config to select the right Source 1 track
+            # Use analysis_lang_source1 from settings to select the right Source 1 track
             # Falls back to first track if no language set or no match found
-            ref_lang = self.config.get("analysis_lang_source1")
+            ref_lang = self.settings.analysis_lang_source1
             ref_index, _ = get_audio_stream_info(
                 ref_file_path, ref_lang, self.runner, self.tool_paths
             )
@@ -2148,7 +2141,7 @@ class SteppingCorrector:
                 )
             )
 
-            triage_std_dev_ms = self.config.get("segment_triage_std_dev_ms", 50)
+            triage_std_dev_ms = self.settings.segment_triage_std_dev_ms
 
             for i in range(len(coarse_map) - 1):
                 zone_start_s, delay_before_ms, _delay_before_raw = coarse_map[i]
@@ -2282,7 +2275,7 @@ class SteppingCorrector:
                 self.log(
                     "  [SteppingCorrector] Decoding reference audio for Smart Fill capability..."
                 )
-                ref_lang = self.config.get("analysis_lang_source1")
+                ref_lang = self.settings.analysis_lang_source1
                 ref_index, _ = get_audio_stream_info(
                     ref_file_path, ref_lang, self.runner, self.tool_paths
                 )
@@ -2342,7 +2335,7 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
         if item.track.type == TrackType.AUDIO
     }
 
-    corrector = SteppingCorrector(runner, ctx.tool_paths, ctx.settings.to_dict())
+    corrector = SteppingCorrector(runner, ctx.tool_paths, ctx.settings)
     ref_file_path = ctx.sources.get("Source 1")
 
     for analysis_track_key, flag_info in ctx.segment_flags.items():
@@ -2465,10 +2458,8 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
                     preserved_item.is_default = False
                     original_props = preserved_item.track.props
 
-                    # Build preserved track name from config
-                    preserved_label = corrector.config.get(
-                        "stepping_preserved_track_label", ""
-                    )
+                    # Build preserved track name from settings
+                    preserved_label = corrector.settings.stepping_preserved_track_label
                     if preserved_label:
                         preserved_name = (
                             f"{original_props.name} ({preserved_label})"
@@ -2498,10 +2489,8 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
                         0  # FIXED: New FLAC has no container delay
                     )
 
-                    # Build corrected track name from config
-                    corrected_label = corrector.config.get(
-                        "stepping_corrected_track_label", ""
-                    )
+                    # Build corrected track name from settings
+                    corrected_label = corrector.settings.stepping_corrected_track_label
                     if corrected_label:
                         corrected_name = (
                             f"{original_props.name} ({corrected_label})"
