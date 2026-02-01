@@ -78,9 +78,7 @@ def run_linear_correction(ctx: Context, runner: CommandRunner) -> Context:
             tempo_ratio = 1000.0 / (1000.0 + drift_rate_ms_s)
             sample_rate = _get_sample_rate(str(original_path), runner, ctx.tool_paths)
 
-            resample_engine = ctx.settings_dict.get(
-                "segment_resample_engine", "aresample"
-            )
+            resample_engine = ctx.settings.segment_resample_engine
             filter_chain = ""
 
             if resample_engine == "rubberband":
@@ -89,17 +87,15 @@ def run_linear_correction(ctx: Context, runner: CommandRunner) -> Context:
                 )
                 rb_opts = [f"tempo={tempo_ratio}"]
 
-                if not ctx.settings_dict.get("segment_rb_pitch_correct", False):
+                if not ctx.settings.segment_rb_pitch_correct:
                     rb_opts.append(f"pitch={tempo_ratio}")
 
-                rb_opts.append(
-                    f"transients={ctx.settings_dict.get('segment_rb_transients', 'crisp')}"
-                )
+                rb_opts.append(f"transients={ctx.settings.segment_rb_transients}")
 
-                if ctx.settings_dict.get("segment_rb_smoother", True):
+                if ctx.settings.segment_rb_smoother:
                     rb_opts.append("smoother=on")
 
-                if ctx.settings_dict.get("segment_rb_pitchq", True):
+                if ctx.settings.segment_rb_pitchq:
                     rb_opts.append("pitchq=on")
 
                 filter_chain = "rubberband=" + ":".join(rb_opts)

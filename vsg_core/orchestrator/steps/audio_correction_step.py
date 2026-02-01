@@ -24,7 +24,7 @@ class AudioCorrectionStep:
     """
 
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
-        if not ctx.and_merge or not ctx.settings_dict.get("segmented_enabled", False):
+        if not ctx.and_merge or not ctx.settings.segmented_enabled:
             return ctx
 
         try:
