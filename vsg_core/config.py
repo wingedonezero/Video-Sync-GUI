@@ -31,6 +31,8 @@ import warnings
 from pathlib import Path
 from typing import Any
 
+from vsg_core.models import AppSettings
+
 
 class AppConfig:
     def __init__(self, settings_filename="settings.json"):
@@ -316,11 +318,11 @@ class AppConfig:
             "sync_stability_outlier_mode": "any",  # 'any' = flag any variance, 'threshold' = use custom threshold
             "sync_stability_outlier_threshold": 1.0,  # Custom outlier threshold in ms (when mode='threshold')
         }
-        self.settings = self.defaults.copy()
+        self.settings: AppSettings = None  # type: ignore  # Set by load()
         self._accessed_keys: set[str] = set()  # Track accessed keys for typo detection
         self._validation_enabled = True  # Can be disabled for backwards compatibility
         self.load()
-        self._ensure_types_coerced()  # Additional safety: ensure all values have correct types
+        # Note: _ensure_types_coerced() no longer needed - AppSettings handles types
         self.ensure_dirs_exist()
 
     def _validate_value(self, key: str, value: Any) -> tuple[bool, str | None]:
@@ -427,7 +429,7 @@ class AppConfig:
             Coerced value matching default's type
         """
         # If value is already the correct type, return as-is
-        if type(value) == type(default_value):
+        if type(value) is type(default_value):
             return value
 
         # Try to coerce to default's type
@@ -458,21 +460,13 @@ class AppConfig:
 
     def _ensure_types_coerced(self):
         """
-        Ensures all values in self.settings match the expected types from defaults.
+        Ensures all values in self.settings match the expected types.
 
-        This provides an additional safety layer for UI code that accesses
-        config.settings dict directly, bypassing the get() method.
+        Note: With AppSettings dataclass, this is a no-op since types are
+        handled by AppSettings.from_config().
         """
-        for key in list(
-            self.settings.keys()
-        ):  # Use list() to avoid dict size change during iteration
-            if key in self.defaults:
-                current_value = self.settings[key]
-                expected_type_value = self.defaults[key]
-                coerced_value = self._coerce_type(
-                    key, current_value, expected_type_value
-                )
-                self.settings[key] = coerced_value
+        # AppSettings dataclass handles type coercion in from_config()
+        pass
 
     def validate_all(self) -> list[str]:
         """
@@ -481,9 +475,12 @@ class AppConfig:
         Returns:
             List of validation error messages (empty if all valid)
         """
+        import dataclasses
+
         errors = []
-        for key, value in self.settings.items():
-            is_valid, error_msg = self._validate_value(key, value)
+        for field in dataclasses.fields(self.settings):
+            value = getattr(self.settings, field.name)
+            is_valid, error_msg = self._validate_value(field.name, value)
             if not is_valid:
                 errors.append(error_msg)
         return errors
@@ -550,28 +547,14 @@ class AppConfig:
                             loaded_settings[key] = coerced
                             changed = True
 
-                self.settings = loaded_settings
+                # Create AppSettings dataclass from the merged dict
+                self.settings = AppSettings.from_config(loaded_settings)
 
-                # Validate loaded settings
-                if self._validation_enabled:
-                    validation_errors = self.validate_all()
-                    if validation_errors:
-                        warnings.warn(
-                            f"Config validation found {len(validation_errors)} issue(s):\n"
-                            + "\n".join(f"  - {err}" for err in validation_errors[:5])
-                            + (
-                                f"\n  ... and {len(validation_errors) - 5} more"
-                                if len(validation_errors) > 5
-                                else ""
-                            ),
-                            UserWarning,
-                            stacklevel=2,
-                        )
             except (OSError, json.JSONDecodeError):
-                self.settings = self.defaults.copy()
+                self.settings = AppSettings.from_config(self.defaults)
                 changed = True
         else:
-            self.settings = self.defaults.copy()
+            self.settings = AppSettings.from_config(self.defaults)
             changed = True
 
         if changed:
@@ -579,9 +562,11 @@ class AppConfig:
 
     def save(self):
         try:
+            # Convert AppSettings to dict, only saving known keys
+            settings_dict = self.settings.to_dict()
             keys_to_save = self.defaults.keys()
             settings_to_save = {
-                k: self.settings.get(k) for k in keys_to_save if k in self.settings
+                k: settings_dict.get(k) for k in keys_to_save if k in settings_dict
             }
             with open(self.settings_path, "w", encoding="utf-8") as f:
                 json.dump(settings_to_save, f, indent=4)
@@ -590,13 +575,10 @@ class AppConfig:
 
     def get(self, key: str, default: Any = None) -> Any:
         """
-        Gets a config value with automatic type coercion.
+        Gets a config value from the AppSettings dataclass.
 
         Tracks accessed keys for typo detection. If a key is not in defaults
         and no default is provided, warns about potential typo.
-
-        Always coerces the value to match the expected type from defaults,
-        providing an additional safety layer against type mismatches.
         """
         self._accessed_keys.add(key)
 
@@ -608,17 +590,12 @@ class AppConfig:
                 stacklevel=2,
             )
 
-        value = self.settings.get(key, default)
-
-        # Apply type coercion if we have a default to match against
-        if key in self.defaults and value is not None:
-            value = self._coerce_type(key, value, self.defaults[key])
-
-        return value
+        # Use getattr to access AppSettings dataclass fields
+        return getattr(self.settings, key, default)
 
     def set(self, key: str, value: Any):
         """
-        Sets a config value with optional validation.
+        Sets a config value on the AppSettings dataclass.
 
         Validates the value before setting if validation is enabled.
         """
@@ -627,7 +604,8 @@ class AppConfig:
             if not is_valid:
                 raise ValueError(f"Invalid config value: {error_msg}")
 
-        self.settings[key] = value
+        # Use setattr to modify AppSettings dataclass fields
+        setattr(self.settings, key, value)
 
     def get_unrecognized_keys(self) -> builtins.set[str]:
         """
@@ -641,22 +619,21 @@ class AppConfig:
         """
         Returns set of keys in settings that are not in defaults.
 
-        These are invalid/orphaned entries that will be removed on next save.
+        Note: With AppSettings dataclass, this always returns empty set
+        since the dataclass has fixed fields.
         """
-        return set(self.settings.keys()) - set(self.defaults.keys())
+        # AppSettings dataclass has fixed fields, no orphaned keys possible
+        return set()
 
     def remove_orphaned_keys(self) -> builtins.set[str]:
         """
         Removes orphaned keys from settings and saves.
 
-        Returns the set of keys that were removed.
+        Note: With AppSettings dataclass, this is a no-op since there
+        are no orphaned keys.
         """
-        orphaned = self.get_orphaned_keys()
-        if orphaned:
-            for key in orphaned:
-                del self.settings[key]
-            self.save()
-        return orphaned
+        # AppSettings dataclass has fixed fields, nothing to remove
+        return set()
 
     def ensure_dirs_exist(self):
         Path(self.get("output_folder")).mkdir(parents=True, exist_ok=True)
