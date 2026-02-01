@@ -1057,7 +1057,7 @@ def get_available_backends() -> list[str]:
 
         pytesseract.get_tesseract_version()
         available.append("tesseract")
-    except:
+    except Exception:
         pass
 
     # Check EasyOCR

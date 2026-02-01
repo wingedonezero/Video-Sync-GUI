@@ -113,7 +113,7 @@ def extract_frame_as_image(
         del clip
         try:
             del clip_rgb
-        except:
+        except NameError:
             pass
         del core
         del img
