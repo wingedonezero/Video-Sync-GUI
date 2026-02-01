@@ -39,7 +39,8 @@ def _read_raw_ass_timestamps(
     """
     Read raw timestamp strings from an ASS file without full parsing.
 
-    Returns list of (start_str, end_str, text_preview) tuples for first N dialogue events.
+    Returns list of (start_str, end_str, style) tuples for first N events.
+    Reads both Dialogue and Comment lines to match SubtitleData.events order.
     Used for diagnostics to compare original file timestamps with parsed values.
     """
     results = []
@@ -58,10 +59,10 @@ def _read_raw_ass_timestamps(
         if not content:
             return results
 
-        # Pattern: Dialogue: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
-        # We want Start and End fields
+        # Pattern: Dialogue/Comment: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text
+        # Match both Dialogue and Comment lines to align with SubtitleData.events
         pattern = re.compile(
-            r"^Dialogue:\s*\d+,(\d+:\d+:\d+\.\d+),(\d+:\d+:\d+\.\d+),([^,]*),",
+            r"^(?:Dialogue|Comment):\s*\d+,(\d+:\d+:\d+\.\d+),(\d+:\d+:\d+\.\d+),([^,]*),",
             re.MULTILINE,
         )
 
