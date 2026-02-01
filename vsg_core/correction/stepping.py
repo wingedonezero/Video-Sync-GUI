@@ -8,17 +8,19 @@ import shutil
 from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from scipy.signal import correlate
 
 from ..analysis.audio_corr import get_audio_stream_info, run_audio_correlation
 from ..extraction.tracks import extract_tracks
-from ..io.runner import CommandRunner
 from ..models.enums import TrackType
 from ..models.media import StreamProps, Track
-from ..orchestrator.steps.context import Context
+
+if TYPE_CHECKING:
+    from ..io.runner import CommandRunner
+    from ..orchestrator.steps.context import Context
 
 
 class CorrectionVerdict(Enum):
@@ -82,7 +84,7 @@ def generate_edl_from_correlation(
             if invalid_clusters:
                 # Build list of invalid time ranges
                 invalid_time_ranges = []
-                for label in invalid_clusters.keys():
+                for label in invalid_clusters:
                     if label in validation_results:
                         time_range = validation_results[label]["time_range"]
                         invalid_time_ranges.append(time_range)
@@ -1904,7 +1906,7 @@ class SteppingCorrector:
         if correction_mode != "filtered":
             return coarse_map
 
-        valid_clusters = diagnosis_details.get("valid_clusters", {})
+        diagnosis_details.get("valid_clusters", {})
         invalid_clusters = diagnosis_details.get("invalid_clusters", {})
         validation_results = diagnosis_details.get("validation_results", {})
         fallback_mode = diagnosis_details.get("fallback_mode", "nearest")
@@ -2149,7 +2151,7 @@ class SteppingCorrector:
             triage_std_dev_ms = self.config.get("segment_triage_std_dev_ms", 50)
 
             for i in range(len(coarse_map) - 1):
-                zone_start_s, delay_before_ms, delay_before_raw = coarse_map[i]
+                zone_start_s, delay_before_ms, _delay_before_raw = coarse_map[i]
                 zone_end_s, delay_after_ms, delay_after_raw = coarse_map[i + 1]
                 if abs(delay_before_ms - delay_after_ms) < triage_std_dev_ms:
                     continue
@@ -2175,7 +2177,7 @@ class SteppingCorrector:
                     )
                 )
 
-            edl = sorted(list(set(edl)), key=lambda x: x.start_s)
+            edl = sorted(set(edl), key=lambda x: x.start_s)
 
             if len(edl) <= 1:
                 refined_delay = edl[0].delay_ms if edl else base_delay_ms

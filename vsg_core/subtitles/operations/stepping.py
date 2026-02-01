@@ -120,10 +120,7 @@ def _spans_boundary(start_s: float, end_s: float, edl: list) -> bool:
     if len(edl) <= 1:
         return False
 
-    for segment in edl[1:]:  # Skip first segment
-        if start_s < segment.start_s < end_s:
-            return True
-    return False
+    return any(start_s < segment.start_s < end_s for segment in edl[1:])
 
 
 def _get_offset_at_time(
@@ -180,7 +177,7 @@ def _get_offset_at_time(
 
         # Build boundaries within subtitle range
         boundaries = [seg.start_s for seg in edl] + [end_s]
-        boundaries = sorted(set([b for b in boundaries if start_s <= b <= end_s]))
+        boundaries = sorted({b for b in boundaries if start_s <= b <= end_s})
 
         if not boundaries or (len(boundaries) == 1 and boundaries[0] == end_s):
             return get_cumulative_offset_at_time(start_s)

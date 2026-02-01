@@ -11,12 +11,13 @@ All timing is float ms internally - rounding happens only at final save.
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ..sync_modes import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from ..data import OperationResult, SubtitleData
 
 

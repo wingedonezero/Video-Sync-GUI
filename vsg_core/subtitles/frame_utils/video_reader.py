@@ -13,6 +13,10 @@ from __future__ import annotations
 import gc
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from PIL import Image
 
 
 def _get_ffms2_cache_path(video_path: str, temp_dir: Path | None) -> Path:
@@ -189,11 +193,14 @@ def get_vapoursynth_frame_info(
         return None
     except Exception as e:
         runner._log_message(f"[VapourSynth] ERROR: Failed to index video: {e}")
-        # Ensure cleanup even on error
+        # Ensure cleanup even on error (variables may not exist if import failed)
         try:
             del clip
+        except NameError:
+            pass
+        try:
             del core
-        except:
+        except NameError:
             pass
         gc.collect()
         return None
@@ -225,9 +232,9 @@ class VideoReader:
         self,
         video_path: str,
         runner,
-        temp_dir: Path = None,
+        temp_dir: Path | None = None,
         deinterlace: str = "auto",
-        config: dict = None,
+        config: dict | None = None,
         **kwargs,
     ):
         self.video_path = video_path

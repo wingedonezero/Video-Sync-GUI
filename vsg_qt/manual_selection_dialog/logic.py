@@ -1,7 +1,12 @@
 # vsg_qt/manual_selection_dialog/logic.py
 from __future__ import annotations
 
-from vsg_qt.track_widget.ui import TrackWidget
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from vsg_qt.track_widget.ui import TrackWidget
+
+    from .ui import ManualSelectionDialog
 
 
 class ManualLogic:

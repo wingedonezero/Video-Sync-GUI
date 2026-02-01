@@ -152,7 +152,7 @@ class TimebaseFrameLockedSync(SyncPlugin):
 
             original_start = event.start_ms
             original_end = event.end_ms
-            original_duration = original_end - original_start
+            original_end - original_start
 
             # Apply delay
             delayed_start = original_start + frame_aligned_delay

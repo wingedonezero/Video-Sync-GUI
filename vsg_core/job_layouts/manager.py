@@ -25,13 +25,15 @@ from __future__ import annotations
 
 import hashlib
 from collections import defaultdict
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .persistence import LayoutPersistence
 from .signature import EnhancedSignatureGenerator
 from .validation import LayoutValidator
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class JobLayoutManager:

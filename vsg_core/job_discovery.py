@@ -42,11 +42,9 @@ def discover_jobs(sources: dict[str, str]) -> list[dict[str, dict[str, str]]]:
     # --- Single File Mode ---
     if source1_path.is_file():
         job_sources = {"Source 1": str(source1_path)}
-        has_other_sources = False
         for key, path in other_source_paths.items():
             if path.is_file():
                 job_sources[key] = str(path)
-                has_other_sources = True
 
         # CHANGE: Always return the job, even with only Source 1
         # This enables remux-only mode for processing a single file
@@ -68,12 +66,10 @@ def discover_jobs(sources: dict[str, str]) -> list[dict[str, dict[str, str]]]:
             and ref_file.suffix.lower() in [".mkv", ".mp4", ".m4v"]
         ):
             job_sources = {"Source 1": str(ref_file)}
-            has_other_sources = False
             for key, path in other_source_paths.items():
                 match_file = path / ref_file.name
                 if match_file.is_file():
                     job_sources[key] = str(match_file)
-                    has_other_sources = True
 
             # CHANGE: Allow single-source batch jobs (remux-only mode)
             # Always include the job, even if no matching files in other sources

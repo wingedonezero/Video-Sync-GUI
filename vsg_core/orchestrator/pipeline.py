@@ -6,9 +6,8 @@ Enhanced pipeline with comprehensive validation at each step.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from vsg_core.audit import AuditTrail
 from vsg_core.io.runner import CommandRunner
@@ -24,6 +23,9 @@ from vsg_core.orchestrator.steps import (
     SubtitlesStep,
 )
 from vsg_core.orchestrator.validation import PipelineValidationError, StepValidator
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class Orchestrator:
@@ -44,7 +46,7 @@ class Orchestrator:
         output_dir: str,
         manual_layout: list[dict[str, Any]],
         attachment_sources: list[str],
-        source_settings: dict[str, dict[str, Any]] = None,
+        source_settings: dict[str, dict[str, Any]] | None = None,
     ) -> Context:
         """
         Executes the pipeline steps with validation.

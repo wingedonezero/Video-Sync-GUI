@@ -735,10 +735,7 @@ class OCRPostProcessor:
             return True
 
         # End of line/sentence is more likely to be exclamation
-        if position == len(words) - 1:
-            return True
-
-        return False
+        return position == len(words) - 1
 
     def _apply_normalization(self, text: str, result: ProcessResult) -> str:
         """Apply text normalization fixes."""
@@ -925,10 +922,7 @@ class OCRPostProcessor:
             "us",
             "we",
         }
-        if word.lower() in common_short:
-            return True
-
-        return False
+        return word.lower() in common_short
 
     def _is_garbage_line(self, text: str, confidence: float = 100.0) -> bool:
         """

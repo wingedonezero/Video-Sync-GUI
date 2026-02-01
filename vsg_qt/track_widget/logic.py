@@ -1,7 +1,10 @@
 # vsg_qt/track_widget/logic.py
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .ui import TrackWidget
 
 
 class TrackWidgetLogic:
@@ -64,7 +67,6 @@ class TrackWidgetLogic:
         # NEW: Show custom language if set, otherwise show original
         original_lang = self.track_data.get("lang", "und")
         custom_lang = self.track_data.get("custom_lang", "")
-        display_lang = custom_lang if custom_lang else original_lang
 
         # Show indicator if language was customized
         lang_indicator = (

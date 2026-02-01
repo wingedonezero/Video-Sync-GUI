@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import warnings
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from sklearn.cluster import DBSCAN
 
-from ..io.runner import CommandRunner
+if TYPE_CHECKING:
+    from ..io.runner import CommandRunner
 
 
 def _build_cluster_diagnostics(
@@ -414,7 +415,7 @@ def diagnose_audio_issue(
     min_samples = config.get("detection_dbscan_min_samples", 2)
     delays_reshaped = delays.reshape(-1, 1)
     db = DBSCAN(eps=epsilon_ms, min_samples=min_samples).fit(delays_reshaped)
-    unique_clusters = set(label for label in db.labels_ if label != -1)
+    unique_clusters = {label for label in db.labels_ if label != -1}
 
     if len(unique_clusters) > 1:
         # Build cluster membership data
@@ -469,7 +470,7 @@ def diagnose_audio_issue(
 
             # Log cluster info
             status = "ACCEPTED" if validation["valid"] else "FILTERED OUT"
-            status_symbol = "✓" if validation["valid"] else "✗"
+            "✓" if validation["valid"] else "✗"
 
             runner._log_message(
                 f"  Cluster {label + 1} (@{time_start:.1f}s - {time_end:.1f}s): {mean_delay:+.0f}ms"
@@ -509,7 +510,7 @@ def diagnose_audio_issue(
         )
 
         # Decide whether to accept stepping based on correction mode
-        if correction_mode == "full" or correction_mode == "strict":
+        if correction_mode in {"full", "strict"}:
             # Full/Strict mode: Reject if ANY cluster is invalid
             if len(invalid_clusters) > 0:
                 runner._log_message(

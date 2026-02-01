@@ -3,14 +3,16 @@ from __future__ import annotations
 
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from vsg_core.extraction.tracks import extract_tracks, get_stream_info_with_delays
-from vsg_core.io.runner import CommandRunner
 from vsg_core.models.enums import TrackType
 from vsg_core.models.jobs import PlanItem
 from vsg_core.models.media import StreamProps, Track
-from vsg_core.orchestrator.steps.context import Context
+
+if TYPE_CHECKING:
+    from vsg_core.io.runner import CommandRunner
+    from vsg_core.orchestrator.steps.context import Context
 
 
 class ExtractStep:
@@ -237,7 +239,7 @@ class ExtractStep:
 
             # Fix: Ensure size_multiplier defaults to 1.0 and handle None/empty values
             size_mult = sel.get("size_multiplier")
-            if size_mult is None or size_mult == "" or size_mult == 0:
+            if size_mult is None or size_mult in {"", 0}:
                 plan_item.size_multiplier = 1.0
             else:
                 plan_item.size_multiplier = float(size_mult)

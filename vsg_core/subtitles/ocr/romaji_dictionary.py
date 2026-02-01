@@ -384,7 +384,6 @@ class KanaToRomaji:
         """
         result = []
         i = 0
-        prev_char = ""
 
         while i < len(text):
             matched = False
@@ -396,7 +395,7 @@ class KanaToRomaji:
 
                     # Handle sokuon (small tsu) - doubles the next consonant
                     if kana in ("っ", "ッ") and i + len(kana) < len(text):
-                        next_char = text[i + len(kana)]
+                        text[i + len(kana)]
                         # Look ahead for the next kana's romaji
                         for next_kana in self.sorted_kana:
                             if text[i + len(kana) :].startswith(next_kana):
@@ -470,9 +469,11 @@ class JMdictParser:
 
         # Open file (handle gzip)
         if str(file_path).endswith(".gz"):
-            open_func = lambda p: gzip.open(p, "rt", encoding="utf-8")
+            def open_func(p):
+                return gzip.open(p, "rt", encoding="utf-8")
         else:
-            open_func = lambda p: open(p, encoding="utf-8")
+            def open_func(p):
+                return open(p, encoding="utf-8")
 
         try:
             # Use iterparse for memory efficiency

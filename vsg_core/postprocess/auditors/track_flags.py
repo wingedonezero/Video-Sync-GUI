@@ -16,7 +16,6 @@ class TrackFlagsAuditor(BaseAuditor):
         """
         issues = 0
         actual_tracks = final_mkvmerge_data.get("tracks", [])
-        plan_items = self.ctx.extracted_items
 
         # Group tracks by type for proper default flag checking
         video_tracks = [

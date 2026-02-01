@@ -1,11 +1,16 @@
 # vsg_qt/manual_selection_dialog/widgets.py
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QAbstractItemView, QListWidget, QListWidgetItem, QMenu
 
 from vsg_qt.track_widget import TrackWidget
+
+if TYPE_CHECKING:
+    from .ui import ManualSelectionDialog
 
 
 class SourceList(QListWidget):

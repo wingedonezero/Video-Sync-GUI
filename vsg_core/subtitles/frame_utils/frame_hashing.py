@@ -13,7 +13,10 @@ from __future__ import annotations
 
 import gc
 import io
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from PIL import Image
 
 
 def compute_perceptual_hash(

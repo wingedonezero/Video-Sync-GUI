@@ -116,7 +116,7 @@ def _analyze_uniform(
         }
 
     std_delay = stdev(raw_delays)
-    var_delay = variance(raw_delays)
+    variance(raw_delays)
 
     # Find min/max
     min_delay = min(raw_delays)
@@ -232,7 +232,7 @@ def _analyze_with_clusters(
             continue
 
         cluster_mean = mean(cluster_delays)
-        cluster_std = stdev(cluster_delays)
+        stdev(cluster_delays)
         cluster_min = min(cluster_delays)
         cluster_max = max(cluster_delays)
         cluster_variance = cluster_max - cluster_min

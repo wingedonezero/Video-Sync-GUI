@@ -2,15 +2,17 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from vsg_core.analysis.audio_corr import run_audio_correlation, run_multi_correlation
 from vsg_core.analysis.drift_detection import diagnose_audio_issue
 from vsg_core.analysis.sync_stability import analyze_sync_stability
 from vsg_core.extraction.tracks import get_stream_info, get_stream_info_with_delays
-from vsg_core.io.runner import CommandRunner
 from vsg_core.models.jobs import Delays
-from vsg_core.orchestrator.steps.context import Context
+
+if TYPE_CHECKING:
+    from vsg_core.io.runner import CommandRunner
+    from vsg_core.orchestrator.steps.context import Context
 
 
 def _format_track_details(track: dict[str, Any], index: int) -> str:
@@ -28,7 +30,7 @@ def _format_track_details(track: dict[str, Any], index: int) -> str:
 
     # Language
     lang = props.get("language", "und")
-    lang_name = props.get("language_ietf", "") or props.get("track_name", "")
+    props.get("language_ietf", "") or props.get("track_name", "")
 
     # Codec - extract readable name from codec_id
     codec_id = props.get("codec_id", "unknown")
@@ -290,7 +292,7 @@ def _choose_final_delay(
         counts = Counter(delays)
         cluster_info = {}  # key: representative delay, value: {raw_values, early_count, first_chunk_idx}
 
-        for delay_val in counts.keys():
+        for delay_val in counts:
             # Collect all chunks within ±1ms of this delay value
             cluster_raw_values = []
             early_count = 0
@@ -321,7 +323,7 @@ def _choose_final_delay(
         if early_stable_clusters:
             # Pick the cluster that appears earliest
             early_stable_clusters.sort(key=lambda x: x[1]["first_chunk_idx"])
-            winner_delay, winner_info = early_stable_clusters[0]
+            _winner_delay, winner_info = early_stable_clusters[0]
 
             # Average the raw values in this cluster
             raw_avg = sum(winner_info["raw_values"]) / len(winner_info["raw_values"])
@@ -445,7 +447,7 @@ def _choose_final_delay_raw(
         counts = Counter(delays)
         cluster_info = {}  # key: representative delay, value: {raw_values, early_count, first_chunk_idx}
 
-        for delay_val in counts.keys():
+        for delay_val in counts:
             # Collect all chunks within ±1ms of this delay value
             cluster_raw_values = []
             early_count = 0
@@ -476,7 +478,7 @@ def _choose_final_delay_raw(
         if early_stable_clusters:
             # Pick the cluster that appears earliest
             early_stable_clusters.sort(key=lambda x: x[1]["first_chunk_idx"])
-            winner_delay, winner_info = early_stable_clusters[0]
+            _winner_delay, winner_info = early_stable_clusters[0]
 
             # Average the raw values in this cluster
             raw_avg = sum(winner_info["raw_values"]) / len(winner_info["raw_values"])
@@ -648,14 +650,12 @@ class AnalysisStep:
             ]
 
             # Log Source 1 track selection for clarity
-            source1_selected_index = None
             if ref_lang:
                 for idx, track in enumerate(audio_tracks):
                     if (
                         track.get("properties", {}).get("language", "") or ""
                     ).strip().lower() == ref_lang:
                         source1_audio_track_id = track.get("id")
-                        source1_selected_index = idx
                         runner._log_message(
                             f"[Source 1] Selected (lang={ref_lang}): {_format_track_details(track, idx)}"
                         )
@@ -663,7 +663,6 @@ class AnalysisStep:
 
             if source1_audio_track_id is None and audio_tracks:
                 source1_audio_track_id = audio_tracks[0].get("id")
-                source1_selected_index = 0
                 runner._log_message(
                     f"[Source 1] Selected (first track): {_format_track_details(audio_tracks[0], 0)}"
                 )
@@ -885,7 +884,7 @@ class AnalysisStep:
 
                 # Use the first method's results for actual processing
                 # (or the dropdown method if we want to be smarter about this)
-                first_method = list(all_method_results.keys())[0]
+                first_method = next(iter(all_method_results.keys()))
                 results = all_method_results[first_method]
                 runner._log_message(
                     f"[MULTI-CORRELATION] Using '{first_method}' results for delay calculation"

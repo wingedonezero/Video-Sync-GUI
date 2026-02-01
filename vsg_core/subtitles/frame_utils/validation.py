@@ -10,8 +10,10 @@ Contains:
 from __future__ import annotations
 
 import gc
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 def extract_frame_as_image(
@@ -77,8 +79,6 @@ def extract_frame_as_image(
 
         # Convert frame to RGB for PIL
         # VapourSynth frame format is planar, need to convert to interleaved
-        width = frame.width
-        height = frame.height
 
         # Read planes (YUV or RGB depending on format)
         # Convert to RGB24 first if needed
@@ -124,11 +124,14 @@ def extract_frame_as_image(
         runner._log_message(
             f"[VapourSynth] ERROR: Failed to extract frame {frame_number}: {e}"
         )
-        # Cleanup on error
+        # Cleanup on error (variables may not exist if import failed)
         try:
             del clip
+        except NameError:
+            pass
+        try:
             del core
-        except:
+        except NameError:
             pass
         gc.collect()
         return None
@@ -140,7 +143,7 @@ def validate_frame_alignment(
     subtitle_events: list,
     duration_offset_ms: float,
     runner,
-    config: dict = None,
+    config: dict | None = None,
     temp_dir: Path | None = None,
 ) -> dict[str, Any]:
     """

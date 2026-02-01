@@ -375,7 +375,7 @@ class VobSubParser(SubtitleImageParser):
 
         # First two bytes are total size (we already have the data)
         # Next two bytes are offset to control sequence
-        data_size = struct.unpack(">H", data[0:2])[0]
+        struct.unpack(">H", data[0:2])[0]
         ctrl_offset = struct.unpack(">H", data[2:4])[0]
 
         if ctrl_offset >= len(data):

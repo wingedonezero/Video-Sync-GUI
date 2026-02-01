@@ -246,7 +246,7 @@ class ReportViewer(QDialog):
             stability_item = QTableWidgetItem(stability_text)
             stability_item.setTextAlignment(Qt.AlignCenter)
             # Color coding for stability issues
-            if stability_text != "-" and stability_text != "OK":
+            if stability_text not in {"-", "OK"}:
                 stability_item.setForeground(QColor("#856404"))
             self.table.setItem(row, 5, stability_item)
 

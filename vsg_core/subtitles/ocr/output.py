@@ -514,7 +514,7 @@ def create_subtitle_data_from_ocr(
         total_fixes_applied=total_fixes,
         positioned_subtitles=positioned_count,
         fixes_by_type=fixes_by_type,
-        unknown_words=[info for info in unknown_words_map.values()],
+        unknown_words=list(unknown_words_map.values()),
     )
 
     return data

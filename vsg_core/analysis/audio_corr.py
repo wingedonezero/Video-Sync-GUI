@@ -7,13 +7,16 @@ Implements a decode-once strategy for improved accuracy and consistency.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy.signal import butter, correlate, firwin, lfilter
 
-from ..io.runner import CommandRunner
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from ..io.runner import CommandRunner
 
 # --- Language Normalization ---
 _LANG2TO3 = {

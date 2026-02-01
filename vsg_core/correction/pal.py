@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import copy
+from typing import TYPE_CHECKING
 
-from ..io.runner import CommandRunner
 from ..models.enums import TrackType
 from ..models.media import StreamProps, Track
-from ..orchestrator.steps.context import Context
+
+if TYPE_CHECKING:
+    from ..io.runner import CommandRunner
+    from ..orchestrator.steps.context import Context
 
 
 def run_pal_correction(ctx: Context, runner: CommandRunner) -> Context:

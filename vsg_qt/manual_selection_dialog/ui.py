@@ -6,9 +6,8 @@ import re
 import shutil
 import sys
 import time
-from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -33,10 +32,15 @@ from vsg_core.io.runner import CommandRunner
 from vsg_core.subtitles.convert import convert_srt_to_ass
 from vsg_core.subtitles.style_engine import StyleEngine
 from vsg_qt.subtitle_editor import SubtitleEditorWindow
-from vsg_qt.track_widget import TrackWidget
 
 from .logic import ManualLogic
 from .widgets import FinalList, SourceList
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from vsg_core.config import AppConfig
+    from vsg_qt.track_widget import TrackWidget
 
 
 class ManualSelectionDialog(QDialog):

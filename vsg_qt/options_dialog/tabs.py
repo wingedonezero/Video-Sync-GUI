@@ -377,7 +377,7 @@ class OCRTab(QWidget):
         dialog = OCRDictionaryDialog(self)
         dialog.exec()
 
-    def _update_font_preview(self, ratio: float = None):
+    def _update_font_preview(self, ratio: float | None = None):
         """Update the font size preview label with calculated values."""
         if ratio is None:
             ratio = self.widgets["ocr_font_size_ratio"].value()

@@ -19,7 +19,7 @@ def verify_correlation_with_frame_snap(
     pure_correlation_delay_ms: float,
     fps: float,
     runner,
-    config: dict = None,
+    config: dict | None = None,
 ) -> dict[str, Any]:
     """
     Verify frame alignment and calculate precise ms refinement from anchor frames.
@@ -198,7 +198,6 @@ def verify_correlation_with_frame_snap(
                 )
                 search_end = predicted_target_center_frame + search_range_frames
 
-                best_offset_frames = 0
                 best_total_distance = float("inf")
                 best_matched_center = predicted_target_center_frame
 
@@ -237,7 +236,7 @@ def verify_correlation_with_frame_snap(
 
                     if total_distance < best_total_distance:
                         best_total_distance = total_distance
-                        best_offset_frames = (
+                        (
                             target_center - predicted_target_center_frame
                         )
                         best_matched_center = target_center
@@ -315,7 +314,7 @@ def verify_alignment_with_sliding_window(
     subtitle_events: list,
     duration_offset_ms: float,
     runner,
-    config: dict = None,
+    config: dict | None = None,
 ) -> dict[str, Any]:
     """
     Hybrid verification with TEMPORAL CONSISTENCY: Use duration offset as starting
@@ -407,7 +406,6 @@ def verify_alignment_with_sliding_window(
 
     fps = source_reader.fps or 23.976
     frame_duration_ms = 1000.0 / fps
-    num_frames = 11  # center ± 5
 
     for i, event in enumerate(checkpoints):
         checkpoint_time_ms = event.start

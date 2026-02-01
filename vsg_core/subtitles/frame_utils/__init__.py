@@ -88,36 +88,36 @@ from .video_reader import (
 # Public API
 # ============================================================================
 __all__ = [
-    # Timing
-    "time_to_frame_floor",
-    "frame_to_time_floor",
-    "time_to_frame_middle",
-    "frame_to_time_middle",
-    "time_to_frame_aegisub",
-    "frame_to_time_aegisub",
+    # Video reader
+    "VideoReader",
     "clear_vfr_cache",
-    "get_vfr_timestamps",
-    "frame_to_time_vfr",
-    "time_to_frame_vfr",
+    "compare_frames",
+    "compare_video_properties",
+    "compute_frame_hash",
+    "compute_hamming_distance",
+    "compute_mse",
+    # Frame hashing
+    "compute_perceptual_hash",
+    "compute_ssim",
+    # Scene detection
+    "detect_scene_changes",
     # Video properties
     "detect_video_fps",
     "detect_video_properties",
-    "get_video_properties",
-    "get_video_duration_ms",
-    "compare_video_properties",
-    # Scene detection
-    "detect_scene_changes",
-    # Video reader
-    "VideoReader",
-    "get_vapoursynth_frame_info",
-    # Frame hashing
-    "compute_perceptual_hash",
-    "compute_frame_hash",
-    "compute_hamming_distance",
-    "compute_ssim",
-    "compute_mse",
-    "compare_frames",
     # Validation
     "extract_frame_as_image",
+    "frame_to_time_aegisub",
+    "frame_to_time_floor",
+    "frame_to_time_middle",
+    "frame_to_time_vfr",
+    "get_vapoursynth_frame_info",
+    "get_vfr_timestamps",
+    "get_video_duration_ms",
+    "get_video_properties",
+    "time_to_frame_aegisub",
+    # Timing
+    "time_to_frame_floor",
+    "time_to_frame_middle",
+    "time_to_frame_vfr",
     "validate_frame_alignment",
 ]

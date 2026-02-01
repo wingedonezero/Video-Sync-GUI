@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import zipfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QThreadPool, QTimer
 from PySide6.QtWidgets import QMessageBox
 
-from vsg_core.config import AppConfig
 from vsg_core.job_discovery import discover_jobs
 from vsg_core.job_layouts import JobLayoutManager
 from vsg_core.reporting import ReportWriter
@@ -15,6 +15,11 @@ from vsg_qt.job_queue_dialog import JobQueueDialog
 from vsg_qt.options_dialog import OptionsDialog
 from vsg_qt.report_dialogs import BatchCompletionDialog
 from vsg_qt.worker import JobWorker
+
+if TYPE_CHECKING:
+    from vsg_core.config import AppConfig
+
+    from .window import MainWindow
 
 
 class MainController:

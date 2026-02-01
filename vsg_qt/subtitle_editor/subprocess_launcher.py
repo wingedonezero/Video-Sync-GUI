@@ -76,7 +76,7 @@ def main():
     # Initialize Qt application for this subprocess
     from PySide6.QtWidgets import QApplication
 
-    app = QApplication(sys.argv)
+    QApplication(sys.argv)
 
     # Import and create the editor
     from vsg_qt.subtitle_editor.editor_window import SubtitleEditorWindow

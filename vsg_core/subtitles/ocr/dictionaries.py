@@ -269,7 +269,7 @@ class OCRDictionaries:
         return False, "Failed to save rules"
 
     def remove_replacement(
-        self, pattern: str, rule_type: str = None
+        self, pattern: str, rule_type: str | None = None
     ) -> tuple[bool, str]:
         """Remove a replacement rule by pattern."""
         rules = self.load_replacements()
@@ -470,7 +470,7 @@ class OCRDictionaries:
                     confidence_gated=confidence_gated,
                 )
 
-                success, msg = self.add_replacement(rule)
+                success, _msg = self.add_replacement(rule)
                 if success:
                     added += 1
                 else:

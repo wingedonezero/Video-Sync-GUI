@@ -1,9 +1,13 @@
 # vsg_core/orchestrator/steps/chapters_step.py
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from vsg_core.chapters.process import process_chapters
-from vsg_core.io.runner import CommandRunner
-from vsg_core.orchestrator.steps.context import Context
+
+if TYPE_CHECKING:
+    from vsg_core.io.runner import CommandRunner
+    from vsg_core.orchestrator.steps.context import Context
 
 
 class ChaptersStep:

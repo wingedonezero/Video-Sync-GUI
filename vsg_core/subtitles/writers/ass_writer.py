@@ -9,10 +9,11 @@ Float milliseconds are converted to centiseconds here and only here.
 from __future__ import annotations
 
 import math
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from ..data import SubtitleData
 
 
@@ -158,8 +159,8 @@ def _write_script_info(data: SubtitleData, lines: list) -> None:
         return
 
     # Ensure critical fields exist (for files that might be missing them)
-    has_script_type = any(k.lower() == "scripttype" for k in data.script_info.keys())
-    has_collisions = any(k.lower() == "collisions" for k in data.script_info.keys())
+    has_script_type = any(k.lower() == "scripttype" for k in data.script_info)
+    has_collisions = any(k.lower() == "collisions" for k in data.script_info)
 
     for key, value in data.script_info.items():
         if key == "__comments__":

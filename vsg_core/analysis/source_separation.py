@@ -18,14 +18,17 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Callable
 from importlib import resources
 from math import gcd
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 from scipy.io import wavfile
 from scipy.signal import resample_poly
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 # Import GPU environment support
 if importlib.util.find_spec("vsg_core.system.gpu_env"):

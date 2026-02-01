@@ -1166,7 +1166,7 @@ class WordListsConfigTab(QWidget):
 
         # Update status
         total_words = sum(wl.word_count for wl in word_lists)
-        enabled_lists = sum(1 for wl in word_lists if wl.enabled)
+        sum(1 for wl in word_lists if wl.enabled)
         self.status_label.setText(
             f"{len(word_lists)} word lists configured, {total_words:,} total words"
         )

@@ -1,16 +1,16 @@
 # vsg_core/orchestrator/steps/context.py
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from vsg_core.models.jobs import Delays, PlanItem
-from vsg_core.models.settings import AppSettings
-
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
     from vsg_core.audit import AuditTrail
+    from vsg_core.models.jobs import Delays, PlanItem
+    from vsg_core.models.settings import AppSettings
 
 
 @dataclass

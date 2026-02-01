@@ -129,9 +129,7 @@ class MkvmergeOptionsBuilder:
                 )
 
             is_default = (
-                (i == first_video_idx)
-                or (i == default_audio_idx)
-                or (i == default_sub_idx)
+                i in (first_video_idx, default_audio_idx, default_sub_idx)
             )
 
             # NEW: Use custom language if set, otherwise use original from track

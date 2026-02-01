@@ -53,7 +53,7 @@ class CommandRunner:
             return None
 
         tool_name = cmd[0]
-        full_cmd = [tool_paths.get(tool_name, tool_name)] + list(map(str, cmd[1:]))
+        full_cmd = [tool_paths.get(tool_name, tool_name), *list(map(str, cmd[1:]))]
 
         try:
             pretty_cmd = " ".join(shlex.quote(str(c)) for c in full_cmd)

@@ -49,7 +49,7 @@ class FavoriteColorsManager:
                 data = json.load(f)
 
             # Handle version migrations if needed in the future
-            version = data.get("version", 1)
+            data.get("version", 1)
             self._favorites = data.get("favorites", [])
 
             # Validate loaded data
@@ -70,9 +70,7 @@ class FavoriteColorsManager:
         required_keys = ["id", "name", "hex"]
         if not all(key in fav for key in required_keys):
             return False
-        if not isinstance(fav["hex"], str) or not fav["hex"].startswith("#"):
-            return False
-        return True
+        return not (not isinstance(fav["hex"], str) or not fav["hex"].startswith("#"))
 
     def _save(self):
         """Save favorites to the JSON file."""

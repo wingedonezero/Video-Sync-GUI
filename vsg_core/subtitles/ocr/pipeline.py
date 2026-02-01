@@ -616,7 +616,7 @@ class OCRPipeline:
             for color in sub_image.palette:
                 if color and len(color) >= 3:
                     subtitle_colors.append(
-                        list(color[:4]) if len(color) >= 4 else list(color) + [255]
+                        list(color[:4]) if len(color) >= 4 else [*list(color), 255]
                     )
             # First non-transparent color is often the dominant text color
             for color in sub_image.palette:

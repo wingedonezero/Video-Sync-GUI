@@ -19,7 +19,6 @@ class ChaptersAuditor(BaseAuditor):
         - If chapters weren't processed: verifies final matches source
         Returns the number of issues found.
         """
-        issues = 0
 
         # Check if SOURCE has chapters
         source1_file = self.ctx.sources.get("Source 1")

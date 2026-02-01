@@ -4,16 +4,20 @@ from __future__ import annotations
 import re
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHeaderView, QMessageBox, QTableWidgetItem
 
 from vsg_core.extraction.tracks import get_track_info_for_dialog
 from vsg_core.io.runner import CommandRunner
-from vsg_core.job_layouts import JobLayoutManager
 from vsg_qt.add_job_dialog import AddJobDialog
 from vsg_qt.manual_selection_dialog import ManualSelectionDialog
+
+if TYPE_CHECKING:
+    from vsg_core.job_layouts import JobLayoutManager
+
+    from .ui import JobQueueDialog
 
 
 def natural_sort_key(s: str) -> list[Any]:

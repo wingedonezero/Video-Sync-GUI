@@ -20,7 +20,7 @@ class TrackSettingsDialog(QDialog):
     """Small popup dialog to edit per-track options."""
 
     def __init__(
-        self, track_type: str, codec_id: str, track_data: dict = None, **kwargs
+        self, track_type: str, codec_id: str, track_data: dict | None = None, **kwargs
     ):
         super().__init__()
         self.setWindowTitle("Track Settings")

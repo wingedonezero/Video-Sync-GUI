@@ -325,7 +325,7 @@ class EasyOCRBackend(OCRBackend):
     name = "easyocr"
 
     def __init__(
-        self, languages: list[str] = None, model_storage_directory: str = None
+        self, languages: list[str] | None = None, model_storage_directory: str | None = None
     ):
         self.languages = languages or ["en"]
         self._reader = None
@@ -593,7 +593,7 @@ class PaddleOCRBackend(OCRBackend):
     def __init__(
         self,
         language: str = "en",
-        model_storage_directory: str = None,
+        model_storage_directory: str | None = None,
         drop_score: float = 0.5,
         force_cpu: bool = False,
     ):

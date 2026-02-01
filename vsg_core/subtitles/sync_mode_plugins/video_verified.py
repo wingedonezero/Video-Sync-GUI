@@ -161,7 +161,7 @@ def calculate_video_verified_offset(
         hash_threshold = int(config.get("interlaced_hash_threshold", 25))
         window_radius = int(config.get("frame_window_radius", 5))
         comparison_method = config.get("interlaced_comparison_method", "ssim")
-        interlaced_fallback_to_audio = config.get("interlaced_fallback_to_audio", True)
+        config.get("interlaced_fallback_to_audio", True)
     else:
         num_checkpoints = config.get("video_verified_num_checkpoints", 5)
         search_range_frames = config.get("video_verified_search_range_frames", 3)
@@ -170,7 +170,6 @@ def calculate_video_verified_offset(
         hash_threshold = int(config.get("frame_hash_threshold", 5))
         window_radius = int(config.get("frame_window_radius", 5))
         comparison_method = config.get("frame_comparison_method", "hash")
-        interlaced_fallback_to_audio = True  # Default behavior
 
     log(
         f"[VideoVerified] Checkpoints: {num_checkpoints}, Search: ±{search_range_frames} frames"
@@ -782,7 +781,7 @@ def _measure_frame_offset_quality_static(
             distances.append(initial_distance)
 
             # Now verify with sequence of consecutive frames
-            seq_matched, seq_avg_dist, seq_distances = _verify_frame_sequence_static(
+            seq_matched, seq_avg_dist, _seq_distances = _verify_frame_sequence_static(
                 source_frame_idx,
                 target_frame_idx,
                 sequence_verify_length,

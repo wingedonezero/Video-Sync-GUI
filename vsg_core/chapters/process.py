@@ -9,7 +9,7 @@ from .keyframes import probe_keyframes_ns
 
 def _parse_ns(t: str) -> int:
     hh, mm, rest = t.strip().split(":")
-    ss, frac = (rest.split(".") + ["0"])[:2]
+    ss, frac = ([*rest.split("."), "0"])[:2]
     frac = (frac + "000000000")[:9]
     return (int(hh) * 3600 + int(mm) * 60 + int(ss)) * 1_000_000_000 + int(frac)
 

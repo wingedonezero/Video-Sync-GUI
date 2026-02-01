@@ -1,7 +1,7 @@
 # vsg_qt/job_queue_dialog/ui.py
 from __future__ import annotations
 
-from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QItemSelectionModel, Qt
 from PySide6.QtGui import QKeySequence, QShortcut
@@ -19,6 +19,12 @@ from PySide6.QtWidgets import (
 from vsg_qt.add_job_dialog import AddJobDialog
 
 from .logic import JobQueueLogic
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from vsg_core.config import AppConfig
+    from vsg_core.job_layouts import JobLayoutManager
 
 
 class JobQueueDialog(QDialog):

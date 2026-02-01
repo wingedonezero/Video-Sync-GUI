@@ -77,7 +77,7 @@ def extract_attachments(
         runner._log_message(
             f"[Attachments] Found {total_attachments} attachments, extracting {font_count} font file(s)..."
         )
-        runner.run(["mkvextract", str(mkv), "attachments"] + specs, tool_paths)
+        runner.run(["mkvextract", str(mkv), "attachments", *specs], tool_paths)
     else:
         runner._log_message(
             f"[Attachments] Found {total_attachments} attachments, but none were identified as fonts."

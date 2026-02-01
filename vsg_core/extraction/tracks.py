@@ -362,7 +362,7 @@ def extract_tracks(
         runner._log_message(
             f"[{role}] Extracting {len(specs)} track(s) with mkvextract..."
         )
-        result = runner.run(["mkvextract", str(mkv), "tracks"] + specs, tool_paths)
+        result = runner.run(["mkvextract", str(mkv), "tracks", *specs], tool_paths)
 
         if result is None:
             runner._log_message(f"[{role}] [ERROR] mkvextract command failed!")

@@ -280,7 +280,7 @@ class SubtitleEditorWindow(QDialog):
         self._state.save_preview()
         print(f"[EditorWindow] Saved preview to: {self._state.preview_path}")
 
-    def _reload_video_subtitles(self, style_name: str = None):
+    def _reload_video_subtitles(self, style_name: str | None = None):
         """Reload video subtitles after changes."""
         if self._state.preview_path:
             print(

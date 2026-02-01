@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import json
 import shutil
-from collections.abc import Callable
 from datetime import datetime
-from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
 
 class LayoutPersistence:

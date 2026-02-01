@@ -197,7 +197,7 @@ def clear_vfr_cache():
     gc.collect()  # Force garbage collection to release nanobind objects
 
 
-def get_vfr_timestamps(video_path: str, fps: float, runner, config: dict = None):
+def get_vfr_timestamps(video_path: str, fps: float, runner, config: dict | None = None):
     """
     Get appropriate timestamp handler based on video type.
 
@@ -286,7 +286,7 @@ def get_vfr_timestamps(video_path: str, fps: float, runner, config: dict = None)
 
 
 def frame_to_time_vfr(
-    frame_num: int, video_path: str, fps: float, runner, config: dict = None
+    frame_num: int, video_path: str, fps: float, runner, config: dict | None = None
 ) -> int | None:
     """
     MODE: VFR (VideoTimestamps-based).
@@ -323,7 +323,7 @@ def frame_to_time_vfr(
 
 
 def time_to_frame_vfr(
-    time_ms: float, video_path: str, fps: float, runner, config: dict = None
+    time_ms: float, video_path: str, fps: float, runner, config: dict | None = None
 ) -> int | None:
     """
     MODE: VFR using VideoTimestamps.

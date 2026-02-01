@@ -5,12 +5,16 @@ Audio correction step with proper error handling and validation.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from vsg_core.correction.linear import run_linear_correction
 from vsg_core.correction.pal import run_pal_correction
 from vsg_core.correction.stepping import run_stepping_correction
-from vsg_core.io.runner import CommandRunner
 from vsg_core.models.enums import TrackType
-from vsg_core.orchestrator.steps.context import Context
+
+if TYPE_CHECKING:
+    from vsg_core.io.runner import CommandRunner
+    from vsg_core.orchestrator.steps.context import Context
 
 
 class AudioCorrectionStep:

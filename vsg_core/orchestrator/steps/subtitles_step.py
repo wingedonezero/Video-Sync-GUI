@@ -25,12 +25,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from vsg_core.io.runner import CommandRunner
+    from vsg_core.orchestrator.steps.context import Context
     from vsg_core.subtitles.data import SubtitleData
 
-from vsg_core.io.runner import CommandRunner
 from vsg_core.models.enums import TrackType
 from vsg_core.models.media import StreamProps, Track
-from vsg_core.orchestrator.steps.context import Context
 
 
 def _read_raw_ass_timestamps(
@@ -306,7 +306,7 @@ class SubtitlesStep:
         from vsg_core.subtitles.data import SubtitleData as SubtitleDataClass
 
         subtitle_sync_mode = ctx.settings_dict.get("subtitle_sync_mode", "time-based")
-        logs_dir = Path(ctx.settings_dict.get("logs_folder", ctx.temp_dir))
+        Path(ctx.settings_dict.get("logs_folder", ctx.temp_dir))
 
         # ================================================================
         # STEP 1: Load into SubtitleData (or use provided)

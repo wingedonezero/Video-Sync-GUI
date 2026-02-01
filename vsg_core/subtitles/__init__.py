@@ -35,25 +35,25 @@ from .edit_plan import (
 )
 
 __all__ = [
-    # Data containers
-    "SubtitleData",
-    "SubtitleEvent",
-    "SubtitleStyle",
-    "OCREventData",
-    "OCRMetadata",
-    "SyncEventData",
-    "SteppingEventData",
-    "OperationRecord",
-    "OperationResult",
+    "ApplyResult",
     "EmbeddedFont",
     "EmbeddedGraphic",
-    # Edit plan system
-    "SubtitleEditPlan",
     "EventEdit",
-    "StyleEdit",
+    "EventGroup",
+    "GroupDefinition",
     "NewEventSpec",
     "NewStyleSpec",
-    "GroupDefinition",
-    "EventGroup",
-    "ApplyResult",
+    "OCREventData",
+    "OCRMetadata",
+    "OperationRecord",
+    "OperationResult",
+    "SteppingEventData",
+    "StyleEdit",
+    # Data containers
+    "SubtitleData",
+    # Edit plan system
+    "SubtitleEditPlan",
+    "SubtitleEvent",
+    "SubtitleStyle",
+    "SyncEventData",
 ]

@@ -84,8 +84,8 @@ Dialogue: 1,0:00:15.00,0:00:18.99,Signs,,0,0,0,,{\\pos(100,200)}Sign text here
         assert event0.end_ms == 4560.0, f"Expected 4560.0, got {event0.end_ms}"
 
         # Check comment detection
-        assert data.events[2].is_comment == True
-        assert data.events[0].is_comment == False
+        assert data.events[2].is_comment
+        assert not data.events[0].is_comment
 
         # Check style parsing
         default_style = data.styles["Default"]
@@ -279,7 +279,7 @@ def test_float_precision_through_pipeline():
     ]
 
     # Apply multiple operations
-    result1 = data.apply_sync(
+    data.apply_sync(
         mode="time-based",
         total_delay_ms=100.333,
         global_shift_ms=100.333,
@@ -287,7 +287,7 @@ def test_float_precision_through_pipeline():
     )
 
     # Apply another delay
-    result2 = data.apply_sync(
+    data.apply_sync(
         mode="time-based",
         total_delay_ms=50.666,
         global_shift_ms=50.666,
@@ -314,7 +314,7 @@ def test_float_precision_through_pipeline():
 
         # Read raw file to check timing format
         with open(temp_output) as f:
-            content = f.read()
+            f.read()
 
         print("  Output file written")
 
@@ -452,7 +452,7 @@ def test_timebase_frame_locked_sync():
     )
 
     print(f"  Without video: success={result.success}")
-    assert result.success == False, "Should fail without target video"
+    assert not result.success, "Should fail without target video"
     assert "Target video required" in result.error
 
     # Test with fake video path (will use fallback calculation)

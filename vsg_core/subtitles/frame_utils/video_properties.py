@@ -300,7 +300,7 @@ def detect_video_properties(video_path: str, runner) -> dict[str, Any]:
 
 
 def get_video_properties(
-    video_path: str, runner, tool_paths: dict = None
+    video_path: str, runner, tool_paths: dict | None = None
 ) -> dict[str, Any]:
     """
     Get video properties including resolution.

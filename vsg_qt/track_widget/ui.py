@@ -1,6 +1,8 @@
 # vsg_qt/track_widget/ui.py
 from __future__ import annotations
 
+from typing import Any
+
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -25,7 +27,7 @@ class TrackWidget(QWidget):
         track_data: dict,
         available_sources: list[str],
         parent=None,
-        source_settings: dict = None,
+        source_settings: dict | None = None,
     ):
         super().__init__(parent)
         self.track_data = track_data

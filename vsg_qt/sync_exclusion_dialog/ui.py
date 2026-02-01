@@ -27,7 +27,7 @@ class SyncExclusionDialog(QDialog):
     in anchor mode (they will use corrected offset instead).
     """
 
-    def __init__(self, track_data: dict, existing_config: dict = None, parent=None):
+    def __init__(self, track_data: dict, existing_config: dict | None = None, parent=None):
         super().__init__(parent)
         self.track_data = track_data
         self.existing_config = existing_config  # For editing existing exclusions
