@@ -1133,26 +1133,6 @@ def _read_audio_file(path: Path) -> tuple[int, np.ndarray]:
     return sample_rate, np.ascontiguousarray(data)
 
 
-def _resolve_separation_settings(config: dict) -> tuple[str, str]:
-    mode = config.get("source_separation_mode")
-    model_filename = config.get("source_separation_model", DEFAULT_MODEL)
-
-    if mode is None:
-        legacy_value = config.get("source_separation_model", "")
-        legacy_map = {
-            "Demucs - Music/Effects (Strip Vocals)": "instrumental",
-            "Demucs - Vocals Only": "vocals",
-        }
-        if legacy_value in legacy_map:
-            mode = legacy_map[legacy_value]
-            model_filename = DEFAULT_MODEL
-
-    if mode not in SEPARATION_MODES:
-        mode = "none"
-
-    return mode, model_filename
-
-
 def _log_separator_stderr(log: Callable[[str], None], stderr: str) -> None:
     last_progress = -10
     # Fixed regex pattern: single backslash to match pipe character
@@ -1184,11 +1164,6 @@ def _log_separator_stderr(log: Callable[[str], None], stderr: str) -> None:
         if info_pattern.match(line) and not warning_pattern.match(line):
             continue
         log(f"[SOURCE SEPARATION] {line}")
-
-
-def is_separation_enabled(config: dict) -> bool:
-    mode, _ = _resolve_separation_settings(config)
-    return SEPARATION_MODES.get(mode) is not None
 
 
 def separate_audio(
