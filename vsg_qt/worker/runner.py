@@ -10,9 +10,7 @@ from .signals import WorkerSignals
 
 
 class JobWorker(QRunnable):
-    def __init__(
-        self, config: dict[str, Any], jobs: list[dict], and_merge: bool, output_dir: str
-    ):
+    def __init__(self, config: Any, jobs: list[dict], and_merge: bool, output_dir: str):
         super().__init__()
         self.config = config
         self.jobs = jobs
