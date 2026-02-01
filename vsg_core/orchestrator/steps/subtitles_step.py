@@ -1217,7 +1217,7 @@ class SubtitlesStep:
                     target_video=str(source1_file),
                     total_delay_ms=total_delay_ms,
                     global_shift_ms=global_shift_ms,
-                    config=ctx.settings.to_dict(),
+                    settings=ctx.settings,
                     runner=runner,
                     temp_dir=ctx.temp_dir,
                 )
@@ -1344,7 +1344,7 @@ class SubtitlesStep:
                 target_video=str(target_video),
                 total_delay_ms=total_delay_ms,
                 global_shift_ms=global_shift_ms,
-                config=ctx.settings.to_dict(),
+                settings=ctx.settings,
                 runner=runner,
                 temp_dir=ctx.temp_dir,
             )

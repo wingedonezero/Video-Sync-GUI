@@ -56,7 +56,7 @@ class ChaptersStep:
                 ctx.temp_dir,
                 runner,
                 ctx.tool_paths,
-                ctx.settings.to_dict(),
+                ctx.settings,
                 shift_ms,
             )
 
