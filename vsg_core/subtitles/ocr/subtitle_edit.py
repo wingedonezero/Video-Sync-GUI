@@ -809,7 +809,10 @@ class SubtitleEditCorrector:
 
         # Check SE valid words (names, spell_words, etc.)
         all_valid = self.dicts.get_all_valid_words()
-        return bool(clean_word in all_valid or clean_word.lower() in {w.lower() for w in all_valid})
+        return bool(
+            clean_word in all_valid
+            or clean_word.lower() in {w.lower() for w in all_valid}
+        )
 
     def _try_fix_word(self, word: str) -> tuple[str, str | None]:
         """

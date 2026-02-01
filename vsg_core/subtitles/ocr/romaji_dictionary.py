@@ -469,9 +469,11 @@ class JMdictParser:
 
         # Open file (handle gzip)
         if str(file_path).endswith(".gz"):
+
             def open_func(p):
                 return gzip.open(p, "rt", encoding="utf-8")
         else:
+
             def open_func(p):
                 return open(p, encoding="utf-8")
 

@@ -236,9 +236,7 @@ def verify_correlation_with_frame_snap(
 
                     if total_distance < best_total_distance:
                         best_total_distance = total_distance
-                        (
-                            target_center - predicted_target_center_frame
-                        )
+                        (target_center - predicted_target_center_frame)
                         best_matched_center = target_center
 
                 # Calculate refinement

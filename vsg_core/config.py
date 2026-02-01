@@ -350,7 +350,9 @@ class AppConfig:
             if not isinstance(value, (int, float)):
                 return False, f"{key} must be numeric, got {type(value).__name__}"
             if value > 0:
-                warnings.warn(f"{key} is typically negative (dB), got {value}", stacklevel=2)
+                warnings.warn(
+                    f"{key} is typically negative (dB), got {value}", stacklevel=2
+                )
 
         elif key.endswith(
             ("_count", "_chunks", "_samples", "_taps", "_workers", "_points")
@@ -441,7 +443,8 @@ class AppConfig:
             # Coercion failed, return default value
             warnings.warn(
                 f"Config key '{key}' has invalid value '{value}', using default: {default_value}",
-                UserWarning, stacklevel=2,
+                UserWarning,
+                stacklevel=2,
             )
             return default_value
 
@@ -553,7 +556,8 @@ class AppConfig:
                                 if len(validation_errors) > 5
                                 else ""
                             ),
-                            UserWarning, stacklevel=2,
+                            UserWarning,
+                            stacklevel=2,
                         )
             except (OSError, json.JSONDecodeError):
                 self.settings = self.defaults.copy()

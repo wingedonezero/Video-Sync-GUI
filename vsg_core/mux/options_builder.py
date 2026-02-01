@@ -128,9 +128,7 @@ class MkvmergeOptionsBuilder:
                     sync_key=sync_key,
                 )
 
-            is_default = (
-                i in (first_video_idx, default_audio_idx, default_sub_idx)
-            )
+            is_default = i in (first_video_idx, default_audio_idx, default_sub_idx)
 
             # NEW: Use custom language if set, otherwise use original from track
             lang_code = (

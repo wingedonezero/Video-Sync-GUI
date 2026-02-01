@@ -393,7 +393,10 @@ class ModelManagerDialog(QDialog):
         self.progress_label.setText(message)
 
     def _on_download_finished(
-        self, success: bool, error_message: str = "", downloaded_model: dict | None = None
+        self,
+        success: bool,
+        error_message: str = "",
+        downloaded_model: dict | None = None,
     ):
         """Handle download completion."""
         self.progress_bar.setVisible(False)
