@@ -246,7 +246,9 @@ def _build_ocr_settings(settings: AppSettings, lang: str) -> dict:
         "ocr_bottom_threshold": settings.ocr_bottom_threshold,
         "ocr_video_width": settings.ocr_video_width,
         "ocr_video_height": settings.ocr_video_height,
+        "ocr_font_size_ratio": settings.ocr_font_size_ratio,
         # Reporting
+        "ocr_generate_report": settings.ocr_generate_report,
         "ocr_save_debug_images": settings.ocr_save_debug_images,
         # Debug output - saves images and text files for problem subtitles
         "ocr_debug_output": settings.ocr_debug_output,

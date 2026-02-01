@@ -81,8 +81,8 @@ class MkvmergeOptionsBuilder:
 
             # Record delay calculation in audit trail
             sync_key = item.sync_to if tr.source == "External" else tr.source
-            stepping_adj = getattr(item, "stepping_adjusted", False)
-            frame_adj = getattr(item, "frame_adjusted", False)
+            stepping_adj = item.stepping_adjusted
+            frame_adj = item.frame_adjusted
 
             # Determine reason for delay value
             if tr.source == "Source 1" and tr.type == TrackType.VIDEO:
@@ -249,7 +249,7 @@ class MkvmergeOptionsBuilder:
         # If subtitle timestamps were already adjusted with frame-perfect sync,
         # the delay is baked into the subtitle file with frame-snapping applied.
         # Don't apply additional delay via mkvmerge to avoid double-applying.
-        if tr.type == TrackType.SUBTITLES and getattr(item, "frame_adjusted", False):
+        if tr.type == TrackType.SUBTITLES and item.frame_adjusted:
             return 0
 
         sync_key = item.sync_to if tr.source == "External" else tr.source

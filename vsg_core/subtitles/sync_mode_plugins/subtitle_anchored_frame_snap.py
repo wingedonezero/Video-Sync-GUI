@@ -262,7 +262,7 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
         try:
             source_reader.close()
             target_reader.close()
-        except:
+        except Exception:
             pass
 
         # Check if we have enough matches

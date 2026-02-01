@@ -131,7 +131,7 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
         # Try to get video duration for anchor calculation
         try:
             source_duration = get_video_duration_ms(source_video, runner)
-        except:
+        except Exception:
             # Estimate from last subtitle
             if subtitle_data.events:
                 source_duration = max(e.end_ms for e in subtitle_data.events) + 60000
@@ -270,7 +270,7 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
         try:
             source_reader.close()
             target_reader.close()
-        except:
+        except Exception:
             pass
 
         # Determine final offset

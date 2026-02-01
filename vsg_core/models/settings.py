@@ -384,6 +384,8 @@ class AppSettings:
     # OCR Debug & Runtime
     ocr_debug_output: bool  # Save debug output by issue type
     ocr_run_in_subprocess: bool  # Run OCR in subprocess to release memory
+    ocr_font_size_ratio: float  # Font size as % of PlayResY (5.80 = 28pt at 480p)
+    ocr_generate_report: bool  # Generate detailed OCR quality report
 
     @classmethod
     def from_config(cls, cfg: dict) -> AppSettings:
@@ -485,9 +487,7 @@ class AppSettings:
                 cfg.get("corr_anchor_anchor_positions", [10, 50, 90])
             ),
             # Subtitle-Anchored Frame Snap Settings
-            sub_anchor_fallback_mode=str(
-                cfg.get("sub_anchor_fallback_mode", "abort")
-            ),
+            sub_anchor_fallback_mode=str(cfg.get("sub_anchor_fallback_mode", "abort")),
             # Duration Align Settings
             duration_align_verify_with_frames=bool(
                 cfg.get("duration_align_verify_with_frames", False)
@@ -532,7 +532,9 @@ class AppSettings:
             interlaced_search_range_frames=int(
                 cfg.get("interlaced_search_range_frames", 5)
             ),
-            interlaced_hash_algorithm=str(cfg.get("interlaced_hash_algorithm", "ahash")),
+            interlaced_hash_algorithm=str(
+                cfg.get("interlaced_hash_algorithm", "ahash")
+            ),
             interlaced_hash_size=int(cfg.get("interlaced_hash_size", 8)),
             interlaced_hash_threshold=int(cfg.get("interlaced_hash_threshold", 25)),
             interlaced_comparison_method=str(
@@ -830,6 +832,8 @@ class AppSettings:
             # OCR Debug & Runtime
             ocr_debug_output=bool(cfg.get("ocr_debug_output", False)),
             ocr_run_in_subprocess=bool(cfg.get("ocr_run_in_subprocess", True)),
+            ocr_font_size_ratio=float(cfg.get("ocr_font_size_ratio", 5.80)),
+            ocr_generate_report=bool(cfg.get("ocr_generate_report", True)),
         )
 
     def to_dict(self) -> dict:

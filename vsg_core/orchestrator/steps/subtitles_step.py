@@ -885,12 +885,10 @@ class SubtitlesStep:
                     events_modified=result.events_affected
                     if hasattr(result, "events_affected")
                     else 0,
-                    stepping_adjusted_before=getattr(item, "stepping_adjusted", False),
-                    stepping_adjusted_after=getattr(item, "stepping_adjusted", False),
-                    frame_adjusted_before=getattr(item, "frame_adjusted", False),
-                    frame_adjusted_after=getattr(
-                        item, "frame_adjusted", False
-                    ),  # Updated in caller
+                    stepping_adjusted_before=item.stepping_adjusted,
+                    stepping_adjusted_after=item.stepping_adjusted,
+                    frame_adjusted_before=item.frame_adjusted,
+                    frame_adjusted_after=item.frame_adjusted,  # Updated in caller
                 )
 
             return result

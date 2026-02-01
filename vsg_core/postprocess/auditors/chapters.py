@@ -292,7 +292,7 @@ class ChaptersAuditor(BaseAuditor):
         """Count ChapterAtom elements in XML."""
         try:
             return len(re.findall(r"<ChapterAtom>", xml_content))
-        except:
+        except Exception:
             return 0
 
     def _get_xpath_and_nsmap(self, root: ET.Element) -> tuple:
