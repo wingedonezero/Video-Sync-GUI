@@ -129,10 +129,168 @@ class AppSettings:
     video_verified_use_pts_precision: bool  # Use PTS for sub-frame precision
 
     # =========================================================================
+    # Analysis/Correlation Settings
+    # =========================================================================
+    source_separation_mode: str  # "none", "instrumental", "vocals"
+    source_separation_model: str  # Model filename or "default"
+    source_separation_device: str  # "auto", "cpu", "cuda", "rocm", "mps"
+    source_separation_timeout: int  # Timeout in seconds (0 = no timeout)
+    filtering_method: str  # "Dialogue Band-Pass Filter", etc.
+    correlation_method: (
+        str  # "SCC (Sliding Cross-Correlation)", "Phase Correlation (GCC-PHAT)"
+    )
+    correlation_method_source_separated: str  # Method for source-separated audio
+
+    # Delay Selection Settings
+    delay_selection_mode: str  # "Mode (Most Common)", "Average", "First Stable", etc.
+    delay_selection_mode_source_separated: str  # Delay mode for source-separated audio
+    min_accepted_chunks: int  # Minimum accepted chunks for valid result
+    first_stable_min_chunks: int  # Min chunks for first stable segment
+    first_stable_skip_unstable: bool  # Skip unstable segments
+    early_cluster_window: int  # Window size for early cluster detection
+    early_cluster_threshold: int  # Threshold for early cluster detection
+
+    # Multi-Correlation Comparison
+    multi_correlation_enabled: bool  # Enable multi-method comparison
+    multi_corr_scc: bool
+    multi_corr_gcc_phat: bool
+    multi_corr_onset: bool
+    multi_corr_gcc_scot: bool
+    multi_corr_gcc_whiten: bool
+    multi_corr_dtw: bool
+    multi_corr_spectrogram: bool
+
+    # DSP & Filtering
+    filter_bandpass_lowcut_hz: float
+    filter_bandpass_highcut_hz: float
+    filter_bandpass_order: int
+    filter_lowpass_taps: int
+    scan_start_percentage: float  # % of video to start scanning
+    scan_end_percentage: float  # % of video to end scanning
+    use_soxr: bool  # Use SoXR for resampling
+    audio_decode_native: bool
+    audio_peak_fit: bool
+    audio_bandlimit_hz: int
+
+    # Drift Detection Settings
+    detection_dbscan_epsilon_ms: float
+    detection_dbscan_min_samples: int
+    drift_detection_r2_threshold: float
+    drift_detection_r2_threshold_lossless: float
+    drift_detection_slope_threshold_lossy: float
+    drift_detection_slope_threshold_lossless: float
+
+    # =========================================================================
     # Stepping Correction Settings
     # =========================================================================
     stepping_adjust_subtitles: bool
+    stepping_adjust_subtitles_no_audio: bool  # Apply to subs when no audio merged
     stepping_boundary_mode: str  # "start", "majority", "midpoint"
+    stepping_first_stable_min_chunks: int  # Min chunks for stepping delay selection
+    stepping_first_stable_skip_unstable: bool  # Skip unstable segments in stepping
+
+    # Segment Scan & Correction
+    segment_triage_std_dev_ms: int  # Threshold for segment triage
+    segment_coarse_chunk_s: int  # Coarse scan chunk duration
+    segment_coarse_step_s: int  # Coarse scan step size
+    segment_search_locality_s: int  # Search locality window
+    segment_fine_chunk_s: float  # Fine scan chunk duration
+    segment_fine_iterations: int  # Fine scan iterations
+    segment_min_confidence_ratio: float  # Minimum confidence ratio
+
+    # Segment Drift Detection
+    segment_drift_r2_threshold: float
+    segment_drift_slope_threshold: float
+    segment_drift_outlier_sensitivity: float
+    segment_drift_scan_buffer_pct: float
+
+    # Stepping Scan Range
+    stepping_scan_start_percentage: float  # Independent scan start %
+    stepping_scan_end_percentage: (
+        float  # Independent scan end % (higher for end boundaries)
+    )
+
+    # Silence Snapping
+    stepping_snap_to_silence: bool  # Enable boundary snapping to silence
+    stepping_silence_detection_method: (
+        str  # "rms_basic", "ffmpeg_silencedetect", "smart_fusion"
+    )
+    stepping_silence_search_window_s: float  # Search window in seconds
+    stepping_silence_threshold_db: float  # Audio level in dB for silence
+    stepping_silence_min_duration_ms: float  # Minimum silence duration
+    stepping_ffmpeg_silence_noise: float  # dB threshold for FFmpeg silencedetect
+    stepping_ffmpeg_silence_duration: float  # Min silence duration in seconds
+
+    # VAD (Voice Activity Detection)
+    stepping_vad_enabled: bool  # Enable VAD to protect speech
+    stepping_vad_aggressiveness: int  # 0-3: 0=least aggressive, 3=most
+    stepping_vad_avoid_speech: bool  # Never cut in speech regions
+    stepping_vad_frame_duration_ms: int  # VAD analysis frame size (10, 20, 30ms)
+
+    # Transient Detection
+    stepping_transient_detection_enabled: bool  # Avoid cutting on transients
+    stepping_transient_threshold: float  # dB increase threshold
+    stepping_transient_avoid_window_ms: int  # Avoid cuts within ±N ms of transients
+
+    # Smart Fusion Weights
+    stepping_fusion_weight_silence: int
+    stepping_fusion_weight_no_speech: int
+    stepping_fusion_weight_scene_align: int
+    stepping_fusion_weight_duration: int
+    stepping_fusion_weight_no_transient: int
+
+    # Video-Aware Boundary Snapping
+    stepping_snap_to_video_frames: bool  # Enable video frame/scene snapping
+    stepping_video_snap_mode: str  # "scenes", "keyframes", "any_frame"
+    stepping_video_snap_max_offset_s: float  # Maximum snap distance
+    stepping_video_scene_threshold: float  # Scene detection sensitivity (0.1-1.0)
+
+    # Fill Mode & Content
+    stepping_fill_mode: str  # "auto", "silence", "content"
+    stepping_content_correlation_threshold: (
+        float  # Min correlation for content extraction
+    )
+    stepping_content_search_window_s: float  # Search window for content
+
+    # Track Naming
+    stepping_corrected_track_label: str  # Label for corrected audio
+    stepping_preserved_track_label: str  # Label for preserved original
+
+    # Quality Audit Thresholds
+    stepping_audit_min_score: float  # Min boundary score (warning if below)
+    stepping_audit_overflow_tolerance: float  # Max removal/silence ratio
+    stepping_audit_large_correction_s: float  # Threshold for large corrections
+
+    # Filtered Stepping Correction
+    stepping_correction_mode: str  # "full", "filtered", "strict", "disabled"
+    stepping_quality_mode: str  # "strict", "normal", "lenient", "custom"
+    stepping_min_chunks_per_cluster: int  # Min chunks per cluster
+    stepping_min_cluster_percentage: float  # Min % of total chunks
+    stepping_min_cluster_duration_s: float  # Min duration in seconds
+    stepping_min_match_quality_pct: float  # Min average match quality %
+    stepping_min_total_clusters: int  # Min number of total clusters
+    stepping_filtered_fallback: (
+        str  # "nearest", "interpolate", "uniform", "skip", "reject"
+    )
+    stepping_diagnostics_verbose: bool  # Enable detailed cluster reports
+
+    # Segmented Audio QA
+    segmented_qa_threshold: float  # QA threshold %
+    segment_qa_chunk_count: int  # Number of QA chunks
+    segment_qa_min_accepted_chunks: int  # Min accepted QA chunks
+
+    # =========================================================================
+    # Sync Stability Settings
+    # =========================================================================
+    sync_stability_enabled: bool  # Enable variance detection in correlation results
+    sync_stability_variance_threshold: (
+        float  # Max allowed variance in ms (0 = any variance flagged)
+    )
+    sync_stability_min_chunks: int  # Minimum chunks needed to calculate variance
+    sync_stability_outlier_mode: (
+        str  # "any" = flag any variance, "threshold" = use custom threshold
+    )
+    sync_stability_outlier_threshold: float  # Custom outlier threshold in ms
 
     # =========================================================================
     # Resampling Engine Settings
@@ -285,9 +443,249 @@ class AppSettings:
             video_verified_use_pts_precision=bool(
                 cfg.get("video_verified_use_pts_precision", False)
             ),
+            # Analysis/Correlation Settings
+            source_separation_mode=str(cfg.get("source_separation_mode", "none")),
+            source_separation_model=str(cfg.get("source_separation_model", "default")),
+            source_separation_device=str(cfg.get("source_separation_device", "auto")),
+            source_separation_timeout=int(cfg.get("source_separation_timeout", 900)),
+            filtering_method=str(
+                cfg.get("filtering_method", "Dialogue Band-Pass Filter")
+            ),
+            correlation_method=str(
+                cfg.get("correlation_method", "Phase Correlation (GCC-PHAT)")
+            ),
+            correlation_method_source_separated=str(
+                cfg.get(
+                    "correlation_method_source_separated",
+                    "Phase Correlation (GCC-PHAT)",
+                )
+            ),
+            # Delay Selection Settings
+            delay_selection_mode=str(
+                cfg.get("delay_selection_mode", "Mode (Most Common)")
+            ),
+            delay_selection_mode_source_separated=str(
+                cfg.get("delay_selection_mode_source_separated", "Mode (Clustered)")
+            ),
+            min_accepted_chunks=int(cfg.get("min_accepted_chunks", 3)),
+            first_stable_min_chunks=int(cfg.get("first_stable_min_chunks", 3)),
+            first_stable_skip_unstable=bool(
+                cfg.get("first_stable_skip_unstable", True)
+            ),
+            early_cluster_window=int(cfg.get("early_cluster_window", 10)),
+            early_cluster_threshold=int(cfg.get("early_cluster_threshold", 5)),
+            # Multi-Correlation Comparison
+            multi_correlation_enabled=bool(cfg.get("multi_correlation_enabled", False)),
+            multi_corr_scc=bool(cfg.get("multi_corr_scc", True)),
+            multi_corr_gcc_phat=bool(cfg.get("multi_corr_gcc_phat", True)),
+            multi_corr_onset=bool(cfg.get("multi_corr_onset", False)),
+            multi_corr_gcc_scot=bool(cfg.get("multi_corr_gcc_scot", False)),
+            multi_corr_gcc_whiten=bool(cfg.get("multi_corr_gcc_whiten", False)),
+            multi_corr_dtw=bool(cfg.get("multi_corr_dtw", False)),
+            multi_corr_spectrogram=bool(cfg.get("multi_corr_spectrogram", False)),
+            # DSP & Filtering
+            filter_bandpass_lowcut_hz=float(
+                cfg.get("filter_bandpass_lowcut_hz", 300.0)
+            ),
+            filter_bandpass_highcut_hz=float(
+                cfg.get("filter_bandpass_highcut_hz", 3400.0)
+            ),
+            filter_bandpass_order=int(cfg.get("filter_bandpass_order", 5)),
+            filter_lowpass_taps=int(cfg.get("filter_lowpass_taps", 101)),
+            scan_start_percentage=float(cfg.get("scan_start_percentage", 5.0)),
+            scan_end_percentage=float(cfg.get("scan_end_percentage", 95.0)),
+            use_soxr=bool(cfg.get("use_soxr", False)),
+            audio_decode_native=bool(cfg.get("audio_decode_native", False)),
+            audio_peak_fit=bool(cfg.get("audio_peak_fit", False)),
+            audio_bandlimit_hz=int(cfg.get("audio_bandlimit_hz", 0)),
+            # Drift Detection Settings
+            detection_dbscan_epsilon_ms=float(
+                cfg.get("detection_dbscan_epsilon_ms", 20.0)
+            ),
+            detection_dbscan_min_samples=int(
+                cfg.get("detection_dbscan_min_samples", 2)
+            ),
+            drift_detection_r2_threshold=float(
+                cfg.get("drift_detection_r2_threshold", 0.90)
+            ),
+            drift_detection_r2_threshold_lossless=float(
+                cfg.get("drift_detection_r2_threshold_lossless", 0.95)
+            ),
+            drift_detection_slope_threshold_lossy=float(
+                cfg.get("drift_detection_slope_threshold_lossy", 0.7)
+            ),
+            drift_detection_slope_threshold_lossless=float(
+                cfg.get("drift_detection_slope_threshold_lossless", 0.2)
+            ),
             # Stepping Correction Settings
             stepping_adjust_subtitles=bool(cfg.get("stepping_adjust_subtitles", True)),
+            stepping_adjust_subtitles_no_audio=bool(
+                cfg.get("stepping_adjust_subtitles_no_audio", True)
+            ),
             stepping_boundary_mode=str(cfg.get("stepping_boundary_mode", "start")),
+            stepping_first_stable_min_chunks=int(
+                cfg.get("stepping_first_stable_min_chunks", 3)
+            ),
+            stepping_first_stable_skip_unstable=bool(
+                cfg.get("stepping_first_stable_skip_unstable", True)
+            ),
+            # Segment Scan & Correction
+            segment_triage_std_dev_ms=int(cfg.get("segment_triage_std_dev_ms", 50)),
+            segment_coarse_chunk_s=int(cfg.get("segment_coarse_chunk_s", 15)),
+            segment_coarse_step_s=int(cfg.get("segment_coarse_step_s", 60)),
+            segment_search_locality_s=int(cfg.get("segment_search_locality_s", 10)),
+            segment_fine_chunk_s=float(cfg.get("segment_fine_chunk_s", 2.0)),
+            segment_fine_iterations=int(cfg.get("segment_fine_iterations", 10)),
+            segment_min_confidence_ratio=float(
+                cfg.get("segment_min_confidence_ratio", 5.0)
+            ),
+            # Segment Drift Detection
+            segment_drift_r2_threshold=float(
+                cfg.get("segment_drift_r2_threshold", 0.75)
+            ),
+            segment_drift_slope_threshold=float(
+                cfg.get("segment_drift_slope_threshold", 0.7)
+            ),
+            segment_drift_outlier_sensitivity=float(
+                cfg.get("segment_drift_outlier_sensitivity", 1.5)
+            ),
+            segment_drift_scan_buffer_pct=float(
+                cfg.get("segment_drift_scan_buffer_pct", 2.0)
+            ),
+            # Stepping Scan Range
+            stepping_scan_start_percentage=float(
+                cfg.get("stepping_scan_start_percentage", 5.0)
+            ),
+            stepping_scan_end_percentage=float(
+                cfg.get("stepping_scan_end_percentage", 99.0)
+            ),
+            # Silence Snapping
+            stepping_snap_to_silence=bool(cfg.get("stepping_snap_to_silence", True)),
+            stepping_silence_detection_method=str(
+                cfg.get("stepping_silence_detection_method", "smart_fusion")
+            ),
+            stepping_silence_search_window_s=float(
+                cfg.get("stepping_silence_search_window_s", 5.0)
+            ),
+            stepping_silence_threshold_db=float(
+                cfg.get("stepping_silence_threshold_db", -40.0)
+            ),
+            stepping_silence_min_duration_ms=float(
+                cfg.get("stepping_silence_min_duration_ms", 100.0)
+            ),
+            stepping_ffmpeg_silence_noise=float(
+                cfg.get("stepping_ffmpeg_silence_noise", -40.0)
+            ),
+            stepping_ffmpeg_silence_duration=float(
+                cfg.get("stepping_ffmpeg_silence_duration", 0.1)
+            ),
+            # VAD (Voice Activity Detection)
+            stepping_vad_enabled=bool(cfg.get("stepping_vad_enabled", True)),
+            stepping_vad_aggressiveness=int(cfg.get("stepping_vad_aggressiveness", 2)),
+            stepping_vad_avoid_speech=bool(cfg.get("stepping_vad_avoid_speech", True)),
+            stepping_vad_frame_duration_ms=int(
+                cfg.get("stepping_vad_frame_duration_ms", 30)
+            ),
+            # Transient Detection
+            stepping_transient_detection_enabled=bool(
+                cfg.get("stepping_transient_detection_enabled", True)
+            ),
+            stepping_transient_threshold=float(
+                cfg.get("stepping_transient_threshold", 8.0)
+            ),
+            stepping_transient_avoid_window_ms=int(
+                cfg.get("stepping_transient_avoid_window_ms", 50)
+            ),
+            # Smart Fusion Weights
+            stepping_fusion_weight_silence=int(
+                cfg.get("stepping_fusion_weight_silence", 10)
+            ),
+            stepping_fusion_weight_no_speech=int(
+                cfg.get("stepping_fusion_weight_no_speech", 8)
+            ),
+            stepping_fusion_weight_scene_align=int(
+                cfg.get("stepping_fusion_weight_scene_align", 5)
+            ),
+            stepping_fusion_weight_duration=int(
+                cfg.get("stepping_fusion_weight_duration", 2)
+            ),
+            stepping_fusion_weight_no_transient=int(
+                cfg.get("stepping_fusion_weight_no_transient", 3)
+            ),
+            # Video-Aware Boundary Snapping
+            stepping_snap_to_video_frames=bool(
+                cfg.get("stepping_snap_to_video_frames", False)
+            ),
+            stepping_video_snap_mode=str(cfg.get("stepping_video_snap_mode", "scenes")),
+            stepping_video_snap_max_offset_s=float(
+                cfg.get("stepping_video_snap_max_offset_s", 2.0)
+            ),
+            stepping_video_scene_threshold=float(
+                cfg.get("stepping_video_scene_threshold", 0.4)
+            ),
+            # Fill Mode & Content
+            stepping_fill_mode=str(cfg.get("stepping_fill_mode", "silence")),
+            stepping_content_correlation_threshold=float(
+                cfg.get("stepping_content_correlation_threshold", 0.5)
+            ),
+            stepping_content_search_window_s=float(
+                cfg.get("stepping_content_search_window_s", 5.0)
+            ),
+            # Track Naming
+            stepping_corrected_track_label=str(
+                cfg.get("stepping_corrected_track_label", "")
+            ),
+            stepping_preserved_track_label=str(
+                cfg.get("stepping_preserved_track_label", "")
+            ),
+            # Quality Audit Thresholds
+            stepping_audit_min_score=float(cfg.get("stepping_audit_min_score", 12.0)),
+            stepping_audit_overflow_tolerance=float(
+                cfg.get("stepping_audit_overflow_tolerance", 0.8)
+            ),
+            stepping_audit_large_correction_s=float(
+                cfg.get("stepping_audit_large_correction_s", 3.0)
+            ),
+            # Filtered Stepping Correction
+            stepping_correction_mode=str(cfg.get("stepping_correction_mode", "full")),
+            stepping_quality_mode=str(cfg.get("stepping_quality_mode", "normal")),
+            stepping_min_chunks_per_cluster=int(
+                cfg.get("stepping_min_chunks_per_cluster", 3)
+            ),
+            stepping_min_cluster_percentage=float(
+                cfg.get("stepping_min_cluster_percentage", 5.0)
+            ),
+            stepping_min_cluster_duration_s=float(
+                cfg.get("stepping_min_cluster_duration_s", 20.0)
+            ),
+            stepping_min_match_quality_pct=float(
+                cfg.get("stepping_min_match_quality_pct", 85.0)
+            ),
+            stepping_min_total_clusters=int(cfg.get("stepping_min_total_clusters", 2)),
+            stepping_filtered_fallback=str(
+                cfg.get("stepping_filtered_fallback", "nearest")
+            ),
+            stepping_diagnostics_verbose=bool(
+                cfg.get("stepping_diagnostics_verbose", True)
+            ),
+            # Segmented Audio QA
+            segmented_qa_threshold=float(cfg.get("segmented_qa_threshold", 85.0)),
+            segment_qa_chunk_count=int(cfg.get("segment_qa_chunk_count", 30)),
+            segment_qa_min_accepted_chunks=int(
+                cfg.get("segment_qa_min_accepted_chunks", 28)
+            ),
+            # Sync Stability Settings
+            sync_stability_enabled=bool(cfg.get("sync_stability_enabled", True)),
+            sync_stability_variance_threshold=float(
+                cfg.get("sync_stability_variance_threshold", 0.0)
+            ),
+            sync_stability_min_chunks=int(cfg.get("sync_stability_min_chunks", 3)),
+            sync_stability_outlier_mode=str(
+                cfg.get("sync_stability_outlier_mode", "any")
+            ),
+            sync_stability_outlier_threshold=float(
+                cfg.get("sync_stability_outlier_threshold", 1.0)
+            ),
             # Resampling Engine Settings
             segment_resample_engine=str(
                 cfg.get("segment_resample_engine", "aresample")
