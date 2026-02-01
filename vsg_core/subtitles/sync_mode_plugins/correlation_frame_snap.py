@@ -1,5 +1,4 @@
 # vsg_core/subtitles/sync_mode_plugins/correlation_frame_snap.py
-# -*- coding: utf-8 -*-
 """
 Correlation + Frame Snap sync plugin for SubtitleData.
 
@@ -8,17 +7,18 @@ and sliding window matching.
 
 All timing is float ms internally - rounding happens only at final save.
 """
+
 from __future__ import annotations
 
-import math
 from datetime import datetime
-from pathlib import Path
-from typing import Dict, Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..sync_modes import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
-    from ..data import SubtitleData, OperationResult, OperationRecord, SyncEventData
+    from pathlib import Path
+
+    from ..data import OperationResult, SubtitleData
 
 
 @register_sync_plugin
@@ -29,23 +29,23 @@ class CorrelationFrameSnapSync(SyncPlugin):
     Uses audio correlation as guide, then verifies with scene detection.
     """
 
-    name = 'correlation-frame-snap'
-    description = 'Audio correlation with frame snap verification'
+    name = "correlation-frame-snap"
+    description = "Audio correlation with frame snap verification"
 
     def apply(
         self,
-        subtitle_data: 'SubtitleData',
+        subtitle_data: SubtitleData,
         total_delay_ms: float,
         global_shift_ms: float,
-        target_fps: Optional[float] = None,
-        source_video: Optional[str] = None,
-        target_video: Optional[str] = None,
+        target_fps: float | None = None,
+        source_video: str | None = None,
+        target_video: str | None = None,
         runner=None,
-        config: Optional[dict] = None,
-        temp_dir: Optional[Path] = None,
-        cached_frame_correction: Optional[Dict[str, Any]] = None,
-        **kwargs
-    ) -> 'OperationResult':
+        config: dict | None = None,
+        temp_dir: Path | None = None,
+        cached_frame_correction: dict[str, Any] | None = None,
+        **kwargs,
+    ) -> OperationResult:
         """
         Apply correlation + frame snap sync to subtitle data.
 
@@ -69,8 +69,8 @@ class CorrelationFrameSnapSync(SyncPlugin):
         Returns:
             OperationResult with statistics
         """
-        from ..data import OperationResult, OperationRecord, SyncEventData
-        from ..frame_utils import detect_video_fps, detect_scene_changes
+        from ..data import OperationRecord, OperationResult, SyncEventData
+        from ..frame_utils import detect_video_fps
         from ..frame_verification import verify_correlation_with_frame_snap
 
         config = config or {}
@@ -79,14 +79,14 @@ class CorrelationFrameSnapSync(SyncPlugin):
             if runner:
                 runner._log_message(msg)
 
-        log(f"[CorrFrameSnap] === Correlation + Frame Snap Sync ===")
+        log("[CorrFrameSnap] === Correlation + Frame Snap Sync ===")
         log(f"[CorrFrameSnap] Events: {len(subtitle_data.events)}")
 
         if not source_video or not target_video:
             return OperationResult(
                 success=False,
-                operation='sync',
-                error='Both source and target videos required for correlation-frame-snap'
+                operation="sync",
+                error="Both source and target videos required for correlation-frame-snap",
             )
 
         # Calculate pure correlation by subtracting global shift
@@ -111,25 +111,29 @@ class CorrelationFrameSnapSync(SyncPlugin):
         verification_result = {}
 
         if cached_frame_correction is not None:
-            cached_correction_ms = cached_frame_correction.get('frame_correction_ms', 0.0)
-            cached_num_scenes = cached_frame_correction.get('num_scene_matches', 0)
+            cached_correction_ms = cached_frame_correction.get(
+                "frame_correction_ms", 0.0
+            )
+            cached_num_scenes = cached_frame_correction.get("num_scene_matches", 0)
 
-            log(f"[CorrFrameSnap] Using cached frame correction: {cached_correction_ms:+.3f}ms")
+            log(
+                f"[CorrFrameSnap] Using cached frame correction: {cached_correction_ms:+.3f}ms"
+            )
             log(f"[CorrFrameSnap] (from {cached_num_scenes} scene matches)")
 
             frame_correction_ms = cached_correction_ms
             verification_result = {
-                'valid': True,
-                'cached': True,
-                'frame_correction_ms': cached_correction_ms,
-                'num_scene_matches': cached_num_scenes,
+                "valid": True,
+                "cached": True,
+                "frame_correction_ms": cached_correction_ms,
+                "num_scene_matches": cached_num_scenes,
             }
         else:
             # Run scene detection and frame verification
-            use_scene_changes = config.get('correlation_snap_use_scene_changes', True)
+            use_scene_changes = config.get("correlation_snap_use_scene_changes", True)
 
             if use_scene_changes:
-                log(f"[CorrFrameSnap] Detecting scene changes...")
+                log("[CorrFrameSnap] Detecting scene changes...")
 
                 # Create event wrapper for verification function
                 class EventWrapper:
@@ -138,50 +142,71 @@ class CorrelationFrameSnapSync(SyncPlugin):
                         self.end = int(event.end_ms)
                         self.style = event.style
 
-                wrapped_events = [EventWrapper(e) for e in subtitle_data.events if not e.is_comment]
+                wrapped_events = [
+                    EventWrapper(e) for e in subtitle_data.events if not e.is_comment
+                ]
 
                 verification_result = verify_correlation_with_frame_snap(
-                    source_video, target_video, wrapped_events,
-                    pure_correlation_ms, fps, runner, config
+                    source_video,
+                    target_video,
+                    wrapped_events,
+                    pure_correlation_ms,
+                    fps,
+                    runner,
+                    config,
                 )
 
-                if verification_result.get('valid'):
-                    frame_correction_ms = verification_result.get('frame_correction_ms', 0.0)
-                    num_matches = verification_result.get('num_scene_matches', 0)
-                    log(f"[CorrFrameSnap] ✓ Verification passed: {num_matches} scene matches")
-                    log(f"[CorrFrameSnap] Frame correction: {frame_correction_ms:+.3f}ms")
+                if verification_result.get("valid"):
+                    frame_correction_ms = verification_result.get(
+                        "frame_correction_ms", 0.0
+                    )
+                    num_matches = verification_result.get("num_scene_matches", 0)
+                    log(
+                        f"[CorrFrameSnap] ✓ Verification passed: {num_matches} scene matches"
+                    )
+                    log(
+                        f"[CorrFrameSnap] Frame correction: {frame_correction_ms:+.3f}ms"
+                    )
                 else:
                     # Verification failed - handle fallback
-                    fallback_mode = config.get('correlation_snap_fallback_mode', 'snap-to-frame')
-                    log(f"[CorrFrameSnap] Verification failed, fallback: {fallback_mode}")
+                    fallback_mode = config.get(
+                        "correlation_snap_fallback_mode", "snap-to-frame"
+                    )
+                    log(
+                        f"[CorrFrameSnap] Verification failed, fallback: {fallback_mode}"
+                    )
 
-                    if fallback_mode == 'abort':
+                    if fallback_mode == "abort":
                         return OperationResult(
                             success=False,
-                            operation='sync',
-                            error='Frame verification failed'
+                            operation="sync",
+                            error="Frame verification failed",
                         )
-                    elif fallback_mode == 'use-raw':
+                    elif fallback_mode == "use-raw":
                         frame_correction_ms = 0.0
-                        log(f"[CorrFrameSnap] Using raw correlation (no correction)")
+                        log("[CorrFrameSnap] Using raw correlation (no correction)")
                     else:  # snap-to-frame
-                        frame_delta = verification_result.get('frame_delta', 0)
+                        frame_delta = verification_result.get("frame_delta", 0)
                         frame_correction_ms = frame_delta * frame_duration_ms
-                        log(f"[CorrFrameSnap] Snapping to frame: {frame_delta} frames = {frame_correction_ms:+.3f}ms")
+                        log(
+                            f"[CorrFrameSnap] Snapping to frame: {frame_delta} frames = {frame_correction_ms:+.3f}ms"
+                        )
 
         # Calculate final offset
         # total_delay_ms already includes global_shift, just add frame correction
         final_offset_ms = total_delay_ms + frame_correction_ms
 
-        log(f"[CorrFrameSnap] ───────────────────────────────────────")
-        log(f"[CorrFrameSnap] Final offset calculation:")
+        log("[CorrFrameSnap] ───────────────────────────────────────")
+        log("[CorrFrameSnap] Final offset calculation:")
         log(f"[CorrFrameSnap]   Total delay:       {total_delay_ms:+.3f}ms")
         log(f"[CorrFrameSnap]   + Frame correction: {frame_correction_ms:+.3f}ms")
         log(f"[CorrFrameSnap]   = Final offset:    {final_offset_ms:+.3f}ms")
-        log(f"[CorrFrameSnap] ───────────────────────────────────────")
+        log("[CorrFrameSnap] ───────────────────────────────────────")
 
         # Apply offset to all events
-        log(f"[CorrFrameSnap] Applying {final_offset_ms:+.3f}ms to {len(subtitle_data.events)} events")
+        log(
+            f"[CorrFrameSnap] Applying {final_offset_ms:+.3f}ms to {len(subtitle_data.events)} events"
+        )
 
         events_synced = 0
         for event in subtitle_data.events:
@@ -206,44 +231,46 @@ class CorrelationFrameSnapSync(SyncPlugin):
             events_synced += 1
 
         # Build summary
-        summary = f"Correlation+FrameSnap: {events_synced} events, {final_offset_ms:+.1f}ms"
-        if verification_result.get('valid'):
-            num_matches = verification_result.get('num_scene_matches', 0)
+        summary = (
+            f"Correlation+FrameSnap: {events_synced} events, {final_offset_ms:+.1f}ms"
+        )
+        if verification_result.get("valid"):
+            num_matches = verification_result.get("num_scene_matches", 0)
             summary += f" ({num_matches} scenes verified)"
-        elif verification_result.get('cached'):
+        elif verification_result.get("cached"):
             summary += " (cached)"
 
         # Record operation
         record = OperationRecord(
-            operation='sync',
+            operation="sync",
             timestamp=datetime.now(),
             parameters={
-                'mode': self.name,
-                'total_delay_ms': total_delay_ms,
-                'global_shift_ms': global_shift_ms,
-                'pure_correlation_ms': pure_correlation_ms,
-                'frame_correction_ms': frame_correction_ms,
-                'final_offset_ms': final_offset_ms,
-                'fps': fps,
+                "mode": self.name,
+                "total_delay_ms": total_delay_ms,
+                "global_shift_ms": global_shift_ms,
+                "pure_correlation_ms": pure_correlation_ms,
+                "frame_correction_ms": frame_correction_ms,
+                "final_offset_ms": final_offset_ms,
+                "fps": fps,
             },
             events_affected=events_synced,
-            summary=summary
+            summary=summary,
         )
         subtitle_data.operations.append(record)
 
         log(f"[CorrFrameSnap] Sync complete: {events_synced} events")
-        log(f"[CorrFrameSnap] ===================================")
+        log("[CorrFrameSnap] ===================================")
 
         return OperationResult(
             success=True,
-            operation='sync',
+            operation="sync",
             events_affected=events_synced,
             summary=summary,
             details={
-                'pure_correlation_ms': pure_correlation_ms,
-                'frame_correction_ms': frame_correction_ms,
-                'final_offset_ms': final_offset_ms,
-                'verification': verification_result,
-                'num_scene_matches': verification_result.get('num_scene_matches', 0),
-            }
+                "pure_correlation_ms": pure_correlation_ms,
+                "frame_correction_ms": frame_correction_ms,
+                "final_offset_ms": final_offset_ms,
+                "verification": verification_result,
+                "num_scene_matches": verification_result.get("num_scene_matches", 0),
+            },
         )

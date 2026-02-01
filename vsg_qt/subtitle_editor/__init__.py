@@ -1,5 +1,4 @@
 # vsg_qt/subtitle_editor/__init__.py
-# -*- coding: utf-8 -*-
 """
 Subtitle Editor - Full-featured subtitle editing dialog.
 
@@ -35,15 +34,15 @@ Usage:
 """
 
 from .editor_window import SubtitleEditorWindow
-from .state import EditorState
 from .events_table import EventsTable
-from .video_panel import VideoPanel
+from .state import EditorState
 from .tab_panel import TabPanel
+from .video_panel import VideoPanel
 
 __all__ = [
-    'SubtitleEditorWindow',
-    'EditorState',
-    'EventsTable',
-    'VideoPanel',
-    'TabPanel',
+    "EditorState",
+    "EventsTable",
+    "SubtitleEditorWindow",
+    "TabPanel",
+    "VideoPanel",
 ]

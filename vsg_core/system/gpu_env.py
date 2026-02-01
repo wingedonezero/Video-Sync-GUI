@@ -1,5 +1,4 @@
 # vsg_core/system/gpu_env.py
-# -*- coding: utf-8 -*-
 """
 GPU and hardware acceleration environment setup.
 
@@ -9,10 +8,9 @@ ffprobe/ffmpeg/mkvmerge don't need any special GPU environment variables.
 """
 
 import os
-from typing import Dict
 
 
-def get_subprocess_environment() -> Dict[str, str]:
+def get_subprocess_environment() -> dict[str, str]:
     """
     Get environment for subprocesses.
 

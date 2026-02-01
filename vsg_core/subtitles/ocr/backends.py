@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/backends.py
-# -*- coding: utf-8 -*-
 """
 OCR Engine Backends
 
@@ -11,11 +10,11 @@ Provides abstract interface and implementations for different OCR engines:
 This abstraction allows easy switching between engines for comparison.
 """
 
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+
 import numpy as np
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -23,21 +22,23 @@ logger = logging.getLogger(__name__)
 @dataclass
 class OCRLineResult:
     """Result for a single OCR line."""
+
     text: str
     confidence: float  # 0-100 scale
-    word_confidences: List[Tuple[str, float]] = field(default_factory=list)
+    word_confidences: list[tuple[str, float]] = field(default_factory=list)
     backend: str = "unknown"
 
 
 @dataclass
 class OCRResult:
     """Complete OCR result for a subtitle image."""
+
     text: str  # Full recognized text
-    lines: List[OCRLineResult] = field(default_factory=list)
+    lines: list[OCRLineResult] = field(default_factory=list)
     average_confidence: float = 0.0
     min_confidence: float = 0.0
     low_confidence: bool = False
-    error: Optional[str] = None
+    error: str | None = None
     backend: str = "unknown"
 
     @property
@@ -94,9 +95,7 @@ class OCRBackend(ABC):
         pass
 
     def ocr_lines_separately(
-        self,
-        image: np.ndarray,
-        line_images: Optional[List[np.ndarray]] = None
+        self, image: np.ndarray, line_images: list[np.ndarray] | None = None
     ) -> OCRResult:
         """
         OCR each line separately for better accuracy.
@@ -123,31 +122,33 @@ class OCRBackend(ABC):
         all_lines = []
         for i, line_img in enumerate(line_images):
             line_result = self.ocr_line(line_img)
-            logger.debug(f"[{self.name}] Line {i+1}: text='{line_result.text[:50] if line_result.text else ''}...', "
-                        f"conf={line_result.average_confidence:.1f}%, lines={len(line_result.lines)}")
+            logger.debug(
+                f"[{self.name}] Line {i + 1}: text='{line_result.text[:50] if line_result.text else ''}...', "
+                f"conf={line_result.average_confidence:.1f}%, lines={len(line_result.lines)}"
+            )
             all_lines.extend(line_result.lines)
 
         # Build combined result
-        text = '\n'.join(line.text for line in all_lines if line.text.strip())
+        text = "\n".join(line.text for line in all_lines if line.text.strip())
 
-        result = OCRResult(
-            text=text,
-            lines=all_lines,
-            backend=self.name
-        )
+        result = OCRResult(text=text, lines=all_lines, backend=self.name)
 
         if all_lines:
-            confidences = [line.confidence for line in all_lines if line.confidence >= 0]
+            confidences = [
+                line.confidence for line in all_lines if line.confidence >= 0
+            ]
             if confidences:
                 result.average_confidence = sum(confidences) / len(confidences)
                 result.min_confidence = min(confidences)
                 result.low_confidence = result.average_confidence < 60.0
-                logger.debug(f"[{self.name}] Combined: {len(all_lines)} lines, "
-                            f"avg_conf={result.average_confidence:.1f}%, min={result.min_confidence:.1f}%")
+                logger.debug(
+                    f"[{self.name}] Combined: {len(all_lines)} lines, "
+                    f"avg_conf={result.average_confidence:.1f}%, min={result.min_confidence:.1f}%"
+                )
 
         return result
 
-    def _split_into_lines(self, image: np.ndarray) -> List[np.ndarray]:
+    def _split_into_lines(self, image: np.ndarray) -> list[np.ndarray]:
         """
         Split a multi-line subtitle image into separate line images.
         Uses horizontal projection to find line boundaries.
@@ -202,14 +203,16 @@ class OCRBackend(ABC):
 # Tesseract Backend
 # =============================================================================
 
+
 class TesseractBackend(OCRBackend):
     """Tesseract OCR backend using pytesseract."""
 
     name = "tesseract"
 
-    def __init__(self, language: str = 'eng', char_blacklist: str = '|'):
+    def __init__(self, language: str = "eng", char_blacklist: str = "|"):
         try:
             import pytesseract
+
             self.pytesseract = pytesseract
             self.Output = pytesseract.Output
         except ImportError:
@@ -230,11 +233,11 @@ class TesseractBackend(OCRBackend):
 
     def _build_config(self, psm: int = 6) -> str:
         """Build Tesseract config string."""
-        parts = [f'--psm {psm}', '--oem 3']
+        parts = [f"--psm {psm}", "--oem 3"]
         if self.char_blacklist:
-            parts.append(f'-c tessedit_char_blacklist={self.char_blacklist}')
-        parts.append('-c preserve_interword_spaces=1')
-        return ' '.join(parts)
+            parts.append(f"-c tessedit_char_blacklist={self.char_blacklist}")
+        parts.append("-c preserve_interword_spaces=1")
+        return " ".join(parts)
 
     def ocr_image(self, image: np.ndarray) -> OCRResult:
         """OCR using block mode (PSM 6)."""
@@ -246,21 +249,18 @@ class TesseractBackend(OCRBackend):
 
     def _do_ocr(self, image: np.ndarray, psm: int) -> OCRResult:
         """Perform OCR with specified PSM."""
-        result = OCRResult(text='', backend=self.name)
+        result = OCRResult(text="", backend=self.name)
 
         try:
             config = self._build_config(psm)
             data = self.pytesseract.image_to_data(
-                image,
-                lang=self.language,
-                config=config,
-                output_type=self.Output.DICT
+                image, lang=self.language, config=config, output_type=self.Output.DICT
             )
 
             # Process into lines
             lines = self._process_data(data)
             result.lines = lines
-            result.text = '\n'.join(line.text for line in lines if line.text.strip())
+            result.text = "\n".join(line.text for line in lines if line.text.strip())
 
             if lines:
                 confidences = [l.confidence for l in lines if l.confidence >= 0]
@@ -274,16 +274,16 @@ class TesseractBackend(OCRBackend):
 
         return result
 
-    def _process_data(self, data: dict) -> List[OCRLineResult]:
+    def _process_data(self, data: dict) -> list[OCRLineResult]:
         """Process Tesseract output into line results."""
         lines = []
         current_line = None
         current_line_num = -1
 
-        for i in range(len(data['text'])):
-            text = data['text'][i].strip()
-            conf = float(data['conf'][i])
-            line_num = data['line_num'][i]
+        for i in range(len(data["text"])):
+            text = data["text"][i].strip()
+            conf = float(data["conf"][i])
+            line_num = data["line_num"][i]
 
             if not text:
                 continue
@@ -291,12 +291,12 @@ class TesseractBackend(OCRBackend):
             if line_num != current_line_num:
                 if current_line is not None:
                     lines.append(current_line)
-                current_line = OCRLineResult(text='', confidence=0.0, backend=self.name)
+                current_line = OCRLineResult(text="", confidence=0.0, backend=self.name)
                 current_line_num = line_num
 
             if current_line is not None:
                 if current_line.text:
-                    current_line.text += ' '
+                    current_line.text += " "
                 current_line.text += text
                 if conf >= 0:
                     current_line.word_confidences.append((text, conf))
@@ -318,13 +318,18 @@ class TesseractBackend(OCRBackend):
 # EasyOCR Backend
 # =============================================================================
 
+
 class EasyOCRBackend(OCRBackend):
     """EasyOCR backend using deep learning."""
 
     name = "easyocr"
 
-    def __init__(self, languages: List[str] = None, model_storage_directory: str = None):
-        self.languages = languages or ['en']
+    def __init__(
+        self,
+        languages: list[str] | None = None,
+        model_storage_directory: str | None = None,
+    ):
+        self.languages = languages or ["en"]
         self._reader = None
         # Use custom model directory if specified, otherwise use app's .config/ocr/easyocr_models
         if model_storage_directory:
@@ -332,8 +337,11 @@ class EasyOCRBackend(OCRBackend):
         else:
             # Try to use the app's config directory
             from pathlib import Path
-            app_dir = Path(__file__).parent.parent.parent.parent  # vsg_core -> project root
-            self.model_dir = str(app_dir / '.config' / 'ocr' / 'easyocr_models')
+
+            app_dir = Path(
+                __file__
+            ).parent.parent.parent.parent  # vsg_core -> project root
+            self.model_dir = str(app_dir / ".config" / "ocr" / "easyocr_models")
         logger.info(f"EasyOCRBackend created with languages: {self.languages}")
         logger.info(f"EasyOCR model directory: {self.model_dir}")
 
@@ -342,18 +350,20 @@ class EasyOCRBackend(OCRBackend):
         """Lazy initialization of EasyOCR reader."""
         if self._reader is None:
             try:
-                import easyocr
                 from pathlib import Path
+
+                import easyocr
 
                 # Auto-detect GPU (CUDA or ROCm)
                 use_gpu = False
                 gpu_info = "CPU"
                 try:
                     import torch
+
                     if torch.cuda.is_available():
                         use_gpu = True
                         # Check if it's ROCm (AMD) or CUDA (NVIDIA)
-                        if hasattr(torch.version, 'hip') and torch.version.hip:
+                        if hasattr(torch.version, "hip") and torch.version.hip:
                             gpu_info = f"ROCm/HIP {torch.version.hip}"
                         else:
                             gpu_info = f"CUDA {torch.version.cuda}"
@@ -362,7 +372,9 @@ class EasyOCRBackend(OCRBackend):
 
                 # Ensure model directory exists
                 Path(self.model_dir).mkdir(parents=True, exist_ok=True)
-                logger.info(f"Initializing EasyOCR Reader with languages: {self.languages}")
+                logger.info(
+                    f"Initializing EasyOCR Reader with languages: {self.languages}"
+                )
                 logger.info(f"Model storage: {self.model_dir}")
                 logger.info(f"GPU: {gpu_info} (enabled: {use_gpu})")
                 logger.info("This may take a moment if models need to be downloaded...")
@@ -370,7 +382,7 @@ class EasyOCRBackend(OCRBackend):
                     self.languages,
                     gpu=use_gpu,
                     model_storage_directory=self.model_dir,
-                    verbose=True
+                    verbose=True,
                 )
                 logger.info("EasyOCR Reader initialized successfully")
             except ImportError:
@@ -391,9 +403,7 @@ class EasyOCRBackend(OCRBackend):
         return self._do_ocr(image, single_line=True)
 
     def ocr_lines_separately(
-        self,
-        image: np.ndarray,
-        line_images: Optional[List[np.ndarray]] = None
+        self, image: np.ndarray, line_images: list[np.ndarray] | None = None
     ) -> OCRResult:
         """
         Override base class to skip manual line splitting for EasyOCR.
@@ -421,7 +431,7 @@ class EasyOCRBackend(OCRBackend):
         For single-line mode (when image is pre-split):
         - Just sort by X position and join all text as one line
         """
-        result = OCRResult(text='', backend=self.name)
+        result = OCRResult(text="", backend=self.name)
 
         try:
             # Always use paragraph=False to get bounding boxes for proper ordering
@@ -446,13 +456,15 @@ class EasyOCRBackend(OCRBackend):
                     x_center = sum(x_coords) / len(x_coords)
                     height = max(y_coords) - min(y_coords)
 
-                    detection_data.append({
-                        'text': text,
-                        'conf': conf,
-                        'y_center': y_center,
-                        'x_center': x_center,
-                        'height': height
-                    })
+                    detection_data.append(
+                        {
+                            "text": text,
+                            "conf": conf,
+                            "y_center": y_center,
+                            "x_center": x_center,
+                            "height": height,
+                        }
+                    )
 
             if not detection_data:
                 return result
@@ -460,30 +472,34 @@ class EasyOCRBackend(OCRBackend):
             # Single-line mode: Image is pre-split, treat all detections as one line
             if single_line:
                 # Sort by X position only (left to right)
-                detection_data.sort(key=lambda d: d['x_center'])
+                detection_data.sort(key=lambda d: d["x_center"])
 
                 # Join all text as one line
-                line_text = ' '.join(d['text'] for d in detection_data)
-                line_conf = sum(d['conf'] for d in detection_data) / len(detection_data) * 100.0
+                line_text = " ".join(d["text"] for d in detection_data)
+                line_conf = (
+                    sum(d["conf"] for d in detection_data) / len(detection_data) * 100.0
+                )
 
                 line = OCRLineResult(
                     text=line_text,
                     confidence=line_conf,
-                    word_confidences=[(d['text'], d['conf'] * 100.0) for d in detection_data],
-                    backend=self.name
+                    word_confidences=[
+                        (d["text"], d["conf"] * 100.0) for d in detection_data
+                    ],
+                    backend=self.name,
                 )
 
                 result.lines = [line]
                 result.text = line_text
                 result.average_confidence = line_conf
-                result.min_confidence = min(d['conf'] * 100.0 for d in detection_data)
+                result.min_confidence = min(d["conf"] * 100.0 for d in detection_data)
                 result.low_confidence = result.average_confidence < 60.0
 
                 return result
 
             # Multi-line mode: Group by Y position
             # Sort by Y position first (top to bottom)
-            detection_data.sort(key=lambda d: d['y_center'])
+            detection_data.sort(key=lambda d: d["y_center"])
 
             # Group detections into lines based on Y proximity
             line_groups = []
@@ -491,10 +507,14 @@ class EasyOCRBackend(OCRBackend):
 
             for det in detection_data[1:]:
                 # Use the average height as threshold for same-line detection
-                avg_height = sum(d['height'] for d in current_group) / len(current_group)
-                y_threshold = max(avg_height * 0.5, 10)  # At least 10 pixels or half line height
+                avg_height = sum(d["height"] for d in current_group) / len(
+                    current_group
+                )
+                y_threshold = max(
+                    avg_height * 0.5, 10
+                )  # At least 10 pixels or half line height
 
-                if abs(det['y_center'] - current_group[0]['y_center']) < y_threshold:
+                if abs(det["y_center"] - current_group[0]["y_center"]) < y_threshold:
                     # Same line - add to current group
                     current_group.append(det)
                 else:
@@ -509,24 +529,24 @@ class EasyOCRBackend(OCRBackend):
             lines = []
             for group in line_groups:
                 # Sort by X position within the line
-                group.sort(key=lambda d: d['x_center'])
+                group.sort(key=lambda d: d["x_center"])
 
                 # Join text with spaces
-                line_text = ' '.join(d['text'] for d in group)
+                line_text = " ".join(d["text"] for d in group)
 
                 # Calculate average confidence for the line
-                line_conf = sum(d['conf'] for d in group) / len(group) * 100.0
+                line_conf = sum(d["conf"] for d in group) / len(group) * 100.0
 
                 line = OCRLineResult(
                     text=line_text,
                     confidence=line_conf,
-                    word_confidences=[(d['text'], d['conf'] * 100.0) for d in group],
-                    backend=self.name
+                    word_confidences=[(d["text"], d["conf"] * 100.0) for d in group],
+                    backend=self.name,
                 )
                 lines.append(line)
 
             result.lines = lines
-            result.text = '\n'.join(line.text for line in lines if line.text.strip())
+            result.text = "\n".join(line.text for line in lines if line.text.strip())
 
             if lines:
                 confidences = [l.confidence for l in lines]
@@ -547,6 +567,7 @@ class EasyOCRBackend(OCRBackend):
             try:
                 # Clear CUDA cache if using GPU
                 import torch
+
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
             except ImportError:
@@ -560,6 +581,7 @@ class EasyOCRBackend(OCRBackend):
 # PaddleOCR Backend (Full Implementation)
 # =============================================================================
 
+
 class PaddleOCRBackend(OCRBackend):
     """
     PaddleOCR backend for OCR processing.
@@ -570,8 +592,13 @@ class PaddleOCRBackend(OCRBackend):
 
     name = "paddleocr"
 
-    def __init__(self, language: str = 'en', model_storage_directory: str = None,
-                 drop_score: float = 0.5, force_cpu: bool = False):
+    def __init__(
+        self,
+        language: str = "en",
+        model_storage_directory: str | None = None,
+        drop_score: float = 0.5,
+        force_cpu: bool = False,
+    ):
         import os
         from pathlib import Path
 
@@ -583,14 +610,16 @@ class PaddleOCRBackend(OCRBackend):
         if model_storage_directory:
             self.model_dir = model_storage_directory
         else:
-            app_dir = Path(__file__).parent.parent.parent.parent  # vsg_core -> project root
-            self.model_dir = str(app_dir / '.config' / 'ocr' / 'paddleocr_models')
+            app_dir = Path(
+                __file__
+            ).parent.parent.parent.parent  # vsg_core -> project root
+            self.model_dir = str(app_dir / ".config" / "ocr" / "paddleocr_models")
 
         # PaddleOCR 3.0 uses PaddleX - set env vars BEFORE any paddleocr imports
         # These MUST be set at init time, not later when lazily loading
         Path(self.model_dir).mkdir(parents=True, exist_ok=True)
-        os.environ['PADDLEX_HOME'] = self.model_dir
-        os.environ['PADDLEOCR_HOME'] = self.model_dir
+        os.environ["PADDLEX_HOME"] = self.model_dir
+        os.environ["PADDLEOCR_HOME"] = self.model_dir
 
         logger.info(f"PaddleOCRBackend created with language: {self.language}")
         logger.info(f"PaddleOCR model directory: {self.model_dir}")
@@ -612,6 +641,7 @@ class PaddleOCRBackend(OCRBackend):
                 else:
                     try:
                         import paddle
+
                         if paddle.device.is_compiled_with_cuda():
                             # Check if CUDA device is available
                             gpu_count = paddle.device.cuda.device_count()
@@ -653,9 +683,7 @@ class PaddleOCRBackend(OCRBackend):
         return self._do_ocr(image, single_line=True)
 
     def ocr_lines_separately(
-        self,
-        image: np.ndarray,
-        line_images: Optional[List[np.ndarray]] = None
+        self, image: np.ndarray, line_images: list[np.ndarray] | None = None
     ) -> OCRResult:
         """
         Override base class to skip manual line splitting for PaddleOCR.
@@ -679,7 +707,7 @@ class PaddleOCRBackend(OCRBackend):
         3. Group detections on the same line
         4. Join with newlines
         """
-        result = OCRResult(text='', backend=self.name)
+        result = OCRResult(text="", backend=self.name)
 
         try:
             import cv2
@@ -715,10 +743,12 @@ class PaddleOCRBackend(OCRBackend):
 
             try:
                 # Convert to list if generator
-                if hasattr(ocr_result, '__next__'):
+                if hasattr(ocr_result, "__next__"):
                     ocr_result = list(ocr_result)
 
-                logger.info(f"[{self.name}] ocr_result length: {len(ocr_result) if ocr_result else 0}")
+                logger.info(
+                    f"[{self.name}] ocr_result length: {len(ocr_result) if ocr_result else 0}"
+                )
 
                 # Handle different result formats
                 for idx, res_obj in enumerate(ocr_result):
@@ -730,7 +760,7 @@ class PaddleOCRBackend(OCRBackend):
                     # Try to get data as dict
                     data = None
 
-                    if hasattr(res_obj, 'json'):
+                    if hasattr(res_obj, "json"):
                         # PaddleOCR 3.x result object with .json property
                         data = res_obj.json
                         logger.info(f"[{self.name}] Got .json, type: {type(data)}")
@@ -743,34 +773,46 @@ class PaddleOCRBackend(OCRBackend):
                             first = res_obj[0]
                             if isinstance(first, (list, tuple)) and len(first) >= 2:
                                 # Check if it looks like [box, (text, conf)]
-                                if isinstance(first[1], (list, tuple)) and len(first[1]) >= 2:
+                                if (
+                                    isinstance(first[1], (list, tuple))
+                                    and len(first[1]) >= 2
+                                ):
                                     # Old format items
                                     for item in res_obj:
                                         if item and len(item) >= 2:
                                             box, text_conf = item[0], item[1]
-                                            if isinstance(text_conf, (list, tuple)) and len(text_conf) >= 2:
+                                            if (
+                                                isinstance(text_conf, (list, tuple))
+                                                and len(text_conf) >= 2
+                                            ):
                                                 dt_polys.append(box)
                                                 rec_texts.append(str(text_conf[0]))
                                                 rec_scores.append(float(text_conf[1]))
                                     continue
 
                     if data is None:
-                        logger.info(f"[{self.name}] Could not extract data from result {idx}")
+                        logger.info(
+                            f"[{self.name}] Could not extract data from result {idx}"
+                        )
                         continue
 
                     # Navigate nested structure if present
                     if isinstance(data, dict):
-                        if 'res' in data and isinstance(data['res'], dict):
-                            actual = data['res']
+                        if "res" in data and isinstance(data["res"], dict):
+                            actual = data["res"]
                         else:
                             actual = data
 
-                        logger.info(f"[{self.name}] Data keys: {list(actual.keys()) if isinstance(actual, dict) else 'not a dict'}")
+                        logger.info(
+                            f"[{self.name}] Data keys: {list(actual.keys()) if isinstance(actual, dict) else 'not a dict'}"
+                        )
 
                         # Extract texts, scores, polygons - try various key names
-                        texts = actual.get('rec_texts') or actual.get('rec_text') or []
-                        scores = actual.get('rec_scores') or actual.get('rec_score') or []
-                        polys = actual.get('dt_polys') or actual.get('rec_polys') or []
+                        texts = actual.get("rec_texts") or actual.get("rec_text") or []
+                        scores = (
+                            actual.get("rec_scores") or actual.get("rec_score") or []
+                        )
+                        polys = actual.get("dt_polys") or actual.get("rec_polys") or []
 
                         # Handle single values vs lists
                         if isinstance(texts, str):
@@ -778,19 +820,26 @@ class PaddleOCRBackend(OCRBackend):
                         if isinstance(scores, (int, float)):
                             scores = [scores]
                         if texts:
-                            logger.info(f"[{self.name}] Found {len(texts)} texts: {texts[:3]}...")
+                            logger.info(
+                                f"[{self.name}] Found {len(texts)} texts: {texts[:3]}..."
+                            )
 
                         rec_texts.extend(texts if isinstance(texts, list) else [texts])
-                        rec_scores.extend(scores if isinstance(scores, list) else [scores])
+                        rec_scores.extend(
+                            scores if isinstance(scores, list) else [scores]
+                        )
                         dt_polys.extend(polys if isinstance(polys, list) else [polys])
 
             except Exception as e:
                 logger.error(f"[{self.name}] Error iterating OCR results: {e}")
                 import traceback
+
                 logger.error(f"[{self.name}] Traceback: {traceback.format_exc()}")
                 return result
 
-            logger.info(f"[{self.name}] Total extracted: {len(rec_texts)} texts, {len(dt_polys)} polys")
+            logger.info(
+                f"[{self.name}] Total extracted: {len(rec_texts)} texts, {len(dt_polys)} polys"
+            )
 
             if not rec_texts:
                 logger.debug(f"[{self.name}] No text extracted")
@@ -826,13 +875,15 @@ class PaddleOCRBackend(OCRBackend):
                     except (TypeError, IndexError, ValueError):
                         pass
 
-                detection_data.append({
-                    'text': text,
-                    'conf': conf,
-                    'y_center': y_center,
-                    'x_center': x_center,
-                    'height': height
-                })
+                detection_data.append(
+                    {
+                        "text": text,
+                        "conf": conf,
+                        "y_center": y_center,
+                        "x_center": x_center,
+                        "height": height,
+                    }
+                )
 
             logger.debug(f"[{self.name}] Parsed {len(detection_data)} text regions")
 
@@ -842,30 +893,34 @@ class PaddleOCRBackend(OCRBackend):
             # Single-line mode: treat all detections as one line
             if single_line:
                 # Sort by X position only (left to right)
-                detection_data.sort(key=lambda d: d['x_center'])
+                detection_data.sort(key=lambda d: d["x_center"])
 
                 # Join all text as one line
-                line_text = ' '.join(d['text'] for d in detection_data)
-                line_conf = sum(d['conf'] for d in detection_data) / len(detection_data) * 100.0
+                line_text = " ".join(d["text"] for d in detection_data)
+                line_conf = (
+                    sum(d["conf"] for d in detection_data) / len(detection_data) * 100.0
+                )
 
                 line = OCRLineResult(
                     text=line_text,
                     confidence=line_conf,
-                    word_confidences=[(d['text'], d['conf'] * 100.0) for d in detection_data],
-                    backend=self.name
+                    word_confidences=[
+                        (d["text"], d["conf"] * 100.0) for d in detection_data
+                    ],
+                    backend=self.name,
                 )
 
                 result.lines = [line]
                 result.text = line_text
                 result.average_confidence = line_conf
-                result.min_confidence = min(d['conf'] * 100.0 for d in detection_data)
+                result.min_confidence = min(d["conf"] * 100.0 for d in detection_data)
                 result.low_confidence = result.average_confidence < 60.0
 
                 return result
 
             # Multi-line mode: Group by Y position
             # Sort by Y position first (top to bottom)
-            detection_data.sort(key=lambda d: d['y_center'])
+            detection_data.sort(key=lambda d: d["y_center"])
 
             # Group detections into lines based on Y proximity
             line_groups = []
@@ -873,10 +928,14 @@ class PaddleOCRBackend(OCRBackend):
 
             for det in detection_data[1:]:
                 # Use the average height as threshold for same-line detection
-                avg_height = sum(d['height'] for d in current_group) / len(current_group)
-                y_threshold = max(avg_height * 0.5, 10)  # At least 10 pixels or half line height
+                avg_height = sum(d["height"] for d in current_group) / len(
+                    current_group
+                )
+                y_threshold = max(
+                    avg_height * 0.5, 10
+                )  # At least 10 pixels or half line height
 
-                if abs(det['y_center'] - current_group[0]['y_center']) < y_threshold:
+                if abs(det["y_center"] - current_group[0]["y_center"]) < y_threshold:
                     # Same line - add to current group
                     current_group.append(det)
                 else:
@@ -891,24 +950,24 @@ class PaddleOCRBackend(OCRBackend):
             lines = []
             for group in line_groups:
                 # Sort by X position within the line
-                group.sort(key=lambda d: d['x_center'])
+                group.sort(key=lambda d: d["x_center"])
 
                 # Join text with spaces
-                line_text = ' '.join(d['text'] for d in group)
+                line_text = " ".join(d["text"] for d in group)
 
                 # Calculate average confidence for the line
-                line_conf = sum(d['conf'] for d in group) / len(group) * 100.0
+                line_conf = sum(d["conf"] for d in group) / len(group) * 100.0
 
                 line = OCRLineResult(
                     text=line_text,
                     confidence=line_conf,
-                    word_confidences=[(d['text'], d['conf'] * 100.0) for d in group],
-                    backend=self.name
+                    word_confidences=[(d["text"], d["conf"] * 100.0) for d in group],
+                    backend=self.name,
                 )
                 lines.append(line)
 
             result.lines = lines
-            result.text = '\n'.join(line.text for line in lines if line.text.strip())
+            result.text = "\n".join(line.text for line in lines if line.text.strip())
 
             if lines:
                 confidences = [l.confidence for l in lines]
@@ -918,6 +977,7 @@ class PaddleOCRBackend(OCRBackend):
 
         except Exception as e:
             import traceback
+
             result.error = str(e)
             logger.error(f"PaddleOCR error: {e}")
             logger.error(f"Traceback: {traceback.format_exc()}")
@@ -931,6 +991,7 @@ class PaddleOCRBackend(OCRBackend):
             try:
                 # Clear Paddle GPU memory if using GPU
                 import paddle
+
                 if paddle.device.is_compiled_with_cuda():
                     paddle.device.cuda.empty_cache()
             except ImportError:
@@ -946,62 +1007,79 @@ class PaddleOCRBackend(OCRBackend):
 
 # Map of available backends
 BACKENDS = {
-    'tesseract': TesseractBackend,
-    'easyocr': EasyOCRBackend,
-    'paddleocr': PaddleOCRBackend,
+    "tesseract": TesseractBackend,
+    "easyocr": EasyOCRBackend,
+    "paddleocr": PaddleOCRBackend,
 }
 
 # Language code mapping for different backends
 LANGUAGE_MAP = {
-    'tesseract': {
-        'eng': 'eng', 'jpn': 'jpn', 'spa': 'spa', 'fra': 'fra',
-        'deu': 'deu', 'chi_sim': 'chi_sim', 'chi_tra': 'chi_tra', 'kor': 'kor'
+    "tesseract": {
+        "eng": "eng",
+        "jpn": "jpn",
+        "spa": "spa",
+        "fra": "fra",
+        "deu": "deu",
+        "chi_sim": "chi_sim",
+        "chi_tra": "chi_tra",
+        "kor": "kor",
     },
-    'easyocr': {
-        'eng': ['en'], 'jpn': ['ja'], 'spa': ['es'], 'fra': ['fr'],
-        'deu': ['de'], 'chi_sim': ['ch_sim'], 'chi_tra': ['ch_tra'], 'kor': ['ko']
+    "easyocr": {
+        "eng": ["en"],
+        "jpn": ["ja"],
+        "spa": ["es"],
+        "fra": ["fr"],
+        "deu": ["de"],
+        "chi_sim": ["ch_sim"],
+        "chi_tra": ["ch_tra"],
+        "kor": ["ko"],
     },
-    'paddleocr': {
-        'eng': 'en', 'jpn': 'japan', 'spa': 'es', 'fra': 'fr',
-        'deu': 'de', 'chi_sim': 'ch', 'chi_tra': 'ch', 'kor': 'korean'
-    }
+    "paddleocr": {
+        "eng": "en",
+        "jpn": "japan",
+        "spa": "es",
+        "fra": "fr",
+        "deu": "de",
+        "chi_sim": "ch",
+        "chi_tra": "ch",
+        "kor": "korean",
+    },
 }
 
 
-def get_available_backends() -> List[str]:
+def get_available_backends() -> list[str]:
     """Get list of available OCR backends."""
     available = []
 
     # Check Tesseract
     try:
         import pytesseract
+
         pytesseract.get_tesseract_version()
-        available.append('tesseract')
+        available.append("tesseract")
     except:
         pass
 
     # Check EasyOCR
     try:
         import easyocr
-        available.append('easyocr')
+
+        available.append("easyocr")
     except ImportError:
         pass
 
     # Check PaddleOCR
     try:
         from paddleocr import PaddleOCR
-        available.append('paddleocr')
+
+        available.append("paddleocr")
     except ImportError:
         pass
 
     return available
 
 
-def create_backend(
-    backend_name: str,
-    language: str = 'eng',
-    **kwargs
-) -> OCRBackend:
+def create_backend(backend_name: str, language: str = "eng", **kwargs) -> OCRBackend:
     """
     Create an OCR backend instance.
 
@@ -1014,7 +1092,9 @@ def create_backend(
         Configured OCRBackend instance
     """
     if backend_name not in BACKENDS:
-        raise ValueError(f"Unknown backend: {backend_name}. Available: {list(BACKENDS.keys())}")
+        raise ValueError(
+            f"Unknown backend: {backend_name}. Available: {list(BACKENDS.keys())}"
+        )
 
     backend_class = BACKENDS[backend_name]
 
@@ -1022,17 +1102,17 @@ def create_backend(
     lang_map = LANGUAGE_MAP.get(backend_name, {})
     mapped_lang = lang_map.get(language, language)
 
-    if backend_name == 'tesseract':
+    if backend_name == "tesseract":
         return backend_class(language=mapped_lang, **kwargs)
-    elif backend_name == 'easyocr':
+    elif backend_name == "easyocr":
         langs = mapped_lang if isinstance(mapped_lang, list) else [mapped_lang]
         return backend_class(languages=langs)
-    elif backend_name == 'paddleocr':
+    elif backend_name == "paddleocr":
         # Pass through drop_score and force_cpu if provided
         return backend_class(
             language=mapped_lang,
-            drop_score=kwargs.get('drop_score', 0.5),
-            force_cpu=kwargs.get('force_cpu', False)
+            drop_score=kwargs.get("drop_score", 0.5),
+            force_cpu=kwargs.get("force_cpu", False),
         )
 
     return backend_class()

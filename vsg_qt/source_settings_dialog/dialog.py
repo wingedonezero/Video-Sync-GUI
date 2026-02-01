@@ -1,14 +1,20 @@
 # vsg_qt/source_settings_dialog/dialog.py
-# -*- coding: utf-8 -*-
 """Dialog for configuring per-source correlation settings."""
+
 from __future__ import annotations
-from typing import Dict, List, Any, Optional
+
+from typing import Any
 
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QFormLayout, QGroupBox,
-    QComboBox, QCheckBox, QDialogButtonBox, QLabel
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QGroupBox,
+    QLabel,
+    QVBoxLayout,
 )
-from PySide6.QtCore import Qt
 
 
 class SourceSettingsDialog(QDialog):
@@ -26,10 +32,10 @@ class SourceSettingsDialog(QDialog):
     def __init__(
         self,
         source_key: str,
-        source_audio_tracks: List[Dict[str, Any]],
-        source1_audio_tracks: List[Dict[str, Any]],  # Kept for backwards compatibility
-        current_settings: Optional[Dict[str, Any]] = None,
-        parent=None
+        source_audio_tracks: list[dict[str, Any]],
+        source1_audio_tracks: list[dict[str, Any]],  # Kept for backwards compatibility
+        current_settings: dict[str, Any] | None = None,
+        parent=None,
     ):
         """
         Initialize the source settings dialog.
@@ -45,7 +51,7 @@ class SourceSettingsDialog(QDialog):
         self.source_key = source_key
         self.source_tracks = source_audio_tracks
         self.current_settings = current_settings or {}
-        self.is_source1 = (source_key == "Source 1")
+        self.is_source1 = source_key == "Source 1"
 
         self.setWindowTitle(f"{source_key} Correlation Settings")
         self.setMinimumWidth(500)
@@ -143,25 +149,25 @@ class SourceSettingsDialog(QDialog):
         # Add each audio track from this source
         # Note: get_track_info_for_dialog() returns flattened structure
         for i, track in enumerate(self.source_tracks):
-            description = track.get('description', '')
-            lang = track.get('lang', 'und')
-            name = track.get('name', '')
-            codec = track.get('codec_id', 'unknown')
-            channels = track.get('audio_channels', '')
+            description = track.get("description", "")
+            lang = track.get("lang", "und")
+            name = track.get("name", "")
+            codec = track.get("codec_id", "unknown")
+            channels = track.get("audio_channels", "")
 
             # Build display string
             if description:
                 display_text = f"Track {i}: {description}"
             else:
                 parts = [f"Track {i}"]
-                if lang and lang != 'und':
+                if lang and lang != "und":
                     parts.append(f"[{lang.upper()}]")
                 if name:
                     parts.append(f'"{name}"')
                 if channels:
                     parts.append(f"({channels}ch)")
                 if codec:
-                    codec_short = codec.replace('A_', '').split('/')[0]
+                    codec_short = codec.replace("A_", "").split("/")[0]
                     parts.append(f"- {codec_short}")
                 display_text = " ".join(parts)
 
@@ -171,9 +177,9 @@ class SourceSettingsDialog(QDialog):
         """Apply current settings to the UI controls."""
         # Source track - field name depends on source
         if self.is_source1:
-            source_track = self.current_settings.get('correlation_ref_track')
+            source_track = self.current_settings.get("correlation_ref_track")
         else:
-            source_track = self.current_settings.get('correlation_source_track')
+            source_track = self.current_settings.get("correlation_source_track")
 
         if source_track is not None:
             for i in range(self.source_track_combo.count()):
@@ -185,7 +191,7 @@ class SourceSettingsDialog(QDialog):
 
         # Source separation (only for Source 2/3)
         if not self.is_source1:
-            use_sep = self.current_settings.get('use_source_separation', False)
+            use_sep = self.current_settings.get("use_source_separation", False)
             self.use_separation_cb.setChecked(use_sep)
 
     def _reset_to_defaults(self):
@@ -194,7 +200,7 @@ class SourceSettingsDialog(QDialog):
         if not self.is_source1:
             self.use_separation_cb.setChecked(False)
 
-    def get_settings(self) -> Dict[str, Any]:
+    def get_settings(self) -> dict[str, Any]:
         """
         Get the configured settings.
 
@@ -207,22 +213,19 @@ class SourceSettingsDialog(QDialog):
             - 'use_source_separation': bool
         """
         if self.is_source1:
-            return {
-                'correlation_ref_track': self.source_track_combo.currentData()
-            }
+            return {"correlation_ref_track": self.source_track_combo.currentData()}
         else:
             return {
-                'correlation_source_track': self.source_track_combo.currentData(),
-                'use_source_separation': self.use_separation_cb.isChecked()
+                "correlation_source_track": self.source_track_combo.currentData(),
+                "use_source_separation": self.use_separation_cb.isChecked(),
             }
 
     def has_non_default_settings(self) -> bool:
         """Check if any non-default settings are configured."""
         settings = self.get_settings()
         if self.is_source1:
-            return settings.get('correlation_ref_track') is not None
+            return settings.get("correlation_ref_track") is not None
         else:
-            return (
-                settings.get('correlation_source_track') is not None or
-                settings.get('use_source_separation', False)
+            return settings.get("correlation_source_track") is not None or settings.get(
+                "use_source_separation", False
             )

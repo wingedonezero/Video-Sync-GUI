@@ -1,5 +1,4 @@
 # vsg_qt/report_dialogs/batch_completion_dialog.py
-# -*- coding: utf-8 -*-
 """
 Batch completion dialog with Show Report button.
 
@@ -8,14 +7,18 @@ a button to open the detailed report viewer.
 """
 
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Any
 
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QFrame, QSizePolicy
-)
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
+from PySide6.QtWidgets import (
+    QDialog,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QVBoxLayout,
+)
 
 
 class BatchCompletionDialog(QDialog):
@@ -33,9 +36,9 @@ class BatchCompletionDialog(QDialog):
         successful: int,
         warnings: int,
         failed: int,
-        stepping_jobs: List[Dict[str, Any]],
-        stepping_disabled_jobs: List[Dict[str, Any]],
-        report_path: Optional[Path] = None
+        stepping_jobs: list[dict[str, Any]],
+        stepping_disabled_jobs: list[dict[str, Any]],
+        report_path: Path | None = None,
     ):
         """
         Initialize the completion dialog.
@@ -52,8 +55,14 @@ class BatchCompletionDialog(QDialog):
         """
         super().__init__(parent)
         self.report_path = report_path
-        self._setup_ui(total_jobs, successful, warnings, failed,
-                       stepping_jobs, stepping_disabled_jobs)
+        self._setup_ui(
+            total_jobs,
+            successful,
+            warnings,
+            failed,
+            stepping_jobs,
+            stepping_disabled_jobs,
+        )
 
     def _setup_ui(
         self,
@@ -61,8 +70,8 @@ class BatchCompletionDialog(QDialog):
         successful: int,
         warnings: int,
         failed: int,
-        stepping_jobs: List[Dict[str, Any]],
-        stepping_disabled_jobs: List[Dict[str, Any]]
+        stepping_jobs: list[dict[str, Any]],
+        stepping_disabled_jobs: list[dict[str, Any]],
     ):
         """Set up the dialog UI."""
         # Determine dialog type based on results
@@ -106,7 +115,9 @@ class BatchCompletionDialog(QDialog):
         """)
         header_layout.addWidget(icon_label)
 
-        title_label = QLabel(f"Processed {total_jobs} Job{'s' if total_jobs != 1 else ''}")
+        title_label = QLabel(
+            f"Processed {total_jobs} Job{'s' if total_jobs != 1 else ''}"
+        )
         title_font = QFont()
         title_font.setPointSize(14)
         title_font.setBold(True)
@@ -151,7 +162,9 @@ class BatchCompletionDialog(QDialog):
             stepping_frame.setFrameShape(QFrame.StyledPanel)
             stepping_layout = QVBoxLayout(stepping_frame)
 
-            stepping_label = QLabel(f"Stepping Correction Applied ({len(stepping_jobs)} job{'s' if len(stepping_jobs) != 1 else ''})")
+            stepping_label = QLabel(
+                f"Stepping Correction Applied ({len(stepping_jobs)} job{'s' if len(stepping_jobs) != 1 else ''})"
+            )
             stepping_font = QFont()
             stepping_font.setBold(True)
             stepping_label.setFont(stepping_font)
@@ -163,8 +176,10 @@ class BatchCompletionDialog(QDialog):
 
             # Show first few jobs
             for job_info in stepping_jobs[:3]:
-                sources_str = ', '.join(job_info.get('sources', []))
-                job_label = QLabel(f"  {job_info.get('name', 'Unknown')}: {sources_str}")
+                sources_str = ", ".join(job_info.get("sources", []))
+                job_label = QLabel(
+                    f"  {job_info.get('name', 'Unknown')}: {sources_str}"
+                )
                 stepping_layout.addWidget(job_label)
 
             if len(stepping_jobs) > 3:
@@ -179,14 +194,20 @@ class BatchCompletionDialog(QDialog):
             warning_frame.setFrameShape(QFrame.StyledPanel)
             warning_layout = QVBoxLayout(warning_frame)
 
-            warning_label = QLabel(f"Stepping Detected - Correction Disabled ({len(stepping_disabled_jobs)} job{'s' if len(stepping_disabled_jobs) != 1 else ''})")
+            warning_label = QLabel(
+                f"Stepping Detected - Correction Disabled ({len(stepping_disabled_jobs)} job{'s' if len(stepping_disabled_jobs) != 1 else ''})"
+            )
             warning_font = QFont()
             warning_font.setBold(True)
             warning_label.setFont(warning_font)
-            warning_label.setStyleSheet("color: #ffc107;")  # Yellow - visible on both themes
+            warning_label.setStyleSheet(
+                "color: #ffc107;"
+            )  # Yellow - visible on both themes
             warning_layout.addWidget(warning_label)
 
-            warning_text = QLabel("These files have timing inconsistencies.\nMANUAL REVIEW REQUIRED!")
+            warning_text = QLabel(
+                "These files have timing inconsistencies.\nMANUAL REVIEW REQUIRED!"
+            )
             warning_layout.addWidget(warning_text)
 
             layout.addWidget(warning_frame)

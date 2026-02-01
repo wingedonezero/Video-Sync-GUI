@@ -1,10 +1,11 @@
 # vsg_core/job_layouts/signature.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
 import hashlib
 import json
 from collections import Counter
-from typing import Dict, List, Any
+from typing import Any
+
 
 class EnhancedSignatureGenerator:
     """
@@ -12,7 +13,9 @@ class EnhancedSignatureGenerator:
     Handles duplicate tracks (e.g., PGS) by including their position.
     """
 
-    def generate_track_signature(self, track_info: Dict[str, List[dict]], strict: bool = False) -> Dict[str, Any]:
+    def generate_track_signature(
+        self, track_info: dict[str, list[dict]], strict: bool = False
+    ) -> dict[str, Any]:
         """
         Generates a basic signature for a set of tracks.
 
@@ -36,7 +39,7 @@ class EnhancedSignatureGenerator:
             type_counters = {}
             for source_key, tracks in track_info.items():
                 for track in tracks:
-                    track_type = track.get('type', 'unknown')
+                    track_type = track.get("type", "unknown")
                     position = type_counters.get(track_type, 0)
                     type_counters[track_type] = position + 1
 
@@ -48,12 +51,14 @@ class EnhancedSignatureGenerator:
             signature = Counter(signature_items)
 
         return {
-            'signature': dict(signature),
-            'strict': strict,
-            'total_tracks': sum(signature.values())
+            "signature": dict(signature),
+            "strict": strict,
+            "total_tracks": sum(signature.values()),
         }
 
-    def generate_structure_signature(self, track_info: Dict[str, List[dict]]) -> Dict[str, Any]:
+    def generate_structure_signature(
+        self, track_info: dict[str, list[dict]]
+    ) -> dict[str, Any]:
         """
         Generates a detailed, order-sensitive signature of the file structure.
         This is used for exact compatibility checking.
@@ -63,22 +68,26 @@ class EnhancedSignatureGenerator:
         """
         structure = {}
         for source_key, tracks in sorted(track_info.items()):
-            source_structure = {'video': [], 'audio': [], 'subtitles': []}
+            source_structure = {"video": [], "audio": [], "subtitles": []}
             for track in tracks:
-                track_type = track.get('type')
+                track_type = track.get("type")
                 if track_type in source_structure:
-                    source_structure[track_type].append({
-                        'id': track.get('id'),  # ADDED: Track ID for exact matching
-                        'codec_id': track.get('codec_id', ''),
-                        'lang': track.get('lang', 'und'),
-                    })
+                    source_structure[track_type].append(
+                        {
+                            "id": track.get("id"),  # ADDED: Track ID for exact matching
+                            "codec_id": track.get("codec_id", ""),
+                            "lang": track.get("lang", "und"),
+                        }
+                    )
             structure[source_key] = source_structure
 
         structure_json = json.dumps(structure, sort_keys=True)
         structure_hash = hashlib.sha256(structure_json.encode()).hexdigest()
 
-        return {'structure': structure, 'hash': structure_hash}
+        return {"structure": structure, "hash": structure_hash}
 
-    def structures_are_compatible(self, struct1: Dict[str, Any], struct2: Dict[str, Any]) -> bool:
+    def structures_are_compatible(
+        self, struct1: dict[str, Any], struct2: dict[str, Any]
+    ) -> bool:
         """Compares two structure signatures for exact compatibility."""
-        return struct1.get('hash') and struct1.get('hash') == struct2.get('hash')
+        return struct1.get("hash") and struct1.get("hash") == struct2.get("hash")

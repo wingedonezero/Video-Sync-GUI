@@ -1,21 +1,40 @@
 # vsg_qt/job_queue_dialog/ui.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
-from typing import List, Dict, Callable
 
-from PySide6.QtCore import Qt, QItemSelectionModel
-from PySide6.QtGui import QShortcut, QKeySequence
+from typing import TYPE_CHECKING
+
+from PySide6.QtCore import QItemSelectionModel, Qt
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QDialogButtonBox,
-    QTableWidget, QAbstractItemView, QHeaderView, QMenu
+    QAbstractItemView,
+    QDialog,
+    QDialogButtonBox,
+    QHBoxLayout,
+    QMenu,
+    QPushButton,
+    QTableWidget,
+    QVBoxLayout,
 )
 
-from .logic import JobQueueLogic
 from vsg_qt.add_job_dialog import AddJobDialog
 
+from .logic import JobQueueLogic
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from vsg_core.config import AppConfig
+    from vsg_core.job_layouts import JobLayoutManager
+
+
 class JobQueueDialog(QDialog):
-    def __init__(self, config: "AppConfig", log_callback: Callable[[str], None],
-                 layout_manager: "JobLayoutManager", parent=None):
+    def __init__(
+        self,
+        config: AppConfig,
+        log_callback: Callable[[str], None],
+        layout_manager: JobLayoutManager,
+        parent=None,
+    ):
         super().__init__(parent)
         self.setWindowTitle("Job Queue")
         self.setMinimumSize(1200, 600)
@@ -30,8 +49,10 @@ class JobQueueDialog(QDialog):
         self.populate_table()
 
     def dragEnterEvent(self, event):
-        if event.mimeData().hasUrls(): event.acceptProposedAction()
-        else: event.ignore()
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
 
     def dropEvent(self, event):
         if event.mimeData().hasUrls():
@@ -40,7 +61,8 @@ class JobQueueDialog(QDialog):
             add_dialog.populate_sources_from_paths(paths)
             if add_dialog.exec():
                 new_jobs = add_dialog.get_discovered_jobs()
-                if new_jobs: self._logic.add_jobs(new_jobs)
+                if new_jobs:
+                    self._logic.add_jobs(new_jobs)
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -79,18 +101,29 @@ class JobQueueDialog(QDialog):
         dialog_btns.rejected.connect(self.reject)
 
     def _connect_signals(self):
-        self.table.itemDoubleClicked.connect(lambda item: self._logic.configure_job_at_row(item.row()))
+        self.table.itemDoubleClicked.connect(
+            lambda item: self._logic.configure_job_at_row(item.row())
+        )
         self.table.customContextMenuRequested.connect(self._show_context_menu)
         self.add_job_btn.clicked.connect(self._logic.add_jobs_from_dialog)
         self.remove_btn.clicked.connect(self._logic.remove_selected_jobs)
         self.move_up_btn.clicked.connect(lambda: self.move_selected_jobs(-1))
         self.move_down_btn.clicked.connect(lambda: self.move_selected_jobs(1))
-        QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Up), self, lambda: self.move_selected_jobs(-1))
-        QShortcut(QKeySequence(Qt.CTRL | Qt.Key_Down), self, lambda: self.move_selected_jobs(1))
+        QShortcut(
+            QKeySequence(Qt.CTRL | Qt.Key_Up), self, lambda: self.move_selected_jobs(-1)
+        )
+        QShortcut(
+            QKeySequence(Qt.CTRL | Qt.Key_Down),
+            self,
+            lambda: self.move_selected_jobs(1),
+        )
 
     def move_selected_jobs(self, direction: int):
-        selected_rows = sorted([r.row() for r in self.table.selectionModel().selectedRows()])
-        if not selected_rows: return
+        selected_rows = sorted(
+            [r.row() for r in self.table.selectionModel().selectedRows()]
+        )
+        if not selected_rows:
+            return
 
         if direction == -1 and selected_rows[0] > 0:
             for row_index in selected_rows:
@@ -108,7 +141,9 @@ class JobQueueDialog(QDialog):
         selection_model.clearSelection()
         for i in range(len(selected_rows)):
             index = self.table.model().index(new_selection_start + i, 0)
-            selection_model.select(index, QItemSelectionModel.Select | QItemSelectionModel.Rows)
+            selection_model.select(
+                index, QItemSelectionModel.Select | QItemSelectionModel.Rows
+            )
 
     def populate_table(self):
         self.table.selectionModel().clear()
@@ -116,7 +151,8 @@ class JobQueueDialog(QDialog):
 
     def _show_context_menu(self, pos: Qt.Point):
         selected_rows = self.table.selectionModel().selectedRows()
-        if not selected_rows: return
+        if not selected_rows:
+            return
 
         menu = QMenu()
         config_action = menu.addAction("Configure...")
@@ -130,7 +166,7 @@ class JobQueueDialog(QDialog):
         # Enable "Copy" if a single, configured job is selected
         source_job_index = selected_rows[0].row()
         source_job = self._logic.jobs[source_job_index]
-        is_configured = source_job.get('status') == 'Configured'
+        is_configured = source_job.get("status") == "Configured"
         copy_action.setEnabled(len(selected_rows) == 1 and is_configured)
 
         # Enable "Paste" if the clipboard has content
@@ -147,5 +183,5 @@ class JobQueueDialog(QDialog):
         elif action == paste_action:
             self._logic.paste_layout()
 
-    def get_final_jobs(self) -> List[Dict]:
+    def get_final_jobs(self) -> list[dict]:
         return self._logic.get_final_jobs()

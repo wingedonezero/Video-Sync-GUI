@@ -1,13 +1,12 @@
 # vsg_core/pipeline_components/result_auditor.py
-# -*- coding: utf-8 -*-
 """
 Result auditor component.
 
 Wraps the FinalAuditor for post-merge validation.
 """
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from ..io.runner import CommandRunner
 from ..postprocess import FinalAuditor
@@ -21,7 +20,7 @@ class ResultAuditor:
         output_file: Path,
         context: object,
         runner: CommandRunner,
-        log_callback: Callable[[str], None]
+        log_callback: Callable[[str], None],
     ) -> int:
         """
         Audits the merged output file.

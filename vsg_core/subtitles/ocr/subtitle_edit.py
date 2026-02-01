@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/subtitle_edit.py
-# -*- coding: utf-8 -*-
 """
 Subtitle Edit Dictionary Support
 
@@ -19,15 +18,16 @@ import logging
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
 
 # Try to use 'regex' module for Unicode property support (\p{L}, \p{Ll}, etc.)
 # Fall back to standard 're' module if not available
 try:
     import regex as re
+
     REGEX_UNICODE_SUPPORT = True
 except ImportError:
     import re
+
     REGEX_UNICODE_SUPPORT = False
 
 logger = logging.getLogger(__name__)
@@ -36,10 +36,13 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SEReplacementRule:
     """A replacement rule from Subtitle Edit OCRFixReplaceList."""
+
     from_text: str
     to_text: str
-    rule_type: str  # whole_line, partial_line_always, partial_line, begin_line, end_line,
-                    # whole_word, partial_word_always, partial_word, regex
+    rule_type: (
+        str  # whole_line, partial_line_always, partial_line, begin_line, end_line,
+    )
+    # whole_word, partial_word_always, partial_word, regex
 
     def __hash__(self):
         return hash((self.from_text, self.to_text, self.rule_type))
@@ -48,6 +51,7 @@ class SEReplacementRule:
 @dataclass
 class SEDictionaryConfig:
     """Configuration for which SE dictionaries are enabled."""
+
     ocr_fix_enabled: bool = True
     names_enabled: bool = True
     no_break_enabled: bool = True
@@ -59,26 +63,27 @@ class SEDictionaryConfig:
 @dataclass
 class SEDictionaries:
     """Loaded Subtitle Edit dictionary data."""
+
     # OCR Fix replacements by type
-    whole_lines: List[SEReplacementRule] = field(default_factory=list)
-    partial_lines_always: List[SEReplacementRule] = field(default_factory=list)
-    partial_lines: List[SEReplacementRule] = field(default_factory=list)
-    begin_lines: List[SEReplacementRule] = field(default_factory=list)
-    end_lines: List[SEReplacementRule] = field(default_factory=list)
-    whole_words: List[SEReplacementRule] = field(default_factory=list)
-    partial_words_always: List[SEReplacementRule] = field(default_factory=list)
-    partial_words: List[SEReplacementRule] = field(default_factory=list)
-    regex_rules: List[SEReplacementRule] = field(default_factory=list)
+    whole_lines: list[SEReplacementRule] = field(default_factory=list)
+    partial_lines_always: list[SEReplacementRule] = field(default_factory=list)
+    partial_lines: list[SEReplacementRule] = field(default_factory=list)
+    begin_lines: list[SEReplacementRule] = field(default_factory=list)
+    end_lines: list[SEReplacementRule] = field(default_factory=list)
+    whole_words: list[SEReplacementRule] = field(default_factory=list)
+    partial_words_always: list[SEReplacementRule] = field(default_factory=list)
+    partial_words: list[SEReplacementRule] = field(default_factory=list)
+    regex_rules: list[SEReplacementRule] = field(default_factory=list)
 
     # Other dictionaries
-    names: Set[str] = field(default_factory=set)
-    names_blacklist: Set[str] = field(default_factory=set)
-    no_break_after: Set[str] = field(default_factory=set)
-    spell_words: Set[str] = field(default_factory=set)
-    interjections: Set[str] = field(default_factory=set)
-    word_split_list: Set[str] = field(default_factory=set)
+    names: set[str] = field(default_factory=set)
+    names_blacklist: set[str] = field(default_factory=set)
+    no_break_after: set[str] = field(default_factory=set)
+    spell_words: set[str] = field(default_factory=set)
+    interjections: set[str] = field(default_factory=set)
+    word_split_list: set[str] = field(default_factory=set)
 
-    def get_all_valid_words(self) -> Set[str]:
+    def get_all_valid_words(self) -> set[str]:
         """Get all words that should be considered valid."""
         words = set()
         words.update(self.names - self.names_blacklist)
@@ -89,11 +94,17 @@ class SEDictionaries:
 
     def get_replacement_count(self) -> int:
         """Get total number of replacement rules."""
-        return (len(self.whole_lines) + len(self.partial_lines_always) +
-                len(self.partial_lines) + len(self.begin_lines) +
-                len(self.end_lines) + len(self.whole_words) +
-                len(self.partial_words_always) + len(self.partial_words) +
-                len(self.regex_rules))
+        return (
+            len(self.whole_lines)
+            + len(self.partial_lines_always)
+            + len(self.partial_lines)
+            + len(self.begin_lines)
+            + len(self.end_lines)
+            + len(self.whole_words)
+            + len(self.partial_words_always)
+            + len(self.partial_words)
+            + len(self.regex_rules)
+        )
 
 
 class SubtitleEditParser:
@@ -117,9 +128,9 @@ class SubtitleEditParser:
             se_dir: Path to directory containing SE dictionary files
         """
         self.se_dir = Path(se_dir)
-        self._cache: Dict[str, any] = {}
+        self._cache: dict[str, any] = {}
 
-    def get_available_files(self) -> Dict[str, List[Path]]:
+    def get_available_files(self) -> dict[str, list[Path]]:
         """
         Get available SE dictionary files by category.
 
@@ -127,12 +138,12 @@ class SubtitleEditParser:
             Dict mapping category to list of available files
         """
         files = {
-            'ocr_fix': [],
-            'names': [],
-            'no_break': [],
-            'spell_words': [],
-            'interjections': [],
-            'word_split': [],
+            "ocr_fix": [],
+            "names": [],
+            "no_break": [],
+            "spell_words": [],
+            "interjections": [],
+            "word_split": [],
         }
 
         if not self.se_dir.exists():
@@ -141,18 +152,18 @@ class SubtitleEditParser:
         for path in self.se_dir.iterdir():
             name = path.name.lower()
 
-            if name.endswith('_ocrfixreplacelist.xml'):
-                files['ocr_fix'].append(path)
-            elif name.endswith('_names.xml') or name == 'names.xml':
-                files['names'].append(path)
-            elif name.endswith('_nobreakafterlist.xml'):
-                files['no_break'].append(path)
-            elif name.endswith('_se.xml') and 'interjection' not in name:
-                files['spell_words'].append(path)
-            elif 'interjection' in name and name.endswith('.xml'):
-                files['interjections'].append(path)
-            elif name.endswith('_wordsplitlist.txt'):
-                files['word_split'].append(path)
+            if name.endswith("_ocrfixreplacelist.xml"):
+                files["ocr_fix"].append(path)
+            elif name.endswith("_names.xml") or name == "names.xml":
+                files["names"].append(path)
+            elif name.endswith("_nobreakafterlist.xml"):
+                files["no_break"].append(path)
+            elif name.endswith("_se.xml") and "interjection" not in name:
+                files["spell_words"].append(path)
+            elif "interjection" in name and name.endswith(".xml"):
+                files["interjections"].append(path)
+            elif name.endswith("_wordsplitlist.txt"):
+                files["word_split"].append(path)
 
         return files
 
@@ -184,153 +195,157 @@ class SubtitleEditParser:
             root = tree.getroot()
 
             # Parse WholeLines
-            whole_lines = root.find('WholeLines')
+            whole_lines = root.find("WholeLines")
             if whole_lines is not None:
-                for elem in whole_lines.findall('Line'):
-                    from_text = elem.get('from', '')
-                    to_text = elem.get('to', '')
+                for elem in whole_lines.findall("Line"):
+                    from_text = elem.get("from", "")
+                    to_text = elem.get("to", "")
                     if from_text:
-                        result.whole_lines.append(SEReplacementRule(
-                            from_text, to_text, 'whole_line'
-                        ))
+                        result.whole_lines.append(
+                            SEReplacementRule(from_text, to_text, "whole_line")
+                        )
 
             # Parse PartialLinesAlways
-            partial_always = root.find('PartialLinesAlways')
+            partial_always = root.find("PartialLinesAlways")
             if partial_always is not None:
-                for elem in partial_always.findall('LinePart'):
-                    from_text = elem.get('from', '')
-                    to_text = elem.get('to', '')
+                for elem in partial_always.findall("LinePart"):
+                    from_text = elem.get("from", "")
+                    to_text = elem.get("to", "")
                     if from_text:
-                        result.partial_lines_always.append(SEReplacementRule(
-                            from_text, to_text, 'partial_line_always'
-                        ))
-                for elem in partial_always.findall('WordPart'):
-                    from_text = elem.get('from', '')
-                    to_text = elem.get('to', '')
+                        result.partial_lines_always.append(
+                            SEReplacementRule(from_text, to_text, "partial_line_always")
+                        )
+                for elem in partial_always.findall("WordPart"):
+                    from_text = elem.get("from", "")
+                    to_text = elem.get("to", "")
                     if from_text:
-                        result.partial_lines_always.append(SEReplacementRule(
-                            from_text, to_text, 'partial_line_always'
-                        ))
+                        result.partial_lines_always.append(
+                            SEReplacementRule(from_text, to_text, "partial_line_always")
+                        )
 
             # Parse PartialLines
-            partial_lines = root.find('PartialLines')
+            partial_lines = root.find("PartialLines")
             if partial_lines is not None:
                 # Handle both <LinePart> and <WordPart> elements
-                for elem in partial_lines.findall('LinePart'):
-                    from_text = elem.get('from', '')
-                    to_text = elem.get('to', '')
+                for elem in partial_lines.findall("LinePart"):
+                    from_text = elem.get("from", "")
+                    to_text = elem.get("to", "")
                     if from_text:
-                        result.partial_lines.append(SEReplacementRule(
-                            from_text, to_text, 'partial_line'
-                        ))
-                for elem in partial_lines.findall('WordPart'):
-                    from_text = elem.get('from', '')
-                    to_text = elem.get('to', '')
+                        result.partial_lines.append(
+                            SEReplacementRule(from_text, to_text, "partial_line")
+                        )
+                for elem in partial_lines.findall("WordPart"):
+                    from_text = elem.get("from", "")
+                    to_text = elem.get("to", "")
                     if from_text:
-                        result.partial_lines.append(SEReplacementRule(
-                            from_text, to_text, 'partial_line'
-                        ))
+                        result.partial_lines.append(
+                            SEReplacementRule(from_text, to_text, "partial_line")
+                        )
 
             # Parse BeginLines
-            begin_lines = root.find('BeginLines')
+            begin_lines = root.find("BeginLines")
             if begin_lines is not None:
                 # Handle both <Line> and <Beginning> elements
-                for elem in begin_lines.findall('Line'):
-                    from_text = elem.get('from', '')
-                    to_text = elem.get('to', '')
+                for elem in begin_lines.findall("Line"):
+                    from_text = elem.get("from", "")
+                    to_text = elem.get("to", "")
                     if from_text:
-                        result.begin_lines.append(SEReplacementRule(
-                            from_text, to_text, 'begin_line'
-                        ))
-                for elem in begin_lines.findall('Beginning'):
-                    from_text = elem.get('from', '')
-                    to_text = elem.get('to', '')
+                        result.begin_lines.append(
+                            SEReplacementRule(from_text, to_text, "begin_line")
+                        )
+                for elem in begin_lines.findall("Beginning"):
+                    from_text = elem.get("from", "")
+                    to_text = elem.get("to", "")
                     if from_text:
-                        result.begin_lines.append(SEReplacementRule(
-                            from_text, to_text, 'begin_line'
-                        ))
+                        result.begin_lines.append(
+                            SEReplacementRule(from_text, to_text, "begin_line")
+                        )
 
             # Parse EndLines
-            end_lines = root.find('EndLines')
+            end_lines = root.find("EndLines")
             if end_lines is not None:
                 # Handle both <Line> and <Ending> elements
-                for elem in end_lines.findall('Line'):
-                    from_text = elem.get('from', '')
-                    to_text = elem.get('to', '')
+                for elem in end_lines.findall("Line"):
+                    from_text = elem.get("from", "")
+                    to_text = elem.get("to", "")
                     if from_text:
-                        result.end_lines.append(SEReplacementRule(
-                            from_text, to_text, 'end_line'
-                        ))
-                for elem in end_lines.findall('Ending'):
-                    from_text = elem.get('from', '')
-                    to_text = elem.get('to', '')
+                        result.end_lines.append(
+                            SEReplacementRule(from_text, to_text, "end_line")
+                        )
+                for elem in end_lines.findall("Ending"):
+                    from_text = elem.get("from", "")
+                    to_text = elem.get("to", "")
                     if from_text:
-                        result.end_lines.append(SEReplacementRule(
-                            from_text, to_text, 'end_line'
-                        ))
+                        result.end_lines.append(
+                            SEReplacementRule(from_text, to_text, "end_line")
+                        )
 
             # Parse WholeWords
-            whole_words = root.find('WholeWords')
+            whole_words = root.find("WholeWords")
             if whole_words is not None:
-                for elem in whole_words.findall('Word'):
-                    from_text = elem.get('from', '')
-                    to_text = elem.get('to', '')
+                for elem in whole_words.findall("Word"):
+                    from_text = elem.get("from", "")
+                    to_text = elem.get("to", "")
                     if from_text:
-                        result.whole_words.append(SEReplacementRule(
-                            from_text, to_text, 'whole_word'
-                        ))
+                        result.whole_words.append(
+                            SEReplacementRule(from_text, to_text, "whole_word")
+                        )
 
             # Parse PartialWordsAlways
-            partial_words_always = root.find('PartialWordsAlways')
+            partial_words_always = root.find("PartialWordsAlways")
             if partial_words_always is not None:
-                for elem in partial_words_always.findall('WordPart'):
-                    from_text = elem.get('from', '')
-                    to_text = elem.get('to', '')
+                for elem in partial_words_always.findall("WordPart"):
+                    from_text = elem.get("from", "")
+                    to_text = elem.get("to", "")
                     if from_text:
-                        result.partial_words_always.append(SEReplacementRule(
-                            from_text, to_text, 'partial_word_always'
-                        ))
+                        result.partial_words_always.append(
+                            SEReplacementRule(from_text, to_text, "partial_word_always")
+                        )
 
             # Parse PartialWords
-            partial_words = root.find('PartialWords')
+            partial_words = root.find("PartialWords")
             if partial_words is not None:
-                for elem in partial_words.findall('WordPart'):
-                    from_text = elem.get('from', '')
-                    to_text = elem.get('to', '')
+                for elem in partial_words.findall("WordPart"):
+                    from_text = elem.get("from", "")
+                    to_text = elem.get("to", "")
                     if from_text:
-                        result.partial_words.append(SEReplacementRule(
-                            from_text, to_text, 'partial_word'
-                        ))
+                        result.partial_words.append(
+                            SEReplacementRule(from_text, to_text, "partial_word")
+                        )
 
             # Parse RegularExpressions
-            regex_section = root.find('RegularExpressions')
+            regex_section = root.find("RegularExpressions")
             if regex_section is not None:
                 # Handle both <Regex> and <RegEx> elements
-                for elem in regex_section.findall('Regex'):
-                    find_pattern = elem.get('find', '')
-                    replace_with = elem.get('replaceWith', '')
+                for elem in regex_section.findall("Regex"):
+                    find_pattern = elem.get("find", "")
+                    replace_with = elem.get("replaceWith", "")
                     if find_pattern:
-                        result.regex_rules.append(SEReplacementRule(
-                            find_pattern, replace_with, 'regex'
-                        ))
-                for elem in regex_section.findall('RegEx'):
-                    find_pattern = elem.get('find', '')
-                    replace_with = elem.get('replaceWith', '')
+                        result.regex_rules.append(
+                            SEReplacementRule(find_pattern, replace_with, "regex")
+                        )
+                for elem in regex_section.findall("RegEx"):
+                    find_pattern = elem.get("find", "")
+                    replace_with = elem.get("replaceWith", "")
                     if find_pattern:
-                        result.regex_rules.append(SEReplacementRule(
-                            find_pattern, replace_with, 'regex'
-                        ))
+                        result.regex_rules.append(
+                            SEReplacementRule(find_pattern, replace_with, "regex")
+                        )
 
-            logger.info(f"Loaded OCR fix list: {result.get_replacement_count()} rules from {path.name}")
-            logger.debug(f"  Breakdown: whole_lines={len(result.whole_lines)}, "
-                        f"partial_lines_always={len(result.partial_lines_always)}, "
-                        f"partial_lines={len(result.partial_lines)}, "
-                        f"begin_lines={len(result.begin_lines)}, "
-                        f"end_lines={len(result.end_lines)}, "
-                        f"whole_words={len(result.whole_words)}, "
-                        f"partial_words_always={len(result.partial_words_always)}, "
-                        f"partial_words={len(result.partial_words)}, "
-                        f"regex={len(result.regex_rules)}")
+            logger.info(
+                f"Loaded OCR fix list: {result.get_replacement_count()} rules from {path.name}"
+            )
+            logger.debug(
+                f"  Breakdown: whole_lines={len(result.whole_lines)}, "
+                f"partial_lines_always={len(result.partial_lines_always)}, "
+                f"partial_lines={len(result.partial_lines)}, "
+                f"begin_lines={len(result.begin_lines)}, "
+                f"end_lines={len(result.end_lines)}, "
+                f"whole_words={len(result.whole_words)}, "
+                f"partial_words_always={len(result.partial_words_always)}, "
+                f"partial_words={len(result.partial_words)}, "
+                f"regex={len(result.regex_rules)}"
+            )
 
         except ET.ParseError as e:
             logger.error(f"XML parse error in {path}: {e}")
@@ -339,7 +354,7 @@ class SubtitleEditParser:
 
         return result
 
-    def parse_names_xml(self, path: Path) -> Tuple[Set[str], Set[str]]:
+    def parse_names_xml(self, path: Path) -> tuple[set[str], set[str]]:
         """
         Parse a names XML file.
 
@@ -365,18 +380,20 @@ class SubtitleEditParser:
             root = tree.getroot()
 
             # Parse blacklist
-            blacklist_elem = root.find('blacklist')
+            blacklist_elem = root.find("blacklist")
             if blacklist_elem is not None:
-                for name_elem in blacklist_elem.findall('name'):
+                for name_elem in blacklist_elem.findall("name"):
                     if name_elem.text:
                         blacklist.add(name_elem.text.strip())
 
             # Parse names (direct children of root, not in blacklist section)
-            for name_elem in root.findall('name'):
+            for name_elem in root.findall("name"):
                 if name_elem.text:
                     names.add(name_elem.text.strip())
 
-            logger.info(f"Loaded {len(names)} names, {len(blacklist)} blacklisted from {path.name}")
+            logger.info(
+                f"Loaded {len(names)} names, {len(blacklist)} blacklisted from {path.name}"
+            )
 
         except ET.ParseError as e:
             logger.error(f"XML parse error in {path}: {e}")
@@ -385,7 +402,7 @@ class SubtitleEditParser:
 
         return names, blacklist
 
-    def parse_no_break_list(self, path: Path) -> Set[str]:
+    def parse_no_break_list(self, path: Path) -> set[str]:
         """
         Parse a NoBreakAfterList.xml file.
 
@@ -405,7 +422,7 @@ class SubtitleEditParser:
             tree = ET.parse(path)
             root = tree.getroot()
 
-            for item_elem in root.findall('Item'):
+            for item_elem in root.findall("Item"):
                 if item_elem.text:
                     items.add(item_elem.text.strip())
 
@@ -418,7 +435,7 @@ class SubtitleEditParser:
 
         return items
 
-    def parse_spell_words_xml(self, path: Path) -> Set[str]:
+    def parse_spell_words_xml(self, path: Path) -> set[str]:
         """
         Parse a spell check words XML file (*_se.xml).
 
@@ -438,7 +455,7 @@ class SubtitleEditParser:
             tree = ET.parse(path)
             root = tree.getroot()
 
-            for word_elem in root.findall('word'):
+            for word_elem in root.findall("word"):
                 if word_elem.text:
                     words.add(word_elem.text.strip())
 
@@ -451,7 +468,7 @@ class SubtitleEditParser:
 
         return words
 
-    def parse_word_split_list(self, path: Path) -> Set[str]:
+    def parse_word_split_list(self, path: Path) -> set[str]:
         """
         Parse a WordSplitList.txt file.
 
@@ -467,20 +484,22 @@ class SubtitleEditParser:
             return words
 
         try:
-            content = path.read_text(encoding='utf-8')
+            content = path.read_text(encoding="utf-8")
             for line in content.splitlines():
                 word = line.strip()
-                if word and not word.startswith('#'):
+                if word and not word.startswith("#"):
                     words.add(word)
 
-            logger.info(f"Loaded {len(words)} words for word splitting from {path.name}")
+            logger.info(
+                f"Loaded {len(words)} words for word splitting from {path.name}"
+            )
 
         except Exception as e:
             logger.error(f"Error loading word split list {path}: {e}")
 
         return words
 
-    def load_all(self, config: Optional[SEDictionaryConfig] = None) -> SEDictionaries:
+    def load_all(self, config: SEDictionaryConfig | None = None) -> SEDictionaries:
         """
         Load all available SE dictionary files.
 
@@ -497,7 +516,7 @@ class SubtitleEditParser:
 
         # Load OCR fix lists
         if config.ocr_fix_enabled:
-            for path in available['ocr_fix']:
+            for path in available["ocr_fix"]:
                 ocr_data = self.parse_ocr_fix_list(path)
                 result.whole_lines.extend(ocr_data.whole_lines)
                 result.partial_lines_always.extend(ocr_data.partial_lines_always)
@@ -511,32 +530,32 @@ class SubtitleEditParser:
 
         # Load names
         if config.names_enabled:
-            for path in available['names']:
+            for path in available["names"]:
                 names, blacklist = self.parse_names_xml(path)
                 result.names.update(names)
                 result.names_blacklist.update(blacklist)
 
         # Load no break after list
         if config.no_break_enabled:
-            for path in available['no_break']:
+            for path in available["no_break"]:
                 no_break = self.parse_no_break_list(path)
                 result.no_break_after.update(no_break)
 
         # Load spell check words
         if config.spell_words_enabled:
-            for path in available['spell_words']:
+            for path in available["spell_words"]:
                 words = self.parse_spell_words_xml(path)
                 result.spell_words.update(words)
 
         # Load interjections
         if config.interjections_enabled:
-            for path in available['interjections']:
+            for path in available["interjections"]:
                 words = self.parse_spell_words_xml(path)  # Same format
                 result.interjections.update(words)
 
         # Load word split list
         if config.word_split_enabled:
-            for path in available['word_split']:
+            for path in available["word_split"]:
                 words = self.parse_word_split_list(path)
                 result.word_split_list.update(words)
 
@@ -551,7 +570,7 @@ class WordSplitter:
     them into "this is" or "I don't".
     """
 
-    def __init__(self, valid_words: Set[str]):
+    def __init__(self, valid_words: set[str]):
         """
         Initialize with set of valid words.
 
@@ -559,13 +578,15 @@ class WordSplitter:
             valid_words: Set of valid words for splitting
         """
         self.valid_words = {w.lower() for w in valid_words}
-        self.max_word_len = max(len(w) for w in self.valid_words) if self.valid_words else 20
+        self.max_word_len = (
+            max(len(w) for w in self.valid_words) if self.valid_words else 20
+        )
 
     def is_valid_word(self, word: str) -> bool:
         """Check if word is in the valid words set."""
         return word.lower() in self.valid_words
 
-    def try_split(self, text: str) -> Optional[str]:
+    def try_split(self, text: str) -> str | None:
         """
         Try to split a merged word into two valid words.
 
@@ -606,7 +627,7 @@ class WordSplitter:
             Text with merged words split (preserves line breaks)
         """
         # Process line by line to preserve newlines
-        lines = text.split('\n')
+        lines = text.split("\n")
         result_lines = []
 
         for line in lines:
@@ -620,7 +641,11 @@ class WordSplitter:
                     continue
 
                 # Skip if word is known in validator (romaji, user dict, etc.)
-                if validator and hasattr(validator, 'is_known_word') and validator.is_known_word(word):
+                if (
+                    validator
+                    and hasattr(validator, "is_known_word")
+                    and validator.is_known_word(word)
+                ):
                     result_words.append(word)
                     continue
 
@@ -641,7 +666,11 @@ class WordSplitter:
                         if dictionary and dictionary.check(part):
                             continue
                         # Check validator (romaji, user dict, etc.)
-                        if validator and hasattr(validator, 'is_known_word') and validator.is_known_word(part):
+                        if (
+                            validator
+                            and hasattr(validator, "is_known_word")
+                            and validator.is_known_word(part)
+                        ):
                             continue
                         # Part is not valid - reject the split
                         all_valid = False
@@ -654,9 +683,9 @@ class WordSplitter:
                 else:
                     result_words.append(word)
 
-            result_lines.append(' '.join(result_words))
+            result_lines.append(" ".join(result_words))
 
-        return '\n'.join(result_lines)
+        return "\n".join(result_lines)
 
 
 class SubtitleEditCorrector:
@@ -671,7 +700,9 @@ class SubtitleEditCorrector:
     or fall back to spell_checker + SE dictionaries only.
     """
 
-    def __init__(self, se_dicts: SEDictionaries, spell_checker=None, validation_manager=None):
+    def __init__(
+        self, se_dicts: SEDictionaries, spell_checker=None, validation_manager=None
+    ):
         """
         Initialize corrector with loaded dictionaries.
 
@@ -697,17 +728,21 @@ class SubtitleEditCorrector:
                 self._compiled_regex.append((pattern, rule.to_text))
             except re.error as e:
                 # Check if this is a Unicode property pattern (\p{...})
-                if '\\p{' in rule.from_text or r'\p{' in rule.from_text:
+                if "\\p{" in rule.from_text or r"\p{" in rule.from_text:
                     unicode_pattern_count += 1
                 else:
                     logger.warning(f"Invalid SE regex pattern '{rule.from_text}': {e}")
 
         if unicode_pattern_count > 0 and not REGEX_UNICODE_SUPPORT:
-            logger.info(f"Skipped {unicode_pattern_count} SE regex patterns with Unicode properties. "
-                       f"Install 'regex' module for full support: pip install regex")
+            logger.info(
+                f"Skipped {unicode_pattern_count} SE regex patterns with Unicode properties. "
+                f"Install 'regex' module for full support: pip install regex"
+            )
 
         # Build lookup dicts for faster word-level processing
-        self._whole_word_map = {rule.from_text: rule.to_text for rule in se_dicts.whole_words}
+        self._whole_word_map = {
+            rule.from_text: rule.to_text for rule in se_dicts.whole_words
+        }
 
     def _is_word_protected(self, word: str) -> bool:
         """Check if a word is protected from being fixed."""
@@ -774,12 +809,12 @@ class SubtitleEditCorrector:
 
         # Check SE valid words (names, spell_words, etc.)
         all_valid = self.dicts.get_all_valid_words()
-        if clean_word in all_valid or clean_word.lower() in {w.lower() for w in all_valid}:
-            return True
+        return bool(
+            clean_word in all_valid
+            or clean_word.lower() in {w.lower() for w in all_valid}
+        )
 
-        return False
-
-    def _try_fix_word(self, word: str) -> Tuple[str, Optional[str]]:
+    def _try_fix_word(self, word: str) -> tuple[str, str | None]:
         """
         Try to fix a single word using SE rules.
 
@@ -826,7 +861,10 @@ class SubtitleEditCorrector:
             replacement = self._whole_word_map[clean_word]
             # Only accept fix if result is a valid fix target
             if self._is_valid_fix_result(replacement):
-                return prefix + replacement + suffix, f"whole_word: {clean_word} -> {replacement}"
+                return (
+                    prefix + replacement + suffix,
+                    f"whole_word: {clean_word} -> {replacement}",
+                )
 
         # Try partial word fixes (only PartialWords, not PartialWordsAlways - those are line-level)
         for rule in self.dicts.partial_words:
@@ -834,12 +872,15 @@ class SubtitleEditCorrector:
                 new_word = clean_word.replace(rule.from_text, rule.to_text)
                 # Only accept fix if result is a valid fix target
                 if self._is_valid_fix_result(new_word):
-                    return prefix + new_word + suffix, f"partial_word: {rule.from_text} -> {rule.to_text}"
+                    return (
+                        prefix + new_word + suffix,
+                        f"partial_word: {rule.from_text} -> {rule.to_text}",
+                    )
 
         # Word couldn't be fixed
         return word, None
 
-    def apply_corrections(self, text: str) -> Tuple[str, List[str], List[str]]:
+    def apply_corrections(self, text: str) -> tuple[str, list[str], list[str]]:
         """
         Apply all SE corrections to text.
 
@@ -869,26 +910,30 @@ class SubtitleEditCorrector:
         # 2. Begin line replacements
         for rule in self.dicts.begin_lines:
             if text.startswith(rule.from_text):
-                text = rule.to_text + text[len(rule.from_text):]
+                text = rule.to_text + text[len(rule.from_text) :]
                 fixes_applied.append(f"begin_line: {rule.from_text} -> {rule.to_text}")
 
         # 3. End line replacements
         for rule in self.dicts.end_lines:
             if text.endswith(rule.from_text):
-                text = text[:-len(rule.from_text)] + rule.to_text
+                text = text[: -len(rule.from_text)] + rule.to_text
                 fixes_applied.append(f"end_line: {rule.from_text} -> {rule.to_text}")
 
         # 4. Partial lines always (safe substring fixes like '' -> " or ,., -> ...)
         for rule in self.dicts.partial_lines_always:
             if rule.from_text in text:
                 text = text.replace(rule.from_text, rule.to_text)
-                fixes_applied.append(f"partial_always: {rule.from_text} -> {rule.to_text}")
+                fixes_applied.append(
+                    f"partial_always: {rule.from_text} -> {rule.to_text}"
+                )
 
         # 5. Partial words always (safe substring fixes applied to whole text)
         for rule in self.dicts.partial_words_always:
             if rule.from_text in text:
                 text = text.replace(rule.from_text, rule.to_text)
-                fixes_applied.append(f"partial_word_always: {rule.from_text} -> {rule.to_text}")
+                fixes_applied.append(
+                    f"partial_word_always: {rule.from_text} -> {rule.to_text}"
+                )
 
         # 6. Regex replacements (usually safe patterns)
         for pattern, replacement in self._compiled_regex:
@@ -901,7 +946,7 @@ class SubtitleEditCorrector:
         # Only do word-level processing if we have a spell checker
         if self.spell_checker:
             # Split into words, preserving spacing
-            words = re.findall(r'\S+|\s+', text)
+            words = re.findall(r"\S+|\s+", text)
             result_words = []
 
             for word in words:
@@ -924,7 +969,7 @@ class SubtitleEditCorrector:
                         if clean not in unknown_words:
                             unknown_words.append(clean)
 
-            text = ''.join(result_words)
+            text = "".join(result_words)
 
             # Word splitting (only for unknown words - already handled in WordSplitter)
             if self.word_splitter:
@@ -942,7 +987,7 @@ class SubtitleEditCorrector:
         if not self.spell_checker:
             return True
 
-        words = re.findall(r'\b[a-zA-Z]+\b', text)
+        words = re.findall(r"\b[a-zA-Z]+\b", text)
         if not words:
             return True
 
@@ -976,14 +1021,14 @@ def load_se_config(config_dir: Path) -> SEDictionaryConfig:
 
     if config_path.exists():
         try:
-            data = json.loads(config_path.read_text(encoding='utf-8'))
+            data = json.loads(config_path.read_text(encoding="utf-8"))
             return SEDictionaryConfig(
-                ocr_fix_enabled=data.get('ocr_fix_enabled', True),
-                names_enabled=data.get('names_enabled', True),
-                no_break_enabled=data.get('no_break_enabled', True),
-                spell_words_enabled=data.get('spell_words_enabled', True),
-                word_split_enabled=data.get('word_split_enabled', True),
-                interjections_enabled=data.get('interjections_enabled', True),
+                ocr_fix_enabled=data.get("ocr_fix_enabled", True),
+                names_enabled=data.get("names_enabled", True),
+                no_break_enabled=data.get("no_break_enabled", True),
+                spell_words_enabled=data.get("spell_words_enabled", True),
+                word_split_enabled=data.get("word_split_enabled", True),
+                interjections_enabled=data.get("interjections_enabled", True),
             )
         except Exception as e:
             logger.error(f"Error loading SE config: {e}")
@@ -997,14 +1042,14 @@ def save_se_config(config_dir: Path, config: SEDictionaryConfig) -> bool:
 
     try:
         data = {
-            'ocr_fix_enabled': config.ocr_fix_enabled,
-            'names_enabled': config.names_enabled,
-            'no_break_enabled': config.no_break_enabled,
-            'spell_words_enabled': config.spell_words_enabled,
-            'word_split_enabled': config.word_split_enabled,
-            'interjections_enabled': config.interjections_enabled,
+            "ocr_fix_enabled": config.ocr_fix_enabled,
+            "names_enabled": config.names_enabled,
+            "no_break_enabled": config.no_break_enabled,
+            "spell_words_enabled": config.spell_words_enabled,
+            "word_split_enabled": config.word_split_enabled,
+            "interjections_enabled": config.interjections_enabled,
         }
-        config_path.write_text(json.dumps(data, indent=2), encoding='utf-8')
+        config_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         return True
     except Exception as e:
         logger.error(f"Error saving SE config: {e}")

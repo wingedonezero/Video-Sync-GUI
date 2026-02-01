@@ -1,5 +1,4 @@
 # vsg_core/subtitles/sync_mode_plugins/subtitle_anchored_frame_snap.py
-# -*- coding: utf-8 -*-
 """
 Subtitle-Anchored Frame Snap sync plugin for SubtitleData.
 
@@ -8,17 +7,17 @@ to find matching frames via perceptual hashing, without audio correlation.
 
 All timing is float ms internally - rounding happens only at final save.
 """
+
 from __future__ import annotations
 
-import math
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional, List, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from ..sync_modes import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
-    from ..data import SubtitleData, OperationResult, OperationRecord, SyncEventData
+    from ..data import OperationResult, SubtitleData
 
 
 @register_sync_plugin
@@ -29,22 +28,22 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
     Visual-only sync using subtitle positions as anchors.
     """
 
-    name = 'subtitle-anchored-frame-snap'
-    description = 'Visual-only sync using subtitle positions as anchors'
+    name = "subtitle-anchored-frame-snap"
+    description = "Visual-only sync using subtitle positions as anchors"
 
     def apply(
         self,
-        subtitle_data: 'SubtitleData',
+        subtitle_data: SubtitleData,
         total_delay_ms: float,
         global_shift_ms: float,
-        target_fps: Optional[float] = None,
-        source_video: Optional[str] = None,
-        target_video: Optional[str] = None,
+        target_fps: float | None = None,
+        source_video: str | None = None,
+        target_video: str | None = None,
         runner=None,
-        config: Optional[dict] = None,
-        temp_dir: Optional[Path] = None,
-        **kwargs
-    ) -> 'OperationResult':
+        config: dict | None = None,
+        temp_dir: Path | None = None,
+        **kwargs,
+    ) -> OperationResult:
         """
         Apply subtitle-anchored frame snap sync to subtitle data.
 
@@ -68,9 +67,9 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
         Returns:
             OperationResult with statistics
         """
-        from ..data import OperationResult, OperationRecord, SyncEventData
-        from ..frame_utils import detect_video_fps
         from ..checkpoint_selection import select_smart_checkpoints
+        from ..data import OperationRecord, OperationResult, SyncEventData
+        from ..frame_utils import detect_video_fps
 
         config = config or {}
 
@@ -78,14 +77,14 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
             if runner:
                 runner._log_message(msg)
 
-        log(f"[SubAnchor] === Subtitle-Anchored Frame Snap Sync ===")
+        log("[SubAnchor] === Subtitle-Anchored Frame Snap Sync ===")
         log(f"[SubAnchor] Events: {len(subtitle_data.events)}")
 
         if not source_video or not target_video:
             return OperationResult(
                 success=False,
-                operation='sync',
-                error='Both source and target videos required for subtitle-anchored-frame-snap'
+                operation="sync",
+                error="Both source and target videos required for subtitle-anchored-frame-snap",
             )
 
         log(f"[SubAnchor] Source: {Path(source_video).name}")
@@ -102,18 +101,22 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
         log(f"[SubAnchor] FPS: {fps:.3f} (frame: {frame_duration_ms:.3f}ms)")
 
         # Get unified config parameters
-        search_range_ms = config.get('frame_search_range_ms', 2000)
-        hash_algorithm = config.get('frame_hash_algorithm', 'dhash')
-        hash_size = int(config.get('frame_hash_size', 8))
-        hash_threshold = int(config.get('frame_hash_threshold', 5))
-        window_radius = int(config.get('frame_window_radius', 5))
-        tolerance_ms = config.get('frame_agreement_tolerance_ms', 100)
-        fallback_mode = config.get('sub_anchor_fallback_mode', 'abort')
-        use_vapoursynth = config.get('frame_use_vapoursynth', True)
+        search_range_ms = config.get("frame_search_range_ms", 2000)
+        hash_algorithm = config.get("frame_hash_algorithm", "dhash")
+        hash_size = int(config.get("frame_hash_size", 8))
+        hash_threshold = int(config.get("frame_hash_threshold", 5))
+        window_radius = int(config.get("frame_window_radius", 5))
+        tolerance_ms = config.get("frame_agreement_tolerance_ms", 100)
+        fallback_mode = config.get("sub_anchor_fallback_mode", "abort")
+        use_vapoursynth = config.get("frame_use_vapoursynth", True)
 
         log(f"[SubAnchor] Search range: ±{search_range_ms}ms")
-        log(f"[SubAnchor] Hash: {hash_algorithm}, size={hash_size}, threshold={hash_threshold}")
-        log(f"[SubAnchor] Window radius: {window_radius} frames, tolerance: {tolerance_ms}ms")
+        log(
+            f"[SubAnchor] Hash: {hash_algorithm}, size={hash_size}, threshold={hash_threshold}"
+        )
+        log(
+            f"[SubAnchor] Window radius: {window_radius} frames, tolerance: {tolerance_ms}ms"
+        )
 
         # Create event wrapper for checkpoint selection
         class EventWrapper:
@@ -124,13 +127,17 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
                 self.text = event.text
                 self.idx = idx
 
-        wrapped_events = [EventWrapper(e, i) for i, e in enumerate(subtitle_data.events) if not e.is_comment]
+        wrapped_events = [
+            EventWrapper(e, i)
+            for i, e in enumerate(subtitle_data.events)
+            if not e.is_comment
+        ]
 
         if not wrapped_events:
             return OperationResult(
                 success=False,
-                operation='sync',
-                error='No dialogue events for checkpoint selection'
+                operation="sync",
+                error="No dialogue events for checkpoint selection",
             )
 
         # Select checkpoints
@@ -138,31 +145,37 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
         if len(checkpoints) < 2:
             return OperationResult(
                 success=False,
-                operation='sync',
-                error=f'Need at least 2 checkpoints, got {len(checkpoints)}'
+                operation="sync",
+                error=f"Need at least 2 checkpoints, got {len(checkpoints)}",
             )
 
         log(f"[SubAnchor] Selected {len(checkpoints)} checkpoints")
 
         # Try to import frame utilities
         try:
-            from ..frame_utils import VideoReader, compute_frame_hash, compute_hamming_distance
+            from ..frame_utils import (
+                VideoReader,
+                compute_frame_hash,
+                compute_hamming_distance,
+            )
         except ImportError as e:
             return OperationResult(
                 success=False,
-                operation='sync',
-                error=f'Frame utilities not available: {e}'
+                operation="sync",
+                error=f"Frame utilities not available: {e}",
             )
 
         # Open video readers
         try:
-            source_reader = VideoReader(source_video, runner, use_vapoursynth=use_vapoursynth, temp_dir=temp_dir)
-            target_reader = VideoReader(target_video, runner, use_vapoursynth=use_vapoursynth, temp_dir=temp_dir)
+            source_reader = VideoReader(
+                source_video, runner, use_vapoursynth=use_vapoursynth, temp_dir=temp_dir
+            )
+            target_reader = VideoReader(
+                target_video, runner, use_vapoursynth=use_vapoursynth, temp_dir=temp_dir
+            )
         except Exception as e:
             return OperationResult(
-                success=False,
-                operation='sync',
-                error=f'Failed to open videos: {e}'
+                success=False, operation="sync", error=f"Failed to open videos: {e}"
             )
 
         # Process each checkpoint
@@ -171,22 +184,28 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
 
         for i, event in enumerate(checkpoints):
             subtitle_time_ms = event.start
-            log(f"[SubAnchor] Checkpoint {i+1}/{len(checkpoints)}: {subtitle_time_ms}ms")
+            log(
+                f"[SubAnchor] Checkpoint {i + 1}/{len(checkpoints)}: {subtitle_time_ms}ms"
+            )
 
             # Get source frame and compute hash
             source_frame = source_reader.get_frame_at_time(subtitle_time_ms)
             if source_frame is None:
-                log(f"[SubAnchor] WARNING: Failed to get source frame at {subtitle_time_ms}ms")
+                log(
+                    f"[SubAnchor] WARNING: Failed to get source frame at {subtitle_time_ms}ms"
+                )
                 continue
 
-            source_hash = compute_frame_hash(source_frame, hash_size=hash_size, method=hash_algorithm)
+            source_hash = compute_frame_hash(
+                source_frame, hash_size=hash_size, method=hash_algorithm
+            )
             if source_hash is None:
-                log(f"[SubAnchor] WARNING: Failed to compute source hash")
+                log("[SubAnchor] WARNING: Failed to compute source hash")
                 continue
 
             # Search in target
             best_match_time = None
-            best_match_distance = float('inf')
+            best_match_distance = float("inf")
             search_start = subtitle_time_ms - search_range_ms
             search_end = subtitle_time_ms + search_range_ms
 
@@ -195,7 +214,9 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
             while search_time <= search_end:
                 target_frame = target_reader.get_frame_at_time(int(search_time))
                 if target_frame is not None:
-                    target_hash = compute_frame_hash(target_frame, hash_size=hash_size, method=hash_algorithm)
+                    target_hash = compute_frame_hash(
+                        target_frame, hash_size=hash_size, method=hash_algorithm
+                    )
                     if target_hash is not None:
                         distance = compute_hamming_distance(source_hash, target_hash)
                         if distance < best_match_distance:
@@ -206,23 +227,33 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
             if best_match_time is not None and best_match_distance <= hash_threshold:
                 offset = best_match_time - subtitle_time_ms
                 checkpoint_offsets.append(offset)
-                checkpoint_details.append({
-                    'checkpoint': i + 1,
-                    'source_time_ms': subtitle_time_ms,
-                    'target_time_ms': best_match_time,
-                    'offset_ms': offset,
-                    'hash_distance': best_match_distance,
-                    'match_quality': 'good' if best_match_distance <= 3 else 'marginal'
-                })
-                log(f"[SubAnchor]   Match: {subtitle_time_ms}ms → {best_match_time}ms (Δ{offset:+.1f}ms, dist={best_match_distance})")
+                checkpoint_details.append(
+                    {
+                        "checkpoint": i + 1,
+                        "source_time_ms": subtitle_time_ms,
+                        "target_time_ms": best_match_time,
+                        "offset_ms": offset,
+                        "hash_distance": best_match_distance,
+                        "match_quality": "good"
+                        if best_match_distance <= 3
+                        else "marginal",
+                    }
+                )
+                log(
+                    f"[SubAnchor]   Match: {subtitle_time_ms}ms → {best_match_time}ms (Δ{offset:+.1f}ms, dist={best_match_distance})"
+                )
             else:
-                log(f"[SubAnchor]   No match found (best distance: {best_match_distance})")
-                checkpoint_details.append({
-                    'checkpoint': i + 1,
-                    'source_time_ms': subtitle_time_ms,
-                    'match_quality': 'none',
-                    'best_distance': best_match_distance,
-                })
+                log(
+                    f"[SubAnchor]   No match found (best distance: {best_match_distance})"
+                )
+                checkpoint_details.append(
+                    {
+                        "checkpoint": i + 1,
+                        "source_time_ms": subtitle_time_ms,
+                        "match_quality": "none",
+                        "best_distance": best_match_distance,
+                    }
+                )
 
         # Close readers
         try:
@@ -233,20 +264,20 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
 
         # Check if we have enough matches
         if len(checkpoint_offsets) < 2:
-            if fallback_mode == 'abort':
+            if fallback_mode == "abort":
                 return OperationResult(
                     success=False,
-                    operation='sync',
-                    error=f'Not enough matching checkpoints ({len(checkpoint_offsets)}/2 minimum)'
+                    operation="sync",
+                    error=f"Not enough matching checkpoints ({len(checkpoint_offsets)}/2 minimum)",
                 )
             else:
-                log(f"[SubAnchor] WARNING: Only {len(checkpoint_offsets)} matches, using available data")
+                log(
+                    f"[SubAnchor] WARNING: Only {len(checkpoint_offsets)} matches, using available data"
+                )
 
         if not checkpoint_offsets:
             return OperationResult(
-                success=False,
-                operation='sync',
-                error='No checkpoints matched'
+                success=False, operation="sync", error="No checkpoints matched"
             )
 
         # Check agreement
@@ -254,29 +285,35 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
         offsets_agree = offset_range <= tolerance_ms
 
         if not offsets_agree:
-            log(f"[SubAnchor] WARNING: Offsets disagree (range: {offset_range:.1f}ms > tolerance: {tolerance_ms}ms)")
-            if fallback_mode == 'abort':
+            log(
+                f"[SubAnchor] WARNING: Offsets disagree (range: {offset_range:.1f}ms > tolerance: {tolerance_ms}ms)"
+            )
+            if fallback_mode == "abort":
                 return OperationResult(
                     success=False,
-                    operation='sync',
-                    error=f'Checkpoint offsets disagree: range {offset_range:.1f}ms exceeds {tolerance_ms}ms tolerance'
+                    operation="sync",
+                    error=f"Checkpoint offsets disagree: range {offset_range:.1f}ms exceeds {tolerance_ms}ms tolerance",
                 )
-            log(f"[SubAnchor] Using median offset anyway")
+            log("[SubAnchor] Using median offset anyway")
 
         # Calculate final offset (median + global shift)
         sorted_offsets = sorted(checkpoint_offsets)
         median_offset = sorted_offsets[len(sorted_offsets) // 2]
         final_offset_ms = median_offset + global_shift_ms
 
-        log(f"[SubAnchor] ───────────────────────────────────────")
-        log(f"[SubAnchor] Checkpoint offsets: {[f'{o:+.1f}' for o in checkpoint_offsets]}")
+        log("[SubAnchor] ───────────────────────────────────────")
+        log(
+            f"[SubAnchor] Checkpoint offsets: {[f'{o:+.1f}' for o in checkpoint_offsets]}"
+        )
         log(f"[SubAnchor] Median offset: {median_offset:+.3f}ms")
         log(f"[SubAnchor] + Global shift: {global_shift_ms:+.3f}ms")
         log(f"[SubAnchor] = Final offset: {final_offset_ms:+.3f}ms")
-        log(f"[SubAnchor] ───────────────────────────────────────")
+        log("[SubAnchor] ───────────────────────────────────────")
 
         # Apply offset to all events
-        log(f"[SubAnchor] Applying {final_offset_ms:+.3f}ms to {len(subtitle_data.events)} events")
+        log(
+            f"[SubAnchor] Applying {final_offset_ms:+.3f}ms to {len(subtitle_data.events)} events"
+        )
 
         events_synced = 0
         for event in subtitle_data.events:
@@ -309,34 +346,34 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
 
         # Record operation
         record = OperationRecord(
-            operation='sync',
+            operation="sync",
             timestamp=datetime.now(),
             parameters={
-                'mode': self.name,
-                'median_offset_ms': median_offset,
-                'global_shift_ms': global_shift_ms,
-                'final_offset_ms': final_offset_ms,
-                'num_checkpoints': len(checkpoint_offsets),
-                'offsets_agree': offsets_agree,
-                'offset_range_ms': offset_range,
+                "mode": self.name,
+                "median_offset_ms": median_offset,
+                "global_shift_ms": global_shift_ms,
+                "final_offset_ms": final_offset_ms,
+                "num_checkpoints": len(checkpoint_offsets),
+                "offsets_agree": offsets_agree,
+                "offset_range_ms": offset_range,
             },
             events_affected=events_synced,
-            summary=summary
+            summary=summary,
         )
         subtitle_data.operations.append(record)
 
         log(f"[SubAnchor] Sync complete: {events_synced} events")
-        log(f"[SubAnchor] ===================================")
+        log("[SubAnchor] ===================================")
 
         return OperationResult(
             success=True,
-            operation='sync',
+            operation="sync",
             events_affected=events_synced,
             summary=summary,
             details={
-                'median_offset_ms': median_offset,
-                'final_offset_ms': final_offset_ms,
-                'checkpoints': checkpoint_details,
-                'offsets_agree': offsets_agree,
-            }
+                "median_offset_ms": median_offset,
+                "final_offset_ms": final_offset_ms,
+                "checkpoints": checkpoint_details,
+                "offsets_agree": offsets_agree,
+            },
         )

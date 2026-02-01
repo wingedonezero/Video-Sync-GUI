@@ -1,5 +1,4 @@
 # vsg_core/subtitles/ocr/word_lists.py
-# -*- coding: utf-8 -*-
 """
 Unified Word List Management System
 
@@ -14,39 +13,40 @@ Config stored in .config/ocr/ocr_config.json
 
 import json
 import logging
-from dataclasses import dataclass, field, asdict
-from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from dataclasses import asdict, dataclass, field
 from enum import Enum
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
 class WordListSource(Enum):
     """Source type for word lists."""
-    USER = "user"           # User-created lists (editable)
-    SUBTITLE_EDIT = "se"    # From SubtitleEdit files (read-only, overridable)
-    BUILT = "built"         # Generated/built lists like romaji
-    SYSTEM = "system"       # System spell checker (Enchant/Hunspell)
+
+    USER = "user"  # User-created lists (editable)
+    SUBTITLE_EDIT = "se"  # From SubtitleEdit files (read-only, overridable)
+    BUILT = "built"  # Generated/built lists like romaji
+    SYSTEM = "system"  # System spell checker (Enchant/Hunspell)
 
 
 @dataclass
 class WordListConfig:
     """Configuration for a word list."""
-    name: str                           # Display name
-    source: str                         # WordListSource value
+
+    name: str  # Display name
+    source: str  # WordListSource value
     enabled: bool = True
 
     # Behavior flags
-    validates_known: bool = True        # Words won't show as "unknown"
-    protects_from_fix: bool = True      # Won't try to "fix" these words
+    validates_known: bool = True  # Words won't show as "unknown"
+    protects_from_fix: bool = True  # Won't try to "fix" these words
     accepts_as_fix_result: bool = True  # Accept fixes that produce these words
 
     # For ordering (lower = higher priority)
     order: int = 100
 
     # File reference (for file-backed lists)
-    file_path: Optional[str] = None
+    file_path: str | None = None
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -79,8 +79,9 @@ class WordListConfig:
 @dataclass
 class WordList:
     """A word list with its configuration and loaded words."""
+
     config: WordListConfig
-    words: Set[str] = field(default_factory=set)
+    words: set[str] = field(default_factory=set)
 
     @property
     def name(self) -> str:
@@ -173,8 +174,8 @@ DEFAULT_WORD_LISTS = [
         source="se",
         order=70,
         file_path="subtitleedit/eng_WordSplitList.txt",
-        validates_known=False,   # Not used for validation
-        protects_from_fix=False, # Not used for protection
+        validates_known=False,  # Not used for validation
+        protects_from_fix=False,  # Not used for protection
         accepts_as_fix_result=False,  # Not used for fix acceptance
     ),
 ]
@@ -183,17 +184,19 @@ DEFAULT_WORD_LISTS = [
 @dataclass
 class ValidationResult:
     """Result of a word validation check."""
+
     is_known: bool
-    source_name: Optional[str] = None  # Which list it was found in
-    is_protected: bool = False         # Should not be "fixed"
+    source_name: str | None = None  # Which list it was found in
+    is_protected: bool = False  # Should not be "fixed"
 
 
 @dataclass
 class ValidationStats:
     """Statistics for logging."""
+
     total_validated: int = 0
-    by_source: Dict[str, int] = field(default_factory=dict)
-    unknown_words: List[str] = field(default_factory=list)
+    by_source: dict[str, int] = field(default_factory=dict)
+    unknown_words: list[str] = field(default_factory=list)
 
     def add_validated(self, source_name: str):
         self.total_validated += 1
@@ -208,14 +211,18 @@ class ValidationStats:
         if not self.by_source:
             return "0 words validated"
 
-        parts = [f"{count} {source}" for source, count in sorted(self.by_source.items())]
+        parts = [
+            f"{count} {source}" for source, count in sorted(self.by_source.items())
+        ]
         summary = f"{self.total_validated} words validated ({', '.join(parts)})"
 
         if self.unknown_words:
             unknown_preview = self.unknown_words[:5]
             if len(self.unknown_words) > 5:
                 unknown_preview.append(f"...+{len(self.unknown_words) - 5} more")
-            summary += f", {len(self.unknown_words)} unknown: {', '.join(unknown_preview)}"
+            summary += (
+                f", {len(self.unknown_words)} unknown: {', '.join(unknown_preview)}"
+            )
 
         return summary
 
@@ -240,7 +247,7 @@ class ValidationManager:
         self.config_dir = Path(config_dir)
         self.config_path = self.config_dir / "ocr_config.json"
 
-        self.word_lists: List[WordList] = []
+        self.word_lists: list[WordList] = []
         self.spell_checker = None  # Enchant dictionary, set externally
 
         self._stats = ValidationStats()
@@ -249,14 +256,14 @@ class ValidationManager:
         """Set the system spell checker (Enchant/Hunspell)."""
         self.spell_checker = spell_checker
 
-    def load_config(self) -> List[WordListConfig]:
+    def load_config(self) -> list[WordListConfig]:
         """Load word list configurations from JSON."""
         if not self.config_path.exists():
-            logger.info(f"[WordLists] No config found, using defaults")
+            logger.info("[WordLists] No config found, using defaults")
             return [WordListConfig(**asdict(c)) for c in DEFAULT_WORD_LISTS]
 
         try:
-            with open(self.config_path, 'r', encoding='utf-8') as f:
+            with open(self.config_path, encoding="utf-8") as f:
                 data = json.load(f)
 
             configs = []
@@ -275,11 +282,9 @@ class ValidationManager:
         try:
             self.config_dir.mkdir(parents=True, exist_ok=True)
 
-            data = {
-                "word_lists": [wl.config.to_dict() for wl in self.word_lists]
-            }
+            data = {"word_lists": [wl.config.to_dict() for wl in self.word_lists]}
 
-            with open(self.config_path, 'w', encoding='utf-8') as f:
+            with open(self.config_path, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
 
             logger.info(f"[WordLists] Saved config to {self.config_path}")
@@ -287,17 +292,17 @@ class ValidationManager:
         except Exception as e:
             logger.error(f"[WordLists] Error saving config: {e}")
 
-    def get_word_lists(self) -> List[WordList]:
+    def get_word_lists(self) -> list[WordList]:
         """Get all word lists sorted by order."""
         return sorted(self.word_lists, key=lambda wl: wl.config.order)
 
-    def add_word_list(self, config: WordListConfig, words: Set[str]):
+    def add_word_list(self, config: WordListConfig, words: set[str]):
         """Add a word list."""
         word_list = WordList(config=config, words=words)
         self.word_lists.append(word_list)
         logger.debug(f"[WordLists] Added '{config.name}' with {len(words)} words")
 
-    def get_word_list_by_name(self, name: str) -> Optional[WordList]:
+    def get_word_list_by_name(self, name: str) -> WordList | None:
         """Get a word list by name."""
         for wl in self.word_lists:
             if wl.name == name:
@@ -342,13 +347,20 @@ class ValidationManager:
 
         # Check system spell checker first (if available and enabled)
         system_list = self.get_word_list_by_name("System Dictionary")
-        if (system_list and system_list.enabled and
-            system_list.config.validates_known and self.spell_checker):
+        if (
+            system_list
+            and system_list.enabled
+            and system_list.config.validates_known
+            and self.spell_checker
+        ):
             if self.spell_checker.check(word) or self.spell_checker.check(word_lower):
                 if track_stats:
                     self._stats.add_validated("System")
-                return ValidationResult(is_known=True, source_name="System Dictionary",
-                                        is_protected=system_list.config.protects_from_fix)
+                return ValidationResult(
+                    is_known=True,
+                    source_name="System Dictionary",
+                    is_protected=system_list.config.protects_from_fix,
+                )
 
         # Check word lists in order
         for wl in self.get_word_lists():
@@ -363,7 +375,7 @@ class ValidationManager:
                 return ValidationResult(
                     is_known=True,
                     source_name=wl.name,
-                    is_protected=wl.config.protects_from_fix
+                    is_protected=wl.config.protects_from_fix,
                 )
 
         # Not found
@@ -387,8 +399,12 @@ class ValidationManager:
 
         # Check system spell checker
         system_list = self.get_word_list_by_name("System Dictionary")
-        if (system_list and system_list.enabled and
-            system_list.config.protects_from_fix and self.spell_checker):
+        if (
+            system_list
+            and system_list.enabled
+            and system_list.config.protects_from_fix
+            and self.spell_checker
+        ):
             if self.spell_checker.check(word) or self.spell_checker.check(word_lower):
                 return True
 
@@ -422,8 +438,12 @@ class ValidationManager:
 
         # Check system spell checker
         system_list = self.get_word_list_by_name("System Dictionary")
-        if (system_list and system_list.enabled and
-            system_list.config.accepts_as_fix_result and self.spell_checker):
+        if (
+            system_list
+            and system_list.enabled
+            and system_list.config.accepts_as_fix_result
+            and self.spell_checker
+        ):
             if self.spell_checker.check(word) or self.spell_checker.check(word_lower):
                 return True
 
@@ -468,15 +488,17 @@ class ValidationManager:
             if wl.config.accepts_as_fix_result:
                 flags.append("A")
             flags_str = "".join(flags) if flags else "-"
-            lines.append(f"  [{wl.config.order:02d}] {wl.name}: {wl.word_count:,} words ({status}) [{flags_str}]")
+            lines.append(
+                f"  [{wl.config.order:02d}] {wl.name}: {wl.word_count:,} words ({status}) [{flags_str}]"
+            )
         return "\n".join(lines)
 
 
 # Global instance
-_validation_manager: Optional[ValidationManager] = None
+_validation_manager: ValidationManager | None = None
 
 
-def get_validation_manager(config_dir: Optional[Path] = None) -> ValidationManager:
+def get_validation_manager(config_dir: Path | None = None) -> ValidationManager:
     """Get or create the global ValidationManager instance."""
     global _validation_manager
 
@@ -493,7 +515,8 @@ def get_validation_manager(config_dir: Optional[Path] = None) -> ValidationManag
 # Word List Loaders
 # =============================================================================
 
-def load_text_wordlist(path: Path) -> Set[str]:
+
+def load_text_wordlist(path: Path) -> set[str]:
     """
     Load words from a text file (one word per line).
 
@@ -508,10 +531,10 @@ def load_text_wordlist(path: Path) -> Set[str]:
         return words
 
     try:
-        with open(path, 'r', encoding='utf-8') as f:
+        with open(path, encoding="utf-8") as f:
             for line in f:
                 word = line.strip()
-                if word and not word.startswith('#'):
+                if word and not word.startswith("#"):
                     words.add(word.lower())
         logger.debug(f"[WordLists] Loaded {len(words)} words from {path.name}")
     except Exception as e:
@@ -520,7 +543,7 @@ def load_text_wordlist(path: Path) -> Set[str]:
     return words
 
 
-def load_se_xml_wordlist(path: Path, element_name: str = "word") -> Set[str]:
+def load_se_xml_wordlist(path: Path, element_name: str = "word") -> set[str]:
     """
     Load words from a SubtitleEdit XML file.
 
@@ -550,7 +573,7 @@ def load_se_xml_wordlist(path: Path, element_name: str = "word") -> Set[str]:
     return words
 
 
-def load_se_names_xml(path: Path) -> Tuple[Set[str], Set[str]]:
+def load_se_names_xml(path: Path) -> tuple[set[str], set[str]]:
     """
     Load names from SubtitleEdit names XML file.
 
@@ -570,27 +593,31 @@ def load_se_names_xml(path: Path) -> Tuple[Set[str], Set[str]]:
         root = tree.getroot()
 
         # Parse blacklist section
-        blacklist_elem = root.find('blacklist')
+        blacklist_elem = root.find("blacklist")
         if blacklist_elem is not None:
-            for name_elem in blacklist_elem.findall('name'):
+            for name_elem in blacklist_elem.findall("name"):
                 if name_elem.text:
                     blacklist.add(name_elem.text.strip())
 
         # Parse names (direct children of root, not in blacklist section)
-        for name_elem in root.findall('name'):
+        for name_elem in root.findall("name"):
             if name_elem.text:
                 name = name_elem.text.strip()
                 if name not in blacklist:
                     names.add(name.lower())
 
-        logger.debug(f"[WordLists] Loaded {len(names)} names ({len(blacklist)} blacklisted) from {path.name}")
+        logger.debug(
+            f"[WordLists] Loaded {len(names)} names ({len(blacklist)} blacklisted) from {path.name}"
+        )
     except Exception as e:
         logger.error(f"[WordLists] Error loading {path}: {e}")
 
     return names, blacklist
 
 
-def initialize_validation_manager(config_dir: Path, spell_checker=None) -> ValidationManager:
+def initialize_validation_manager(
+    config_dir: Path, spell_checker=None
+) -> ValidationManager:
     """
     Initialize and populate the ValidationManager with all word lists.
 
@@ -624,16 +651,16 @@ def initialize_validation_manager(config_dir: Path, spell_checker=None) -> Valid
         elif config.file_path:
             file_path = config_dir / config.file_path
 
-            if config.file_path.endswith('.txt'):
+            if config.file_path.endswith(".txt"):
                 words = load_text_wordlist(file_path)
 
-            elif 'names.xml' in config.file_path.lower():
+            elif "names.xml" in config.file_path.lower():
                 names, _ = load_se_names_xml(file_path)
                 words = names
 
-            elif config.file_path.endswith('.xml'):
+            elif config.file_path.endswith(".xml"):
                 # Try 'word' element first, common in SE files
-                words = load_se_xml_wordlist(file_path, 'word')
+                words = load_se_xml_wordlist(file_path, "word")
 
         manager.add_word_list(config, words)
 

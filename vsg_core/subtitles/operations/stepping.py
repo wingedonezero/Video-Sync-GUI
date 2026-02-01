@@ -1,5 +1,4 @@
 # vsg_core/subtitles/operations/stepping.py
-# -*- coding: utf-8 -*-
 """
 Stepping operation for SubtitleData.
 
@@ -11,21 +10,22 @@ in all cases. The boundary mode handling (start/midpoint/majority) and cumulativ
 offset calculation may need review. See original stepping_adjust.py (now removed)
 for reference implementation details.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, List, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from ..data import SubtitleData, OperationResult, OperationRecord
+    from ..data import OperationResult, SubtitleData
 
 
 def apply_stepping(
-    data: 'SubtitleData',
-    edl_segments: List[Any],
-    boundary_mode: str = 'start',
-    runner=None
-) -> 'OperationResult':
+    data: SubtitleData,
+    edl_segments: list[Any],
+    boundary_mode: str = "start",
+    runner=None,
+) -> OperationResult:
     """
     Apply stepping correction EDL to subtitle timestamps.
 
@@ -41,7 +41,7 @@ def apply_stepping(
     Returns:
         OperationResult with statistics
     """
-    from ..data import OperationResult, OperationRecord
+    from ..data import OperationRecord, OperationResult
 
     def log(msg: str):
         if runner:
@@ -51,9 +51,7 @@ def apply_stepping(
     if not edl_segments or len(edl_segments) == 0:
         log("[Stepping] No EDL provided, skipping")
         return OperationResult(
-            success=True,
-            operation='stepping',
-            summary='No EDL provided'
+            success=True, operation="stepping", summary="No EDL provided"
         )
 
     # Sort EDL by start time
@@ -86,47 +84,48 @@ def apply_stepping(
 
     # Record operation
     record = OperationRecord(
-        operation='stepping',
+        operation="stepping",
         timestamp=datetime.now(),
         parameters={
-            'edl_segments': len(sorted_edl),
-            'boundary_mode': boundary_mode,
+            "edl_segments": len(sorted_edl),
+            "boundary_mode": boundary_mode,
         },
         events_affected=adjusted_count,
-        summary=f"Adjusted {adjusted_count}/{len(data.events)} events, max {max_adjustment_ms:+.1f}ms"
+        summary=f"Adjusted {adjusted_count}/{len(data.events)} events, max {max_adjustment_ms:+.1f}ms",
     )
     data.operations.append(record)
 
-    log(f"[Stepping] Adjusted {adjusted_count}/{len(data.events)} events using '{boundary_mode}' mode")
+    log(
+        f"[Stepping] Adjusted {adjusted_count}/{len(data.events)} events using '{boundary_mode}' mode"
+    )
     log(f"[Stepping] Max adjustment: {max_adjustment_ms:+.1f}ms")
     if spanning_count > 0:
         log(f"[Stepping] {spanning_count} event(s) span stepping boundaries")
 
     return OperationResult(
         success=True,
-        operation='stepping',
+        operation="stepping",
         events_affected=adjusted_count,
         summary=record.summary,
         details={
-            'max_adjustment_ms': max_adjustment_ms,
-            'spanning_boundaries': spanning_count,
-            'edl_segments': len(sorted_edl),
-        }
+            "max_adjustment_ms": max_adjustment_ms,
+            "spanning_boundaries": spanning_count,
+            "edl_segments": len(sorted_edl),
+        },
     )
 
 
-def _spans_boundary(start_s: float, end_s: float, edl: List) -> bool:
+def _spans_boundary(start_s: float, end_s: float, edl: list) -> bool:
     """Check if subtitle spans a stepping boundary."""
     if len(edl) <= 1:
         return False
 
-    for segment in edl[1:]:  # Skip first segment
-        if start_s < segment.start_s < end_s:
-            return True
-    return False
+    return any(start_s < segment.start_s < end_s for segment in edl[1:])
 
 
-def _get_offset_at_time(start_s: float, end_s: float, edl: List, mode: str = 'start') -> float:
+def _get_offset_at_time(
+    start_s: float, end_s: float, edl: list, mode: str = "start"
+) -> float:
     """
     Calculate cumulative offset (in float ms) for a subtitle.
 
@@ -146,27 +145,29 @@ def _get_offset_at_time(start_s: float, end_s: float, edl: List, mode: str = 'st
             return 0.0
 
         cumulative_offset = 0.0
-        base_delay = getattr(edl[0], 'delay_raw', float(edl[0].delay_ms))
+        base_delay = getattr(edl[0], "delay_raw", float(edl[0].delay_ms))
 
         for i in range(1, len(edl)):
             segment = edl[i]
             if segment.start_s <= time_s:
-                segment_delay_raw = getattr(segment, 'delay_raw', float(segment.delay_ms))
-                cumulative_offset += (segment_delay_raw - base_delay)
+                segment_delay_raw = getattr(
+                    segment, "delay_raw", float(segment.delay_ms)
+                )
+                cumulative_offset += segment_delay_raw - base_delay
                 base_delay = segment_delay_raw
             else:
                 break
 
         return cumulative_offset
 
-    if mode == 'start':
+    if mode == "start":
         return get_cumulative_offset_at_time(start_s)
 
-    elif mode == 'midpoint':
+    elif mode == "midpoint":
         midpoint_s = (start_s + end_s) / 2.0
         return get_cumulative_offset_at_time(midpoint_s)
 
-    elif mode == 'majority':
+    elif mode == "majority":
         duration = end_s - start_s
         if duration <= 0:
             return get_cumulative_offset_at_time(start_s)
@@ -176,7 +177,7 @@ def _get_offset_at_time(start_s: float, end_s: float, edl: List, mode: str = 'st
 
         # Build boundaries within subtitle range
         boundaries = [seg.start_s for seg in edl] + [end_s]
-        boundaries = sorted(set([b for b in boundaries if start_s <= b <= end_s]))
+        boundaries = sorted({b for b in boundaries if start_s <= b <= end_s})
 
         if not boundaries or (len(boundaries) == 1 and boundaries[0] == end_s):
             return get_cumulative_offset_at_time(start_s)

@@ -1,15 +1,24 @@
 # vsg_qt/resample_dialog/ui.py
-# -*- coding: utf-8 -*-
 import json
 import shutil
+
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QFormLayout,
-    QSpinBox, QPushButton, QDialogButtonBox, QLabel
+    QDialog,
+    QDialogButtonBox,
+    QFormLayout,
+    QGroupBox,
+    QLabel,
+    QPushButton,
+    QSpinBox,
+    QVBoxLayout,
 )
+
 from vsg_core.io.runner import CommandRunner
+
 
 class ResampleDialog(QDialog):
     """A dialog for resampling subtitle PlayResX/Y values."""
+
     def __init__(self, current_x: int, current_y: int, video_path: str, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Resample Resolution")
@@ -18,8 +27,12 @@ class ResampleDialog(QDialog):
         self.src_x = QLabel(str(current_x))
         self.src_y = QLabel(str(current_y))
 
-        self.dest_x = QSpinBox(); self.dest_x.setRange(1, 9999); self.dest_x.setValue(current_x)
-        self.dest_y = QSpinBox(); self.dest_y.setRange(1, 9999); self.dest_y.setValue(current_y)
+        self.dest_x = QSpinBox()
+        self.dest_x.setRange(1, 9999)
+        self.dest_x.setValue(current_x)
+        self.dest_y = QSpinBox()
+        self.dest_y.setRange(1, 9999)
+        self.dest_y.setValue(current_y)
 
         # Layout
         main_layout = QVBoxLayout(self)
@@ -50,24 +63,32 @@ class ResampleDialog(QDialog):
         """Runs ffprobe to get the video dimensions and updates the destination fields."""
         # This uses a dummy config and log callback for a one-off command
         runner = CommandRunner({}, lambda msg: print(f"[ffprobe] {msg}"))
-        tool_paths = {'ffprobe': shutil.which('ffprobe')}
+        tool_paths = {"ffprobe": shutil.which("ffprobe")}
 
-        if not tool_paths['ffprobe']:
+        if not tool_paths["ffprobe"]:
             print("ffprobe not found in PATH")
             return
 
         cmd = [
-            'ffprobe', '-v', 'error', '-select_streams', 'v:0',
-            '-show_entries', 'stream=width,height', '-of', 'json', self.video_path
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height",
+            "-of",
+            "json",
+            self.video_path,
         ]
 
         output = runner.run(cmd, tool_paths)
         if output:
             try:
                 data = json.loads(output)
-                stream = data['streams'][0]
-                self.dest_x.setValue(int(stream['width']))
-                self.dest_y.setValue(int(stream['height']))
+                stream = data["streams"][0]
+                self.dest_x.setValue(int(stream["width"]))
+                self.dest_y.setValue(int(stream["height"]))
             except (json.JSONDecodeError, KeyError, IndexError, ValueError) as e:
                 print(f"Error parsing ffprobe output: {e}")
 

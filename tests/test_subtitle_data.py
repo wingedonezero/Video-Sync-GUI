@@ -1,5 +1,4 @@
 # tests/test_subtitle_data.py
-# -*- coding: utf-8 -*-
 """
 Comprehensive tests for the unified SubtitleData system.
 
@@ -10,6 +9,7 @@ Tests:
 4. Operations (stepping, style ops)
 5. Float ms precision through pipeline
 """
+
 import os
 import sys
 import tempfile
@@ -54,7 +54,9 @@ Dialogue: 1,0:00:15.00,0:00:18.99,Signs,,0,0,0,,{\\pos(100,200)}Sign text here
 
 """
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.ass', delete=False, encoding='utf-8') as f:
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".ass", delete=False, encoding="utf-8"
+    ) as f:
         f.write(ass_content)
         temp_input = f.name
 
@@ -72,8 +74,8 @@ Dialogue: 1,0:00:15.00,0:00:18.99,Signs,,0,0,0,,{\\pos(100,200)}Sign text here
 
         assert len(data.events) == 4, f"Expected 4 events, got {len(data.events)}"
         assert len(data.styles) == 2, f"Expected 2 styles, got {len(data.styles)}"
-        assert 'Default' in data.styles
-        assert 'Signs' in data.styles
+        assert "Default" in data.styles
+        assert "Signs" in data.styles
 
         # Check timing precision (centiseconds -> ms)
         event0 = data.events[0]
@@ -82,25 +84,25 @@ Dialogue: 1,0:00:15.00,0:00:18.99,Signs,,0,0,0,,{\\pos(100,200)}Sign text here
         assert event0.end_ms == 4560.0, f"Expected 4560.0, got {event0.end_ms}"
 
         # Check comment detection
-        assert data.events[2].is_comment == True
-        assert data.events[0].is_comment == False
+        assert data.events[2].is_comment
+        assert not data.events[0].is_comment
 
         # Check style parsing
-        default_style = data.styles['Default']
+        default_style = data.styles["Default"]
         print(f"  Default style: {default_style.fontname}, {default_style.fontsize}pt")
-        assert default_style.fontname == 'Arial'
+        assert default_style.fontname == "Arial"
         assert default_style.fontsize == 48.0
 
-        signs_style = data.styles['Signs']
+        signs_style = data.styles["Signs"]
         assert signs_style.bold == -1  # True in ASS
         assert signs_style.alignment == 8
 
         # Check Script Info
-        assert data.script_info.get('PlayResX') == '1920'
-        assert data.script_info.get('PlayResY') == '1080'
+        assert data.script_info.get("PlayResX") == "1920"
+        assert data.script_info.get("PlayResY") == "1080"
 
         # Write back and verify
-        with tempfile.NamedTemporaryFile(suffix='.ass', delete=False) as f:
+        with tempfile.NamedTemporaryFile(suffix=".ass", delete=False) as f:
             temp_output = f.name
 
         data.save_ass(temp_output)
@@ -141,7 +143,9 @@ With multiple lines.
 <i>Italic text</i>
 """
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.srt', delete=False, encoding='utf-8') as f:
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".srt", delete=False, encoding="utf-8"
+    ) as f:
         f.write(srt_content)
         temp_input = f.name
 
@@ -163,7 +167,9 @@ With multiple lines.
 
         # Check multi-line text
         event1 = data.events[1]
-        assert '\n' in event1.text or '\\N' in event1.text, "Multi-line text not preserved"
+        assert "\n" in event1.text or "\\N" in event1.text, (
+            "Multi-line text not preserved"
+        )
 
         print("  PASSED: SRT parsing works correctly")
 
@@ -183,18 +189,18 @@ def test_sync_plugin_registry():
     plugins = list_sync_plugins()
     print(f"  Registered plugins: {list(plugins.keys())}")
 
-    assert 'timebase-frame-locked-timestamps' in plugins
-    assert 'time-based' in plugins
+    assert "timebase-frame-locked-timestamps" in plugins
+    assert "time-based" in plugins
 
     # Get plugin instance
-    plugin = get_sync_plugin('timebase-frame-locked-timestamps')
+    plugin = get_sync_plugin("timebase-frame-locked-timestamps")
     assert plugin is not None
-    assert plugin.name == 'timebase-frame-locked-timestamps'
+    assert plugin.name == "timebase-frame-locked-timestamps"
 
     # Get time-based plugin
-    tb_plugin = get_sync_plugin('time-based')
+    tb_plugin = get_sync_plugin("time-based")
     assert tb_plugin is not None
-    assert tb_plugin.name == 'time-based'
+    assert tb_plugin.name == "time-based"
 
     print("  PASSED: Plugin registry works correctly")
     return True
@@ -204,12 +210,13 @@ def test_time_based_sync():
     """Test time-based sync mode."""
     print("\n=== Test: Time-Based Sync Mode ===")
 
-    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
     from collections import OrderedDict
+
+    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
 
     # Create test data
     data = SubtitleData()
-    data.styles = OrderedDict([('Default', SubtitleStyle.default())])
+    data.styles = OrderedDict([("Default", SubtitleStyle.default())])
     data.events = [
         SubtitleEvent(start_ms=1000.0, end_ms=2000.0, text="Event 1"),
         SubtitleEvent(start_ms=3000.0, end_ms=4000.0, text="Event 2"),
@@ -220,10 +227,10 @@ def test_time_based_sync():
 
     # Apply sync with raw values mode
     result = data.apply_sync(
-        mode='time-based',
+        mode="time-based",
         total_delay_ms=500.5,  # Use float to test precision
         global_shift_ms=500.5,
-        config={'time_based_use_raw_values': True}
+        config={"time_based_use_raw_values": True},
     )
 
     print(f"  Result: {result.success}, events affected: {result.events_affected}")
@@ -239,7 +246,7 @@ def test_time_based_sync():
 
     # Check operation record
     assert len(data.operations) == 1
-    assert data.operations[0].operation == 'sync'
+    assert data.operations[0].operation == "sync"
 
     print("  PASSED: Time-based sync works correctly")
     return True
@@ -249,18 +256,21 @@ def test_float_precision_through_pipeline():
     """Test that float precision is maintained until final save."""
     print("\n=== Test: Float Precision Through Pipeline ===")
 
-    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
-    from collections import OrderedDict
     import tempfile
+    from collections import OrderedDict
+
+    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
 
     # Create test data with precise float timing
     data = SubtitleData()
-    data.styles = OrderedDict([('Default', SubtitleStyle.default())])
-    data.script_info = OrderedDict([
-        ('ScriptType', 'v4.00+'),
-        ('PlayResX', '1920'),
-        ('PlayResY', '1080'),
-    ])
+    data.styles = OrderedDict([("Default", SubtitleStyle.default())])
+    data.script_info = OrderedDict(
+        [
+            ("ScriptType", "v4.00+"),
+            ("PlayResX", "1920"),
+            ("PlayResY", "1080"),
+        ]
+    )
 
     # Use timing that would lose precision if rounded early
     # 1234.567ms should stay as float until save
@@ -269,19 +279,19 @@ def test_float_precision_through_pipeline():
     ]
 
     # Apply multiple operations
-    result1 = data.apply_sync(
-        mode='time-based',
+    data.apply_sync(
+        mode="time-based",
         total_delay_ms=100.333,
         global_shift_ms=100.333,
-        config={'time_based_use_raw_values': True}
+        config={"time_based_use_raw_values": True},
     )
 
     # Apply another delay
-    result2 = data.apply_sync(
-        mode='time-based',
+    data.apply_sync(
+        mode="time-based",
         total_delay_ms=50.666,
         global_shift_ms=50.666,
-        config={'time_based_use_raw_values': True}
+        config={"time_based_use_raw_values": True},
     )
 
     # Check precision is maintained
@@ -291,20 +301,22 @@ def test_float_precision_through_pipeline():
     print(f"  Expected: {expected}")
 
     # Should be very close (floating point precision)
-    assert abs(event.start_ms - expected) < 0.001, f"Precision lost: {event.start_ms} vs {expected}"
+    assert abs(event.start_ms - expected) < 0.001, (
+        f"Precision lost: {event.start_ms} vs {expected}"
+    )
 
     # Save and verify rounding happens only at save
-    with tempfile.NamedTemporaryFile(suffix='.ass', delete=False) as f:
+    with tempfile.NamedTemporaryFile(suffix=".ass", delete=False) as f:
         temp_output = f.name
 
     try:
         data.save_ass(temp_output)
 
         # Read raw file to check timing format
-        with open(temp_output, 'r') as f:
-            content = f.read()
+        with open(temp_output) as f:
+            f.read()
 
-        print(f"  Output file written")
+        print("  Output file written")
 
         # ASS times should be rounded to centiseconds
         # 1234.567 + 100.333 + 50.666 = 1385.566 -> 1385.56 ms -> 138.556 cs -> 138 cs = 0:00:01.38
@@ -320,7 +332,9 @@ def test_float_precision_through_pipeline():
         # The start time should now be a multiple of 10 (centiseconds)
         assert data2.events[0].start_ms % 10 == 0, "Should be rounded to centiseconds"
 
-        print("  PASSED: Float precision maintained until save, rounding happens at save")
+        print(
+            "  PASSED: Float precision maintained until save, rounding happens at save"
+        )
 
     finally:
         os.unlink(temp_output)
@@ -332,17 +346,23 @@ def test_style_operations():
     """Test style operations."""
     print("\n=== Test: Style Operations ===")
 
-    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
     from collections import OrderedDict
+
+    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
 
     # Create test data
     data = SubtitleData()
-    data.styles = OrderedDict([
-        ('Default', SubtitleStyle(name='Default', fontname='Arial', fontsize=48.0)),
-        ('Signs', SubtitleStyle(name='Signs', fontname='Times New Roman', fontsize=36.0)),
-    ])
+    data.styles = OrderedDict(
+        [
+            ("Default", SubtitleStyle(name="Default", fontname="Arial", fontsize=48.0)),
+            (
+                "Signs",
+                SubtitleStyle(name="Signs", fontname="Times New Roman", fontsize=36.0),
+            ),
+        ]
+    )
     data.events = [
-        SubtitleEvent(start_ms=1000.0, end_ms=2000.0, text="Test", style='Default'),
+        SubtitleEvent(start_ms=1000.0, end_ms=2000.0, text="Test", style="Default"),
     ]
 
     # Test size multiplier
@@ -352,8 +372,12 @@ def test_style_operations():
     assert result.success
 
     # Check sizes were multiplied
-    assert data.styles['Default'].fontsize == 72.0, f"Expected 72.0, got {data.styles['Default'].fontsize}"
-    assert data.styles['Signs'].fontsize == 54.0, f"Expected 54.0, got {data.styles['Signs'].fontsize}"
+    assert data.styles["Default"].fontsize == 72.0, (
+        f"Expected 72.0, got {data.styles['Default'].fontsize}"
+    )
+    assert data.styles["Signs"].fontsize == 54.0, (
+        f"Expected 54.0, got {data.styles['Signs'].fontsize}"
+    )
 
     print("  PASSED: Style operations work correctly")
     return True
@@ -363,16 +387,21 @@ def test_validation():
     """Test data validation."""
     print("\n=== Test: Data Validation ===")
 
-    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
     from collections import OrderedDict
+
+    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
 
     # Create test data with issues
     data = SubtitleData()
-    data.styles = OrderedDict([('Default', SubtitleStyle.default())])
+    data.styles = OrderedDict([("Default", SubtitleStyle.default())])
     data.events = [
         SubtitleEvent(start_ms=2000.0, end_ms=1000.0, text="Bad timing"),  # end < start
-        SubtitleEvent(start_ms=-100.0, end_ms=1000.0, text="Negative"),    # negative start
-        SubtitleEvent(start_ms=1000.0, end_ms=2000.0, text="OK", style='Unknown'),  # unknown style
+        SubtitleEvent(
+            start_ms=-100.0, end_ms=1000.0, text="Negative"
+        ),  # negative start
+        SubtitleEvent(
+            start_ms=1000.0, end_ms=2000.0, text="OK", style="Unknown"
+        ),  # unknown style
     ]
 
     warnings = data.validate()
@@ -391,19 +420,20 @@ def test_timebase_frame_locked_sync():
     """Test timebase-frame-locked-timestamps sync mode."""
     print("\n=== Test: TimeBase Frame-Locked Sync Mode ===")
 
-    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
-    from vsg_core.subtitles.sync_modes import get_sync_plugin
     from collections import OrderedDict
 
+    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
+    from vsg_core.subtitles.sync_modes import get_sync_plugin
+
     # Get the plugin
-    plugin = get_sync_plugin('timebase-frame-locked-timestamps')
+    plugin = get_sync_plugin("timebase-frame-locked-timestamps")
     assert plugin is not None
     print(f"  Plugin: {plugin.name}")
     print(f"  Description: {plugin.description}")
 
     # Create test data
     data = SubtitleData()
-    data.styles = OrderedDict([('Default', SubtitleStyle.default())])
+    data.styles = OrderedDict([("Default", SubtitleStyle.default())])
     data.events = [
         SubtitleEvent(start_ms=1000.0, end_ms=2000.0, text="Event 1"),
         SubtitleEvent(start_ms=3000.0, end_ms=4000.0, text="Event 2"),
@@ -414,7 +444,7 @@ def test_timebase_frame_locked_sync():
 
     # Test without target video (should fail gracefully)
     result = data.apply_sync(
-        mode='timebase-frame-locked-timestamps',
+        mode="timebase-frame-locked-timestamps",
         total_delay_ms=500.0,
         global_shift_ms=500.0,
         target_fps=23.976,
@@ -422,14 +452,14 @@ def test_timebase_frame_locked_sync():
     )
 
     print(f"  Without video: success={result.success}")
-    assert result.success == False, "Should fail without target video"
+    assert not result.success, "Should fail without target video"
     assert "Target video required" in result.error
 
     # Test with fake video path (will use fallback calculation)
     # Since we don't have a real video, VideoTimestamps will fail
     # but the plugin should still apply delay
     result2 = data.apply_sync(
-        mode='timebase-frame-locked-timestamps',
+        mode="timebase-frame-locked-timestamps",
         total_delay_ms=500.0,
         global_shift_ms=500.0,
         target_fps=23.976,
@@ -456,12 +486,13 @@ def test_mkvmerge_sync_mode():
     """Test time-based sync in mkvmerge mode (no subtitle modification)."""
     print("\n=== Test: MKVMerge Sync Mode ===")
 
-    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
     from collections import OrderedDict
+
+    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
 
     # Create test data
     data = SubtitleData()
-    data.styles = OrderedDict([('Default', SubtitleStyle.default())])
+    data.styles = OrderedDict([("Default", SubtitleStyle.default())])
     data.events = [
         SubtitleEvent(start_ms=1000.0, end_ms=2000.0, text="Event 1"),
         SubtitleEvent(start_ms=3000.0, end_ms=4000.0, text="Event 2"),
@@ -471,10 +502,10 @@ def test_mkvmerge_sync_mode():
 
     # Apply sync in default mode (mkvmerge handles sync)
     result = data.apply_sync(
-        mode='time-based',
+        mode="time-based",
         total_delay_ms=500.0,
         global_shift_ms=500.0,
-        config={'time_based_use_raw_values': False}  # Default: mkvmerge mode
+        config={"time_based_use_raw_values": False},  # Default: mkvmerge mode
     )
 
     print(f"  Result: success={result.success}")
@@ -486,7 +517,9 @@ def test_mkvmerge_sync_mode():
 
     # Verify events are unchanged
     for i, event in enumerate(data.events):
-        assert event.start_ms == original_starts[i], "Events should not be modified in mkvmerge mode"
+        assert event.start_ms == original_starts[i], (
+            "Events should not be modified in mkvmerge mode"
+        )
 
     print("  PASSED: MKVMerge sync mode works correctly")
     return True
@@ -496,33 +529,36 @@ def test_json_export():
     """Test JSON debug export."""
     print("\n=== Test: JSON Debug Export ===")
 
-    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
-    from collections import OrderedDict
-    import tempfile
     import json
+    import tempfile
+    from collections import OrderedDict
+
+    from vsg_core.subtitles.data import SubtitleData, SubtitleEvent, SubtitleStyle
 
     # Create test data
     data = SubtitleData()
-    data.script_info = OrderedDict([
-        ('Title', 'Test'),
-        ('PlayResX', '1920'),
-        ('PlayResY', '1080'),
-    ])
-    data.styles = OrderedDict([('Default', SubtitleStyle.default())])
+    data.script_info = OrderedDict(
+        [
+            ("Title", "Test"),
+            ("PlayResX", "1920"),
+            ("PlayResY", "1080"),
+        ]
+    )
+    data.styles = OrderedDict([("Default", SubtitleStyle.default())])
     data.events = [
         SubtitleEvent(start_ms=1234.567, end_ms=5678.901, text="Test event"),
     ]
 
     # Apply an operation to have a record
     data.apply_sync(
-        mode='time-based',
+        mode="time-based",
         total_delay_ms=100.0,
         global_shift_ms=100.0,
-        config={'time_based_use_raw_values': True}
+        config={"time_based_use_raw_values": True},
     )
 
     # Export to JSON
-    with tempfile.NamedTemporaryFile(suffix='.json', delete=False) as f:
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
         temp_output = f.name
 
     try:
@@ -536,21 +572,26 @@ def test_json_export():
         print(f"  Events in JSON: {len(json_data['events'])}")
         print(f"  Operations recorded: {len(json_data['operations'])}")
 
-        assert 'events' in json_data
-        assert 'styles' in json_data
-        assert 'operations' in json_data
-        assert len(json_data['events']) == 1
-        assert len(json_data['operations']) == 1
+        assert "events" in json_data
+        assert "styles" in json_data
+        assert "operations" in json_data
+        assert len(json_data["events"]) == 1
+        assert len(json_data["operations"]) == 1
 
         # Check float precision in JSON
-        event_data = json_data['events'][0]
-        print(f"  Event timing in JSON: {event_data['start_ms']} -> {event_data['end_ms']}")
-        assert event_data['start_ms'] == 1334.567, f"Float not preserved: {event_data['start_ms']}"
+        event_data = json_data["events"][0]
+        print(
+            f"  Event timing in JSON: {event_data['start_ms']} -> {event_data['end_ms']}"
+        )
+        assert event_data["start_ms"] == 1334.567, (
+            f"Float not preserved: {event_data['start_ms']}"
+        )
 
         print("  PASSED: JSON export works correctly")
 
     finally:
         import os
+
         os.unlink(temp_output)
 
     return True
@@ -585,6 +626,7 @@ def run_all_tests():
         except Exception as e:
             print(f"\n  FAILED: {e}")
             import traceback
+
             traceback.print_exc()
             failed += 1
 
@@ -595,6 +637,6 @@ def run_all_tests():
     return failed == 0
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     success = run_all_tests()
     sys.exit(0 if success else 1)

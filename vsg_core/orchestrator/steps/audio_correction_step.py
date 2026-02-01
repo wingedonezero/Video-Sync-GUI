@@ -1,16 +1,20 @@
 # vsg_core/orchestrator/steps/audio_correction_step.py
-# -*- coding: utf-8 -*-
 """
 Audio correction step with proper error handling and validation.
 """
+
 from __future__ import annotations
 
-from vsg_core.orchestrator.steps.context import Context
-from vsg_core.io.runner import CommandRunner
-from vsg_core.correction.pal import run_pal_correction
+from typing import TYPE_CHECKING
+
 from vsg_core.correction.linear import run_linear_correction
+from vsg_core.correction.pal import run_pal_correction
 from vsg_core.correction.stepping import run_stepping_correction
 from vsg_core.models.enums import TrackType
+
+if TYPE_CHECKING:
+    from vsg_core.io.runner import CommandRunner
+    from vsg_core.orchestrator.steps.context import Context
 
 
 class AudioCorrectionStep:
@@ -18,23 +22,26 @@ class AudioCorrectionStep:
     Acts as a router to apply the correct audio correction based on the
     diagnosis from the AnalysisStep.
     """
+
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
-        if not ctx.and_merge or not ctx.settings_dict.get('segmented_enabled', False):
+        if not ctx.and_merge or not ctx.settings_dict.get("segmented_enabled", False):
             return ctx
 
         try:
             if ctx.pal_drift_flags:
-                runner._log_message('--- PAL Drift Audio Correction Phase ---')
+                runner._log_message("--- PAL Drift Audio Correction Phase ---")
                 ctx = run_pal_correction(ctx, runner)
                 self._validate_pal_correction(ctx, runner)
 
             elif ctx.linear_drift_flags:
-                runner._log_message('--- Linear Drift Audio Correction Phase ---')
+                runner._log_message("--- Linear Drift Audio Correction Phase ---")
                 ctx = run_linear_correction(ctx, runner)
                 self._validate_linear_correction(ctx, runner)
 
             elif ctx.segment_flags:
-                runner._log_message('--- Segmented (Stepping) Audio Correction Phase ---')
+                runner._log_message(
+                    "--- Segmented (Stepping) Audio Correction Phase ---"
+                )
                 ctx = run_stepping_correction(ctx, runner)
                 self._validate_stepping_correction(ctx, runner)
 
@@ -47,13 +54,16 @@ class AudioCorrectionStep:
     def _validate_pal_correction(self, ctx: Context, runner: CommandRunner):
         """Validate that PAL correction was applied successfully."""
         for analysis_key in ctx.pal_drift_flags:
-            source_key = analysis_key.split('_')[0]
+            source_key = analysis_key.split("_")[0]
 
             audio_tracks_from_source = [
-                item for item in ctx.extracted_items
-                if (item.track.source == source_key and
-                    item.track.type == TrackType.AUDIO and
-                    not item.is_preserved)
+                item
+                for item in ctx.extracted_items
+                if (
+                    item.track.source == source_key
+                    and item.track.type == TrackType.AUDIO
+                    and not item.is_preserved
+                )
             ]
 
             if not audio_tracks_from_source:
@@ -64,8 +74,7 @@ class AudioCorrectionStep:
                 continue
 
             corrected_items = [
-                item for item in audio_tracks_from_source
-                if item.is_corrected
+                item for item in audio_tracks_from_source if item.is_corrected
             ]
 
             if not corrected_items:
@@ -89,13 +98,16 @@ class AudioCorrectionStep:
     def _validate_linear_correction(self, ctx: Context, runner: CommandRunner):
         """Validate that linear drift correction was applied successfully."""
         for analysis_key in ctx.linear_drift_flags:
-            source_key = analysis_key.split('_')[0]
+            source_key = analysis_key.split("_")[0]
 
             audio_tracks_from_source = [
-                item for item in ctx.extracted_items
-                if (item.track.source == source_key and
-                    item.track.type == TrackType.AUDIO and
-                    not item.is_preserved)
+                item
+                for item in ctx.extracted_items
+                if (
+                    item.track.source == source_key
+                    and item.track.type == TrackType.AUDIO
+                    and not item.is_preserved
+                )
             ]
 
             if not audio_tracks_from_source:
@@ -106,8 +118,7 @@ class AudioCorrectionStep:
                 continue
 
             corrected_items = [
-                item for item in audio_tracks_from_source
-                if item.is_corrected
+                item for item in audio_tracks_from_source if item.is_corrected
             ]
 
             if not corrected_items:
@@ -131,13 +142,16 @@ class AudioCorrectionStep:
     def _validate_stepping_correction(self, ctx: Context, runner: CommandRunner):
         """Validate that stepping correction was applied successfully."""
         for analysis_key in ctx.segment_flags:
-            source_key = analysis_key.split('_')[0]
+            source_key = analysis_key.split("_")[0]
 
             audio_tracks_from_source = [
-                item for item in ctx.extracted_items
-                if (item.track.source == source_key and
-                    item.track.type == TrackType.AUDIO and
-                    not item.is_preserved)
+                item
+                for item in ctx.extracted_items
+                if (
+                    item.track.source == source_key
+                    and item.track.type == TrackType.AUDIO
+                    and not item.is_preserved
+                )
             ]
 
             if not audio_tracks_from_source:
@@ -148,8 +162,7 @@ class AudioCorrectionStep:
                 continue
 
             corrected_items = [
-                item for item in audio_tracks_from_source
-                if item.is_corrected
+                item for item in audio_tracks_from_source if item.is_corrected
             ]
 
             # SAFEGUARD #2: If no corrected items, check if stepping was actually found
@@ -162,7 +175,7 @@ class AudioCorrectionStep:
                     f"This is expected if the corrector determined no stepping exists after detailed analysis."
                 )
                 runner._log_message(
-                    f"[Validation] The globally-shifted delay from initial analysis will be used."
+                    "[Validation] The globally-shifted delay from initial analysis will be used."
                 )
                 # SAFEGUARD #3: Mark that this is intentional - stepping was a false positive
                 # Validation passes - this is not an error condition

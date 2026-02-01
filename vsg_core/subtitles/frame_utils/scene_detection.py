@@ -1,14 +1,14 @@
 # vsg_core/subtitles/frame_utils/scene_detection.py
-# -*- coding: utf-8 -*-
 """
 Scene change detection using PySceneDetect.
 
 Contains:
 - Scene change detection for sync verification anchor points
 """
+
 from __future__ import annotations
+
 from pathlib import Path
-from typing import List
 
 
 def detect_scene_changes(
@@ -17,8 +17,8 @@ def detect_scene_changes(
     end_frame: int,
     runner,
     max_scenes: int = 10,
-    threshold: float = 27.0
-) -> List[int]:
+    threshold: float = 27.0,
+) -> list[int]:
     """
     Detect scene changes in a video using PySceneDetect.
 
@@ -43,11 +43,17 @@ def detect_scene_changes(
         List of frame numbers (the frame BEFORE each scene change)
     """
     try:
-        from scenedetect import detect, ContentDetector, open_video
+        from scenedetect import ContentDetector, detect, open_video
 
-        runner._log_message(f"[SceneDetect] Detecting scene changes in {Path(video_path).name}")
-        runner._log_message(f"[SceneDetect] Using PySceneDetect (ContentDetector, threshold={threshold})")
-        runner._log_message(f"[SceneDetect] Searching frames {start_frame} to {end_frame}")
+        runner._log_message(
+            f"[SceneDetect] Detecting scene changes in {Path(video_path).name}"
+        )
+        runner._log_message(
+            f"[SceneDetect] Using PySceneDetect (ContentDetector, threshold={threshold})"
+        )
+        runner._log_message(
+            f"[SceneDetect] Searching frames {start_frame} to {end_frame}"
+        )
 
         # Open video and get framerate
         video = open_video(str(video_path))
@@ -59,7 +65,9 @@ def detect_scene_changes(
         start_time_sec = start_frame / fps
         end_time_sec = end_frame / fps
 
-        runner._log_message(f"[SceneDetect] Time range: {start_time_sec:.2f}s - {end_time_sec:.2f}s (fps={fps:.3f})")
+        runner._log_message(
+            f"[SceneDetect] Time range: {start_time_sec:.2f}s - {end_time_sec:.2f}s (fps={fps:.3f})"
+        )
 
         # Detect scenes using ContentDetector
         # Returns list of (start_timecode, end_timecode) tuples for each scene
@@ -68,7 +76,7 @@ def detect_scene_changes(
             ContentDetector(threshold=threshold, min_scene_len=15),
             start_time=start_time_sec,
             end_time=end_time_sec,
-            show_progress=False
+            show_progress=False,
         )
 
         # Extract frame BEFORE each scene change (last frame of previous scene)
@@ -89,24 +97,28 @@ def detect_scene_changes(
                 scene_frames.append(anchor_frame)
                 runner._log_message(
                     f"[SceneDetect] Scene change at frame {cut_frame} -> anchor frame {anchor_frame} "
-                    f"(t={anchor_frame/fps:.3f}s)"
+                    f"(t={anchor_frame / fps:.3f}s)"
                 )
 
                 if len(scene_frames) >= max_scenes:
                     break
 
-        runner._log_message(f"[SceneDetect] Found {len(scene_frames)} scene change anchor frames")
+        runner._log_message(
+            f"[SceneDetect] Found {len(scene_frames)} scene change anchor frames"
+        )
 
         # If we didn't find enough scenes, try with lower threshold
         if len(scene_frames) < 2:
-            runner._log_message(f"[SceneDetect] Few scenes found, trying with lower threshold (15.0)")
+            runner._log_message(
+                "[SceneDetect] Few scenes found, trying with lower threshold (15.0)"
+            )
 
             scene_list = detect(
                 str(video_path),
                 ContentDetector(threshold=15.0, min_scene_len=10),
                 start_time=start_time_sec,
                 end_time=end_time_sec,
-                show_progress=False
+                show_progress=False,
             )
 
             scene_frames = []
@@ -121,16 +133,21 @@ def detect_scene_changes(
                     if len(scene_frames) >= max_scenes:
                         break
 
-            runner._log_message(f"[SceneDetect] Found {len(scene_frames)} scenes with lower threshold")
+            runner._log_message(
+                f"[SceneDetect] Found {len(scene_frames)} scenes with lower threshold"
+            )
 
         return scene_frames
 
     except ImportError as e:
         runner._log_message(f"[SceneDetect] WARNING: PySceneDetect not available: {e}")
-        runner._log_message("[SceneDetect] Install with: pip install scenedetect opencv-python")
+        runner._log_message(
+            "[SceneDetect] Install with: pip install scenedetect opencv-python"
+        )
         return []
     except Exception as e:
         runner._log_message(f"[SceneDetect] ERROR: {e}")
         import traceback
+
         runner._log_message(f"[SceneDetect] Traceback: {traceback.format_exc()}")
         return []

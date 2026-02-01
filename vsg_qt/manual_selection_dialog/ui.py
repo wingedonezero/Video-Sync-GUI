@@ -1,36 +1,60 @@
 # vsg_qt/manual_selection_dialog/ui.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
+
+import json
+import re
 import shutil
 import sys
 import time
-import re
-import json
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Callable, Tuple
+from typing import TYPE_CHECKING, Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QDialogButtonBox,
-    QGroupBox, QScrollArea, QWidget, QMessageBox, QPushButton, QCheckBox, QFileDialog, QMenu
+    QCheckBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QMenu,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
-from .logic import ManualLogic
-from .widgets import SourceList, FinalList
-from vsg_qt.track_widget import TrackWidget
-from vsg_qt.subtitle_editor import SubtitleEditorWindow
-from vsg_core.extraction.tracks import extract_tracks
 from vsg_core.extraction.attachments import extract_attachments
-from vsg_core.subtitles.convert import convert_srt_to_ass
+from vsg_core.extraction.tracks import extract_tracks
 from vsg_core.io.runner import CommandRunner
+from vsg_core.subtitles.convert import convert_srt_to_ass
 from vsg_core.subtitles.style_engine import StyleEngine
+from vsg_qt.subtitle_editor import SubtitleEditorWindow
+
+from .logic import ManualLogic
+from .widgets import FinalList, SourceList
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from vsg_core.config import AppConfig
+    from vsg_qt.track_widget import TrackWidget
+
 
 class ManualSelectionDialog(QDialog):
-    def __init__(self, track_info: Dict[str, List[dict]], *, config: "AppConfig",
-                 log_callback: Optional[Callable[[str], None]] = None, parent=None,
-                 previous_layout: Optional[List[dict]] = None,
-                 previous_attachment_sources: Optional[List[str]] = None,
-                 previous_source_settings: Optional[Dict[str, Dict[str, Any]]] = None):
+    def __init__(
+        self,
+        track_info: dict[str, list[dict]],
+        *,
+        config: AppConfig,
+        log_callback: Callable[[str], None] | None = None,
+        parent=None,
+        previous_layout: list[dict] | None = None,
+        previous_attachment_sources: list[str] | None = None,
+        previous_source_settings: dict[str, dict[str, Any]] | None = None,
+    ):
         super().__init__(parent)
         self.setWindowTitle("Manual Track Selection")
         self.setMinimumSize(1200, 700)
@@ -38,31 +62,39 @@ class ManualSelectionDialog(QDialog):
         self.track_info = track_info
         self.config = config
         self.log_callback = log_callback or (lambda msg: print(f"[Dialog] {msg}"))
-        self.manual_layout: Optional[List[dict]] = None
-        self.attachment_sources: List[str] = []
-        self.source_settings: Dict[str, Dict[str, Any]] = previous_source_settings or {}
-        self._style_edit_clipboard: Optional[Dict[str, Any]] = None  # Stores style_patch and font_replacements
+        self.manual_layout: list[dict] | None = None
+        self.attachment_sources: list[str] = []
+        self.source_settings: dict[str, dict[str, Any]] = previous_source_settings or {}
+        self._style_edit_clipboard: dict[str, Any] | None = (
+            None  # Stores style_patch and font_replacements
+        )
         self.edited_widget = None
-        self._source_group_boxes: Dict[str, QGroupBox] = {}  # Track group boxes for context menu
+        self._source_group_boxes: dict[
+            str, QGroupBox
+        ] = {}  # Track group boxes for context menu
 
         # FIX: Instantiate the logic controller
         self._logic = ManualLogic(self)
 
-        self.source_lists: Dict[str, SourceList] = {}
-        self.attachment_checkboxes: Dict[str, QCheckBox] = {}
-        self.available_sources = sorted(track_info.keys(), key=lambda k: int(re.search(r'\d+', k).group()))
+        self.source_lists: dict[str, SourceList] = {}
+        self.attachment_checkboxes: dict[str, QCheckBox] = {}
+        self.available_sources = sorted(
+            track_info.keys(), key=lambda k: int(re.search(r"\d+", k).group())
+        )
 
         self._build_ui(previous_attachment_sources)
         self._wire_signals()
         self._populate_sources()
 
         if previous_layout:
-            self.info_label.setText("✅ Pre-populated with the layout from the previous file.")
+            self.info_label.setText(
+                "✅ Pre-populated with the layout from the previous file."
+            )
             self.info_label.setVisible(True)
             # FIX: Call the prepopulate method on the logic instance
             self._logic.prepopulate_from_layout(previous_layout)
 
-    def _build_ui(self, previous_attachment_sources: Optional[List[str]] = None):
+    def _build_ui(self, previous_attachment_sources: list[str] | None = None):
         root = QVBoxLayout(self)
         self.info_label = QLabel()
         self.info_label.setVisible(False)
@@ -71,33 +103,46 @@ class ManualSelectionDialog(QDialog):
 
         main_hbox = QHBoxLayout()
         left_pane_widget = QWidget()
-        left_pane_layout = QVBoxLayout(left_pane_widget); left_pane_layout.setContentsMargins(0,0,0,0)
-        left_scroll = QScrollArea(); left_scroll.setWidgetResizable(True)
+        left_pane_layout = QVBoxLayout(left_pane_widget)
+        left_pane_layout.setContentsMargins(0, 0, 0, 0)
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
         left_widget = QWidget()
-        self.left_vbox = QVBoxLayout(left_widget); self.left_vbox.setContentsMargins(0,0,0,0)
+        self.left_vbox = QVBoxLayout(left_widget)
+        self.left_vbox.setContentsMargins(0, 0, 0, 0)
 
         for source_key in self.available_sources:
-            path_name = Path(self.track_info[source_key][0]['original_path']).name if self.track_info[source_key] else "N/A"
+            path_name = (
+                Path(self.track_info[source_key][0]["original_path"]).name
+                if self.track_info[source_key]
+                else "N/A"
+            )
             title = f"{source_key} Tracks ('{path_name}')"
-            if source_key == "Source 1": title = f"{source_key} (Reference) Tracks ('{path_name}')"
+            if source_key == "Source 1":
+                title = f"{source_key} (Reference) Tracks ('{path_name}')"
 
             source_list_widget = SourceList(dialog=self)
             self.source_lists[source_key] = source_list_widget
             group_box = QGroupBox(title)
-            group_layout = QVBoxLayout(group_box); group_layout.addWidget(source_list_widget)
+            group_layout = QVBoxLayout(group_box)
+            group_layout.addWidget(source_list_widget)
 
             # Add context menu for source settings (all sources including Source 1)
             group_box.setContextMenuPolicy(Qt.CustomContextMenu)
             group_box.customContextMenuRequested.connect(
-                lambda pos, sk=source_key, gb=group_box: self._show_source_context_menu(pos, sk, gb)
+                lambda pos, sk=source_key, gb=group_box: self._show_source_context_menu(
+                    pos, sk, gb
+                )
             )
             self._source_group_boxes[source_key] = group_box
 
             self.left_vbox.addWidget(group_box)
 
         self.external_list = SourceList(dialog=self)
-        self.ext_group = QGroupBox("External Subtitles"); ext_layout = QVBoxLayout(self.ext_group)
-        ext_layout.addWidget(self.external_list); self.ext_group.setVisible(False)
+        self.ext_group = QGroupBox("External Subtitles")
+        ext_layout = QVBoxLayout(self.ext_group)
+        ext_layout.addWidget(self.external_list)
+        self.ext_group.setVisible(False)
         self.left_vbox.addWidget(self.ext_group)
         self.left_vbox.addStretch(1)
         left_scroll.setWidget(left_widget)
@@ -108,17 +153,22 @@ class ManualSelectionDialog(QDialog):
         main_hbox.addWidget(left_pane_widget, 1)
 
         right_pane_widget = QWidget()
-        right_pane_layout = QVBoxLayout(right_pane_widget); right_pane_layout.setContentsMargins(0,0,0,0)
+        right_pane_layout = QVBoxLayout(right_pane_widget)
+        right_pane_layout.setContentsMargins(0, 0, 0, 0)
         self.final_list = FinalList(self)
         final_group = QGroupBox("Final Output (Drag to reorder)")
-        final_layout = QVBoxLayout(final_group); final_layout.addWidget(self.final_list)
+        final_layout = QVBoxLayout(final_group)
+        final_layout.addWidget(self.final_list)
 
         self.attachment_group = QGroupBox("Attachments")
         attachment_layout = QHBoxLayout(self.attachment_group)
         attachment_layout.addWidget(QLabel("Include attachments from:"))
         for source_key in self.available_sources:
             cb = QCheckBox(source_key)
-            if previous_attachment_sources and source_key in previous_attachment_sources:
+            if (
+                previous_attachment_sources
+                and source_key in previous_attachment_sources
+            ):
                 cb.setChecked(True)
             self.attachment_checkboxes[source_key] = cb
             attachment_layout.addWidget(cb)
@@ -147,19 +197,24 @@ class ManualSelectionDialog(QDialog):
                 widget.add_track_item(t, guard_block=self._logic.is_blocked_video(t))
 
     def _on_double_clicked_source(self, item):
-        if not item: return
+        if not item:
+            return
         td = item.data(Qt.UserRole)
         # FIX: Call method on the logic instance
         if td and not self._logic.is_blocked_video(td):
-            self.final_list.add_track_widget(td, preset=('style_patch' in td))
+            self.final_list.add_track_widget(td, preset=("style_patch" in td))
 
-    def get_manual_layout_and_attachment_sources(self) -> Tuple[List[Dict], List[str], Dict[str, Dict[str, Any]]]:
+    def get_manual_layout_and_attachment_sources(
+        self,
+    ) -> tuple[list[dict], list[str], dict[str, dict[str, Any]]]:
         """Returns (manual_layout, attachment_sources, source_settings)."""
         return self.manual_layout, self.attachment_sources, self.source_settings
 
     def accept(self):
         # FIX: Call method on the logic instance
-        self.manual_layout, self.attachment_sources = self._logic.get_final_layout_and_attachments()
+        self.manual_layout, self.attachment_sources = (
+            self._logic.get_final_layout_and_attachments()
+        )
         super().accept()
 
     def _show_source_context_menu(self, pos, source_key: str, group_box: QGroupBox):
@@ -169,11 +224,11 @@ class ManualSelectionDialog(QDialog):
         # Check if this source has non-default settings
         current = self.source_settings.get(source_key, {})
         if source_key == "Source 1":
-            has_settings = bool(current.get('correlation_ref_track') is not None)
+            has_settings = bool(current.get("correlation_ref_track") is not None)
         else:
             has_settings = bool(
-                current.get('correlation_source_track') is not None or
-                current.get('use_source_separation')
+                current.get("correlation_source_track") is not None
+                or current.get("use_source_separation")
             )
 
         # Configure correlation settings action
@@ -198,17 +253,21 @@ class ManualSelectionDialog(QDialog):
         from vsg_qt.source_settings_dialog import SourceSettingsDialog
 
         # Get this source's audio tracks
-        source_tracks = [t for t in self.track_info.get(source_key, []) if t.get('type') == 'audio']
+        source_tracks = [
+            t for t in self.track_info.get(source_key, []) if t.get("type") == "audio"
+        ]
 
         # Get Source 1's audio tracks
-        source1_tracks = [t for t in self.track_info.get('Source 1', []) if t.get('type') == 'audio']
+        source1_tracks = [
+            t for t in self.track_info.get("Source 1", []) if t.get("type") == "audio"
+        ]
 
         dialog = SourceSettingsDialog(
             source_key=source_key,
             source_audio_tracks=source_tracks,
             source1_audio_tracks=source1_tracks,
             current_settings=self.source_settings.get(source_key),
-            parent=self
+            parent=self,
         )
 
         if dialog.exec():
@@ -216,7 +275,9 @@ class ManualSelectionDialog(QDialog):
             # Store settings if any are non-default
             if dialog.has_non_default_settings():
                 self.source_settings[source_key] = settings
-                self.info_label.setText(f"Correlation settings configured for {source_key}.")
+                self.info_label.setText(
+                    f"Correlation settings configured for {source_key}."
+                )
                 self.info_label.setVisible(True)
             else:
                 # Remove settings if all are default
@@ -237,121 +298,173 @@ class ManualSelectionDialog(QDialog):
 
     def _refresh_badges_for_source(self, source_key: str):
         """Refresh badges and summary for all audio tracks from the specified source."""
-        if not hasattr(self, 'final_list'):
+        if not hasattr(self, "final_list"):
             return
 
         for i in range(self.final_list.count()):
             widget = self.final_list.itemWidget(self.final_list.item(i))
-            if widget and hasattr(widget, 'track_data') and hasattr(widget, 'logic'):
-                track_source = widget.track_data.get('source', '')
-                track_type = widget.track_data.get('type', '')
+            if widget and hasattr(widget, "track_data") and hasattr(widget, "logic"):
+                track_source = widget.track_data.get("source", "")
+                track_type = widget.track_data.get("type", "")
                 # Refresh badges and summary for audio tracks from this source
-                if track_source == source_key and track_type == 'audio':
+                if track_source == source_key and track_type == "audio":
                     widget.logic.refresh_badges()
                     widget.logic.refresh_summary()
 
     # ... other methods like _add_external_subtitles, keyPressEvent, etc remain the same ...
     # They are omitted here for brevity but should be kept in your file.
     def keyPressEvent(self, event):
-        if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Up: self.final_list._move_by(-1); event.accept(); return
-        if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Down: self.final_list._move_by(+1); event.accept(); return
+        if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Up:
+            self.final_list._move_by(-1)
+            event.accept()
+            return
+        if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Down:
+            self.final_list._move_by(+1)
+            event.accept()
+            return
         if event.key() == Qt.Key_Delete:
             item = self.final_list.currentItem()
-            if item: self.final_list.takeItem(self.final_list.row(item)); event.accept(); return
+            if item:
+                self.final_list.takeItem(self.final_list.row(item))
+                event.accept()
+                return
         super().keyPressEvent(event)
 
     def _add_external_subtitles(self):
         files, _ = QFileDialog.getOpenFileNames(
-            self, "Select External Subtitle Files", "",
-            "Subtitle Files (*.srt *.ass *.ssa *.sup);;All Files (*)"
+            self,
+            "Select External Subtitle Files",
+            "",
+            "Subtitle Files (*.srt *.ass *.ssa *.sup);;All Files (*)",
         )
         if not files:
             return
 
         runner = CommandRunner(self.config.settings, self.log_callback)
-        tool_paths = {'ffprobe': shutil.which('ffprobe')}
-        if not tool_paths['ffprobe']:
+        tool_paths = {"ffprobe": shutil.which("ffprobe")}
+        if not tool_paths["ffprobe"]:
             QMessageBox.critical(self, "Error", "ffprobe tool not found in PATH.")
             return
 
         for file_path in files:
             try:
-                out = runner.run([
-                    'ffprobe', '-v', 'error', '-select_streams', 's:0',
-                    '-show_entries', 'stream=codec_name,codec_long_name,codec_type:stream_tags=language',
-                    '-of', 'json', file_path
-                ], tool_paths)
+                out = runner.run(
+                    [
+                        "ffprobe",
+                        "-v",
+                        "error",
+                        "-select_streams",
+                        "s:0",
+                        "-show_entries",
+                        "stream=codec_name,codec_long_name,codec_type:stream_tags=language",
+                        "-of",
+                        "json",
+                        file_path,
+                    ],
+                    tool_paths,
+                )
 
                 if not out:
-                    self.log_callback(f"[WARN] ffprobe found no subtitle stream in {Path(file_path).name}")
+                    self.log_callback(
+                        f"[WARN] ffprobe found no subtitle stream in {Path(file_path).name}"
+                    )
                     continue
 
-                streams = json.loads(out).get('streams', [])
+                streams = json.loads(out).get("streams", [])
                 if not streams:
-                    self.log_callback(f"[WARN] No subtitle streams found in {Path(file_path).name}")
+                    self.log_callback(
+                        f"[WARN] No subtitle streams found in {Path(file_path).name}"
+                    )
                     continue
 
                 info = streams[0]
                 # Explicitly verify this is a subtitle stream
-                if info.get('codec_type') != 'subtitle':
-                    self.log_callback(f"[WARN] {Path(file_path).name} stream is not a subtitle (got: {info.get('codec_type')})")
+                if info.get("codec_type") != "subtitle":
+                    self.log_callback(
+                        f"[WARN] {Path(file_path).name} stream is not a subtitle (got: {info.get('codec_type')})"
+                    )
                     continue
-                codec_id_map = {'subrip': 'S_TEXT/UTF8', 'ssa': 'S_TEXT/SSA', 'ass': 'S_TEXT/ASS', 'hdmv_pgs_subtitle': 'S_HDMV/PGS'}
-                codec_id = codec_id_map.get(info.get('codec_name'), f"S_{info.get('codec_name', 'UNKNOWN').upper()}")
+                codec_id_map = {
+                    "subrip": "S_TEXT/UTF8",
+                    "ssa": "S_TEXT/SSA",
+                    "ass": "S_TEXT/ASS",
+                    "hdmv_pgs_subtitle": "S_HDMV/PGS",
+                }
+                codec_id = codec_id_map.get(
+                    info.get("codec_name"),
+                    f"S_{info.get('codec_name', 'UNKNOWN').upper()}",
+                )
 
                 track_data = {
-                    'source': 'External', 'original_path': file_path, 'id': 0,
-                    'type': 'subtitles', 'codec_id': codec_id,
-                    'lang': info.get('tags', {}).get('language', 'und'),
-                    'name': Path(file_path).stem
+                    "source": "External",
+                    "original_path": file_path,
+                    "id": 0,
+                    "type": "subtitles",
+                    "codec_id": codec_id,
+                    "lang": info.get("tags", {}).get("language", "und"),
+                    "name": Path(file_path).stem,
                 }
                 self.external_list.add_track_item(track_data, guard_block=False)
             except Exception as e:
-                self.log_callback(f"[ERROR] Failed to process external file {file_path}: {e}")
+                self.log_callback(
+                    f"[ERROR] Failed to process external file {file_path}: {e}"
+                )
 
         if self.external_list.count() > 0:
             self.ext_group.setVisible(True)
 
-    def _ensure_editable_subtitle_path(self, widget: TrackWidget) -> Optional[str]:
+    def _ensure_editable_subtitle_path(self, widget: TrackWidget) -> str | None:
         track_data = widget.track_data
-        if track_data.get('user_modified_path'):
-            return track_data['user_modified_path']
+        if track_data.get("user_modified_path"):
+            return track_data["user_modified_path"]
 
-        source_file = track_data.get('original_path')
-        track_id = track_data.get('id')
+        source_file = track_data.get("original_path")
+        track_id = track_data.get("id")
         if not all([source_file, track_id is not None, self.config]):
             self.log_callback("[ERROR] Missing info for subtitle extraction.")
             return None
 
         runner = CommandRunner(self.config.settings, self.log_callback)
-        tool_paths = {t: shutil.which(t) for t in ['mkvmerge', 'mkvextract', 'ffmpeg']}
+        tool_paths = {t: shutil.which(t) for t in ["mkvmerge", "mkvextract", "ffmpeg"]}
 
         try:
             temp_root = self.config.get_style_editor_temp_dir()
-            temp_dir = temp_root / f"vsg_style_edit_{Path(source_file).stem}_{track_id}_{int(time.time())}"
+            temp_dir = (
+                temp_root
+                / f"vsg_style_edit_{Path(source_file).stem}_{track_id}_{int(time.time())}"
+            )
             temp_dir.mkdir(parents=True, exist_ok=True)
 
-            if track_data.get('source') == 'External':
+            if track_data.get("source") == "External":
                 temp_path = temp_dir / Path(source_file).name
                 shutil.copy2(source_file, temp_path)
                 temp_path_str = str(temp_path)
             else:
-                extracted = extract_tracks(source_file, temp_dir, runner, tool_paths, 'edit', specific_tracks=[track_id])
+                extracted = extract_tracks(
+                    source_file,
+                    temp_dir,
+                    runner,
+                    tool_paths,
+                    "edit",
+                    specific_tracks=[track_id],
+                )
                 if not extracted:
-                    self.log_callback(f"[ERROR] mkvextract failed for track ID {track_id}")
+                    self.log_callback(
+                        f"[ERROR] mkvextract failed for track ID {track_id}"
+                    )
                     return None
-                temp_path_str = extracted[0]['path']
+                temp_path_str = extracted[0]["path"]
 
-            if Path(temp_path_str).suffix.lower() == '.srt':
+            if Path(temp_path_str).suffix.lower() == ".srt":
                 temp_path_str = convert_srt_to_ass(temp_path_str, runner, tool_paths)
 
-            widget.track_data['user_modified_path'] = temp_path_str
+            widget.track_data["user_modified_path"] = temp_path_str
             return temp_path_str
         except Exception as e:
             self.log_callback(f"[ERROR] Exception during subtitle preparation: {e}")
             return None
 
-    def _prepare_ocr_preview(self, widget: TrackWidget) -> Optional[Tuple[str, str]]:
+    def _prepare_ocr_preview(self, widget: TrackWidget) -> tuple[str, str] | None:
         """
         Run preview OCR on image-based subtitle for style editing.
 
@@ -365,9 +478,9 @@ class ManualSelectionDialog(QDialog):
         track_data = widget.track_data
 
         # Check if we already have a preview
-        if track_data.get('ocr_preview_json') and track_data.get('user_modified_path'):
-            existing_json = track_data['ocr_preview_json']
-            existing_ass = track_data['user_modified_path']
+        if track_data.get("ocr_preview_json") and track_data.get("user_modified_path"):
+            existing_json = track_data["ocr_preview_json"]
+            existing_ass = track_data["user_modified_path"]
             if Path(existing_json).exists() and Path(existing_ass).exists():
                 self.log_callback("[Style Editor] Using existing OCR preview")
                 return existing_json, existing_ass
@@ -376,14 +489,15 @@ class ManualSelectionDialog(QDialog):
         extracted_path = self._extract_image_subtitle(widget)
         if not extracted_path:
             QMessageBox.warning(
-                self, "OCR Preview",
+                self,
+                "OCR Preview",
                 "Failed to extract image-based subtitle.\n\n"
-                "Make sure the source file is accessible."
+                "Make sure the source file is accessible.",
             )
             return None
 
         # Get language from track settings or default to English
-        lang = track_data.get('custom_lang') or 'eng'
+        lang = track_data.get("custom_lang") or "eng"
 
         # Get style_editor_temp directory
         output_dir = self.config.get_style_editor_temp_dir()
@@ -402,23 +516,24 @@ class ManualSelectionDialog(QDialog):
 
         if result is None:
             QMessageBox.warning(
-                self, "OCR Preview Failed",
+                self,
+                "OCR Preview Failed",
                 "Preview OCR failed to process the subtitle.\n\n"
-                "Check the log for details. The subtitle may be empty or corrupted."
+                "Check the log for details. The subtitle may be empty or corrupted.",
             )
             return None
 
         json_path, ass_path = result
 
         # Store paths in track_data
-        widget.track_data['user_modified_path'] = ass_path
-        widget.track_data['ocr_preview_json'] = json_path
+        widget.track_data["user_modified_path"] = ass_path
+        widget.track_data["ocr_preview_json"] = json_path
 
         self.log_callback(f"[Style Editor] Preview ready: {Path(ass_path).name}")
 
         return json_path, ass_path
 
-    def _extract_image_subtitle(self, widget: TrackWidget) -> Optional[str]:
+    def _extract_image_subtitle(self, widget: TrackWidget) -> str | None:
         """
         Extract image-based subtitle (VobSub/PGS) from source file.
 
@@ -426,37 +541,42 @@ class ManualSelectionDialog(QDialog):
             Path to extracted .idx (VobSub) or .sup (PGS), or None on failure.
         """
         track_data = widget.track_data
-        source_file = track_data.get('original_path')
-        track_id = track_data.get('id')
+        source_file = track_data.get("original_path")
+        track_id = track_data.get("id")
 
         if not all([source_file, track_id is not None]):
-            self.log_callback("[ERROR] Missing source file or track ID for OCR extraction.")
+            self.log_callback(
+                "[ERROR] Missing source file or track ID for OCR extraction."
+            )
             return None
 
         runner = CommandRunner(self.config.settings, self.log_callback)
-        tool_paths = {t: shutil.which(t) for t in ['mkvmerge', 'mkvextract', 'ffmpeg']}
+        tool_paths = {t: shutil.which(t) for t in ["mkvmerge", "mkvextract", "ffmpeg"]}
 
         try:
             # Create temp directory for extraction
             temp_root = self.config.get_style_editor_temp_dir()
-            temp_dir = temp_root / f"vsg_ocr_preview_{Path(source_file).stem}_{track_id}_{int(time.time())}"
+            temp_dir = (
+                temp_root
+                / f"vsg_ocr_preview_{Path(source_file).stem}_{track_id}_{int(time.time())}"
+            )
             temp_dir.mkdir(parents=True, exist_ok=True)
 
-            if track_data.get('source') == 'External':
+            if track_data.get("source") == "External":
                 # External file - just copy it
                 temp_path = temp_dir / Path(source_file).name
                 shutil.copy2(source_file, temp_path)
 
                 # For VobSub, handle .idx/.sub pair
-                if temp_path.suffix.lower() == '.idx':
+                if temp_path.suffix.lower() == ".idx":
                     # .idx provided - also copy the .sub file
-                    sub_file = Path(source_file).with_suffix('.sub')
+                    sub_file = Path(source_file).with_suffix(".sub")
                     if sub_file.exists():
                         shutil.copy2(sub_file, temp_dir / sub_file.name)
                     return str(temp_path)
-                elif temp_path.suffix.lower() == '.sub':
+                elif temp_path.suffix.lower() == ".sub":
                     # .sub provided - check for .idx and use that instead
-                    idx_file = Path(source_file).with_suffix('.idx')
+                    idx_file = Path(source_file).with_suffix(".idx")
                     if idx_file.exists():
                         idx_temp = temp_dir / idx_file.name
                         shutil.copy2(idx_file, idx_temp)
@@ -468,42 +588,57 @@ class ManualSelectionDialog(QDialog):
             else:
                 # Extract from container
                 extracted = extract_tracks(
-                    source_file, temp_dir, runner, tool_paths,
-                    'ocr_preview', specific_tracks=[track_id]
+                    source_file,
+                    temp_dir,
+                    runner,
+                    tool_paths,
+                    "ocr_preview",
+                    specific_tracks=[track_id],
                 )
                 if not extracted:
-                    self.log_callback(f"[ERROR] Failed to extract track {track_id} for OCR preview")
+                    self.log_callback(
+                        f"[ERROR] Failed to extract track {track_id} for OCR preview"
+                    )
                     return None
 
-                extracted_path = Path(extracted[0]['path'])
+                extracted_path = Path(extracted[0]["path"])
 
                 # For VobSub, mkvextract creates both .idx and .sub files
                 # extract_tracks returns .sub path, but OCR needs .idx
-                if extracted_path.suffix.lower() == '.sub':
-                    idx_path = extracted_path.with_suffix('.idx')
+                if extracted_path.suffix.lower() == ".sub":
+                    idx_path = extracted_path.with_suffix(".idx")
                     if idx_path.exists():
-                        self.log_callback(f"[INFO] Using .idx file for VobSub OCR: {idx_path.name}")
+                        self.log_callback(
+                            f"[INFO] Using .idx file for VobSub OCR: {idx_path.name}"
+                        )
                         return str(idx_path)
 
                 return str(extracted_path)
 
         except Exception as e:
-            self.log_callback(f"[ERROR] Exception during image subtitle extraction: {e}")
+            self.log_callback(
+                f"[ERROR] Exception during image subtitle extraction: {e}"
+            )
             return None
 
     def _copy_style_edits(self, widget: TrackWidget):
         """Copy style_patch and font_replacements from track_data (not raw style block)."""
-        style_patch = widget.track_data.get('style_patch')
-        font_replacements = widget.track_data.get('font_replacements')
+        style_patch = widget.track_data.get("style_patch")
+        font_replacements = widget.track_data.get("font_replacements")
 
         if not style_patch and not font_replacements:
-            QMessageBox.warning(self, "Copy Style Edits", "No style edits found on this track.\n\nUse the Style Editor to make changes first.")
+            QMessageBox.warning(
+                self,
+                "Copy Style Edits",
+                "No style edits found on this track.\n\nUse the Style Editor to make changes first.",
+            )
             return
 
         self._style_edit_clipboard = {
-            'style_patch': style_patch.copy() if style_patch else {},
-            'font_replacements': font_replacements.copy() if font_replacements else {},
-            'source_name': widget.track_data.get('custom_name') or widget.track_data.get('description', 'Unknown')
+            "style_patch": style_patch.copy() if style_patch else {},
+            "font_replacements": font_replacements.copy() if font_replacements else {},
+            "source_name": widget.track_data.get("custom_name")
+            or widget.track_data.get("description", "Unknown"),
         }
 
         # Build description of what was copied
@@ -519,20 +654,28 @@ class ManualSelectionDialog(QDialog):
     def _paste_style_edits(self, widget: TrackWidget):
         """Paste style_patch and font_replacements to target track with validation."""
         if not self._style_edit_clipboard:
-            QMessageBox.warning(self, "Paste Style Edits", "Clipboard is empty.\n\nCopy style edits from another track first.")
+            QMessageBox.warning(
+                self,
+                "Paste Style Edits",
+                "Clipboard is empty.\n\nCopy style edits from another track first.",
+            )
             return
 
-        style_patch = self._style_edit_clipboard.get('style_patch', {})
-        font_replacements = self._style_edit_clipboard.get('font_replacements', {})
+        style_patch = self._style_edit_clipboard.get("style_patch", {})
+        font_replacements = self._style_edit_clipboard.get("font_replacements", {})
 
         if not style_patch and not font_replacements:
-            QMessageBox.warning(self, "Paste Style Edits", "Clipboard contains no style edits.")
+            QMessageBox.warning(
+                self, "Paste Style Edits", "Clipboard contains no style edits."
+            )
             return
 
         # Get target track's editable file path
         temp_path = self._ensure_editable_subtitle_path(widget)
         if not temp_path:
-            QMessageBox.warning(self, "Error", "Could not prepare subtitle file for pasting.")
+            QMessageBox.warning(
+                self, "Error", "Could not prepare subtitle file for pasting."
+            )
             return
 
         # Get available styles from target file for validation
@@ -560,9 +703,11 @@ class ManualSelectionDialog(QDialog):
 
         if not valid_style_patch and not valid_font_replacements:
             QMessageBox.warning(
-                self, "Paste Failed",
-                "None of the styles in the clipboard exist in the target track.\n\n" +
-                "Missing styles:\n" + "\n".join(warnings)
+                self,
+                "Paste Failed",
+                "None of the styles in the clipboard exist in the target track.\n\n"
+                + "Missing styles:\n"
+                + "\n".join(warnings),
             )
             return
 
@@ -579,7 +724,7 @@ class ManualSelectionDialog(QDialog):
         # Apply font replacements (update fontname attribute in styles)
         if valid_font_replacements:
             for style_name, repl_data in valid_font_replacements.items():
-                new_font = repl_data.get('new_font_name')
+                new_font = repl_data.get("new_font_name")
                 if new_font and style_name in data.styles:
                     data.styles[style_name].fontname = new_font
 
@@ -587,15 +732,15 @@ class ManualSelectionDialog(QDialog):
         data.save_ass(temp_path)
 
         # Merge into target track's track_data
-        existing_patch = widget.track_data.get('style_patch', {})
+        existing_patch = widget.track_data.get("style_patch", {})
         existing_patch.update(valid_style_patch)
         if existing_patch:
-            widget.track_data['style_patch'] = existing_patch
+            widget.track_data["style_patch"] = existing_patch
 
-        existing_font_repl = widget.track_data.get('font_replacements', {})
+        existing_font_repl = widget.track_data.get("font_replacements", {})
         existing_font_repl.update(valid_font_replacements)
         if existing_font_repl:
-            widget.track_data['font_replacements'] = existing_font_repl
+            widget.track_data["font_replacements"] = existing_font_repl
 
         # Show result
         applied_parts = []
@@ -608,7 +753,7 @@ class ManualSelectionDialog(QDialog):
         if warnings:
             result_msg += f" ({len(warnings)} skipped)"
             # Store warnings for badge display
-            widget.track_data['pasted_warnings'] = warnings
+            widget.track_data["pasted_warnings"] = warnings
 
         self.info_label.setText(result_msg)
         self.info_label.setVisible(True)
@@ -627,9 +772,9 @@ class ManualSelectionDialog(QDialog):
         Args:
             source_track: The source track dictionary to filter from
         """
-        source_file = source_track.get('original_path')
-        track_id = source_track.get('id')
-        is_external = source_track.get('source') == 'External'
+        source_file = source_track.get("original_path")
+        track_id = source_track.get("id")
+        is_external = source_track.get("source") == "External"
 
         if not source_file or (track_id is None and not is_external):
             QMessageBox.warning(self, "Error", "Missing track information.")
@@ -639,9 +784,9 @@ class ManualSelectionDialog(QDialog):
         generated_track = dict(source_track)
 
         # Mark it as generated (filter configuration will be set via Style Editor)
-        generated_track['is_generated'] = True
-        generated_track['source_track_id'] = source_track.get('id')
-        generated_track['needs_configuration'] = True  # Flag to show warning badge
+        generated_track["is_generated"] = True
+        generated_track["source_track_id"] = source_track.get("id")
+        generated_track["needs_configuration"] = True  # Flag to show warning badge
 
         # Add the generated track to the FinalList
         self.final_list.add_track_widget(generated_track)
@@ -653,10 +798,12 @@ class ManualSelectionDialog(QDialog):
             "A generated track has been created.\n\n"
             "To configure which subtitle styles to include or exclude, "
             "click the 'Style Editor...' button on the track.\n\n"
-            "Use the 'Filtering' tab in the Style Editor to select styles."
+            "Use the 'Filtering' tab in the Style Editor to select styles.",
         )
 
-        self.info_label.setText("✅ Generated track created. Use Style Editor to configure filtering.")
+        self.info_label.setText(
+            "✅ Generated track created. Use Style Editor to configure filtering."
+        )
         self.info_label.setVisible(True)
 
     def _edit_generated_track(self, widget: TrackWidget, item):
@@ -671,7 +818,7 @@ class ManualSelectionDialog(QDialog):
             item: The list item containing the widget
         """
         track_data = widget.track_data
-        if not track_data.get('is_generated'):
+        if not track_data.get("is_generated"):
             QMessageBox.warning(self, "Error", "This is not a generated track.")
             return
 
@@ -682,30 +829,37 @@ class ManualSelectionDialog(QDialog):
         track_data = widget.track_data
 
         # Use the track's source video for preview (not always Source 1)
-        source_key = track_data.get('source', 'Source 1')
-        if source_key == 'External':
+        source_key = track_data.get("source", "Source 1")
+        if source_key == "External":
             # External subtitles use Source 1 for preview
-            source_key = 'Source 1'
-        ref_video_path = self.track_info.get(source_key, [{}])[0].get('original_path')
+            source_key = "Source 1"
+        ref_video_path = self.track_info.get(source_key, [{}])[0].get("original_path")
         if not ref_video_path:
-            QMessageBox.warning(self, "Error", f"Reference video path is missing for {source_key}.")
+            QMessageBox.warning(
+                self, "Error", f"Reference video path is missing for {source_key}."
+            )
             return
 
         # Check if this is an OCR track (image-based subtitle with OCR enabled)
-        codec_id = track_data.get('codec_id', '').upper()
+        codec_id = track_data.get("codec_id", "").upper()
         # Read perform_ocr from checkbox widget (track_data may not be synced after Track Settings dialog)
-        perform_ocr = widget.cb_ocr.isChecked() if hasattr(widget, 'cb_ocr') else track_data.get('perform_ocr', False)
-        is_image_based = 'VOBSUB' in codec_id or 'PGS' in codec_id or 'HDMV' in codec_id
+        perform_ocr = (
+            widget.cb_ocr.isChecked()
+            if hasattr(widget, "cb_ocr")
+            else track_data.get("perform_ocr", False)
+        )
+        is_image_based = "VOBSUB" in codec_id or "PGS" in codec_id or "HDMV" in codec_id
         is_ocr_track = perform_ocr and is_image_based
 
         # Check: Image-based subtitle without OCR enabled
         if is_image_based and not perform_ocr:
             QMessageBox.information(
-                self, "OCR Required",
+                self,
+                "OCR Required",
                 "This is an image-based subtitle (VobSub/PGS) which cannot be "
                 "edited directly.\n\n"
                 "To use the Style Editor, enable 'Perform OCR' in Track Settings first. "
-                "This will convert the images to editable text."
+                "This will convert the images to editable text.",
             )
             return
 
@@ -717,10 +871,14 @@ class ManualSelectionDialog(QDialog):
                 self.log_callback("[Style Editor] OCR preview returned None")
                 return
             json_path, editable_sub_path = result
-            self.log_callback(f"[Style Editor] OCR result: json={json_path}, ass={editable_sub_path}")
-            widget.track_data['ocr_preview_json'] = json_path
+            self.log_callback(
+                f"[Style Editor] OCR result: json={json_path}, ass={editable_sub_path}"
+            )
+            widget.track_data["ocr_preview_json"] = json_path
         else:
-            self.log_callback("[Style Editor] Taking non-OCR path (extracting subtitle)...")
+            self.log_callback(
+                "[Style Editor] Taking non-OCR path (extracting subtitle)..."
+            )
             editable_sub_path = self._ensure_editable_subtitle_path(widget)
             self.log_callback(f"[Style Editor] Extracted path: {editable_sub_path}")
 
@@ -729,24 +887,28 @@ class ManualSelectionDialog(QDialog):
             return
 
         runner = CommandRunner(self.config.settings, self.log_callback)
-        tool_paths = {t: shutil.which(t) for t in ['mkvmerge', 'mkvextract']}
+        tool_paths = {t: shutil.which(t) for t in ["mkvmerge", "mkvextract"]}
         fonts_dir = None
         try:
-            source_file = track_data.get('original_path')
+            source_file = track_data.get("original_path")
             temp_root = self.config.get_style_editor_temp_dir()
             font_temp_dir = temp_root / f"vsg_fonts_{Path(source_file).stem}"
             font_temp_dir.mkdir(parents=True, exist_ok=True)
-            extracted_fonts = extract_attachments(source_file, font_temp_dir, runner, tool_paths, 'font')
+            extracted_fonts = extract_attachments(
+                source_file, font_temp_dir, runner, tool_paths, "font"
+            )
             if extracted_fonts:
-                self.log_callback(f"[INFO] Extracted {len(extracted_fonts)} font(s) for preview.")
+                self.log_callback(
+                    f"[INFO] Extracted {len(extracted_fonts)} font(s) for preview."
+                )
             fonts_dir = str(font_temp_dir)
         except Exception as e:
             self.log_callback(f"[WARN] Could not extract fonts: {e}")
 
         # Pass existing editor state if any (for reopening)
-        existing_font_replacements = track_data.get('font_replacements')
-        existing_style_patch = track_data.get('style_patch')
-        existing_filter_config = track_data.get('filter_config')
+        existing_font_replacements = track_data.get("font_replacements")
+        existing_style_patch = track_data.get("style_patch")
+        existing_filter_config = track_data.get("filter_config")
 
         # Launch subtitle editor in-process to preserve layout/subdata integration.
         self._launch_subtitle_editor_dialog(
@@ -756,7 +918,7 @@ class ManualSelectionDialog(QDialog):
             fonts_dir=fonts_dir,
             existing_font_replacements=existing_font_replacements,
             existing_style_patch=existing_style_patch,
-            existing_filter_config=existing_filter_config
+            existing_filter_config=existing_filter_config,
         )
 
     def _launch_subtitle_editor_dialog(
@@ -764,10 +926,10 @@ class ManualSelectionDialog(QDialog):
         widget: TrackWidget,
         subtitle_path: str,
         video_path: str,
-        fonts_dir: Optional[str],
-        existing_font_replacements: Optional[Dict],
-        existing_style_patch: Optional[Dict] = None,
-        existing_filter_config: Optional[Dict] = None
+        fonts_dir: str | None,
+        existing_font_replacements: dict | None,
+        existing_style_patch: dict | None = None,
+        existing_filter_config: dict | None = None,
     ):
         """Launch subtitle editor as an in-process dialog."""
         self.log_callback("[INFO] Launching subtitle editor...")
@@ -779,7 +941,7 @@ class ManualSelectionDialog(QDialog):
                 existing_font_replacements=existing_font_replacements,
                 existing_style_patch=existing_style_patch,
                 existing_filter_config=existing_filter_config,
-                parent=self
+                parent=self,
             )
             if editor.exec() == QDialog.Accepted:
                 style_patch = editor.get_style_patch()
@@ -789,19 +951,19 @@ class ManualSelectionDialog(QDialog):
                 # Only store style_patch if non-empty, delete it if empty
                 # An empty style_patch {} is falsy, which causes issues in subtitles_step
                 if style_patch:
-                    widget.track_data['style_patch'] = style_patch
-                elif 'style_patch' in widget.track_data:
-                    del widget.track_data['style_patch']
+                    widget.track_data["style_patch"] = style_patch
+                elif "style_patch" in widget.track_data:
+                    del widget.track_data["style_patch"]
 
                 if font_replacements:
-                    widget.track_data['font_replacements'] = font_replacements
-                elif 'font_replacements' in widget.track_data:
-                    del widget.track_data['font_replacements']
+                    widget.track_data["font_replacements"] = font_replacements
+                elif "font_replacements" in widget.track_data:
+                    del widget.track_data["font_replacements"]
                 if filter_config:
-                    widget.track_data['filter_config'] = filter_config
+                    widget.track_data["filter_config"] = filter_config
                     # Clear the needs_configuration flag for generated tracks
-                    if widget.track_data.get('is_generated'):
-                        widget.track_data.pop('needs_configuration', None)
+                    if widget.track_data.get("is_generated"):
+                        widget.track_data.pop("needs_configuration", None)
 
                 self.edited_widget = widget
                 widget.logic.refresh_badges()
@@ -812,9 +974,13 @@ class ManualSelectionDialog(QDialog):
 
         except Exception as e:
             self.log_callback(f"[ERROR] Failed to run subtitle editor: {e}")
-            QMessageBox.critical(self, "Error", f"Failed to launch subtitle editor:\n{e}")
+            QMessageBox.critical(
+                self, "Error", f"Failed to launch subtitle editor:\n{e}"
+            )
 
-    def _prepare_ocr_preview_with_progress(self, widget: TrackWidget) -> Optional[Tuple[str, str]]:
+    def _prepare_ocr_preview_with_progress(
+        self, widget: TrackWidget
+    ) -> tuple[str, str] | None:
         """
         Run preview OCR with a progress dialog.
 
@@ -824,17 +990,17 @@ class ManualSelectionDialog(QDialog):
         Returns:
             Tuple of (json_path, ass_path) on success, or None on failure.
         """
-        from PySide6.QtWidgets import QProgressDialog
-        from PySide6.QtCore import Qt, QProcess
         import json
-        import sys
+
+        from PySide6.QtCore import QProcess, Qt
+        from PySide6.QtWidgets import QProgressDialog
 
         track_data = widget.track_data
 
         # Check if we already have a preview
-        if track_data.get('ocr_preview_json') and track_data.get('user_modified_path'):
-            existing_json = track_data['ocr_preview_json']
-            existing_ass = track_data['user_modified_path']
+        if track_data.get("ocr_preview_json") and track_data.get("user_modified_path"):
+            existing_json = track_data["ocr_preview_json"]
+            existing_ass = track_data["user_modified_path"]
             if Path(existing_json).exists() and Path(existing_ass).exists():
                 self.log_callback("[Style Editor] Using existing OCR preview")
                 return existing_json, existing_ass
@@ -843,14 +1009,15 @@ class ManualSelectionDialog(QDialog):
         extracted_path = self._extract_image_subtitle(widget)
         if not extracted_path:
             QMessageBox.warning(
-                self, "OCR Preview",
+                self,
+                "OCR Preview",
                 "Failed to extract image-based subtitle.\n\n"
-                "Make sure the source file is accessible."
+                "Make sure the source file is accessible.",
             )
             return None
 
         # Get language and output directory
-        lang = track_data.get('custom_lang') or 'eng'
+        lang = track_data.get("custom_lang") or "eng"
         output_dir = self.config.get_style_editor_temp_dir()
 
         # Create progress dialog
@@ -880,6 +1047,7 @@ class ManualSelectionDialog(QDialog):
                     pass
             # Process events to update UI
             from PySide6.QtWidgets import QApplication
+
             QApplication.processEvents()
             if progress.wasCanceled():
                 canceled[0] = True
@@ -888,16 +1056,18 @@ class ManualSelectionDialog(QDialog):
 
         process = QProcess(self)
         process.setProgram(sys.executable)
-        process.setArguments([
-            "-m",
-            "vsg_core.subtitles.ocr.preview_subprocess",
-            "--subtitle-path",
-            extracted_path,
-            "--lang",
-            lang,
-            "--output-dir",
-            str(output_dir),
-        ])
+        process.setArguments(
+            [
+                "-m",
+                "vsg_core.subtitles.ocr.preview_subprocess",
+                "--subtitle-path",
+                extracted_path,
+                "--lang",
+                lang,
+                "--output-dir",
+                str(output_dir),
+            ]
+        )
 
         process.setProcessChannelMode(QProcess.SeparateChannels)
         process.start()
@@ -905,22 +1075,26 @@ class ManualSelectionDialog(QDialog):
         if not process.waitForStarted(3000):
             progress.close()
             QMessageBox.warning(
-                self, "OCR Preview Failed",
-                "Failed to start preview OCR subprocess."
+                self, "OCR Preview Failed", "Failed to start preview OCR subprocess."
             )
             return None
 
         json_payload = None
 
         from PySide6.QtWidgets import QApplication
+
         while process.state() != QProcess.NotRunning:
             process.waitForReadyRead(100)
-            output = bytes(process.readAllStandardOutput()).decode("utf-8", errors="replace")
+            output = bytes(process.readAllStandardOutput()).decode(
+                "utf-8", errors="replace"
+            )
             if output:
                 for line in output.splitlines():
                     if line.startswith("__VSG_PREVIEW_JSON__ "):
                         try:
-                            json_payload = json.loads(line.split("__VSG_PREVIEW_JSON__ ", 1)[1])
+                            json_payload = json.loads(
+                                line.split("__VSG_PREVIEW_JSON__ ", 1)[1]
+                            )
                         except json.JSONDecodeError:
                             json_payload = None
                     else:
@@ -935,18 +1109,24 @@ class ManualSelectionDialog(QDialog):
             QApplication.processEvents()
 
         # Flush remaining output
-        output = bytes(process.readAllStandardOutput()).decode("utf-8", errors="replace")
+        output = bytes(process.readAllStandardOutput()).decode(
+            "utf-8", errors="replace"
+        )
         if output:
             for line in output.splitlines():
                 if line.startswith("__VSG_PREVIEW_JSON__ "):
                     try:
-                        json_payload = json.loads(line.split("__VSG_PREVIEW_JSON__ ", 1)[1])
+                        json_payload = json.loads(
+                            line.split("__VSG_PREVIEW_JSON__ ", 1)[1]
+                        )
                     except json.JSONDecodeError:
                         json_payload = None
                 else:
                     progress_log(line)
 
-        error_output = bytes(process.readAllStandardError()).decode("utf-8", errors="replace")
+        error_output = bytes(process.readAllStandardError()).decode(
+            "utf-8", errors="replace"
+        )
         if error_output:
             for line in error_output.splitlines():
                 self.log_callback(f"[Preview OCR] {line}")
@@ -959,12 +1139,17 @@ class ManualSelectionDialog(QDialog):
             return None
 
         if not json_payload or not json_payload.get("success"):
-            error_detail = json_payload.get("error") if json_payload else "No output from subprocess"
+            error_detail = (
+                json_payload.get("error")
+                if json_payload
+                else "No output from subprocess"
+            )
             QMessageBox.warning(
-                self, "OCR Preview Failed",
+                self,
+                "OCR Preview Failed",
                 "Preview OCR failed to process the subtitle.\n\n"
                 f"Details: {error_detail}\n\n"
-                "Check the log for more information."
+                "Check the log for more information.",
             )
             return None
 
@@ -972,15 +1157,16 @@ class ManualSelectionDialog(QDialog):
         ass_path = json_payload.get("ass_path")
         if not json_path or not ass_path:
             QMessageBox.warning(
-                self, "OCR Preview Failed",
+                self,
+                "OCR Preview Failed",
                 "Preview OCR did not return output paths.\n\n"
-                "Check the log for details."
+                "Check the log for details.",
             )
             return None
 
         # Store paths in track_data
-        widget.track_data['user_modified_path'] = ass_path
-        widget.track_data['ocr_preview_json'] = json_path
+        widget.track_data["user_modified_path"] = ass_path
+        widget.track_data["ocr_preview_json"] = json_path
 
         self.log_callback(f"[Style Editor] Preview ready: {Path(ass_path).name}")
 

@@ -1,16 +1,16 @@
 # vsg_qt/subtitle_editor/tabs/base_tab.py
-# -*- coding: utf-8 -*-
 """
 Base class for subtitle editor tabs.
 
 All tabs inherit from this and implement their specific functionality.
 """
+
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
-from PySide6.QtWidgets import QWidget, QScrollArea, QVBoxLayout
+from PySide6.QtWidgets import QScrollArea, QVBoxLayout, QWidget
 
 if TYPE_CHECKING:
     from ..state import EditorState
@@ -31,7 +31,7 @@ class BaseTab(QScrollArea):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._state: Optional['EditorState'] = None
+        self._state: EditorState | None = None
 
         # Set up scrollable area
         self.setWidgetResizable(True)
@@ -43,7 +43,7 @@ class BaseTab(QScrollArea):
         self._content_layout.setContentsMargins(8, 8, 8, 8)
         self.setWidget(self._content)
 
-    def set_state(self, state: 'EditorState'):
+    def set_state(self, state: EditorState):
         """
         Set the editor state.
 
@@ -54,7 +54,7 @@ class BaseTab(QScrollArea):
         self._on_state_set()
 
     @property
-    def state(self) -> Optional['EditorState']:
+    def state(self) -> EditorState | None:
         """Get the editor state."""
         return self._state
 

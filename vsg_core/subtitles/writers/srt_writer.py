@@ -1,23 +1,24 @@
 # vsg_core/subtitles/writers/srt_writer.py
-# -*- coding: utf-8 -*-
 """
 SRT subtitle file writer.
 
 Converts SubtitleData to SRT format.
 Float milliseconds are rounded to integer ms here.
 """
+
 from __future__ import annotations
 
 import math
 import re
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from ..data import SubtitleData
 
 
-def write_srt_file(data: 'SubtitleData', path: Path, rounding: str = 'round') -> None:
+def write_srt_file(data: SubtitleData, path: Path, rounding: str = "round") -> None:
     """
     Write SubtitleData to SRT file.
 
@@ -42,24 +43,24 @@ def write_srt_file(data: 'SubtitleData', path: Path, rounding: str = 'round') ->
         # Timing line (round to integer ms)
         start_str = _format_srt_time(event.start_ms, rounding)
         end_str = _format_srt_time(event.end_ms, rounding)
-        lines.append(f'{start_str} --> {end_str}')
+        lines.append(f"{start_str} --> {end_str}")
 
         # Text (convert ASS tags to HTML-ish)
         text = _convert_ass_to_srt(event.text)
         lines.append(text)
 
         # Blank line separator
-        lines.append('')
+        lines.append("")
 
     # Write file
-    content = '\n'.join(lines)
+    content = "\n".join(lines)
 
     # Handle encoding
-    encoding = 'utf-8'
+    encoding = "utf-8"
     if data.has_bom:
-        encoding = 'utf-8-sig'
+        encoding = "utf-8-sig"
 
-    with open(path, 'w', encoding=encoding) as f:
+    with open(path, "w", encoding=encoding) as f:
         f.write(content)
 
 
@@ -78,8 +79,7 @@ def _format_srt_time(ms: float, rounding: str) -> str:
     # Round to integer ms
     total_ms = _round_ms(ms, rounding)
 
-    if total_ms < 0:
-        total_ms = 0
+    total_ms = max(total_ms, 0)
 
     milliseconds = total_ms % 1000
     total_seconds = total_ms // 1000
@@ -93,10 +93,10 @@ def _format_srt_time(ms: float, rounding: str) -> str:
 
 def _round_ms(ms: float, rounding: str) -> int:
     """Round milliseconds to integer based on rounding mode."""
-    mode = (rounding or 'round').lower()
-    if mode == 'ceil':
+    mode = (rounding or "round").lower()
+    if mode == "ceil":
         return int(math.ceil(ms))
-    if mode == 'floor':
+    if mode == "floor":
         return int(math.floor(ms))
     return int(round(ms))
 
@@ -112,22 +112,22 @@ def _convert_ass_to_srt(text: str) -> str:
         Text with SRT tags (or plain text)
     """
     # Convert line breaks
-    text = text.replace('\\N', '\n')
-    text = text.replace('\\n', '\n')
+    text = text.replace("\\N", "\n")
+    text = text.replace("\\n", "\n")
 
     # Convert bold
-    text = re.sub(r'\{\\b1\}', '<b>', text)
-    text = re.sub(r'\{\\b0\}', '</b>', text)
+    text = re.sub(r"\{\\b1\}", "<b>", text)
+    text = re.sub(r"\{\\b0\}", "</b>", text)
 
     # Convert italic
-    text = re.sub(r'\{\\i1\}', '<i>', text)
-    text = re.sub(r'\{\\i0\}', '</i>', text)
+    text = re.sub(r"\{\\i1\}", "<i>", text)
+    text = re.sub(r"\{\\i0\}", "</i>", text)
 
     # Convert underline
-    text = re.sub(r'\{\\u1\}', '<u>', text)
-    text = re.sub(r'\{\\u0\}', '</u>', text)
+    text = re.sub(r"\{\\u1\}", "<u>", text)
+    text = re.sub(r"\{\\u0\}", "</u>", text)
 
     # Remove all other ASS tags (override blocks)
-    text = re.sub(r'\{[^}]*\}', '', text)
+    text = re.sub(r"\{[^}]*\}", "", text)
 
     return text

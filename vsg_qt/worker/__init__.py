@@ -1,5 +1,4 @@
-# -*- coding: utf-8 -*-
-from .signals import WorkerSignals
 from .runner import JobWorker
+from .signals import WorkerSignals
 
-__all__ = ["WorkerSignals", "JobWorker"]
+__all__ = ["JobWorker", "WorkerSignals"]

@@ -1,5 +1,4 @@
 # vsg_qt/ocr_dictionary_dialog/ui.py
-# -*- coding: utf-8 -*-
 """
 OCR Dictionary Editor Dialog
 
@@ -10,27 +9,42 @@ Provides a GUI for editing the three OCR correction databases:
 """
 
 from pathlib import Path
-from typing import Optional
 
-from PySide6.QtCore import Qt, Signal, QThread
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
-    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
-    QListWidget, QListWidgetItem,
-    QPushButton, QLineEdit, QComboBox, QCheckBox, QLabel,
-    QGroupBox, QFormLayout, QMessageBox, QFileDialog,
-    QDialogButtonBox, QSplitter, QFrame, QProgressBar
+    QAbstractItemView,
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
 from vsg_core.subtitles.ocr.dictionaries import (
-    OCRDictionaries, ReplacementRule, RuleType, get_dictionaries
+    OCRDictionaries,
+    ReplacementRule,
+    get_dictionaries,
 )
 from vsg_core.subtitles.ocr.subtitle_edit import (
-    SubtitleEditParser, SEDictionaryConfig, load_se_config, save_se_config
-)
-from vsg_core.subtitles.ocr.word_lists import (
-    WordListConfig, ValidationManager, get_validation_manager,
-    initialize_validation_manager, DEFAULT_WORD_LISTS
+    SEDictionaryConfig,
+    SubtitleEditParser,
+    load_se_config,
+    save_se_config,
 )
 
 
@@ -69,7 +83,7 @@ class ReplacementEditWidget(QWidget):
         self.description_edit.setPlaceholderText("Optional description")
         layout.addRow("Description:", self.description_edit)
 
-    def get_rule(self) -> Optional[ReplacementRule]:
+    def get_rule(self) -> ReplacementRule | None:
         """Get the rule from current inputs."""
         pattern = self.pattern_edit.text().strip()
         replacement = self.replacement_edit.text()  # Can be empty
@@ -139,13 +153,27 @@ class ReplacementsTab(QWidget):
         # Table
         self.table = QTableWidget()
         self.table.setColumnCount(6)
-        self.table.setHorizontalHeaderLabels(["Source", "Pattern", "Replacement", "Type", "Conf. Gated", "Description"])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
+        self.table.setHorizontalHeaderLabels(
+            ["Source", "Pattern", "Replacement", "Type", "Conf. Gated", "Description"]
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            4, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            5, QHeaderView.ResizeMode.Stretch
+        )
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
@@ -205,30 +233,48 @@ class ReplacementsTab(QWidget):
 
         parser = SubtitleEditParser(se_dir)
         available = parser.get_available_files()
-        ocr_fix_files = available.get('ocr_fix', [])
+        ocr_fix_files = available.get("ocr_fix", [])
 
         rules = []
         for path in ocr_fix_files:
             se_dicts = parser.parse_ocr_fix_list(path)
             # Combine all rule types
             for rule in se_dicts.whole_lines:
-                rules.append(('SE', rule.from_text, rule.to_text, rule.rule_type, False, rule))
+                rules.append(
+                    ("SE", rule.from_text, rule.to_text, rule.rule_type, False, rule)
+                )
             for rule in se_dicts.partial_lines_always:
-                rules.append(('SE', rule.from_text, rule.to_text, rule.rule_type, False, rule))
+                rules.append(
+                    ("SE", rule.from_text, rule.to_text, rule.rule_type, False, rule)
+                )
             for rule in se_dicts.partial_lines:
-                rules.append(('SE', rule.from_text, rule.to_text, rule.rule_type, False, rule))
+                rules.append(
+                    ("SE", rule.from_text, rule.to_text, rule.rule_type, False, rule)
+                )
             for rule in se_dicts.begin_lines:
-                rules.append(('SE', rule.from_text, rule.to_text, rule.rule_type, False, rule))
+                rules.append(
+                    ("SE", rule.from_text, rule.to_text, rule.rule_type, False, rule)
+                )
             for rule in se_dicts.end_lines:
-                rules.append(('SE', rule.from_text, rule.to_text, rule.rule_type, False, rule))
+                rules.append(
+                    ("SE", rule.from_text, rule.to_text, rule.rule_type, False, rule)
+                )
             for rule in se_dicts.whole_words:
-                rules.append(('SE', rule.from_text, rule.to_text, rule.rule_type, False, rule))
+                rules.append(
+                    ("SE", rule.from_text, rule.to_text, rule.rule_type, False, rule)
+                )
             for rule in se_dicts.partial_words_always:
-                rules.append(('SE', rule.from_text, rule.to_text, rule.rule_type, False, rule))
+                rules.append(
+                    ("SE", rule.from_text, rule.to_text, rule.rule_type, False, rule)
+                )
             for rule in se_dicts.partial_words:
-                rules.append(('SE', rule.from_text, rule.to_text, rule.rule_type, False, rule))
+                rules.append(
+                    ("SE", rule.from_text, rule.to_text, rule.rule_type, False, rule)
+                )
             for rule in se_dicts.regex_rules:
-                rules.append(('SE', rule.from_text, rule.to_text, rule.rule_type, False, rule))
+                rules.append(
+                    ("SE", rule.from_text, rule.to_text, rule.rule_type, False, rule)
+                )
 
         self._se_rules = rules
         return rules
@@ -240,22 +286,58 @@ class ReplacementsTab(QWidget):
         all_rows = []
 
         # Load user rules
-        if source_filter in ('user', 'all'):
+        if source_filter in ("user", "all"):
             user_rules = self.dictionaries.load_replacements()
             for rule in user_rules:
-                all_rows.append(('User', rule.pattern, rule.replacement, rule.rule_type,
-                                 rule.confidence_gated, rule.description or '', rule, True))
+                all_rows.append(
+                    (
+                        "User",
+                        rule.pattern,
+                        rule.replacement,
+                        rule.rule_type,
+                        rule.confidence_gated,
+                        rule.description or "",
+                        rule,
+                        True,
+                    )
+                )
 
         # Load SE rules
-        if source_filter in ('se', 'all'):
+        if source_filter in ("se", "all"):
             se_rules = self._load_se_rules()
-            for source, pattern, replacement, rule_type, conf_gated, rule_obj in se_rules:
-                all_rows.append((source, pattern, replacement, rule_type,
-                                 conf_gated, '', rule_obj, False))
+            for (
+                source,
+                pattern,
+                replacement,
+                rule_type,
+                conf_gated,
+                rule_obj,
+            ) in se_rules:
+                all_rows.append(
+                    (
+                        source,
+                        pattern,
+                        replacement,
+                        rule_type,
+                        conf_gated,
+                        "",
+                        rule_obj,
+                        False,
+                    )
+                )
 
         self.table.setRowCount(len(all_rows))
 
-        for row, (source, pattern, replacement, rule_type, conf_gated, desc, rule_obj, is_user) in enumerate(all_rows):
+        for row, (
+            source,
+            pattern,
+            replacement,
+            rule_type,
+            conf_gated,
+            desc,
+            rule_obj,
+            is_user,
+        ) in enumerate(all_rows):
             # Source column
             source_item = QTableWidgetItem(source)
             source_item.setFlags(source_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
@@ -300,9 +382,9 @@ class ReplacementsTab(QWidget):
         # Update count label
         user_count = sum(1 for r in all_rows if r[7])
         se_count = sum(1 for r in all_rows if not r[7])
-        if source_filter == 'user':
+        if source_filter == "user":
             self.rules_count_label.setText(f"{user_count} user rules")
-        elif source_filter == 'se':
+        elif source_filter == "se":
             self.rules_count_label.setText(f"{se_count} SE rules (read-only)")
         else:
             self.rules_count_label.setText(f"{user_count} user + {se_count} SE rules")
@@ -325,21 +407,32 @@ class ReplacementsTab(QWidget):
 
             if rule:
                 # For user rules, populate the edit widget
-                if is_user and hasattr(rule, 'pattern'):
+                if is_user and hasattr(rule, "pattern"):
                     self.edit_widget.set_rule(rule)
                 elif not is_user:
                     # For SE rules, show in edit widget but user can't save changes
-                    self.edit_widget.pattern_edit.setText(rule.from_text if hasattr(rule, 'from_text') else '')
-                    self.edit_widget.replacement_edit.setText(rule.to_text if hasattr(rule, 'to_text') else '')
+                    self.edit_widget.pattern_edit.setText(
+                        rule.from_text if hasattr(rule, "from_text") else ""
+                    )
+                    self.edit_widget.replacement_edit.setText(
+                        rule.to_text if hasattr(rule, "to_text") else ""
+                    )
                     # Find closest match for type
-                    se_type = rule.rule_type if hasattr(rule, 'rule_type') else 'literal'
+                    se_type = (
+                        rule.rule_type if hasattr(rule, "rule_type") else "literal"
+                    )
                     type_map = {
-                        'whole_line': 'literal', 'partial_line': 'literal', 'partial_line_always': 'literal',
-                        'begin_line': 'word_start', 'end_line': 'word_end',
-                        'whole_word': 'word', 'partial_word': 'word_middle', 'partial_word_always': 'word_middle',
-                        'regex': 'regex'
+                        "whole_line": "literal",
+                        "partial_line": "literal",
+                        "partial_line_always": "literal",
+                        "begin_line": "word_start",
+                        "end_line": "word_end",
+                        "whole_word": "word",
+                        "partial_word": "word_middle",
+                        "partial_word_always": "word_middle",
+                        "regex": "regex",
                     }
-                    mapped_type = type_map.get(se_type, 'literal')
+                    mapped_type = type_map.get(se_type, "literal")
                     idx = self.edit_widget.type_combo.findData(mapped_type)
                     if idx >= 0:
                         self.edit_widget.type_combo.setCurrentIndex(idx)
@@ -406,13 +499,16 @@ class ReplacementsTab(QWidget):
             return
 
         reply = QMessageBox.question(
-            self, "Confirm Delete",
+            self,
+            "Confirm Delete",
             f"Delete rule '{rule.pattern}' -> '{rule.replacement}'?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
         if reply == QMessageBox.StandardButton.Yes:
-            success, msg = self.dictionaries.remove_replacement(rule.pattern, rule.rule_type)
+            success, msg = self.dictionaries.remove_replacement(
+                rule.pattern, rule.rule_type
+            )
             if success:
                 self._load_data()
                 self.edit_widget.clear()
@@ -422,8 +518,7 @@ class ReplacementsTab(QWidget):
     def _import_rules(self):
         """Import rules from file."""
         path, _ = QFileDialog.getOpenFileName(
-            self, "Import Replacement Rules",
-            "", "Text Files (*.txt);;All Files (*)"
+            self, "Import Replacement Rules", "", "Text Files (*.txt);;All Files (*)"
         )
         if not path:
             return
@@ -432,7 +527,7 @@ class ReplacementsTab(QWidget):
 
         msg = f"Imported {added} rules, skipped {skipped} duplicates."
         if errors:
-            msg += f"\n\nErrors:\n" + "\n".join(errors[:10])
+            msg += "\n\nErrors:\n" + "\n".join(errors[:10])
             if len(errors) > 10:
                 msg += f"\n...and {len(errors) - 10} more errors"
 
@@ -442,27 +537,33 @@ class ReplacementsTab(QWidget):
     def _export_rules(self):
         """Export rules to file."""
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export Replacement Rules",
-            "replacements.txt", "Text Files (*.txt);;All Files (*)"
+            self,
+            "Export Replacement Rules",
+            "replacements.txt",
+            "Text Files (*.txt);;All Files (*)",
         )
         if not path:
             return
 
         if self.dictionaries.export_replacements(Path(path)):
-            QMessageBox.information(self, "Export Complete", f"Rules exported to {path}")
+            QMessageBox.information(
+                self, "Export Complete", f"Rules exported to {path}"
+            )
         else:
             QMessageBox.warning(self, "Export Failed", "Failed to export rules.")
 
     def _reset_defaults(self):
         """Reset to default rules."""
         reply = QMessageBox.question(
-            self, "Reset to Defaults",
+            self,
+            "Reset to Defaults",
             "This will replace all current rules with the defaults. Continue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
         if reply == QMessageBox.StandardButton.Yes:
             from vsg_core.subtitles.ocr.dictionaries import DEFAULT_REPLACEMENT_RULES
+
             self.dictionaries.save_replacements(list(DEFAULT_REPLACEMENT_RULES))
             self._load_data()
 
@@ -470,7 +571,9 @@ class ReplacementsTab(QWidget):
 class WordListTab(QWidget):
     """Tab for managing a simple word list (user dictionary or names)."""
 
-    def __init__(self, dictionaries: OCRDictionaries, list_type: str = "user", parent=None):
+    def __init__(
+        self, dictionaries: OCRDictionaries, list_type: str = "user", parent=None
+    ):
         super().__init__(parent)
         self.dictionaries = dictionaries
         self.list_type = list_type  # "user" or "names"
@@ -491,7 +594,9 @@ class WordListTab(QWidget):
 
         # List
         self.list_widget = QListWidget()
-        self.list_widget.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.list_widget.setSelectionMode(
+            QAbstractItemView.SelectionMode.ExtendedSelection
+        )
         self.list_widget.setSortingEnabled(True)
         layout.addWidget(self.list_widget)
 
@@ -545,7 +650,9 @@ class WordListTab(QWidget):
     def _update_stats(self):
         """Update stats label."""
         total = self.list_widget.count()
-        visible = sum(1 for i in range(total) if not self.list_widget.item(i).isHidden())
+        visible = sum(
+            1 for i in range(total) if not self.list_widget.item(i).isHidden()
+        )
         if visible == total:
             self.stats_label.setText(f"{total} words")
         else:
@@ -588,9 +695,10 @@ class WordListTab(QWidget):
             return
 
         reply = QMessageBox.question(
-            self, "Confirm Delete",
+            self,
+            "Confirm Delete",
             f"Delete {len(selected)} selected word(s)?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
         if reply != QMessageBox.StandardButton.Yes:
@@ -608,40 +716,44 @@ class WordListTab(QWidget):
     def _import_words(self):
         """Import words from file."""
         path, _ = QFileDialog.getOpenFileName(
-            self, "Import Words",
-            "", "Text Files (*.txt);;All Files (*)"
+            self, "Import Words", "", "Text Files (*.txt);;All Files (*)"
         )
         if not path:
             return
 
         added, skipped = self.dictionaries.import_wordlist(Path(path), self.list_type)
         QMessageBox.information(
-            self, "Import Complete",
-            f"Imported {added} words, skipped {skipped} duplicates."
+            self,
+            "Import Complete",
+            f"Imported {added} words, skipped {skipped} duplicates.",
         )
         self._load_data()
 
     def _export_words(self):
         """Export words to file."""
-        default_name = "names.txt" if self.list_type == "names" else "user_dictionary.txt"
+        default_name = (
+            "names.txt" if self.list_type == "names" else "user_dictionary.txt"
+        )
         path, _ = QFileDialog.getSaveFileName(
-            self, "Export Words",
-            default_name, "Text Files (*.txt);;All Files (*)"
+            self, "Export Words", default_name, "Text Files (*.txt);;All Files (*)"
         )
         if not path:
             return
 
         if self.dictionaries.export_wordlist(Path(path), self.list_type):
-            QMessageBox.information(self, "Export Complete", f"Words exported to {path}")
+            QMessageBox.information(
+                self, "Export Complete", f"Words exported to {path}"
+            )
         else:
             QMessageBox.warning(self, "Export Failed", "Failed to export words.")
 
     def _clear_all(self):
         """Clear all words."""
         reply = QMessageBox.question(
-            self, "Clear All",
+            self,
+            "Clear All",
             "This will delete all words from this dictionary. Continue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
         if reply == QMessageBox.StandardButton.Yes:
@@ -698,7 +810,9 @@ class SubtitleEditTab(QWidget):
 
         self.ocr_fix_check = QCheckBox()
         self.ocr_fix_check.stateChanged.connect(self._save_config)
-        toggles_layout.addRow("OCR Fix Replace List (*_OCRFixReplaceList.xml):", self.ocr_fix_check)
+        toggles_layout.addRow(
+            "OCR Fix Replace List (*_OCRFixReplaceList.xml):", self.ocr_fix_check
+        )
 
         self.names_check = QCheckBox()
         self.names_check.stateChanged.connect(self._save_config)
@@ -706,7 +820,9 @@ class SubtitleEditTab(QWidget):
 
         self.no_break_check = QCheckBox()
         self.no_break_check.stateChanged.connect(self._save_config)
-        toggles_layout.addRow("No Break After List (*_NoBreakAfterList.xml):", self.no_break_check)
+        toggles_layout.addRow(
+            "No Break After List (*_NoBreakAfterList.xml):", self.no_break_check
+        )
 
         self.spell_words_check = QCheckBox()
         self.spell_words_check.stateChanged.connect(self._save_config)
@@ -714,11 +830,15 @@ class SubtitleEditTab(QWidget):
 
         self.interjections_check = QCheckBox()
         self.interjections_check.stateChanged.connect(self._save_config)
-        toggles_layout.addRow("Interjections (*_interjections_se.xml):", self.interjections_check)
+        toggles_layout.addRow(
+            "Interjections (*_interjections_se.xml):", self.interjections_check
+        )
 
         self.word_split_check = QCheckBox()
         self.word_split_check.stateChanged.connect(self._save_config)
-        toggles_layout.addRow("Word Split List (*_WordSplitList.txt):", self.word_split_check)
+        toggles_layout.addRow(
+            "Word Split List (*_WordSplitList.txt):", self.word_split_check
+        )
 
         layout.addWidget(toggles_group)
 
@@ -729,10 +849,18 @@ class SubtitleEditTab(QWidget):
         self.files_table = QTableWidget()
         self.files_table.setColumnCount(3)
         self.files_table.setHorizontalHeaderLabels(["File", "Type", "Status"])
-        self.files_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self.files_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.files_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.files_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.files_table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
+        self.files_table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.files_table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.files_table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
         files_layout.addWidget(self.files_table)
 
         # Refresh button
@@ -786,26 +914,28 @@ class SubtitleEditTab(QWidget):
         # Populate table
         all_files = []
         type_names = {
-            'ocr_fix': 'OCR Fix List',
-            'names': 'Names',
-            'no_break': 'No Break After',
-            'spell_words': 'Spell Words',
-            'interjections': 'Interjections',
-            'word_split': 'Word Split',
+            "ocr_fix": "OCR Fix List",
+            "names": "Names",
+            "no_break": "No Break After",
+            "spell_words": "Spell Words",
+            "interjections": "Interjections",
+            "word_split": "Word Split",
         }
         type_enabled = {
-            'ocr_fix': config.ocr_fix_enabled,
-            'names': config.names_enabled,
-            'no_break': config.no_break_enabled,
-            'spell_words': config.spell_words_enabled,
-            'interjections': config.interjections_enabled,
-            'word_split': config.word_split_enabled,
+            "ocr_fix": config.ocr_fix_enabled,
+            "names": config.names_enabled,
+            "no_break": config.no_break_enabled,
+            "spell_words": config.spell_words_enabled,
+            "interjections": config.interjections_enabled,
+            "word_split": config.word_split_enabled,
         }
 
         for file_type, files in available.items():
             for path in files:
                 enabled = type_enabled.get(file_type, True)
-                all_files.append((path.name, type_names.get(file_type, file_type), enabled))
+                all_files.append(
+                    (path.name, type_names.get(file_type, file_type), enabled)
+                )
 
         self.files_table.setRowCount(len(all_files))
         for row, (name, file_type, enabled) in enumerate(all_files):
@@ -821,7 +951,9 @@ class SubtitleEditTab(QWidget):
         total_files = len(all_files)
         enabled_files = sum(1 for _, _, enabled in all_files if enabled)
         if total_files == 0:
-            self.stats_label.setText("No Subtitle Edit dictionary files found. Add files to the folder above.")
+            self.stats_label.setText(
+                "No Subtitle Edit dictionary files found. Add files to the folder above."
+            )
         else:
             self.stats_label.setText(f"{enabled_files} of {total_files} files enabled")
 
@@ -846,12 +978,12 @@ class SubtitleEditTab(QWidget):
 
         self.se_dir.mkdir(parents=True, exist_ok=True)
 
-        if sys.platform == 'darwin':
-            subprocess.run(['open', str(self.se_dir)])
-        elif sys.platform == 'win32':
-            subprocess.run(['explorer', str(self.se_dir)])
+        if sys.platform == "darwin":
+            subprocess.run(["open", str(self.se_dir)])
+        elif sys.platform == "win32":
+            subprocess.run(["explorer", str(self.se_dir)])
         else:
-            subprocess.run(['xdg-open', str(self.se_dir)])
+            subprocess.run(["xdg-open", str(self.se_dir)])
 
 
 class WordListsConfigTab(QWidget):
@@ -900,16 +1032,30 @@ class WordListsConfigTab(QWidget):
 
         self.table = QTableWidget()
         self.table.setColumnCount(7)
-        self.table.setHorizontalHeaderLabels([
-            "Order", "Name", "Source", "Words", "Validates", "Protects", "Accept Fix"
-        ])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.setHorizontalHeaderLabels(
+            ["Order", "Name", "Source", "Words", "Validates", "Protects", "Accept Fix"]
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.ResizeMode.Stretch
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            2, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            3, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            4, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            5, QHeaderView.ResizeMode.ResizeToContents
+        )
+        self.table.horizontalHeader().setSectionResizeMode(
+            6, QHeaderView.ResizeMode.ResizeToContents
+        )
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         table_layout.addWidget(self.table)
@@ -983,7 +1129,9 @@ class WordListsConfigTab(QWidget):
             validates_check = QCheckBox()
             validates_check.setChecked(wl.config.validates_known)
             validates_check.stateChanged.connect(
-                lambda state, name=wl.config.name: self._on_validates_changed(name, state)
+                lambda state, name=wl.config.name: self._on_validates_changed(
+                    name, state
+                )
             )
             validates_layout.addWidget(validates_check)
             self.table.setCellWidget(row, 4, validates_widget)
@@ -996,7 +1144,9 @@ class WordListsConfigTab(QWidget):
             protects_check = QCheckBox()
             protects_check.setChecked(wl.config.protects_from_fix)
             protects_check.stateChanged.connect(
-                lambda state, name=wl.config.name: self._on_protects_changed(name, state)
+                lambda state, name=wl.config.name: self._on_protects_changed(
+                    name, state
+                )
             )
             protects_layout.addWidget(protects_check)
             self.table.setCellWidget(row, 5, protects_widget)
@@ -1016,7 +1166,7 @@ class WordListsConfigTab(QWidget):
 
         # Update status
         total_words = sum(wl.word_count for wl in word_lists)
-        enabled_lists = sum(1 for wl in word_lists if wl.enabled)
+        sum(1 for wl in word_lists if wl.enabled)
         self.status_label.setText(
             f"{len(word_lists)} word lists configured, {total_words:,} total words"
         )
@@ -1024,17 +1174,23 @@ class WordListsConfigTab(QWidget):
     def _on_validates_changed(self, name: str, state: int):
         """Handle validates checkbox change."""
         manager = self.dictionaries.get_validation_manager()
-        manager.update_word_list_config(name, validates_known=(state == Qt.CheckState.Checked.value))
+        manager.update_word_list_config(
+            name, validates_known=(state == Qt.CheckState.Checked.value)
+        )
 
     def _on_protects_changed(self, name: str, state: int):
         """Handle protects checkbox change."""
         manager = self.dictionaries.get_validation_manager()
-        manager.update_word_list_config(name, protects_from_fix=(state == Qt.CheckState.Checked.value))
+        manager.update_word_list_config(
+            name, protects_from_fix=(state == Qt.CheckState.Checked.value)
+        )
 
     def _on_accept_changed(self, name: str, state: int):
         """Handle accept fix checkbox change."""
         manager = self.dictionaries.get_validation_manager()
-        manager.update_word_list_config(name, accepts_as_fix_result=(state == Qt.CheckState.Checked.value))
+        manager.update_word_list_config(
+            name, accepts_as_fix_result=(state == Qt.CheckState.Checked.value)
+        )
 
     def _move_up(self):
         """Move selected list up in priority."""
@@ -1084,10 +1240,11 @@ class WordListsConfigTab(QWidget):
     def _reset_defaults(self):
         """Reset to default word list configuration."""
         reply = QMessageBox.question(
-            self, "Reset Defaults",
+            self,
+            "Reset Defaults",
             "Reset all word list configurations to defaults?\n"
             "This will reset order and all flag settings.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply == QMessageBox.StandardButton.Yes:
             # Delete config file to reset to defaults
@@ -1114,13 +1271,16 @@ class RomajiBuildWorker(QThread):
     def run(self):
         """Build the romaji dictionary in a background thread."""
         try:
+
             def progress_callback(status, current, total):
                 self.progress.emit(status, current, total)
 
-            success, message = self.dictionaries.build_romaji_dictionary(progress_callback)
+            success, message = self.dictionaries.build_romaji_dictionary(
+                progress_callback
+            )
             self.finished.emit(success, message)
         except Exception as e:
-            self.finished.emit(False, f"Error: {str(e)}")
+            self.finished.emit(False, f"Error: {e!s}")
 
 
 class RomajiTab(QWidget):
@@ -1230,10 +1390,10 @@ class RomajiTab(QWidget):
         try:
             stats = self.dictionaries.get_romaji_stats()
 
-            word_count = stats.get('word_count', 0)
-            dict_exists = stats.get('dict_exists', False)
-            jmdict_cached = stats.get('jmdict_cached', False)
-            dict_path = stats.get('dict_path', '-')
+            word_count = stats.get("word_count", 0)
+            dict_exists = stats.get("dict_exists", False)
+            jmdict_cached = stats.get("jmdict_cached", False)
+            dict_path = stats.get("dict_path", "-")
 
             if dict_exists and word_count > 0:
                 self.status_label.setText("Ready")
@@ -1250,7 +1410,9 @@ class RomajiTab(QWidget):
 
             self.word_count_label.setText(f"{word_count:,}")
             self.dict_path_label.setText(dict_path)
-            self.jmdict_status_label.setText("Cached" if jmdict_cached else "Not downloaded")
+            self.jmdict_status_label.setText(
+                "Cached" if jmdict_cached else "Not downloaded"
+            )
 
             # Get romaji config from validation manager
             try:
@@ -1304,10 +1466,11 @@ class RomajiTab(QWidget):
     def _rebuild_dictionary(self):
         """Delete cached files and rebuild."""
         reply = QMessageBox.question(
-            self, "Rebuild Dictionary",
+            self,
+            "Rebuild Dictionary",
             "This will delete the cached JMdict file and rebuild the dictionary from scratch. "
             "This requires re-downloading ~20MB.\n\nContinue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
         if reply != QMessageBox.StandardButton.Yes:
@@ -1364,7 +1527,7 @@ class OCRDictionaryDialog(QDialog):
         - Subtitle Edit dictionaries (external OCR fix lists)
     """
 
-    def __init__(self, parent=None, config_dir: Optional[Path] = None):
+    def __init__(self, parent=None, config_dir: Path | None = None):
         super().__init__(parent)
         self.dictionaries = get_dictionaries(config_dir)
         self._setup_ui()
@@ -1432,21 +1595,16 @@ class OCRDictionaryDialog(QDialog):
             "Replacements: Pattern-based corrections for OCR errors. "
             "'Literal' matches exact text, 'Word' matches whole words only. "
             "Import format: pattern|replacement|type|confidence_gated",
-
             "User Dictionary: Words that won't be flagged as unknown. "
             "Add custom words, technical terms, or foreign words here.",
-
             "Names: Proper names (characters, places) that won't be flagged. "
             "Useful for anime/movie character names, romaji, etc.",
-
             "Subtitle Edit: Use dictionary files from Subtitle Edit. "
             "Download from GitHub and place in the subtitleedit folder. "
             "Includes OCR fixes, names, word splitting, and more.",
-
             "Romaji: Japanese words in romanized form from JMdict. "
             "Click 'Build Dictionary' to download and generate ~100k words. "
             "Prevents words like 'arigatou', 'sugoi' from being flagged.",
-
             "Word Lists: Configure behavior for all word lists. "
             "Set which lists validate words, protect from fixes, or accept as fix results. "
             "Drag or use buttons to reorder priority.",

@@ -4,29 +4,41 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, List, Dict
 
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QPushButton, QLabel, QComboBox, QLineEdit, QProgressBar, QTextEdit,
-    QHeaderView, QAbstractItemView, QMessageBox, QGroupBox, QFormLayout
-)
 from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QComboBox,
+    QDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QHeaderView,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QProgressBar,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QTextEdit,
+    QVBoxLayout,
+)
 
 from vsg_core.analysis.source_separation import (
+    download_model,
     get_all_available_models_from_registry,
     get_installed_models,
     update_installed_models_json,
-    download_model,
 )
 
 
 class ModelDownloadThread(QThread):
     """Thread for downloading models without blocking the UI."""
+
     progress = Signal(int, str)  # (percent, message)
     finished = Signal(bool, str, dict)  # (success, error_message, model_metadata)
 
-    def __init__(self, model: Dict, model_dir: str):
+    def __init__(self, model: dict, model_dir: str):
         super().__init__()
         self.model = model  # Store full model metadata
         self.model_dir = model_dir
@@ -34,18 +46,19 @@ class ModelDownloadThread(QThread):
 
     def run(self):
         """Download the model."""
+
         # Capture the last progress message as error message
         def progress_with_capture(percent: int, message: str):
-            if percent == 0 and "not installed" in message.lower():
-                self.error_message = message
-            elif percent == 0 and "failed" in message.lower():
+            if (percent == 0 and "not installed" in message.lower()) or (
+                percent == 0 and "failed" in message.lower()
+            ):
                 self.error_message = message
             self.progress.emit(percent, message)
 
         success = download_model(
-            self.model['filename'],
+            self.model["filename"],
             self.model_dir,
-            progress_callback=progress_with_capture
+            progress_callback=progress_with_capture,
         )
         self.finished.emit(success, self.error_message, self.model)
 
@@ -56,9 +69,9 @@ class ModelManagerDialog(QDialog):
     def __init__(self, model_dir: str, parent=None):
         super().__init__(parent)
         self.model_dir = model_dir
-        self.all_models: List[Dict] = []
-        self.installed_models: List[Dict] = []
-        self.download_thread: Optional[ModelDownloadThread] = None
+        self.all_models: list[dict] = []
+        self.installed_models: list[dict] = []
+        self.download_thread: ModelDownloadThread | None = None
 
         self.setWindowTitle("Source Separation Model Manager")
         self.resize(900, 600)
@@ -75,13 +88,22 @@ class ModelManagerDialog(QDialog):
         filter_layout.addWidget(QLabel("Filter by Type:"))
 
         self.type_filter = QComboBox()
-        self.type_filter.addItems(['All Types', 'Demucs v4', 'BS-Roformer', 'MelBand Roformer', 'MDX-Net', 'VR Arch'])
+        self.type_filter.addItems(
+            [
+                "All Types",
+                "Demucs v4",
+                "BS-Roformer",
+                "MelBand Roformer",
+                "MDX-Net",
+                "VR Arch",
+            ]
+        )
         self.type_filter.currentTextChanged.connect(self._apply_filters)
         filter_layout.addWidget(self.type_filter)
 
         filter_layout.addWidget(QLabel("Status:"))
         self.status_filter = QComboBox()
-        self.status_filter.addItems(['All', 'Installed', 'Available'])
+        self.status_filter.addItems(["All", "Installed", "Available"])
         self.status_filter.currentTextChanged.connect(self._apply_filters)
         filter_layout.addWidget(self.status_filter)
 
@@ -96,12 +118,16 @@ class ModelManagerDialog(QDialog):
         # Model table
         self.table = QTableWidget()
         self.table.setColumnCount(7)
-        self.table.setHorizontalHeaderLabels(['Name', 'Quality', 'Type', 'SDR (V/I)', 'Stems', 'Status', 'Action'])
+        self.table.setHorizontalHeaderLabels(
+            ["Name", "Quality", "Type", "SDR (V/I)", "Stems", "Status", "Action"]
+        )
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.horizontalHeader().setStretchLastSection(False)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
         self.table.setSortingEnabled(True)
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
         layout.addWidget(self.table)
@@ -146,7 +172,9 @@ class ModelManagerDialog(QDialog):
         try:
             # Load installed models
             self.installed_models = get_installed_models(self.model_dir)
-            print(f"[Model Manager] Loaded {len(self.installed_models)} installed models")
+            print(
+                f"[Model Manager] Loaded {len(self.installed_models)} installed models"
+            )
 
             # Query audio-separator for all available models
             print("[Model Manager] Querying audio-separator registry...")
@@ -162,25 +190,22 @@ class ModelManagerDialog(QDialog):
                     "• audio-separator is not installed\n"
                     "• The command timed out\n"
                     "• There was a network issue\n\n"
-                    "Check the terminal for error messages."
+                    "Check the terminal for error messages.",
                 )
 
             # Merge: mark which models are installed
-            installed_filenames = {m['filename'] for m in self.installed_models}
+            installed_filenames = {m["filename"] for m in self.installed_models}
             for model in self.all_models:
-                model['installed'] = model['filename'] in installed_filenames
+                model["installed"] = model["filename"] in installed_filenames
 
             self._populate_table()
 
         except Exception as e:
             print(f"[Model Manager] Error loading models: {e}")
             import traceback
+
             traceback.print_exc()
-            QMessageBox.critical(
-                self,
-                "Error",
-                f"Failed to load models:\n\n{e}"
-            )
+            QMessageBox.critical(self, "Error", f"Failed to load models:\n\n{e}")
         finally:
             self.refresh_btn.setEnabled(True)
             self.refresh_btn.setText("Refresh List")
@@ -192,7 +217,7 @@ class ModelManagerDialog(QDialog):
         # Sort models by rank (best first), then by name
         sorted_models = sorted(
             self.all_models,
-            key=lambda m: (m.get('rank', 999), m.get('name', m.get('filename', '')))
+            key=lambda m: (m.get("rank", 999), m.get("name", m.get("filename", ""))),
         )
 
         for model in sorted_models:
@@ -200,53 +225,53 @@ class ModelManagerDialog(QDialog):
 
         self._apply_filters()
 
-    def _add_model_row(self, model: Dict):
+    def _add_model_row(self, model: dict):
         """Add a row to the table for a model."""
         row = self.table.rowCount()
         self.table.insertRow(row)
 
         # Name (with star for recommended models)
-        name_text = model.get('name', model['filename'])
-        if model.get('recommended'):
+        name_text = model.get("name", model["filename"])
+        if model.get("recommended"):
             name_text = f"⭐ {name_text}"
         name_item = QTableWidgetItem(name_text)
         name_item.setData(Qt.ItemDataRole.UserRole, model)
         self.table.setItem(row, 0, name_item)
 
         # Quality tier
-        quality_tier = model.get('quality_tier', 'C-Tier')
+        quality_tier = model.get("quality_tier", "C-Tier")
         quality_item = QTableWidgetItem(quality_tier)
         # Add color coding
-        if quality_tier == 'S-Tier':
+        if quality_tier == "S-Tier":
             quality_item.setForeground(Qt.GlobalColor.darkGreen)
-        elif quality_tier == 'A-Tier':
+        elif quality_tier == "A-Tier":
             quality_item.setForeground(Qt.GlobalColor.darkBlue)
-        elif quality_tier == 'B-Tier':
+        elif quality_tier == "B-Tier":
             quality_item.setForeground(Qt.GlobalColor.darkYellow)
         self.table.setItem(row, 1, quality_item)
 
         # Type
-        self.table.setItem(row, 2, QTableWidgetItem(model.get('type', 'Unknown')))
+        self.table.setItem(row, 2, QTableWidgetItem(model.get("type", "Unknown")))
 
         # SDR scores
-        sdr_text = ''
-        if model.get('sdr_vocals') and model.get('sdr_instrumental'):
+        sdr_text = ""
+        if model.get("sdr_vocals") and model.get("sdr_instrumental"):
             sdr_text = f"{model['sdr_vocals']:.1f} / {model['sdr_instrumental']:.1f}"
-        elif model.get('sdr_vocals'):
+        elif model.get("sdr_vocals"):
             sdr_text = f"{model['sdr_vocals']:.1f}"
         self.table.setItem(row, 3, QTableWidgetItem(sdr_text))
 
         # Stems
-        self.table.setItem(row, 4, QTableWidgetItem(model.get('stems', 'Unknown')))
+        self.table.setItem(row, 4, QTableWidgetItem(model.get("stems", "Unknown")))
 
         # Status
-        status = '✓ Installed' if model.get('installed') else 'Available'
+        status = "✓ Installed" if model.get("installed") else "Available"
         self.table.setItem(row, 5, QTableWidgetItem(status))
 
         # Action button
-        action_btn = QPushButton('Delete' if model.get('installed') else 'Download')
-        action_btn.setProperty('model', model)
-        if model.get('installed'):
+        action_btn = QPushButton("Delete" if model.get("installed") else "Download")
+        action_btn.setProperty("model", model)
+        if model.get("installed"):
             action_btn.clicked.connect(lambda checked, m=model: self._delete_model(m))
         else:
             action_btn.clicked.connect(lambda checked, m=model: self._download_model(m))
@@ -266,24 +291,26 @@ class ModelManagerDialog(QDialog):
             model = item.data(Qt.ItemDataRole.UserRole)
 
             # Type filter
-            type_match = (type_filter == 'All Types' or model.get('type') == type_filter)
+            type_match = type_filter == "All Types" or model.get("type") == type_filter
 
             # Status filter
             status_match = True
-            if status_filter == 'Installed':
-                status_match = model.get('installed', False)
-            elif status_filter == 'Available':
-                status_match = not model.get('installed', False)
+            if status_filter == "Installed":
+                status_match = model.get("installed", False)
+            elif status_filter == "Available":
+                status_match = not model.get("installed", False)
 
             # Search filter
             search_match = (
-                not search_text or
-                search_text in model.get('name', '').lower() or
-                search_text in model.get('filename', '').lower()
+                not search_text
+                or search_text in model.get("name", "").lower()
+                or search_text in model.get("filename", "").lower()
             )
 
             # Show/hide row
-            self.table.setRowHidden(row, not (type_match and status_match and search_match))
+            self.table.setRowHidden(
+                row, not (type_match and status_match and search_match)
+            )
 
     def _on_selection_changed(self):
         """Update info panel when selection changes."""
@@ -296,8 +323,8 @@ class ModelManagerDialog(QDialog):
         model = item.data(Qt.ItemDataRole.UserRole)
 
         # Build info text
-        name_display = model.get('name', model['filename'])
-        if model.get('recommended'):
+        name_display = model.get("name", model["filename"])
+        if model.get("recommended"):
             name_display = f"⭐ {name_display} (Recommended)"
 
         info_lines = [
@@ -309,26 +336,32 @@ class ModelManagerDialog(QDialog):
             f"<b>Stems:</b> {model.get('stems', 'Unknown')}",
         ]
 
-        if model.get('sdr_vocals'):
+        if model.get("sdr_vocals"):
             info_lines.append(f"<b>Vocal SDR:</b> {model['sdr_vocals']:.1f} dB")
-        if model.get('sdr_instrumental'):
-            info_lines.append(f"<b>Instrumental SDR:</b> {model['sdr_instrumental']:.1f} dB")
+        if model.get("sdr_instrumental"):
+            info_lines.append(
+                f"<b>Instrumental SDR:</b> {model['sdr_instrumental']:.1f} dB"
+            )
 
         # Add use cases
-        use_cases = model.get('use_cases', [])
+        use_cases = model.get("use_cases", [])
         if use_cases:
             info_lines.append(f"<b>Best For:</b> {', '.join(use_cases)}")
 
-        if model.get('description'):
+        if model.get("description"):
             info_lines.append("")
             info_lines.append(f"<b>Description:</b> {model['description']}")
 
-        self.info_text.setHtml('<br>'.join(info_lines))
+        self.info_text.setHtml("<br>".join(info_lines))
 
-    def _download_model(self, model: Dict):
+    def _download_model(self, model: dict):
         """Download a model."""
         if self.download_thread and self.download_thread.isRunning():
-            QMessageBox.warning(self, "Download in Progress", "Please wait for the current download to complete.")
+            QMessageBox.warning(
+                self,
+                "Download in Progress",
+                "Please wait for the current download to complete.",
+            )
             return
 
         # Confirm download
@@ -336,7 +369,7 @@ class ModelManagerDialog(QDialog):
             self,
             "Download Model",
             f"Download {model['name']}?\n\nFilename: {model['filename']}",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
         if reply != QMessageBox.StandardButton.Yes:
@@ -359,84 +392,101 @@ class ModelManagerDialog(QDialog):
         self.progress_bar.setValue(percent)
         self.progress_label.setText(message)
 
-    def _on_download_finished(self, success: bool, error_message: str = "", downloaded_model: Dict = None):
+    def _on_download_finished(
+        self,
+        success: bool,
+        error_message: str = "",
+        downloaded_model: dict | None = None,
+    ):
         """Handle download completion."""
         self.progress_bar.setVisible(False)
         self.progress_label.setVisible(False)
         self.refresh_btn.setEnabled(True)
 
         if success:
-            print(f"[Model Manager] Download successful: {downloaded_model.get('filename')}")
+            print(
+                f"[Model Manager] Download successful: {downloaded_model.get('filename')}"
+            )
 
             # Update installed models JSON with the new model
             installed = get_installed_models(self.model_dir)
             print(f"[Model Manager] Current installed models: {len(installed)}")
 
             # Add the downloaded model if not already in the list
-            model_filename = downloaded_model['filename']
-            if not any(m['filename'] == model_filename for m in installed):
+            model_filename = downloaded_model["filename"]
+            if not any(m["filename"] == model_filename for m in installed):
                 installed.append(downloaded_model)
                 print(f"[Model Manager] Adding {model_filename} to installed list")
 
                 # Save to JSON
-                from vsg_core.analysis.source_separation import update_installed_models_json
+                from vsg_core.analysis.source_separation import (
+                    update_installed_models_json,
+                )
+
                 if update_installed_models_json(installed, self.model_dir):
-                    print(f"[Model Manager] Successfully updated installed_models.json")
+                    print("[Model Manager] Successfully updated installed_models.json")
                 else:
-                    print(f"[Model Manager] WARNING: Failed to update installed_models.json")
+                    print(
+                        "[Model Manager] WARNING: Failed to update installed_models.json"
+                    )
             else:
-                print(f"[Model Manager] Model {model_filename} already in installed list")
+                print(
+                    f"[Model Manager] Model {model_filename} already in installed list"
+                )
 
             # Reload the model list to show the model as installed
             self._load_models()
 
-            QMessageBox.information(self, "Success", f"Model downloaded successfully!\n\n{downloaded_model['name']}")
+            QMessageBox.information(
+                self,
+                "Success",
+                f"Model downloaded successfully!\n\n{downloaded_model['name']}",
+            )
+        # Show detailed error message
+        elif error_message and "not installed" in error_message.lower():
+            # audio-separator not installed - show helpful message
+            QMessageBox.critical(
+                self,
+                "audio-separator Not Installed",
+                "audio-separator is not installed.\n\n"
+                "To download models, you need to install audio-separator first:\n\n"
+                "1. Open a terminal/command prompt\n"
+                "2. Run one of these commands:\n\n"
+                "   pip install audio-separator\n\n"
+                "   OR for GPU support:\n\n"
+                "   pip install 'audio-separator[gpu]'\n\n"
+                "After installing, restart this application and try again.",
+            )
         else:
-            # Show detailed error message
-            if error_message and "not installed" in error_message.lower():
-                # audio-separator not installed - show helpful message
-                QMessageBox.critical(
-                    self,
-                    "audio-separator Not Installed",
-                    "audio-separator is not installed.\n\n"
-                    "To download models, you need to install audio-separator first:\n\n"
-                    "1. Open a terminal/command prompt\n"
-                    "2. Run one of these commands:\n\n"
-                    "   pip install audio-separator\n\n"
-                    "   OR for GPU support:\n\n"
-                    "   pip install 'audio-separator[gpu]'\n\n"
-                    "After installing, restart this application and try again."
-                )
+            # Generic error
+            error_text = "Failed to download model."
+            if error_message:
+                error_text += f"\n\n{error_message}"
             else:
-                # Generic error
-                error_text = "Failed to download model."
-                if error_message:
-                    error_text += f"\n\n{error_message}"
-                else:
-                    error_text += "\n\nCheck the terminal/console for details."
-                QMessageBox.critical(self, "Download Error", error_text)
+                error_text += "\n\nCheck the terminal/console for details."
+            QMessageBox.critical(self, "Download Error", error_text)
 
-    def _delete_model(self, model: Dict):
+    def _delete_model(self, model: dict):
         """Delete an installed model."""
         reply = QMessageBox.question(
             self,
             "Delete Model",
             f"Delete {model['name']}?\n\nThis will remove the model file from disk.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
 
         if reply != QMessageBox.StandardButton.Yes:
             return
 
         # Find and delete the model file
-        model_path = Path(self.model_dir) / model['filename']
+        model_path = Path(self.model_dir) / model["filename"]
         try:
             if model_path.exists():
                 model_path.unlink()
 
             # Update JSON
             installed = get_installed_models(self.model_dir)
-            installed = [m for m in installed if m['filename'] != model['filename']]
+            installed = [m for m in installed if m["filename"] != model["filename"]]
             update_installed_models_json(installed, self.model_dir)
 
             QMessageBox.information(self, "Success", "Model deleted successfully!")

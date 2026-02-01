@@ -1,24 +1,25 @@
 # vsg_core/subtitles/style_engine.py
-# -*- coding: utf-8 -*-
 """
 Style engine using SubtitleData for subtitle manipulation.
 
 Provides style modification operations (font replacement, size scaling,
 rescaling, color changes) using the unified SubtitleData system.
 """
+
 import hashlib
 import re
 import time
 from pathlib import Path
-from typing import Optional, List, Dict, Any
+from typing import Any
 
-from .data import SubtitleData, SubtitleStyle
 from vsg_core.config import AppConfig
 
+from .data import SubtitleData, SubtitleStyle
 
 # =============================================================================
 # Color Conversion Helpers
 # =============================================================================
+
 
 def ass_color_to_qt(ass_color: str) -> str:
     """
@@ -31,7 +32,7 @@ def ass_color_to_qt(ass_color: str) -> str:
           Qt alpha is normal (FF = opaque, 00 = transparent)
     """
     # Remove &H prefix and ensure 8 characters
-    color = ass_color.lstrip('&Hh').upper()
+    color = ass_color.lstrip("&Hh").upper()
     color = color.zfill(8)
 
     # Parse AABBGGRR
@@ -57,7 +58,7 @@ def qt_color_to_ass(qt_color: str) -> str:
           ASS alpha is inverted (00 = opaque, FF = transparent)
     """
     # Remove # prefix
-    color = qt_color.lstrip('#').upper()
+    color = qt_color.lstrip("#").upper()
     color = color.zfill(8)
 
     # Parse AARRGGBB
@@ -76,13 +77,14 @@ def qt_color_to_ass(qt_color: str) -> str:
 # Style Engine
 # =============================================================================
 
+
 class StyleEngine:
     """
     Handles loading, parsing, manipulating, and saving subtitle styles
     using the SubtitleData system.
     """
 
-    def __init__(self, subtitle_path: str, temp_dir: Optional[Path] = None):
+    def __init__(self, subtitle_path: str, temp_dir: Path | None = None):
         """
         Initialize the style engine.
 
@@ -92,8 +94,8 @@ class StyleEngine:
                       If not provided, uses config's style_editor_temp directory.
         """
         self.path = Path(subtitle_path)
-        self.data: Optional[SubtitleData] = None
-        self._temp_file: Optional[Path] = None
+        self.data: SubtitleData | None = None
+        self._temp_file: Path | None = None
 
         # Use provided temp_dir or get from config
         if temp_dir:
@@ -116,7 +118,9 @@ class StyleEngine:
             if self._temp_file is None:
                 source_stem = self.path.stem
                 unique_id = int(time.time() * 1000) % 1000000
-                self._temp_file = self._temp_dir / f"preview_{source_stem}_{unique_id}.ass"
+                self._temp_file = (
+                    self._temp_dir / f"preview_{source_stem}_{unique_id}.ass"
+                )
             self.data.save_ass(self._temp_file)
 
     def save_to_original(self):
@@ -142,11 +146,11 @@ class StyleEngine:
         # Release SubtitleData to free memory
         self.data = None
 
-    def get_style_names(self) -> List[str]:
+    def get_style_names(self) -> list[str]:
         """Returns a list of all style names defined in the file."""
         return list(self.data.styles.keys()) if self.data else []
 
-    def get_style_attributes(self, style_name: str) -> Dict[str, Any]:
+    def get_style_attributes(self, style_name: str) -> dict[str, Any]:
         """Returns a dictionary of attributes for a given style."""
         if not self.data or style_name not in self.data.styles:
             return {}
@@ -171,7 +175,7 @@ class StyleEngine:
             "marginv": style.margin_v,
         }
 
-    def update_style_attributes(self, style_name: str, attributes: Dict[str, Any]):
+    def update_style_attributes(self, style_name: str, attributes: dict[str, Any]):
         """Updates attributes for a given style."""
         if not self.data or style_name not in self.data.styles:
             return
@@ -213,12 +217,12 @@ class StyleEngine:
             elif key == "marginv":
                 style.margin_v = int(value)
 
-    def get_events(self) -> List[Dict[str, Any]]:
+    def get_events(self) -> list[dict[str, Any]]:
         """Returns all subtitle events."""
         if not self.data:
             return []
 
-        tag_pattern = re.compile(r'{[^}]+}')
+        tag_pattern = re.compile(r"{[^}]+}")
 
         return [
             {
@@ -227,31 +231,31 @@ class StyleEngine:
                 "end": int(event.end_ms),
                 "style": event.style,
                 "text": event.text,
-                "plaintext": tag_pattern.sub('', event.text),
+                "plaintext": tag_pattern.sub("", event.text),
             }
             for i, event in enumerate(self.data.events)
             if not event.is_comment
         ]
 
-    def get_raw_style_block(self) -> Optional[List[str]]:
+    def get_raw_style_block(self) -> list[str] | None:
         """Extracts the raw [V4+ Styles] block as a list of strings."""
         try:
-            content = self.path.read_text(encoding='utf-8-sig')
+            content = self.path.read_text(encoding="utf-8-sig")
             in_styles_block = False
             style_lines = []
             for line in content.splitlines():
                 line_strip = line.strip()
-                if line_strip.lower() in ('[v4+ styles]', '[v4 styles]'):
+                if line_strip.lower() in ("[v4+ styles]", "[v4 styles]"):
                     in_styles_block = True
-                elif in_styles_block and line_strip.startswith(('Format:', 'Style:')):
+                elif in_styles_block and line_strip.startswith(("Format:", "Style:")):
                     style_lines.append(line)
-                elif in_styles_block and line_strip.startswith('['):
+                elif in_styles_block and line_strip.startswith("["):
                     break
             return style_lines if style_lines else None
         except Exception:
             return None
 
-    def set_raw_style_block(self, style_lines: List[str]):
+    def set_raw_style_block(self, style_lines: list[str]):
         """Overwrites the [V4+ Styles] block with the provided lines."""
         if not self.data or not style_lines:
             return
@@ -262,10 +266,10 @@ class StyleEngine:
 
         for line in style_lines:
             line = line.strip()
-            if line.startswith('Format:'):
-                format_line = [f.strip() for f in line[7:].split(',')]
-            elif line.startswith('Style:'):
-                values = line[6:].split(',')
+            if line.startswith("Format:"):
+                format_line = [f.strip() for f in line[7:].split(",")]
+            elif line.startswith("Style:"):
+                values = line[6:].split(",")
                 if format_line:
                     style = SubtitleStyle.from_format_line(format_line, values)
                     styles.append(style)
@@ -309,7 +313,7 @@ class StyleEngine:
     # =========================================================================
 
     @property
-    def info(self) -> Dict[str, Any]:
+    def info(self) -> dict[str, Any]:
         """Access to script info for compatibility."""
         if self.data:
             return self.data.script_info
@@ -331,6 +335,7 @@ class StyleEngine:
         Only styles with matching names are updated; unique styles in the target are preserved.
         """
         from copy import deepcopy  # Local import - only needed here
+
         try:
             target_data = SubtitleData.from_file(target_path)
             template_data = SubtitleData.from_file(template_path)
@@ -338,7 +343,9 @@ class StyleEngine:
             updated_count = 0
             for style_name in target_data.styles:
                 if style_name in template_data.styles:
-                    target_data.styles[style_name] = deepcopy(template_data.styles[style_name])
+                    target_data.styles[style_name] = deepcopy(
+                        template_data.styles[style_name]
+                    )
                     updated_count += 1
 
             if updated_count > 0:
@@ -350,28 +357,30 @@ class StyleEngine:
             return False
 
     @staticmethod
-    def get_content_signature(subtitle_path: str) -> Optional[str]:
+    def get_content_signature(subtitle_path: str) -> str | None:
         """Generates a unique hash of the [V4+ Styles] block for content matching."""
         try:
-            content = Path(subtitle_path).read_text(encoding='utf-8-sig')
+            content = Path(subtitle_path).read_text(encoding="utf-8-sig")
             in_styles_block = False
             style_lines = []
             for line in content.splitlines():
                 line_strip = line.strip()
-                if line_strip.lower() in ('[v4+ styles]', '[v4 styles]'):
+                if line_strip.lower() in ("[v4+ styles]", "[v4 styles]"):
                     in_styles_block = True
-                elif in_styles_block and line_strip.startswith('Style:'):
+                elif in_styles_block and line_strip.startswith("Style:"):
                     style_lines.append(line_strip)
                 elif in_styles_block and not line_strip:
                     break
             if not style_lines:
                 return None
-            return hashlib.sha256('\n'.join(sorted(style_lines)).encode('utf-8')).hexdigest()
+            return hashlib.sha256(
+                "\n".join(sorted(style_lines)).encode("utf-8")
+            ).hexdigest()
         except Exception:
             return None
 
     @staticmethod
-    def get_name_signature(track_name: str) -> Optional[str]:
+    def get_name_signature(track_name: str) -> str | None:
         """Generates a fallback signature from the track name (e.g., 'Signs [LostYears]')."""
         if not track_name:
             return None

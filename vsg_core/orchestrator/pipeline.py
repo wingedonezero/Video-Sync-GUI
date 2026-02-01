@@ -1,21 +1,31 @@
 # vsg_core/orchestrator/pipeline.py
-# -*- coding: utf-8 -*-
 """
 Enhanced pipeline with comprehensive validation at each step.
 """
+
 from __future__ import annotations
+
 import time
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Callable
+from typing import TYPE_CHECKING, Any
 
+from vsg_core.audit import AuditTrail
 from vsg_core.io.runner import CommandRunner
 from vsg_core.models.settings import AppSettings
 from vsg_core.orchestrator.steps import (
-    Context, AnalysisStep, ExtractStep, AudioCorrectionStep, SubtitlesStep,
-    ChaptersStep, AttachmentsStep, MuxStep
+    AnalysisStep,
+    AttachmentsStep,
+    AudioCorrectionStep,
+    ChaptersStep,
+    Context,
+    ExtractStep,
+    MuxStep,
+    SubtitlesStep,
 )
-from vsg_core.orchestrator.validation import StepValidator, PipelineValidationError
-from vsg_core.audit import AuditTrail
+from vsg_core.orchestrator.validation import PipelineValidationError, StepValidator
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class Orchestrator:
@@ -23,19 +33,20 @@ class Orchestrator:
     Runs the modular steps in order with validation at each stage.
     Any validation failure will halt the job with a clear error message.
     """
+
     def run(
         self,
         *,
-        settings_dict: Dict[str, Any],
-        tool_paths: Dict[str, Optional[str]],
+        settings_dict: dict[str, Any],
+        tool_paths: dict[str, str | None],
         log: Callable[[str], None],
         progress: Callable[[float], None],
-        sources: Dict[str, str],
+        sources: dict[str, str],
         and_merge: bool,
         output_dir: str,
-        manual_layout: List[Dict[str, Any]],
-        attachment_sources: List[str],
-        source_settings: Dict[str, Dict[str, Any]] = None
+        manual_layout: list[dict[str, Any]],
+        attachment_sources: list[str],
+        source_settings: dict[str, dict[str, Any]] | None = None,
     ) -> Context:
         """
         Executes the pipeline steps with validation.
@@ -52,25 +63,27 @@ class Orchestrator:
 
         # Cleanup old style editor temp files from previous sessions
         from vsg_core.config import AppConfig
+
         config = AppConfig()
         cleaned = config.cleanup_style_editor_temp()
         if cleaned > 0:
-            log(f'[Cleanup] Removed {cleaned} old style editor temp files')
+            log(f"[Cleanup] Removed {cleaned} old style editor temp files")
 
         runner = CommandRunner(settings_dict, log)
 
         # Create audit trail for debugging timing issues
         job_name = Path(source1_file).stem
         audit = AuditTrail(job_temp, job_name)
-        log(f'[Audit] Trail created: {audit.get_path()}')
+        log(f"[Audit] Trail created: {audit.get_path()}")
 
         # Record sources in audit
         for src_key, src_path in sources.items():
             audit.record_source(src_key, src_path)
-        audit.append_event('milestone', 'Pipeline started', {
-            'sources': list(sources.keys()),
-            'and_merge': and_merge
-        })
+        audit.append_event(
+            "milestone",
+            "Pipeline started",
+            {"sources": list(sources.keys()), "and_merge": and_merge},
+        )
 
         ctx = Context(
             settings=settings,
@@ -85,98 +98,100 @@ class Orchestrator:
             and_merge=bool(and_merge),
             manual_layout=manual_layout or [],
             attachment_sources=attachment_sources,
-            source_settings=source_settings or {}
+            source_settings=source_settings or {},
         )
 
-        log('--- Analysis Phase ---')
+        log("--- Analysis Phase ---")
         progress(0.10)
         try:
             ctx = AnalysisStep().run(ctx, runner)
             StepValidator.validate_analysis(ctx)
-            log('[Validation] Analysis phase validated successfully.')
+            log("[Validation] Analysis phase validated successfully.")
         except PipelineValidationError as e:
-            log(f'[FATAL] Analysis validation failed: {e}')
+            log(f"[FATAL] Analysis validation failed: {e}")
             raise
         except Exception as e:
-            log(f'[FATAL] Analysis phase failed: {e}')
+            log(f"[FATAL] Analysis phase failed: {e}")
             raise RuntimeError(f"Analysis phase failed: {e}") from e
 
         if not and_merge:
-            log('--- Analysis Complete (No Merge) ---')
+            log("--- Analysis Complete (No Merge) ---")
             progress(1.0)
             return ctx
 
-        log('--- Extraction Phase ---')
+        log("--- Extraction Phase ---")
         progress(0.40)
         try:
             ctx = ExtractStep().run(ctx, runner)
             StepValidator.validate_extraction(ctx)
-            log('[Validation] Extraction phase validated successfully.')
+            log("[Validation] Extraction phase validated successfully.")
         except PipelineValidationError as e:
-            log(f'[FATAL] Extraction validation failed: {e}')
+            log(f"[FATAL] Extraction validation failed: {e}")
             raise
         except Exception as e:
-            log(f'[FATAL] Extraction phase failed: {e}')
+            log(f"[FATAL] Extraction phase failed: {e}")
             raise RuntimeError(f"Extraction phase failed: {e}") from e
 
-        if ctx.settings_dict.get('segmented_enabled', False) and (ctx.segment_flags or ctx.pal_drift_flags or ctx.linear_drift_flags):
-            log('--- Advanced Audio Correction Phase ---')
+        if ctx.settings_dict.get("segmented_enabled", False) and (
+            ctx.segment_flags or ctx.pal_drift_flags or ctx.linear_drift_flags
+        ):
+            log("--- Advanced Audio Correction Phase ---")
             progress(0.50)
             try:
                 ctx = AudioCorrectionStep().run(ctx, runner)
                 StepValidator.validate_correction(ctx)
-                log('[Validation] Audio correction phase validated successfully.')
+                log("[Validation] Audio correction phase validated successfully.")
             except PipelineValidationError as e:
-                log(f'[FATAL] Audio correction validation failed: {e}')
+                log(f"[FATAL] Audio correction validation failed: {e}")
                 raise
             except Exception as e:
-                log(f'[FATAL] Audio correction phase failed: {e}')
+                log(f"[FATAL] Audio correction phase failed: {e}")
                 raise RuntimeError(f"Audio correction phase failed: {e}") from e
 
-        log('--- Subtitle Processing Phase ---')
+        log("--- Subtitle Processing Phase ---")
         try:
             ctx = SubtitlesStep().run(ctx, runner)
             StepValidator.validate_subtitles(ctx)
-            log('[Validation] Subtitle processing phase validated successfully.')
+            log("[Validation] Subtitle processing phase validated successfully.")
         except PipelineValidationError as e:
-            log(f'[FATAL] Subtitle processing validation failed: {e}')
+            log(f"[FATAL] Subtitle processing validation failed: {e}")
             raise
         except Exception as e:
-            log(f'[FATAL] Subtitle processing phase failed: {e}')
+            log(f"[FATAL] Subtitle processing phase failed: {e}")
             raise RuntimeError(f"Subtitle processing phase failed: {e}") from e
 
-        log('--- Chapters Phase ---')
+        log("--- Chapters Phase ---")
         try:
             ctx = ChaptersStep().run(ctx, runner)
-            log('[Validation] Chapters phase completed.')
+            log("[Validation] Chapters phase completed.")
         except Exception as e:
-            log(f'[WARNING] Chapters phase had issues (non-fatal): {e}')
+            log(f"[WARNING] Chapters phase had issues (non-fatal): {e}")
 
-        log('--- Attachments Phase ---')
+        log("--- Attachments Phase ---")
         progress(0.60)
         try:
             ctx = AttachmentsStep().run(ctx, runner)
-            log('[Validation] Attachments phase completed.')
+            log("[Validation] Attachments phase completed.")
         except Exception as e:
-            log(f'[WARNING] Attachments phase had issues (non-fatal): {e}')
+            log(f"[WARNING] Attachments phase had issues (non-fatal): {e}")
 
-        log('--- Merge Planning Phase ---')
+        log("--- Merge Planning Phase ---")
         progress(0.75)
         try:
             ctx = MuxStep().run(ctx, runner)
             StepValidator.validate_mux(ctx)
-            log('[Validation] Merge planning phase validated successfully.')
+            log("[Validation] Merge planning phase validated successfully.")
         except PipelineValidationError as e:
-            log(f'[FATAL] Merge planning validation failed: {e}')
+            log(f"[FATAL] Merge planning validation failed: {e}")
             raise
         except Exception as e:
-            log(f'[FATAL] Merge planning phase failed: {e}')
+            log(f"[FATAL] Merge planning phase failed: {e}")
             raise RuntimeError(f"Merge planning phase failed: {e}") from e
 
         progress(0.80)
 
         # Finalize audit trail
         audit.finalize(output_file=ctx.out_file, success=True)
-        log(f'[Audit] Trail finalized: {audit.get_path()}')
+        log(f"[Audit] Trail finalized: {audit.get_path()}")
 
         return ctx

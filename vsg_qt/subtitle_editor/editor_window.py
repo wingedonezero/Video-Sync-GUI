@@ -1,5 +1,4 @@
 # vsg_qt/subtitle_editor/editor_window.py
-# -*- coding: utf-8 -*-
 """
 Main subtitle editor window.
 
@@ -13,25 +12,26 @@ The window provides a unified interface for:
 - Configuring filters for generated tracks
 - Managing font replacements
 """
+
 from __future__ import annotations
 
 import gc
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Dict, Any
+from typing import Any
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QSplitter,
-    QDialogButtonBox, QMessageBox
+    QDialog,
+    QDialogButtonBox,
+    QMessageBox,
+    QSplitter,
+    QVBoxLayout,
 )
 
-from .state import EditorState
-from .video_panel import VideoPanel
-from .tab_panel import TabPanel
 from .events_table import EventsTable
-
-if TYPE_CHECKING:
-    pass
+from .state import EditorState
+from .tab_panel import TabPanel
+from .video_panel import VideoPanel
 
 
 class SubtitleEditorWindow(QDialog):
@@ -58,11 +58,11 @@ class SubtitleEditorWindow(QDialog):
         self,
         subtitle_path: str,
         video_path: str,
-        fonts_dir: Optional[str] = None,
-        existing_font_replacements: Optional[Dict] = None,
-        existing_style_patch: Optional[Dict] = None,
-        existing_filter_config: Optional[Dict] = None,
-        parent=None
+        fonts_dir: str | None = None,
+        existing_font_replacements: dict | None = None,
+        existing_style_patch: dict | None = None,
+        existing_filter_config: dict | None = None,
+        parent=None,
     ):
         super().__init__(parent)
 
@@ -80,13 +80,13 @@ class SubtitleEditorWindow(QDialog):
         self._state = EditorState(
             parent=self,
             existing_style_patch=self._existing_style_patch,
-            existing_filter_config=self._existing_filter_config
+            existing_filter_config=self._existing_filter_config,
         )
 
         # Cached results (populated on accept)
-        self._cached_style_patch: Dict[str, Dict[str, Any]] = {}
-        self._cached_font_replacements: Dict[str, Dict[str, Any]] = {}
-        self._cached_filter_config: Dict[str, Any] = {}
+        self._cached_style_patch: dict[str, dict[str, Any]] = {}
+        self._cached_font_replacements: dict[str, dict[str, Any]] = {}
+        self._cached_filter_config: dict[str, Any] = {}
 
         self._setup_window()
         self._build_ui()
@@ -100,9 +100,9 @@ class SubtitleEditorWindow(QDialog):
 
         # Allow maximize
         self.setWindowFlags(
-            self.windowFlags() |
-            Qt.WindowMaximizeButtonHint |
-            Qt.WindowMinimizeButtonHint
+            self.windowFlags()
+            | Qt.WindowMaximizeButtonHint
+            | Qt.WindowMinimizeButtonHint
         )
 
         # Ensure proper cleanup when closed
@@ -186,9 +186,7 @@ class SubtitleEditorWindow(QDialog):
         # Load subtitle into state
         if not self._state.load_subtitle(self._subtitle_path, self._video_path):
             QMessageBox.critical(
-                self,
-                "Error",
-                f"Failed to load subtitle file:\n{self._subtitle_path}"
+                self, "Error", f"Failed to load subtitle file:\n{self._subtitle_path}"
             )
             return
 
@@ -219,7 +217,7 @@ class SubtitleEditorWindow(QDialog):
             self._video_panel.start_player(
                 str(self._video_path),
                 str(preview_path),
-                fonts_dir=str(self._fonts_dir) if self._fonts_dir else None
+                fonts_dir=str(self._fonts_dir) if self._fonts_dir else None,
             )
 
     def _on_event_selected(self, event_index: int):
@@ -251,7 +249,9 @@ class SubtitleEditorWindow(QDialog):
         """Apply font replacements to the preview subtitle."""
         fonts_tab = self._tab_panel.get_fonts_tab()
         if not fonts_tab or not self._state.subtitle_data:
-            print("[EditorWindow] _apply_font_replacements: No fonts_tab or subtitle_data")
+            print(
+                "[EditorWindow] _apply_font_replacements: No fonts_tab or subtitle_data"
+            )
             return
 
         replacements = fonts_tab.get_replacements()
@@ -261,16 +261,18 @@ class SubtitleEditorWindow(QDialog):
         for style_name, style in self._state.styles.items():
             if style_name in replacements:
                 # Apply replacement
-                new_font = replacements[style_name].get('new_font_name')
-                if new_font and hasattr(style, 'fontname'):
+                new_font = replacements[style_name].get("new_font_name")
+                if new_font and hasattr(style, "fontname"):
                     old_font = style.fontname
                     style.fontname = new_font
-                    print(f"[EditorWindow] Style '{style_name}': '{old_font}' -> '{new_font}'")
+                    print(
+                        f"[EditorWindow] Style '{style_name}': '{old_font}' -> '{new_font}'"
+                    )
             else:
                 # Restore original font from snapshot
                 original_values = self._state._original_style_values.get(style_name, {})
-                original_font = original_values.get('fontname')
-                if original_font and hasattr(style, 'fontname'):
+                original_font = original_values.get("fontname")
+                if original_font and hasattr(style, "fontname"):
                     style.fontname = original_font
 
         # Mark modified and save preview
@@ -278,16 +280,19 @@ class SubtitleEditorWindow(QDialog):
         self._state.save_preview()
         print(f"[EditorWindow] Saved preview to: {self._state.preview_path}")
 
-    def _reload_video_subtitles(self, style_name: str = None):
+    def _reload_video_subtitles(self, style_name: str | None = None):
         """Reload video subtitles after changes."""
         if self._state.preview_path:
-            print(f"[EditorWindow] Reloading subtitles from: {self._state.preview_path}")
+            print(
+                f"[EditorWindow] Reloading subtitles from: {self._state.preview_path}"
+            )
             self._video_panel.reload_subtitles(str(self._state.preview_path))
 
     def _cleanup_old_temp_files(self):
         """Clean up old temp files from previous editor sessions."""
         try:
             from vsg_core.config import AppConfig
+
             config = AppConfig()
             cleaned = config.cleanup_old_style_editor_temp(max_age_hours=1.0)
             if cleaned > 0:
@@ -338,7 +343,7 @@ class SubtitleEditorWindow(QDialog):
 
     # --- Public API ---
 
-    def get_style_patch(self) -> Dict[str, Dict[str, Any]]:
+    def get_style_patch(self) -> dict[str, dict[str, Any]]:
         """
         Get the style changes made in this session.
 
@@ -347,7 +352,7 @@ class SubtitleEditorWindow(QDialog):
         """
         return self._cached_style_patch.copy()
 
-    def get_font_replacements(self) -> Dict[str, Dict[str, Any]]:
+    def get_font_replacements(self) -> dict[str, dict[str, Any]]:
         """
         Get the configured font replacements.
 
@@ -356,7 +361,7 @@ class SubtitleEditorWindow(QDialog):
         """
         return self._cached_font_replacements.copy()
 
-    def get_filter_config(self) -> Dict[str, Any]:
+    def get_filter_config(self) -> dict[str, Any]:
         """
         Get the filter configuration.
 

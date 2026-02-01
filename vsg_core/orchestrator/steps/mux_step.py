@@ -1,23 +1,28 @@
 # vsg_core/orchestrator/steps/mux_step.py
-# -*- coding: utf-8 -*-
 from __future__ import annotations
-from pathlib import Path
 
-from vsg_core.io.runner import CommandRunner
-from vsg_core.orchestrator.steps.context import Context
-from vsg_core.models.jobs import MergePlan, Delays
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from vsg_core.models.jobs import Delays, MergePlan
 from vsg_core.mux.options_builder import MkvmergeOptionsBuilder
+
+if TYPE_CHECKING:
+    from vsg_core.io.runner import CommandRunner
+    from vsg_core.orchestrator.steps.context import Context
+
 
 class MuxStep:
     """
     Builds mkvmerge tokens and stores them on the context.
     """
+
     def run(self, ctx: Context, runner: CommandRunner) -> Context:
         plan = MergePlan(
             items=ctx.extracted_items or [],
             delays=ctx.delays or Delays(),
             chapters_xml=Path(ctx.chapters_xml) if ctx.chapters_xml else None,
-            attachments=[Path(a) for a in (ctx.attachments or [])]
+            attachments=[Path(a) for a in (ctx.attachments or [])],
         )
 
         builder = MkvmergeOptionsBuilder()
