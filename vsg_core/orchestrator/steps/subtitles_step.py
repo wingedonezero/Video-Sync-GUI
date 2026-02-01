@@ -1284,6 +1284,14 @@ class SubtitlesStep:
             item.sync_to if item.track.source == "External" else item.track.source
         )
 
+        # Source 1 is the reference - no frame matching needed
+        # (Would compare against itself which is meaningless)
+        if source_key == "Source 1":
+            runner._log_message(
+                f"[VideoVerified] Bitmap track {item.track.id} ({ext}): Source 1 is reference, skipping frame matching"
+            )
+            return
+
         # Check if this source was already processed in the per-source pre-processing step
         if source_key in ctx.video_verified_sources:
             cached = ctx.video_verified_sources[source_key]
