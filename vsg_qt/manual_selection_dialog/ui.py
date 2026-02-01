@@ -29,7 +29,6 @@ from PySide6.QtWidgets import (
 from vsg_core.extraction.attachments import extract_attachments
 from vsg_core.extraction.tracks import extract_tracks
 from vsg_core.io.runner import CommandRunner
-from vsg_core.models import AppSettings
 from vsg_core.subtitles.convert import convert_srt_to_ass
 from vsg_core.subtitles.style_engine import StyleEngine
 from vsg_qt.subtitle_editor import SubtitleEditorWindow
@@ -341,9 +340,7 @@ class ManualSelectionDialog(QDialog):
         if not files:
             return
 
-        runner = CommandRunner(
-            AppSettings.from_config(self.config.settings), self.log_callback
-        )
+        runner = CommandRunner(self.config.settings, self.log_callback)
         tool_paths = {"ffprobe": shutil.which("ffprobe")}
         if not tool_paths["ffprobe"]:
             QMessageBox.critical(self, "Error", "ffprobe tool not found in PATH.")
@@ -427,9 +424,7 @@ class ManualSelectionDialog(QDialog):
             self.log_callback("[ERROR] Missing info for subtitle extraction.")
             return None
 
-        runner = CommandRunner(
-            AppSettings.from_config(self.config.settings), self.log_callback
-        )
+        runner = CommandRunner(self.config.settings, self.log_callback)
         tool_paths = {t: shutil.which(t) for t in ["mkvmerge", "mkvextract", "ffmpeg"]}
 
         try:
@@ -555,9 +550,7 @@ class ManualSelectionDialog(QDialog):
             )
             return None
 
-        runner = CommandRunner(
-            AppSettings.from_config(self.config.settings), self.log_callback
-        )
+        runner = CommandRunner(self.config.settings, self.log_callback)
         tool_paths = {t: shutil.which(t) for t in ["mkvmerge", "mkvextract", "ffmpeg"]}
 
         try:
@@ -893,9 +886,7 @@ class ManualSelectionDialog(QDialog):
             QMessageBox.critical(self, "Error", "Failed to prepare the subtitle file.")
             return
 
-        runner = CommandRunner(
-            AppSettings.from_config(self.config.settings), self.log_callback
-        )
+        runner = CommandRunner(self.config.settings, self.log_callback)
         tool_paths = {t: shutil.which(t) for t in ["mkvmerge", "mkvextract"]}
         fonts_dir = None
         try:

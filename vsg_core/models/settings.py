@@ -38,6 +38,11 @@ class AppSettings:
     temp_root: str
     logs_folder: str
     videodiff_path: str
+    fonts_directory: str  # User-specified fonts directory
+    last_ref_path: str  # Last used reference path
+    last_sec_path: str  # Last used secondary path
+    last_ter_path: str  # Last used tertiary path
+    source_separation_model_dir: str  # Directory for source separation models
 
     # =========================================================================
     # Analysis Settings
@@ -83,6 +88,7 @@ class AppSettings:
     log_progress_step: int
     log_show_options_pretty: bool
     log_show_options_json: bool
+    log_audio_drift: bool  # Log audio drift detection details
     archive_logs: bool
 
     # =========================================================================
@@ -90,6 +96,17 @@ class AppSettings:
     # =========================================================================
     auto_apply_strict: bool
     sync_mode: str  # "positive_only", "allow_negative", "preserve_existing"
+
+    # =========================================================================
+    # Timing Fix Settings
+    # =========================================================================
+    timing_fix_enabled: bool  # Enable timing fixes
+    timing_fix_overlaps: bool  # Fix overlapping subtitles
+    timing_overlap_min_gap_ms: int  # Minimum gap between subtitles
+    timing_fix_short_durations: bool  # Fix short durations
+    timing_min_duration_ms: int  # Minimum subtitle duration
+    timing_fix_long_durations: bool  # Fix long durations
+    timing_max_cps: float  # Maximum characters per second
 
     # =========================================================================
     # Segmented Audio Correction
@@ -130,6 +147,8 @@ class AppSettings:
     # =========================================================================
     corr_anchor_fallback_mode: str  # "use-correlation", "use-median", "abort"
     corr_anchor_anchor_positions: tuple[int, ...]  # Anchor positions as % of video
+    corr_anchor_refine_per_line: bool  # Refine each subtitle line to exact frames
+    corr_anchor_refine_workers: int  # Number of parallel workers for refinement
 
     # =========================================================================
     # Subtitle-Anchored Frame Snap Settings
@@ -144,6 +163,9 @@ class AppSettings:
     duration_align_fallback_mode: str  # "duration-offset", "abort"
     duration_align_validate_points: int  # Number of validation checkpoints (1 or 3)
     duration_align_strictness: int  # Validation strictness % (0-100)
+    duration_align_skip_validation_generated_tracks: (
+        bool  # Skip validation for generated tracks
+    )
 
     # =========================================================================
     # Frame Lock Settings
@@ -174,6 +196,7 @@ class AppSettings:
     interlaced_fallback_to_audio: bool  # Fall back to audio if frame match fails
     interlaced_sequence_length: int  # Sequence length for interlaced
     interlaced_deinterlace_method: str  # Deinterlace filter: "bwdif", "yadif", etc.
+    interlaced_use_ivtc: bool  # Use inverse telecine for telecine content
 
     # =========================================================================
     # Analysis/Correlation Settings
@@ -351,6 +374,7 @@ class AppSettings:
     # =========================================================================
     # OCR Settings
     # =========================================================================
+    ocr_enabled: bool  # Enable OCR for image-based subtitles
     ocr_engine: str  # "tesseract", "easyocr", "paddleocr"
     ocr_language: str  # Tesseract language code e.g. "eng"
     ocr_psm: int  # Page segmentation mode (default 7)
@@ -407,6 +431,11 @@ class AppSettings:
             temp_root=cfg.get("temp_root", ""),
             logs_folder=cfg.get("logs_folder", ""),
             videodiff_path=cfg.get("videodiff_path", ""),
+            fonts_directory=str(cfg.get("fonts_directory", "")),
+            last_ref_path=str(cfg.get("last_ref_path", "")),
+            last_sec_path=str(cfg.get("last_sec_path", "")),
+            last_ter_path=str(cfg.get("last_ter_path", "")),
+            source_separation_model_dir=str(cfg.get("source_separation_model_dir", "")),
             # Analysis Settings
             analysis_mode=AnalysisMode(cfg.get("analysis_mode", "Audio Correlation")),
             analysis_lang_source1=analysis_lang_source1 or None,
@@ -443,10 +472,21 @@ class AppSettings:
             log_progress_step=int(cfg.get("log_progress_step", 20)),
             log_show_options_pretty=bool(cfg.get("log_show_options_pretty", False)),
             log_show_options_json=bool(cfg.get("log_show_options_json", False)),
+            log_audio_drift=bool(cfg.get("log_audio_drift", True)),
             archive_logs=bool(cfg.get("archive_logs", True)),
             # Timing Sync Settings
             auto_apply_strict=bool(cfg.get("auto_apply_strict", False)),
             sync_mode=str(cfg.get("sync_mode", "positive_only")),
+            # Timing Fix Settings
+            timing_fix_enabled=bool(cfg.get("timing_fix_enabled", False)),
+            timing_fix_overlaps=bool(cfg.get("timing_fix_overlaps", True)),
+            timing_overlap_min_gap_ms=int(cfg.get("timing_overlap_min_gap_ms", 1)),
+            timing_fix_short_durations=bool(
+                cfg.get("timing_fix_short_durations", True)
+            ),
+            timing_min_duration_ms=int(cfg.get("timing_min_duration_ms", 500)),
+            timing_fix_long_durations=bool(cfg.get("timing_fix_long_durations", True)),
+            timing_max_cps=float(cfg.get("timing_max_cps", 20.0)),
             # Segmented Audio Correction
             segmented_enabled=bool(cfg.get("segmented_enabled", False)),
             # Subtitle Sync Settings
@@ -486,6 +526,10 @@ class AppSettings:
             corr_anchor_anchor_positions=tuple(
                 cfg.get("corr_anchor_anchor_positions", [10, 50, 90])
             ),
+            corr_anchor_refine_per_line=bool(
+                cfg.get("corr_anchor_refine_per_line", False)
+            ),
+            corr_anchor_refine_workers=int(cfg.get("corr_anchor_refine_workers", 4)),
             # Subtitle-Anchored Frame Snap Settings
             sub_anchor_fallback_mode=str(cfg.get("sub_anchor_fallback_mode", "abort")),
             # Duration Align Settings
@@ -500,6 +544,9 @@ class AppSettings:
                 cfg.get("duration_align_validate_points", 3)
             ),
             duration_align_strictness=int(cfg.get("duration_align_strictness", 80)),
+            duration_align_skip_validation_generated_tracks=bool(
+                cfg.get("duration_align_skip_validation_generated_tracks", True)
+            ),
             # Frame Lock Settings
             frame_lock_submillisecond_precision=bool(
                 cfg.get("frame_lock_submillisecond_precision", False)
@@ -547,6 +594,7 @@ class AppSettings:
             interlaced_deinterlace_method=str(
                 cfg.get("interlaced_deinterlace_method", "bwdif")
             ),
+            interlaced_use_ivtc=bool(cfg.get("interlaced_use_ivtc", False)),
             # Analysis/Correlation Settings
             source_separation_mode=str(cfg.get("source_separation_mode", "none")),
             source_separation_model=str(cfg.get("source_separation_model", "default")),
@@ -799,6 +847,7 @@ class AppSettings:
             segment_rb_smoother=bool(cfg.get("segment_rb_smoother", True)),
             segment_rb_pitchq=bool(cfg.get("segment_rb_pitchq", True)),
             # OCR Settings
+            ocr_enabled=bool(cfg.get("ocr_enabled", True)),
             ocr_engine=str(cfg.get("ocr_engine", "tesseract")),
             ocr_language=str(cfg.get("ocr_language", "eng")),
             ocr_psm=int(cfg.get("ocr_psm", 7)),
