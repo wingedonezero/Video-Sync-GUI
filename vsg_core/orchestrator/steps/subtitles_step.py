@@ -936,7 +936,7 @@ class SubtitlesStep:
                 item.track.props.lang,
                 runner,
                 ctx.tool_paths,
-                ctx.settings_dict,
+                ctx.settings,
                 work_dir=ocr_work_dir,
                 logs_dir=logs_dir,
                 track_id=item.track.id,
