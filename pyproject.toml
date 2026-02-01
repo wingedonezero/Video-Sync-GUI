@@ -65,6 +65,7 @@ dev = [
     "pyright",
     "pytest",
     "pytest-cov",
+    "pre-commit",
     # Type stubs
     "PySide6-stubs",
     "numpy",           # numpy includes stubs in package
