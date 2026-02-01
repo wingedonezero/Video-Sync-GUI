@@ -761,11 +761,7 @@ class SubtitlesStep:
 
         # Check if video-verified was already computed for this source
         # If so, use the pre-computed delay and apply it directly (skip re-running frame matching)
-        if (
-            sync_mode == "video-verified"
-            and hasattr(ctx, "video_verified_sources")
-            and source_key in ctx.video_verified_sources
-        ):
+        if sync_mode == "video-verified" and source_key in ctx.video_verified_sources:
             cached = ctx.video_verified_sources[source_key]
             runner._log_message(
                 f"[Sync] Using pre-computed video-verified delay for {source_key}"
@@ -1235,8 +1231,6 @@ class SubtitlesStep:
                         ctx.delays.raw_source_delays_ms[source_key] = corrected_delay_ms
 
                     # Store that we've processed this source
-                    if not hasattr(ctx, "video_verified_sources"):
-                        ctx.video_verified_sources = {}
                     ctx.video_verified_sources[source_key] = {
                         "original_delay_ms": original_delay,
                         "corrected_delay_ms": corrected_delay_ms,
@@ -1291,10 +1285,7 @@ class SubtitlesStep:
         )
 
         # Check if this source was already processed in the per-source pre-processing step
-        if (
-            hasattr(ctx, "video_verified_sources")
-            and source_key in ctx.video_verified_sources
-        ):
+        if source_key in ctx.video_verified_sources:
             cached = ctx.video_verified_sources[source_key]
             runner._log_message(
                 f"[VideoVerified] Bitmap track {item.track.id} ({ext}): using pre-computed delay for {source_key}"

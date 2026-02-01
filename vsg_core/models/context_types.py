@@ -272,6 +272,22 @@ class FilterConfig(TypedDict, total=False):
 
 
 # =============================================================================
+# Video Verified Types (Context.video_verified_sources)
+# =============================================================================
+
+
+class VideoVerifiedResult(TypedDict, total=False):
+    """Result from video-verified subtitle sync for a source.
+
+    Stores the original and corrected delay values after frame matching.
+    """
+
+    original_delay_ms: float
+    corrected_delay_ms: float
+    details: dict[str, object]  # Frame matching details
+
+
+# =============================================================================
 # Correlation Results Types (used in analysis steps)
 # =============================================================================
 
