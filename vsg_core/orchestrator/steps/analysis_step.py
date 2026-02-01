@@ -531,8 +531,8 @@ class AnalysisStep:
             raise ValueError("Context is missing Source 1 for analysis.")
 
         # --- Part 1: Determine if a global shift is required ---
-        config = ctx.settings_dict
-        sync_mode = config.get("sync_mode", "positive_only")
+        config = ctx.settings.to_dict()
+        sync_mode = ctx.settings.sync_mode
 
         # Check if there are audio tracks from secondary sources
         has_secondary_audio = any(
