@@ -18,6 +18,7 @@ from ..sync_modes import SyncPlugin, register_sync_plugin
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from ...models.settings import AppSettings
     from ..data import OperationResult, SubtitleData
 
 
@@ -41,7 +42,7 @@ class CorrelationFrameSnapSync(SyncPlugin):
         source_video: str | None = None,
         target_video: str | None = None,
         runner=None,
-        config: dict | None = None,
+        settings: AppSettings | None = None,
         temp_dir: Path | None = None,
         cached_frame_correction: dict[str, Any] | None = None,
         **kwargs,
@@ -63,17 +64,19 @@ class CorrelationFrameSnapSync(SyncPlugin):
             source_video: Path to source video
             target_video: Path to target video
             runner: CommandRunner for logging
-            config: Settings dict
+            settings: AppSettings instance
             cached_frame_correction: Optional cached result from previous track
 
         Returns:
             OperationResult with statistics
         """
+        from ...models.settings import AppSettings
         from ..data import OperationRecord, OperationResult, SyncEventData
         from ..frame_utils import detect_video_fps
         from ..frame_verification import verify_correlation_with_frame_snap
 
-        config = config or {}
+        if settings is None:
+            settings = AppSettings.from_config({})
 
         def log(msg: str):
             if runner:
@@ -130,7 +133,7 @@ class CorrelationFrameSnapSync(SyncPlugin):
             }
         else:
             # Run scene detection and frame verification
-            use_scene_changes = config.get("correlation_snap_use_scene_changes", True)
+            use_scene_changes = settings.correlation_snap_use_scene_changes
 
             if use_scene_changes:
                 log("[CorrFrameSnap] Detecting scene changes...")
@@ -153,7 +156,7 @@ class CorrelationFrameSnapSync(SyncPlugin):
                     pure_correlation_ms,
                     fps,
                     runner,
-                    config,
+                    settings.to_dict(),
                 )
 
                 if verification_result.get("valid"):
@@ -169,9 +172,7 @@ class CorrelationFrameSnapSync(SyncPlugin):
                     )
                 else:
                     # Verification failed - handle fallback
-                    fallback_mode = config.get(
-                        "correlation_snap_fallback_mode", "snap-to-frame"
-                    )
+                    fallback_mode = settings.correlation_snap_fallback_mode
                     log(
                         f"[CorrFrameSnap] Verification failed, fallback: {fallback_mode}"
                     )

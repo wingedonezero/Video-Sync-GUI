@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any
 from ..sync_modes import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
+    from ...models.settings import AppSettings
     from ..data import OperationResult, SubtitleData
 
 
@@ -43,7 +44,7 @@ def calculate_video_verified_offset(
     target_video: str,
     total_delay_ms: float,
     global_shift_ms: float,
-    config: dict | None = None,
+    settings: AppSettings | None = None,
     runner=None,
     temp_dir: Path | None = None,
     video_duration_ms: float | None = None,
@@ -67,7 +68,7 @@ def calculate_video_verified_offset(
         target_video: Path to target video file (Source 1)
         total_delay_ms: Total delay from audio correlation (with global shift)
         global_shift_ms: Global shift component of the delay
-        config: Settings dict with video-verified parameters
+        settings: AppSettings with video-verified parameters
         runner: CommandRunner for logging
         temp_dir: Temp directory for frame cache
         video_duration_ms: Optional video duration (auto-detected if not provided)
@@ -79,9 +80,11 @@ def calculate_video_verified_offset(
         - details_dict: Contains 'reason', 'audio_correlation_ms', 'video_offset_ms',
           'candidates', etc.
     """
+    from ...models.settings import AppSettings
     from ..frame_utils import detect_video_properties
 
-    config = config or {}
+    if settings is None:
+        settings = AppSettings.from_config({})
 
     def log(msg: str):
         if runner:
@@ -109,8 +112,8 @@ def calculate_video_verified_offset(
     target_props = detect_video_properties(target_video, runner)
 
     # Determine if we should use interlaced handling
-    interlaced_handling_enabled = config.get("interlaced_handling_enabled", False)
-    force_mode = config.get("interlaced_force_mode", "auto")
+    interlaced_handling_enabled = settings.interlaced_handling_enabled
+    force_mode = settings.interlaced_force_mode
 
     # Check if either video is interlaced/telecine
     source_needs_interlaced = source_props.get("content_type") in (
@@ -152,24 +155,24 @@ def calculate_video_verified_offset(
     frame_duration_ms = 1000.0 / fps
     log(f"[VideoVerified] FPS: {fps:.3f} (frame: {frame_duration_ms:.3f}ms)")
 
-    # Get config parameters - use interlaced settings if appropriate
+    # Get settings parameters - use interlaced settings if appropriate
     if use_interlaced_settings:
-        num_checkpoints = config.get("interlaced_num_checkpoints", 5)
-        search_range_frames = config.get("interlaced_search_range_frames", 5)
-        hash_algorithm = config.get("interlaced_hash_algorithm", "ahash")
-        hash_size = int(config.get("interlaced_hash_size", 8))
-        hash_threshold = int(config.get("interlaced_hash_threshold", 25))
-        window_radius = int(config.get("frame_window_radius", 5))
-        comparison_method = config.get("interlaced_comparison_method", "ssim")
-        config.get("interlaced_fallback_to_audio", True)
+        num_checkpoints = settings.interlaced_num_checkpoints
+        search_range_frames = settings.interlaced_search_range_frames
+        hash_algorithm = settings.interlaced_hash_algorithm
+        hash_size = settings.interlaced_hash_size
+        hash_threshold = settings.interlaced_hash_threshold
+        window_radius = settings.frame_window_radius
+        comparison_method = settings.interlaced_comparison_method
+        # interlaced_fallback_to_audio is accessed later if needed
     else:
-        num_checkpoints = config.get("video_verified_num_checkpoints", 5)
-        search_range_frames = config.get("video_verified_search_range_frames", 3)
-        hash_algorithm = config.get("frame_hash_algorithm", "dhash")
-        hash_size = int(config.get("frame_hash_size", 8))
-        hash_threshold = int(config.get("frame_hash_threshold", 5))
-        window_radius = int(config.get("frame_window_radius", 5))
-        comparison_method = config.get("frame_comparison_method", "hash")
+        num_checkpoints = settings.video_verified_num_checkpoints
+        search_range_frames = settings.video_verified_search_range_frames
+        hash_algorithm = settings.frame_hash_algorithm
+        hash_size = settings.frame_hash_size
+        hash_threshold = settings.frame_hash_threshold
+        window_radius = settings.frame_window_radius
+        comparison_method = settings.frame_comparison_method
 
     log(
         f"[VideoVerified] Checkpoints: {num_checkpoints}, Search: ±{search_range_frames} frames"
@@ -181,11 +184,7 @@ def calculate_video_verified_offset(
 
     # Try to import frame utilities
     try:
-        from ..frame_utils import (
-            VideoReader,
-            compute_frame_hash,
-            compute_hamming_distance,
-        )
+        from ..frame_utils import VideoReader
     except ImportError as e:
         log(f"[VideoVerified] Frame utilities unavailable: {e}")
         log("[VideoVerified] Falling back to correlation")
@@ -226,25 +225,27 @@ def calculate_video_verified_offset(
     try:
         # Use interlaced deinterlace method if enabled, otherwise auto-detect
         if use_interlaced_settings:
-            deinterlace_mode = config.get("interlaced_deinterlace_method", "bwdif")
+            deinterlace_mode = settings.interlaced_deinterlace_method
             log(f"[VideoVerified] Using deinterlace method: {deinterlace_mode}")
         else:
             # Progressive content: auto-detect if deinterlacing is needed
             deinterlace_mode = "auto"
 
+        # VideoReader still expects a dict config
+        config_dict = settings.to_dict()
         source_reader = VideoReader(
             source_video,
             runner,
             temp_dir=temp_dir,
             deinterlace=deinterlace_mode,
-            config=config,
+            config=config_dict,
         )
         target_reader = VideoReader(
             target_video,
             runner,
             temp_dir=temp_dir,
             deinterlace=deinterlace_mode,
-            config=config,
+            config=config_dict,
         )
     except Exception as e:
         log(f"[VideoVerified] Failed to open videos: {e}")
@@ -268,9 +269,9 @@ def calculate_video_verified_offset(
 
     # Get sequence length based on content type
     if use_interlaced_settings:
-        sequence_length = config.get("interlaced_sequence_length", 5)
+        sequence_length = settings.interlaced_sequence_length
     else:
-        sequence_length = config.get("video_verified_sequence_length", 10)
+        sequence_length = settings.video_verified_sequence_length
 
     log(
         f"[VideoVerified] Sequence verification: {sequence_length} consecutive frames must match"
@@ -374,8 +375,8 @@ def calculate_video_verified_offset(
 
     # Calculate offset in milliseconds
     # By default uses frame-based (frame_offset * frame_duration)
-    # Optionally can use PTS for VFR content (enable via config)
-    use_pts = config.get("video_verified_use_pts_precision", False)
+    # Optionally can use PTS for VFR content (enable via settings)
+    use_pts = settings.video_verified_use_pts_precision
     sub_frame_offset_ms = _calculate_subframe_offset_static(
         best_frame_offset,
         best_result.get("match_details", []),
@@ -996,7 +997,7 @@ class VideoVerifiedSync(SyncPlugin):
         source_video: str | None = None,
         target_video: str | None = None,
         runner=None,
-        config: dict | None = None,
+        settings: AppSettings | None = None,
         temp_dir: Path | None = None,
         **kwargs,
     ) -> OperationResult:
@@ -1019,15 +1020,17 @@ class VideoVerifiedSync(SyncPlugin):
             source_video: Path to source video
             target_video: Path to target video
             runner: CommandRunner for logging
-            config: Settings dict
+            settings: AppSettings with video-verified parameters
             temp_dir: Temp directory for index files
 
         Returns:
             OperationResult with statistics
         """
+        from ...models.settings import AppSettings
         from ..data import OperationResult
 
-        config = config or {}
+        if settings is None:
+            settings = AppSettings.from_config({})
 
         def log(msg: str):
             if runner:
@@ -1057,7 +1060,7 @@ class VideoVerifiedSync(SyncPlugin):
             target_video=target_video,
             total_delay_ms=total_delay_ms,
             global_shift_ms=global_shift_ms,
-            config=config,
+            settings=settings,
             runner=runner,
             temp_dir=temp_dir,
             video_duration_ms=video_duration,

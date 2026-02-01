@@ -9,6 +9,7 @@ from sklearn.cluster import DBSCAN
 
 if TYPE_CHECKING:
     from ..io.runner import CommandRunner
+    from ..models.settings import AppSettings
 
 
 def _build_cluster_diagnostics(
@@ -17,13 +18,13 @@ def _build_cluster_diagnostics(
     cluster_members: dict[int, list[int]],
     delays: np.ndarray,
     runner: CommandRunner,
-    config: dict,
+    settings: AppSettings,
 ) -> list[dict[str, Any]]:
     """
     Builds detailed cluster composition and transition analysis.
     Returns a list of cluster info dictionaries.
     """
-    verbose = config.get("stepping_diagnostics_verbose", True)
+    verbose = settings.stepping_diagnostics_verbose
 
     # Sort clusters by their mean delay
     cluster_info = []
@@ -209,12 +210,12 @@ def _get_video_framerate(
         return 0.0
 
 
-def _get_quality_thresholds(config: dict) -> dict[str, Any]:
+def _get_quality_thresholds(settings: AppSettings) -> dict[str, Any]:
     """
     Returns quality validation thresholds based on the selected quality mode.
     Modes: 'strict', 'normal', 'lenient', 'custom'
     """
-    quality_mode = config.get("stepping_quality_mode", "normal")
+    quality_mode = settings.stepping_quality_mode
 
     # Preset modes
     presets = {
@@ -244,15 +245,11 @@ def _get_quality_thresholds(config: dict) -> dict[str, Any]:
     # If custom mode, use user-configured values
     if quality_mode == "custom":
         return {
-            "min_chunks_per_cluster": config.get("stepping_min_chunks_per_cluster", 3),
-            "min_cluster_percentage": config.get(
-                "stepping_min_cluster_percentage", 5.0
-            ),
-            "min_cluster_duration_s": config.get(
-                "stepping_min_cluster_duration_s", 20.0
-            ),
-            "min_match_quality_pct": config.get("stepping_min_match_quality_pct", 85.0),
-            "min_total_clusters": config.get("stepping_min_total_clusters", 2),
+            "min_chunks_per_cluster": settings.stepping_min_chunks_per_cluster,
+            "min_cluster_percentage": settings.stepping_min_cluster_percentage,
+            "min_cluster_duration_s": settings.stepping_min_cluster_duration_s,
+            "min_match_quality_pct": settings.stepping_min_match_quality_pct,
+            "min_total_clusters": settings.stepping_min_total_clusters,
         }
 
     # Return preset or default to normal
@@ -345,7 +342,7 @@ def _filter_clusters(
     delays: np.ndarray,
     thresholds: dict[str, Any],
     runner: CommandRunner,
-    config: dict,
+    settings: AppSettings,
 ) -> tuple:
     """
     Filters clusters based on quality validation.
@@ -356,8 +353,8 @@ def _filter_clusters(
     invalid_clusters = {}
     validation_results = {}
 
-    # Get chunk duration from config (used for cluster duration calculation)
-    chunk_duration = float(config.get("scan_chunk_duration", 15.0))
+    # Get chunk duration from settings (used for cluster duration calculation)
+    chunk_duration = float(settings.scan_chunk_duration)
 
     for label, members in cluster_members.items():
         validation = _validate_cluster(
@@ -376,7 +373,7 @@ def _filter_clusters(
 def diagnose_audio_issue(
     video_path: str,
     chunks: list[dict[str, Any]],
-    config: dict,
+    settings: AppSettings,
     runner: CommandRunner,
     tool_paths: dict,
     codec_id: str,
@@ -411,8 +408,8 @@ def diagnose_audio_issue(
     # Use DBSCAN (Density-Based Spatial Clustering) to detect delay clustering
     # eps: Maximum distance (ms) between delays to be in same cluster
     # min_samples: Minimum delays required to form a cluster (reject noise)
-    epsilon_ms = config.get("detection_dbscan_epsilon_ms", 20.0)
-    min_samples = config.get("detection_dbscan_min_samples", 2)
+    epsilon_ms = settings.detection_dbscan_epsilon_ms
+    min_samples = settings.detection_dbscan_min_samples
     delays_reshaped = delays.reshape(-1, 1)
     db = DBSCAN(eps=epsilon_ms, min_samples=min_samples).fit(delays_reshaped)
     unique_clusters = {label for label in db.labels_ if label != -1}
@@ -429,8 +426,8 @@ def diagnose_audio_issue(
                 cluster_members[label].append(i)
 
         # Get correction mode and quality thresholds
-        correction_mode = config.get("stepping_correction_mode", "full")
-        quality_mode = config.get("stepping_quality_mode", "normal")
+        correction_mode = settings.stepping_correction_mode
+        quality_mode = settings.stepping_quality_mode
 
         # Check if stepping correction is disabled
         if correction_mode == "disabled":
@@ -440,7 +437,7 @@ def diagnose_audio_issue(
             return "UNIFORM", {}
 
         # Get quality thresholds based on mode
-        thresholds = _get_quality_thresholds(config)
+        thresholds = _get_quality_thresholds(settings)
 
         # Log detection
         runner._log_message(
@@ -452,7 +449,7 @@ def diagnose_audio_issue(
 
         # Perform cluster filtering/validation
         valid_clusters, invalid_clusters, validation_results = _filter_clusters(
-            cluster_members, accepted_chunks, delays, thresholds, runner, config
+            cluster_members, accepted_chunks, delays, thresholds, runner, settings
         )
 
         # Log validation results with enhanced diagnostics
@@ -506,7 +503,7 @@ def diagnose_audio_issue(
 
         # Build detailed cluster composition for diagnostics (for all clusters)
         cluster_details = _build_cluster_diagnostics(
-            accepted_chunks, db.labels_, cluster_members, delays, runner, config
+            accepted_chunks, db.labels_, cluster_members, delays, runner, settings
         )
 
         # Decide whether to accept stepping based on correction mode
@@ -550,7 +547,7 @@ def diagnose_audio_issue(
                 return "UNIFORM", {}
 
             # Check fallback mode
-            fallback_mode = config.get("stepping_filtered_fallback", "nearest")
+            fallback_mode = settings.stepping_filtered_fallback
             if fallback_mode == "reject" and len(invalid_clusters) > 0:
                 runner._log_message(
                     f"[Filtered Stepping Rejected] Fallback mode is 'reject' and {len(invalid_clusters)} clusters were filtered."
@@ -579,7 +576,7 @@ def diagnose_audio_issue(
         else:
             # Unknown mode - fall back to legacy behavior
             min_cluster_size = min(cluster_sizes.values()) if cluster_sizes else 0
-            MIN_CHUNKS_PER_SEGMENT = config.get("stepping_min_chunks_per_cluster", 3)
+            MIN_CHUNKS_PER_SEGMENT = settings.stepping_min_chunks_per_cluster
 
             if min_cluster_size >= MIN_CHUNKS_PER_SEGMENT:
                 return "STEPPING", {
@@ -592,7 +589,7 @@ def diagnose_audio_issue(
     # --- Test 3: Check for General Linear Drift (Now Codec-Aware) ---
     slope, intercept = np.polyfit(times, delays, 1)
 
-    # Use new settings from config
+    # Use new settings
     codec_name_lower = (codec_id or "").lower()
     is_lossless = (
         "pcm" in codec_name_lower
@@ -601,14 +598,14 @@ def diagnose_audio_issue(
     )
 
     slope_threshold = (
-        config.get("drift_detection_slope_threshold_lossless")
+        settings.drift_detection_slope_threshold_lossless
         if is_lossless
-        else config.get("drift_detection_slope_threshold_lossy")
+        else settings.drift_detection_slope_threshold_lossy
     )
     r2_threshold = (
-        config.get("drift_detection_r2_threshold_lossless")
+        settings.drift_detection_r2_threshold_lossless
         if is_lossless
-        else config.get("drift_detection_r2_threshold")
+        else settings.drift_detection_r2_threshold
     )
 
     runner._log_message(

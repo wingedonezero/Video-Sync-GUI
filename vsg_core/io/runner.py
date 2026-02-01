@@ -3,10 +3,16 @@
 Wrapper for running external command-line processes.
 """
 
+from __future__ import annotations
+
 import shlex
 import subprocess
 from collections.abc import Callable
 from datetime import datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from vsg_core.models import AppSettings
 
 # Import GPU environment support
 try:
@@ -25,8 +31,8 @@ except ImportError:
 class CommandRunner:
     """Executes external commands and streams output."""
 
-    def __init__(self, config: dict, log_callback: Callable[[str], None]):
-        self.config = config
+    def __init__(self, settings: AppSettings, log_callback: Callable[[str], None]):
+        self.settings = settings
         self.log = log_callback
         self.abs_paths = {}
 
@@ -62,10 +68,10 @@ class CommandRunner:
 
         self._log_message(f"$ {pretty_cmd}")
 
-        compact = self.config.get("log_compact", True)
-        tail_ok = int(self.config.get("log_tail_lines", 0))
-        err_tail = int(self.config.get("log_error_tail", 20))
-        prog_step = max(1, int(self.config.get("log_progress_step", 100)))
+        compact = self.settings.log_compact
+        tail_ok = self.settings.log_tail_lines
+        err_tail = self.settings.log_error_tail
+        prog_step = max(1, self.settings.log_progress_step)
 
         try:
             # Get environment with GPU support

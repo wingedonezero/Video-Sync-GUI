@@ -12,6 +12,7 @@ from vsg_core.models.jobs import Delays
 
 if TYPE_CHECKING:
     from vsg_core.io.runner import CommandRunner
+    from vsg_core.models.settings import AppSettings
     from vsg_core.orchestrator.steps.context import Context
 
 
@@ -76,7 +77,7 @@ def _format_track_details(track: dict[str, Any], index: int) -> str:
 
 
 def _should_use_source_separated_mode(
-    source_key: str, config: dict, source_settings: dict[str, dict[str, Any]]
+    source_key: str, settings: AppSettings, source_settings: dict[str, dict[str, Any]]
 ) -> bool:
     """
     Check if this source should use source separation during correlation.
@@ -86,15 +87,14 @@ def _should_use_source_separated_mode(
 
     Args:
         source_key: The source being analyzed (e.g., "Source 2", "Source 3")
-        config: Configuration dictionary (for separation mode/model settings)
+        settings: AppSettings instance
         source_settings: Per-source correlation settings from job layout
 
     Returns:
         True if source separation should be applied to this comparison, False otherwise
     """
     # Check if source separation is configured at all (mode must be set)
-    separation_mode = config.get("source_separation_mode", "none")
-    if separation_mode == "none":
+    if settings.source_separation_mode == "none":
         return False
 
     # Check per-source setting - source separation must be explicitly enabled per-source
@@ -105,8 +105,11 @@ def _should_use_source_separated_mode(
 def _find_first_stable_segment_delay(
     results: list[dict[str, Any]],
     runner: CommandRunner,
-    config: dict,
+    settings: AppSettings,
     return_raw: bool = False,
+    *,
+    override_min_chunks: int | None = None,
+    override_skip_unstable: bool | None = None,
 ) -> int | float | None:
     """
     Find the delay from the first stable segment of chunks.
@@ -117,14 +120,24 @@ def _find_first_stable_segment_delay(
     Args:
         results: List of correlation results with 'delay', 'raw_delay', 'accepted', and 'start' keys
         runner: CommandRunner for logging
-        config: Configuration dictionary with 'first_stable_min_chunks' and 'first_stable_skip_unstable'
+        settings: AppSettings instance
         return_raw: If True, return the raw (unrounded) delay value
+        override_min_chunks: Override first_stable_min_chunks (for stepping mode)
+        override_skip_unstable: Override first_stable_skip_unstable (for stepping mode)
 
     Returns:
         The delay value from the first stable segment, or None if no stable segment found
     """
-    min_chunks = int(config.get("first_stable_min_chunks", 3))
-    skip_unstable = config.get("first_stable_skip_unstable", True)
+    min_chunks = (
+        override_min_chunks
+        if override_min_chunks is not None
+        else settings.first_stable_min_chunks
+    )
+    skip_unstable = (
+        override_skip_unstable
+        if override_skip_unstable is not None
+        else settings.first_stable_skip_unstable
+    )
 
     accepted = [r for r in results if r.get("accepted", False)]
     if len(accepted) < min_chunks:
@@ -210,14 +223,19 @@ def _find_first_stable_segment_delay(
 
 
 def _choose_final_delay(
-    results: list[dict[str, Any]], config: dict, runner: CommandRunner, role_tag: str
+    results: list[dict[str, Any]],
+    settings: AppSettings,
+    runner: CommandRunner,
+    role_tag: str,
+    *,
+    override_delay_mode: str | None = None,
 ) -> int | None:
     """
     Select final delay from correlation results using configured mode.
     Returns rounded integer for mkvmerge compatibility.
     """
-    min_accepted_chunks = int(config.get("min_accepted_chunks", 3))
-    delay_mode = config.get("delay_selection_mode", "Mode (Most Common)")
+    min_accepted_chunks = settings.min_accepted_chunks
+    delay_mode = override_delay_mode or settings.delay_selection_mode
 
     accepted = [r for r in results if r.get("accepted", False)]
     if len(accepted) < min_accepted_chunks:
@@ -232,7 +250,7 @@ def _choose_final_delay(
     if delay_mode == "First Stable":
         # Use proper stability detection to find first stable segment
         winner = _find_first_stable_segment_delay(
-            results, runner, config, return_raw=False
+            results, runner, settings, return_raw=False
         )
         if winner is None:
             # Fallback to mode if no stable segment found
@@ -285,8 +303,8 @@ def _choose_final_delay(
             method_label = "mode (clustered fallback)"
     elif delay_mode == "Mode (Early Cluster)":
         # Find clusters using ±1ms tolerance, prioritizing early stability
-        early_window = int(config.get("early_cluster_window", 10))
-        early_threshold = int(config.get("early_cluster_threshold", 5))
+        early_window = settings.early_cluster_window
+        early_threshold = settings.early_cluster_threshold
 
         # Build clusters: group delays within ±1ms of each other
         counts = Counter(delays)
@@ -371,7 +389,12 @@ def _choose_final_delay(
 
 
 def _choose_final_delay_raw(
-    results: list[dict[str, Any]], config: dict, runner: CommandRunner, role_tag: str
+    results: list[dict[str, Any]],
+    settings: AppSettings,
+    runner: CommandRunner,
+    role_tag: str,
+    *,
+    override_delay_mode: str | None = None,
 ) -> float | None:
     """
     Select final delay from correlation results, returning raw float value.
@@ -382,8 +405,8 @@ def _choose_final_delay_raw(
     - Average: Returns true average of all raw delays (no intermediate rounding)
     - Mode: Returns raw delay from the first chunk matching the most common rounded value
     """
-    min_accepted_chunks = int(config.get("min_accepted_chunks", 3))
-    delay_mode = config.get("delay_selection_mode", "Mode (Most Common)")
+    min_accepted_chunks = settings.min_accepted_chunks
+    delay_mode = override_delay_mode or settings.delay_selection_mode
 
     accepted = [r for r in results if r.get("accepted", False)]
     if len(accepted) < min_accepted_chunks:
@@ -395,7 +418,7 @@ def _choose_final_delay_raw(
     if delay_mode == "First Stable":
         # Get raw average from first stable segment
         winner_raw = _find_first_stable_segment_delay(
-            results, runner, config, return_raw=True
+            results, runner, settings, return_raw=True
         )
         if winner_raw is None:
             # Fallback to mode - find raw value for most common rounded delay
@@ -440,8 +463,8 @@ def _choose_final_delay_raw(
 
     elif delay_mode == "Mode (Early Cluster)":
         # Find clusters using ±1ms tolerance, prioritizing early stability
-        early_window = int(config.get("early_cluster_window", 10))
-        early_threshold = int(config.get("early_cluster_threshold", 5))
+        early_window = settings.early_cluster_window
+        early_threshold = settings.early_cluster_threshold
 
         # Build clusters: group delays within ±1ms of each other
         counts = Counter(delays)
@@ -531,8 +554,8 @@ class AnalysisStep:
             raise ValueError("Context is missing Source 1 for analysis.")
 
         # --- Part 1: Determine if a global shift is required ---
-        config = ctx.settings.to_dict()
-        sync_mode = ctx.settings.sync_mode
+        settings = ctx.settings
+        sync_mode = settings.sync_mode
 
         # Check if there are audio tracks from secondary sources
         has_secondary_audio = any(
@@ -622,7 +645,7 @@ class AnalysisStep:
         source1_audio_container_delay = 0
         source1_video_container_delay = 0
 
-        ref_lang = config.get("analysis_lang_source1")
+        ref_lang = settings.analysis_lang_source1
         if source1_info:
             # Get video track delay first
             video_tracks = [
@@ -706,7 +729,7 @@ class AnalysisStep:
                 tgt_lang = None  # Bypassed by explicit track index
             else:
                 # Fall back to global language setting for target
-                tgt_lang = config.get("analysis_lang_others")
+                tgt_lang = settings.analysis_lang_others
 
             # Get Source 1 track selection (can be per-job or global)
             # Check if Source 1 has per-job track selection configured
@@ -733,44 +756,27 @@ class AnalysisStep:
             # ===================================================================
             # CRITICAL DECISION POINT: Determine if source separation was applied
             # This decision affects correlation method and delay selection mode
-            # Make this decision ONCE and create appropriate config for this source
+            # Make this decision ONCE and determine effective delay mode for this source
             # ===================================================================
             use_source_separated_settings = _should_use_source_separated_mode(
-                source_key, config, ctx.source_settings
+                source_key, settings, ctx.source_settings
             )
 
+            # Determine effective delay selection mode for this source
             if use_source_separated_settings:
-                # Create config with source-separated overrides
-                # Use dict spread to create new dict without modifying original
-                source_config = {
-                    **config,
-                    "correlation_method": config.get(
-                        "correlation_method_source_separated",
-                        "Phase Correlation (GCC-PHAT)",
-                    ),
-                    "delay_selection_mode": config.get(
-                        "delay_selection_mode_source_separated", "Mode (Clustered)"
-                    ),
-                }
+                effective_delay_mode = settings.delay_selection_mode_source_separated
                 runner._log_message(
                     "[Analysis Config] Source separation enabled - using:"
                 )
                 runner._log_message(
-                    f"  Correlation: {source_config['correlation_method']}"
+                    f"  Correlation: {settings.correlation_method_source_separated}"
                 )
-                runner._log_message(
-                    f"  Delay Mode: {source_config['delay_selection_mode']}"
-                )
+                runner._log_message(f"  Delay Mode: {effective_delay_mode}")
             else:
-                # Use original config as-is (no source separation)
-                source_config = config
+                effective_delay_mode = settings.delay_selection_mode
                 runner._log_message("[Analysis Config] Standard mode - using:")
-                runner._log_message(
-                    f"  Correlation: {source_config.get('correlation_method', 'SCC (Sliding Cross-Correlation)')}"
-                )
-                runner._log_message(
-                    f"  Delay Mode: {source_config.get('delay_selection_mode', 'Mode (Most Common)')}"
-                )
+                runner._log_message(f"  Correlation: {settings.correlation_method}")
+                runner._log_message(f"  Delay Mode: {effective_delay_mode}")
 
             stream_info = get_stream_info(source_file, runner, ctx.tool_paths)
             if not stream_info:
@@ -838,9 +844,7 @@ class AnalysisStep:
                 continue
 
             # Check if multi-correlation comparison is enabled (Analyze Only mode only)
-            multi_corr_enabled = bool(
-                source_config.get("multi_correlation_enabled", False)
-            ) and (not ctx.and_merge)
+            multi_corr_enabled = settings.multi_correlation_enabled and (not ctx.and_merge)
 
             if multi_corr_enabled:
                 # Run multiple correlation methods for comparison
@@ -849,10 +853,10 @@ class AnalysisStep:
                 all_method_results = run_multi_correlation(
                     str(source1_file),
                     str(source_file),
-                    source_config,
+                    settings,
                     runner,
                     ctx.tool_paths,
-                    ref_lang=source_config.get("analysis_lang_source1"),
+                    ref_lang=settings.analysis_lang_source1,
                     target_lang=tgt_lang,
                     role_tag=source_key,
                     ref_track_index=correlation_ref_track,  # Use per-job setting if configured
@@ -891,14 +895,14 @@ class AnalysisStep:
                 )
             else:
                 # Normal single-method correlation
-                # Use source_config which already has the right correlation_method set
+                # The use_source_separation flag tells the function which correlation_method to use
                 results = run_audio_correlation(
                     str(source1_file),
                     str(source_file),
-                    source_config,
+                    settings,
                     runner,
                     ctx.tool_paths,
-                    ref_lang=source_config.get("analysis_lang_source1"),
+                    ref_lang=settings.analysis_lang_source1,
                     target_lang=tgt_lang,
                     role_tag=source_key,
                     ref_track_index=correlation_ref_track,  # Use per-job setting if configured
@@ -911,13 +915,13 @@ class AnalysisStep:
             details = {}
             stepping_override_delay = None
             stepping_override_delay_raw = None
-            stepping_enabled = source_config.get("segmented_enabled", False)
+            stepping_enabled = settings.segmented_enabled
 
             # ALWAYS run diagnosis to detect stepping (even if correction is disabled)
             diagnosis, details = diagnose_audio_issue(
                 video_path=source1_file,
                 chunks=results,
-                config=source_config,
+                settings=settings,
                 runner=runner,
                 tool_paths=ctx.tool_paths,
                 codec_id=target_codec_id,
@@ -940,20 +944,22 @@ class AnalysisStep:
                     if has_audio_from_source:
                         # Stepping correction will run, so use first segment delay
                         # Use stepping-specific stability criteria (separate from First Stable delay selection mode)
-                        stepping_config = {
-                            "first_stable_min_chunks": source_config.get(
-                                "stepping_first_stable_min_chunks", 3
-                            ),
-                            "first_stable_skip_unstable": source_config.get(
-                                "stepping_first_stable_skip_unstable", True
-                            ),
-                        }
                         # Get both rounded (for mkvmerge) and raw (for subtitle precision)
                         first_segment_delay = _find_first_stable_segment_delay(
-                            results, runner, stepping_config, return_raw=False
+                            results,
+                            runner,
+                            settings,
+                            return_raw=False,
+                            override_min_chunks=settings.stepping_first_stable_min_chunks,
+                            override_skip_unstable=settings.stepping_first_stable_skip_unstable,
                         )
                         first_segment_delay_raw = _find_first_stable_segment_delay(
-                            results, runner, stepping_config, return_raw=True
+                            results,
+                            runner,
+                            settings,
+                            return_raw=True,
+                            override_min_chunks=settings.stepping_first_stable_min_chunks,
+                            override_skip_unstable=settings.stepping_first_stable_skip_unstable,
                         )
                         if first_segment_delay is not None:
                             stepping_override_delay = first_segment_delay
@@ -973,9 +979,6 @@ class AnalysisStep:
                     else:
                         # No audio tracks from this source - stepping correction won't run
                         # Use normal delay selection mode instead
-                        delay_mode = source_config.get(
-                            "delay_selection_mode", "Mode (Most Common)"
-                        )
                         runner._log_message(
                             f"[Stepping Detected] Found stepping in {source_key}"
                         )
@@ -983,16 +986,13 @@ class AnalysisStep:
                             "[Stepping] No audio tracks from this source are being merged"
                         )
                         runner._log_message(
-                            f"[Stepping] Using delay_selection_mode='{delay_mode}' instead of first segment (stepping correction won't run)"
+                            f"[Stepping] Using delay_selection_mode='{effective_delay_mode}' instead of first segment (stepping correction won't run)"
                         )
                         # Don't set stepping_override_delay - let normal flow handle it
                 elif use_source_separated_settings:
                     # Source separation blocks stepping correction (unreliable on separated stems)
                     # Track for audit warning - user should manually review this file
                     ctx.stepping_detected_separated.append(source_key)
-                    delay_mode = source_config.get(
-                        "delay_selection_mode", "Mode (Clustered)"
-                    )
                     runner._log_message(
                         f"[Stepping Detected] Found stepping in {source_key}"
                     )
@@ -1003,7 +1003,7 @@ class AnalysisStep:
                         "[Stepping Disabled] Separated stems have different waveform characteristics that break stepping detection"
                     )
                     runner._log_message(
-                        f"[Stepping Disabled] Using delay_selection_mode='{delay_mode}' instead"
+                        f"[Stepping Disabled] Using delay_selection_mode='{effective_delay_mode}' instead"
                     )
                     # Don't set stepping_override_delay - let normal flow handle it with source-separated delay mode
                 else:
@@ -1037,12 +1037,20 @@ class AnalysisStep:
                     f"{source_key.capitalize()} delay determined: {correlation_delay_ms:+d} ms (first segment, stepping corrected)."
                 )
             else:
-                # Use source_config which already has the right delay_selection_mode set
+                # Use effective_delay_mode which is set based on source separation
                 correlation_delay_ms = _choose_final_delay(
-                    results, source_config, runner, source_key
+                    results,
+                    settings,
+                    runner,
+                    source_key,
+                    override_delay_mode=effective_delay_mode,
                 )
                 correlation_delay_raw = _choose_final_delay_raw(
-                    results, source_config, runner, source_key
+                    results,
+                    settings,
+                    runner,
+                    source_key,
+                    override_delay_mode=effective_delay_mode,
                 )
 
                 if correlation_delay_ms is None:
@@ -1050,7 +1058,7 @@ class AnalysisStep:
                     accepted_count = len(
                         [r for r in results if r.get("accepted", False)]
                     )
-                    min_required = source_config.get("min_accepted_chunks", 3)
+                    min_required = settings.min_accepted_chunks
                     total_chunks = len(results)
 
                     raise RuntimeError(
@@ -1058,7 +1066,7 @@ class AnalysisStep:
                         f"  - Accepted chunks: {accepted_count}\n"
                         f"  - Minimum required: {min_required}\n"
                         f"  - Total chunks scanned: {total_chunks}\n"
-                        f"  - Match threshold: {source_config.get('min_match_pct', 5.0)}%\n"
+                        f"  - Match threshold: {settings.min_match_pct}%\n"
                         f"\n"
                         f"Possible causes:\n"
                         f"  - Audio quality is too poor for reliable correlation\n"
@@ -1084,7 +1092,7 @@ class AnalysisStep:
             stability_result = analyze_sync_stability(
                 chunk_results=results,
                 source_key=source_key,
-                config=source_config,
+                settings=settings,
                 log=runner._log_message,
                 stepping_clusters=stepping_clusters,
             )
@@ -1122,8 +1130,8 @@ class AnalysisStep:
                             f"{actual_container_delay:+.3f}ms (global reference was {source1_audio_container_delay:+.3f}ms)"
                         )
                 # Priority 2: Language matching fallback
-                elif source_config.get("analysis_lang_source1"):
-                    ref_lang = source_config.get("analysis_lang_source1")
+                elif settings.analysis_lang_source1:
+                    ref_lang = settings.analysis_lang_source1
                     for i, track in enumerate(source1_audio_tracks):
                         track_lang = (
                             (track.get("properties", {}).get("language", "") or "")
@@ -1173,9 +1181,7 @@ class AnalysisStep:
                     container_delay_ms=actual_container_delay,
                     final_raw_ms=final_delay_raw,
                     final_rounded_ms=final_delay_ms,
-                    selection_method=source_config.get(
-                        "delay_selection_mode", "Mode (Most Common)"
-                    ),
+                    selection_method=effective_delay_mode,
                     accepted_chunks=accepted_count,
                     total_chunks=len(results),
                 )
@@ -1270,8 +1276,9 @@ class AnalysisStep:
                             runner._log_message(
                                 f"[Stepping] Stepping correction will be applied to audio tracks from {source_key}."
                             )
-                        elif source_has_subs_in_layout and config.get(
-                            "stepping_adjust_subtitles_no_audio", True
+                        elif (
+                            source_has_subs_in_layout
+                            and settings.stepping_adjust_subtitles_no_audio
                         ):
                             # No audio but subs exist - run full stepping correction to get verified EDL
                             runner._log_message(

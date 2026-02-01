@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from ..io.runner import CommandRunner
+    from ..models.settings import AppSettings
 
 # --- Language Normalization ---
 _LANG2TO3 = {
@@ -565,7 +566,7 @@ def _find_delay_spectrogram(
 def run_audio_correlation(
     ref_file: str,
     target_file: str,
-    config: dict,
+    settings: AppSettings,
     runner: CommandRunner,
     tool_paths: dict[str, str],
     ref_lang: str | None,
@@ -584,7 +585,7 @@ def run_audio_correlation(
     Args:
         ref_file: Path to reference video file (Source 1)
         target_file: Path to target video file to analyze
-        config: Configuration dictionary with analysis settings
+        settings: AppSettings with analysis configuration
         runner: CommandRunner for executing ffmpeg/ffprobe commands
         tool_paths: Paths to external tools (ffmpeg, ffprobe, etc.)
         ref_lang: Optional language code to select reference audio stream
@@ -652,7 +653,7 @@ def run_audio_correlation(
 
     # --- 2. Decode ---
     DEFAULT_SR = 48000
-    use_soxr = config.get("use_soxr", False)
+    use_soxr = settings.use_soxr
     log(f"[DECODE DEBUG] Decoding ref: -map 0:a:{idx_ref} from {Path(ref_file).name}")
     ref_pcm = _decode_to_memory(
         ref_file, idx_ref, DEFAULT_SR, use_soxr, runner, tool_paths
@@ -675,13 +676,13 @@ def run_audio_correlation(
     # --- 2b. Source Separation (Optional) ---
     # Only apply separation if explicitly requested via per-source settings
     # AND a separation mode is configured in global settings
-    separation_mode = config.get("source_separation_mode", "none")
+    separation_mode = settings.source_separation_mode
     if use_source_separation and separation_mode and separation_mode != "none":
         try:
             from .source_separation import apply_source_separation
 
             ref_pcm, tgt_pcm = apply_source_separation(
-                ref_pcm, tgt_pcm, DEFAULT_SR, config, log, role_tag
+                ref_pcm, tgt_pcm, DEFAULT_SR, settings, log, role_tag
             )
         except ImportError as e:
             log(
@@ -702,29 +703,29 @@ def run_audio_correlation(
             )
 
     # --- 3. Pre-processing (Filtering) ---
-    filtering_method = config.get("filtering_method", "None")
+    filtering_method = settings.filtering_method
     if filtering_method == "Dialogue Band-Pass Filter":
         log("Applying Dialogue Band-Pass filter...")
-        lowcut = config.get("filter_bandpass_lowcut_hz", 300.0)
-        highcut = config.get("filter_bandpass_highcut_hz", 3400.0)
-        order = config.get("filter_bandpass_order", 5)
+        lowcut = settings.filter_bandpass_lowcut_hz
+        highcut = settings.filter_bandpass_highcut_hz
+        order = settings.filter_bandpass_order
         ref_pcm = _apply_bandpass(ref_pcm, DEFAULT_SR, lowcut, highcut, order, log)
         tgt_pcm = _apply_bandpass(tgt_pcm, DEFAULT_SR, lowcut, highcut, order, log)
     elif filtering_method == "Low-Pass Filter":
-        cutoff = int(config.get("audio_bandlimit_hz", 0))
+        cutoff = settings.audio_bandlimit_hz
         if cutoff > 0:
             log(f"Applying Low-Pass filter at {cutoff} Hz...")
-            taps = config.get("filter_lowpass_taps", 101)
+            taps = settings.filter_lowpass_taps
             ref_pcm = _apply_lowpass(ref_pcm, DEFAULT_SR, cutoff, taps, log)
             tgt_pcm = _apply_lowpass(tgt_pcm, DEFAULT_SR, cutoff, taps, log)
 
     # --- 4. Per-Chunk Correlation ---
     duration_s = len(ref_pcm) / float(DEFAULT_SR)
-    chunk_count = int(config.get("scan_chunk_count", 10))
-    chunk_dur = float(config.get("scan_chunk_duration", 15.0))
+    chunk_count = settings.scan_chunk_count
+    chunk_dur = float(settings.scan_chunk_duration)
 
-    start_pct = config.get("scan_start_percentage", 5.0)
-    end_pct = config.get("scan_end_percentage", 95.0)
+    start_pct = settings.scan_start_percentage
+    end_pct = settings.scan_end_percentage
     if not 0.0 <= start_pct < end_pct <= 100.0:  # Sanity check
         start_pct, end_pct = 5.0, 95.0
 
@@ -742,9 +743,9 @@ def run_audio_correlation(
     results = []
     chunk_samples = int(round(chunk_dur * DEFAULT_SR))
 
-    correlation_method = config.get("correlation_method", "Standard Correlation (SCC)")
-    peak_fit = config.get("audio_peak_fit", False)
-    min_match = float(config.get("min_match_pct", 5.0))
+    correlation_method = settings.correlation_method
+    peak_fit = settings.audio_peak_fit
+    min_match = float(settings.min_match_pct)
 
     for i, t0 in enumerate(starts, 1):
         start_sample = int(round(t0 * DEFAULT_SR))
@@ -874,7 +875,7 @@ def _run_method_on_chunks(
 def run_multi_correlation(
     ref_file: str,
     target_file: str,
-    config: dict,
+    settings: AppSettings,
     runner: CommandRunner,
     tool_paths: dict[str, str],
     ref_lang: str | None,
@@ -894,7 +895,7 @@ def run_multi_correlation(
     Args:
         ref_file: Path to reference video file (Source 1)
         target_file: Path to target video file to analyze
-        config: Configuration dictionary with analysis settings
+        settings: AppSettings with analysis configuration
         runner: CommandRunner for executing ffmpeg/ffprobe commands
         tool_paths: Paths to external tools
         ref_lang: Optional language code for reference audio
@@ -910,15 +911,13 @@ def run_multi_correlation(
     log = runner._log_message
 
     # Safety check: if multi-correlation is disabled, fall back to single method immediately
-    if not config.get("multi_correlation_enabled", False):
+    if not settings.multi_correlation_enabled:
         log("[MULTI-CORRELATION] Feature disabled, using single correlation method")
         return {
-            config.get(
-                "correlation_method", "Standard Correlation (SCC)"
-            ): run_audio_correlation(
+            settings.correlation_method: run_audio_correlation(
                 ref_file,
                 target_file,
-                config,
+                settings,
                 runner,
                 tool_paths,
                 ref_lang,
@@ -930,21 +929,19 @@ def run_multi_correlation(
             )
         }
 
-    # Get enabled methods
+    # Get enabled methods by checking each multi_corr_* setting
     enabled_methods = []
     for method_name, config_key in MULTI_CORR_METHODS:
-        if config.get(config_key, False):
+        if getattr(settings, config_key, False):
             enabled_methods.append(method_name)
 
     if not enabled_methods:
         log("[MULTI-CORRELATION] No methods enabled, falling back to single method")
         return {
-            config.get(
-                "correlation_method", "Standard Correlation (SCC)"
-            ): run_audio_correlation(
+            settings.correlation_method: run_audio_correlation(
                 ref_file,
                 target_file,
-                config,
+                settings,
                 runner,
                 tool_paths,
                 ref_lang,
@@ -1001,7 +998,7 @@ def run_multi_correlation(
 
     # --- 2. Decode ---
     DEFAULT_SR = 48000
-    use_soxr = config.get("use_soxr", False)
+    use_soxr = settings.use_soxr
     ref_pcm = _decode_to_memory(
         ref_file, idx_ref, DEFAULT_SR, use_soxr, runner, tool_paths
     )
@@ -1012,13 +1009,13 @@ def run_multi_correlation(
     # --- 2b. Source Separation (Optional) ---
     # Only apply separation if explicitly requested via per-source settings
     # AND a separation mode is configured in global settings
-    separation_mode = config.get("source_separation_mode", "none")
+    separation_mode = settings.source_separation_mode
     if use_source_separation and separation_mode and separation_mode != "none":
         try:
             from .source_separation import apply_source_separation
 
             ref_pcm, tgt_pcm = apply_source_separation(
-                ref_pcm, tgt_pcm, DEFAULT_SR, config, log, role_tag
+                ref_pcm, tgt_pcm, DEFAULT_SR, settings, log, role_tag
             )
         except ImportError as e:
             log(
@@ -1039,29 +1036,29 @@ def run_multi_correlation(
             )
 
     # --- 3. Pre-processing (Filtering) ---
-    filtering_method = config.get("filtering_method", "None")
+    filtering_method = settings.filtering_method
     if filtering_method == "Dialogue Band-Pass Filter":
         log("Applying Dialogue Band-Pass filter...")
-        lowcut = config.get("filter_bandpass_lowcut_hz", 300.0)
-        highcut = config.get("filter_bandpass_highcut_hz", 3400.0)
-        order = config.get("filter_bandpass_order", 5)
+        lowcut = settings.filter_bandpass_lowcut_hz
+        highcut = settings.filter_bandpass_highcut_hz
+        order = settings.filter_bandpass_order
         ref_pcm = _apply_bandpass(ref_pcm, DEFAULT_SR, lowcut, highcut, order, log)
         tgt_pcm = _apply_bandpass(tgt_pcm, DEFAULT_SR, lowcut, highcut, order, log)
     elif filtering_method == "Low-Pass Filter":
-        cutoff = int(config.get("audio_bandlimit_hz", 0))
+        cutoff = settings.audio_bandlimit_hz
         if cutoff > 0:
             log(f"Applying Low-Pass filter at {cutoff} Hz...")
-            taps = config.get("filter_lowpass_taps", 101)
+            taps = settings.filter_lowpass_taps
             ref_pcm = _apply_lowpass(ref_pcm, DEFAULT_SR, cutoff, taps, log)
             tgt_pcm = _apply_lowpass(tgt_pcm, DEFAULT_SR, cutoff, taps, log)
 
     # --- 4. Extract chunks ONCE ---
     duration_s = len(ref_pcm) / float(DEFAULT_SR)
-    chunk_count = int(config.get("scan_chunk_count", 10))
-    chunk_dur = float(config.get("scan_chunk_duration", 15.0))
+    chunk_count = settings.scan_chunk_count
+    chunk_dur = float(settings.scan_chunk_duration)
 
-    start_pct = config.get("scan_start_percentage", 5.0)
-    end_pct = config.get("scan_end_percentage", 95.0)
+    start_pct = settings.scan_start_percentage
+    end_pct = settings.scan_end_percentage
     if not 0.0 <= start_pct < end_pct <= 100.0:
         start_pct, end_pct = 5.0, 95.0
 
@@ -1093,8 +1090,8 @@ def run_multi_correlation(
     )
 
     # --- 5. Run each method on the same chunks ---
-    peak_fit = config.get("audio_peak_fit", False)
-    min_match = float(config.get("min_match_pct", 5.0))
+    peak_fit = settings.audio_peak_fit
+    min_match = float(settings.min_match_pct)
     all_results = {}
 
     for method_name in enabled_methods:

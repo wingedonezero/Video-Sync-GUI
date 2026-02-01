@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .io.runner import CommandRunner
+from .models.settings import AppSettings
 from .pipeline_components import (
     LogManager,
     OutputWriter,
@@ -45,6 +46,7 @@ class JobPipeline:
             progress_callback: Callback for progress updates
         """
         self.config = config
+        self.settings = AppSettings.from_config(config)
         self.gui_log_callback = log_callback
         self.progress = progress_callback
         self.tool_paths = {}
@@ -96,7 +98,7 @@ class JobPipeline:
             job_name, output_dir, self.gui_log_callback
         )
 
-        runner = CommandRunner(self.config, log_to_all)
+        runner = CommandRunner(self.settings, log_to_all)
 
         # --- 3. Validate Tools ---
         try:
@@ -178,7 +180,7 @@ class JobPipeline:
 
             # --- 10. Write mkvmerge Options ---
             opts_path = OutputWriter.write_mkvmerge_options(
-                ctx.tokens, ctx.temp_dir, self.config, runner
+                ctx.tokens, ctx.temp_dir, self.settings, runner
             )
 
             # --- 11. Execute Merge ---
@@ -190,7 +192,7 @@ class JobPipeline:
             SyncExecutor.finalize_output(
                 mkvmerge_output_path,
                 final_output_path,
-                self.config,
+                self.settings,
                 self.tool_paths,
                 runner,
             )

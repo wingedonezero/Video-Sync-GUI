@@ -5,11 +5,17 @@ Sync executor component.
 Handles merge execution and post-processing finalization.
 """
 
+from __future__ import annotations
+
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..io.runner import CommandRunner
 from ..postprocess import check_if_rebasing_is_needed, finalize_merged_file
+
+if TYPE_CHECKING:
+    from vsg_core.models import AppSettings
 
 
 class SyncExecutor:
@@ -37,7 +43,7 @@ class SyncExecutor:
     def finalize_output(
         temp_output_path: Path,
         final_output_path: Path,
-        config: dict,
+        settings: AppSettings,
         tool_paths: dict[str, str],
         runner: CommandRunner,
     ):
@@ -50,17 +56,17 @@ class SyncExecutor:
         Args:
             temp_output_path: Path to temporary merged file
             final_output_path: Path to final output location
-            config: Configuration dictionary
+            settings: AppSettings with post-mux options
             tool_paths: Dictionary of tool paths
             runner: CommandRunner for execution
         """
-        normalize_enabled = config.get("post_mux_normalize_timestamps", False)
+        normalize_enabled = settings.post_mux_normalize_timestamps
 
         if normalize_enabled and check_if_rebasing_is_needed(
             temp_output_path, runner, tool_paths
         ):
             finalize_merged_file(
-                temp_output_path, final_output_path, runner, config, tool_paths
+                temp_output_path, final_output_path, runner, settings, tool_paths
             )
         else:
             shutil.move(temp_output_path, final_output_path)

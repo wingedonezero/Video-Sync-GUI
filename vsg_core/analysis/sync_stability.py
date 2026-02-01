@@ -8,7 +8,10 @@ sync issues, even when the final rounded delay appears correct.
 
 from collections.abc import Callable
 from statistics import mean, stdev, variance
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ..models.settings import AppSettings
 
 
 def _to_float(value) -> float:
@@ -19,7 +22,7 @@ def _to_float(value) -> float:
 def analyze_sync_stability(
     chunk_results: list[dict[str, Any]],
     source_key: str,
-    config: dict[str, Any],
+    settings: "AppSettings",
     log: Callable[[str], None] | None = None,
     stepping_clusters: list[dict] | None = None,
 ) -> dict[str, Any] | None:
@@ -32,7 +35,7 @@ def analyze_sync_stability(
     Args:
         chunk_results: List of chunk dicts with 'raw_delay', 'delay', 'match', 'accepted'
         source_key: Source identifier (e.g., 'Source 2')
-        config: Config dict with sync_stability_* settings
+        settings: AppSettings instance with sync_stability_* settings
         log: Optional logging callback
         stepping_clusters: Optional list of stepping clusters to exclude from variance check
 
@@ -40,14 +43,14 @@ def analyze_sync_stability(
         Dict with stability analysis results, or None if check disabled/skipped
     """
     # Check if enabled
-    if not config.get("sync_stability_enabled", True):
+    if not settings.sync_stability_enabled:
         return None
 
     # Get settings
-    variance_threshold = config.get("sync_stability_variance_threshold", 0.0)
-    min_chunks = config.get("sync_stability_min_chunks", 3)
-    outlier_mode = config.get("sync_stability_outlier_mode", "any")
-    outlier_threshold = config.get("sync_stability_outlier_threshold", 1.0)
+    variance_threshold = settings.sync_stability_variance_threshold
+    min_chunks = settings.sync_stability_min_chunks
+    outlier_mode = settings.sync_stability_outlier_mode
+    outlier_threshold = settings.sync_stability_outlier_threshold
 
     # Get accepted chunks with raw delays
     accepted = [r for r in chunk_results if r.get("accepted", False)]
@@ -69,11 +72,9 @@ def analyze_sync_stability(
             accepted,
             raw_delays,
             source_key,
-            config,
             log,
             stepping_clusters,
             variance_threshold,
-            min_chunks,
             outlier_mode,
             outlier_threshold,
         )
@@ -82,10 +83,8 @@ def analyze_sync_stability(
             accepted,
             raw_delays,
             source_key,
-            config,
             log,
             variance_threshold,
-            min_chunks,
             outlier_mode,
             outlier_threshold,
         )
@@ -95,10 +94,8 @@ def _analyze_uniform(
     accepted: list[dict],
     raw_delays: list[float],
     source_key: str,
-    config: dict[str, Any],
     log: Callable | None,
     variance_threshold: float,
-    min_chunks: int,
     outlier_mode: str,
     outlier_threshold: float,
 ) -> dict[str, Any]:
@@ -205,11 +202,9 @@ def _analyze_with_clusters(
     accepted: list[dict],
     raw_delays: list[float],
     source_key: str,
-    config: dict[str, Any],
     log: Callable | None,
     stepping_clusters: list[dict],
     variance_threshold: float,
-    min_chunks: int,
     outlier_mode: str,
     outlier_threshold: float,
 ) -> dict[str, Any]:
