@@ -13,6 +13,10 @@ from __future__ import annotations
 import gc
 import math
 import threading
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from vsg_core.models import AppSettings
 
 # ============================================================================
 # MODE 0: FRAME START (For Correlation-Frame-Snap - STABLE & DETERMINISTIC)
@@ -197,7 +201,9 @@ def clear_vfr_cache():
     gc.collect()  # Force garbage collection to release nanobind objects
 
 
-def get_vfr_timestamps(video_path: str, fps: float, runner, config: dict | None = None):
+def get_vfr_timestamps(
+    video_path: str, fps: float, runner, settings: AppSettings | None = None
+):
     """
     Get appropriate timestamp handler based on video type.
 
@@ -208,7 +214,7 @@ def get_vfr_timestamps(video_path: str, fps: float, runner, config: dict | None 
         video_path: Path to video file
         fps: Frame rate
         runner: CommandRunner for logging
-        config: Optional config dict with 'videotimestamps_rounding' setting
+        settings: AppSettings with videotimestamps_rounding setting
     """
     try:
         from fractions import Fraction
@@ -220,9 +226,12 @@ def get_vfr_timestamps(video_path: str, fps: float, runner, config: dict | None 
             VideoTimestamps,
         )
 
-        # Get rounding method from config (default: ROUND)
-        config = config or {}
-        rounding_str = config.get("videotimestamps_rounding", "round").upper()
+        # Get rounding method from settings (default: ROUND)
+        rounding_str = (
+            settings.videotimestamps_rounding.upper()
+            if settings is not None
+            else "ROUND"
+        )
 
         if rounding_str == "FLOOR":
             rounding_method = RoundingMethod.FLOOR
@@ -286,7 +295,11 @@ def get_vfr_timestamps(video_path: str, fps: float, runner, config: dict | None 
 
 
 def frame_to_time_vfr(
-    frame_num: int, video_path: str, fps: float, runner, config: dict | None = None
+    frame_num: int,
+    video_path: str,
+    fps: float,
+    runner,
+    settings: AppSettings | None = None,
 ) -> int | None:
     """
     MODE: VFR (VideoTimestamps-based).
@@ -299,7 +312,7 @@ def frame_to_time_vfr(
         video_path: Path to video file
         fps: Frame rate (used for CFR mode)
         runner: CommandRunner for logging
-        config: Optional config dict with settings
+        settings: AppSettings with timing settings
 
     Returns:
         Timestamp in milliseconds, or None if VideoTimestamps unavailable
@@ -307,7 +320,7 @@ def frame_to_time_vfr(
     try:
         from video_timestamps import TimeType
 
-        vts = get_vfr_timestamps(video_path, fps, runner, config)
+        vts = get_vfr_timestamps(video_path, fps, runner, settings)
         if vts is None:
             return None
 
@@ -323,7 +336,11 @@ def frame_to_time_vfr(
 
 
 def time_to_frame_vfr(
-    time_ms: float, video_path: str, fps: float, runner, config: dict | None = None
+    time_ms: float,
+    video_path: str,
+    fps: float,
+    runner,
+    settings: AppSettings | None = None,
 ) -> int | None:
     """
     MODE: VFR using VideoTimestamps.
@@ -335,7 +352,7 @@ def time_to_frame_vfr(
         video_path: Path to video file
         fps: Frame rate (used for CFR mode)
         runner: CommandRunner for logging
-        config: Optional config dict with settings
+        settings: AppSettings with timing settings
 
     Returns:
         Frame number, or None if VideoTimestamps unavailable
@@ -345,7 +362,7 @@ def time_to_frame_vfr(
 
         from video_timestamps import TimeType
 
-        vts = get_vfr_timestamps(video_path, fps, runner, config)
+        vts = get_vfr_timestamps(video_path, fps, runner, settings)
         if vts is None:
             return None
 

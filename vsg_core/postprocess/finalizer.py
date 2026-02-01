@@ -1,9 +1,15 @@
 # vsg_core/postprocess/finalizer.py
+from __future__ import annotations
+
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..io.runner import CommandRunner
 from .chapter_backup import extract_chapters_xml, inject_chapters
+
+if TYPE_CHECKING:
+    from vsg_core.models import AppSettings
 
 
 def check_if_rebasing_is_needed(
@@ -50,7 +56,7 @@ def finalize_merged_file(
     temp_output_path: Path,
     final_output_path: Path,
     runner: CommandRunner,
-    config: dict,
+    settings: AppSettings,
     tool_paths: dict,
 ):
     """
@@ -103,7 +109,7 @@ def finalize_merged_file(
         inject_chapters(temp_output_path, original_chapters_xml, runner, tool_paths)
 
     # Step 4: Optional tag stripping
-    if config.get("post_mux_strip_tags", False):
+    if settings.post_mux_strip_tags:
         log("[Finalize] Step 2/2: Stripping ENCODER tag with mkvpropedit...")
         propedit_cmd = ["mkvpropedit", str(temp_output_path), "--tags", "all:"]
         runner.run(propedit_cmd, tool_paths)

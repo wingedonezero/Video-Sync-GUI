@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from ..sync_modes import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
+    from ...models.settings import AppSettings
     from ..data import OperationResult, SubtitleData
 
 
@@ -40,7 +41,7 @@ class DurationAlignSync(SyncPlugin):
         source_video: str | None = None,
         target_video: str | None = None,
         runner=None,
-        config: dict | None = None,
+        settings: AppSettings | None = None,
         temp_dir: Path | None = None,
         **kwargs,
     ) -> OperationResult:
@@ -62,12 +63,13 @@ class DurationAlignSync(SyncPlugin):
             source_video: Path to source video (where subs are from)
             target_video: Path to target video (Source 1)
             runner: CommandRunner for logging
-            config: Settings dict
+            settings: AppSettings instance
             temp_dir: Temp directory for index files
 
         Returns:
             OperationResult with statistics
         """
+        from ...models.settings import AppSettings
         from ..data import OperationRecord, OperationResult, SyncEventData
         from ..frame_utils import (
             detect_video_fps,
@@ -77,7 +79,8 @@ class DurationAlignSync(SyncPlugin):
         )
         from ..frame_verification import verify_alignment_with_sliding_window
 
-        config = config or {}
+        if settings is None:
+            settings = AppSettings.from_config({})
 
         def log(msg: str):
             if runner:
@@ -107,7 +110,7 @@ class DurationAlignSync(SyncPlugin):
         log(f"[DurationAlign] Target: {Path(target_video).name}")
 
         # Get video durations - try VapourSynth first, fallback to ffprobe
-        use_vapoursynth = config.get("frame_use_vapoursynth", True)
+        use_vapoursynth = settings.frame_use_vapoursynth
 
         source_frame_count = None
         source_duration_ms = None
@@ -170,7 +173,7 @@ class DurationAlignSync(SyncPlugin):
                         source_info["streams"][0]["nb_read_frames"]
                     )
                     source_duration_ms = frame_to_time_vfr(
-                        source_frame_count - 1, source_video, source_fps, runner, config
+                        source_frame_count - 1, source_video, source_fps, runner, settings.to_dict()
                     )
 
                 if target_duration_ms is None:
@@ -199,7 +202,7 @@ class DurationAlignSync(SyncPlugin):
                         target_video,
                         target_fps_detected or target_fps,
                         runner,
-                        config,
+                        settings.to_dict(),
                     )
 
             except Exception as e:
@@ -230,8 +233,8 @@ class DurationAlignSync(SyncPlugin):
 
         # Optionally verify with frame matching
         validation_result = {}
-        use_hybrid_verification = config.get("duration_align_verify_with_frames", False)
-        validate_enabled = config.get("duration_align_validate", True)
+        use_hybrid_verification = settings.duration_align_verify_with_frames
+        validate_enabled = settings.duration_align_validate
 
         if use_hybrid_verification:
             # Convert SubtitleData events to format expected by verification
@@ -251,7 +254,7 @@ class DurationAlignSync(SyncPlugin):
                 wrapped_events,
                 duration_offset_ms,
                 runner,
-                config,
+                settings.to_dict(),
             )
 
             if validation_result.get("valid"):
@@ -259,9 +262,7 @@ class DurationAlignSync(SyncPlugin):
                 log(f"[DurationAlign] ✓ Using precise offset: {precise_offset:+.3f}ms")
                 total_shift_ms = precise_offset + global_shift_ms
             else:
-                fallback_mode = config.get(
-                    "duration_align_fallback_mode", "duration-offset"
-                )
+                fallback_mode = settings.duration_align_fallback_mode
                 log(f"[DurationAlign] Verification failed, fallback: {fallback_mode}")
 
                 if fallback_mode == "abort":
@@ -290,14 +291,12 @@ class DurationAlignSync(SyncPlugin):
                 wrapped_events,
                 duration_offset_ms,
                 runner,
-                config,
+                settings.to_dict(),
                 temp_dir,
             )
 
             if validation_result.get("enabled") and not validation_result.get("valid"):
-                fallback_mode = config.get(
-                    "duration_align_fallback_mode", "duration-offset"
-                )
+                fallback_mode = settings.duration_align_fallback_mode
                 log(f"[DurationAlign] Validation failed, fallback: {fallback_mode}")
 
                 if fallback_mode == "abort":

@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from ..sync_modes import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
+    from ...models.settings import AppSettings
     from ..data import OperationResult, SubtitleData
 
 
@@ -40,7 +41,7 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
         source_video: str | None = None,
         target_video: str | None = None,
         runner=None,
-        config: dict | None = None,
+        settings: AppSettings | None = None,
         temp_dir: Path | None = None,
         sync_exclusion_styles: list[str] | None = None,
         sync_exclusion_mode: str = "exclude",
@@ -64,7 +65,7 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
             source_video: Path to source video
             target_video: Path to target video
             runner: CommandRunner for logging
-            config: Settings dict
+            settings: AppSettings instance
             temp_dir: Temp directory for index files
             sync_exclusion_styles: Styles to exclude/include from frame sync
             sync_exclusion_mode: 'exclude' or 'include'
@@ -72,10 +73,12 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
         Returns:
             OperationResult with statistics
         """
+        from ...models.settings import AppSettings
         from ..data import OperationResult
         from ..frame_utils import detect_video_fps, get_video_duration_ms
 
-        config = config or {}
+        if settings is None:
+            settings = AppSettings.from_config({})
 
         def log(msg: str):
             if runner:
@@ -110,14 +113,14 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
         log(f"[CorrGuided] FPS: {fps:.3f} (frame: {frame_duration_ms:.3f}ms)")
 
         # Get unified config parameters
-        search_range_ms = config.get("frame_search_range_ms", 2000)
-        hash_algorithm = config.get("frame_hash_algorithm", "dhash")
-        hash_size = int(config.get("frame_hash_size", 8))
-        hash_threshold = int(config.get("frame_hash_threshold", 5))
-        window_radius = int(config.get("frame_window_radius", 5))
-        tolerance_ms = config.get("frame_agreement_tolerance_ms", 100)
-        fallback_mode = config.get("corr_anchor_fallback_mode", "use-correlation")
-        anchor_positions = config.get("corr_anchor_anchor_positions", [10, 50, 90])
+        search_range_ms = settings.frame_search_range_ms
+        hash_algorithm = settings.frame_hash_algorithm
+        hash_size = settings.frame_hash_size
+        hash_threshold = settings.frame_hash_threshold
+        window_radius = settings.frame_window_radius
+        tolerance_ms = settings.frame_agreement_tolerance_ms
+        fallback_mode = settings.corr_anchor_fallback_mode
+        anchor_positions = list(settings.corr_anchor_anchor_positions)
 
         log(f"[CorrGuided] Search range: ±{search_range_ms}ms")
         log(
@@ -159,7 +162,7 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
 
         # Open video readers
         try:
-            use_vs = config.get("frame_use_vapoursynth", True)
+            use_vs = settings.frame_use_vapoursynth
             source_reader = VideoReader(
                 source_video, runner, use_vapoursynth=use_vs, temp_dir=temp_dir
             )

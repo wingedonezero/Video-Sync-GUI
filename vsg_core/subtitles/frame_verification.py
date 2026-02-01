@@ -9,7 +9,10 @@ validating frame alignment between source and target videos.
 from __future__ import annotations
 
 import gc
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from ..models.settings import AppSettings
 
 
 def verify_correlation_with_frame_snap(
@@ -19,7 +22,7 @@ def verify_correlation_with_frame_snap(
     pure_correlation_delay_ms: float,
     fps: float,
     runner,
-    config: dict | None = None,
+    settings: AppSettings,
 ) -> dict[str, Any]:
     """
     Verify frame alignment and calculate precise ms refinement from anchor frames.
@@ -33,7 +36,7 @@ def verify_correlation_with_frame_snap(
         pure_correlation_delay_ms: PURE correlation delay (WITHOUT global_shift)
         fps: Frame rate of videos
         runner: CommandRunner for logging
-        config: Configuration dict
+        settings: AppSettings configuration
 
     Returns:
         Dict with:
@@ -43,8 +46,6 @@ def verify_correlation_with_frame_snap(
             - num_scene_matches: int (number of scene checkpoints that matched)
     """
     from .frame_utils import detect_scene_changes
-
-    config = config or {}
 
     runner._log_message(
         "[Correlation+FrameSnap] ═══════════════════════════════════════"
@@ -60,11 +61,11 @@ def verify_correlation_with_frame_snap(
     )
 
     # Get unified config parameters
-    hash_algorithm = config.get("frame_hash_algorithm", "dhash")
-    hash_size = int(config.get("frame_hash_size", 8))
-    hash_threshold = int(config.get("frame_hash_threshold", 5))
-    window_radius = int(config.get("frame_window_radius", 5))
-    search_range_frames = int(config.get("correlation_snap_search_range", 5))
+    hash_algorithm = settings.frame_hash_algorithm
+    hash_size = settings.frame_hash_size
+    hash_threshold = settings.frame_hash_threshold
+    window_radius = settings.frame_window_radius
+    search_range_frames = settings.video_verified_search_range_frames
 
     runner._log_message(
         f"[Correlation+FrameSnap] Hash: {hash_algorithm}, size={hash_size}, threshold={hash_threshold}"
@@ -104,7 +105,7 @@ def verify_correlation_with_frame_snap(
             "frame_correction_ms": 0.0,
         }
 
-    use_scene_checkpoints = config.get("correlation_snap_use_scene_changes", True)
+    use_scene_checkpoints = settings.correlation_snap_use_scene_changes
     refinements_ms = []
 
     if use_scene_checkpoints:
@@ -131,7 +132,7 @@ def verify_correlation_with_frame_snap(
             source_reader = None
             target_reader = None
             try:
-                use_vs = config.get("frame_use_vapoursynth", True)
+                use_vs = settings.frame_use_vapoursynth
                 source_reader = VideoReader(
                     source_video, runner, use_vapoursynth=use_vs
                 )
@@ -312,7 +313,7 @@ def verify_alignment_with_sliding_window(
     subtitle_events: list,
     duration_offset_ms: float,
     runner,
-    config: dict | None = None,
+    settings: AppSettings,
 ) -> dict[str, Any]:
     """
     Hybrid verification with TEMPORAL CONSISTENCY: Use duration offset as starting
@@ -324,7 +325,7 @@ def verify_alignment_with_sliding_window(
         subtitle_events: List of subtitle events
         duration_offset_ms: Rough offset from duration calculation
         runner: CommandRunner for logging
-        config: Config dict
+        settings: AppSettings configuration
 
     Returns:
         Dict with:
@@ -336,8 +337,6 @@ def verify_alignment_with_sliding_window(
     """
     from .checkpoint_selection import select_smart_checkpoints
 
-    config = config or {}
-
     runner._log_message("[Hybrid Verification] ═══════════════════════════════════════")
     runner._log_message(
         "[Hybrid Verification] Running TEMPORAL CONSISTENCY verification..."
@@ -347,11 +346,11 @@ def verify_alignment_with_sliding_window(
     )
 
     # Get unified config parameters
-    search_window_ms = config.get("frame_search_range_ms", 2000)
-    tolerance_ms = config.get("frame_agreement_tolerance_ms", 100)
-    hash_algorithm = config.get("frame_hash_algorithm", "dhash")
-    hash_size = int(config.get("frame_hash_size", 8))
-    hash_threshold = int(config.get("frame_hash_threshold", 5))
+    search_window_ms = settings.frame_search_range_ms
+    tolerance_ms = settings.frame_agreement_tolerance_ms
+    hash_algorithm = settings.frame_hash_algorithm
+    hash_size = settings.frame_hash_size
+    hash_threshold = settings.frame_hash_threshold
 
     runner._log_message(f"[Hybrid Verification] Search window: ±{search_window_ms}ms")
     runner._log_message(f"[Hybrid Verification] Agreement tolerance: ±{tolerance_ms}ms")
@@ -389,7 +388,7 @@ def verify_alignment_with_sliding_window(
     checkpoint_details = []
 
     try:
-        use_vs = config.get("frame_use_vapoursynth", True)
+        use_vs = settings.frame_use_vapoursynth
         source_reader = VideoReader(source_video, runner, use_vapoursynth=use_vs)
         target_reader = VideoReader(target_video, runner, use_vapoursynth=use_vs)
     except Exception as e:

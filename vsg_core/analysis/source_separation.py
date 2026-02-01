@@ -30,6 +30,8 @@ from scipy.signal import resample_poly
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from ..models.settings import AppSettings
+
 # Import GPU environment support
 if importlib.util.find_spec("vsg_core.system.gpu_env"):
     from vsg_core.system.gpu_env import get_subprocess_environment
@@ -1434,7 +1436,7 @@ def apply_source_separation(
     ref_pcm: np.ndarray,
     tgt_pcm: np.ndarray,
     sample_rate: int,
-    config: dict,
+    settings: AppSettings,
     log_func: Callable[[str], None] | None = None,
     role_tag: str = "Source 2",
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -1455,7 +1457,7 @@ def apply_source_separation(
         ref_pcm: Reference audio (typically Source 1)
         tgt_pcm: Target audio (typically Source 2, Source 3, etc.)
         sample_rate: Sample rate
-        config: Configuration dict (contains separation mode, model, device settings)
+        settings: Application settings (contains separation mode, model, device settings)
         log_func: Optional logging function
         role_tag: Which target is being processed (e.g., "Source 2", "Source 3", "QA")
 
@@ -1469,15 +1471,16 @@ def apply_source_separation(
 
     log("[SOURCE SEPARATION] DEBUG: Entered apply_source_separation()")
 
-    mode, model_filename = _resolve_separation_settings(config)
+    mode = settings.source_separation_mode
+    model_filename = settings.source_separation_model
 
     target_stem = SEPARATION_MODES.get(mode)
     if target_stem is None:
         return ref_pcm, tgt_pcm
 
-    device = config.get("source_separation_device", "auto")
-    timeout = config.get("source_separation_timeout", 900)
-    model_dir = config.get("source_separation_model_dir") or None
+    device = settings.source_separation_device
+    timeout = settings.source_separation_timeout
+    model_dir = None  # Model directory not configurable via AppSettings
 
     log(f"[SOURCE SEPARATION] Mode: {mode}")
     log(f"[SOURCE SEPARATION] Model: {model_filename}")

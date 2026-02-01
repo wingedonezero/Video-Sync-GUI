@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from PIL import Image
 
+    from vsg_core.models import AppSettings
+
 
 def _get_ffms2_cache_path(video_path: str, temp_dir: Path | None) -> Path:
     """
@@ -234,7 +236,7 @@ class VideoReader:
         runner,
         temp_dir: Path | None = None,
         deinterlace: str = "auto",
-        config: dict | None = None,
+        settings: AppSettings | None = None,
         **kwargs,
     ):
         self.video_path = video_path
@@ -248,7 +250,7 @@ class VideoReader:
         self.fps = None
         self.temp_dir = temp_dir
         self.deinterlace_method = deinterlace
-        self.config = config or {}
+        self.settings = settings
         self.is_interlaced = False
         self.field_order = "progressive"
         self.deinterlace_applied = False
@@ -359,7 +361,9 @@ class VideoReader:
         """Get the actual deinterlace method to use."""
         if self.deinterlace_method == "auto":
             # Use interlaced deinterlace method setting, default to bwdif
-            return self.config.get("interlaced_deinterlace_method", "bwdif")
+            if self.settings is not None:
+                return self.settings.interlaced_deinterlace_method
+            return "bwdif"
         return self.deinterlace_method
 
     def _apply_deinterlace_filter(self, clip, core):

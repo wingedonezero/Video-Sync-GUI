@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from ..sync_modes import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
+    from ...models.settings import AppSettings
     from ..data import OperationResult, SubtitleData
 
 
@@ -38,7 +39,7 @@ class TimeBasedSync(SyncPlugin):
         source_video: str | None = None,
         target_video: str | None = None,
         runner=None,
-        config: dict | None = None,
+        settings: AppSettings | None = None,
         **kwargs,
     ) -> OperationResult:
         """
@@ -49,15 +50,17 @@ class TimeBasedSync(SyncPlugin):
 
         If True, applies raw delay to subtitle events.
         """
+        from ...models.settings import AppSettings
         from ..data import OperationRecord, OperationResult
 
-        config = config or {}
+        if settings is None:
+            settings = AppSettings.from_config({})
 
         def log(msg: str):
             if runner:
                 runner._log_message(msg)
 
-        use_raw_values = config.get("time_based_use_raw_values", False)
+        use_raw_values = settings.time_based_use_raw_values
 
         if not use_raw_values:
             # Default: mkvmerge --sync handles the delay

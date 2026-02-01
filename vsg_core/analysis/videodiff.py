@@ -1,21 +1,27 @@
+from __future__ import annotations
+
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..io.runner import CommandRunner
+
+if TYPE_CHECKING:
+    from vsg_core.models import AppSettings
 
 
 def run_videodiff(
     ref_file: str,
     target_file: str,
-    config: dict,
+    settings: AppSettings,
     runner: CommandRunner,
     tool_paths: dict,
 ) -> tuple[int, float]:
     """
-    Prefer an explicit config path if it exists; otherwise allow PATH/tool_paths resolution.
+    Prefer an explicit settings path if it exists; otherwise allow PATH/tool_paths resolution.
     Do not hard-fail just because a literal path doesn't exist—let runner.resolve/PATH try it.
     """
-    cfg_path = (config.get("videodiff_path") or "").strip()
+    cfg_path = (settings.videodiff_path or "").strip()
     if cfg_path:
         # Use absolute/relative path if it exists; else treat it as a program name
         if Path(cfg_path).exists():

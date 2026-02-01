@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 from ..sync_modes import SyncPlugin, register_sync_plugin
 
 if TYPE_CHECKING:
+    from ...models.settings import AppSettings
     from ..data import OperationResult, SubtitleData
 
 
@@ -44,7 +45,7 @@ class TimebaseFrameLockedSync(SyncPlugin):
         source_video: str | None = None,
         target_video: str | None = None,
         runner=None,
-        config: dict | None = None,
+        settings: AppSettings | None = None,
         **kwargs,
     ) -> OperationResult:
         """
@@ -57,14 +58,16 @@ class TimebaseFrameLockedSync(SyncPlugin):
             target_fps: Target video FPS
             target_video: Path to target video (required for frame locking)
             runner: CommandRunner for logging
-            config: Settings dict
+            settings: AppSettings instance
 
         Returns:
             OperationResult with statistics
         """
+        from ...models.settings import AppSettings
         from ..data import OperationRecord, OperationResult, SyncEventData
 
-        config = config or {}
+        if settings is None:
+            settings = AppSettings.from_config({})
 
         def log(msg: str):
             if runner:
@@ -93,7 +96,7 @@ class TimebaseFrameLockedSync(SyncPlugin):
         )
 
         # Try to get VideoTimestamps for precise frame alignment
-        vts = self._get_video_timestamps(target_video, target_fps, runner, config)
+        vts = self._get_video_timestamps(target_video, target_fps, runner, settings.to_dict())
 
         # Statistics tracking
         stats = {
@@ -110,11 +113,9 @@ class TimebaseFrameLockedSync(SyncPlugin):
         # Step 1: Frame-align the global delay
         # Config option: frame_lock_submillisecond_precision (default: False)
         # When True, preserves sub-ms precision in frame calculations
-        use_submillisecond = config.get("frame_lock_submillisecond_precision", False)
+        use_submillisecond = settings.frame_lock_submillisecond_precision
 
-        snap_mode = (
-            config.get("videotimestamps_snap_mode", "start") or "start"
-        ).upper()
+        snap_mode = (settings.videotimestamps_snap_mode or "start").upper()
         snap_time_type = "EXACT" if snap_mode == "EXACT" else "START"
         log(f"[FrameLocked] Frame snap mode: {snap_time_type}")
 

@@ -5,10 +5,16 @@ Output writer component.
 Handles writing mkvmerge options files and managing output paths.
 """
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..io.runner import CommandRunner
+
+if TYPE_CHECKING:
+    from vsg_core.models import AppSettings
 
 
 class OutputWriter:
@@ -16,7 +22,7 @@ class OutputWriter:
 
     @staticmethod
     def write_mkvmerge_options(
-        tokens: list[str], temp_dir: Path, config: dict, runner: CommandRunner
+        tokens: list[str], temp_dir: Path, settings: AppSettings, runner: CommandRunner
     ) -> str:
         """
         Writes mkvmerge options to a JSON file.
@@ -24,7 +30,7 @@ class OutputWriter:
         Args:
             tokens: List of mkvmerge command arguments
             temp_dir: Temporary directory for options file
-            config: Configuration dictionary (for logging preferences)
+            settings: AppSettings for logging preferences
             runner: CommandRunner for logging
 
         Returns:
@@ -41,14 +47,14 @@ class OutputWriter:
             )
 
             # Optional logging
-            if config.get("log_show_options_json"):
+            if settings.log_show_options_json:
                 runner._log_message(
                     "--- mkvmerge options (json) ---\n"
                     + json.dumps(tokens, indent=2, ensure_ascii=False)
                     + "\n-------------------------------"
                 )
 
-            if config.get("log_show_options_pretty"):
+            if settings.log_show_options_pretty:
                 runner._log_message(
                     "--- mkvmerge options (pretty) ---\n"
                     + " \\\n  ".join(tokens)

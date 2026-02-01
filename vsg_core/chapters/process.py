@@ -1,10 +1,16 @@
 # vsg_core/chapters/process.py
+from __future__ import annotations
+
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from lxml import etree as ET
 
 from ..io.runner import CommandRunner
 from .keyframes import probe_keyframes_ns
+
+if TYPE_CHECKING:
+    from vsg_core.models import AppSettings
 
 
 def _parse_ns(t: str) -> int:
@@ -234,7 +240,7 @@ def process_chapters(
     temp_dir: Path,
     runner: CommandRunner,
     tool_paths: dict,
-    config: dict,
+    settings: AppSettings,
     shift_ms: int,
 ) -> str | None:
     xml_content = runner.run(["mkvextract", str(ref_mkv), "chapters", "-"], tool_paths)
@@ -255,11 +261,11 @@ def process_chapters(
         # IMPORTANT: Snap FIRST (in video time), THEN shift to container time
         # This ensures chapters land on actual keyframes in the final muxed file
         # (Video gets container delay, so keyframe at video_time X = container_time X + shift)
-        if config.get("snap_chapters", False):
+        if settings.snap_chapters:
             keyframes_ns = probe_keyframes_ns(ref_mkv, runner, tool_paths)
             if keyframes_ns:
                 _snap_chapter_times_inplace(
-                    root, keyframes_ns, config, runner, nsmap, prefix
+                    root, keyframes_ns, settings, runner, nsmap, prefix
                 )
             else:
                 runner._log_message(
@@ -279,7 +285,7 @@ def process_chapters(
         runner._log_message("[Chapters] Normalizing chapter data...")
         _normalize_and_dedupe_chapters(root, runner, nsmap, prefix)
 
-        if config.get("rename_chapters", False):
+        if settings.rename_chapters:
             runner._log_message('[Chapters] Renaming chapters to "Chapter NN"...')
 
             # Use consistent namespace-aware XPath query
@@ -334,16 +340,16 @@ def process_chapters(
 def _snap_chapter_times_inplace(
     root,
     keyframes_ns: list[int],
-    config: dict,
+    settings: AppSettings,
     runner: CommandRunner,
     nsmap: dict,
     prefix: str,
 ):
     import bisect
 
-    mode = config.get("snap_mode", "previous")
-    threshold_ms = config.get("snap_threshold_ms", 250)
-    starts_only = config.get("snap_starts_only", True)
+    mode = settings.snap_mode.value  # SnapMode enum has .value
+    threshold_ms = settings.snap_threshold_ms
+    starts_only = settings.snap_starts_only
     threshold_ns = threshold_ms * 1_000_000
     moved, on_kf, too_far = 0, 0, 0
 

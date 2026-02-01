@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from vsg_core.models import AppSettings
+
 
 def extract_frame_as_image(
     video_path: str, frame_number: int, runner, temp_dir: Path | None = None
@@ -143,7 +145,7 @@ def validate_frame_alignment(
     subtitle_events: list,
     duration_offset_ms: float,
     runner,
-    config: dict | None = None,
+    settings: AppSettings | None = None,
     temp_dir: Path | None = None,
 ) -> dict[str, Any]:
     """
@@ -166,10 +168,7 @@ def validate_frame_alignment(
         subtitle_events: List of subtitle events
         duration_offset_ms: Calculated duration offset
         runner: CommandRunner for logging
-        config: Optional config dict with:
-            - 'duration_align_validate': bool (enable/disable)
-            - 'duration_align_validate_points': int (1 or 3)
-            - 'duration_align_hash_threshold': int (max hamming distance)
+        settings: AppSettings with validation options
         temp_dir: Optional job temp directory for index storage
 
     Returns:
@@ -178,10 +177,8 @@ def validate_frame_alignment(
     from .frame_hashing import compute_perceptual_hash
     from .video_properties import detect_video_fps
 
-    config = config or {}
-
     # Check if validation is enabled
-    if not config.get("duration_align_validate", True):
+    if settings is None or not settings.duration_align_validate:
         runner._log_message("[Frame Validation] Validation disabled in config")
         return {"enabled": False, "valid": True}
 
@@ -189,25 +186,14 @@ def validate_frame_alignment(
     runner._log_message("[Frame Validation] Validating frame alignment...")
 
     # Get number of checkpoints to validate
-    # UI sends text like "1 point (fast)" or "3 points (thorough)", extract the number
-    num_points_str = config.get("duration_align_validate_points", "3 points (thorough)")
-    if "1 point" in str(num_points_str):
-        num_points = 1
-    elif "3 points" in str(num_points_str):
+    num_points = settings.duration_align_validate_points
+    if num_points not in (1, 3):
         num_points = 3
-    else:
-        # Fallback: try to extract number or default to 3
-        try:
-            num_points = int(num_points_str)
-        except (ValueError, TypeError):
-            num_points = 3
 
-    hash_threshold = config.get("duration_align_hash_threshold", 5)
-    hash_algorithm = config.get("duration_align_hash_algorithm", "dhash")
-    # UI sends hash_size as string ("4", "8", "16"), convert to int
-    hash_size_str = config.get("duration_align_hash_size", "8")
-    hash_size = int(hash_size_str) if isinstance(hash_size_str, str) else hash_size_str
-    strictness_pct = config.get("duration_align_strictness", 80)
+    hash_threshold = settings.frame_hash_threshold
+    hash_algorithm = settings.frame_hash_algorithm
+    hash_size = settings.frame_hash_size
+    strictness_pct = settings.duration_align_strictness
 
     runner._log_message(f"[Frame Validation] Hash algorithm: {hash_algorithm}")
     runner._log_message(f"[Frame Validation] Hash size: {hash_size}x{hash_size}")

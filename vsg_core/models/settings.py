@@ -68,6 +68,12 @@ class AppSettings:
     disable_header_compression: bool
 
     # =========================================================================
+    # Post-Mux Settings
+    # =========================================================================
+    post_mux_normalize_timestamps: bool  # Enable timestamp normalization with FFmpeg
+    post_mux_strip_tags: bool  # Strip ENCODER tag with mkvpropedit
+
+    # =========================================================================
     # Logging Settings
     # =========================================================================
     log_compact: bool
@@ -99,6 +105,7 @@ class AppSettings:
     subtitle_rounding: str  # "floor", "round", "ceil"
     subtitle_target_fps: float  # Target FPS for frame-based modes
     videotimestamps_snap_mode: str  # Frame snap mode: "start", "exact"
+    videotimestamps_rounding: str  # VideoTimestamps rounding: "floor", "round"
 
     # =========================================================================
     # Frame Matching Settings (shared by all frame-based sync modes)
@@ -119,6 +126,31 @@ class AppSettings:
     correlation_snap_use_scene_changes: bool  # Use PySceneDetect for anchor points
 
     # =========================================================================
+    # Correlation-Guided Frame Anchor Settings
+    # =========================================================================
+    corr_anchor_fallback_mode: str  # "use-correlation", "use-median", "abort"
+    corr_anchor_anchor_positions: tuple[int, ...]  # Anchor positions as % of video
+
+    # =========================================================================
+    # Subtitle-Anchored Frame Snap Settings
+    # =========================================================================
+    sub_anchor_fallback_mode: str  # "abort", "use-available"
+
+    # =========================================================================
+    # Duration Align Settings
+    # =========================================================================
+    duration_align_verify_with_frames: bool  # Use hybrid frame matching verification
+    duration_align_validate: bool  # Enable simple validation
+    duration_align_fallback_mode: str  # "duration-offset", "abort"
+    duration_align_validate_points: int  # Number of validation checkpoints (1 or 3)
+    duration_align_strictness: int  # Validation strictness % (0-100)
+
+    # =========================================================================
+    # Frame Lock Settings
+    # =========================================================================
+    frame_lock_submillisecond_precision: bool  # Preserve sub-ms precision
+
+    # =========================================================================
     # Video-Verified Sync Settings
     # =========================================================================
     video_verified_zero_check_frames: int  # Verify if correlation < N frames
@@ -127,6 +159,21 @@ class AppSettings:
     video_verified_search_range_frames: int  # Frame range to search
     video_verified_sequence_length: int  # Consecutive frames to verify
     video_verified_use_pts_precision: bool  # Use PTS for sub-frame precision
+
+    # =========================================================================
+    # Interlaced Video Settings
+    # =========================================================================
+    interlaced_handling_enabled: bool  # Enable interlaced content handling
+    interlaced_force_mode: str  # "auto", "progressive", "interlaced", "telecine"
+    interlaced_num_checkpoints: int  # Checkpoints for interlaced content
+    interlaced_search_range_frames: int  # Frame search range for interlaced
+    interlaced_hash_algorithm: str  # Hash algorithm for interlaced
+    interlaced_hash_size: int  # Hash size for interlaced
+    interlaced_hash_threshold: int  # Hash threshold for interlaced
+    interlaced_comparison_method: str  # Comparison method for interlaced
+    interlaced_fallback_to_audio: bool  # Fall back to audio if frame match fails
+    interlaced_sequence_length: int  # Sequence length for interlaced
+    interlaced_deinterlace_method: str  # Deinterlace filter: "bwdif", "yadif", etc.
 
     # =========================================================================
     # Analysis/Correlation Settings
@@ -381,6 +428,11 @@ class AppSettings:
             disable_header_compression=bool(
                 cfg.get("disable_header_compression", True)
             ),
+            # Post-Mux Settings
+            post_mux_normalize_timestamps=bool(
+                cfg.get("post_mux_normalize_timestamps", False)
+            ),
+            post_mux_strip_tags=bool(cfg.get("post_mux_strip_tags", False)),
             # Logging Settings
             log_compact=bool(cfg.get("log_compact", True)),
             log_autoscroll=bool(cfg.get("log_autoscroll", True)),
@@ -406,6 +458,7 @@ class AppSettings:
             videotimestamps_snap_mode=str(
                 cfg.get("videotimestamps_snap_mode", "start")
             ),
+            videotimestamps_rounding=str(cfg.get("videotimestamps_rounding", "round")),
             # Frame Matching Settings
             frame_hash_algorithm=str(cfg.get("frame_hash_algorithm", "dhash")),
             frame_hash_size=int(cfg.get("frame_hash_size", 8)),
@@ -423,6 +476,33 @@ class AppSettings:
             ),
             correlation_snap_use_scene_changes=bool(
                 cfg.get("correlation_snap_use_scene_changes", True)
+            ),
+            # Correlation-Guided Frame Anchor Settings
+            corr_anchor_fallback_mode=str(
+                cfg.get("corr_anchor_fallback_mode", "use-correlation")
+            ),
+            corr_anchor_anchor_positions=tuple(
+                cfg.get("corr_anchor_anchor_positions", [10, 50, 90])
+            ),
+            # Subtitle-Anchored Frame Snap Settings
+            sub_anchor_fallback_mode=str(
+                cfg.get("sub_anchor_fallback_mode", "abort")
+            ),
+            # Duration Align Settings
+            duration_align_verify_with_frames=bool(
+                cfg.get("duration_align_verify_with_frames", False)
+            ),
+            duration_align_validate=bool(cfg.get("duration_align_validate", True)),
+            duration_align_fallback_mode=str(
+                cfg.get("duration_align_fallback_mode", "duration-offset")
+            ),
+            duration_align_validate_points=int(
+                cfg.get("duration_align_validate_points", 3)
+            ),
+            duration_align_strictness=int(cfg.get("duration_align_strictness", 80)),
+            # Frame Lock Settings
+            frame_lock_submillisecond_precision=bool(
+                cfg.get("frame_lock_submillisecond_precision", False)
             ),
             # Video-Verified Sync Settings
             video_verified_zero_check_frames=int(
@@ -442,6 +522,28 @@ class AppSettings:
             ),
             video_verified_use_pts_precision=bool(
                 cfg.get("video_verified_use_pts_precision", False)
+            ),
+            # Interlaced Video Settings
+            interlaced_handling_enabled=bool(
+                cfg.get("interlaced_handling_enabled", False)
+            ),
+            interlaced_force_mode=str(cfg.get("interlaced_force_mode", "auto")),
+            interlaced_num_checkpoints=int(cfg.get("interlaced_num_checkpoints", 5)),
+            interlaced_search_range_frames=int(
+                cfg.get("interlaced_search_range_frames", 5)
+            ),
+            interlaced_hash_algorithm=str(cfg.get("interlaced_hash_algorithm", "ahash")),
+            interlaced_hash_size=int(cfg.get("interlaced_hash_size", 8)),
+            interlaced_hash_threshold=int(cfg.get("interlaced_hash_threshold", 25)),
+            interlaced_comparison_method=str(
+                cfg.get("interlaced_comparison_method", "ssim")
+            ),
+            interlaced_fallback_to_audio=bool(
+                cfg.get("interlaced_fallback_to_audio", True)
+            ),
+            interlaced_sequence_length=int(cfg.get("interlaced_sequence_length", 5)),
+            interlaced_deinterlace_method=str(
+                cfg.get("interlaced_deinterlace_method", "bwdif")
             ),
             # Analysis/Correlation Settings
             source_separation_mode=str(cfg.get("source_separation_mode", "none")),

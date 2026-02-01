@@ -5,7 +5,7 @@ import copy
 import gc
 import json
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -1990,20 +1990,18 @@ class SteppingCorrector:
                     "  [QA] Filtered regions retain original timing, so delay stability check will be relaxed."
                 )
 
-        # Create QA config with overrides (use dict spread to avoid shallow copy issues)
+        # Create QA settings with overrides using dataclasses.replace()
         qa_threshold = self.settings.segmented_qa_threshold
         qa_scan_chunks = self.settings.segment_qa_chunk_count
         qa_min_chunks = self.settings.segment_qa_min_accepted_chunks
 
-        # Build QA config dict for run_audio_correlation (still uses dict interface)
-        qa_config = {
-            **self.settings.to_dict(),
-            "scan_chunk_count": qa_scan_chunks,
-            "min_accepted_chunks": qa_min_chunks,
-            "min_match_pct": qa_threshold,
-            "scan_start_percentage": self.settings.scan_start_percentage,
-            "scan_end_percentage": self.settings.scan_end_percentage,
-        }
+        # Build QA settings with overrides for QA-specific scan parameters
+        qa_settings = replace(
+            self.settings,
+            scan_chunk_count=qa_scan_chunks,
+            min_accepted_chunks=qa_min_chunks,
+            min_match_pct=qa_threshold,
+        )
         self.log(
             f"  [QA] Using minimum match confidence of {qa_threshold:.1f}% within main scan window."
         )
@@ -2014,7 +2012,7 @@ class SteppingCorrector:
             results = run_audio_correlation(
                 ref_file=ref_file_path,
                 target_file=corrected_path,
-                config=qa_config,
+                settings=qa_settings,
                 runner=self.runner,
                 tool_paths=self.tool_paths,
                 ref_lang=ref_lang,
@@ -2023,7 +2021,7 @@ class SteppingCorrector:
             )
             accepted = [r for r in results if r.get("accepted", False)]
 
-            min_accepted = qa_config.get("min_accepted_chunks", 3)
+            min_accepted = qa_min_chunks
             if len(accepted) < min_accepted:
                 self.log(
                     f"  [QA] FAILED: Not enough confident chunks ({len(accepted)}/{min_accepted})."
