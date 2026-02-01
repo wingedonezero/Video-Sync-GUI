@@ -139,13 +139,24 @@ class OptionsDialog(QDialog):
 
     # --- public (kept for compatibility) ---
     def load_settings(self):
-        self._logic.load_from_config(
-            self.config.settings if hasattr(self.config, "settings") else self.config
-        )
+        settings = self.config.settings if hasattr(self.config, "settings") else self.config
+        # Convert AppSettings dataclass to dict if needed
+        if hasattr(settings, "to_dict"):
+            settings = settings.to_dict()
+        self._logic.load_from_config(settings)
         # Initialize font size preview after settings are loaded
         self._ocr_tab.initialize_font_preview()
 
     def accept(self):
-        cfg = self.config.settings if hasattr(self.config, "settings") else self.config
-        self._logic.save_to_config(cfg)
+        # Get settings as dict, update it, then update the config
+        if hasattr(self.config, "settings") and hasattr(self.config.settings, "to_dict"):
+            # AppSettings dataclass - convert to dict, modify, and recreate
+            from vsg_core.models import AppSettings
+
+            settings_dict = self.config.settings.to_dict()
+            self._logic.save_to_config(settings_dict)
+            self.config.settings = AppSettings.from_config(settings_dict)
+        else:
+            # Plain dict config (legacy path)
+            self._logic.save_to_config(self.config)
         super().accept()
