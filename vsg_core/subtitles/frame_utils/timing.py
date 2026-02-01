@@ -494,12 +494,16 @@ def apply_sync_with_frame_remap(
     fps: float,
 ) -> tuple[FrameRemapResult, FrameRemapResult]:
     """
-    Apply sync to start and end times using frame remap to preserve positions.
+    Apply sync to start and end times using a consistent centisecond shift.
 
     This ensures:
-    - Duration in frames is preserved (end_frame - start_frame stays constant)
-    - Centisecond position within each frame is preserved
-    - No boundary crossing from rounding errors
+    - Duration is EXACTLY preserved (same shift applied to start and end)
+    - No ±1cs drift between start and end
+    - Frame-aligned shift (converted to nearest centisecond)
+
+    The key insight: calculate shift_cs ONCE and apply it to both start and end.
+    This guarantees new_duration = old_duration because:
+        (end_cs + shift_cs) - (start_cs + shift_cs) = end_cs - start_cs
 
     Args:
         start_ms: Original start timestamp in milliseconds
@@ -510,8 +514,55 @@ def apply_sync_with_frame_remap(
     Returns:
         Tuple of (start_result, end_result) FrameRemapResults
     """
-    start_result = remap_time_to_target_frame(start_ms, frame_offset, fps)
-    end_result = remap_time_to_target_frame(end_ms, frame_offset, fps)
+    frame_duration_ms = 1000.0 / fps
+
+    # Calculate shift in centiseconds ONCE - apply to both start and end
+    shift_ms = frame_offset * frame_duration_ms
+    shift_cs = round(shift_ms / 10)  # Round to nearest centisecond
+
+    # Convert original times to centiseconds
+    start_cs = int(start_ms / 10)
+    end_cs = int(end_ms / 10)
+
+    # Apply the SAME shift to both
+    new_start_cs = start_cs + shift_cs
+    new_end_cs = end_cs + shift_cs
+
+    # Clamp to non-negative
+    if new_start_cs < 0:
+        new_start_cs = 0
+    if new_end_cs < 0:
+        new_end_cs = 0
+
+    # Convert back to ms
+    new_start_ms = new_start_cs * 10.0
+    new_end_ms = new_end_cs * 10.0
+
+    # Calculate frame info for the results (informational only)
+    start_frame = int(start_ms / frame_duration_ms)
+    end_frame = int(end_ms / frame_duration_ms)
+    new_start_frame = int(new_start_ms / frame_duration_ms)
+    new_end_frame = int(new_end_ms / frame_duration_ms)
+
+    start_result = FrameRemapResult(
+        original_ms=start_ms,
+        original_frame=start_frame,
+        original_position_cs=start_cs - int(start_frame * frame_duration_ms / 10),
+        target_frame=new_start_frame,
+        target_ms=new_start_ms,
+        target_cs=new_start_cs,
+        was_adjusted=False,
+    )
+
+    end_result = FrameRemapResult(
+        original_ms=end_ms,
+        original_frame=end_frame,
+        original_position_cs=end_cs - int(end_frame * frame_duration_ms / 10),
+        target_frame=new_end_frame,
+        target_ms=new_end_ms,
+        target_cs=new_end_cs,
+        was_adjusted=False,
+    )
 
     return start_result, end_result
 
