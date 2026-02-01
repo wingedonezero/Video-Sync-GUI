@@ -9,6 +9,17 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vsg_core.audit import AuditTrail
+    from vsg_core.correction.stepping import AudioSegment
+    from vsg_core.models.context_types import (
+        DriftFlagsEntry,
+        ManualLayoutItem,
+        SegmentFlagsEntry,
+        Source1Settings,
+        SourceNSettings,
+        SteppingQualityIssue,
+        SyncStabilityIssue,
+        VideoVerifiedResult,
+    )
     from vsg_core.models.jobs import Delays, PlanItem
     from vsg_core.models.settings import AppSettings
 
@@ -26,12 +37,14 @@ class Context:
     audit: AuditTrail | None = None  # Pipeline audit trail for debugging
     sources: dict[str, str] = field(default_factory=dict)
     and_merge: bool = False
-    manual_layout: list[dict[str, Any]] = field(default_factory=list)
+    manual_layout: list[ManualLayoutItem] = field(default_factory=list)
     attachment_sources: list[str] = field(default_factory=list)
 
     # Per-source correlation settings (from job layout)
     # Format: {'Source 1': {'correlation_ref_track': 0}, 'Source 2': {'correlation_source_track': 1, 'use_source_separation': True}, ...}
-    source_settings: dict[str, dict[str, Any]] = field(default_factory=dict)
+    source_settings: dict[str, Source1Settings | SourceNSettings] = field(
+        default_factory=dict
+    )
 
     # Filled along the pipeline
     delays: Delays | None = None
@@ -40,13 +53,14 @@ class Context:
     attachments: list[str] | None = None
 
     # Stores flags for tracks that need segmented (stepping) correction
-    segment_flags: dict[str, dict] = field(default_factory=dict)
+    # Key format: "{source}_{track_id}" e.g. "Source 2_1"
+    segment_flags: dict[str, SegmentFlagsEntry] = field(default_factory=dict)
 
     # Stores flags for tracks that need PAL drift correction
-    pal_drift_flags: dict[str, dict] = field(default_factory=dict)
+    pal_drift_flags: dict[str, DriftFlagsEntry] = field(default_factory=dict)
 
     # Stores flags for tracks that need linear drift correction
-    linear_drift_flags: dict[str, dict] = field(default_factory=dict)
+    linear_drift_flags: dict[str, DriftFlagsEntry] = field(default_factory=dict)
 
     # NEW FIELDS: Container delay tracking
     # Store Source 1's reference audio container delay for chain calculation
@@ -73,20 +87,21 @@ class Context:
     stepping_detected_separated: list[str] = field(default_factory=list)
 
     # Store EDLs (Edit Decision Lists) for stepping correction by source
-    # Format: {source_key: List[AudioSegment]}
-    stepping_edls: dict[str, list[Any]] = field(default_factory=dict)
+    stepping_edls: dict[str, list[AudioSegment]] = field(default_factory=dict)
 
     # Store stepping quality issues for reporting
-    # Format: [{'source': str, 'issue_type': str, 'severity': str, 'message': str, 'details': dict}]
-    stepping_quality_issues: list[dict[str, Any]] = field(default_factory=list)
+    stepping_quality_issues: list[SteppingQualityIssue] = field(default_factory=list)
 
     # Store sync stability issues (correlation variance) for reporting
-    # Format: [{'source': str, 'variance_detected': bool, 'max_variance_ms': float, 'outliers': list, 'details': dict}]
-    sync_stability_issues: list[dict[str, Any]] = field(default_factory=list)
+    sync_stability_issues: list[SyncStabilityIssue] = field(default_factory=list)
 
     # Flag if any subtitle track used raw delay fallback due to no scene matches
     # (correlation-frame-snap mode couldn't find scenes to verify against)
     correlation_snap_no_scenes_fallback: bool = False
+
+    # Cache video-verified subtitle sync results per source
+    # Format: {"Source 2": {"original_delay_ms": 100.0, "corrected_delay_ms": 102.5, ...}}
+    video_verified_sources: dict[str, VideoVerifiedResult] = field(default_factory=dict)
 
     # Results/summaries
     out_file: str | None = None

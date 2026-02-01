@@ -143,7 +143,7 @@ class SubtitlesStep:
         # If video-verified mode is enabled, run frame matching once per
         # unique source and update ctx.delays. This ensures all subtitle
         # tracks (text, bitmap, OCR'd, preserved) use the corrected delay.
-        subtitle_sync_mode = ctx.settings_dict.get("subtitle_sync_mode", "time-based")
+        subtitle_sync_mode = ctx.settings.subtitle_sync_mode
         if subtitle_sync_mode == "video-verified" and source1_file:
             self._run_video_verified_per_source(ctx, runner, source1_file)
 
@@ -175,13 +175,9 @@ class SubtitlesStep:
             # This matches old behavior where time-based + mkvmerge just passed
             # the file through unchanged
             # ================================================================
-            subtitle_sync_mode = ctx.settings_dict.get(
-                "subtitle_sync_mode", "time-based"
-            )
-            use_raw_values = ctx.settings_dict.get("time_based_use_raw_values", False)
-            bypass_subtitle_data = ctx.settings_dict.get(
-                "time_based_bypass_subtitle_data", True
-            )
+            subtitle_sync_mode = ctx.settings.subtitle_sync_mode
+            use_raw_values = ctx.settings.time_based_use_raw_values
+            bypass_subtitle_data = ctx.settings.time_based_bypass_subtitle_data
 
             # Determine if we need SubtitleData processing
             needs_subtitle_data = (
@@ -202,7 +198,7 @@ class SubtitlesStep:
                 or use_raw_values  # Raw values mode applies delay in SubtitleData
                 or (
                     item.track.source in ctx.stepping_edls
-                    and ctx.settings_dict.get("stepping_adjust_subtitles", True)
+                    and ctx.settings.stepping_adjust_subtitles
                 )  # Stepping needs SubtitleData
             )
 
@@ -305,8 +301,8 @@ class SubtitlesStep:
         """
         from vsg_core.subtitles.data import SubtitleData as SubtitleDataClass
 
-        subtitle_sync_mode = ctx.settings_dict.get("subtitle_sync_mode", "time-based")
-        Path(ctx.settings_dict.get("logs_folder", ctx.temp_dir))
+        subtitle_sync_mode = ctx.settings.subtitle_sync_mode
+        Path(ctx.settings.logs_folder or ctx.temp_dir)
 
         # ================================================================
         # STEP 1: Load into SubtitleData (or use provided)
@@ -446,16 +442,14 @@ class SubtitlesStep:
         # ================================================================
         # STEP 2: Apply Stepping (if applicable)
         # ================================================================
-        if ctx.settings_dict.get("stepping_adjust_subtitles", True):
+        if ctx.settings.stepping_adjust_subtitles:
             source_key = item.track.source
             if source_key in ctx.stepping_edls:
                 runner._log_message("[SubtitleData] Applying stepping correction...")
 
                 result = subtitle_data.apply_stepping(
                     edl_segments=ctx.stepping_edls[source_key],
-                    boundary_mode=ctx.settings_dict.get(
-                        "stepping_boundary_mode", "start"
-                    ),
+                    boundary_mode=ctx.settings.stepping_boundary_mode,
                     runner=runner,
                 )
 
@@ -607,7 +601,7 @@ class SubtitlesStep:
             runner._log_message(f"[SubtitleData] WARNING: Could not save JSON: {e}")
 
         # For OCR with debug enabled, also copy to OCR debug folder
-        if item.perform_ocr and ctx.settings_dict.get("ocr_debug_output", False):
+        if item.perform_ocr and ctx.settings.ocr_debug_output:
             ocr_debug_dir = self._get_ocr_debug_dir(item, ctx)
             if ocr_debug_dir:
                 ocr_json_path = ocr_debug_dir / "subtitle_data.json"
@@ -628,7 +622,7 @@ class SubtitlesStep:
 
         runner._log_message(f"[SubtitleData] Saving to {output_path.name}...")
         try:
-            rounding_mode = ctx.settings_dict.get("subtitle_rounding", "floor")
+            rounding_mode = ctx.settings.subtitle_rounding
 
             # DIAGNOSTIC: Log timestamps BEFORE save (what SubtitleData has in memory)
             if subtitle_data.events:
@@ -767,11 +761,7 @@ class SubtitlesStep:
 
         # Check if video-verified was already computed for this source
         # If so, use the pre-computed delay and apply it directly (skip re-running frame matching)
-        if (
-            sync_mode == "video-verified"
-            and hasattr(ctx, "video_verified_sources")
-            and source_key in ctx.video_verified_sources
-        ):
+        if sync_mode == "video-verified" and source_key in ctx.video_verified_sources:
             cached = ctx.video_verified_sources[source_key]
             runner._log_message(
                 f"[Sync] Using pre-computed video-verified delay for {source_key}"
@@ -926,9 +916,9 @@ class SubtitlesStep:
         from vsg_core.subtitles.ocr import run_ocr_unified
 
         ocr_work_dir = ctx.temp_dir / "ocr"
-        logs_dir = Path(ctx.settings_dict.get("logs_folder", ctx.temp_dir))
+        logs_dir = Path(ctx.settings.logs_folder or ctx.temp_dir)
 
-        if ctx.settings_dict.get("ocr_run_in_subprocess", False):
+        if ctx.settings.ocr_run_in_subprocess:
             subtitle_data = self._run_ocr_subprocess(
                 item=item,
                 ctx=ctx,
@@ -942,7 +932,7 @@ class SubtitlesStep:
                 item.track.props.lang,
                 runner,
                 ctx.tool_paths,
-                ctx.settings_dict,
+                ctx.settings,
                 work_dir=ocr_work_dir,
                 logs_dir=logs_dir,
                 track_id=item.track.id,
@@ -1116,7 +1106,7 @@ class SubtitlesStep:
         Looks for the debug folder created by OCR pipeline:
         {logs_dir}/{base_name}_ocr_debug_{timestamp}/
         """
-        logs_dir = Path(ctx.settings_dict.get("logs_folder", ctx.temp_dir))
+        logs_dir = Path(ctx.settings.logs_folder or ctx.temp_dir)
 
         # Find existing OCR debug directory for this track
         # Format: track_{id}_ocr_debug_* or similar
@@ -1241,8 +1231,6 @@ class SubtitlesStep:
                         ctx.delays.raw_source_delays_ms[source_key] = corrected_delay_ms
 
                     # Store that we've processed this source
-                    if not hasattr(ctx, "video_verified_sources"):
-                        ctx.video_verified_sources = {}
                     ctx.video_verified_sources[source_key] = {
                         "original_delay_ms": original_delay,
                         "corrected_delay_ms": corrected_delay_ms,
@@ -1297,10 +1285,7 @@ class SubtitlesStep:
         )
 
         # Check if this source was already processed in the per-source pre-processing step
-        if (
-            hasattr(ctx, "video_verified_sources")
-            and source_key in ctx.video_verified_sources
-        ):
+        if source_key in ctx.video_verified_sources:
             cached = ctx.video_verified_sources[source_key]
             runner._log_message(
                 f"[VideoVerified] Bitmap track {item.track.id} ({ext}): using pre-computed delay for {source_key}"

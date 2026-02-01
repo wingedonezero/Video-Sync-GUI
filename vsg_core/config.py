@@ -48,13 +48,19 @@ class AppConfig:
             "ocr_enabled": True,  # Enable OCR for image-based subtitles
             "ocr_engine": "tesseract",  # OCR engine: 'tesseract', 'easyocr', 'paddleocr'
             "ocr_language": "eng",  # Tesseract language code
+            "ocr_psm": 7,  # Page segmentation mode (7 = single text line)
+            "ocr_char_whitelist": "",  # Characters to include (empty = all)
             "ocr_char_blacklist": "",  # Characters to exclude from OCR
+            "ocr_multi_pass": True,  # Enable multi-pass OCR for better accuracy
             "ocr_output_format": "ass",  # 'ass' or 'srt'
             "ocr_font_size_ratio": 5.80,  # Font size as % of PlayResY (5.80% = 28pt at 480p, 63pt at 1080p)
             # OCR Preprocessing
             "ocr_preprocess_auto": True,  # Auto-detect optimal preprocessing
             "ocr_force_binarization": False,  # Force binary thresholding
             "ocr_upscale_threshold": 40,  # Upscale if height < this (pixels)
+            "ocr_target_height": 80,  # Target height after upscaling (pixels)
+            "ocr_border_size": 5,  # Border padding in pixels
+            "ocr_binarization_method": "otsu",  # Binarization method: 'otsu', 'adaptive'
             "ocr_denoise": False,  # Apply denoising
             # OCR Post-Processing
             "ocr_cleanup_enabled": True,  # Enable pattern-based text cleanup
@@ -64,6 +70,8 @@ class AppConfig:
             # OCR Position Handling
             "ocr_preserve_positions": True,  # Keep non-bottom subtitle positions
             "ocr_bottom_threshold": 75.0,  # Y% threshold for "bottom" (configurable)
+            "ocr_video_width": 1920,  # Video width for position calculation
+            "ocr_video_height": 1080,  # Video height for position calculation
             # OCR Reporting
             "ocr_generate_report": True,  # Generate detailed OCR report
             "ocr_save_debug_images": False,  # Save preprocessed images for debugging

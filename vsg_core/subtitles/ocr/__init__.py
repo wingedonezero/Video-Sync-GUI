@@ -25,10 +25,11 @@ The pipeline is designed to:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from vsg_core.io.runner import CommandRunner
+    from vsg_core.models.settings import AppSettings
     from vsg_core.subtitles.data import SubtitleData
 
 from .engine import OCREngine
@@ -63,7 +64,7 @@ def run_ocr(
     lang: str,
     runner: CommandRunner,
     tool_paths: dict,
-    config: dict,
+    settings: AppSettings,
     work_dir: Path | None = None,
     logs_dir: Path | None = None,
     track_id: int = 0,
@@ -83,7 +84,7 @@ def run_ocr(
         lang: The 3-letter language code for OCR (e.g., 'eng')
         runner: The CommandRunner instance for logging
         tool_paths: A dictionary of tool paths (unused by new OCR)
-        config: The application's configuration dictionary
+        settings: The application's typed settings
         work_dir: Working directory for temp files
         logs_dir: Directory for OCR reports
         track_id: Track ID for organizing work files
@@ -114,13 +115,8 @@ def run_ocr(
         runner._log_message(f"[OCR] Skipping {sub_path.name}: Unsupported format.")
         return None
 
-    # Check if OCR is enabled
-    if not config.get("ocr_enabled", True):
-        runner._log_message(f"[OCR] Skipping {sub_path.name}: OCR is disabled.")
-        return None
-
     # Determine output format and path
-    output_format = config.get("ocr_output_format", "ass")
+    output_format = settings.ocr_output_format
     output_suffix = ".ass" if output_format == "ass" else ".srt"
     output_path = sub_path.with_suffix(output_suffix)
 
@@ -138,8 +134,8 @@ def run_ocr(
         def progress_callback(message: str, progress: float):
             runner._log_message(f"[OCR] {message} ({int(progress * 100)}%)")
 
-        # Build settings dict for pipeline
-        ocr_settings = _build_ocr_settings(config, lang)
+        # Build settings dict for pipeline from typed AppSettings
+        ocr_settings = _build_ocr_settings(settings, lang)
 
         # Create and run pipeline
         pipeline = OCRPipeline(
@@ -199,11 +195,12 @@ def run_ocr(
         return None
 
 
-def _build_ocr_settings(config: dict, lang: str) -> dict:
+def _build_ocr_settings(settings: AppSettings, lang: str) -> dict:
     """
-    Build OCR settings dict from application config.
+    Build OCR settings dict from AppSettings for internal OCR pipeline.
 
-    Maps config keys to OCR pipeline settings.
+    Maps AppSettings fields to OCR pipeline settings dict.
+    The internal OCR components still use dict for flexibility.
     """
     # Map 3-letter language codes to Tesseract codes
     lang_map = {
@@ -225,31 +222,34 @@ def _build_ocr_settings(config: dict, lang: str) -> dict:
         # Language
         "ocr_language": tesseract_lang,
         # Preprocessing
-        "ocr_preprocess_auto": config.get("ocr_preprocess_auto", True),
-        "ocr_force_binarization": config.get("ocr_force_binarization", False),
-        "ocr_upscale_threshold": config.get("ocr_upscale_threshold", 40),
-        "ocr_denoise": config.get("ocr_denoise", False),
+        "ocr_preprocess_auto": settings.ocr_preprocess_auto,
+        "ocr_force_binarization": settings.ocr_force_binarization,
+        "ocr_upscale_threshold": settings.ocr_upscale_threshold,
+        "ocr_target_height": settings.ocr_target_height,
+        "ocr_border_size": settings.ocr_border_size,
+        "ocr_binarization_method": settings.ocr_binarization_method,
+        "ocr_denoise": settings.ocr_denoise,
         # OCR engine
-        "ocr_engine": config.get("ocr_engine", "tesseract"),
-        "ocr_char_blacklist": config.get("ocr_char_blacklist", ""),
-        "ocr_low_confidence_threshold": config.get(
-            "ocr_low_confidence_threshold", 60.0
-        ),
+        "ocr_engine": settings.ocr_engine,
+        "ocr_psm": settings.ocr_psm,
+        "ocr_char_whitelist": settings.ocr_char_whitelist,
+        "ocr_char_blacklist": settings.ocr_char_blacklist,
+        "ocr_multi_pass": settings.ocr_multi_pass,
+        "ocr_low_confidence_threshold": settings.ocr_low_confidence_threshold,
         # Post-processing
-        "ocr_cleanup_enabled": config.get("ocr_cleanup_enabled", True),
-        "ocr_cleanup_normalize_ellipsis": config.get(
-            "ocr_cleanup_normalize_ellipsis", False
-        ),
-        "ocr_custom_wordlist_path": config.get("ocr_custom_wordlist_path", ""),
+        "ocr_cleanup_enabled": settings.ocr_cleanup_enabled,
+        "ocr_cleanup_normalize_ellipsis": settings.ocr_cleanup_normalize_ellipsis,
+        "ocr_custom_wordlist_path": settings.ocr_custom_wordlist_path,
         # Output
-        "ocr_output_format": config.get("ocr_output_format", "ass"),
-        "ocr_preserve_positions": config.get("ocr_preserve_positions", True),
-        "ocr_bottom_threshold": config.get("ocr_bottom_threshold", 75.0),
+        "ocr_output_format": settings.ocr_output_format,
+        "ocr_preserve_positions": settings.ocr_preserve_positions,
+        "ocr_bottom_threshold": settings.ocr_bottom_threshold,
+        "ocr_video_width": settings.ocr_video_width,
+        "ocr_video_height": settings.ocr_video_height,
         # Reporting
-        "ocr_generate_report": config.get("ocr_generate_report", True),
-        "ocr_save_debug_images": config.get("ocr_save_debug_images", False),
+        "ocr_save_debug_images": settings.ocr_save_debug_images,
         # Debug output - saves images and text files for problem subtitles
-        "ocr_debug_output": config.get("ocr_debug_output", False),
+        "ocr_debug_output": settings.ocr_debug_output,
     }
 
 
@@ -276,7 +276,7 @@ def run_ocr_unified(
     lang: str,
     runner: CommandRunner,
     tool_paths: dict,
-    config: dict,
+    settings: AppSettings,
     work_dir: Path | None = None,
     logs_dir: Path | None = None,
     track_id: int = 0,
@@ -293,7 +293,7 @@ def run_ocr_unified(
         lang: The 3-letter language code for OCR (e.g., 'eng')
         runner: The CommandRunner instance for logging
         tool_paths: A dictionary of tool paths (unused by new OCR)
-        config: The application's configuration dictionary
+        settings: The application's typed settings
         work_dir: Working directory for temp files
         logs_dir: Directory for OCR reports
         track_id: Track ID for organizing work files
@@ -321,11 +321,6 @@ def run_ocr_unified(
         runner._log_message(f"[OCR] Skipping {sub_path.name}: Unsupported format.")
         return None
 
-    # Check if OCR is enabled
-    if not config.get("ocr_enabled", True):
-        runner._log_message(f"[OCR] Skipping {sub_path.name}: OCR is disabled.")
-        return None
-
     # Set up directories
     if work_dir is None:
         work_dir = sub_path.parent / "ocr_work"
@@ -340,8 +335,8 @@ def run_ocr_unified(
         def progress_callback(message: str, progress: float):
             runner._log_message(f"[OCR] {message} ({int(progress * 100)}%)")
 
-        # Build settings dict for pipeline
-        ocr_settings = _build_ocr_settings(config, lang)
+        # Build settings dict for pipeline from typed AppSettings
+        ocr_settings = _build_ocr_settings(settings, lang)
 
         # Create and run pipeline with return_subtitle_data=True
         pipeline = OCRPipeline(

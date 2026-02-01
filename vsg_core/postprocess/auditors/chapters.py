@@ -119,7 +119,7 @@ class ChaptersAuditor(BaseAuditor):
             )
 
             # Check 3: If renaming was enabled, verify it was applied
-            if self.ctx.settings_dict.get("rename_chapters", False):
+            if self.ctx.settings.rename_chapters:
                 issues += self._verify_rename_applied(
                     final_atoms, final_prefix, final_nsmap
                 )

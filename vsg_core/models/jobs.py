@@ -1,15 +1,25 @@
 # vsg_core/models/jobs.py
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Literal
+from __future__ import annotations
 
-from .media import Track
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from .context_types import (
+        FilterConfig,
+        FontReplacements,
+        ManualLayoutItem,
+        StylePatch,
+    )
+    from .media import Track
 
 
 @dataclass(frozen=True)
 class JobSpec:
     sources: dict[str, Path]
-    manual_layout: list[dict] | None = None
+    manual_layout: list[ManualLayoutItem] | None = None
 
 
 @dataclass(frozen=True)
@@ -34,8 +44,8 @@ class PlanItem:
     convert_to_ass: bool = False
     rescale: bool = False
     size_multiplier: float = 1.0
-    style_patch: dict[str, Any] | None = None
-    font_replacements: dict[str, Any] | None = (
+    style_patch: StylePatch | None = None
+    font_replacements: FontReplacements | None = (
         None  # Font replacement mappings from Font Manager
     )
     user_modified_path: str | None = None
@@ -55,7 +65,7 @@ class PlanItem:
     # Generated track fields (for tracks created by filtering styles from another track)
     is_generated: bool = False  # Marks this as a generated track
     source_track_id: int | None = None  # ID of the source track this was generated from
-    filter_config: dict[str, Any] | None = (
+    filter_config: FilterConfig | None = (
         None  # Filter settings: mode, styles, forced_include, forced_exclude
     )
     original_style_list: list[str] = field(

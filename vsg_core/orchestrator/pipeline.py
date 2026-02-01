@@ -57,7 +57,9 @@ class Orchestrator:
         if not source1_file:
             raise ValueError("Job is missing Source 1 (Reference).")
 
-        base_temp = Path(settings_dict.get("temp_root", Path.cwd() / "temp_work"))
+        base_temp = (
+            Path(settings.temp_root) if settings.temp_root else Path.cwd() / "temp_work"
+        )
         job_temp = base_temp / f"orch_{Path(source1_file).stem}_{int(time.time())}"
         job_temp.mkdir(parents=True, exist_ok=True)
 
@@ -132,7 +134,7 @@ class Orchestrator:
             log(f"[FATAL] Extraction phase failed: {e}")
             raise RuntimeError(f"Extraction phase failed: {e}") from e
 
-        if ctx.settings_dict.get("segmented_enabled", False) and (
+        if ctx.settings.segmented_enabled and (
             ctx.segment_flags or ctx.pal_drift_flags or ctx.linear_drift_flags
         ):
             log("--- Advanced Audio Correction Phase ---")
