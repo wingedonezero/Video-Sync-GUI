@@ -33,7 +33,7 @@ class JobPipeline:
 
     def __init__(
         self,
-        config: dict,
+        config: dict | AppSettings,
         log_callback: Callable[[str], None],
         progress_callback: Callable[[float], None],
     ):
@@ -41,12 +41,17 @@ class JobPipeline:
         Initializes the job pipeline.
 
         Args:
-            config: Configuration dictionary
+            config: Configuration dictionary or AppSettings instance
             log_callback: Callback for GUI log messages
             progress_callback: Callback for progress updates
         """
-        self.config = config
-        self.settings = AppSettings.from_config(config)
+        # Accept both dict and AppSettings for backwards compatibility
+        if isinstance(config, AppSettings):
+            self.settings = config
+            self.config = config.to_dict()
+        else:
+            self.config = config
+            self.settings = AppSettings.from_config(config)
         self.gui_log_callback = log_callback
         self.progress = progress_callback
         self.tool_paths = {}
