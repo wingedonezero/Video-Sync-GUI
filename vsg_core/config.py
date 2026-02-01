@@ -128,6 +128,7 @@ class AppConfig:
             "video_verified_search_range_frames": 3,  # Frame range to search around candidates
             "video_verified_sequence_length": 10,  # Number of consecutive frames to verify at each checkpoint
             "video_verified_use_pts_precision": False,  # Use PTS for sub-frame precision (vs frame-based)
+            "video_verified_frame_remap": False,  # Preserve centisecond position within frames during sync
             # --- Interlaced/Telecine Content Settings ---
             # Separate settings for interlaced/telecine content which needs different handling
             # These are used when interlaced or telecine content is detected

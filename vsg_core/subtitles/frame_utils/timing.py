@@ -13,6 +13,7 @@ from __future__ import annotations
 import gc
 import math
 import threading
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -377,3 +378,184 @@ def time_to_frame_vfr(
     except Exception as e:
         runner._log_message(f"[VideoTimestamps] WARNING: time_to_frame_vfr failed: {e}")
         return None
+
+
+# ============================================================================
+# FRAME REMAP: Preserve centisecond position within frames during sync
+# ============================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class FrameRemapResult:
+    """Result of frame remap calculation for a single timestamp."""
+
+    original_ms: float  # Original timestamp in milliseconds
+    original_frame: int  # Frame number in source video
+    original_position_cs: int  # Centisecond position within frame (0-4 typically)
+    target_frame: int  # Frame number in target video (after offset)
+    target_ms: float  # Calculated target timestamp in milliseconds
+    target_cs: int  # Final centisecond value for ASS
+    was_adjusted: bool  # True if boundary adjustment was needed
+
+
+def calculate_frame_position(time_ms: float, fps: float) -> tuple[int, int]:
+    """
+    Calculate which frame a timestamp is in and its centisecond position within that frame.
+
+    Args:
+        time_ms: Timestamp in milliseconds
+        fps: Frame rate (e.g., 23.976)
+
+    Returns:
+        Tuple of (frame_number, position_in_frame_cs)
+
+    Example at 23.976 fps (frame_duration ≈ 41.708ms, ≈ 4.17cs):
+        time_ms=1020 → frame 24 (starts at 1001ms ≈ 100cs), position = 102cs - 100cs = 2cs
+    """
+    frame_duration_ms = 1000.0 / fps
+    frame_duration_cs = frame_duration_ms / 10.0
+
+    # Which frame is this timestamp in?
+    frame_num = int(time_ms / frame_duration_ms)
+
+    # What centisecond does this frame start at?
+    frame_start_cs = int(frame_num * frame_duration_cs)
+
+    # What's the timestamp's centisecond value?
+    time_cs = int(time_ms / 10)
+
+    # Position within frame (in centiseconds)
+    position_cs = time_cs - frame_start_cs
+
+    return frame_num, position_cs
+
+
+def remap_time_to_target_frame(
+    time_ms: float,
+    frame_offset: int,
+    fps: float,
+) -> FrameRemapResult:
+    """
+    Remap a timestamp to target video while preserving centisecond position within frame.
+
+    Instead of adding a delay (which can cause boundary crossings due to rounding),
+    this calculates which frame the timestamp belongs to, applies the frame offset,
+    and preserves the centisecond position within that frame.
+
+    Args:
+        time_ms: Original timestamp in milliseconds
+        frame_offset: Frame offset from video verified (e.g., -24)
+        fps: Frame rate (e.g., 23.976)
+
+    Returns:
+        FrameRemapResult with all calculation details
+
+    Example at 23.976 fps with frame_offset=-24:
+        time_ms=1020 (102cs, frame 24, 2cs into frame)
+        → target frame 0, 2cs into frame
+        → target_cs=2, target_ms=20
+    """
+    frame_duration_ms = 1000.0 / fps
+    frame_duration_cs = frame_duration_ms / 10.0
+
+    # Step 1: Find source frame and position
+    source_frame, position_cs = calculate_frame_position(time_ms, fps)
+
+    # Step 2: Calculate target frame
+    target_frame = source_frame + frame_offset
+
+    # Handle negative frames (clamp to 0)
+    if target_frame < 0:
+        target_frame = 0
+        position_cs = 0  # Start at beginning of frame 0
+
+    # Step 3: Calculate target centisecond
+    target_frame_start_cs = int(target_frame * frame_duration_cs)
+    target_cs = target_frame_start_cs + position_cs
+
+    # Step 4: Convert back to ms
+    target_ms = target_cs * 10.0
+
+    return FrameRemapResult(
+        original_ms=time_ms,
+        original_frame=source_frame,
+        original_position_cs=position_cs,
+        target_frame=target_frame,
+        target_ms=target_ms,
+        target_cs=target_cs,
+        was_adjusted=False,  # Pure remap, no adjustment needed
+    )
+
+
+def apply_sync_with_frame_remap(
+    start_ms: float,
+    end_ms: float,
+    frame_offset: int,
+    fps: float,
+) -> tuple[FrameRemapResult, FrameRemapResult]:
+    """
+    Apply sync to start and end times using frame remap to preserve positions.
+
+    This ensures:
+    - Duration in frames is preserved (end_frame - start_frame stays constant)
+    - Centisecond position within each frame is preserved
+    - No boundary crossing from rounding errors
+
+    Args:
+        start_ms: Original start timestamp in milliseconds
+        end_ms: Original end timestamp in milliseconds
+        frame_offset: Frame offset from video verified
+        fps: Frame rate
+
+    Returns:
+        Tuple of (start_result, end_result) FrameRemapResults
+    """
+    start_result = remap_time_to_target_frame(start_ms, frame_offset, fps)
+    end_result = remap_time_to_target_frame(end_ms, frame_offset, fps)
+
+    return start_result, end_result
+
+
+def verify_frame_boundary(
+    time_ms: float,
+    delay_ms: float,
+    fps: float,
+) -> tuple[int, bool]:
+    """
+    Verify if applying a delay would cause a frame boundary crossing after ASS rounding.
+
+    This is the "hybrid" approach: apply delay normally, then check if floor rounding
+    to centiseconds would put us in a different frame than expected.
+
+    Args:
+        time_ms: Original timestamp in milliseconds
+        delay_ms: Delay to apply (from video verified)
+        fps: Frame rate
+
+    Returns:
+        Tuple of (adjusted_centiseconds, was_adjusted)
+        - adjusted_centiseconds: The centisecond value to use (possibly adjusted)
+        - was_adjusted: True if adjustment was made to prevent boundary crossing
+    """
+    frame_duration_ms = 1000.0 / fps
+
+    # Calculate new time and expected frame after applying delay
+    new_time_ms = time_ms + delay_ms
+    expected_frame = int(new_time_ms / frame_duration_ms)
+
+    # Handle negative times
+    if new_time_ms < 0:
+        return 0, True
+
+    # What would floor rounding give us?
+    floored_cs = int(new_time_ms / 10)  # floor division
+    floored_ms = floored_cs * 10.0
+    actual_frame = int(floored_ms / frame_duration_ms)
+
+    if actual_frame == expected_frame:
+        # Floor rounding keeps us in the correct frame
+        return floored_cs, False
+    else:
+        # Floor crossed a boundary - use ceil to stay in correct frame
+        ceiled_cs = int(math.ceil(new_time_ms / 10))
+        return ceiled_cs, True

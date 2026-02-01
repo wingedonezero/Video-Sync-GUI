@@ -774,32 +774,88 @@ class SubtitlesStep:
             # Apply the delay directly to subtitle events (like time-based mode)
             from vsg_core.subtitles.data import OperationResult, SyncEventData
 
-            events_synced = 0
-            for event in subtitle_data.events:
-                if event.is_comment:
-                    continue
-                original_start = event.start_ms
-                original_end = event.end_ms
-                event.start_ms += cached["corrected_delay_ms"]
-                event.end_ms += cached["corrected_delay_ms"]
-                event.sync = SyncEventData(
-                    original_start_ms=original_start,
-                    original_end_ms=original_end,
-                    start_adjustment_ms=cached["corrected_delay_ms"],
-                    end_adjustment_ms=cached["corrected_delay_ms"],
-                    snapped_to_frame=False,
-                )
-                events_synced += 1
-
-            runner._log_message(
-                f"[Sync] Applied {cached['corrected_delay_ms']:+.1f}ms to {events_synced} events"
+            # Check if frame remap is enabled and we have the required data
+            details: dict = cached.get("details", {})
+            raw_frame_offset = details.get("frame_offset")
+            raw_fps = details.get("fps")
+            frame_offset: int | None = None
+            fps: float | None = None
+            if isinstance(raw_frame_offset, int | float):
+                frame_offset = int(raw_frame_offset)
+            if isinstance(raw_fps, int | float):
+                fps = float(raw_fps)
+            use_frame_remap = (
+                ctx.settings.video_verified_frame_remap
+                and frame_offset is not None
+                and fps is not None
             )
+
+            if use_frame_remap:
+                from vsg_core.subtitles.frame_utils import apply_sync_with_frame_remap
+
+                # Type narrowing: we know these are not None due to use_frame_remap check
+                assert frame_offset is not None
+                assert fps is not None
+                runner._log_message(
+                    f"[Sync] Using frame remap: offset={frame_offset:+d} frames, fps={fps:.3f}"
+                )
+
+                events_synced = 0
+                for event in subtitle_data.events:
+                    if event.is_comment:
+                        continue
+                    original_start = event.start_ms
+                    original_end = event.end_ms
+
+                    # Use frame remap to preserve centisecond position within frames
+                    start_result, end_result = apply_sync_with_frame_remap(
+                        original_start, original_end, frame_offset, fps
+                    )
+                    event.start_ms = start_result.target_ms
+                    event.end_ms = end_result.target_ms
+                    event.sync = SyncEventData(
+                        original_start_ms=original_start,
+                        original_end_ms=original_end,
+                        start_adjustment_ms=start_result.target_ms - original_start,
+                        end_adjustment_ms=end_result.target_ms - original_end,
+                        snapped_to_frame=True,
+                        target_frame_start=start_result.target_frame,
+                        target_frame_end=end_result.target_frame,
+                    )
+                    events_synced += 1
+
+                runner._log_message(
+                    f"[Sync] Frame remap applied to {events_synced} events "
+                    f"(offset={frame_offset:+d} frames)"
+                )
+            else:
+                # Standard delay application
+                events_synced = 0
+                for event in subtitle_data.events:
+                    if event.is_comment:
+                        continue
+                    original_start = event.start_ms
+                    original_end = event.end_ms
+                    event.start_ms += cached["corrected_delay_ms"]
+                    event.end_ms += cached["corrected_delay_ms"]
+                    event.sync = SyncEventData(
+                        original_start_ms=original_start,
+                        original_end_ms=original_end,
+                        start_adjustment_ms=cached["corrected_delay_ms"],
+                        end_adjustment_ms=cached["corrected_delay_ms"],
+                        snapped_to_frame=False,
+                    )
+                    events_synced += 1
+                runner._log_message(
+                    f"[Sync] Applied {cached['corrected_delay_ms']:+.1f}ms to {events_synced} events"
+                )
             item.frame_adjusted = True
             return OperationResult(
                 success=True,
                 operation="sync",
                 events_affected=events_synced,
-                summary=f"Video-verified (pre-computed): {cached['corrected_delay_ms']:+.1f}ms applied to {events_synced} events",
+                summary=f"Video-verified (pre-computed): {cached['corrected_delay_ms']:+.1f}ms applied to {events_synced} events"
+                + (" (frame remap)" if use_frame_remap else ""),
             )
 
         # For video-verified mode: Source 1 is the reference - no frame matching needed

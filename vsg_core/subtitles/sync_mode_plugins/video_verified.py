@@ -423,6 +423,8 @@ def calculate_video_verified_offset(
         "video_offset_ms": sub_frame_offset_ms,
         "frame_offset": best_frame_offset,
         "final_offset_ms": final_offset_ms,
+        "fps": fps,
+        "frame_duration_ms": frame_duration_ms,
         "candidates": candidate_results,
         "checkpoints": len(checkpoint_times),
         "use_pts_precision": use_pts,

@@ -181,6 +181,7 @@ class AppSettings:
     video_verified_search_range_frames: int  # Frame range to search
     video_verified_sequence_length: int  # Consecutive frames to verify
     video_verified_use_pts_precision: bool  # Use PTS for sub-frame precision
+    video_verified_frame_remap: bool  # Preserve centisecond position within frames
 
     # =========================================================================
     # Interlaced Video Settings
@@ -569,6 +570,9 @@ class AppSettings:
             ),
             video_verified_use_pts_precision=bool(
                 cfg.get("video_verified_use_pts_precision", False)
+            ),
+            video_verified_frame_remap=bool(
+                cfg.get("video_verified_frame_remap", False)
             ),
             # Interlaced Video Settings
             interlaced_handling_enabled=bool(

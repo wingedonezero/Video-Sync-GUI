@@ -40,6 +40,10 @@ from .scene_detection import (
 # Timing functions (CFR and VFR)
 # ============================================================================
 from .timing import (
+    # Frame remap (preserve centisecond position within frames)
+    FrameRemapResult,
+    apply_sync_with_frame_remap,
+    calculate_frame_position,
     # MODE 3: VFR (VideoTimestamps-based)
     clear_vfr_cache,
     frame_to_time_aegisub,
@@ -47,6 +51,7 @@ from .timing import (
     frame_to_time_middle,
     frame_to_time_vfr,
     get_vfr_timestamps,
+    remap_time_to_target_frame,
     # MODE 2: Aegisub-style
     time_to_frame_aegisub,
     # MODE 0: Frame START (floor-based, deterministic)
@@ -54,6 +59,7 @@ from .timing import (
     # MODE 1: Middle of frame
     time_to_frame_middle,
     time_to_frame_vfr,
+    verify_frame_boundary,
 )
 
 # ============================================================================
@@ -88,8 +94,12 @@ from .video_reader import (
 # Public API
 # ============================================================================
 __all__ = [
+    # Frame remap
+    "FrameRemapResult",
     # Video reader
     "VideoReader",
+    "apply_sync_with_frame_remap",
+    "calculate_frame_position",
     "clear_vfr_cache",
     "compare_frames",
     "compare_video_properties",
@@ -114,10 +124,12 @@ __all__ = [
     "get_vfr_timestamps",
     "get_video_duration_ms",
     "get_video_properties",
+    "remap_time_to_target_frame",
     "time_to_frame_aegisub",
     # Timing
     "time_to_frame_floor",
     "time_to_frame_middle",
     "time_to_frame_vfr",
     "validate_frame_alignment",
+    "verify_frame_boundary",
 ]
