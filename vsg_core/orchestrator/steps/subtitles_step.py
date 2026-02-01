@@ -855,7 +855,7 @@ class SubtitlesStep:
                 source_video=str(source_video) if source_video else None,
                 target_video=str(target_video) if target_video else None,
                 runner=runner,
-                config=ctx.settings_dict,
+                config=ctx.settings.to_dict(),
                 temp_dir=ctx.temp_dir,
                 sync_exclusion_styles=getattr(item, "sync_exclusion_styles", None),
                 sync_exclusion_mode=getattr(item, "sync_exclusion_mode", "exclude"),
@@ -996,7 +996,9 @@ class SubtitlesStep:
 
         try:
             with open(config_path, "w", encoding="utf-8") as config_file:
-                json.dump(ctx.settings_dict, config_file, indent=2, ensure_ascii=False)
+                json.dump(
+                    ctx.settings.to_dict(), config_file, indent=2, ensure_ascii=False
+                )
         except Exception as e:
             runner._log_message(f"[OCR] ERROR: Failed to write OCR config: {e}")
             return None
@@ -1216,7 +1218,7 @@ class SubtitlesStep:
                     target_video=str(source1_file),
                     total_delay_ms=total_delay_ms,
                     global_shift_ms=global_shift_ms,
-                    config=ctx.settings_dict,
+                    config=ctx.settings.to_dict(),
                     runner=runner,
                     temp_dir=ctx.temp_dir,
                 )
@@ -1335,7 +1337,7 @@ class SubtitlesStep:
                 target_video=str(target_video),
                 total_delay_ms=total_delay_ms,
                 global_shift_ms=global_shift_ms,
-                config=ctx.settings_dict,
+                config=ctx.settings.to_dict(),
                 runner=runner,
                 temp_dir=ctx.temp_dir,
             )

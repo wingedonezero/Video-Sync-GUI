@@ -71,7 +71,7 @@ class Orchestrator:
         if cleaned > 0:
             log(f"[Cleanup] Removed {cleaned} old style editor temp files")
 
-        runner = CommandRunner(settings_dict, log)
+        runner = CommandRunner(settings.to_dict(), log)
 
         # Create audit trail for debugging timing issues
         job_name = Path(source1_file).stem
@@ -89,7 +89,6 @@ class Orchestrator:
 
         ctx = Context(
             settings=settings,
-            settings_dict=settings_dict,
             tool_paths=tool_paths,
             log=log,
             progress=progress,

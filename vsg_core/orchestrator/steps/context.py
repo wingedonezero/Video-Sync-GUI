@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -28,7 +28,6 @@ if TYPE_CHECKING:
 class Context:
     # Provided by Orchestrator entry
     settings: AppSettings
-    settings_dict: dict[str, Any]
     tool_paths: dict[str, str | None]
     log: Callable[[str], None]
     progress: Callable[[float], None]

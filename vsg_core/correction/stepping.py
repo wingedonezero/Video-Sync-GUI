@@ -2342,7 +2342,7 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
         if item.track.type == TrackType.AUDIO
     }
 
-    corrector = SteppingCorrector(runner, ctx.tool_paths, ctx.settings_dict)
+    corrector = SteppingCorrector(runner, ctx.tool_paths, ctx.settings.to_dict())
     ref_file_path = ctx.sources.get("Source 1")
 
     for analysis_track_key, flag_info in ctx.segment_flags.items():

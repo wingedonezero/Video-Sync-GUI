@@ -97,6 +97,36 @@ class AppSettings:
     time_based_use_raw_values: bool
     time_based_bypass_subtitle_data: bool
     subtitle_rounding: str  # "floor", "round", "ceil"
+    subtitle_target_fps: float  # Target FPS for frame-based modes
+    videotimestamps_snap_mode: str  # Frame snap mode: "start", "exact"
+
+    # =========================================================================
+    # Frame Matching Settings (shared by all frame-based sync modes)
+    # =========================================================================
+    frame_hash_algorithm: str  # "dhash", "phash", "average_hash", "whash"
+    frame_hash_size: int  # 4, 8, or 16
+    frame_hash_threshold: int  # Max hamming distance (0-30)
+    frame_window_radius: int  # Frames before/after center
+    frame_search_range_ms: int  # Search ±N ms around expected position
+    frame_agreement_tolerance_ms: int  # Checkpoints must agree within ±N ms
+    frame_use_vapoursynth: bool  # Use VapourSynth for frame extraction
+    frame_comparison_method: str  # "hash", "ssim", "mse"
+
+    # =========================================================================
+    # Correlation Snap Settings
+    # =========================================================================
+    correlation_snap_fallback_mode: str  # "snap-to-frame", "use-raw", "abort"
+    correlation_snap_use_scene_changes: bool  # Use PySceneDetect for anchor points
+
+    # =========================================================================
+    # Video-Verified Sync Settings
+    # =========================================================================
+    video_verified_zero_check_frames: int  # Verify if correlation < N frames
+    video_verified_min_quality_advantage: float  # Quality margin for non-zero offset
+    video_verified_num_checkpoints: int  # Number of checkpoint times
+    video_verified_search_range_frames: int  # Frame range to search
+    video_verified_sequence_length: int  # Consecutive frames to verify
+    video_verified_use_pts_precision: bool  # Use PTS for sub-frame precision
 
     # =========================================================================
     # Stepping Correction Settings
@@ -214,6 +244,47 @@ class AppSettings:
                 cfg.get("time_based_bypass_subtitle_data", True)
             ),
             subtitle_rounding=str(cfg.get("subtitle_rounding", "floor")),
+            subtitle_target_fps=float(cfg.get("subtitle_target_fps", 0.0)),
+            videotimestamps_snap_mode=str(
+                cfg.get("videotimestamps_snap_mode", "start")
+            ),
+            # Frame Matching Settings
+            frame_hash_algorithm=str(cfg.get("frame_hash_algorithm", "dhash")),
+            frame_hash_size=int(cfg.get("frame_hash_size", 8)),
+            frame_hash_threshold=int(cfg.get("frame_hash_threshold", 5)),
+            frame_window_radius=int(cfg.get("frame_window_radius", 5)),
+            frame_search_range_ms=int(cfg.get("frame_search_range_ms", 2000)),
+            frame_agreement_tolerance_ms=int(
+                cfg.get("frame_agreement_tolerance_ms", 100)
+            ),
+            frame_use_vapoursynth=bool(cfg.get("frame_use_vapoursynth", True)),
+            frame_comparison_method=str(cfg.get("frame_comparison_method", "hash")),
+            # Correlation Snap Settings
+            correlation_snap_fallback_mode=str(
+                cfg.get("correlation_snap_fallback_mode", "snap-to-frame")
+            ),
+            correlation_snap_use_scene_changes=bool(
+                cfg.get("correlation_snap_use_scene_changes", True)
+            ),
+            # Video-Verified Sync Settings
+            video_verified_zero_check_frames=int(
+                cfg.get("video_verified_zero_check_frames", 3)
+            ),
+            video_verified_min_quality_advantage=float(
+                cfg.get("video_verified_min_quality_advantage", 0.1)
+            ),
+            video_verified_num_checkpoints=int(
+                cfg.get("video_verified_num_checkpoints", 5)
+            ),
+            video_verified_search_range_frames=int(
+                cfg.get("video_verified_search_range_frames", 3)
+            ),
+            video_verified_sequence_length=int(
+                cfg.get("video_verified_sequence_length", 10)
+            ),
+            video_verified_use_pts_precision=bool(
+                cfg.get("video_verified_use_pts_precision", False)
+            ),
             # Stepping Correction Settings
             stepping_adjust_subtitles=bool(cfg.get("stepping_adjust_subtitles", True)),
             stepping_boundary_mode=str(cfg.get("stepping_boundary_mode", "start")),
@@ -260,3 +331,21 @@ class AppSettings:
             ocr_debug_output=bool(cfg.get("ocr_debug_output", False)),
             ocr_run_in_subprocess=bool(cfg.get("ocr_run_in_subprocess", True)),
         )
+
+    def to_dict(self) -> dict:
+        """Convert AppSettings to a dictionary for serialization.
+
+        Used when settings need to be passed to subprocesses or external tools
+        that expect dict-based configuration.
+        """
+        from dataclasses import fields
+
+        result = {}
+        for f in fields(self):
+            value = getattr(self, f.name)
+            # Convert enums to their string values
+            if hasattr(value, "value"):
+                result[f.name] = value.value
+            else:
+                result[f.name] = value
+        return result
