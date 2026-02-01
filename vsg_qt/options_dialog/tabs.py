@@ -2187,6 +2187,19 @@ class SubtitleSyncTab(QWidget):
             "  - Can introduce noise from container start time differences"
         )
 
+        self.widgets["video_verified_frame_remap"] = QCheckBox()
+        self.widgets["video_verified_frame_remap"].setChecked(False)
+        self.widgets["video_verified_frame_remap"].setToolTip(
+            "Preserve frame position during sync:\n\n"
+            "OFF (Default): Apply delay as milliseconds\n"
+            "  - Simple offset addition to all timestamps\n"
+            "  - May have minor rounding at frame boundaries\n\n"
+            "ON: Remap using frame + centisecond position\n"
+            "  - Preserves exact position within each frame\n"
+            "  - Guarantees duration in frames is preserved\n"
+            "  - No rounding issues at frame boundaries"
+        )
+
         specific_layout.addRow(
             "Zero-Check Threshold:", self.widgets["video_verified_zero_check_frames"]
         )
@@ -2204,6 +2217,9 @@ class SubtitleSyncTab(QWidget):
         )
         specific_layout.addRow(
             "Use PTS Precision:", self.widgets["video_verified_use_pts_precision"]
+        )
+        specific_layout.addRow(
+            "Preserve Frame Position:", self.widgets["video_verified_frame_remap"]
         )
 
         main_layout.addWidget(specific_group)
@@ -2462,6 +2478,7 @@ class SubtitleSyncTab(QWidget):
         self.widgets["video_verified_search_range_frames"].setEnabled(is_video_verified)
         self.widgets["video_verified_sequence_length"].setEnabled(is_video_verified)
         self.widgets["video_verified_use_pts_precision"].setEnabled(is_video_verified)
+        self.widgets["video_verified_frame_remap"].setEnabled(is_video_verified)
 
         # Interlaced settings - enabled when video-verified mode AND interlaced handling enabled
         self.widgets["interlaced_handling_enabled"].setEnabled(is_video_verified)
