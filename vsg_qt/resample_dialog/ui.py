@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from vsg_core.io.runner import CommandRunner
+from vsg_core.models import AppSettings
 
 
 class ResampleDialog(QDialog):
@@ -62,7 +63,9 @@ class ResampleDialog(QDialog):
     def _probe_video_resolution(self):
         """Runs ffprobe to get the video dimensions and updates the destination fields."""
         # This uses a dummy config and log callback for a one-off command
-        runner = CommandRunner({}, lambda msg: print(f"[ffprobe] {msg}"))
+        runner = CommandRunner(
+            AppSettings.from_config({}), lambda msg: print(f"[ffprobe] {msg}")
+        )
         tool_paths = {"ffprobe": shutil.which("ffprobe")}
 
         if not tool_paths["ffprobe"]:

@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QHeaderView, QMessageBox, QTableWidgetItem
 
 from vsg_core.extraction.tracks import get_track_info_for_dialog
 from vsg_core.io.runner import CommandRunner
+from vsg_core.models import AppSettings
 from vsg_qt.add_job_dialog import AddJobDialog
 from vsg_qt.manual_selection_dialog import ManualSelectionDialog
 
@@ -34,7 +35,9 @@ class JobQueueLogic:
 
         self._layout_clipboard: dict | None = None
 
-        self.runner = CommandRunner(self.v.config.settings, self.v.log_callback)
+        self.runner = CommandRunner(
+            AppSettings.from_config(self.v.config.settings), self.v.log_callback
+        )
         self.tool_paths = {
             t: shutil.which(t) for t in ["mkvmerge", "mkvextract", "ffmpeg", "ffprobe"]
         }
