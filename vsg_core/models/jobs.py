@@ -61,6 +61,9 @@ class PlanItem:
     stepping_adjusted: bool = (
         False  # True if subtitle timestamps were adjusted for stepping corrections
     )
+    frame_adjusted: bool = (
+        False  # True if subtitle timestamps were adjusted for frame-level corrections
+    )
 
     # Generated track fields (for tracks created by filtering styles from another track)
     is_generated: bool = False  # Marks this as a generated track
