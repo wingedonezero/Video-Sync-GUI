@@ -1238,15 +1238,12 @@ class SubtitlesStep:
                         "details": details,
                     }
 
-                    # Report the result with precise values
-                    if abs(corrected_delay_ms - original_delay) > 1:
-                        runner._log_message(
-                            f"[VideoVerified] ✓ {source_key} → Source 1: {original_delay:+.3f}ms → {corrected_delay_ms:+.3f}ms applied"
-                        )
-                    else:
-                        runner._log_message(
-                            f"[VideoVerified] ✓ {source_key} → Source 1: {corrected_delay_ms:+.3f}ms (no frame correction needed)"
-                        )
+                    # Report the result - always show both values for transparency
+                    frame_diff_ms = corrected_delay_ms - original_delay
+                    runner._log_message(
+                        f"[VideoVerified] ✓ {source_key} → Source 1: {corrected_delay_ms:+.3f}ms "
+                        f"(audio: {original_delay:+.3f}ms, delta: {frame_diff_ms:+.3f}ms)"
+                    )
                 else:
                     runner._log_message(
                         f"[VideoVerified] ✗ {source_key}: frame matching failed, using audio correlation"
