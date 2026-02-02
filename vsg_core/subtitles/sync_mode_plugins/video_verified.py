@@ -1225,8 +1225,8 @@ class VideoVerifiedSync(SyncPlugin):
         )
 
         # Determine output directory
-        # Use ~/.config/video-sync-gui/sync_checks/
-        config_dir = Path.home() / ".config" / "video-sync-gui" / "sync_checks"
+        # Use the program's .config directory (same as other config files)
+        config_dir = Path.cwd() / ".config" / "sync_checks"
 
         # Write the report
         report_path = write_audit_report(result, config_dir, log)
