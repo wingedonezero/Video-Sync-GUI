@@ -12,16 +12,30 @@ class OptionsLogic:
     def __init__(self, dialog):
         self.dlg = dialog
 
-    # --- load/save over a flat dict (same keys as before) ---
+    # --- load/save over a flat dict or AppSettings dataclass ---
     def load_from_config(self, cfg: dict[str, Any]):
+        # Handle both dict and AppSettings dataclass
+        is_dataclass = hasattr(cfg, "__dataclass_fields__")
         for section in self.dlg.sections.values():
             for key, widget in section.items():
-                self._set_widget_val(widget, cfg.get(key))
+                if is_dataclass:
+                    value = getattr(cfg, key, None)
+                else:
+                    value = cfg.get(key)
+                self._set_widget_val(widget, value)
 
     def save_to_config(self, cfg: dict[str, Any]):
+        # Handle both dict and AppSettings dataclass
+        is_dataclass = hasattr(cfg, "__dataclass_fields__")
         for section in self.dlg.sections.values():
             for key, widget in section.items():
-                cfg[key] = self._get_widget_val(widget)
+                value = self._get_widget_val(widget)
+                if is_dataclass:
+                    # Only set if the attribute exists on the dataclass
+                    if hasattr(cfg, key):
+                        setattr(cfg, key, value)
+                else:
+                    cfg[key] = value
 
     # --- widget helpers copied from previous OptionsDialog (kept behavior) ---
     def _get_widget_val(self, widget):
