@@ -1059,7 +1059,8 @@ class SubtitleData:
             source_video=source_video,
             target_video=target_video,
             runner=runner,
-            config=config or {},
+            settings=config,  # Pass as 'settings' for sync plugins that expect AppSettings
+            config=config or {},  # Keep for backward compatibility
             **kwargs,
         )
 

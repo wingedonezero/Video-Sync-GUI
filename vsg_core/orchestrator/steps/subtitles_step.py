@@ -856,7 +856,8 @@ class SubtitlesStep:
                 source_video=str(source_video) if source_video else None,
                 target_video=str(target_video) if target_video else None,
                 runner=runner,
-                config=ctx.settings.to_dict(),
+                settings=ctx.settings,  # Pass AppSettings directly for plugins that need it
+                config=ctx.settings.to_dict(),  # Keep dict for backward compatibility
                 temp_dir=ctx.temp_dir,
                 sync_exclusion_styles=getattr(item, "sync_exclusion_styles", None),
                 sync_exclusion_mode=getattr(item, "sync_exclusion_mode", "exclude"),
