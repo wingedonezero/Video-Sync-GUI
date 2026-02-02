@@ -14,6 +14,10 @@ class OptionsLogic:
 
     # --- load/save over a flat dict (same keys as before) ---
     def load_from_config(self, cfg: dict[str, Any]):
+        # Handle both dict and AppSettings dataclass
+        if hasattr(cfg, "to_dict"):
+            # It's an AppSettings dataclass, convert to dict
+            cfg = cfg.to_dict()
         for section in self.dlg.sections.values():
             for key, widget in section.items():
                 self._set_widget_val(widget, cfg.get(key))
