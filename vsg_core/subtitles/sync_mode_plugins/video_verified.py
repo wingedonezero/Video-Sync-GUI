@@ -1075,6 +1075,9 @@ class VideoVerifiedSync(SyncPlugin):
         video_offset_ms = details.get("video_offset_ms", pure_correlation_ms)
         selection_reason = details.get("reason", "unknown")
 
+        # Generate job name from target video
+        job_name = Path(target_video).stem if target_video else "unknown"
+
         return self._apply_offset(
             subtitle_data,
             final_offset_ms,
@@ -1084,6 +1087,9 @@ class VideoVerifiedSync(SyncPlugin):
             selection_reason,
             details,
             runner,
+            settings=settings,
+            target_fps=target_fps,
+            job_name=job_name,
         )
 
     def _apply_offset(
@@ -1096,6 +1102,9 @@ class VideoVerifiedSync(SyncPlugin):
         selection_reason: str,
         details: dict,
         runner,
+        settings: AppSettings | None = None,
+        target_fps: float | None = None,
+        job_name: str = "unknown",
     ) -> OperationResult:
         """Apply the calculated offset to all events."""
         from ..data import OperationRecord, OperationResult, SyncEventData
@@ -1129,6 +1138,17 @@ class VideoVerifiedSync(SyncPlugin):
             )
 
             events_synced += 1
+
+        # Run frame alignment audit if enabled
+        if settings and settings.video_verified_frame_audit and target_fps:
+            self._run_frame_audit(
+                subtitle_data=subtitle_data,
+                fps=target_fps,
+                offset_ms=final_offset_ms,
+                job_name=job_name,
+                settings=settings,
+                log=log,
+            )
 
         # Build summary
         if abs(video_offset_ms - audio_correlation_ms) > 1.0:
@@ -1172,3 +1192,72 @@ class VideoVerifiedSync(SyncPlugin):
                 **details,
             },
         )
+
+    def _run_frame_audit(
+        self,
+        subtitle_data: SubtitleData,
+        fps: float,
+        offset_ms: float,
+        job_name: str,
+        settings: AppSettings,
+        log,
+    ) -> None:
+        """Run frame alignment audit and write report.
+
+        This checks whether centisecond rounding will cause any subtitle
+        events to land on wrong frames, and writes a detailed report.
+        """
+        from ..frame_utils.frame_audit import run_frame_audit, write_audit_report
+
+        log("[FrameAudit] Running frame alignment audit...")
+
+        # Get rounding mode from settings
+        rounding_mode = settings.subtitle_rounding or "floor"
+
+        # Run the audit
+        result = run_frame_audit(
+            subtitle_data=subtitle_data,
+            fps=fps,
+            rounding_mode=rounding_mode,
+            offset_ms=offset_ms,
+            job_name=job_name,
+            log=log,
+        )
+
+        # Determine output directory
+        # Use ~/.config/video-sync-gui/sync_checks/
+        config_dir = Path.home() / ".config" / "video-sync-gui" / "sync_checks"
+
+        # Write the report
+        report_path = write_audit_report(result, config_dir, log)
+
+        # Log summary
+        total = result.total_events
+        if total > 0:
+            start_pct = 100 * result.start_ok / total
+            end_pct = 100 * result.end_ok / total
+            log(
+                f"[FrameAudit] Start times OK: {result.start_ok}/{total} ({start_pct:.1f}%)"
+            )
+            log(f"[FrameAudit] End times OK: {result.end_ok}/{total} ({end_pct:.1f}%)")
+
+            if result.has_issues:
+                log(
+                    f"[FrameAudit] Issues found: {len(result.issues)} events with frame drift"
+                )
+                log(
+                    f"[FrameAudit] Suggested rounding mode: {self._get_best_rounding_mode(result)}"
+                )
+            else:
+                log("[FrameAudit] No frame drift issues detected")
+
+        log(f"[FrameAudit] Report saved: {report_path}")
+
+    def _get_best_rounding_mode(self, result) -> str:
+        """Get the rounding mode with fewest issues."""
+        modes = [
+            ("floor", result.floor_issues),
+            ("round", result.round_issues),
+            ("ceil", result.ceil_issues),
+        ]
+        return min(modes, key=lambda x: x[1])[0]

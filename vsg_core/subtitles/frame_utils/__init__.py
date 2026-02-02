@@ -18,6 +18,16 @@ Existing imports will continue to work:
 from __future__ import annotations
 
 # ============================================================================
+# Frame audit (diagnostic)
+# ============================================================================
+from .frame_audit import (
+    FrameAuditIssue,
+    FrameAuditResult,
+    run_frame_audit,
+    write_audit_report,
+)
+
+# ============================================================================
 # Frame hashing and comparison
 # ============================================================================
 from .frame_hashing import (
@@ -88,7 +98,8 @@ from .video_reader import (
 # Public API
 # ============================================================================
 __all__ = [
-    # Video reader
+    "FrameAuditIssue",
+    "FrameAuditResult",
     "VideoReader",
     "clear_vfr_cache",
     "compare_frames",
@@ -96,15 +107,11 @@ __all__ = [
     "compute_frame_hash",
     "compute_hamming_distance",
     "compute_mse",
-    # Frame hashing
     "compute_perceptual_hash",
     "compute_ssim",
-    # Scene detection
     "detect_scene_changes",
-    # Video properties
     "detect_video_fps",
     "detect_video_properties",
-    # Validation
     "extract_frame_as_image",
     "frame_to_time_aegisub",
     "frame_to_time_floor",
@@ -114,10 +121,11 @@ __all__ = [
     "get_vfr_timestamps",
     "get_video_duration_ms",
     "get_video_properties",
+    "run_frame_audit",
     "time_to_frame_aegisub",
-    # Timing
     "time_to_frame_floor",
     "time_to_frame_middle",
     "time_to_frame_vfr",
     "validate_frame_alignment",
+    "write_audit_report",
 ]
