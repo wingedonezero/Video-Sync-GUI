@@ -2194,7 +2194,7 @@ class SubtitleSyncTab(QWidget):
             "When enabled, analyzes each subtitle line after sync to check if\n"
             "centisecond rounding will cause frame drift.\n\n"
             "Writes a detailed report to:\n"
-            "  ~/.config/video-sync-gui/sync_checks/\n\n"
+            "  .config/sync_checks/\n\n"
             "The report includes:\n"
             "• How many lines land on correct frames\n"
             "• Which lines have start/end frame drift\n"
