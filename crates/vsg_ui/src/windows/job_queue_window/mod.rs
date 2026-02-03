@@ -22,7 +22,11 @@ use gtk4::{gio, glib};
 use relm4::prelude::*;
 
 use vsg_core::config::ConfigManager;
-use vsg_core::jobs::{JobQueue, JobQueueEntry, LayoutManager};
+use vsg_core::jobs::{JobQueue, JobQueueEntry, JobQueueStatus, LayoutManager, ManualLayout, FinalTrackEntry, TrackConfig};
+
+use crate::windows::manual_selection_window::{
+    ManualSelectionInit, ManualSelectionOutput, ManualSelectionWindow,
+};
 
 /// Initialization data for the job queue window
 pub struct JobQueueInit {
@@ -40,6 +44,11 @@ pub struct JobQueueWindow {
 
     // GTK widgets for manual updates (will be used for future enhancements)
     list_store: gio::ListStore,
+
+    // Manual selection dialog (spawned on demand)
+    manual_selection_window: Option<Controller<ManualSelectionWindow>>,
+    /// Index of job currently being configured
+    configuring_job_index: Option<usize>,
 }
 
 #[relm4::component(pub)]
@@ -205,6 +214,8 @@ impl Component for JobQueueWindow {
             job_queue,
             layout_manager,
             list_store,
+            manual_selection_window: None,
+            configuring_job_index: None,
         };
 
         let widgets = view_output!();
@@ -366,9 +377,109 @@ impl Component for JobQueueWindow {
 
             JobQueueMsg::ConfigureSelected => {
                 if let Some(idx) = self.model.single_selection() {
-                    // TODO: Open manual selection dialog
-                    tracing::info!("Configure job at index {} (not implemented)", idx);
+                    if let Some(job) = self.model.jobs.get(idx) {
+                        // Close existing dialog if open
+                        self.manual_selection_window = None;
+                        self.configuring_job_index = Some(idx);
+
+                        // Get previous layout if any
+                        let previous_layout = job.entry.layout.clone();
+
+                        // Open manual selection dialog
+                        let dialog = ManualSelectionWindow::builder()
+                            .launch(ManualSelectionInit {
+                                sources: job.entry.sources.clone(),
+                                config: self.config.clone(),
+                                previous_layout,
+                                parent: None,
+                            })
+                            .forward(sender.input_sender(), move |msg| match msg {
+                                ManualSelectionOutput::LayoutConfigured { layout, attachment_sources } => {
+                                    JobQueueMsg::LayoutConfigured {
+                                        job_index: idx,
+                                        layout,
+                                        attachment_sources,
+                                    }
+                                }
+                                ManualSelectionOutput::Cancelled => {
+                                    JobQueueMsg::LayoutConfigurationCancelled
+                                }
+                            });
+
+                        self.manual_selection_window = Some(dialog);
+                        tracing::info!("Opened manual selection dialog for job at index {}", idx);
+                    }
                 }
+            }
+
+            JobQueueMsg::LayoutConfigured { job_index, layout, attachment_sources } => {
+                self.manual_selection_window = None;
+                self.configuring_job_index = None;
+
+                // Convert UI layout to core ManualLayout
+                if let Some(job) = self.model.jobs.get_mut(job_index) {
+                    let core_layout = ManualLayout {
+                        final_tracks: layout.iter().enumerate().map(|(i, t)| {
+                            use vsg_core::models::TrackType as CoreTrackType;
+                            let core_type = match t.track_type {
+                                vsg_core::extraction::TrackType::Video => CoreTrackType::Video,
+                                vsg_core::extraction::TrackType::Audio => CoreTrackType::Audio,
+                                vsg_core::extraction::TrackType::Subtitles => CoreTrackType::Subtitles,
+                            };
+                            FinalTrackEntry {
+                                track_id: t.track_id,
+                                source_key: t.source_key.clone(),
+                                track_type: core_type,
+                                config: TrackConfig {
+                                    sync_to_source: t.sync_to_source.clone(),
+                                    is_default: t.is_default,
+                                    is_forced_display: t.is_forced,
+                                    custom_name: t.custom_name.clone(),
+                                    custom_lang: t.custom_lang.clone(),
+                                    apply_track_name: t.apply_track_name,
+                                    perform_ocr: t.perform_ocr,
+                                    convert_to_ass: t.convert_to_ass,
+                                    rescale: t.rescale,
+                                    ..Default::default()
+                                },
+                                user_order_index: i,
+                                position_in_source_type: t.position_in_source_type,
+                                is_generated: t.is_generated,
+                                generated_source_track_id: t.generated_source_track_id,
+                                generated_source_path: None,
+                                generated_filter_mode: "exclude".to_string(),
+                                generated_filter_styles: Vec::new(),
+                                generated_original_style_list: Vec::new(),
+                                generated_verify_only_lines_removed: true,
+                            }
+                        }).collect(),
+                        attachment_sources,
+                        source_settings: HashMap::new(),
+                    };
+
+                    // Update job
+                    job.entry.layout = Some(core_layout);
+                    job.entry.status = JobQueueStatus::Configured;
+
+                    // Also update backend queue
+                    if let Some(backend_job) = self.job_queue.get_mut(job_index) {
+                        backend_job.layout = job.entry.layout.clone();
+                        backend_job.status = JobQueueStatus::Configured;
+                    }
+
+                    if let Err(e) = self.job_queue.save() {
+                        tracing::error!("Failed to save queue: {}", e);
+                    }
+
+                    self.refresh_list_view(root);
+                    tracing::info!("Job {} configured with {} tracks", job_index, layout.len());
+                }
+            }
+
+            JobQueueMsg::LayoutConfigurationCancelled => {
+                self.manual_selection_window = None;
+                self.configuring_job_index = None;
+                tracing::info!("Layout configuration cancelled");
             }
 
             JobQueueMsg::SelectionChanged(indices) => {
