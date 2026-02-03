@@ -88,8 +88,6 @@ impl FinalTrackEntry {
     }
 
     /// Refresh badges based on current config
-    /// Note: OCR, →ASS, and Rescale badges are not shown since those features
-    /// don't have backend implementation yet (subtitles step is stubbed)
     pub fn refresh_badges(&mut self) {
         self.badges.clear();
 
@@ -100,18 +98,9 @@ impl FinalTrackEntry {
         if self.data.is_forced && self.data.track_type == TrackType::Subtitles {
             self.badges.push("Forced".to_string());
         }
-        // Show Sync badge when track is from non-Source 1 (syncs to Source 1)
-        if let Some(ref sync_target) = self.data.sync_to_source {
-            if self.data.source_key != "Source 1" {
-                self.badges.push(format!("Sync→{}", sync_target));
-            }
-        }
         // Show custom language if set
         if let Some(ref lang) = self.data.custom_lang {
             self.badges.push(format!("Lang:{}", lang));
-        }
-        if self.data.is_generated {
-            self.badges.push("Generated".to_string());
         }
     }
 
@@ -142,10 +131,6 @@ impl FinalTrackEntry {
             parts.push(format!("Custom Language: {}", lang));
         } else if let Some(lang) = &self.info.language {
             parts.push(format!("Language: {}", lang));
-        }
-
-        if let Some(sync) = &self.data.sync_to_source {
-            parts.push(format!("Sync to: {}", sync));
         }
 
         parts.join("\n")
@@ -274,19 +259,9 @@ impl ManualSelectionModel {
             custom_name: None,
             custom_lang: None,
             apply_track_name: false,
-            sync_to_source: if source_key != "Source 1" {
-                Some("Source 1".to_string())
-            } else {
-                None
-            },
-            perform_ocr: false,
-            convert_to_ass: false,
-            rescale: false,
             user_order_index: self.final_tracks.len(),
             position_in_source_type: position,
             source_path: entry.source_path.clone(),
-            is_generated: false,
-            generated_source_track_id: None,
         };
 
         let final_entry = FinalTrackEntry::new(entry.info.clone(), data);

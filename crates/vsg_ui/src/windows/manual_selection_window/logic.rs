@@ -77,15 +77,12 @@ pub fn convert_to_manual_layout(model: &ManualSelectionModel) -> ManualLayout {
         };
 
         let config = TrackConfig {
-            sync_to_source: entry.data.sync_to_source.clone(),
+            sync_to_source: None, // Sync is automatic based on language/first track
             is_default: entry.data.is_default,
             is_forced_display: entry.data.is_forced,
             custom_name: entry.data.custom_name.clone(),
             custom_lang: entry.data.custom_lang.clone(),
             apply_track_name: entry.data.apply_track_name,
-            perform_ocr: entry.data.perform_ocr,
-            convert_to_ass: entry.data.convert_to_ass,
-            rescale: entry.data.rescale,
             ..Default::default()
         };
 
@@ -96,8 +93,8 @@ pub fn convert_to_manual_layout(model: &ManualSelectionModel) -> ManualLayout {
             config,
             user_order_index: i,
             position_in_source_type: entry.data.position_in_source_type,
-            is_generated: entry.data.is_generated,
-            generated_source_track_id: entry.data.generated_source_track_id,
+            is_generated: false,
+            generated_source_track_id: None,
             generated_source_path: None,
             generated_filter_mode: "exclude".to_string(),
             generated_filter_styles: Vec::new(),
@@ -163,11 +160,6 @@ pub fn prepopulate_from_layout(model: &mut ManualSelectionModel, layout: &Manual
                                 final_track.data.custom_name = entry.config.custom_name.clone();
                                 final_track.data.custom_lang = entry.config.custom_lang.clone();
                                 final_track.data.apply_track_name = entry.config.apply_track_name;
-                                final_track.data.sync_to_source =
-                                    entry.config.sync_to_source.clone();
-                                final_track.data.perform_ocr = entry.config.perform_ocr;
-                                final_track.data.convert_to_ass = entry.config.convert_to_ass;
-                                final_track.data.rescale = entry.config.rescale;
                                 final_track.refresh_badges();
                             }
                         }
