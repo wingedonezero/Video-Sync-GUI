@@ -208,7 +208,7 @@ impl Onset {
         let scale = 1.0 / fft_len as f64;
         let correlation: Vec<f64> = g.iter().map(|c| c.re.abs() * scale).collect();
 
-        let (peak_idx, peak_val) = correlation
+        let (peak_idx, _peak_val) = correlation
             .iter()
             .enumerate()
             .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
@@ -229,6 +229,8 @@ impl Onset {
     }
 
     /// Compute confidence score using normalized peak analysis.
+    ///
+    /// Uses sigmoid transforms to ensure output is strictly 0-100%.
     fn compute_confidence(&self, correlation: &[f64], peak_idx: usize) -> f64 {
         if correlation.is_empty() {
             return 0.0;
@@ -275,9 +277,25 @@ impl Onset {
         };
         let snr_ratio = peak_value / (bg_stddev + 1e-9);
 
-        // Combine metrics (matching Python weights)
-        let confidence = (prominence_ratio * 5.0) + (uniqueness_ratio * 8.0) + (snr_ratio * 1.5);
-        (confidence / 3.0).clamp(0.0, 100.0)
+        // Sigmoid-like transform: score = 100 * (1 - 1/(1 + ratio/scale))
+        // Maps ratio=0 -> 0%, ratio=scale -> 50%, ratio=inf -> 100%
+        fn sigmoid_score(ratio: f64, scale: f64) -> f64 {
+            100.0 * (1.0 - 1.0 / (1.0 + ratio / scale))
+        }
+
+        // Combine metrics with appropriate scales
+        // prominence_ratio: good matches have 5+, excellent 20+
+        // uniqueness_ratio: good matches have 1.5+, excellent 3+
+        // snr_ratio: good matches have 10+, excellent 50+
+        let prominence_score = sigmoid_score(prominence_ratio, 10.0);
+        let uniqueness_score = sigmoid_score(uniqueness_ratio - 1.0, 2.0); // -1 since identical peaks have ratio=1
+        let snr_score = sigmoid_score(snr_ratio, 30.0);
+
+        // Weighted average (uniqueness is most important for correlation quality)
+        let confidence = (prominence_score * 0.25 + uniqueness_score * 0.50 + snr_score * 0.25)
+            .clamp(0.0, 100.0);
+
+        confidence
     }
 }
 
@@ -341,23 +359,31 @@ impl CorrelationMethod for Onset {
         reference: &AudioChunk,
         other: &AudioChunk,
     ) -> AnalysisResult<Vec<f64>> {
-        if reference.samples.is_empty() || other.samples.is_empty() {
-            return Err(AnalysisError::InvalidAudio("Empty audio chunk".to_string()));
-        }
+        // Onset uses frame-level correlation, not sample-level.
+        // For peak_fit compatibility, create a synthetic correlation signal
+        // with a Gaussian peak at the computed delay position.
+        let result = self.correlate(reference, other)?;
 
-        let ref_envelope = self.compute_onset_envelope(&reference.samples);
-        let other_envelope = self.compute_onset_envelope(&other.samples);
+        // Create a correlation-like signal at sample resolution
+        let n_samples = reference.samples.len();
+        let center = n_samples / 2;
+        let delay_samples = result.delay_samples as isize;
 
-        if ref_envelope.is_empty() || other_envelope.is_empty() {
-            return Err(AnalysisError::InvalidAudio(
-                "Audio too short for onset detection".to_string(),
-            ));
-        }
+        // Peak position (in correlation array coordinates)
+        let peak_pos = (center as isize + delay_samples) as usize;
 
-        // Return the onset envelopes concatenated (for visualization)
-        let mut result = ref_envelope;
-        result.extend(other_envelope);
-        Ok(result)
+        // Create Gaussian peak with width proportional to hop_length
+        let sigma = self.hop_length as f64;
+        let confidence_scale = result.match_pct / 100.0; // 0-1 scale
+
+        let correlation: Vec<f64> = (0..n_samples)
+            .map(|i| {
+                let dist = (i as f64 - peak_pos as f64).abs();
+                confidence_scale * (-0.5 * (dist / sigma).powi(2)).exp()
+            })
+            .collect();
+
+        Ok(correlation)
     }
 }
 
