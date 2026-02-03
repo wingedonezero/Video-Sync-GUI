@@ -11,6 +11,9 @@ pub fn correlation_method_names() -> Vec<(&'static str, CorrelationMethod)> {
         ("Phase Correlation (GCC-PHAT)", CorrelationMethod::GccPhat),
         ("GCC-SCOT", CorrelationMethod::GccScot),
         ("Whitened Cross-Correlation", CorrelationMethod::Whitened),
+        ("Onset Detection", CorrelationMethod::Onset),
+        ("DTW (Dynamic Time Warping)", CorrelationMethod::Dtw),
+        ("Spectrogram Correlation", CorrelationMethod::Spectrogram),
     ]
 }
 
@@ -21,6 +24,9 @@ pub fn correlation_method_index(method: &CorrelationMethod) -> u32 {
         CorrelationMethod::GccPhat => 1,
         CorrelationMethod::GccScot => 2,
         CorrelationMethod::Whitened => 3,
+        CorrelationMethod::Onset => 4,
+        CorrelationMethod::Dtw => 5,
+        CorrelationMethod::Spectrogram => 6,
     }
 }
 

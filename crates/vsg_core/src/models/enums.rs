@@ -157,6 +157,15 @@ pub enum CorrelationMethod {
     /// Whitened Cross-Correlation (robust to spectral differences).
     #[serde(rename = "Whitened Cross-Correlation")]
     Whitened,
+    /// Onset Detection - correlates audio transients/attacks.
+    #[serde(rename = "Onset Detection")]
+    Onset,
+    /// Dynamic Time Warping on MFCC features - handles tempo variations.
+    #[serde(rename = "DTW (Dynamic Time Warping)")]
+    Dtw,
+    /// Spectrogram Correlation - mel-spectrogram based matching.
+    #[serde(rename = "Spectrogram Correlation")]
+    Spectrogram,
 }
 
 impl CorrelationMethod {
@@ -167,12 +176,23 @@ impl CorrelationMethod {
             Self::GccPhat => "Phase Correlation (GCC-PHAT)",
             Self::GccScot => "GCC-SCOT",
             Self::Whitened => "Whitened Cross-Correlation",
+            Self::Onset => "Onset Detection",
+            Self::Dtw => "DTW (Dynamic Time Warping)",
+            Self::Spectrogram => "Spectrogram Correlation",
         }
     }
 
     /// Get all available methods as a list.
     pub fn all() -> &'static [CorrelationMethod] {
-        &[Self::Scc, Self::GccPhat, Self::GccScot, Self::Whitened]
+        &[
+            Self::Scc,
+            Self::GccPhat,
+            Self::GccScot,
+            Self::Whitened,
+            Self::Onset,
+            Self::Dtw,
+            Self::Spectrogram,
+        ]
     }
 
     /// Create from index (for UI combo boxes).

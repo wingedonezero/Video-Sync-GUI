@@ -235,6 +235,18 @@ pub struct AnalysisSettings {
     #[serde(default = "default_true")]
     pub multi_corr_whitened: bool,
 
+    /// [Multi-Correlation] Enable Onset Detection method.
+    #[serde(default = "default_true")]
+    pub multi_corr_onset: bool,
+
+    /// [Multi-Correlation] Enable DTW (Dynamic Time Warping) method.
+    #[serde(default = "default_true")]
+    pub multi_corr_dtw: bool,
+
+    /// [Multi-Correlation] Enable Spectrogram Correlation method.
+    #[serde(default = "default_true")]
+    pub multi_corr_spectrogram: bool,
+
     /// Method for selecting final delay from chunk measurements.
     #[serde(default)]
     pub delay_selection_mode: DelaySelectionMode,
@@ -329,6 +341,9 @@ impl Default for AnalysisSettings {
             multi_corr_gcc_phat: true,
             multi_corr_gcc_scot: true,
             multi_corr_whitened: true,
+            multi_corr_onset: true,
+            multi_corr_dtw: true,
+            multi_corr_spectrogram: true,
             delay_selection_mode: DelaySelectionMode::default(),
             first_stable_min_chunks: default_first_stable_min_chunks(),
             first_stable_skip_unstable: false,

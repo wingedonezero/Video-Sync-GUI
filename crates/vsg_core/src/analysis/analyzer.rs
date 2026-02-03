@@ -67,6 +67,12 @@ pub struct Analyzer {
     multi_corr_gcc_scot: bool,
     /// [Multi-Correlation] Use Whitened method.
     multi_corr_whitened: bool,
+    /// [Multi-Correlation] Use Onset Detection method.
+    multi_corr_onset: bool,
+    /// [Multi-Correlation] Use DTW method.
+    multi_corr_dtw: bool,
+    /// [Multi-Correlation] Use Spectrogram Correlation method.
+    multi_corr_spectrogram: bool,
     /// Audio filtering method to apply before correlation.
     filtering_method: FilteringMethod,
     /// Low cutoff frequency for filtering (Hz).
@@ -98,6 +104,9 @@ impl Analyzer {
             multi_corr_gcc_phat: true,
             multi_corr_gcc_scot: true,
             multi_corr_whitened: true,
+            multi_corr_onset: true,
+            multi_corr_dtw: true,
+            multi_corr_spectrogram: true,
             filtering_method: FilteringMethod::None,
             filter_low_cutoff_hz: 300.0,
             filter_high_cutoff_hz: 3400.0,
@@ -126,6 +135,9 @@ impl Analyzer {
             multi_corr_gcc_phat: settings.multi_corr_gcc_phat,
             multi_corr_gcc_scot: settings.multi_corr_gcc_scot,
             multi_corr_whitened: settings.multi_corr_whitened,
+            multi_corr_onset: settings.multi_corr_onset,
+            multi_corr_dtw: settings.multi_corr_dtw,
+            multi_corr_spectrogram: settings.multi_corr_spectrogram,
             filtering_method: settings.filtering_method,
             filter_low_cutoff_hz: settings.filter_low_cutoff_hz,
             filter_high_cutoff_hz: settings.filter_high_cutoff_hz,
@@ -361,6 +373,9 @@ impl Analyzer {
             self.multi_corr_gcc_phat,
             self.multi_corr_gcc_scot,
             self.multi_corr_whitened,
+            self.multi_corr_onset,
+            self.multi_corr_dtw,
+            self.multi_corr_spectrogram,
         );
 
         if methods.is_empty() {
