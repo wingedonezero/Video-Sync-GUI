@@ -4,14 +4,20 @@
 //! for different correlation algorithms. Each method can be used
 //! independently or combined with peak fitting for sub-sample accuracy.
 
+mod dtw;
 mod gcc_phat;
 mod gcc_scot;
+mod onset;
 mod scc;
+mod spectrogram;
 mod whitened;
 
+pub use dtw::Dtw;
 pub use gcc_phat::GccPhat;
 pub use gcc_scot::GccScot;
+pub use onset::Onset;
 pub use scc::Scc;
+pub use spectrogram::Spectrogram;
 pub use whitened::Whitened;
 
 use crate::analysis::types::{AnalysisResult, AudioChunk, CorrelationResult};
@@ -60,13 +66,26 @@ pub fn create_method(name: &str) -> Option<Box<dyn CorrelationMethod>> {
         }
         "gcc-scot" | "scot" => Some(Box::new(GccScot::new())),
         "whitened" | "whitened cross-correlation" => Some(Box::new(Whitened::new())),
+        "onset" | "onset detection" => Some(Box::new(Onset::new())),
+        "dtw" | "dynamic time warping" | "dtw (dynamic time warping)" => {
+            Some(Box::new(Dtw::new()))
+        }
+        "spectrogram" | "spectrogram correlation" => Some(Box::new(Spectrogram::new())),
         _ => None,
     }
 }
 
 /// Get a list of available correlation method names.
 pub fn available_methods() -> Vec<&'static str> {
-    vec!["scc", "gcc-phat", "gcc-scot", "whitened"]
+    vec![
+        "scc",
+        "gcc-phat",
+        "gcc-scot",
+        "whitened",
+        "onset",
+        "dtw",
+        "spectrogram",
+    ]
 }
 
 /// Create a correlation method from the enum.
@@ -76,6 +95,9 @@ pub fn create_from_enum(method: CorrelationMethodEnum) -> Box<dyn CorrelationMet
         CorrelationMethodEnum::GccPhat => Box::new(GccPhat::new()),
         CorrelationMethodEnum::GccScot => Box::new(GccScot::new()),
         CorrelationMethodEnum::Whitened => Box::new(Whitened::new()),
+        CorrelationMethodEnum::Onset => Box::new(Onset::new()),
+        CorrelationMethodEnum::Dtw => Box::new(Dtw::new()),
+        CorrelationMethodEnum::Spectrogram => Box::new(Spectrogram::new()),
     }
 }
 
@@ -86,6 +108,9 @@ pub fn all_methods() -> Vec<Box<dyn CorrelationMethod>> {
         Box::new(GccPhat::new()),
         Box::new(GccScot::new()),
         Box::new(Whitened::new()),
+        Box::new(Onset::new()),
+        Box::new(Dtw::new()),
+        Box::new(Spectrogram::new()),
     ]
 }
 
@@ -96,6 +121,9 @@ pub fn selected_methods(
     gcc_phat: bool,
     gcc_scot: bool,
     whitened: bool,
+    onset: bool,
+    dtw: bool,
+    spectrogram: bool,
 ) -> Vec<Box<dyn CorrelationMethod>> {
     let mut methods: Vec<Box<dyn CorrelationMethod>> = Vec::new();
     if scc {
@@ -109,6 +137,15 @@ pub fn selected_methods(
     }
     if whitened {
         methods.push(Box::new(Whitened::new()));
+    }
+    if onset {
+        methods.push(Box::new(Onset::new()));
+    }
+    if dtw {
+        methods.push(Box::new(Dtw::new()));
+    }
+    if spectrogram {
+        methods.push(Box::new(Spectrogram::new()));
     }
     methods
 }
@@ -145,6 +182,24 @@ mod tests {
     fn factory_creates_whitened() {
         let method = create_method("whitened").unwrap();
         assert_eq!(method.name(), "Whitened");
+    }
+
+    #[test]
+    fn factory_creates_onset() {
+        let method = create_method("onset").unwrap();
+        assert_eq!(method.name(), "Onset");
+    }
+
+    #[test]
+    fn factory_creates_dtw() {
+        let method = create_method("dtw").unwrap();
+        assert_eq!(method.name(), "DTW");
+    }
+
+    #[test]
+    fn factory_creates_spectrogram() {
+        let method = create_method("spectrogram").unwrap();
+        assert_eq!(method.name(), "Spectrogram");
     }
 
     #[test]

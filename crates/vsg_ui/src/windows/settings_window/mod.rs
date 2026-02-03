@@ -272,6 +272,11 @@ impl Component for SettingsWindow {
             SettingsMsg::ToggleMultiCorrGccPhat(v) => self.model.analysis.multi_corr_gcc_phat = v,
             SettingsMsg::ToggleMultiCorrGccScot(v) => self.model.analysis.multi_corr_gcc_scot = v,
             SettingsMsg::ToggleMultiCorrWhitened(v) => self.model.analysis.multi_corr_whitened = v,
+            SettingsMsg::ToggleMultiCorrOnset(v) => self.model.analysis.multi_corr_onset = v,
+            SettingsMsg::ToggleMultiCorrDtw(v) => self.model.analysis.multi_corr_dtw = v,
+            SettingsMsg::ToggleMultiCorrSpectrogram(v) => {
+                self.model.analysis.multi_corr_spectrogram = v
+            }
             SettingsMsg::SetDelaySelectionMode(v) => self.model.analysis.delay_selection_mode = v,
             SettingsMsg::SetFirstStableMinChunks(v) => {
                 self.model.analysis.first_stable_min_chunks = v
@@ -559,9 +564,12 @@ fn build_analysis_tab(
             "Phase Correlation (GCC-PHAT)",
             "GCC-SCOT",
             "Whitened Cross-Correlation",
+            "Onset Detection",
+            "DTW (Dynamic Time Warping)",
+            "Spectrogram Correlation",
         ]))
         .hexpand(true)
-        .tooltip_text("SCC: Standard cross-correlation, good general purpose\nGCC-PHAT: Phase transform, sharp peaks, noise resistant\nGCC-SCOT: Smoothed coherence, balanced\nWhitened: Robust to spectral differences")
+        .tooltip_text("SCC: Standard cross-correlation, good general purpose\nGCC-PHAT: Phase transform, sharp peaks, noise resistant\nGCC-SCOT: Smoothed coherence, balanced\nWhitened: Robust to spectral differences\nOnset: Correlates audio transients\nDTW: Handles tempo variations\nSpectrogram: Mel-spectrogram based")
         .build();
     method_combo.set_selected(correlation_method_index(&analysis.correlation_method));
     {
@@ -571,7 +579,10 @@ fn build_analysis_tab(
                 0 => CorrelationMethod::Scc,
                 1 => CorrelationMethod::GccPhat,
                 2 => CorrelationMethod::GccScot,
-                _ => CorrelationMethod::Whitened,
+                3 => CorrelationMethod::Whitened,
+                4 => CorrelationMethod::Onset,
+                5 => CorrelationMethod::Dtw,
+                _ => CorrelationMethod::Spectrogram,
             };
             sender.input(SettingsMsg::SetCorrelationMethod(method));
         });
@@ -1081,6 +1092,52 @@ fn build_analysis_tab(
     methods_row.append(&whitened_check);
 
     multi_box.append(&methods_row);
+
+    // Second row for new methods
+    let methods_row2 = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(16)
+        .build();
+
+    let onset_check = gtk4::CheckButton::builder()
+        .label("Onset")
+        .active(analysis.multi_corr_onset)
+        .tooltip_text("Onset Detection (correlates audio transients/attacks)")
+        .build();
+    {
+        let sender = sender.clone();
+        onset_check.connect_toggled(move |b| {
+            sender.input(SettingsMsg::ToggleMultiCorrOnset(b.is_active()))
+        });
+    }
+    methods_row2.append(&onset_check);
+
+    let dtw_check = gtk4::CheckButton::builder()
+        .label("DTW")
+        .active(analysis.multi_corr_dtw)
+        .tooltip_text("Dynamic Time Warping (handles tempo variations)")
+        .build();
+    {
+        let sender = sender.clone();
+        dtw_check
+            .connect_toggled(move |b| sender.input(SettingsMsg::ToggleMultiCorrDtw(b.is_active())));
+    }
+    methods_row2.append(&dtw_check);
+
+    let spectrogram_check = gtk4::CheckButton::builder()
+        .label("Spectrogram")
+        .active(analysis.multi_corr_spectrogram)
+        .tooltip_text("Spectrogram Correlation (mel-spectrogram based matching)")
+        .build();
+    {
+        let sender = sender.clone();
+        spectrogram_check.connect_toggled(move |b| {
+            sender.input(SettingsMsg::ToggleMultiCorrSpectrogram(b.is_active()))
+        });
+    }
+    methods_row2.append(&spectrogram_check);
+
+    multi_box.append(&methods_row2);
     multi_frame.set_child(Some(&multi_box));
     page.append(&multi_frame);
 
