@@ -27,6 +27,8 @@ pub enum ManualSelectionMsg {
     ToggleTrackDefault { final_index: usize },
     /// Toggle forced flag for track (subtitles only)
     ToggleTrackForced { final_index: usize },
+    /// Toggle keep original track name
+    ToggleKeepName { final_index: usize },
     /// Set custom name for track
     SetTrackCustomName {
         final_index: usize,
