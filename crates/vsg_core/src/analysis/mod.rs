@@ -54,7 +54,6 @@
 //! let stability = calculate_stability(&chunks, 5.0);
 //! ```
 
-mod analyzer;
 mod chunks;
 mod correlation;
 pub mod delay_selection;
@@ -108,7 +107,3 @@ pub use methods::{
 
 // Re-export delay selection
 pub use delay_selection::{get_selector, DelaySelector, SelectorConfig};
-
-// Keep Analyzer for backward compatibility during migration
-// TODO: Remove after step refactor is complete
-pub use analyzer::Analyzer;
