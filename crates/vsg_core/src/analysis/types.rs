@@ -333,8 +333,12 @@ pub enum AnalysisError {
     SourceNotFound(String),
 
     /// Insufficient valid chunks for analysis.
-    #[error("Insufficient valid chunks: got {valid} of {required} required")]
+    #[error("Insufficient valid chunks: got {valid} accepted, need at least {required}")]
     InsufficientChunks { valid: usize, required: usize },
+
+    /// Delay selector failed to find consensus (e.g., delays too scattered).
+    #[error("Could not determine delay: {reason} ({accepted} chunks accepted)")]
+    SelectorFailed { reason: String, accepted: usize },
 }
 
 /// Type alias for analysis results.

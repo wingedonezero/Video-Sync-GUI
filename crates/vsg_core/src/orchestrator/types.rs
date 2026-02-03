@@ -35,6 +35,9 @@ pub struct Context {
     pub logger: Arc<JobLogger>,
     /// Optional progress callback.
     progress_callback: Option<ProgressCallback>,
+    /// Whether this is an analyze-only run (no merge).
+    /// Multi-correlation comparison only runs in analyze-only mode.
+    pub analyze_only: bool,
 }
 
 impl Context {
@@ -55,7 +58,15 @@ impl Context {
             output_dir,
             logger,
             progress_callback: None,
+            analyze_only: false,
         }
+    }
+
+    /// Mark this context as analyze-only (no merge).
+    /// Multi-correlation comparison only runs in analyze-only mode.
+    pub fn with_analyze_only(mut self, analyze_only: bool) -> Self {
+        self.analyze_only = analyze_only;
+        self
     }
 
     /// Set the progress callback.

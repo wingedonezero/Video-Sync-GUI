@@ -400,15 +400,18 @@ impl CorrelationMethod for Dtw {
             .copied()
             .unwrap_or(f64::INFINITY);
 
+        // Normalize by path length and feature dimension
         let avg_cost = if path_length > 0 {
             final_cost / path_length as f64
         } else {
             f64::INFINITY
         };
 
-        // Convert to 0-100 scale (lower cost = higher confidence)
-        // Empirically, good matches have avg_cost < 50, poor matches > 200
-        let confidence = (100.0 - avg_cost * 0.5).clamp(0.0, 100.0);
+        // Use exponential decay for confidence: 100 / (1 + avg_cost/scale)
+        // MFCC euclidean distances typically range 10-100, so scale=30 gives:
+        //   avg_cost=0 -> 100%, avg_cost=30 -> 50%, avg_cost=90 -> 25%
+        let scale = 30.0;
+        let confidence = (100.0 / (1.0 + avg_cost / scale)).clamp(0.0, 100.0);
 
         Ok(CorrelationResult::new(
             delay_samples,
@@ -422,32 +425,31 @@ impl CorrelationMethod for Dtw {
         reference: &AudioChunk,
         other: &AudioChunk,
     ) -> AnalysisResult<Vec<f64>> {
-        if reference.samples.is_empty() || other.samples.is_empty() {
-            return Err(AnalysisError::InvalidAudio("Empty audio chunk".to_string()));
-        }
+        // DTW doesn't produce a traditional correlation signal.
+        // For peak_fit compatibility, we create a synthetic correlation
+        // with a Gaussian peak at the computed delay position.
+        let result = self.correlate(reference, other)?;
 
-        // Return the accumulated cost matrix diagonal for visualization
-        let ref_mfcc = self.compute_mfcc(&reference.samples, reference.sample_rate);
-        let other_mfcc = self.compute_mfcc(&other.samples, other.sample_rate);
+        // Create a correlation-like signal centered at the delay
+        let n_samples = reference.samples.len();
+        let center = n_samples / 2;
+        let delay_samples = result.delay_samples as isize;
 
-        if ref_mfcc.is_empty() || other_mfcc.is_empty() {
-            return Err(AnalysisError::InvalidAudio(
-                "Audio too short for MFCC extraction".to_string(),
-            ));
-        }
+        // Peak position (in correlation array coordinates)
+        let peak_pos = (center as isize + delay_samples) as usize;
 
-        let (cost_matrix, _) = self.compute_dtw(&ref_mfcc, &other_mfcc);
+        // Create Gaussian peak with width proportional to hop_length
+        let sigma = self.hop_length as f64;
+        let confidence_scale = result.match_pct / 100.0; // 0-1 scale
 
-        // Return diagonal of cost matrix
-        let diag_len = cost_matrix.len().min(
-            cost_matrix
-                .first()
-                .map(|r| r.len())
-                .unwrap_or(0),
-        );
-        let diagonal: Vec<f64> = (0..diag_len).map(|i| cost_matrix[i][i]).collect();
+        let correlation: Vec<f64> = (0..n_samples)
+            .map(|i| {
+                let dist = (i as f64 - peak_pos as f64).abs();
+                confidence_scale * (-0.5 * (dist / sigma).powi(2)).exp()
+            })
+            .collect();
 
-        Ok(diagonal)
+        Ok(correlation)
     }
 }
 

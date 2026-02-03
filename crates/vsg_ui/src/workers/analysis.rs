@@ -94,6 +94,7 @@ pub fn run_analysis(
         });
 
     // Create pipeline context with progress callback
+    // Mark as analyze_only=true so multi-correlation runs (like Python's and_merge=False)
     let context = Context::new(
         job_spec,
         settings,
@@ -102,6 +103,7 @@ pub fn run_analysis(
         output_dir, // output goes to output_folder
         logger,
     )
+    .with_analyze_only(true)
     .with_progress_callback(progress_callback);
 
     let mut state = JobState::new(&job_name);
