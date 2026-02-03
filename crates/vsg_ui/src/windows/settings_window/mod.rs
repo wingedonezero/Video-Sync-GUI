@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex};
 use gtk4::prelude::*;
 use relm4::prelude::*;
 
+use vsg_core::analysis::OutlierMode;
 use vsg_core::config::ConfigManager;
 use vsg_core::models::{
     AnalysisMode, CorrelationMethod, DelaySelectionMode, FilteringMethod, SnapMode, SyncMode,
@@ -289,6 +290,23 @@ impl Component for SettingsWindow {
                 self.model.analysis.early_cluster_threshold = v
             }
             SettingsMsg::SetSyncMode(v) => self.model.analysis.sync_mode = v,
+
+            // Sync Stability settings
+            SettingsMsg::ToggleSyncStabilityEnabled(v) => {
+                self.model.analysis.sync_stability_enabled = v
+            }
+            SettingsMsg::SetSyncStabilityVarianceThreshold(v) => {
+                self.model.analysis.sync_stability_variance_threshold = v
+            }
+            SettingsMsg::SetSyncStabilityMinChunks(v) => {
+                self.model.analysis.sync_stability_min_chunks = v
+            }
+            SettingsMsg::SetSyncStabilityOutlierMode(v) => {
+                self.model.analysis.sync_stability_outlier_mode = v
+            }
+            SettingsMsg::SetSyncStabilityOutlierThreshold(v) => {
+                self.model.analysis.sync_stability_outlier_threshold = v
+            }
 
             // Chapters tab
             SettingsMsg::ToggleChapterRename(v) => self.model.chapters.rename = v,
@@ -1140,6 +1158,112 @@ fn build_analysis_tab(
     multi_box.append(&methods_row2);
     multi_frame.set_child(Some(&multi_box));
     page.append(&multi_frame);
+
+    // === Sync Stability Frame ===
+    let stability_frame = gtk4::Frame::builder()
+        .label("Sync Stability (Variance Detection)")
+        .build();
+    let stability_box = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
+        .margin_top(8)
+        .margin_bottom(8)
+        .margin_start(8)
+        .margin_end(8)
+        .spacing(8)
+        .build();
+
+    let stability_enable = gtk4::CheckButton::builder()
+        .label("Enable sync stability analysis")
+        .active(analysis.sync_stability_enabled)
+        .tooltip_text("Check for variance in chunk delays to detect potential sync issues")
+        .build();
+    {
+        let sender = sender.clone();
+        stability_enable.connect_toggled(move |b| {
+            sender.input(SettingsMsg::ToggleSyncStabilityEnabled(b.is_active()))
+        });
+    }
+    stability_box.append(&stability_enable);
+
+    stability_box.append(&create_spin_row_with_tooltip(
+        "Variance Threshold (ms):",
+        analysis.sync_stability_variance_threshold,
+        0.0,
+        100.0,
+        0.5,
+        1,
+        "Maximum acceptable variance in delay measurements (0 = strict mode)",
+        {
+            let sender = sender.clone();
+            move |v| sender.input(SettingsMsg::SetSyncStabilityVarianceThreshold(v))
+        },
+    ));
+
+    stability_box.append(&create_spin_row_with_tooltip(
+        "Min Chunks:",
+        analysis.sync_stability_min_chunks as f64,
+        1.0,
+        50.0,
+        1.0,
+        0,
+        "Minimum accepted chunks required for stability analysis",
+        {
+            let sender = sender.clone();
+            move |v| sender.input(SettingsMsg::SetSyncStabilityMinChunks(v as u32))
+        },
+    ));
+
+    // Outlier mode dropdown
+    let outlier_mode_row = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(8)
+        .build();
+    let outlier_mode_label = gtk4::Label::builder()
+        .label("Outlier Mode:")
+        .width_chars(18)
+        .xalign(0.0)
+        .build();
+    outlier_mode_label.set_tooltip_text(Some("How to detect outlier chunks"));
+    outlier_mode_row.append(&outlier_mode_label);
+    let outlier_mode_combo = gtk4::DropDown::builder()
+        .model(&gtk4::StringList::new(&["Any Deviation", "Threshold"]))
+        .hexpand(true)
+        .tooltip_text("Any: Flag any deviation from first chunk\nThreshold: Flag deviations exceeding threshold from mean")
+        .build();
+    let outlier_mode_idx = match analysis.sync_stability_outlier_mode {
+        OutlierMode::Any => 0,
+        OutlierMode::Threshold => 1,
+    };
+    outlier_mode_combo.set_selected(outlier_mode_idx);
+    {
+        let sender = sender.clone();
+        outlier_mode_combo.connect_selected_notify(move |dd| {
+            let mode = match dd.selected() {
+                0 => OutlierMode::Any,
+                _ => OutlierMode::Threshold,
+            };
+            sender.input(SettingsMsg::SetSyncStabilityOutlierMode(mode));
+        });
+    }
+    outlier_mode_row.append(&outlier_mode_combo);
+    stability_box.append(&outlier_mode_row);
+
+    stability_box.append(&create_spin_row_with_tooltip(
+        "Outlier Threshold (ms):",
+        analysis.sync_stability_outlier_threshold,
+        0.0,
+        100.0,
+        0.5,
+        1,
+        "Deviation from mean to flag as outlier (Threshold mode only)",
+        {
+            let sender = sender.clone();
+            move |v| sender.input(SettingsMsg::SetSyncStabilityOutlierThreshold(v))
+        },
+    ));
+
+    stability_frame.set_child(Some(&stability_box));
+    page.append(&stability_frame);
 
     scroll.set_child(Some(&page));
     scroll

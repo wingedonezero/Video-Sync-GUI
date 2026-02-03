@@ -81,8 +81,11 @@ pub use correlation::{correlate_chunk_pair, correlate_chunks, CorrelationConfig}
 // Re-export drift detection
 pub use drift_detection::{diagnose_drift, DriftDetectionConfig, DriftDiagnosis, DriftType};
 
-// Re-export stability calculation
-pub use stability::{calculate_stability, calculate_std_dev, StabilityMetrics};
+// Re-export stability calculation and outlier detection
+pub use stability::{
+    calculate_stability, calculate_stability_with_outliers, calculate_std_dev, detect_outliers,
+    OutlierConfig, OutlierInfo, OutlierMode, StabilityMetrics,
+};
 
 // Re-export FFmpeg functions
 pub use ffmpeg::{
