@@ -41,16 +41,12 @@ impl GccScot {
         drop(planner);
 
         // Prepare signals (zero-padded)
-        let mut ref_fft: Vec<Complex<f64>> = reference
-            .iter()
-            .map(|&x| Complex::new(x, 0.0))
-            .collect();
+        let mut ref_fft: Vec<Complex<f64>> =
+            reference.iter().map(|&x| Complex::new(x, 0.0)).collect();
         ref_fft.resize(fft_len, Complex::new(0.0, 0.0));
 
-        let mut other_fft: Vec<Complex<f64>> = other
-            .iter()
-            .map(|&x| Complex::new(x, 0.0))
-            .collect();
+        let mut other_fft: Vec<Complex<f64>> =
+            other.iter().map(|&x| Complex::new(x, 0.0)).collect();
         other_fft.resize(fft_len, Complex::new(0.0, 0.0));
 
         // Compute FFTs

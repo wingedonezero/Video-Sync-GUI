@@ -55,8 +55,8 @@ pub mod types;
 
 // Re-export main types
 pub use types::{
-    format_timestamp_ns, parse_timestamp_ns, ChapterData, ChapterEntry, ChapterError,
-    ChapterName, ChapterResult, KeyframeInfo,
+    format_timestamp_ns, parse_timestamp_ns, ChapterData, ChapterEntry, ChapterError, ChapterName,
+    ChapterResult, KeyframeInfo,
 };
 
 // Re-export extraction functions
@@ -68,9 +68,7 @@ pub use parser::{
 };
 
 // Re-export shifting functions
-pub use shifter::{
-    max_negative_shift, shift_chapters, shift_chapters_copy, shift_chapters_strict,
-};
+pub use shifter::{max_negative_shift, shift_chapters, shift_chapters_copy, shift_chapters_strict};
 
 // Re-export snapping functions
 pub use snapper::{
@@ -80,6 +78,6 @@ pub use snapper::{
 
 // Re-export processing functions
 pub use processor::{
-    deduplicate_chapters, normalize_chapter_ends, process_chapters, rename_chapters,
-    DuplicateInfo, NormalizedEndInfo, ProcessingStats, RenamedInfo,
+    deduplicate_chapters, normalize_chapter_ends, process_chapters, rename_chapters, DuplicateInfo,
+    NormalizedEndInfo, ProcessingStats, RenamedInfo,
 };

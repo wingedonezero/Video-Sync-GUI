@@ -5,7 +5,9 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::models::{AnalysisMode, CorrelationMethod, DelaySelectionMode, FilteringMethod, SnapMode, SyncMode};
+use crate::models::{
+    AnalysisMode, CorrelationMethod, DelaySelectionMode, FilteringMethod, SnapMode, SyncMode,
+};
 
 /// Root settings structure containing all configuration sections.
 #[derive(Debug, Clone, Serialize, Deserialize)]

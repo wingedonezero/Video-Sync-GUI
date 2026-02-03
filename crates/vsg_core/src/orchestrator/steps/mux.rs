@@ -71,7 +71,10 @@ impl MuxStep {
 
         // Build items from manual layout
         if let Some(ref layout) = ctx.job_spec.manual_layout {
-            ctx.logger.info(&format!("Building merge plan from {} layout entries", layout.len()));
+            ctx.logger.info(&format!(
+                "Building merge plan from {} layout entries",
+                layout.len()
+            ));
 
             for (idx, item) in layout.iter().enumerate() {
                 let source_key = item
@@ -85,10 +88,7 @@ impl MuxStep {
                     .map(|v| v as u32)
                     .unwrap_or(0);
 
-                let track_type_str = item
-                    .get("type")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("video");
+                let track_type_str = item.get("type").and_then(|v| v.as_str()).unwrap_or("video");
 
                 let track_type = match track_type_str {
                     "video" => TrackType::Video,
@@ -108,10 +108,7 @@ impl MuxStep {
                     .and_then(|v| v.as_str())
                     .unwrap_or("und");
 
-                let name = item
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("");
 
                 // Get track config options
                 let is_default = item
@@ -160,8 +157,16 @@ impl MuxStep {
 
                 // Create track
                 let props = StreamProps::new(codec)
-                    .with_lang(if custom_lang.is_empty() { lang } else { custom_lang })
-                    .with_name(if custom_name.is_empty() { name } else { custom_name });
+                    .with_lang(if custom_lang.is_empty() {
+                        lang
+                    } else {
+                        custom_lang
+                    })
+                    .with_name(if custom_name.is_empty() {
+                        name
+                    } else {
+                        custom_name
+                    });
 
                 let track = Track::new(source_key, track_id, track_type, props);
 
@@ -191,11 +196,19 @@ impl MuxStep {
                     plan_item.container_delay_ms_raw = delay_ms_raw;
 
                     // Log the delay being applied for debugging
-                    let pre_shift = delays.pre_shift_delays_ms.get(source_key).copied().unwrap_or(0.0);
+                    let pre_shift = delays
+                        .pre_shift_delays_ms
+                        .get(source_key)
+                        .copied()
+                        .unwrap_or(0.0);
                     ctx.logger.debug(&format!(
                         "Track {}:{} ({}): pre-shift={:+.1}ms, global_shift={:+}ms, final={:+.1}ms",
-                        source_key, track_id, track_type,
-                        pre_shift, delays.global_shift_ms, delay_ms_raw
+                        source_key,
+                        track_id,
+                        track_type,
+                        pre_shift,
+                        delays.global_shift_ms,
+                        delay_ms_raw
                     ));
                 }
 
@@ -203,7 +216,8 @@ impl MuxStep {
             }
         } else {
             // No manual layout - create minimal plan with just Source 1 video
-            ctx.logger.info("No manual layout - creating minimal plan from Source 1");
+            ctx.logger
+                .info("No manual layout - creating minimal plan from Source 1");
 
             if let Some(source1_path) = ctx.job_spec.sources.get("Source 1") {
                 let video_track = Track::new(
@@ -221,7 +235,8 @@ impl MuxStep {
         // Add chapters from chapters step
         if let Some(ref chapters) = state.chapters {
             if let Some(ref chapters_xml) = chapters.chapters_xml {
-                ctx.logger.info(&format!("Including chapters: {}", chapters_xml.display()));
+                ctx.logger
+                    .info(&format!("Including chapters: {}", chapters_xml.display()));
                 plan.chapters_xml = Some(chapters_xml.clone());
             }
         }
@@ -247,7 +262,8 @@ impl MuxStep {
         let mkvmerge = self.mkvmerge_cmd();
 
         // Log the command
-        ctx.logger.command(&format!("{} {}", mkvmerge, tokens.join(" ")));
+        ctx.logger
+            .command(&format!("{} {}", mkvmerge, tokens.join(" ")));
 
         // Log pretty format if enabled
         if ctx.settings.logging.show_options_pretty {
@@ -343,11 +359,14 @@ impl PipelineStep for MuxStep {
         // Log delay summary for debugging
         ctx.logger.info("--- Track Delay Summary ---");
         let global_shift = plan.delays.global_shift_ms;
-        ctx.logger.info(&format!("Global shift: {:+}ms", global_shift));
+        ctx.logger
+            .info(&format!("Global shift: {:+}ms", global_shift));
 
         for item in &plan.items {
             let delay_rounded = item.container_delay_ms_raw.round() as i64;
-            let pre_shift = plan.delays.pre_shift_delays_ms
+            let pre_shift = plan
+                .delays
+                .pre_shift_delays_ms
                 .get(&item.track.source)
                 .copied()
                 .unwrap_or(0.0);
@@ -365,9 +384,7 @@ impl PipelineStep for MuxStep {
             } else {
                 ctx.logger.info(&format!(
                     "  {} {}:{} - no sync delay",
-                    item.track.source,
-                    item.track.track_type,
-                    item.track.id
+                    item.track.source, item.track.track_type, item.track.id
                 ));
             }
         }
@@ -398,7 +415,10 @@ impl PipelineStep for MuxStep {
 
         ctx.logger.success(&format!(
             "Merged to: {}",
-            output_path.file_name().unwrap_or_default().to_string_lossy()
+            output_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
         ));
 
         Ok(StepOutcome::Success)

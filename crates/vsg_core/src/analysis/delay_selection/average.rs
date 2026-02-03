@@ -14,11 +14,7 @@ impl DelaySelector for AverageSelector {
         "average"
     }
 
-    fn select(
-        &self,
-        chunks: &[ChunkResult],
-        config: &SelectorConfig,
-    ) -> Option<DelaySelection> {
+    fn select(&self, chunks: &[ChunkResult], config: &SelectorConfig) -> Option<DelaySelection> {
         if chunks.len() < config.min_accepted_chunks {
             return None;
         }

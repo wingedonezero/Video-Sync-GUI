@@ -53,11 +53,7 @@ impl DelaySelector for FirstStableSelector {
         "first_stable"
     }
 
-    fn select(
-        &self,
-        chunks: &[ChunkResult],
-        config: &SelectorConfig,
-    ) -> Option<DelaySelection> {
+    fn select(&self, chunks: &[ChunkResult], config: &SelectorConfig) -> Option<DelaySelection> {
         if chunks.len() < config.min_accepted_chunks {
             return None;
         }
@@ -108,20 +104,18 @@ impl DelaySelector for FirstStableSelector {
             }
         };
 
-        qualifying_segment.map(|seg| {
-            DelaySelection {
-                delay_ms_raw: seg.raw_avg(),
-                delay_ms_rounded: seg.delay_rounded,
-                method_name: self.name().to_string(),
-                chunks_used: seg.len(),
-                details: Some(format!(
-                    "{} chunks at {:+}ms (raw avg: {:.3}ms, starting at {:.1}s)",
-                    seg.len(),
-                    seg.delay_rounded,
-                    seg.raw_avg(),
-                    seg.start_time
-                )),
-            }
+        qualifying_segment.map(|seg| DelaySelection {
+            delay_ms_raw: seg.raw_avg(),
+            delay_ms_rounded: seg.delay_rounded,
+            method_name: self.name().to_string(),
+            chunks_used: seg.len(),
+            details: Some(format!(
+                "{} chunks at {:+}ms (raw avg: {:.3}ms, starting at {:.1}s)",
+                seg.len(),
+                seg.delay_rounded,
+                seg.raw_avg(),
+                seg.start_time
+            )),
         })
     }
 }

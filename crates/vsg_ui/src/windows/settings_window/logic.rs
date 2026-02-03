@@ -1,6 +1,8 @@
 //! Settings window UI logic helpers
 
-use vsg_core::models::{CorrelationMethod, DelaySelectionMode, FilteringMethod, SnapMode, SyncMode};
+use vsg_core::models::{
+    CorrelationMethod, DelaySelectionMode, FilteringMethod, SnapMode, SyncMode,
+};
 
 /// Get display names for correlation methods
 pub fn correlation_method_names() -> Vec<(&'static str, CorrelationMethod)> {

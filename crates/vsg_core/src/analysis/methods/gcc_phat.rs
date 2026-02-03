@@ -43,16 +43,12 @@ impl GccPhat {
         drop(planner);
 
         // Prepare signals (zero-padded)
-        let mut ref_fft: Vec<Complex<f64>> = reference
-            .iter()
-            .map(|&x| Complex::new(x, 0.0))
-            .collect();
+        let mut ref_fft: Vec<Complex<f64>> =
+            reference.iter().map(|&x| Complex::new(x, 0.0)).collect();
         ref_fft.resize(fft_len, Complex::new(0.0, 0.0));
 
-        let mut other_fft: Vec<Complex<f64>> = other
-            .iter()
-            .map(|&x| Complex::new(x, 0.0))
-            .collect();
+        let mut other_fft: Vec<Complex<f64>> =
+            other.iter().map(|&x| Complex::new(x, 0.0)).collect();
         other_fft.resize(fft_len, Complex::new(0.0, 0.0));
 
         // Compute FFTs
@@ -148,11 +144,16 @@ impl GccPhat {
         // Use lower 90% of values
         let threshold_90_idx = (abs_corr.len() * 90) / 100;
         let threshold_90 = sorted.get(threshold_90_idx).copied().unwrap_or(peak_value);
-        let background: Vec<f64> = abs_corr.iter().filter(|&&x| x < threshold_90).copied().collect();
+        let background: Vec<f64> = abs_corr
+            .iter()
+            .filter(|&&x| x < threshold_90)
+            .copied()
+            .collect();
 
         let bg_stddev = if background.len() > 10 {
             let mean: f64 = background.iter().sum::<f64>() / background.len() as f64;
-            let variance: f64 = background.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / background.len() as f64;
+            let variance: f64 = background.iter().map(|x| (x - mean).powi(2)).sum::<f64>()
+                / background.len() as f64;
             variance.sqrt()
         } else {
             1e-9

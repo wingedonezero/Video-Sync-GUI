@@ -179,9 +179,8 @@ fn cleanup_old_backups(logs_dir: &Path, keep_count: usize) {
                 let name = e.file_name();
                 let name_str = name.to_string_lossy();
                 // Match pattern: app_YYYY-MM-DD_HH-MM-SS.log
-                name_str.starts_with("app_")
-                    && name_str.ends_with(".log")
-                    && name_str.len() == 27 // app_ (4) + YYYY-MM-DD_HH-MM-SS (19) + .log (4)
+                name_str.starts_with("app_") && name_str.ends_with(".log") && name_str.len() == 27
+                // app_ (4) + YYYY-MM-DD_HH-MM-SS (19) + .log (4)
             })
             .collect(),
         Err(_) => return,
@@ -212,8 +211,12 @@ pub fn init_test_tracing() {
 /// that would otherwise flood the logs at INFO level.
 fn level_to_filter_str(level: LogLevel) -> &'static str {
     match level {
-        LogLevel::Trace => "trace,wgpu_core=warn,wgpu_hal=warn,wgpu=warn,naga=warn,cosmic_theme=warn",
-        LogLevel::Debug => "debug,wgpu_core=warn,wgpu_hal=warn,wgpu=warn,naga=warn,cosmic_theme=warn",
+        LogLevel::Trace => {
+            "trace,wgpu_core=warn,wgpu_hal=warn,wgpu=warn,naga=warn,cosmic_theme=warn"
+        }
+        LogLevel::Debug => {
+            "debug,wgpu_core=warn,wgpu_hal=warn,wgpu=warn,naga=warn,cosmic_theme=warn"
+        }
         LogLevel::Info => "info,wgpu_core=warn,wgpu_hal=warn,wgpu=warn,naga=warn,cosmic_theme=warn",
         LogLevel::Warn => "warn",
         LogLevel::Error => "error",

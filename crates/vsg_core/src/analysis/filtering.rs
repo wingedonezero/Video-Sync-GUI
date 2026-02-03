@@ -180,11 +180,7 @@ fn apply_butterworth_bandpass(
 
 /// Apply a filter multiple times (cascaded) for higher order response.
 /// Each cascade doubles the effective order (steeper rolloff).
-fn apply_cascaded_filter(
-    samples: &[f64],
-    coeffs: &Coefficients<f64>,
-    order: usize,
-) -> Vec<f64> {
+fn apply_cascaded_filter(samples: &[f64], coeffs: &Coefficients<f64>, order: usize) -> Vec<f64> {
     // Number of cascaded sections needed
     // A biquad is 2nd order, so we need order/2 sections (minimum 1)
     let num_sections = ((order + 1) / 2).max(1);

@@ -174,7 +174,9 @@ impl KeyframeInfo {
     pub fn new(timestamps_ns: Vec<u64>) -> Self {
         let mut sorted = timestamps_ns;
         sorted.sort();
-        Self { timestamps_ns: sorted }
+        Self {
+            timestamps_ns: sorted,
+        }
     }
 
     /// Find the nearest keyframe to the given timestamp.
@@ -292,7 +294,10 @@ pub fn format_timestamp_ns(ns: u64) -> String {
     let minutes = (total_secs % 3600) / 60;
     let seconds = total_secs % 60;
 
-    format!("{:02}:{:02}:{:02}.{:09}", hours, minutes, seconds, remaining_ns)
+    format!(
+        "{:02}:{:02}:{:02}.{:09}",
+        hours, minutes, seconds, remaining_ns
+    )
 }
 
 /// Parse a timestamp string (HH:MM:SS.nnnnnnnnn) to nanoseconds.
@@ -333,8 +338,14 @@ mod tests {
     #[test]
     fn parse_timestamp_works() {
         assert_eq!(parse_timestamp_ns("00:00:00.000000000"), Some(0));
-        assert_eq!(parse_timestamp_ns("00:00:01.500000000"), Some(1_500_000_000));
-        assert_eq!(parse_timestamp_ns("01:01:01.000000000"), Some(3661_000_000_000));
+        assert_eq!(
+            parse_timestamp_ns("00:00:01.500000000"),
+            Some(1_500_000_000)
+        );
+        assert_eq!(
+            parse_timestamp_ns("01:01:01.000000000"),
+            Some(3661_000_000_000)
+        );
     }
 
     #[test]

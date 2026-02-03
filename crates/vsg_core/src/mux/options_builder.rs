@@ -127,8 +127,11 @@ impl<'a> MkvmergeOptionsBuilder<'a> {
             // Log for debugging
             tracing::debug!(
                 "mkvmerge --sync for {} ({}:{}): raw={:.3}ms → rounded={:+}ms",
-                track.source, track.track_type, track.id,
-                final_delay_ms, delay_rounded
+                track.source,
+                track.track_type,
+                track.id,
+                final_delay_ms,
+                delay_rounded
             );
         }
 

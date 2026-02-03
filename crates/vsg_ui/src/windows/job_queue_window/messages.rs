@@ -42,7 +42,10 @@ pub enum JobQueueMsg {
 
     // === Browse dialog results ===
     /// Browse result for source files
-    BrowseResult { source_index: usize, paths: Vec<PathBuf> },
+    BrowseResult {
+        source_index: usize,
+        paths: Vec<PathBuf>,
+    },
 
     // === Manual selection dialog ===
     /// Manual selection dialog closed with layout configured

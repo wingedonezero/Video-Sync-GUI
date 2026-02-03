@@ -6,8 +6,8 @@
 
 use crate::chapters::{
     extract_chapters_to_string, extract_keyframes, format_timestamp_ns, parse_chapter_xml,
-    process_chapters, shift_chapters, snap_chapters_with_threshold, write_chapter_file,
-    SnapDetail, SnapMode as ChapterSnapMode,
+    process_chapters, shift_chapters, snap_chapters_with_threshold, write_chapter_file, SnapDetail,
+    SnapMode as ChapterSnapMode,
 };
 use crate::orchestrator::errors::{StepError, StepResult};
 use crate::orchestrator::step::PipelineStep;
@@ -43,7 +43,9 @@ impl PipelineStep for ChaptersStep {
     fn validate_input(&self, ctx: &Context) -> StepResult<()> {
         // Need Source 1 for chapters
         if !ctx.job_spec.sources.contains_key("Source 1") {
-            return Err(StepError::invalid_input("No Source 1 for chapter extraction"));
+            return Err(StepError::invalid_input(
+                "No Source 1 for chapter extraction",
+            ));
         }
         Ok(())
     }
@@ -64,7 +66,8 @@ impl PipelineStep for ChaptersStep {
         };
 
         // Extract chapters using the chapters module
-        ctx.logger.command(&format!("mkvextract chapters \"{}\"", source1.display()));
+        ctx.logger
+            .command(&format!("mkvextract chapters \"{}\"", source1.display()));
         let chapter_xml = match extract_chapters_to_string(source1) {
             Ok(Some(xml)) => xml,
             Ok(None) => {
@@ -77,7 +80,8 @@ impl PipelineStep for ChaptersStep {
             }
             Err(e) => {
                 // Chapters are optional - log warning but continue
-                ctx.logger.warn(&format!("Failed to extract chapters: {}", e));
+                ctx.logger
+                    .warn(&format!("Failed to extract chapters: {}", e));
                 state.chapters = Some(ChaptersOutput {
                     chapters_xml: None,
                     snapped: false,
@@ -105,8 +109,8 @@ impl PipelineStep for ChaptersStep {
         // Process chapters: deduplicate, normalize ends, and optionally rename
         let proc_stats = process_chapters(
             &mut chapter_data,
-            true,  // Always deduplicate
-            true,  // Always normalize ends
+            true, // Always deduplicate
+            true, // Always normalize ends
             ctx.settings.chapters.rename,
         );
 
@@ -143,9 +147,7 @@ impl PipelineStep for ChaptersStep {
                 let ietf = rename.language_ietf.as_deref().unwrap_or("und");
                 ctx.logger.info(&format!(
                     "  - Renamed chapter {} (language: {}, IETF: {})",
-                    rename.chapter_number,
-                    rename.language,
-                    ietf
+                    rename.chapter_number, rename.language, ietf
                 ));
             }
         }
@@ -173,8 +175,7 @@ impl PipelineStep for ChaptersStep {
             let threshold_ms = ctx.settings.chapters.snap_threshold_ms as i64;
             ctx.logger.info(&format!(
                 "Chapter snapping enabled (mode: {:?}, threshold: {}ms)",
-                ctx.settings.chapters.snap_mode,
-                threshold_ms
+                ctx.settings.chapters.snap_mode, threshold_ms
             ));
 
             // Extract keyframes from video
@@ -203,8 +204,7 @@ impl PipelineStep for ChaptersStep {
                     };
                     ctx.logger.info(&format!(
                         "Snapping with mode={}, threshold={}ms...",
-                        mode_str,
-                        threshold_ms
+                        mode_str, threshold_ms
                     ));
 
                     // Snap chapters to keyframes with threshold enforcement
@@ -233,7 +233,12 @@ impl PipelineStep for ChaptersStep {
                                     SnapDetail::format_timestamp_full(*timestamp_ns)
                                 ));
                             }
-                            SnapDetail::Snapped { name, original_ns, new_ns, shift_ns } => {
+                            SnapDetail::Snapped {
+                                name,
+                                original_ns,
+                                new_ns,
+                                shift_ns,
+                            } => {
                                 ctx.logger.info(&format!(
                                     "  - Snapped '{}' ({}) -> {} (moved by {})",
                                     name,
@@ -242,7 +247,12 @@ impl PipelineStep for ChaptersStep {
                                     SnapDetail::format_shift(*shift_ns)
                                 ));
                             }
-                            SnapDetail::Skipped { name, timestamp_ns, would_shift_ns, threshold_ns } => {
+                            SnapDetail::Skipped {
+                                name,
+                                timestamp_ns,
+                                would_shift_ns,
+                                threshold_ns,
+                            } => {
                                 ctx.logger.info(&format!(
                                     "  - Skipped '{}' ({}) - {} exceeds threshold of {}ms",
                                     name,
@@ -257,16 +267,12 @@ impl PipelineStep for ChaptersStep {
                     // Log summary
                     ctx.logger.info(&format!(
                         "Snap complete: {} moved, {} on keyframe, {} skipped.",
-                        stats.moved,
-                        stats.already_aligned,
-                        stats.skipped
+                        stats.moved, stats.already_aligned, stats.skipped
                     ));
                 }
                 Err(e) => {
-                    ctx.logger.warn(&format!(
-                        "Failed to extract keyframes for snapping: {}",
-                        e
-                    ));
+                    ctx.logger
+                        .warn(&format!("Failed to extract keyframes for snapping: {}", e));
                 }
             }
         } else {

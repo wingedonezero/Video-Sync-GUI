@@ -137,9 +137,10 @@ impl Component for ManualSelectionWindow {
                                 set_model: Some(&gtk4::ListStore::new(&[
                                     glib::Type::STRING, // Column 0: Type icon
                                     glib::Type::STRING, // Column 1: Track description
-                                    glib::Type::STRING, // Column 2: Badges
-                                    glib::Type::STRING, // Column 3: Source
-                                    glib::Type::U32,    // Column 4: Original index (hidden)
+                                    glib::Type::BOOL,   // Column 2: Default checkbox
+                                    glib::Type::BOOL,   // Column 3: Forced checkbox
+                                    glib::Type::STRING, // Column 4: Source
+                                    glib::Type::U32,    // Column 5: Original index (hidden)
                                 ])),
                                 set_headers_visible: true,
                                 set_reorderable: true,
@@ -243,7 +244,10 @@ impl Component for ManualSelectionWindow {
             }
             Err(e) => (
                 ManualSelectionModel::default(),
-                Some(format!("<span color='red'>Error probing files: {}</span>", e)),
+                Some(format!(
+                    "<span color='red'>Error probing files: {}</span>",
+                    e
+                )),
             ),
         };
 
@@ -255,8 +259,8 @@ impl Component for ManualSelectionWindow {
 
         let widgets = view_output!();
 
-        // Set up the final list columns
-        Self::setup_final_tree(&widgets.final_tree);
+        // Set up the final list columns (with sender for toggle callbacks)
+        Self::setup_final_tree(&widgets.final_tree, sender.clone());
 
         // Set up drop target for final tree
         Self::setup_drop_target(&widgets.final_tree, sender.clone());
@@ -288,8 +292,14 @@ impl Component for ManualSelectionWindow {
 
     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, root: &Self::Root) {
         match msg {
-            ManualSelectionMsg::AddTrackToFinal { source_key, track_index } |
-            ManualSelectionMsg::SourceTrackDoubleClicked { source_key, track_index } => {
+            ManualSelectionMsg::AddTrackToFinal {
+                source_key,
+                track_index,
+            }
+            | ManualSelectionMsg::SourceTrackDoubleClicked {
+                source_key,
+                track_index,
+            } => {
                 self.model.add_to_final(&source_key, track_index);
                 self.refresh_final_tree(root);
             }
@@ -387,6 +397,28 @@ impl Component for ManualSelectionWindow {
                 tracing::info!("Selected {} external subtitle files", paths.len());
             }
 
+            ManualSelectionMsg::OpenTrackSettings { final_index } => {
+                if final_index < self.model.final_tracks.len() {
+                    self.open_track_settings_dialog(final_index, sender.clone(), root);
+                }
+            }
+
+            ManualSelectionMsg::SetTrackCustomName { final_index, name } => {
+                if let Some(track) = self.model.final_tracks.get_mut(final_index) {
+                    track.data.custom_name = name;
+                    track.refresh_badges();
+                    self.refresh_final_tree(root);
+                }
+            }
+
+            ManualSelectionMsg::SetTrackCustomLang { final_index, lang } => {
+                if let Some(track) = self.model.final_tracks.get_mut(final_index) {
+                    track.data.custom_lang = lang;
+                    track.refresh_badges();
+                    self.refresh_final_tree(root);
+                }
+            }
+
             _ => {
                 // Other messages not yet implemented
             }
@@ -396,7 +428,7 @@ impl Component for ManualSelectionWindow {
 
 impl ManualSelectionWindow {
     /// Set up the final output TreeView columns
-    fn setup_final_tree(tree: &gtk4::TreeView) {
+    fn setup_final_tree(tree: &gtk4::TreeView, sender: ComponentSender<Self>) {
         // Column 0: Type icon
         let renderer0 = gtk4::CellRendererText::new();
         let column0 = gtk4::TreeViewColumn::new();
@@ -416,23 +448,72 @@ impl ManualSelectionWindow {
         column1.add_attribute(&renderer1, "text", 1);
         tree.append_column(&column1);
 
-        // Column 2: Badges
-        let renderer2 = gtk4::CellRendererText::new();
+        // Column 2: Default checkbox
+        let renderer2 = gtk4::CellRendererToggle::new();
+        renderer2.set_activatable(true);
         let column2 = gtk4::TreeViewColumn::new();
-        column2.set_title("Flags");
-        column2.set_min_width(100);
+        column2.set_title("Default");
+        column2.set_min_width(60);
         column2.pack_start(&renderer2, false);
-        column2.add_attribute(&renderer2, "text", 2);
+        column2.add_attribute(&renderer2, "active", 2);
+
+        // Connect toggle signal for Default
+        let sender_clone = sender.clone();
+        let tree_weak = tree.downgrade();
+        renderer2.connect_toggled(move |_renderer, path| {
+            if let Some(tree) = tree_weak.upgrade() {
+                if let Some(model) = tree.model() {
+                    if let Some(store) = model.downcast_ref::<gtk4::ListStore>() {
+                        if let Some(iter) = store.iter(&path) {
+                            // Get the original index from column 5
+                            let idx: u32 = store.get(&iter, 5);
+                            sender_clone.input(ManualSelectionMsg::ToggleTrackDefault {
+                                final_index: idx as usize,
+                            });
+                        }
+                    }
+                }
+            }
+        });
         tree.append_column(&column2);
 
-        // Column 3: Source
-        let renderer3 = gtk4::CellRendererText::new();
+        // Column 3: Forced checkbox
+        let renderer3 = gtk4::CellRendererToggle::new();
+        renderer3.set_activatable(true);
         let column3 = gtk4::TreeViewColumn::new();
-        column3.set_title("Source");
-        column3.set_min_width(80);
+        column3.set_title("Forced");
+        column3.set_min_width(60);
         column3.pack_start(&renderer3, false);
-        column3.add_attribute(&renderer3, "text", 3);
+        column3.add_attribute(&renderer3, "active", 3);
+
+        // Connect toggle signal for Forced
+        let sender_clone = sender.clone();
+        let tree_weak = tree.downgrade();
+        renderer3.connect_toggled(move |_renderer, path| {
+            if let Some(tree) = tree_weak.upgrade() {
+                if let Some(model) = tree.model() {
+                    if let Some(store) = model.downcast_ref::<gtk4::ListStore>() {
+                        if let Some(iter) = store.iter(&path) {
+                            // Get the original index from column 5
+                            let idx: u32 = store.get(&iter, 5);
+                            sender_clone.input(ManualSelectionMsg::ToggleTrackForced {
+                                final_index: idx as usize,
+                            });
+                        }
+                    }
+                }
+            }
+        });
         tree.append_column(&column3);
+
+        // Column 4: Source
+        let renderer4 = gtk4::CellRendererText::new();
+        let column4 = gtk4::TreeViewColumn::new();
+        column4.set_title("Source");
+        column4.set_min_width(80);
+        column4.pack_start(&renderer4, false);
+        column4.add_attribute(&renderer4, "text", 4);
+        tree.append_column(&column4);
     }
 
     /// Set up drop target for accepting tracks from source lists
@@ -502,7 +583,9 @@ impl ManualSelectionWindow {
         let sender_clone = sender.clone();
 
         gesture.connect_pressed(move |gesture, _n_press, x, y| {
-            let Some(tree) = tree_weak.upgrade() else { return };
+            let Some(tree) = tree_weak.upgrade() else {
+                return;
+            };
 
             // Get path at click position
             if let Some((Some(path), _, _, _)) = tree.path_at_pos(x as i32, y as i32) {
@@ -532,17 +615,22 @@ impl ManualSelectionWindow {
     fn create_track_context_menu(index: usize, sender: ComponentSender<Self>) -> gtk4::PopoverMenu {
         let menu_model = gio::Menu::new();
 
+        // Settings section
+        let settings_section = gio::Menu::new();
+        settings_section.append(
+            Some("Track Settings..."),
+            Some(&format!("track.settings.{}", index)),
+        );
+        menu_model.append_section(None, &settings_section);
+
         // Movement section
         let move_section = gio::Menu::new();
         move_section.append(Some("Move Up"), Some(&format!("track.move-up.{}", index)));
-        move_section.append(Some("Move Down"), Some(&format!("track.move-down.{}", index)));
+        move_section.append(
+            Some("Move Down"),
+            Some(&format!("track.move-down.{}", index)),
+        );
         menu_model.append_section(None, &move_section);
-
-        // Flags section
-        let flags_section = gio::Menu::new();
-        flags_section.append(Some("Toggle Default"), Some(&format!("track.toggle-default.{}", index)));
-        flags_section.append(Some("Toggle Forced"), Some(&format!("track.toggle-forced.{}", index)));
-        menu_model.append_section(None, &flags_section);
 
         // Delete section
         let delete_section = gio::Menu::new();
@@ -554,6 +642,14 @@ impl ManualSelectionWindow {
 
         // Connect actions
         let action_group = gio::SimpleActionGroup::new();
+
+        // Settings action
+        let settings_action = gio::SimpleAction::new(&format!("settings.{}", index), None);
+        let sender_clone = sender.clone();
+        settings_action.connect_activate(move |_, _| {
+            sender_clone.input(ManualSelectionMsg::OpenTrackSettings { final_index: index });
+        });
+        action_group.add_action(&settings_action);
 
         // Move up action
         let move_up_action = gio::SimpleAction::new(&format!("move-up.{}", index), None);
@@ -570,22 +666,6 @@ impl ManualSelectionWindow {
             sender_clone.input(ManualSelectionMsg::MoveTrackDown { final_index: index });
         });
         action_group.add_action(&move_down_action);
-
-        // Toggle default action
-        let default_action = gio::SimpleAction::new(&format!("toggle-default.{}", index), None);
-        let sender_clone = sender.clone();
-        default_action.connect_activate(move |_, _| {
-            sender_clone.input(ManualSelectionMsg::ToggleTrackDefault { final_index: index });
-        });
-        action_group.add_action(&default_action);
-
-        // Toggle forced action
-        let forced_action = gio::SimpleAction::new(&format!("toggle-forced.{}", index), None);
-        let sender_clone = sender.clone();
-        forced_action.connect_activate(move |_, _| {
-            sender_clone.input(ManualSelectionMsg::ToggleTrackForced { final_index: index });
-        });
-        action_group.add_action(&forced_action);
 
         // Remove action
         let remove_action = gio::SimpleAction::new(&format!("remove.{}", index), None);
@@ -618,10 +698,14 @@ impl ManualSelectionWindow {
             };
 
             // Get source path for title
-            let path_name = model.get_source(source_key)
-                .map(|s| s.path.file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| s.path.to_string_lossy().to_string()))
+            let path_name = model
+                .get_source(source_key)
+                .map(|s| {
+                    s.path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| s.path.to_string_lossy().to_string())
+                })
                 .unwrap_or_else(|| "Unknown".to_string());
 
             let title = if source_key == "Source 1" {
@@ -729,27 +813,33 @@ impl ManualSelectionWindow {
     /// Refresh the final output list
     fn refresh_final_list(tree: &gtk4::TreeView, model: &ManualSelectionModel) {
         let store = gtk4::ListStore::new(&[
-            glib::Type::STRING,
-            glib::Type::STRING,
-            glib::Type::STRING,
-            glib::Type::STRING,
-            glib::Type::U32,  // Hidden: original index
+            glib::Type::STRING, // 0: Type icon
+            glib::Type::STRING, // 1: Track description
+            glib::Type::BOOL,   // 2: Default checkbox
+            glib::Type::BOOL,   // 3: Forced checkbox
+            glib::Type::STRING, // 4: Source
+            glib::Type::U32,    // 5: Hidden original index
         ]);
 
         for (i, track) in model.final_tracks.iter().enumerate() {
             let icon = logic::track_type_icon(track.data.track_type);
-            let desc = track.display();
-            let badges = track.badges.join(", ");
+            let desc = track.info.summary();
+            let is_default = track.data.is_default;
+            let is_forced = track.data.is_forced;
             let source = track.data.source_key.clone();
 
             let iter = store.append();
-            store.set(&iter, &[
-                (0, &icon),
-                (1, &desc),
-                (2, &badges),
-                (3, &source),
-                (4, &(i as u32)),  // Store original index
-            ]);
+            store.set(
+                &iter,
+                &[
+                    (0, &icon),
+                    (1, &desc),
+                    (2, &is_default),
+                    (3, &is_forced),
+                    (4, &source),
+                    (5, &(i as u32)), // Store original index
+                ],
+            );
         }
 
         tree.set_model(Some(&store));
@@ -766,10 +856,11 @@ impl ManualSelectionWindow {
         };
 
         // Read the current order of original indices from the TreeView
+        // Column 5 contains the original index
         let mut new_order: Vec<usize> = Vec::new();
         let mut iter = model.iter_first();
         while let Some(it) = iter {
-            if let Ok(idx) = model.get::<u32>(&it, 4).try_into() {
+            if let Ok(idx) = model.get::<u32>(&it, 5).try_into() {
                 new_order.push(idx);
             }
             iter = if model.iter_next(&it) { Some(it) } else { None };
@@ -855,7 +946,8 @@ impl ManualSelectionWindow {
         glib::spawn_future_local(async move {
             match dialog.open_multiple_future(Some(&root_clone)).await {
                 Ok(files) => {
-                    let paths: Vec<PathBuf> = files.iter()
+                    let paths: Vec<PathBuf> = files
+                        .iter()
                         .filter_map(|item| item.ok())
                         .filter_map(|file: gio::File| file.path())
                         .collect();
@@ -867,5 +959,183 @@ impl ManualSelectionWindow {
                 Err(_) => {}
             }
         });
+    }
+
+    /// Open track settings dialog for name and language
+    fn open_track_settings_dialog(
+        &self,
+        final_index: usize,
+        sender: ComponentSender<Self>,
+        root: &gtk4::Window,
+    ) {
+        let track = match self.model.final_tracks.get(final_index) {
+            Some(t) => t,
+            None => return,
+        };
+
+        // Get current values
+        let current_name = track.data.custom_name.clone().unwrap_or_default();
+        let current_lang = track.data.custom_lang.clone();
+        let original_lang = track.info.language.clone();
+
+        // Create dialog
+        let dialog = gtk4::Window::builder()
+            .title("Track Settings")
+            .transient_for(root)
+            .modal(true)
+            .default_width(400)
+            .default_height(200)
+            .build();
+
+        // Main container
+        let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 12);
+        vbox.set_margin_all(16);
+
+        // Track info label
+        let info_label = gtk4::Label::new(Some(&format!("<b>{}</b>", track.info.summary())));
+        info_label.set_use_markup(true);
+        info_label.set_xalign(0.0);
+        info_label.set_margin_bottom(8);
+        vbox.append(&info_label);
+
+        // Language section
+        let lang_frame = gtk4::Frame::new(Some("Language"));
+        let lang_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+        lang_box.set_margin_all(8);
+
+        let lang_combo = gtk4::ComboBoxText::new();
+
+        // Common ISO 639-2 language codes used by mkvmerge
+        let languages = [
+            ("", "(Keep Original)"),
+            ("und", "Undetermined"),
+            ("eng", "English"),
+            ("jpn", "Japanese"),
+            ("spa", "Spanish"),
+            ("fre", "French"),
+            ("ger", "German"),
+            ("ita", "Italian"),
+            ("por", "Portuguese"),
+            ("rus", "Russian"),
+            ("chi", "Chinese"),
+            ("kor", "Korean"),
+            ("ara", "Arabic"),
+            ("hin", "Hindi"),
+            ("pol", "Polish"),
+            ("dut", "Dutch"),
+            ("swe", "Swedish"),
+            ("nor", "Norwegian"),
+            ("dan", "Danish"),
+            ("fin", "Finnish"),
+            ("tha", "Thai"),
+            ("vie", "Vietnamese"),
+            ("ind", "Indonesian"),
+            ("may", "Malay"),
+            ("tur", "Turkish"),
+            ("gre", "Greek"),
+            ("heb", "Hebrew"),
+            ("cze", "Czech"),
+            ("hun", "Hungarian"),
+            ("rum", "Romanian"),
+            ("ukr", "Ukrainian"),
+        ];
+
+        for (code, name) in &languages {
+            let display = if code.is_empty() {
+                if let Some(ref orig) = original_lang {
+                    format!("{} (current: {})", name, orig)
+                } else {
+                    name.to_string()
+                }
+            } else {
+                format!("{} ({})", name, code)
+            };
+            lang_combo.append(Some(code), &display);
+        }
+
+        // Set active based on current custom_lang
+        match &current_lang {
+            Some(lang) => {
+                // Try to find matching language code
+                let found = languages.iter().position(|(code, _)| code == lang);
+                if let Some(idx) = found {
+                    lang_combo.set_active(Some(idx as u32));
+                } else {
+                    lang_combo.set_active(Some(0)); // Default to "Keep Original"
+                }
+            }
+            None => {
+                lang_combo.set_active(Some(0)); // "Keep Original"
+            }
+        }
+
+        lang_box.append(&lang_combo);
+        lang_frame.set_child(Some(&lang_box));
+        vbox.append(&lang_frame);
+
+        // Custom name section
+        let name_frame = gtk4::Frame::new(Some("Custom Track Name"));
+        let name_box = gtk4::Box::new(gtk4::Orientation::Vertical, 4);
+        name_box.set_margin_all(8);
+
+        let name_entry = gtk4::Entry::new();
+        name_entry.set_placeholder_text(Some("Leave empty to use original name"));
+        name_entry.set_text(&current_name);
+
+        name_box.append(&name_entry);
+        name_frame.set_child(Some(&name_box));
+        vbox.append(&name_frame);
+
+        // Buttons
+        let button_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
+        button_box.set_halign(gtk4::Align::End);
+        button_box.set_margin_top(12);
+
+        let cancel_btn = gtk4::Button::with_label("Cancel");
+        let ok_btn = gtk4::Button::with_label("OK");
+        ok_btn.add_css_class("suggested-action");
+
+        button_box.append(&cancel_btn);
+        button_box.append(&ok_btn);
+        vbox.append(&button_box);
+
+        dialog.set_child(Some(&vbox));
+
+        // Connect cancel button
+        let dialog_weak = dialog.downgrade();
+        cancel_btn.connect_clicked(move |_| {
+            if let Some(d) = dialog_weak.upgrade() {
+                d.close();
+            }
+        });
+
+        // Connect OK button
+        let dialog_weak = dialog.downgrade();
+        let sender_clone = sender.clone();
+        ok_btn.connect_clicked(move |_| {
+            if let Some(d) = dialog_weak.upgrade() {
+                // Get language selection
+                let lang = lang_combo
+                    .active_id()
+                    .map(|s| s.to_string())
+                    .filter(|s| !s.is_empty());
+
+                // Get name
+                let name = name_entry.text();
+                let name = if name.is_empty() {
+                    None
+                } else {
+                    Some(name.to_string())
+                };
+
+                // Send messages
+                sender_clone.input(ManualSelectionMsg::SetTrackCustomLang { final_index, lang });
+                sender_clone.input(ManualSelectionMsg::SetTrackCustomName { final_index, name });
+
+                d.close();
+            }
+        });
+
+        dialog.present();
     }
 }

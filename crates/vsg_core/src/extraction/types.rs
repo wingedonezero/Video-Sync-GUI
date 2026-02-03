@@ -144,7 +144,10 @@ impl TrackInfo {
                 )
             }
             TrackType::Subtitles => {
-                format!("[{}-{}] {} ({})", type_prefix, self.id, self.codec_name, lang)
+                format!(
+                    "[{}-{}] {} ({})",
+                    type_prefix, self.id, self.codec_name, lang
+                )
             }
         }
     }
@@ -327,12 +330,16 @@ impl ProbeResult {
 
     /// Get the first default video track.
     pub fn default_video(&self) -> Option<&TrackInfo> {
-        self.video_tracks().find(|t| t.is_default).or_else(|| self.video_tracks().next())
+        self.video_tracks()
+            .find(|t| t.is_default)
+            .or_else(|| self.video_tracks().next())
     }
 
     /// Get the first default audio track.
     pub fn default_audio(&self) -> Option<&TrackInfo> {
-        self.audio_tracks().find(|t| t.is_default).or_else(|| self.audio_tracks().next())
+        self.audio_tracks()
+            .find(|t| t.is_default)
+            .or_else(|| self.audio_tracks().next())
     }
 
     /// Get duration in seconds.

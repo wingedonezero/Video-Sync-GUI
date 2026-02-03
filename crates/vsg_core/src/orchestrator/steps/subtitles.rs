@@ -44,7 +44,8 @@ impl PipelineStep for SubtitlesStep {
     }
 
     fn execute(&self, ctx: &Context, state: &mut JobState) -> StepResult<StepOutcome> {
-        ctx.logger.info("Subtitles step (stub) - passing through without processing");
+        ctx.logger
+            .info("Subtitles step (stub) - passing through without processing");
 
         // Check if there are any subtitle tracks to process
         let has_subtitles = ctx
@@ -74,7 +75,8 @@ impl PipelineStep for SubtitlesStep {
             ocr_performed: false,
         });
 
-        ctx.logger.info("Subtitle processing complete (stub - using extracted files directly)");
+        ctx.logger
+            .info("Subtitle processing complete (stub - using extracted files directly)");
         Ok(StepOutcome::Success)
     }
 

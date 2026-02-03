@@ -231,7 +231,9 @@ impl ConfigManager {
         let mut output = String::new();
 
         output.push_str("# Video Sync GUI Configuration\n");
-        output.push_str("# This file is auto-generated. Comments may be preserved on section updates.\n\n");
+        output.push_str(
+            "# This file is auto-generated. Comments may be preserved on section updates.\n\n",
+        );
 
         // Paths section
         output.push_str("# Output and working directories\n");

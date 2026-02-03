@@ -4,8 +4,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use vsg_core::extraction::{
-    probe_file, build_track_description, get_detailed_stream_info,
-    ExtractionResult, ProbeResult,
+    build_track_description, get_detailed_stream_info, probe_file, ExtractionResult, ProbeResult,
 };
 use vsg_core::jobs::{FinalTrackEntry as CoreFinalTrackEntry, ManualLayout, TrackConfig};
 use vsg_core::models::TrackType as CoreTrackType;
@@ -14,7 +13,9 @@ use super::messages::FinalTrackData;
 use super::model::ManualSelectionModel;
 
 /// Probe all source files and create model
-pub fn probe_sources(sources: &HashMap<String, PathBuf>) -> ExtractionResult<Vec<(String, PathBuf, ProbeResult)>> {
+pub fn probe_sources(
+    sources: &HashMap<String, PathBuf>,
+) -> ExtractionResult<Vec<(String, PathBuf, ProbeResult)>> {
     let mut results = Vec::new();
 
     for (key, path) in sources {
@@ -47,8 +48,18 @@ pub fn probe_sources(sources: &HashMap<String, PathBuf>) -> ExtractionResult<Vec
 
     // Sort by source key
     results.sort_by(|a, b| {
-        let num_a = a.0.chars().filter(|c| c.is_ascii_digit()).collect::<String>().parse::<u32>().unwrap_or(0);
-        let num_b = b.0.chars().filter(|c| c.is_ascii_digit()).collect::<String>().parse::<u32>().unwrap_or(0);
+        let num_a =
+            a.0.chars()
+                .filter(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse::<u32>()
+                .unwrap_or(0);
+        let num_b =
+            b.0.chars()
+                .filter(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse::<u32>()
+                .unwrap_or(0);
         num_a.cmp(&num_b)
     });
 
@@ -56,9 +67,7 @@ pub fn probe_sources(sources: &HashMap<String, PathBuf>) -> ExtractionResult<Vec
 }
 
 /// Convert UI FinalTrackData to core ManualLayout
-pub fn convert_to_manual_layout(
-    model: &ManualSelectionModel,
-) -> ManualLayout {
+pub fn convert_to_manual_layout(model: &ManualSelectionModel) -> ManualLayout {
     let mut final_tracks = Vec::new();
 
     for (i, entry) in model.final_tracks.iter().enumerate() {
@@ -108,10 +117,7 @@ pub fn convert_to_manual_layout(
 }
 
 /// Pre-populate model from a previous layout
-pub fn prepopulate_from_layout(
-    model: &mut ManualSelectionModel,
-    layout: &ManualLayout,
-) {
+pub fn prepopulate_from_layout(model: &mut ManualSelectionModel, layout: &ManualLayout) {
     // Clear existing final tracks
     model.final_tracks.clear();
 
@@ -144,7 +150,8 @@ pub fn prepopulate_from_layout(
                 if source_track.info.track_type.to_string() == type_str {
                     if type_count == position {
                         // Found the matching track - add it
-                        let track_index = source_tracks.iter()
+                        let track_index = source_tracks
+                            .iter()
                             .position(|t| t.info.id == source_track.info.id)
                             .unwrap_or(0);
 
@@ -157,7 +164,8 @@ pub fn prepopulate_from_layout(
                                 final_track.data.custom_name = entry.config.custom_name.clone();
                                 final_track.data.custom_lang = entry.config.custom_lang.clone();
                                 final_track.data.apply_track_name = entry.config.apply_track_name;
-                                final_track.data.sync_to_source = entry.config.sync_to_source.clone();
+                                final_track.data.sync_to_source =
+                                    entry.config.sync_to_source.clone();
                                 final_track.data.perform_ocr = entry.config.perform_ocr;
                                 final_track.data.convert_to_ass = entry.config.convert_to_ass;
                                 final_track.data.rescale = entry.config.rescale;
@@ -188,9 +196,7 @@ pub fn track_type_icon(track_type: vsg_core::extraction::types::TrackType) -> &'
 /// Check if a subtitle track is text-based (vs image-based like PGS/VobSub)
 pub fn is_text_subtitle(codec_id: &str) -> bool {
     let codec_upper = codec_id.to_uppercase();
-    codec_upper.starts_with("S_TEXT/")
-        || codec_upper == "S_SSA"
-        || codec_upper == "S_ASS"
+    codec_upper.starts_with("S_TEXT/") || codec_upper == "S_SSA" || codec_upper == "S_ASS"
 }
 
 /// Check if a subtitle track is image-based (needs OCR)

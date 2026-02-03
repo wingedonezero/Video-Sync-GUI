@@ -79,7 +79,8 @@ impl JobQueueEntry {
         self.sources
             .get(key)
             .map(|p| {
-                let s = p.file_name()
+                let s = p
+                    .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| p.to_string_lossy().to_string());
                 if s.len() > max_len {
@@ -402,7 +403,10 @@ mod tests {
     #[test]
     fn job_entry_source_display() {
         let mut sources = HashMap::new();
-        sources.insert("Source 1".to_string(), PathBuf::from("/path/to/very_long_filename_movie.mkv"));
+        sources.insert(
+            "Source 1".to_string(),
+            PathBuf::from("/path/to/very_long_filename_movie.mkv"),
+        );
 
         let job = JobQueueEntry::new("test".to_string(), "test".to_string(), sources);
 

@@ -74,11 +74,7 @@ pub trait DelaySelector: Send + Sync {
     /// Select final delay from accepted chunks.
     ///
     /// Returns `None` if selection cannot be made (e.g., insufficient chunks).
-    fn select(
-        &self,
-        chunks: &[ChunkResult],
-        config: &SelectorConfig,
-    ) -> Option<DelaySelection>;
+    fn select(&self, chunks: &[ChunkResult], config: &SelectorConfig) -> Option<DelaySelection>;
 }
 
 /// Create a delay selector for the given mode.
@@ -127,11 +123,7 @@ mod tests {
 
     #[test]
     fn average_selector_averages_raw() {
-        let chunks = make_chunks(&[
-            (-1000.0, 10.0),
-            (-1002.0, 20.0),
-            (-1001.0, 30.0),
-        ]);
+        let chunks = make_chunks(&[(-1000.0, 10.0), (-1002.0, 20.0), (-1001.0, 30.0)]);
         let config = SelectorConfig::default();
         let result = AverageSelector.select(&chunks, &config).unwrap();
         // Average of -1000, -1002, -1001 = -1001

@@ -46,7 +46,8 @@ impl PipelineStep for AttachmentsStep {
         // Get attachment sources from job spec
         // If not specified, default to Source 1 only
         let attachment_sources: Vec<String> = if ctx.job_spec.attachment_sources.is_empty() {
-            ctx.logger.info("No attachment sources specified - defaulting to Source 1");
+            ctx.logger
+                .info("No attachment sources specified - defaulting to Source 1");
             vec!["Source 1".to_string()]
         } else {
             ctx.logger.info(&format!(
@@ -57,7 +58,8 @@ impl PipelineStep for AttachmentsStep {
         };
 
         if attachment_sources.is_empty() {
-            ctx.logger.info("No attachment sources specified - skipping");
+            ctx.logger
+                .info("No attachment sources specified - skipping");
             return Ok(StepOutcome::Skipped("No attachment sources".to_string()));
         }
 
@@ -88,9 +90,7 @@ impl PipelineStep for AttachmentsStep {
                                     for path in result.files {
                                         let key = format!(
                                             "attachment_{}",
-                                            path.file_name()
-                                                .unwrap_or_default()
-                                                .to_string_lossy()
+                                            path.file_name().unwrap_or_default().to_string_lossy()
                                         );
                                         extract.attachments.insert(key, path);
                                     }

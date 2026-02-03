@@ -77,9 +77,9 @@ pub fn extract_audio(
         .ok_or_else(|| AnalysisError::FfmpegError("Failed to capture FFmpeg stdout".to_string()))?;
 
     let mut buffer = Vec::new();
-    stdout.read_to_end(&mut buffer).map_err(|e| {
-        AnalysisError::FfmpegError(format!("Failed to read FFmpeg output: {}", e))
-    })?;
+    stdout
+        .read_to_end(&mut buffer)
+        .map_err(|e| AnalysisError::FfmpegError(format!("Failed to read FFmpeg output: {}", e)))?;
 
     // Wait for FFmpeg to finish
     let status = child
@@ -183,9 +183,9 @@ pub fn extract_audio_segment(
         .ok_or_else(|| AnalysisError::FfmpegError("Failed to capture FFmpeg stdout".to_string()))?;
 
     let mut buffer = Vec::new();
-    stdout.read_to_end(&mut buffer).map_err(|e| {
-        AnalysisError::FfmpegError(format!("Failed to read FFmpeg output: {}", e))
-    })?;
+    stdout
+        .read_to_end(&mut buffer)
+        .map_err(|e| AnalysisError::FfmpegError(format!("Failed to read FFmpeg output: {}", e)))?;
 
     let status = child
         .wait()
@@ -275,9 +275,9 @@ pub fn extract_full_audio(
         .ok_or_else(|| AnalysisError::FfmpegError("Failed to capture FFmpeg stdout".to_string()))?;
 
     let mut buffer = Vec::new();
-    stdout.read_to_end(&mut buffer).map_err(|e| {
-        AnalysisError::FfmpegError(format!("Failed to read FFmpeg output: {}", e))
-    })?;
+    stdout
+        .read_to_end(&mut buffer)
+        .map_err(|e| AnalysisError::FfmpegError(format!("Failed to read FFmpeg output: {}", e)))?;
 
     // Wait for FFmpeg to finish
     let status = child

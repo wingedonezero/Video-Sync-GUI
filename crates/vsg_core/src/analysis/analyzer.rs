@@ -17,7 +17,9 @@ use crate::models::{DelaySelectionMode, FilteringMethod};
 use super::delay_selection::{get_selector, SelectorConfig};
 use super::ffmpeg::{extract_full_audio, get_duration, DEFAULT_ANALYSIS_SAMPLE_RATE};
 use super::filtering::{apply_filter, FilterConfig, FilterType};
-use super::methods::{create_from_enum, selected_methods, CorrelationMethod as CorrelationMethodTrait, Scc};
+use super::methods::{
+    create_from_enum, selected_methods, CorrelationMethod as CorrelationMethodTrait, Scc,
+};
 use super::peak_fit::find_and_fit_peak;
 use super::tracks::{find_track_by_language, get_audio_tracks};
 use super::types::{AnalysisError, AnalysisResult, AudioData, ChunkResult, SourceAnalysisResult};
@@ -233,12 +235,8 @@ impl Analyzer {
         )?;
 
         self.log(&format!("Decoding {} audio...", source_name));
-        let other_audio = extract_full_audio(
-            other_path,
-            self.sample_rate,
-            self.use_soxr,
-            other_track_idx,
-        )?;
+        let other_audio =
+            extract_full_audio(other_path, self.sample_rate, self.use_soxr, other_track_idx)?;
 
         self.log(&format!(
             "Audio decoded. Analyzing {} chunks...",
@@ -249,9 +247,7 @@ impl Analyzer {
         if self.filtering_method != FilteringMethod::None {
             self.log(&format!(
                 "Audio filtering: {} (low={:.0}Hz, high={:.0}Hz)",
-                self.filtering_method,
-                self.filter_low_cutoff_hz,
-                self.filter_high_cutoff_hz
+                self.filtering_method, self.filter_low_cutoff_hz, self.filter_high_cutoff_hz
             ));
         }
 
@@ -356,12 +352,8 @@ impl Analyzer {
         )?;
 
         self.log(&format!("Decoding {} audio...", source_name));
-        let other_audio = extract_full_audio(
-            other_path,
-            self.sample_rate,
-            self.use_soxr,
-            other_track_idx,
-        )?;
+        let other_audio =
+            extract_full_audio(other_path, self.sample_rate, self.use_soxr, other_track_idx)?;
 
         // Get selected methods for multi-correlation
         let methods = selected_methods(
@@ -455,7 +447,13 @@ impl Analyzer {
         for (idx, &start_time) in chunk_positions.iter().enumerate() {
             let chunk_num = idx + 1;
 
-            match self.analyze_chunk_with_method(method, ref_audio, other_audio, start_time, chunk_num) {
+            match self.analyze_chunk_with_method(
+                method,
+                ref_audio,
+                other_audio,
+                start_time,
+                chunk_num,
+            ) {
                 Ok(result) => {
                     self.log(&format!(
                         "    Chunk {:2}/{} (@{:.1}s): delay = {:+} ms (match={:.2}) — {}",
@@ -870,6 +868,9 @@ mod tests {
         assert_eq!(analyzer.chunk_duration, 20.0);
         assert!(!analyzer.use_soxr);
         assert!(!analyzer.use_peak_fit);
-        assert_eq!(analyzer.delay_selection_mode, DelaySelectionMode::FirstStable);
+        assert_eq!(
+            analyzer.delay_selection_mode,
+            DelaySelectionMode::FirstStable
+        );
     }
 }

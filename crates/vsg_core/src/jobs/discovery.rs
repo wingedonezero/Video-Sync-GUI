@@ -98,7 +98,10 @@ pub fn discover_jobs(sources: &HashMap<String, PathBuf>) -> Result<Vec<JobQueueE
         .ok_or("Source 1 (Reference) path is required")?;
 
     if !source1.exists() {
-        return Err(format!("Source 1 path does not exist: {}", source1.display()));
+        return Err(format!(
+            "Source 1 path does not exist: {}",
+            source1.display()
+        ));
     }
 
     // Get other source paths (non-empty ones)

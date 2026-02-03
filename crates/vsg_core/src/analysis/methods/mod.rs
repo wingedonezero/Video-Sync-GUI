@@ -42,8 +42,11 @@ pub trait CorrelationMethod: Send + Sync {
     /// Get the raw correlation values (for debugging/visualization).
     ///
     /// Returns the full cross-correlation array.
-    fn raw_correlation(&self, reference: &AudioChunk, other: &AudioChunk)
-        -> AnalysisResult<Vec<f64>>;
+    fn raw_correlation(
+        &self,
+        reference: &AudioChunk,
+        other: &AudioChunk,
+    ) -> AnalysisResult<Vec<f64>>;
 }
 
 /// Factory for creating correlation methods by name.

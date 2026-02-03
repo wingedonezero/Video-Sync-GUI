@@ -20,7 +20,9 @@ use gtk4::prelude::*;
 use relm4::prelude::*;
 
 use vsg_core::config::ConfigManager;
-use vsg_core::models::{AnalysisMode, CorrelationMethod, DelaySelectionMode, FilteringMethod, SnapMode, SyncMode};
+use vsg_core::models::{
+    AnalysisMode, CorrelationMethod, DelaySelectionMode, FilteringMethod, SnapMode, SyncMode,
+};
 
 use logic::*;
 
@@ -263,16 +265,24 @@ impl Component for SettingsWindow {
             SettingsMsg::SetFilteringMethod(v) => self.model.analysis.filtering_method = v,
             SettingsMsg::SetFilterLowCutoff(v) => self.model.analysis.filter_low_cutoff_hz = v,
             SettingsMsg::SetFilterHighCutoff(v) => self.model.analysis.filter_high_cutoff_hz = v,
-            SettingsMsg::ToggleMultiCorrelation(v) => self.model.analysis.multi_correlation_enabled = v,
+            SettingsMsg::ToggleMultiCorrelation(v) => {
+                self.model.analysis.multi_correlation_enabled = v
+            }
             SettingsMsg::ToggleMultiCorrScc(v) => self.model.analysis.multi_corr_scc = v,
             SettingsMsg::ToggleMultiCorrGccPhat(v) => self.model.analysis.multi_corr_gcc_phat = v,
             SettingsMsg::ToggleMultiCorrGccScot(v) => self.model.analysis.multi_corr_gcc_scot = v,
             SettingsMsg::ToggleMultiCorrWhitened(v) => self.model.analysis.multi_corr_whitened = v,
             SettingsMsg::SetDelaySelectionMode(v) => self.model.analysis.delay_selection_mode = v,
-            SettingsMsg::SetFirstStableMinChunks(v) => self.model.analysis.first_stable_min_chunks = v,
-            SettingsMsg::ToggleFirstStableSkipUnstable(v) => self.model.analysis.first_stable_skip_unstable = v,
+            SettingsMsg::SetFirstStableMinChunks(v) => {
+                self.model.analysis.first_stable_min_chunks = v
+            }
+            SettingsMsg::ToggleFirstStableSkipUnstable(v) => {
+                self.model.analysis.first_stable_skip_unstable = v
+            }
             SettingsMsg::SetEarlyClusterWindow(v) => self.model.analysis.early_cluster_window = v,
-            SettingsMsg::SetEarlyClusterThreshold(v) => self.model.analysis.early_cluster_threshold = v,
+            SettingsMsg::SetEarlyClusterThreshold(v) => {
+                self.model.analysis.early_cluster_threshold = v
+            }
             SettingsMsg::SetSyncMode(v) => self.model.analysis.sync_mode = v,
 
             // Chapters tab
@@ -283,8 +293,12 @@ impl Component for SettingsWindow {
             SettingsMsg::ToggleSnapStartsOnly(v) => self.model.chapters.snap_starts_only = v,
 
             // Merge tab
-            SettingsMsg::ToggleDisableTrackStatsTags(v) => self.model.postprocess.disable_track_stats_tags = v,
-            SettingsMsg::ToggleDisableHeaderCompression(v) => self.model.postprocess.disable_header_compression = v,
+            SettingsMsg::ToggleDisableTrackStatsTags(v) => {
+                self.model.postprocess.disable_track_stats_tags = v
+            }
+            SettingsMsg::ToggleDisableHeaderCompression(v) => {
+                self.model.postprocess.disable_header_compression = v
+            }
             SettingsMsg::ToggleApplyDialogNorm(v) => self.model.postprocess.apply_dialog_norm = v,
 
             // Logging tab
@@ -391,7 +405,9 @@ fn build_storage_tab(
     page.append(&row1);
 
     // Temp Root row
-    temp_root_entry.set_tooltip_text(Some("Root directory for temporary working files during processing"));
+    temp_root_entry.set_tooltip_text(Some(
+        "Root directory for temporary working files during processing",
+    ));
     let row2 = create_path_row_with_tooltip(
         "Temp Root:",
         "Root directory for temporary files during processing",
@@ -480,8 +496,14 @@ fn build_analysis_tab(
         .orientation(gtk4::Orientation::Horizontal)
         .spacing(8)
         .build();
-    let mode_label = gtk4::Label::builder().label("Mode:").width_chars(18).xalign(0.0).build();
-    mode_label.set_tooltip_text(Some("Choose between audio correlation (compares audio waveforms) or video diff analysis"));
+    let mode_label = gtk4::Label::builder()
+        .label("Mode:")
+        .width_chars(18)
+        .xalign(0.0)
+        .build();
+    mode_label.set_tooltip_text(Some(
+        "Choose between audio correlation (compares audio waveforms) or video diff analysis",
+    ));
     mode_row.append(&mode_label);
     let mode_combo = gtk4::DropDown::builder()
         .model(&gtk4::StringList::new(&["Audio Correlation", "Video Diff"]))
@@ -524,7 +546,11 @@ fn build_analysis_tab(
         .orientation(gtk4::Orientation::Horizontal)
         .spacing(8)
         .build();
-    let method_label = gtk4::Label::builder().label("Method:").width_chars(18).xalign(0.0).build();
+    let method_label = gtk4::Label::builder()
+        .label("Method:")
+        .width_chars(18)
+        .xalign(0.0)
+        .build();
     method_label.set_tooltip_text(Some("Algorithm used to correlate audio signals"));
     method_row.append(&method_label);
     let method_combo = gtk4::DropDown::builder()
@@ -594,7 +620,11 @@ fn build_analysis_tab(
 
     chunk_box.append(&create_spin_row_with_tooltip(
         "Chunk Count:",
-        analysis.chunk_count as f64, 1.0, 100.0, 1.0, 0,
+        analysis.chunk_count as f64,
+        1.0,
+        100.0,
+        1.0,
+        0,
         "Number of audio segments to analyze. More chunks = more accurate but slower",
         {
             let sender = sender.clone();
@@ -604,7 +634,11 @@ fn build_analysis_tab(
 
     chunk_box.append(&create_spin_row_with_tooltip(
         "Chunk Duration (s):",
-        analysis.chunk_duration as f64, 5.0, 120.0, 1.0, 0,
+        analysis.chunk_duration as f64,
+        5.0,
+        120.0,
+        1.0,
+        0,
         "Duration of each audio chunk in seconds. Longer = more context but slower",
         {
             let sender = sender.clone();
@@ -614,7 +648,11 @@ fn build_analysis_tab(
 
     chunk_box.append(&create_spin_row_with_tooltip(
         "Min Match %:",
-        analysis.min_match_pct, 0.0, 100.0, 0.5, 1,
+        analysis.min_match_pct,
+        0.0,
+        100.0,
+        0.5,
+        1,
         "Minimum correlation percentage to accept a chunk result. Lower = more lenient",
         {
             let sender = sender.clone();
@@ -624,7 +662,11 @@ fn build_analysis_tab(
 
     chunk_box.append(&create_spin_row_with_tooltip(
         "Min Accepted Chunks:",
-        analysis.min_accepted_chunks as f64, 1.0, 50.0, 1.0, 0,
+        analysis.min_accepted_chunks as f64,
+        1.0,
+        50.0,
+        1.0,
+        0,
         "Minimum number of chunks that must pass for valid analysis",
         {
             let sender = sender.clone();
@@ -637,26 +679,48 @@ fn build_analysis_tab(
         .orientation(gtk4::Orientation::Horizontal)
         .spacing(8)
         .build();
-    let scan_label = gtk4::Label::builder().label("Scan Range (%):").width_chars(18).xalign(0.0).build();
-    scan_label.set_tooltip_text(Some("Percentage of file to scan. Avoids intros/credits (e.g., 5-95%)"));
+    let scan_label = gtk4::Label::builder()
+        .label("Scan Range (%):")
+        .width_chars(18)
+        .xalign(0.0)
+        .build();
+    scan_label.set_tooltip_text(Some(
+        "Percentage of file to scan. Avoids intros/credits (e.g., 5-95%)",
+    ));
     scan_row.append(&scan_label);
     let scan_start = gtk4::SpinButton::builder()
-        .adjustment(&gtk4::Adjustment::new(analysis.scan_start_pct, 0.0, 100.0, 1.0, 5.0, 0.0))
+        .adjustment(&gtk4::Adjustment::new(
+            analysis.scan_start_pct,
+            0.0,
+            100.0,
+            1.0,
+            5.0,
+            0.0,
+        ))
         .tooltip_text("Start position as percentage of file duration")
         .build();
     {
         let sender = sender.clone();
-        scan_start.connect_value_changed(move |s| sender.input(SettingsMsg::SetScanStartPct(s.value())));
+        scan_start
+            .connect_value_changed(move |s| sender.input(SettingsMsg::SetScanStartPct(s.value())));
     }
     scan_row.append(&scan_start);
     scan_row.append(&gtk4::Label::new(Some("to")));
     let scan_end = gtk4::SpinButton::builder()
-        .adjustment(&gtk4::Adjustment::new(analysis.scan_end_pct, 0.0, 100.0, 1.0, 5.0, 0.0))
+        .adjustment(&gtk4::Adjustment::new(
+            analysis.scan_end_pct,
+            0.0,
+            100.0,
+            1.0,
+            5.0,
+            0.0,
+        ))
         .tooltip_text("End position as percentage of file duration")
         .build();
     {
         let sender = sender.clone();
-        scan_end.connect_value_changed(move |s| sender.input(SettingsMsg::SetScanEndPct(s.value())));
+        scan_end
+            .connect_value_changed(move |s| sender.input(SettingsMsg::SetScanEndPct(s.value())));
     }
     scan_row.append(&scan_end);
     chunk_box.append(&scan_row);
@@ -682,7 +746,8 @@ fn build_analysis_tab(
         .build();
     {
         let sender = sender.clone();
-        soxr_check.connect_toggled(move |b| sender.input(SettingsMsg::ToggleUseSoxr(b.is_active())));
+        soxr_check
+            .connect_toggled(move |b| sender.input(SettingsMsg::ToggleUseSoxr(b.is_active())));
     }
     audio_box.append(&soxr_check);
 
@@ -693,7 +758,8 @@ fn build_analysis_tab(
         .build();
     {
         let sender = sender.clone();
-        peak_check.connect_toggled(move |b| sender.input(SettingsMsg::ToggleAudioPeakFit(b.is_active())));
+        peak_check
+            .connect_toggled(move |b| sender.input(SettingsMsg::ToggleAudioPeakFit(b.is_active())));
     }
     audio_box.append(&peak_check);
 
@@ -702,7 +768,11 @@ fn build_analysis_tab(
         .orientation(gtk4::Orientation::Horizontal)
         .spacing(8)
         .build();
-    let filter_label = gtk4::Label::builder().label("Filtering:").width_chars(18).xalign(0.0).build();
+    let filter_label = gtk4::Label::builder()
+        .label("Filtering:")
+        .width_chars(18)
+        .xalign(0.0)
+        .build();
     filter_label.set_tooltip_text(Some("Apply frequency filter before correlation"));
     filter_row.append(&filter_label);
     let filter_combo = gtk4::DropDown::builder()
@@ -731,26 +801,50 @@ fn build_analysis_tab(
         .orientation(gtk4::Orientation::Horizontal)
         .spacing(8)
         .build();
-    let cutoff_label = gtk4::Label::builder().label("Filter Cutoffs (Hz):").width_chars(18).xalign(0.0).build();
-    cutoff_label.set_tooltip_text(Some("Frequency range for band-pass filter (default 300-3400Hz for dialogue)"));
+    let cutoff_label = gtk4::Label::builder()
+        .label("Filter Cutoffs (Hz):")
+        .width_chars(18)
+        .xalign(0.0)
+        .build();
+    cutoff_label.set_tooltip_text(Some(
+        "Frequency range for band-pass filter (default 300-3400Hz for dialogue)",
+    ));
     cutoff_row.append(&cutoff_label);
     let low_spin = gtk4::SpinButton::builder()
-        .adjustment(&gtk4::Adjustment::new(analysis.filter_low_cutoff_hz, 20.0, 5000.0, 10.0, 100.0, 0.0))
+        .adjustment(&gtk4::Adjustment::new(
+            analysis.filter_low_cutoff_hz,
+            20.0,
+            5000.0,
+            10.0,
+            100.0,
+            0.0,
+        ))
         .tooltip_text("Low cutoff frequency in Hz")
         .build();
     {
         let sender = sender.clone();
-        low_spin.connect_value_changed(move |s| sender.input(SettingsMsg::SetFilterLowCutoff(s.value())));
+        low_spin.connect_value_changed(move |s| {
+            sender.input(SettingsMsg::SetFilterLowCutoff(s.value()))
+        });
     }
     cutoff_row.append(&low_spin);
     cutoff_row.append(&gtk4::Label::new(Some("-")));
     let high_spin = gtk4::SpinButton::builder()
-        .adjustment(&gtk4::Adjustment::new(analysis.filter_high_cutoff_hz, 100.0, 20000.0, 100.0, 500.0, 0.0))
+        .adjustment(&gtk4::Adjustment::new(
+            analysis.filter_high_cutoff_hz,
+            100.0,
+            20000.0,
+            100.0,
+            500.0,
+            0.0,
+        ))
         .tooltip_text("High cutoff frequency in Hz")
         .build();
     {
         let sender = sender.clone();
-        high_spin.connect_value_changed(move |s| sender.input(SettingsMsg::SetFilterHighCutoff(s.value())));
+        high_spin.connect_value_changed(move |s| {
+            sender.input(SettingsMsg::SetFilterHighCutoff(s.value()))
+        });
     }
     cutoff_row.append(&high_spin);
     audio_box.append(&cutoff_row);
@@ -774,8 +868,14 @@ fn build_analysis_tab(
         .orientation(gtk4::Orientation::Horizontal)
         .spacing(8)
         .build();
-    let sel_mode_label = gtk4::Label::builder().label("Selection Mode:").width_chars(18).xalign(0.0).build();
-    sel_mode_label.set_tooltip_text(Some("How to select final delay from multiple chunk measurements"));
+    let sel_mode_label = gtk4::Label::builder()
+        .label("Selection Mode:")
+        .width_chars(18)
+        .xalign(0.0)
+        .build();
+    sel_mode_label.set_tooltip_text(Some(
+        "How to select final delay from multiple chunk measurements",
+    ));
     sel_mode_row.append(&sel_mode_label);
     let sel_mode_combo = gtk4::DropDown::builder()
         .model(&gtk4::StringList::new(&[
@@ -810,7 +910,11 @@ fn build_analysis_tab(
         .orientation(gtk4::Orientation::Horizontal)
         .spacing(8)
         .build();
-    let sync_label = gtk4::Label::builder().label("Sync Mode:").width_chars(18).xalign(0.0).build();
+    let sync_label = gtk4::Label::builder()
+        .label("Sync Mode:")
+        .width_chars(18)
+        .xalign(0.0)
+        .build();
     sync_label.set_tooltip_text(Some("How to handle negative delays in output"));
     sync_row.append(&sync_label);
     let sync_combo = gtk4::DropDown::builder()
@@ -835,7 +939,11 @@ fn build_analysis_tab(
     // First Stable settings
     delay_box.append(&create_spin_row_with_tooltip(
         "First Stable Min:",
-        analysis.first_stable_min_chunks as f64, 1.0, 20.0, 1.0, 0,
+        analysis.first_stable_min_chunks as f64,
+        1.0,
+        20.0,
+        1.0,
+        0,
         "Minimum consecutive chunks with same delay to consider stable",
         {
             let sender = sender.clone();
@@ -850,14 +958,20 @@ fn build_analysis_tab(
         .build();
     {
         let sender = sender.clone();
-        skip_check.connect_toggled(move |b| sender.input(SettingsMsg::ToggleFirstStableSkipUnstable(b.is_active())));
+        skip_check.connect_toggled(move |b| {
+            sender.input(SettingsMsg::ToggleFirstStableSkipUnstable(b.is_active()))
+        });
     }
     delay_box.append(&skip_check);
 
     // Early Cluster settings
     delay_box.append(&create_spin_row_with_tooltip(
         "Early Cluster Window:",
-        analysis.early_cluster_window as f64, 1.0, 50.0, 1.0, 0,
+        analysis.early_cluster_window as f64,
+        1.0,
+        50.0,
+        1.0,
+        0,
         "Number of early chunks to prioritize for Early Cluster mode",
         {
             let sender = sender.clone();
@@ -867,7 +981,11 @@ fn build_analysis_tab(
 
     delay_box.append(&create_spin_row_with_tooltip(
         "Early Threshold:",
-        analysis.early_cluster_threshold as f64, 1.0, 50.0, 1.0, 0,
+        analysis.early_cluster_threshold as f64,
+        1.0,
+        50.0,
+        1.0,
+        0,
         "Minimum chunks in early window for cluster to be preferred",
         {
             let sender = sender.clone();
@@ -879,7 +997,9 @@ fn build_analysis_tab(
     page.append(&delay_frame);
 
     // === Multi-Correlation Frame ===
-    let multi_frame = gtk4::Frame::builder().label("Multi-Correlation (Compare All Methods)").build();
+    let multi_frame = gtk4::Frame::builder()
+        .label("Multi-Correlation (Compare All Methods)")
+        .build();
     let multi_box = gtk4::Box::builder()
         .orientation(gtk4::Orientation::Vertical)
         .margin_top(8)
@@ -892,11 +1012,15 @@ fn build_analysis_tab(
     let multi_enable = gtk4::CheckButton::builder()
         .label("Enable multi-correlation comparison")
         .active(analysis.multi_correlation_enabled)
-        .tooltip_text("Run multiple correlation methods and compare results (for analysis/debugging)")
+        .tooltip_text(
+            "Run multiple correlation methods and compare results (for analysis/debugging)",
+        )
         .build();
     {
         let sender = sender.clone();
-        multi_enable.connect_toggled(move |b| sender.input(SettingsMsg::ToggleMultiCorrelation(b.is_active())));
+        multi_enable.connect_toggled(move |b| {
+            sender.input(SettingsMsg::ToggleMultiCorrelation(b.is_active()))
+        });
     }
     multi_box.append(&multi_enable);
 
@@ -912,7 +1036,8 @@ fn build_analysis_tab(
         .build();
     {
         let sender = sender.clone();
-        scc_check.connect_toggled(move |b| sender.input(SettingsMsg::ToggleMultiCorrScc(b.is_active())));
+        scc_check
+            .connect_toggled(move |b| sender.input(SettingsMsg::ToggleMultiCorrScc(b.is_active())));
     }
     methods_row.append(&scc_check);
 
@@ -923,7 +1048,9 @@ fn build_analysis_tab(
         .build();
     {
         let sender = sender.clone();
-        phat_check.connect_toggled(move |b| sender.input(SettingsMsg::ToggleMultiCorrGccPhat(b.is_active())));
+        phat_check.connect_toggled(move |b| {
+            sender.input(SettingsMsg::ToggleMultiCorrGccPhat(b.is_active()))
+        });
     }
     methods_row.append(&phat_check);
 
@@ -934,7 +1061,9 @@ fn build_analysis_tab(
         .build();
     {
         let sender = sender.clone();
-        scot_check.connect_toggled(move |b| sender.input(SettingsMsg::ToggleMultiCorrGccScot(b.is_active())));
+        scot_check.connect_toggled(move |b| {
+            sender.input(SettingsMsg::ToggleMultiCorrGccScot(b.is_active()))
+        });
     }
     methods_row.append(&scot_check);
 
@@ -945,7 +1074,9 @@ fn build_analysis_tab(
         .build();
     {
         let sender = sender.clone();
-        whitened_check.connect_toggled(move |b| sender.input(SettingsMsg::ToggleMultiCorrWhitened(b.is_active())));
+        whitened_check.connect_toggled(move |b| {
+            sender.input(SettingsMsg::ToggleMultiCorrWhitened(b.is_active()))
+        });
     }
     methods_row.append(&whitened_check);
 
@@ -984,7 +1115,9 @@ fn build_chapters_tab(
         .build();
     {
         let sender = sender.clone();
-        rename_check.connect_toggled(move |b| sender.input(SettingsMsg::ToggleChapterRename(b.is_active())));
+        rename_check.connect_toggled(move |b| {
+            sender.input(SettingsMsg::ToggleChapterRename(b.is_active()))
+        });
     }
     page.append(&rename_check);
 
@@ -1006,7 +1139,8 @@ fn build_chapters_tab(
         .build();
     {
         let sender = sender.clone();
-        snap_enable.connect_toggled(move |b| sender.input(SettingsMsg::ToggleSnapEnabled(b.is_active())));
+        snap_enable
+            .connect_toggled(move |b| sender.input(SettingsMsg::ToggleSnapEnabled(b.is_active())));
     }
     snap_box.append(&snap_enable);
 
@@ -1015,8 +1149,14 @@ fn build_chapters_tab(
         .orientation(gtk4::Orientation::Horizontal)
         .spacing(8)
         .build();
-    let snap_mode_label = gtk4::Label::builder().label("Snap Mode:").width_chars(15).xalign(0.0).build();
-    snap_mode_label.set_tooltip_text(Some("Which keyframe to snap to relative to chapter position"));
+    let snap_mode_label = gtk4::Label::builder()
+        .label("Snap Mode:")
+        .width_chars(15)
+        .xalign(0.0)
+        .build();
+    snap_mode_label.set_tooltip_text(Some(
+        "Which keyframe to snap to relative to chapter position",
+    ));
     snap_mode_row.append(&snap_mode_label);
     let snap_mode_combo = gtk4::DropDown::builder()
         .model(&gtk4::StringList::new(&["Previous", "Nearest", "Next"]))
@@ -1040,7 +1180,11 @@ fn build_chapters_tab(
 
     snap_box.append(&create_spin_row_with_tooltip(
         "Snap Threshold (ms):",
-        chapters.snap_threshold_ms as f64, 0.0, 5000.0, 10.0, 0,
+        chapters.snap_threshold_ms as f64,
+        0.0,
+        5000.0,
+        10.0,
+        0,
         "Maximum distance in milliseconds to search for keyframe",
         {
             let sender = sender.clone();
@@ -1055,7 +1199,9 @@ fn build_chapters_tab(
         .build();
     {
         let sender = sender.clone();
-        starts_only.connect_toggled(move |b| sender.input(SettingsMsg::ToggleSnapStartsOnly(b.is_active())));
+        starts_only.connect_toggled(move |b| {
+            sender.input(SettingsMsg::ToggleSnapStartsOnly(b.is_active()))
+        });
     }
     snap_box.append(&starts_only);
 
@@ -1092,7 +1238,9 @@ fn build_merge_tab(
         .build();
     {
         let sender = sender.clone();
-        stats_check.connect_toggled(move |b| sender.input(SettingsMsg::ToggleDisableTrackStatsTags(b.is_active())));
+        stats_check.connect_toggled(move |b| {
+            sender.input(SettingsMsg::ToggleDisableTrackStatsTags(b.is_active()))
+        });
     }
     page.append(&stats_check);
 
@@ -1103,7 +1251,9 @@ fn build_merge_tab(
         .build();
     {
         let sender = sender.clone();
-        compression_check.connect_toggled(move |b| sender.input(SettingsMsg::ToggleDisableHeaderCompression(b.is_active())));
+        compression_check.connect_toggled(move |b| {
+            sender.input(SettingsMsg::ToggleDisableHeaderCompression(b.is_active()))
+        });
     }
     page.append(&compression_check);
 
@@ -1114,7 +1264,9 @@ fn build_merge_tab(
         .build();
     {
         let sender = sender.clone();
-        norm_check.connect_toggled(move |b| sender.input(SettingsMsg::ToggleApplyDialogNorm(b.is_active())));
+        norm_check.connect_toggled(move |b| {
+            sender.input(SettingsMsg::ToggleApplyDialogNorm(b.is_active()))
+        });
     }
     page.append(&norm_check);
 
@@ -1148,7 +1300,8 @@ fn build_logging_tab(
         .build();
     {
         let sender = sender.clone();
-        compact_check.connect_toggled(move |b| sender.input(SettingsMsg::ToggleCompact(b.is_active())));
+        compact_check
+            .connect_toggled(move |b| sender.input(SettingsMsg::ToggleCompact(b.is_active())));
     }
     page.append(&compact_check);
 
@@ -1159,13 +1312,18 @@ fn build_logging_tab(
         .build();
     {
         let sender = sender.clone();
-        autoscroll_check.connect_toggled(move |b| sender.input(SettingsMsg::ToggleAutoscroll(b.is_active())));
+        autoscroll_check
+            .connect_toggled(move |b| sender.input(SettingsMsg::ToggleAutoscroll(b.is_active())));
     }
     page.append(&autoscroll_check);
 
     page.append(&create_spin_row_with_tooltip(
         "Error tail lines:",
-        logging.error_tail as f64, 1.0, 200.0, 1.0, 0,
+        logging.error_tail as f64,
+        1.0,
+        200.0,
+        1.0,
+        0,
         "Number of error log lines to show in error summary",
         {
             let sender = sender.clone();
@@ -1175,7 +1333,11 @@ fn build_logging_tab(
 
     page.append(&create_spin_row_with_tooltip(
         "Progress step %:",
-        logging.progress_step as f64, 1.0, 100.0, 1.0, 0,
+        logging.progress_step as f64,
+        1.0,
+        100.0,
+        1.0,
+        0,
         "Progress update frequency (lower = more frequent updates)",
         {
             let sender = sender.clone();
@@ -1190,7 +1352,9 @@ fn build_logging_tab(
         .build();
     {
         let sender = sender.clone();
-        pretty_check.connect_toggled(move |b| sender.input(SettingsMsg::ToggleShowOptionsPretty(b.is_active())));
+        pretty_check.connect_toggled(move |b| {
+            sender.input(SettingsMsg::ToggleShowOptionsPretty(b.is_active()))
+        });
     }
     page.append(&pretty_check);
 
@@ -1201,7 +1365,9 @@ fn build_logging_tab(
         .build();
     {
         let sender = sender.clone();
-        json_check.connect_toggled(move |b| sender.input(SettingsMsg::ToggleShowOptionsJson(b.is_active())));
+        json_check.connect_toggled(move |b| {
+            sender.input(SettingsMsg::ToggleShowOptionsJson(b.is_active()))
+        });
     }
     page.append(&json_check);
 
@@ -1212,7 +1378,8 @@ fn build_logging_tab(
         .build();
     {
         let sender = sender.clone();
-        archive_check.connect_toggled(move |b| sender.input(SettingsMsg::ToggleArchiveLogs(b.is_active())));
+        archive_check
+            .connect_toggled(move |b| sender.input(SettingsMsg::ToggleArchiveLogs(b.is_active())));
     }
     page.append(&archive_check);
 
@@ -1277,7 +1444,14 @@ fn create_spin_row_with_tooltip<F: Fn(f64) + 'static>(
     row.append(&lbl);
 
     let spin = gtk4::SpinButton::builder()
-        .adjustment(&gtk4::Adjustment::new(value, min, max, step, step * 5.0, 0.0))
+        .adjustment(&gtk4::Adjustment::new(
+            value,
+            min,
+            max,
+            step,
+            step * 5.0,
+            0.0,
+        ))
         .digits(digits)
         .hexpand(true)
         .tooltip_text(tooltip)
