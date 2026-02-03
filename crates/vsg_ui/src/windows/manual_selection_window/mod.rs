@@ -129,10 +129,11 @@ impl Component for ManualSelectionWindow {
                             set_hexpand: true,
                             set_min_content_width: 600,
 
-                            #[name = "final_list"]
+                        #[name = "final_list"]
                             gtk4::ListBox {
                                 set_selection_mode: gtk4::SelectionMode::Single,
                                 add_css_class: "boxed-list",
+                                set_widget_name: "final-output-list",
                             },
                         },
 
@@ -579,7 +580,9 @@ impl ManualSelectionWindow {
 
     /// Refresh the final list from root window
     fn refresh_list_from_root(&self, root: &gtk4::Window, sender: ComponentSender<Self>) {
-        if let Some(list_box) = Self::find_widget_by_type::<gtk4::ListBox>(root) {
+        if let Some(list_box) =
+            Self::find_widget_by_name::<gtk4::ListBox>(root, "final-output-list")
+        {
             Self::refresh_final_list(&list_box, &self.model, sender);
         }
     }
@@ -732,17 +735,20 @@ impl ManualSelectionWindow {
         }
     }
 
-    /// Find a widget of a specific type in the hierarchy
-    fn find_widget_by_type<T: IsA<gtk4::Widget>>(root: &gtk4::Window) -> Option<T> {
-        fn search<T: IsA<gtk4::Widget>>(widget: &gtk4::Widget) -> Option<T> {
-            if let Some(typed) = widget.downcast_ref::<T>() {
-                return Some(typed.clone());
+    /// Find a widget by its widget_name in the hierarchy
+    fn find_widget_by_name<T: IsA<gtk4::Widget>>(root: &gtk4::Window, name: &str) -> Option<T> {
+        fn search<T: IsA<gtk4::Widget>>(widget: &gtk4::Widget, name: &str) -> Option<T> {
+            // Check if this widget matches
+            if widget.widget_name() == name {
+                if let Some(typed) = widget.downcast_ref::<T>() {
+                    return Some(typed.clone());
+                }
             }
 
             // Search children
             let mut child = widget.first_child();
             while let Some(c) = child {
-                if let Some(found) = search::<T>(&c) {
+                if let Some(found) = search::<T>(&c, name) {
                     return Some(found);
                 }
                 child = c.next_sibling();
@@ -751,7 +757,7 @@ impl ManualSelectionWindow {
             None
         }
 
-        root.child().and_then(|c| search(&c))
+        root.child().and_then(|c| search(&c, name))
     }
 
     /// Open external subtitle file dialog
