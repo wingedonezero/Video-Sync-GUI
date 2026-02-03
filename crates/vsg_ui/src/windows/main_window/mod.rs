@@ -24,6 +24,7 @@ use relm4::prelude::*;
 use vsg_core::config::ConfigManager;
 
 use crate::components::{FileInput, FileInputInit, FileInputOutput, LogView, LogViewMsg};
+use crate::windows::job_queue_window::{JobQueueInit, JobQueueOutput, JobQueueWindow};
 use crate::windows::settings_window::{SettingsInit, SettingsOutput, SettingsWindow};
 
 /// Main window component
@@ -39,6 +40,9 @@ pub struct MainWindow {
 
     // Settings dialog (spawned on demand)
     settings_window: Option<Controller<SettingsWindow>>,
+
+    // Job queue dialog (spawned on demand)
+    job_queue_window: Option<Controller<JobQueueWindow>>,
 }
 
 #[relm4::component(pub)]
@@ -270,6 +274,7 @@ impl Component for MainWindow {
             source3_input,
             log_view,
             settings_window: None,
+            job_queue_window: None,
         };
 
         let widgets = view_output!();
@@ -312,9 +317,40 @@ impl Component for MainWindow {
             }
 
             MainWindowMsg::OpenJobQueue => {
-                self.log_view.emit(LogViewMsg::Append(
-                    "Job Queue dialog not implemented yet.".to_string(),
-                ));
+                // Close existing job queue window if open
+                self.job_queue_window = None;
+
+                // Open new job queue window
+                let job_queue = JobQueueWindow::builder()
+                    .launch(JobQueueInit {
+                        config: self.config.clone(),
+                        parent: None, // TODO: pass parent window reference
+                    })
+                    .forward(sender.input_sender(), |msg| match msg {
+                        JobQueueOutput::StartProcessing(job_ids) => {
+                            MainWindowMsg::StartProcessingQueue(job_ids)
+                        }
+                        JobQueueOutput::Cancelled => MainWindowMsg::JobQueueClosed,
+                    });
+
+                self.job_queue_window = Some(job_queue);
+                self.log_view
+                    .emit(LogViewMsg::Append("Job Queue dialog opened.".to_string()));
+            }
+
+            MainWindowMsg::JobQueueClosed => {
+                self.job_queue_window = None;
+                self.log_view
+                    .emit(LogViewMsg::Append("Job Queue dialog closed.".to_string()));
+            }
+
+            MainWindowMsg::StartProcessingQueue(job_ids) => {
+                self.job_queue_window = None;
+                self.log_view.emit(LogViewMsg::Append(format!(
+                    "Starting queue processing for {} jobs...",
+                    job_ids.len()
+                )));
+                // TODO: Implement actual queue processing
             }
 
             MainWindowMsg::ToggleArchiveLogs(checked) => {

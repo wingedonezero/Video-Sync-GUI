@@ -15,6 +15,12 @@ pub enum MainWindowMsg {
     /// "Open Job Queue for Merging..." button clicked
     OpenJobQueue,
 
+    /// Job queue dialog closed
+    JobQueueClosed,
+
+    /// Job queue requested to start processing
+    StartProcessingQueue(Vec<String>),
+
     /// Archive logs checkbox toggled
     ToggleArchiveLogs(bool),
 
