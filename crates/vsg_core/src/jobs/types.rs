@@ -115,6 +115,53 @@ impl ManualLayout {
             attachment_sources: Vec::new(),
         }
     }
+
+    /// Convert to the JSON format expected by JobSpec/MuxStep.
+    ///
+    /// Returns a Vec of track objects that MuxStep can read. Each track
+    /// is a HashMap with keys like "source", "id", "type", "is_default", etc.
+    pub fn to_job_spec_format(&self) -> Vec<HashMap<String, serde_json::Value>> {
+        self.final_tracks
+            .iter()
+            .map(|track| {
+                let mut map = HashMap::new();
+
+                // Source and track identification
+                map.insert("source".to_string(), serde_json::json!(track.source_key));
+                map.insert("id".to_string(), serde_json::json!(track.track_id));
+                map.insert(
+                    "type".to_string(),
+                    serde_json::json!(match track.track_type {
+                        TrackType::Video => "video",
+                        TrackType::Audio => "audio",
+                        TrackType::Subtitles => "subtitles",
+                    }),
+                );
+
+                // Track flags
+                map.insert("is_default".to_string(), serde_json::json!(track.config.is_default));
+                map.insert(
+                    "is_forced_display".to_string(),
+                    serde_json::json!(track.config.is_forced_display),
+                );
+
+                // Custom overrides (only include if set)
+                if let Some(ref name) = track.config.custom_name {
+                    map.insert("custom_name".to_string(), serde_json::json!(name));
+                }
+                if let Some(ref lang) = track.config.custom_lang {
+                    map.insert("custom_lang".to_string(), serde_json::json!(lang));
+                }
+
+                // Include empty strings for codec/language/name - MuxStep will use defaults
+                map.insert("codec".to_string(), serde_json::json!(""));
+                map.insert("language".to_string(), serde_json::json!(""));
+                map.insert("name".to_string(), serde_json::json!(""));
+
+                map
+            })
+            .collect()
+    }
 }
 
 impl Default for ManualLayout {

@@ -1,5 +1,7 @@
 //! Main window messages (events)
 
+use std::path::PathBuf;
+
 use vsg_core::models::Delays;
 
 /// Messages for the main window
@@ -45,6 +47,35 @@ pub enum MainWindowMsg {
 
     /// Analysis completed
     AnalysisComplete(Result<AnalysisResult, String>),
+
+    // === Queue processing responses ===
+    /// Queue processing started for a job
+    QueueJobStarted { job_id: String, job_name: String },
+
+    /// Queue processing progress for a job
+    QueueJobProgress {
+        job_id: String,
+        progress: f64,
+        message: String,
+    },
+
+    /// Queue processing log message
+    QueueLog(String),
+
+    /// Single job completed
+    QueueJobComplete {
+        job_id: String,
+        success: bool,
+        output_path: Option<PathBuf>,
+        error: Option<String>,
+    },
+
+    /// All queue processing finished
+    QueueProcessingComplete {
+        total: usize,
+        succeeded: usize,
+        failed: usize,
+    },
 }
 
 /// Result from analysis worker
