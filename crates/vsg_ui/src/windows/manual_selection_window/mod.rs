@@ -561,6 +561,15 @@ impl ManualSelectionWindow {
         // === Line 1: Track description + badges ===
         let line1 = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
 
+        // Track type icon
+        let icon = match track.data.track_type {
+            TrackType::Video => "🎬",
+            TrackType::Audio => "🔊",
+            TrackType::Subtitles => "💬",
+        };
+        let icon_label = gtk4::Label::new(Some(icon));
+        line1.append(&icon_label);
+
         // Source + Track description (bold)
         let desc_text = format!("[{}] {}", track.data.source_key, track.info.summary());
         let desc_label = gtk4::Label::new(Some(&desc_text));

@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use vsg_core::extraction::{
     build_track_description, get_detailed_stream_info, probe_file, ExtractionResult, ProbeResult,
 };
-use vsg_core::jobs::{FinalTrackEntry as CoreFinalTrackEntry, ManualLayout, TrackConfig};
+use vsg_core::jobs::ManualLayout;
 use vsg_core::models::TrackType as CoreTrackType;
 
 use super::model::ManualSelectionModel;
@@ -63,53 +63,6 @@ pub fn probe_sources(
     });
 
     Ok(results)
-}
-
-/// Convert UI FinalTrackData to core ManualLayout
-pub fn convert_to_manual_layout(model: &ManualSelectionModel) -> ManualLayout {
-    let mut final_tracks = Vec::new();
-
-    for (i, entry) in model.final_tracks.iter().enumerate() {
-        let core_track_type = match entry.data.track_type {
-            vsg_core::extraction::types::TrackType::Video => CoreTrackType::Video,
-            vsg_core::extraction::types::TrackType::Audio => CoreTrackType::Audio,
-            vsg_core::extraction::types::TrackType::Subtitles => CoreTrackType::Subtitles,
-        };
-
-        let config = TrackConfig {
-            sync_to_source: None, // Sync is automatic based on language/first track
-            is_default: entry.data.is_default,
-            is_forced_display: entry.data.is_forced,
-            custom_name: entry.data.custom_name.clone(),
-            custom_lang: entry.data.custom_lang.clone(),
-            apply_track_name: entry.data.apply_track_name,
-            ..Default::default()
-        };
-
-        let core_entry = CoreFinalTrackEntry {
-            track_id: entry.data.track_id,
-            source_key: entry.data.source_key.clone(),
-            track_type: core_track_type,
-            config,
-            user_order_index: i,
-            position_in_source_type: entry.data.position_in_source_type,
-            is_generated: false,
-            generated_source_track_id: None,
-            generated_source_path: None,
-            generated_filter_mode: "exclude".to_string(),
-            generated_filter_styles: Vec::new(),
-            generated_original_style_list: Vec::new(),
-            generated_verify_only_lines_removed: true,
-        };
-
-        final_tracks.push(core_entry);
-    }
-
-    ManualLayout {
-        final_tracks,
-        attachment_sources: model.attachment_sources.clone(),
-        source_settings: HashMap::new(),
-    }
 }
 
 /// Pre-populate model from a previous layout
@@ -173,28 +126,4 @@ pub fn prepopulate_from_layout(model: &mut ManualSelectionModel, layout: &Manual
 
     // Restore attachment sources
     model.attachment_sources = layout.attachment_sources.clone();
-}
-
-/// Get track type icon/prefix for display
-pub fn track_type_icon(track_type: vsg_core::extraction::types::TrackType) -> &'static str {
-    match track_type {
-        vsg_core::extraction::types::TrackType::Video => "🎬",
-        vsg_core::extraction::types::TrackType::Audio => "🔊",
-        vsg_core::extraction::types::TrackType::Subtitles => "💬",
-    }
-}
-
-/// Check if a subtitle track is text-based (vs image-based like PGS/VobSub)
-pub fn is_text_subtitle(codec_id: &str) -> bool {
-    let codec_upper = codec_id.to_uppercase();
-    codec_upper.starts_with("S_TEXT/") || codec_upper == "S_SSA" || codec_upper == "S_ASS"
-}
-
-/// Check if a subtitle track is image-based (needs OCR)
-pub fn is_image_subtitle(codec_id: &str) -> bool {
-    let codec_upper = codec_id.to_uppercase();
-    codec_upper.contains("PGS")
-        || codec_upper.contains("HDMV")
-        || codec_upper.contains("VOBSUB")
-        || codec_upper.contains("DVD")
 }
