@@ -139,8 +139,9 @@ impl Component for ManualSelectionWindow {
                                     glib::Type::STRING, // Column 1: Track description
                                     glib::Type::BOOL,   // Column 2: Default checkbox
                                     glib::Type::BOOL,   // Column 3: Forced checkbox
-                                    glib::Type::STRING, // Column 4: Source
-                                    glib::Type::U32,    // Column 5: Original index (hidden)
+                                    glib::Type::BOOL,   // Column 4: Keep Name checkbox
+                                    glib::Type::STRING, // Column 5: Source
+                                    glib::Type::U32,    // Column 6: Original index (hidden)
                                 ])),
                                 set_headers_visible: true,
                                 set_reorderable: true,
@@ -157,8 +158,8 @@ impl Component for ManualSelectionWindow {
                                 set_icon_name: "go-up-symbolic",
                                 set_tooltip_text: Some("Move selected track up"),
                                 connect_clicked[sender] => move |_| {
-                                    // Will be handled via selection
-                                    sender.input(ManualSelectionMsg::MoveTrackUp { final_index: 0 });
+                                    // Use special sentinel value to indicate "use selection"
+                                    sender.input(ManualSelectionMsg::MoveTrackUp { final_index: usize::MAX });
                                 },
                             },
 
@@ -166,7 +167,19 @@ impl Component for ManualSelectionWindow {
                                 set_icon_name: "go-down-symbolic",
                                 set_tooltip_text: Some("Move selected track down"),
                                 connect_clicked[sender] => move |_| {
-                                    sender.input(ManualSelectionMsg::MoveTrackDown { final_index: 0 });
+                                    sender.input(ManualSelectionMsg::MoveTrackDown { final_index: usize::MAX });
+                                },
+                            },
+
+                            gtk4::Separator {
+                                set_orientation: gtk4::Orientation::Vertical,
+                            },
+
+                            gtk4::Button {
+                                set_icon_name: "emblem-system-symbolic",
+                                set_tooltip_text: Some("Track settings..."),
+                                connect_clicked[sender] => move |_| {
+                                    sender.input(ManualSelectionMsg::OpenTrackSettings { final_index: usize::MAX });
                                 },
                             },
 
@@ -178,7 +191,7 @@ impl Component for ManualSelectionWindow {
                                 set_icon_name: "list-remove-symbolic",
                                 set_tooltip_text: Some("Remove selected track"),
                                 connect_clicked[sender] => move |_| {
-                                    sender.input(ManualSelectionMsg::RemoveTrackFromFinal { final_index: 0 });
+                                    sender.input(ManualSelectionMsg::RemoveTrackFromFinal { final_index: usize::MAX });
                                 },
                             },
                         },
@@ -305,58 +318,76 @@ impl Component for ManualSelectionWindow {
             }
 
             ManualSelectionMsg::RemoveTrackFromFinal { final_index } => {
-                // Use provided index from context menu, or fall back to selected
-                let idx = if final_index > 0 || self.model.selected_final_track.is_none() {
-                    final_index
+                // usize::MAX is sentinel for "use selection"
+                let idx = if final_index == usize::MAX {
+                    self.model.selected_final_track
                 } else {
-                    self.model.selected_final_track.unwrap_or(0)
+                    Some(final_index)
                 };
 
-                if idx < self.model.final_tracks.len() {
-                    self.model.remove_from_final(idx);
-                    self.model.selected_final_track = None;
-                    self.refresh_final_tree(root);
+                if let Some(idx) = idx {
+                    if idx < self.model.final_tracks.len() {
+                        self.model.remove_from_final(idx);
+                        self.model.selected_final_track = None;
+                        self.refresh_final_tree(root);
+                    }
                 }
             }
 
             ManualSelectionMsg::MoveTrackUp { final_index } => {
-                // Use provided index from context menu, or fall back to selected
-                let idx = if final_index > 0 || self.model.selected_final_track.is_none() {
-                    final_index
+                // usize::MAX is sentinel for "use selection"
+                let idx = if final_index == usize::MAX {
+                    self.model.selected_final_track
                 } else {
-                    self.model.selected_final_track.unwrap_or(0)
+                    Some(final_index)
                 };
 
-                if idx > 0 && idx < self.model.final_tracks.len() {
-                    self.model.move_up(idx);
-                    self.model.selected_final_track = Some(idx - 1);
-                    self.refresh_final_tree(root);
+                if let Some(idx) = idx {
+                    if idx > 0 && idx < self.model.final_tracks.len() {
+                        self.model.move_up(idx);
+                        self.model.selected_final_track = Some(idx - 1);
+                        self.refresh_final_tree(root);
+                    }
                 }
             }
 
             ManualSelectionMsg::MoveTrackDown { final_index } => {
-                // Use provided index from context menu, or fall back to selected
-                let idx = if final_index > 0 || self.model.selected_final_track.is_none() {
-                    final_index
+                // usize::MAX is sentinel for "use selection"
+                let idx = if final_index == usize::MAX {
+                    self.model.selected_final_track
                 } else {
-                    self.model.selected_final_track.unwrap_or(0)
+                    Some(final_index)
                 };
 
-                if idx + 1 < self.model.final_tracks.len() {
-                    self.model.move_down(idx);
-                    self.model.selected_final_track = Some(idx + 1);
-                    self.refresh_final_tree(root);
+                if let Some(idx) = idx {
+                    if idx + 1 < self.model.final_tracks.len() {
+                        self.model.move_down(idx);
+                        self.model.selected_final_track = Some(idx + 1);
+                        self.refresh_final_tree(root);
+                    }
                 }
             }
 
             ManualSelectionMsg::ToggleTrackDefault { final_index } => {
-                self.model.toggle_default(final_index);
-                self.refresh_final_tree(root);
+                if final_index < self.model.final_tracks.len() {
+                    self.model.toggle_default(final_index);
+                    self.refresh_final_tree(root);
+                }
             }
 
             ManualSelectionMsg::ToggleTrackForced { final_index } => {
-                self.model.toggle_forced(final_index);
-                self.refresh_final_tree(root);
+                if final_index < self.model.final_tracks.len() {
+                    self.model.toggle_forced(final_index);
+                    self.refresh_final_tree(root);
+                }
+            }
+
+            ManualSelectionMsg::ToggleKeepName { final_index } => {
+                if let Some(track) = self.model.final_tracks.get_mut(final_index) {
+                    track.data.apply_track_name = !track.data.apply_track_name;
+                    track.refresh_badges();
+                    self.refresh_final_tree(root);
+                }
             }
 
             ManualSelectionMsg::ToggleAttachmentSource { source_key } => {
@@ -398,8 +429,17 @@ impl Component for ManualSelectionWindow {
             }
 
             ManualSelectionMsg::OpenTrackSettings { final_index } => {
-                if final_index < self.model.final_tracks.len() {
-                    self.open_track_settings_dialog(final_index, sender.clone(), root);
+                // usize::MAX is sentinel for "use selection"
+                let idx = if final_index == usize::MAX {
+                    self.model.selected_final_track
+                } else {
+                    Some(final_index)
+                };
+
+                if let Some(idx) = idx {
+                    if idx < self.model.final_tracks.len() {
+                        self.open_track_settings_dialog(idx, sender.clone(), root);
+                    }
                 }
             }
 
@@ -465,8 +505,8 @@ impl ManualSelectionWindow {
                 if let Some(model) = tree.model() {
                     if let Some(store) = model.downcast_ref::<gtk4::ListStore>() {
                         if let Some(iter) = store.iter(&path) {
-                            // Get the original index from column 5
-                            let idx: u32 = store.get(&iter, 5);
+                            // Get the original index from column 6 (hidden)
+                            let idx: u32 = store.get(&iter, 6);
                             sender_clone.input(ManualSelectionMsg::ToggleTrackDefault {
                                 final_index: idx as usize,
                             });
@@ -494,8 +534,8 @@ impl ManualSelectionWindow {
                 if let Some(model) = tree.model() {
                     if let Some(store) = model.downcast_ref::<gtk4::ListStore>() {
                         if let Some(iter) = store.iter(&path) {
-                            // Get the original index from column 5
-                            let idx: u32 = store.get(&iter, 5);
+                            // Get the original index from column 6 (hidden)
+                            let idx: u32 = store.get(&iter, 6);
                             sender_clone.input(ManualSelectionMsg::ToggleTrackForced {
                                 final_index: idx as usize,
                             });
@@ -506,14 +546,43 @@ impl ManualSelectionWindow {
         });
         tree.append_column(&column3);
 
-        // Column 4: Source
-        let renderer4 = gtk4::CellRendererText::new();
+        // Column 4: Keep Name checkbox
+        let renderer4 = gtk4::CellRendererToggle::new();
+        renderer4.set_activatable(true);
         let column4 = gtk4::TreeViewColumn::new();
-        column4.set_title("Source");
+        column4.set_title("Keep Name");
         column4.set_min_width(80);
         column4.pack_start(&renderer4, false);
-        column4.add_attribute(&renderer4, "text", 4);
+        column4.add_attribute(&renderer4, "active", 4);
+
+        // Connect toggle signal for Keep Name
+        let sender_clone = sender.clone();
+        let tree_weak = tree.downgrade();
+        renderer4.connect_toggled(move |_renderer, path| {
+            if let Some(tree) = tree_weak.upgrade() {
+                if let Some(model) = tree.model() {
+                    if let Some(store) = model.downcast_ref::<gtk4::ListStore>() {
+                        if let Some(iter) = store.iter(&path) {
+                            // Get the original index from column 6 (hidden)
+                            let idx: u32 = store.get(&iter, 6);
+                            sender_clone.input(ManualSelectionMsg::ToggleKeepName {
+                                final_index: idx as usize,
+                            });
+                        }
+                    }
+                }
+            }
+        });
         tree.append_column(&column4);
+
+        // Column 5: Source
+        let renderer5 = gtk4::CellRendererText::new();
+        let column5 = gtk4::TreeViewColumn::new();
+        column5.set_title("Source");
+        column5.set_min_width(80);
+        column5.pack_start(&renderer5, false);
+        column5.add_attribute(&renderer5, "text", 5);
+        tree.append_column(&column5);
     }
 
     /// Set up drop target for accepting tracks from source lists
@@ -817,8 +886,9 @@ impl ManualSelectionWindow {
             glib::Type::STRING, // 1: Track description
             glib::Type::BOOL,   // 2: Default checkbox
             glib::Type::BOOL,   // 3: Forced checkbox
-            glib::Type::STRING, // 4: Source
-            glib::Type::U32,    // 5: Hidden original index
+            glib::Type::BOOL,   // 4: Keep Name checkbox
+            glib::Type::STRING, // 5: Source
+            glib::Type::U32,    // 6: Hidden original index
         ]);
 
         for (i, track) in model.final_tracks.iter().enumerate() {
@@ -826,6 +896,7 @@ impl ManualSelectionWindow {
             let desc = track.info.summary();
             let is_default = track.data.is_default;
             let is_forced = track.data.is_forced;
+            let keep_name = track.data.apply_track_name;
             let source = track.data.source_key.clone();
 
             let iter = store.append();
@@ -836,8 +907,9 @@ impl ManualSelectionWindow {
                     (1, &desc),
                     (2, &is_default),
                     (3, &is_forced),
-                    (4, &source),
-                    (5, &(i as u32)), // Store original index
+                    (4, &keep_name),
+                    (5, &source),
+                    (6, &(i as u32)), // Store original index
                 ],
             );
         }
@@ -856,11 +928,11 @@ impl ManualSelectionWindow {
         };
 
         // Read the current order of original indices from the TreeView
-        // Column 5 contains the original index
+        // Column 6 contains the original index
         let mut new_order: Vec<usize> = Vec::new();
         let mut iter = model.iter_first();
         while let Some(it) = iter {
-            if let Ok(idx) = model.get::<u32>(&it, 5).try_into() {
+            if let Ok(idx) = model.get::<u32>(&it, 6).try_into() {
                 new_order.push(idx);
             }
             iter = if model.iter_next(&it) { Some(it) } else { None };
