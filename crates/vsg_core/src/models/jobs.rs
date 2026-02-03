@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use super::enums::JobStatus;
+use super::enums::{JobStatus, SyncMode};
 use super::media::Track;
 
 /// Specification for a sync/merge job.
@@ -92,6 +92,51 @@ impl Delays {
     /// Get the pre-shift delay for a source (without global shift).
     pub fn get_pre_shift_delay(&self, source: &str) -> Option<f64> {
         self.pre_shift_delays_ms.get(source).copied()
+    }
+
+    /// Apply global shift to eliminate negative delays based on sync mode.
+    ///
+    /// If sync_mode is `PositiveOnly` and there are negative delays,
+    /// shifts all delays so the most negative becomes zero.
+    ///
+    /// Returns the shift that was applied (0 if no shift needed).
+    pub fn apply_global_shift(&mut self, sync_mode: SyncMode) -> i64 {
+        // Find the most negative delay
+        let most_negative = self
+            .raw_source_delays_ms
+            .values()
+            .cloned()
+            .fold(0.0_f64, |min, val| min.min(val));
+
+        // No shift needed if all delays are non-negative or mode allows negatives
+        if most_negative >= 0.0 || sync_mode == SyncMode::AllowNegative {
+            return 0;
+        }
+
+        // Calculate shift to eliminate negative delays
+        let raw_shift = most_negative.abs();
+        let rounded_shift = raw_shift.round() as i64;
+
+        // Store the shift values
+        self.raw_global_shift_ms = raw_shift;
+        self.global_shift_ms = rounded_shift;
+
+        // Apply shift to all raw delays
+        for raw_delay in self.raw_source_delays_ms.values_mut() {
+            *raw_delay += raw_shift;
+        }
+
+        // Update rounded delays to match
+        for (source, rounded) in self.source_delays_ms.iter_mut() {
+            let raw = self
+                .raw_source_delays_ms
+                .get(source)
+                .copied()
+                .unwrap_or(0.0);
+            *rounded = raw.round() as i64;
+        }
+
+        rounded_shift
     }
 }
 

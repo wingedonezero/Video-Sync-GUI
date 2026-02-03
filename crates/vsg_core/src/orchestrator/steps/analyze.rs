@@ -14,11 +14,12 @@
 use std::collections::HashMap;
 
 use crate::analysis::Analyzer;
+use crate::analysis::SourceStability;
 use crate::extraction::probe_file;
 use crate::models::{Delays, SyncMode};
 use crate::orchestrator::errors::{StepError, StepResult};
 use crate::orchestrator::step::PipelineStep;
-use crate::orchestrator::types::{AnalysisOutput, Context, JobState, SourceStability, StepOutcome};
+use crate::orchestrator::types::{AnalysisOutput, Context, JobState, StepOutcome};
 
 /// Analyze step for calculating sync delays.
 ///
@@ -335,37 +336,10 @@ impl PipelineStep for AnalyzeStep {
                             source_count += 1;
                             method_name = format!("Multi ({})", first_method);
 
-                            // Calculate stability metrics
-                            let accepted_delays: Vec<f64> = first_result
-                                .chunk_results
-                                .iter()
-                                .filter(|c| c.match_pct >= ctx.settings.analysis.min_match_pct)
-                                .map(|c| c.delay_ms_raw)
-                                .collect();
-                            let std_dev = if accepted_delays.len() > 1 {
-                                let mean = accepted_delays.iter().sum::<f64>()
-                                    / accepted_delays.len() as f64;
-                                let variance = accepted_delays
-                                    .iter()
-                                    .map(|d| (d - mean).powi(2))
-                                    .sum::<f64>()
-                                    / accepted_delays.len() as f64;
-                                variance.sqrt()
-                            } else {
-                                0.0
-                            };
-
-                            source_stability.insert(
-                                source_name.to_string(),
-                                SourceStability {
-                                    accepted_chunks: first_result.accepted_chunks,
-                                    total_chunks: first_result.total_chunks,
-                                    avg_match_pct: first_result.avg_match_pct,
-                                    delay_std_dev_ms: std_dev,
-                                    drift_detected: first_result.drift_detected,
-                                    acceptance_rate: first_result.acceptance_rate(),
-                                },
-                            );
+                            // Get stability metrics from result (module calculates std_dev)
+                            let stability =
+                                first_result.stability_metrics(ctx.settings.analysis.min_match_pct);
+                            source_stability.insert(source_name.to_string(), stability);
                         }
                     }
                     Err(e) => {
@@ -416,45 +390,17 @@ impl PipelineStep for AnalyzeStep {
                         source_count += 1;
                         method_name = result.correlation_method.clone();
 
-                        // Calculate stability metrics
-                        let accepted_delays: Vec<f64> = result
-                            .chunk_results
-                            .iter()
-                            .filter(|c| c.match_pct >= ctx.settings.analysis.min_match_pct)
-                            .map(|c| c.delay_ms_raw)
-                            .collect();
-                        let std_dev = if accepted_delays.len() > 1 {
-                            let mean =
-                                accepted_delays.iter().sum::<f64>() / accepted_delays.len() as f64;
-                            let variance = accepted_delays
-                                .iter()
-                                .map(|d| (d - mean).powi(2))
-                                .sum::<f64>()
-                                / accepted_delays.len() as f64;
-                            variance.sqrt()
-                        } else {
-                            0.0
-                        };
+                        // Get stability metrics from result (module calculates std_dev)
+                        let stability =
+                            result.stability_metrics(ctx.settings.analysis.min_match_pct);
 
                         // Log stability metrics
                         ctx.logger.info(&format!(
                             "{}: stability: acceptance={:.0}%, std_dev={:.1}ms",
-                            source_name,
-                            result.acceptance_rate(),
-                            std_dev
+                            source_name, stability.acceptance_rate, stability.delay_std_dev_ms
                         ));
 
-                        source_stability.insert(
-                            source_name.to_string(),
-                            SourceStability {
-                                accepted_chunks: result.accepted_chunks,
-                                total_chunks: result.total_chunks,
-                                avg_match_pct: result.avg_match_pct,
-                                delay_std_dev_ms: std_dev,
-                                drift_detected: result.drift_detected,
-                                acceptance_rate: result.acceptance_rate(),
-                            },
-                        );
+                        source_stability.insert(source_name.to_string(), stability);
                     }
                     Err(e) => {
                         ctx.logger
@@ -481,7 +427,6 @@ impl PipelineStep for AnalyzeStep {
         // ============================================================
         // GLOBAL SHIFT CALCULATION
         // ============================================================
-        // Find most negative delay and apply shift if sync_mode is PositiveOnly
         ctx.logger.info("--- Calculating Global Shift ---");
 
         // Log pre-shift delays for debugging
@@ -490,53 +435,30 @@ impl PipelineStep for AnalyzeStep {
             ctx.logger.info(&format!("  {}: {:+.3}ms", source, delay));
         }
 
-        let most_negative_raw = delays
-            .raw_source_delays_ms
-            .values()
-            .cloned()
-            .fold(0.0_f64, |min, val| min.min(val));
+        // Apply global shift using module method (handles sync mode logic)
+        let shift_applied = delays.apply_global_shift(sync_mode);
 
-        if most_negative_raw < 0.0 && sync_mode == SyncMode::PositiveOnly {
-            // Calculate shift to eliminate negative delays
-            let raw_shift = most_negative_raw.abs();
-            let rounded_shift = raw_shift.round() as i64;
-
-            ctx.logger
-                .info(&format!("Most negative delay: {:.3}ms", most_negative_raw));
+        if shift_applied > 0 {
             ctx.logger.info(&format!(
-                "Applying global shift: +{:.3}ms (rounded: +{}ms)",
-                raw_shift, rounded_shift
+                "Applied global shift: +{}ms (to eliminate negative delays)",
+                shift_applied
             ));
-
-            // Store the shift
-            delays.raw_global_shift_ms = raw_shift;
-            delays.global_shift_ms = rounded_shift;
-
-            // Apply shift to all delays (but keep pre_shift_delays_ms unchanged)
+            // Log adjusted delays
             ctx.logger.info("Adjusted delays after global shift:");
-            for (source, raw_delay) in delays.raw_source_delays_ms.iter_mut() {
-                let original = *raw_delay;
-                *raw_delay += raw_shift;
-                ctx.logger.info(&format!(
-                    "  {}: {:+.3}ms → {:+.3}ms (shift applied ONCE)",
-                    source, original, *raw_delay
-                ));
-            }
-
-            // Update rounded delays too
-            for (source, rounded_delay) in delays.source_delays_ms.iter_mut() {
-                let raw = delays
-                    .raw_source_delays_ms
+            for (source, raw_delay) in delays.raw_source_delays_ms.iter() {
+                let pre_shift = delays
+                    .pre_shift_delays_ms
                     .get(source)
                     .copied()
                     .unwrap_or(0.0);
-                *rounded_delay = raw.round() as i64;
+                ctx.logger.info(&format!(
+                    "  {}: {:+.3}ms → {:+.3}ms",
+                    source, pre_shift, raw_delay
+                ));
             }
-        } else if most_negative_raw < 0.0 && sync_mode == SyncMode::AllowNegative {
-            ctx.logger.info(&format!(
-                "Most negative delay: {:.3}ms (kept as-is, allow_negative mode)",
-                most_negative_raw
-            ));
+        } else if sync_mode == SyncMode::AllowNegative {
+            ctx.logger
+                .info("Allow negative mode - no global shift applied.");
         } else {
             ctx.logger
                 .info("All delays are non-negative. No global shift needed.");

@@ -63,8 +63,7 @@ pub fn run_queue_processing(
     for (i, entry) in job_entries.iter().enumerate() {
         let _ = sender.send(MainWindowMsg::QueueLog(format!(
             "Job {}: layout_id={}",
-            entry.id,
-            entry.layout_id
+            entry.id, entry.layout_id
         )));
 
         // Notify job started
@@ -138,7 +137,7 @@ pub fn run_queue_processing(
         )));
     } else {
         let _ = sender.send(MainWindowMsg::QueueLog(
-            "Cleaned up all job layout files.".to_string()
+            "Cleaned up all job layout files.".to_string(),
         ));
     }
 

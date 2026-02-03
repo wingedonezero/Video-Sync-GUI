@@ -57,8 +57,8 @@ pub use filtering::{apply_filter, FilterConfig, FilterType};
 pub use peak_fit::{find_and_fit_peak, fit_peak};
 pub use tracks::{find_track_by_language, get_audio_tracks, AudioTrack};
 pub use types::{
-    AnalysisError, AnalysisResult, AudioChunk, AudioData, ChunkResult, CorrelationResult,
-    DelaySelection, SourceAnalysisResult,
+    calculate_delay_std_dev, AnalysisError, AnalysisResult, AudioChunk, AudioData, ChunkResult,
+    CorrelationResult, DelaySelection, SourceAnalysisResult, SourceStability,
 };
 
 // Re-export method trait, implementations, and factory functions
