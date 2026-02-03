@@ -547,7 +547,15 @@ impl Analyzer {
             (ref_chunk, other_chunk)
         };
 
-        let correlation_result = if self.use_peak_fit {
+        // Peak fitting only works with sample-level correlation methods (SCC).
+        // Skip for frame-level methods (DTW, Onset, Spectrogram) where it doesn't apply.
+        let method_name = method.name();
+        let supports_peak_fit = !matches!(
+            method_name,
+            "DTW" | "Onset" | "Spectrogram"
+        );
+
+        let correlation_result = if self.use_peak_fit && supports_peak_fit {
             let raw = method.raw_correlation(&ref_chunk, &other_chunk)?;
             find_and_fit_peak(&raw, self.sample_rate)
         } else {
@@ -593,9 +601,12 @@ impl Analyzer {
 
         let delay = selector
             .select(&accepted_for_selector, &self.selector_config)
-            .ok_or_else(|| AnalysisError::InsufficientChunks {
-                valid: accepted_count,
-                required: self.min_accepted_chunks,
+            .ok_or_else(|| AnalysisError::SelectorFailed {
+                reason: format!(
+                    "no stable segment found (selector: {}, delays too scattered?)",
+                    selector.name()
+                ),
+                accepted: accepted_count,
             })?;
 
         let delays: Vec<f64> = accepted_chunks.iter().map(|c| c.delay_ms_raw).collect();
@@ -782,9 +793,12 @@ impl Analyzer {
 
         let delay = selector
             .select(&accepted_for_selector, &self.selector_config)
-            .ok_or_else(|| AnalysisError::InsufficientChunks {
-                valid: accepted_count,
-                required: self.min_accepted_chunks,
+            .ok_or_else(|| AnalysisError::SelectorFailed {
+                reason: format!(
+                    "no stable segment found (selector: {}, delays too scattered?)",
+                    selector.name()
+                ),
+                accepted: accepted_count,
             })?;
 
         // Log delay selection result
