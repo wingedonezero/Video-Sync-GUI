@@ -96,11 +96,19 @@ impl FinalTrackEntry {
         if self.data.is_default {
             self.badges.push("Default".to_string());
         }
-        if self.data.is_forced {
+        // Only show Forced badge for subtitle tracks
+        if self.data.is_forced && self.data.track_type == TrackType::Subtitles {
             self.badges.push("Forced".to_string());
         }
-        if self.data.sync_to_source.is_some() {
-            self.badges.push("Sync".to_string());
+        // Show Sync badge when track is from non-Source 1 (syncs to Source 1)
+        if let Some(ref sync_target) = self.data.sync_to_source {
+            if self.data.source_key != "Source 1" {
+                self.badges.push(format!("Sync→{}", sync_target));
+            }
+        }
+        // Show custom language if set
+        if let Some(ref lang) = self.data.custom_lang {
+            self.badges.push(format!("Lang:{}", lang));
         }
         if self.data.is_generated {
             self.badges.push("Generated".to_string());
@@ -313,6 +321,27 @@ impl ManualSelectionModel {
             self.final_tracks.swap(index, index + 1);
             self.update_user_order_indices();
         }
+    }
+
+    /// Reorder a track by moving it from one position to another
+    pub fn reorder_track(&mut self, from_index: usize, to_index: usize) {
+        if from_index >= self.final_tracks.len() || to_index > self.final_tracks.len() {
+            return;
+        }
+        if from_index == to_index {
+            return;
+        }
+
+        let track = self.final_tracks.remove(from_index);
+        // Adjust to_index if removing before insertion point
+        let adjusted_to = if from_index < to_index {
+            to_index - 1
+        } else {
+            to_index
+        };
+        self.final_tracks
+            .insert(adjusted_to.min(self.final_tracks.len()), track);
+        self.update_user_order_indices();
     }
 
     /// Update user order indices after reordering

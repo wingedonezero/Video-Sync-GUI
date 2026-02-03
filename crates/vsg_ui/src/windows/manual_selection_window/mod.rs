@@ -435,6 +435,14 @@ impl Component for ManualSelectionWindow {
                 }
             }
 
+            ManualSelectionMsg::ReorderTrack {
+                from_index,
+                to_index,
+            } => {
+                self.model.reorder_track(from_index, to_index);
+                self.refresh_list_from_root(root, sender.clone());
+            }
+
             _ => {
                 // Other messages not yet implemented
             }
@@ -443,14 +451,35 @@ impl Component for ManualSelectionWindow {
 }
 
 impl ManualSelectionWindow {
-    /// Set up drop target for accepting tracks from source lists
+    /// Set up drop target for accepting tracks from source lists and reordering
     fn setup_drop_target(list_box: &gtk4::ListBox, sender: ComponentSender<Self>) {
-        let drop_target = gtk4::DropTarget::new(glib::Type::STRING, gdk::DragAction::COPY);
+        // Accept both COPY (from source) and MOVE (reorder)
+        let drop_target = gtk4::DropTarget::new(
+            glib::Type::STRING,
+            gdk::DragAction::COPY | gdk::DragAction::MOVE,
+        );
 
-        drop_target.connect_drop(move |_target, value, _x, _y| {
+        let list_box_weak = list_box.downgrade();
+        drop_target.connect_drop(move |_target, value, _x, y| {
             if let Ok(data) = value.get::<String>() {
-                // Parse "source_key:track_index"
-                if let Some((source_key, idx_str)) = data.split_once(':') {
+                // Handle reorder: "reorder:from_index"
+                if let Some(idx_str) = data.strip_prefix("reorder:") {
+                    if let Ok(from_index) = idx_str.parse::<usize>() {
+                        // Calculate target index from y position
+                        if let Some(list_box) = list_box_weak.upgrade() {
+                            let to_index = Self::get_drop_index(&list_box, y);
+                            if from_index != to_index {
+                                sender.input(ManualSelectionMsg::ReorderTrack {
+                                    from_index,
+                                    to_index,
+                                });
+                            }
+                        }
+                        return true;
+                    }
+                }
+                // Handle add from source: "source_key:track_index"
+                else if let Some((source_key, idx_str)) = data.split_once(':') {
                     if let Ok(track_index) = idx_str.parse::<usize>() {
                         sender.input(ManualSelectionMsg::AddTrackToFinal {
                             source_key: source_key.to_string(),
@@ -468,7 +497,7 @@ impl ManualSelectionWindow {
             if let Some(widget) = target.widget() {
                 widget.add_css_class("drop-hover");
             }
-            gdk::DragAction::COPY
+            gdk::DragAction::MOVE
         });
 
         drop_target.connect_leave(|target| {
@@ -478,6 +507,26 @@ impl ManualSelectionWindow {
         });
 
         list_box.add_controller(drop_target);
+    }
+
+    /// Calculate the target index based on drop y position
+    fn get_drop_index(list_box: &gtk4::ListBox, y: f64) -> usize {
+        let mut index = 0;
+        let mut current_y = 0.0;
+
+        // Iterate through rows to find drop position
+        let mut i = 0;
+        while let Some(row) = list_box.row_at_index(i) {
+            let height = row.height() as f64;
+            if y < current_y + height / 2.0 {
+                return index;
+            }
+            current_y += height;
+            index += 1;
+            i += 1;
+        }
+
+        index
     }
 
     /// Set up selection handling for the final ListBox
@@ -500,6 +549,8 @@ impl ManualSelectionWindow {
         track: &model::FinalTrackEntry,
         sender: ComponentSender<Self>,
     ) -> gtk4::ListBoxRow {
+        use vsg_core::extraction::types::TrackType;
+
         let row = gtk4::ListBoxRow::new();
         row.set_widget_name(&format!("track-{}", index));
 
@@ -546,14 +597,16 @@ impl ManualSelectionWindow {
         });
         line2.append(&cb_default);
 
-        // Forced checkbox (only for subtitles)
-        let cb_forced = gtk4::CheckButton::with_label("Forced");
-        cb_forced.set_active(track.data.is_forced);
-        let sender_clone = sender.clone();
-        cb_forced.connect_toggled(move |_| {
-            sender_clone.input(ManualSelectionMsg::ToggleTrackForced { final_index: index });
-        });
-        line2.append(&cb_forced);
+        // Forced checkbox - only show for subtitle tracks
+        if track.data.track_type == TrackType::Subtitles {
+            let cb_forced = gtk4::CheckButton::with_label("Forced");
+            cb_forced.set_active(track.data.is_forced);
+            let sender_clone = sender.clone();
+            cb_forced.connect_toggled(move |_| {
+                sender_clone.input(ManualSelectionMsg::ToggleTrackForced { final_index: index });
+            });
+            line2.append(&cb_forced);
+        }
 
         // Set Name checkbox
         let cb_name = gtk4::CheckButton::with_label("Set Name");
@@ -574,6 +627,18 @@ impl ManualSelectionWindow {
 
         vbox.append(&line2);
         row.set_child(Some(&vbox));
+
+        // Add drag source for reordering
+        let drag_source = gtk4::DragSource::new();
+        drag_source.set_actions(gdk::DragAction::MOVE);
+
+        let drag_data = format!("reorder:{}", index);
+        drag_source.connect_prepare(move |_source, _x, _y| {
+            let provider = gdk::ContentProvider::for_value(&drag_data.to_value());
+            Some(provider)
+        });
+
+        row.add_controller(drag_source);
 
         row
     }
