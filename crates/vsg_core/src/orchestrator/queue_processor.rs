@@ -217,12 +217,35 @@ impl QueueProcessor {
                     .unwrap_or_else(|| self.output_dir.join(format!("{}.mkv", entry.name)));
 
                 logger_info(&ctx, &format!("Job completed: {}", output_path.display()));
+
+                // Cleanup job temp directory on success (matches original Python behavior)
+                self.cleanup_job_temp_dir(&ctx.work_dir);
+
                 JobResult::success(entry.id.clone(), output_path, run_result)
             }
             Err(e) => {
                 let error_msg = format!("Pipeline failed: {}", e);
                 ctx.logger.error(&error_msg);
+
+                // Cleanup job temp directory on failure too (matches original Python behavior)
+                self.cleanup_job_temp_dir(&ctx.work_dir);
+
                 JobResult::failure(entry.id.clone(), error_msg)
+            }
+        }
+    }
+
+    /// Clean up the job's temporary work directory.
+    fn cleanup_job_temp_dir(&self, job_work_dir: &std::path::Path) {
+        if job_work_dir.exists() {
+            if let Err(e) = std::fs::remove_dir_all(job_work_dir) {
+                tracing::warn!(
+                    "Failed to cleanup job temp directory {}: {}",
+                    job_work_dir.display(),
+                    e
+                );
+            } else {
+                tracing::debug!("Cleaned up job temp directory: {}", job_work_dir.display());
             }
         }
     }
