@@ -7,6 +7,7 @@
 //! - Ctrl+V paste from clipboard
 
 use gtk4::gdk;
+use gtk4::gio;
 use gtk4::prelude::*;
 use relm4::prelude::*;
 
@@ -54,6 +55,8 @@ impl Component for FileInput {
     type CommandOutput = ();
 
     view! {
+        #[root]
+        #[name = "root_box"]
         gtk4::Box {
             set_orientation: gtk4::Orientation::Horizontal,
             set_spacing: 8,
@@ -65,7 +68,7 @@ impl Component for FileInput {
                 set_xalign: 0.0,
             },
 
-            // Entry with drag-drop support
+            // Entry
             #[name = "entry"]
             gtk4::Entry {
                 set_hexpand: true,
@@ -99,39 +102,44 @@ impl Component for FileInput {
 
         let widgets = view_output!();
 
-        // Set up drag-drop on the entry
-        // IMPORTANT: Use ACTION_COPY | ACTION_MOVE for Dolphin/Qt compatibility on Wayland
+        // Set up drag-drop on the ROOT BOX (not the entry - avoids conflicts)
+        // Try both gio::File (single file) and gdk::FileList (multiple files)
+        // Use ALL actions for maximum compatibility with different file managers
         let drop_target = gtk4::DropTarget::new(
-            gdk::FileList::static_type(),
-            gdk::DragAction::COPY | gdk::DragAction::MOVE,
+            gio::File::static_type(),
+            gdk::DragAction::COPY | gdk::DragAction::MOVE | gdk::DragAction::LINK,
         );
 
-        // Debug: log when drag enters
-        drop_target.connect_enter(|_target, _x, _y| {
-            eprintln!("[DragDrop] Drag entered entry widget");
-            gdk::DragAction::COPY
-        });
-
-        // Debug: log when drag leaves
-        drop_target.connect_leave(|_target| {
-            eprintln!("[DragDrop] Drag left entry widget");
-        });
+        // Also accept FileList
+        drop_target.set_types(&[gio::File::static_type(), gdk::FileList::static_type()]);
 
         let sender_clone = sender.clone();
         drop_target.connect_drop(move |_target, value, _x, _y| {
             eprintln!("[DragDrop] Drop received! Value type: {:?}", value.type_());
 
-            // Try to get FileList
+            // Try gio::File first (single file from most file managers)
+            if let Ok(file) = value.get::<gio::File>() {
+                if let Some(path) = file.path() {
+                    let path_str = path.to_string_lossy().to_string();
+                    eprintln!("[DragDrop] Got gio::File path: {:?}", path_str);
+
+                    let sender = sender_clone.clone();
+                    gtk4::glib::idle_add_local_once(move || {
+                        sender.input(FileInputMsg::FileDropped(path_str));
+                    });
+                    return true;
+                }
+            }
+
+            // Try gdk::FileList (multiple files)
             if let Ok(file_list) = value.get::<gdk::FileList>() {
                 let files = file_list.files();
                 eprintln!("[DragDrop] Got FileList with {} files", files.len());
                 if let Some(file) = files.first() {
                     if let Some(path) = file.path() {
                         let path_str = path.to_string_lossy().to_string();
-                        eprintln!("[DragDrop] File path: {:?}", path_str);
+                        eprintln!("[DragDrop] FileList path: {:?}", path_str);
 
-                        // IMPORTANT: Defer the update to avoid modifying widgets during drag callback
-                        // This prevents crashes on Wayland/GTK4
                         let sender = sender_clone.clone();
                         gtk4::glib::idle_add_local_once(move || {
                             sender.input(FileInputMsg::FileDropped(path_str));
@@ -139,13 +147,14 @@ impl Component for FileInput {
                         return true;
                     }
                 }
-            } else {
-                eprintln!("[DragDrop] Failed to get FileList from value");
             }
+
+            eprintln!("[DragDrop] Could not extract file path from value");
             false
         });
 
-        widgets.entry.add_controller(drop_target);
+        // Add to the root box, not the entry
+        widgets.root_box.add_controller(drop_target);
 
         ComponentParts { model, widgets }
     }
