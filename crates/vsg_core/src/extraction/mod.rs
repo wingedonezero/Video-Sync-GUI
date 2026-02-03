@@ -78,13 +78,13 @@ pub use tracks::{
 
 // Re-export attachment extraction functions
 pub use attachments::{
-    extract_all_attachments, extract_attachments_by_id, extract_font_attachments,
-    has_attachments, has_font_attachments, list_attachments, total_attachment_size,
+    extract_all_attachments, extract_attachments_by_id, extract_font_attachments, has_attachments,
+    has_font_attachments, list_attachments, total_attachment_size,
 };
 
 // Re-export low-level mkvextract functions
 pub use mkvextract::{
-    extract_attachments, extract_audio_with_ffmpeg, extract_chapters_xml, extract_cues,
-    extract_tags, extract_timestamps, extract_track, extract_tracks, extension_for_codec,
+    extension_for_codec, extract_attachments, extract_audio_with_ffmpeg, extract_chapters_xml,
+    extract_cues, extract_tags, extract_timestamps, extract_track, extract_tracks,
     pcm_codec_from_bit_depth, requires_ffmpeg_extraction,
 };

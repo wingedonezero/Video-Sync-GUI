@@ -86,10 +86,7 @@ pub fn extract_track(
 /// * `track_specs` - List of (track_id, output_path) tuples
 ///
 /// More efficient than multiple single-track extractions.
-pub fn extract_tracks(
-    input_path: &Path,
-    track_specs: &[(usize, &Path)],
-) -> ExtractionResult<()> {
+pub fn extract_tracks(input_path: &Path, track_specs: &[(usize, &Path)]) -> ExtractionResult<()> {
     if track_specs.is_empty() {
         return Ok(());
     }
@@ -207,10 +204,7 @@ pub fn extract_tags(input_path: &Path, output_path: &Path) -> ExtractionResult<(
 
     run_mkvextract(input_path, "tags", &[&output_str])?;
 
-    tracing::info!(
-        "Extracted tags to {}",
-        output_path.display()
-    );
+    tracing::info!("Extracted tags to {}", output_path.display());
 
     Ok(())
 }
@@ -298,23 +292,19 @@ pub fn extract_audio_with_ffmpeg(
 
     // First try: stream copy
     let copy_output = Command::new("ffmpeg")
-        .args([
-            "-y",
-            "-v", "error",
-            "-nostdin",
-            "-i",
-        ])
+        .args(["-y", "-v", "error", "-nostdin", "-i"])
         .arg(input_path)
         .args([
-            "-map", &format!("0:a:{}", audio_stream_index),
-            "-vn", "-sn",
-            "-c:a", "copy",
+            "-map",
+            &format!("0:a:{}", audio_stream_index),
+            "-vn",
+            "-sn",
+            "-c:a",
+            "copy",
         ])
         .arg(output_path)
         .output()
-        .map_err(|e| {
-            ExtractionError::ExtractionFailed(format!("Failed to run ffmpeg: {}", e))
-        })?;
+        .map_err(|e| ExtractionError::ExtractionFailed(format!("Failed to run ffmpeg: {}", e)))?;
 
     if copy_output.status.success() {
         tracing::info!(
@@ -333,23 +323,19 @@ pub fn extract_audio_with_ffmpeg(
 
     let pcm_codec = pcm_codec_from_bit_depth(bit_depth);
     let pcm_output = Command::new("ffmpeg")
-        .args([
-            "-y",
-            "-v", "error",
-            "-nostdin",
-            "-i",
-        ])
+        .args(["-y", "-v", "error", "-nostdin", "-i"])
         .arg(input_path)
         .args([
-            "-map", &format!("0:a:{}", audio_stream_index),
-            "-vn", "-sn",
-            "-acodec", pcm_codec,
+            "-map",
+            &format!("0:a:{}", audio_stream_index),
+            "-vn",
+            "-sn",
+            "-acodec",
+            pcm_codec,
         ])
         .arg(output_path)
         .output()
-        .map_err(|e| {
-            ExtractionError::ExtractionFailed(format!("Failed to run ffmpeg: {}", e))
-        })?;
+        .map_err(|e| ExtractionError::ExtractionFailed(format!("Failed to run ffmpeg: {}", e)))?;
 
     if pcm_output.status.success() {
         tracing::info!(
@@ -365,8 +351,7 @@ pub fn extract_audio_with_ffmpeg(
     let stderr = String::from_utf8_lossy(&pcm_output.stderr);
     Err(ExtractionError::ExtractionFailed(format!(
         "Failed to extract audio stream {} with ffmpeg (both stream copy and PCM failed): {}",
-        audio_stream_index,
-        stderr
+        audio_stream_index, stderr
     )))
 }
 

@@ -57,17 +57,13 @@ impl Scc {
         drop(planner); // Release lock before computation
 
         // Prepare reference signal (zero-padded)
-        let mut ref_complex: Vec<Complex<f64>> = reference
-            .iter()
-            .map(|&x| Complex::new(x, 0.0))
-            .collect();
+        let mut ref_complex: Vec<Complex<f64>> =
+            reference.iter().map(|&x| Complex::new(x, 0.0)).collect();
         ref_complex.resize(fft_len, Complex::new(0.0, 0.0));
 
         // Prepare other signal (zero-padded)
-        let mut other_complex: Vec<Complex<f64>> = other
-            .iter()
-            .map(|&x| Complex::new(x, 0.0))
-            .collect();
+        let mut other_complex: Vec<Complex<f64>> =
+            other.iter().map(|&x| Complex::new(x, 0.0)).collect();
         other_complex.resize(fft_len, Complex::new(0.0, 0.0));
 
         // Compute FFTs

@@ -300,10 +300,7 @@ pub fn extract_keyframes_limited(
 #[derive(Debug, Clone)]
 pub enum SnapDetail {
     /// Chapter was already on a keyframe.
-    AlreadyAligned {
-        name: String,
-        timestamp_ns: u64,
-    },
+    AlreadyAligned { name: String, timestamp_ns: u64 },
     /// Chapter was snapped to a keyframe.
     Snapped {
         name: String,
@@ -334,7 +331,10 @@ impl SnapDetail {
         let total_mins = total_secs / 60;
         let mins = total_mins % 60;
         let hours = total_mins / 60;
-        format!("{:02}:{:02}:{:02}.{:03}.{:03}.{:03}", hours, mins, secs, millis, micros, nanos)
+        format!(
+            "{:02}:{:02}:{:02}.{:03}.{:03}.{:03}",
+            hours, mins, secs, millis, micros, nanos
+        )
     }
 
     /// Format the shift amount for logging.

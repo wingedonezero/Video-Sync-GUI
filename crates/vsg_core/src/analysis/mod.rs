@@ -49,14 +49,20 @@ pub mod types;
 
 // Re-export main types
 pub use analyzer::Analyzer;
-pub use ffmpeg::{extract_audio, extract_audio_segment, extract_full_audio, get_duration, get_audio_container_delays_relative, DEFAULT_ANALYSIS_SAMPLE_RATE};
+pub use ffmpeg::{
+    extract_audio, extract_audio_segment, extract_full_audio, get_audio_container_delays_relative,
+    get_duration, DEFAULT_ANALYSIS_SAMPLE_RATE,
+};
 pub use filtering::{apply_filter, FilterConfig, FilterType};
-pub use tracks::{find_track_by_language, get_audio_tracks, AudioTrack};
 pub use peak_fit::{find_and_fit_peak, fit_peak};
+pub use tracks::{find_track_by_language, get_audio_tracks, AudioTrack};
 pub use types::{
     AnalysisError, AnalysisResult, AudioChunk, AudioData, ChunkResult, CorrelationResult,
     DelaySelection, SourceAnalysisResult,
 };
 
 // Re-export method trait, implementations, and factory functions
-pub use methods::{all_methods, create_from_enum, create_method, selected_methods, CorrelationMethod, GccPhat, GccScot, Scc, Whitened};
+pub use methods::{
+    all_methods, create_from_enum, create_method, selected_methods, CorrelationMethod, GccPhat,
+    GccScot, Scc, Whitened,
+};

@@ -17,11 +17,7 @@ impl DelaySelector for ModeClusteredSelector {
         "mode_clustered"
     }
 
-    fn select(
-        &self,
-        chunks: &[ChunkResult],
-        config: &SelectorConfig,
-    ) -> Option<DelaySelection> {
+    fn select(&self, chunks: &[ChunkResult], config: &SelectorConfig) -> Option<DelaySelection> {
         if chunks.len() < config.min_accepted_chunks {
             return None;
         }
@@ -47,8 +43,8 @@ impl DelaySelector for ModeClusteredSelector {
         }
 
         // Average raw delays in the cluster
-        let raw_avg: f64 = cluster.iter().map(|c| c.delay_ms_raw).sum::<f64>()
-            / cluster.len() as f64;
+        let raw_avg: f64 =
+            cluster.iter().map(|c| c.delay_ms_raw).sum::<f64>() / cluster.len() as f64;
 
         Some(DelaySelection {
             delay_ms_raw: raw_avg,

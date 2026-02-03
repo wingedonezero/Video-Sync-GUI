@@ -5,7 +5,7 @@
 //! - Normalization (fix end times for seamless playback)
 //! - Renaming (standardize chapter names)
 
-use super::types::{ChapterData, ChapterName, format_timestamp_ns};
+use super::types::{format_timestamp_ns, ChapterData, ChapterName};
 
 /// Detail about a removed duplicate chapter.
 #[derive(Debug, Clone)]
@@ -74,7 +74,8 @@ pub struct NormalizedEndInfo {
 impl NormalizedEndInfo {
     /// Format the change for logging.
     pub fn format_change(&self) -> String {
-        let orig = self.original_end_ns
+        let orig = self
+            .original_end_ns
             .map(|ns| format_timestamp_ns(ns))
             .unwrap_or_else(|| "none".to_string());
         format!(
@@ -111,13 +112,19 @@ pub fn normalize_chapter_ends(data: &mut ChapterData) -> Vec<NormalizedEndInfo> 
         } else {
             // Last chapter: max(start + 1s, original_end)
             let min_end = data.chapters[i].start_ns + 1_000_000_000; // start + 1 second
-            data.chapters[i].end_ns.map(|e| e.max(min_end)).unwrap_or(min_end)
+            data.chapters[i]
+                .end_ns
+                .map(|e| e.max(min_end))
+                .unwrap_or(min_end)
         };
 
         let current_end = data.chapters[i].end_ns;
         if current_end != Some(desired_end) {
             normalized.push(NormalizedEndInfo {
-                name: data.chapters[i].display_name().unwrap_or("unnamed").to_string(),
+                name: data.chapters[i]
+                    .display_name()
+                    .unwrap_or("unnamed")
+                    .to_string(),
                 original_end_ns: current_end,
                 new_end_ns: desired_end,
             });

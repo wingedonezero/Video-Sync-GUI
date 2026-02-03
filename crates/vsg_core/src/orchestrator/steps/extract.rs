@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::extraction::{
-    extract_audio_with_ffmpeg, extract_track, extension_for_codec, probe_file,
+    extension_for_codec, extract_audio_with_ffmpeg, extract_track, probe_file,
     requires_ffmpeg_extraction, ProbeResult, TrackType,
 };
 use crate::orchestrator::errors::{StepError, StepResult};
@@ -157,12 +157,8 @@ impl ExtractStep {
             ));
         }
 
-        let metadata = std::fs::metadata(output_path).map_err(|e| {
-            format!(
-                "Cannot read metadata for track {} output: {}",
-                track_id, e
-            )
-        })?;
+        let metadata = std::fs::metadata(output_path)
+            .map_err(|e| format!("Cannot read metadata for track {} output: {}", track_id, e))?;
 
         if metadata.len() == 0 {
             return Err(format!(
@@ -189,7 +185,10 @@ impl ExtractStep {
         msg.push_str(&format!("Source: {}\n", source_key));
         msg.push_str(&format!(
             "File: {}\n",
-            source_path.file_name().unwrap_or_default().to_string_lossy()
+            source_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
         ));
         msg.push_str(&format!("Full Path: {}\n", source_path.display()));
         msg.push_str(&format!("{}\n\n", separator));
@@ -334,7 +333,8 @@ impl PipelineStep for ExtractStep {
                 let probe_result = if let Some(cached) = probe_cache.get(source_key) {
                     cached.clone()
                 } else {
-                    ctx.logger.command(&format!("mkvmerge -J \"{}\"", source_path.display()));
+                    ctx.logger
+                        .command(&format!("mkvmerge -J \"{}\"", source_path.display()));
                     match probe_file(&source_path) {
                         Ok(probe) => {
                             // Log container delays if present
@@ -348,8 +348,7 @@ impl PipelineStep for ExtractStep {
                                         source_key
                                     ));
                                     for (tid, delay) in non_zero {
-                                        ctx.logger
-                                            .info(&format!("  Track {}: {:+}ms", tid, delay));
+                                        ctx.logger.info(&format!("  Track {}: {:+}ms", tid, delay));
                                     }
                                 }
                             }
@@ -464,9 +463,7 @@ impl PipelineStep for ExtractStep {
 
     fn validate_output(&self, _ctx: &Context, state: &JobState) -> StepResult<()> {
         if state.extract.is_none() {
-            return Err(StepError::invalid_output(
-                "Extraction results not recorded",
-            ));
+            return Err(StepError::invalid_output("Extraction results not recorded"));
         }
         Ok(())
     }

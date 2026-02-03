@@ -47,11 +47,7 @@ pub fn fit_peak(correlation: &[f64], peak_index: usize, sample_rate: u32) -> Cor
     let b = (y2 - y0) / 2.0;
 
     // Interpolated peak offset (in samples, relative to peak_index)
-    let delta = if a.abs() > 1e-10 {
-        -b / (2.0 * a)
-    } else {
-        0.0
-    };
+    let delta = if a.abs() > 1e-10 { -b / (2.0 * a) } else { 0.0 };
 
     // Clamp delta to [-1, 1] for sanity
     let delta = delta.clamp(-1.0, 1.0);

@@ -78,11 +78,7 @@ pub fn extract_font_attachments(
 ) -> ExtractionResult<ExtractedAttachments> {
     let probe = probe_file(input_path)?;
 
-    let fonts: Vec<&AttachmentInfo> = probe
-        .attachments
-        .iter()
-        .filter(|a| a.is_font())
-        .collect();
+    let fonts: Vec<&AttachmentInfo> = probe.attachments.iter().filter(|a| a.is_font()).collect();
 
     if fonts.is_empty() {
         tracing::debug!("No font attachments found in {}", input_path.display());
@@ -211,11 +207,8 @@ mod tests {
     #[test]
     fn empty_ids_returns_empty() {
         // This should succeed without touching the filesystem
-        let result = extract_attachments_by_id(
-            &Path::new("/some/file.mkv"),
-            &Path::new("/tmp/out"),
-            &[],
-        );
+        let result =
+            extract_attachments_by_id(&Path::new("/some/file.mkv"), &Path::new("/tmp/out"), &[]);
         // Will succeed because we short-circuit on empty IDs
         assert!(result.is_ok());
         assert!(result.unwrap().files.is_empty());

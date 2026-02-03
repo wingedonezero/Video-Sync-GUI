@@ -172,12 +172,7 @@ impl CorrelationMethod {
 
     /// Get all available methods as a list.
     pub fn all() -> &'static [CorrelationMethod] {
-        &[
-            Self::Scc,
-            Self::GccPhat,
-            Self::GccScot,
-            Self::Whitened,
-        ]
+        &[Self::Scc, Self::GccPhat, Self::GccScot, Self::Whitened]
     }
 
     /// Create from index (for UI combo boxes).

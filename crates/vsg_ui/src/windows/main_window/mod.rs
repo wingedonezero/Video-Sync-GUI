@@ -392,15 +392,15 @@ impl Component for MainWindow {
                     self.model.set_source_path(index, path.clone());
                     // Update the input component
                     match index {
-                        0 => self.source1_input.emit(
-                            crate::components::file_input::FileInputMsg::SetText(path),
-                        ),
-                        1 => self.source2_input.emit(
-                            crate::components::file_input::FileInputMsg::SetText(path),
-                        ),
-                        2 => self.source3_input.emit(
-                            crate::components::file_input::FileInputMsg::SetText(path),
-                        ),
+                        0 => self
+                            .source1_input
+                            .emit(crate::components::file_input::FileInputMsg::SetText(path)),
+                        1 => self
+                            .source2_input
+                            .emit(crate::components::file_input::FileInputMsg::SetText(path)),
+                        2 => self
+                            .source3_input
+                            .emit(crate::components::file_input::FileInputMsg::SetText(path)),
                         _ => {}
                     }
                 }

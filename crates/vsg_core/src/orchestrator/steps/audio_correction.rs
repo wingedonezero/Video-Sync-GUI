@@ -43,7 +43,8 @@ impl PipelineStep for AudioCorrectionStep {
     }
 
     fn execute(&self, ctx: &Context, state: &mut JobState) -> StepResult<StepOutcome> {
-        ctx.logger.info("Audio correction step (stub) - passing through without processing");
+        ctx.logger
+            .info("Audio correction step (stub) - passing through without processing");
 
         // Check if we have analysis data with delays
         let has_delays = state
@@ -53,7 +54,8 @@ impl PipelineStep for AudioCorrectionStep {
             .unwrap_or(false);
 
         if !has_delays {
-            ctx.logger.info("No audio delays calculated - skipping correction");
+            ctx.logger
+                .info("No audio delays calculated - skipping correction");
             state.correction = Some(CorrectionOutput {
                 correction_type: "none".to_string(),
                 corrected_files: std::collections::HashMap::new(),
@@ -73,7 +75,9 @@ impl PipelineStep for AudioCorrectionStep {
             corrected_files: std::collections::HashMap::new(),
         });
 
-        ctx.logger.info("Audio correction complete (stub - delays will be applied at mux time via --sync)");
+        ctx.logger.info(
+            "Audio correction complete (stub - delays will be applied at mux time via --sync)",
+        );
         Ok(StepOutcome::Success)
     }
 

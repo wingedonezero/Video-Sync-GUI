@@ -16,11 +16,7 @@ impl DelaySelector for ModeSelector {
         "mode"
     }
 
-    fn select(
-        &self,
-        chunks: &[ChunkResult],
-        config: &SelectorConfig,
-    ) -> Option<DelaySelection> {
+    fn select(&self, chunks: &[ChunkResult], config: &SelectorConfig) -> Option<DelaySelection> {
         if chunks.len() < config.min_accepted_chunks {
             return None;
         }
@@ -28,17 +24,18 @@ impl DelaySelector for ModeSelector {
         // Count occurrences of each rounded delay
         let mut counts: HashMap<i64, Vec<&ChunkResult>> = HashMap::new();
         for chunk in chunks {
-            counts.entry(chunk.delay_ms_rounded).or_default().push(chunk);
+            counts
+                .entry(chunk.delay_ms_rounded)
+                .or_default()
+                .push(chunk);
         }
 
         // Find the most common delay
-        let (mode_delay, mode_chunks) = counts
-            .into_iter()
-            .max_by_key(|(_, v)| v.len())?;
+        let (mode_delay, mode_chunks) = counts.into_iter().max_by_key(|(_, v)| v.len())?;
 
         // Calculate average raw delay from chunks with this rounded value
-        let raw_avg: f64 = mode_chunks.iter().map(|c| c.delay_ms_raw).sum::<f64>()
-            / mode_chunks.len() as f64;
+        let raw_avg: f64 =
+            mode_chunks.iter().map(|c| c.delay_ms_raw).sum::<f64>() / mode_chunks.len() as f64;
 
         Some(DelaySelection {
             delay_ms_raw: raw_avg,
@@ -83,9 +80,7 @@ mod tests {
 
     #[test]
     fn returns_none_if_insufficient_chunks() {
-        let chunks = vec![
-            make_chunk(1, -1000.0, 10.0),
-        ];
+        let chunks = vec![make_chunk(1, -1000.0, 10.0)];
         let mut config = SelectorConfig::default();
         config.min_accepted_chunks = 3;
         assert!(ModeSelector.select(&chunks, &config).is_none());

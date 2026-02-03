@@ -75,10 +75,8 @@ impl Pipeline {
         for (i, step) in self.steps.iter().enumerate() {
             // Check for cancellation
             if self.is_cancelled() {
-                ctx.logger.warn(&format!(
-                    "Pipeline cancelled before step '{}'",
-                    step.name()
-                ));
+                ctx.logger
+                    .warn(&format!("Pipeline cancelled before step '{}'", step.name()));
                 return Err(PipelineError::cancelled(&ctx.job_name));
             }
 
@@ -90,7 +88,8 @@ impl Pipeline {
             ctx.report_progress(step_name, percent, &format!("Starting {}", step_name));
 
             // Validate input
-            ctx.logger.debug(&format!("Validating input for '{}'", step_name));
+            ctx.logger
+                .debug(&format!("Validating input for '{}'", step_name));
             if let Err(e) = step.validate_input(ctx) {
                 ctx.logger.error(&format!("Input validation failed: {}", e));
                 return Err(PipelineError::step_failed(&ctx.job_name, step_name, e));
@@ -109,7 +108,8 @@ impl Pipeline {
                     ctx.logger
                         .debug(&format!("Validating output for '{}'", step_name));
                     if let Err(e) = step.validate_output(ctx, state) {
-                        ctx.logger.error(&format!("Output validation failed: {}", e));
+                        ctx.logger
+                            .error(&format!("Output validation failed: {}", e));
                         return Err(PipelineError::step_failed(&ctx.job_name, step_name, e));
                     }
 

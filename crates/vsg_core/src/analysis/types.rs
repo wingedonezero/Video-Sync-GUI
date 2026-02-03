@@ -180,11 +180,7 @@ impl ChunkResult {
     }
 
     /// Create a rejected chunk result (e.g., extraction failed).
-    pub fn rejected(
-        chunk_index: usize,
-        chunk_start_secs: f64,
-        reason: impl Into<String>,
-    ) -> Self {
+    pub fn rejected(chunk_index: usize, chunk_start_secs: f64, reason: impl Into<String>) -> Self {
         Self {
             chunk_index,
             chunk_start_secs,
@@ -228,11 +224,7 @@ pub struct DelaySelection {
 
 impl DelaySelection {
     /// Create a new delay selection result.
-    pub fn new(
-        delay_ms_raw: f64,
-        method_name: impl Into<String>,
-        chunks_used: usize,
-    ) -> Self {
+    pub fn new(delay_ms_raw: f64, method_name: impl Into<String>, chunks_used: usize) -> Self {
         Self {
             delay_ms_raw,
             delay_ms_rounded: delay_ms_raw.round() as i64,

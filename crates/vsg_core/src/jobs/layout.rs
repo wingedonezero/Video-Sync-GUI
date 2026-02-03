@@ -64,11 +64,7 @@ impl LayoutManager {
     ) -> Result<(), std::io::Error> {
         self.ensure_dir()?;
 
-        let saved_data = SavedLayoutData::new(
-            job_id.to_string(),
-            sources.clone(),
-            layout.clone(),
-        );
+        let saved_data = SavedLayoutData::new(job_id.to_string(), sources.clone(), layout.clone());
 
         let path = self.layout_path(job_id);
         let json = serde_json::to_string_pretty(&saved_data)
@@ -90,7 +86,10 @@ impl LayoutManager {
     }
 
     /// Load the full saved layout data for a job.
-    pub fn load_layout_data(&self, job_id: &str) -> Result<Option<SavedLayoutData>, std::io::Error> {
+    pub fn load_layout_data(
+        &self,
+        job_id: &str,
+    ) -> Result<Option<SavedLayoutData>, std::io::Error> {
         let path = self.layout_path(job_id);
 
         if !path.exists() {
@@ -152,7 +151,10 @@ impl LayoutManager {
     pub fn cleanup_all(&self) -> Result<(), std::io::Error> {
         if self.layouts_dir.exists() {
             fs::remove_dir_all(&self.layouts_dir)?;
-            tracing::info!("Cleaned up all layout files from {}", self.layouts_dir.display());
+            tracing::info!(
+                "Cleaned up all layout files from {}",
+                self.layouts_dir.display()
+            );
         }
         Ok(())
     }
@@ -188,7 +190,11 @@ impl LayoutManager {
         fs::write(&temp_path, &json)?;
         fs::rename(&temp_path, &path)?;
 
-        tracing::debug!("Saved layout with signatures for job '{}' to {}", job_id, path.display());
+        tracing::debug!(
+            "Saved layout with signatures for job '{}' to {}",
+            job_id,
+            path.display()
+        );
         Ok(())
     }
 
@@ -215,7 +221,10 @@ impl LayoutManager {
         let source_struct_sig = match &source_data.structure_signature {
             Some(sig) => sig,
             None => {
-                tracing::warn!("Cannot copy: Source layout {} has no structure signature", source_job_id);
+                tracing::warn!(
+                    "Cannot copy: Source layout {} has no structure signature",
+                    source_job_id
+                );
                 return Ok(false);
             }
         };
@@ -226,7 +235,8 @@ impl LayoutManager {
         if !sig_gen.structures_are_compatible(source_struct_sig, &target_struct_sig) {
             tracing::info!(
                 "Cannot copy layout: Incompatible track structures between {} and {}",
-                source_job_id, target_job_id
+                source_job_id,
+                target_job_id
             );
             return Ok(false);
         }
@@ -254,7 +264,8 @@ impl LayoutManager {
 
         tracing::info!(
             "Copied layout from {} to {} (structures compatible)",
-            source_job_id, target_job_id
+            source_job_id,
+            target_job_id
         );
         Ok(true)
     }
@@ -277,7 +288,10 @@ impl LayoutManager {
     }
 
     /// Load and validate a layout.
-    pub fn load_validated_layout(&self, job_id: &str) -> Result<Option<SavedLayoutData>, std::io::Error> {
+    pub fn load_validated_layout(
+        &self,
+        job_id: &str,
+    ) -> Result<Option<SavedLayoutData>, std::io::Error> {
         match self.load_layout_data(job_id)? {
             Some(data) => {
                 if let Err(e) = Self::validate_layout(&data) {
@@ -308,7 +322,9 @@ mod tests {
         sources.insert("Source 1".to_string(), PathBuf::from("/path/to/file.mkv"));
 
         // Save with metadata
-        manager.save_layout_with_metadata("test_job", &sources, &layout).unwrap();
+        manager
+            .save_layout_with_metadata("test_job", &sources, &layout)
+            .unwrap();
 
         // Load full data
         let loaded_data = manager.load_layout_data("test_job").unwrap();

@@ -7,20 +7,20 @@
 //! - `SignatureGenerator`: Track/structure signatures for layout compatibility
 //! - `discovery`: Job discovery from source files (stub for now)
 
-mod types;
-mod queue;
 mod discovery;
 mod layout;
+mod queue;
 mod signature;
+mod types;
 
-pub use types::{
-    JobQueueEntry, JobQueueStatus, ManualLayout, FinalTrackEntry,
-    TrackConfig, SourceCorrelationSettings, SavedLayoutData,
-};
-pub use queue::JobQueue;
 pub use discovery::discover_jobs;
-pub use layout::{LayoutManager, generate_layout_id};
+pub use layout::{generate_layout_id, LayoutManager};
+pub use queue::JobQueue;
 pub use signature::{
-    SignatureGenerator, TrackSignature, StructureSignature,
-    TrackSignatureInfo, tracks_to_signature_info,
+    tracks_to_signature_info, SignatureGenerator, StructureSignature, TrackSignature,
+    TrackSignatureInfo,
+};
+pub use types::{
+    FinalTrackEntry, JobQueueEntry, JobQueueStatus, ManualLayout, SavedLayoutData,
+    SourceCorrelationSettings, TrackConfig,
 };

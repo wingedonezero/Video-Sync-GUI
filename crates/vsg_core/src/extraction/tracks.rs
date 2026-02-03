@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::mkvextract::{extract_track, extract_tracks, extension_for_codec};
+use super::mkvextract::{extension_for_codec, extract_track, extract_tracks};
 use super::probe::probe_file;
 use super::types::{ExtractedTrack, ExtractionError, ExtractionResult, TrackInfo, TrackType};
 
@@ -31,9 +31,9 @@ pub fn extract_track_auto(
     // Probe to get codec info
     let probe = probe_file(input_path)?;
 
-    let track_info = probe.track_by_id(track_id).ok_or_else(|| {
-        ExtractionError::TrackNotFound(track_id)
-    })?;
+    let track_info = probe
+        .track_by_id(track_id)
+        .ok_or_else(|| ExtractionError::TrackNotFound(track_id))?;
 
     let extension = extension_for_codec(&track_info.codec_id);
     let output_path = output_dir.join(format!("{}.{}", base_name, extension));
@@ -101,9 +101,9 @@ pub fn extract_tracks_batch(
     let mut results: Vec<ExtractedTrack> = Vec::new();
 
     for spec in specs {
-        let track_info = probe.track_by_id(spec.track_id).ok_or_else(|| {
-            ExtractionError::TrackNotFound(spec.track_id)
-        })?;
+        let track_info = probe
+            .track_by_id(spec.track_id)
+            .ok_or_else(|| ExtractionError::TrackNotFound(spec.track_id))?;
 
         let extension = spec
             .extension
@@ -218,12 +218,10 @@ pub fn get_audio_tracks_sorted(input_path: &Path) -> ExtractionResult<Vec<TrackI
     let mut tracks: Vec<TrackInfo> = probe.audio_tracks().cloned().collect();
 
     // Sort: default tracks first, then by track ID
-    tracks.sort_by(|a, b| {
-        match (a.is_default, b.is_default) {
-            (true, false) => std::cmp::Ordering::Less,
-            (false, true) => std::cmp::Ordering::Greater,
-            _ => a.id.cmp(&b.id),
-        }
+    tracks.sort_by(|a, b| match (a.is_default, b.is_default) {
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        _ => a.id.cmp(&b.id),
     });
 
     Ok(tracks)
@@ -235,8 +233,7 @@ mod tests {
 
     #[test]
     fn track_extract_spec_builder() {
-        let spec = TrackExtractSpec::new(1, "audio")
-            .with_extension("aac");
+        let spec = TrackExtractSpec::new(1, "audio").with_extension("aac");
 
         assert_eq!(spec.track_id, 1);
         assert_eq!(spec.base_name, "audio");

@@ -235,7 +235,10 @@ pub fn serialize_chapter_xml(data: &ChapterData) -> String {
                 name.language
             ));
             // Write IETF language if present, or derive from legacy code
-            let ietf = name.language_ietf.as_ref().map(|s| s.as_str())
+            let ietf = name
+                .language_ietf
+                .as_ref()
+                .map(|s| s.as_str())
                 .unwrap_or_else(|| legacy_to_ietf(&name.language));
             xml.push_str(&format!(
                 "        <ChapLanguageIETF>{}</ChapLanguageIETF>\n",
@@ -364,9 +367,7 @@ mod tests {
     #[test]
     fn escape_special_characters() {
         let mut data = ChapterData::new();
-        data.add_chapter(
-            ChapterEntry::new(0).with_name("Test & <Chapter>", "eng"),
-        );
+        data.add_chapter(ChapterEntry::new(0).with_name("Test & <Chapter>", "eng"));
 
         let xml = serialize_chapter_xml(&data);
         assert!(xml.contains("Test &amp; &lt;Chapter&gt;"));

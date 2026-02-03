@@ -61,9 +61,7 @@ impl PipelineStep for AnalyzeStep {
 
         // Check that Source 1 exists (it's the reference)
         if !ctx.job_spec.sources.contains_key("Source 1") {
-            return Err(StepError::invalid_input(
-                "Source 1 (reference) is required",
-            ));
+            return Err(StepError::invalid_input("Source 1 (reference) is required"));
         }
 
         // Note: Single source (remux-only) is valid - we skip analysis in execute()
@@ -77,7 +75,8 @@ impl PipelineStep for AnalyzeStep {
         // REMUX-ONLY MODE: Skip analysis if only Source 1 exists
         // ============================================================
         if ctx.job_spec.sources.len() == 1 {
-            ctx.logger.info("Remux-only mode - no sync sources to analyze");
+            ctx.logger
+                .info("Remux-only mode - no sync sources to analyze");
 
             // Create empty delays (Source 1 has 0 delay by definition)
             let mut delays = Delays::new();
@@ -139,8 +138,10 @@ impl PipelineStep for AnalyzeStep {
         // to be added to correlation results for accurate sync.
         // We use mkvmerge -J to get minimum_timestamp per track, which is more
         // reliable than ffprobe's start_time for Matroska containers.
-        ctx.logger.info("--- Getting Source 1 Container Delays for Analysis ---");
-        ctx.logger.command(&format!("mkvmerge -J \"{}\"", ref_path.display()));
+        ctx.logger
+            .info("--- Getting Source 1 Container Delays for Analysis ---");
+        ctx.logger
+            .command(&format!("mkvmerge -J \"{}\"", ref_path.display()));
 
         let (source1_audio_container_delay, source1_container_delays, source1_selected_track) =
             match probe_file(ref_path) {
@@ -167,7 +168,9 @@ impl PipelineStep for AnalyzeStep {
                     let relative_delays = probe.get_audio_container_delays_relative();
 
                     // Select audio track for correlation (default audio or first audio)
-                    let selected_track = probe.default_audio().or_else(|| probe.audio_tracks().next());
+                    let selected_track = probe
+                        .default_audio()
+                        .or_else(|| probe.audio_tracks().next());
 
                     let (default_audio_delay, track_info) = if let Some(track) = selected_track {
                         let relative = track.container_delay_ms - video_delay;
@@ -184,11 +187,13 @@ impl PipelineStep for AnalyzeStep {
                         let name = track.name.as_deref().unwrap_or("");
 
                         // Log selected track
-                        let mut track_details = format!("Track {}: {}, {} {}", track.id, lang, codec, channel_str);
+                        let mut track_details =
+                            format!("Track {}: {}, {} {}", track.id, lang, codec, channel_str);
                         if !name.is_empty() {
                             track_details.push_str(&format!(", '{}'", name));
                         }
-                        ctx.logger.info(&format!("[Source 1] Selected: {}", track_details));
+                        ctx.logger
+                            .info(&format!("[Source 1] Selected: {}", track_details));
 
                         (relative, Some((track.id, lang.to_string())))
                     } else {
@@ -223,11 +228,12 @@ impl PipelineStep for AnalyzeStep {
         let _ = source1_container_delays; // Will be used for per-track delay selection
         let _ = source1_selected_track; // Track ID and language of selected track
 
-        ctx.logger.info("--- Running Audio Correlation Analysis ---");
+        ctx.logger
+            .info("--- Running Audio Correlation Analysis ---");
 
         // Create analyzer from settings with job logger for detailed progress
-        let analyzer = Analyzer::from_settings(&ctx.settings.analysis)
-            .with_logger(ctx.logger.clone());
+        let analyzer =
+            Analyzer::from_settings(&ctx.settings.analysis).with_logger(ctx.logger.clone());
 
         if ctx.settings.analysis.multi_correlation_enabled {
             ctx.logger.info("Mode: Multi-Correlation Comparison");
@@ -284,7 +290,10 @@ impl PipelineStep for AnalyzeStep {
             ctx.logger.info(&format!(
                 "Analyzing {}: {}",
                 source_name,
-                source_path.file_name().unwrap_or_default().to_string_lossy()
+                source_path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
             ));
 
             // Check if multi-correlation mode is enabled
@@ -319,7 +328,8 @@ impl PipelineStep for AnalyzeStep {
                             }
 
                             // Apply container delay correction
-                            let corrected_delay = first_result.delay_ms_raw() + source1_audio_container_delay;
+                            let corrected_delay =
+                                first_result.delay_ms_raw() + source1_audio_container_delay;
                             delays.set_delay(source_name, corrected_delay);
                             total_confidence += first_result.avg_match_pct / 100.0;
                             source_count += 1;
@@ -333,8 +343,12 @@ impl PipelineStep for AnalyzeStep {
                                 .map(|c| c.delay_ms_raw)
                                 .collect();
                             let std_dev = if accepted_delays.len() > 1 {
-                                let mean = accepted_delays.iter().sum::<f64>() / accepted_delays.len() as f64;
-                                let variance = accepted_delays.iter().map(|d| (d - mean).powi(2)).sum::<f64>()
+                                let mean = accepted_delays.iter().sum::<f64>()
+                                    / accepted_delays.len() as f64;
+                                let variance = accepted_delays
+                                    .iter()
+                                    .map(|d| (d - mean).powi(2))
+                                    .sum::<f64>()
                                     / accepted_delays.len() as f64;
                                 variance.sqrt()
                             } else {
@@ -410,8 +424,12 @@ impl PipelineStep for AnalyzeStep {
                             .map(|c| c.delay_ms_raw)
                             .collect();
                         let std_dev = if accepted_delays.len() > 1 {
-                            let mean = accepted_delays.iter().sum::<f64>() / accepted_delays.len() as f64;
-                            let variance = accepted_delays.iter().map(|d| (d - mean).powi(2)).sum::<f64>()
+                            let mean =
+                                accepted_delays.iter().sum::<f64>() / accepted_delays.len() as f64;
+                            let variance = accepted_delays
+                                .iter()
+                                .map(|d| (d - mean).powi(2))
+                                .sum::<f64>()
                                 / accepted_delays.len() as f64;
                             variance.sqrt()
                         } else {
@@ -439,10 +457,8 @@ impl PipelineStep for AnalyzeStep {
                         );
                     }
                     Err(e) => {
-                        ctx.logger.error(&format!(
-                            "{}: Analysis failed - {}",
-                            source_name, e
-                        ));
+                        ctx.logger
+                            .error(&format!("{}: Analysis failed - {}", source_name, e));
                         // Set zero delay for failed source
                         delays.set_delay(source_name, 0.0);
                         // Record failed analysis stability
@@ -474,7 +490,8 @@ impl PipelineStep for AnalyzeStep {
             ctx.logger.info(&format!("  {}: {:+.3}ms", source, delay));
         }
 
-        let most_negative_raw = delays.raw_source_delays_ms
+        let most_negative_raw = delays
+            .raw_source_delays_ms
             .values()
             .cloned()
             .fold(0.0_f64, |min, val| min.min(val));
@@ -484,10 +501,8 @@ impl PipelineStep for AnalyzeStep {
             let raw_shift = most_negative_raw.abs();
             let rounded_shift = raw_shift.round() as i64;
 
-            ctx.logger.info(&format!(
-                "Most negative delay: {:.3}ms",
-                most_negative_raw
-            ));
+            ctx.logger
+                .info(&format!("Most negative delay: {:.3}ms", most_negative_raw));
             ctx.logger.info(&format!(
                 "Applying global shift: +{:.3}ms (rounded: +{}ms)",
                 raw_shift, rounded_shift
@@ -510,7 +525,11 @@ impl PipelineStep for AnalyzeStep {
 
             // Update rounded delays too
             for (source, rounded_delay) in delays.source_delays_ms.iter_mut() {
-                let raw = delays.raw_source_delays_ms.get(source).copied().unwrap_or(0.0);
+                let raw = delays
+                    .raw_source_delays_ms
+                    .get(source)
+                    .copied()
+                    .unwrap_or(0.0);
                 *rounded_delay = raw.round() as i64;
             }
         } else if most_negative_raw < 0.0 && sync_mode == SyncMode::AllowNegative {
@@ -519,7 +538,8 @@ impl PipelineStep for AnalyzeStep {
                 most_negative_raw
             ));
         } else {
-            ctx.logger.info("All delays are non-negative. No global shift needed.");
+            ctx.logger
+                .info("All delays are non-negative. No global shift needed.");
         }
 
         // ============================================================
@@ -534,8 +554,7 @@ impl PipelineStep for AnalyzeStep {
         // Log final delays
         ctx.logger.info(&format!(
             "=== FINAL DELAYS (Sync Mode: {}, Global Shift: +{}ms) ===",
-            sync_mode,
-            delays.global_shift_ms
+            sync_mode, delays.global_shift_ms
         ));
         for (source, delay) in delays.source_delays_ms.iter() {
             ctx.logger.info(&format!("  {}: {:+}ms", source, delay));
@@ -556,7 +575,11 @@ impl PipelineStep for AnalyzeStep {
             };
             ctx.logger.info(&format!(
                 "  {}: [{:>4}] accept={:.0}%, match={:.1}%, std_dev={:.1}ms",
-                source, status, stability.acceptance_rate, stability.avg_match_pct, stability.delay_std_dev_ms
+                source,
+                status,
+                stability.acceptance_rate,
+                stability.avg_match_pct,
+                stability.delay_std_dev_ms
             ));
         }
 

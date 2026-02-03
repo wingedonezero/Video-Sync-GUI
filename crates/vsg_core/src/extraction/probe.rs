@@ -141,13 +141,11 @@ fn parse_track_info(track: &Value) -> Option<TrackInfo> {
     // Get container delay from minimum_timestamp (nanoseconds -> milliseconds)
     // Only video and audio tracks have meaningful container delays
     let container_delay_ms = match track_type {
-        TrackType::Video | TrackType::Audio => {
-            properties
-                .and_then(|p| p.get("minimum_timestamp"))
-                .and_then(|m| m.as_i64())
-                .map(|ns| (ns as f64 / 1_000_000.0).round() as i64)
-                .unwrap_or(0)
-        }
+        TrackType::Video | TrackType::Audio => properties
+            .and_then(|p| p.get("minimum_timestamp"))
+            .and_then(|m| m.as_i64())
+            .map(|ns| (ns as f64 / 1_000_000.0).round() as i64)
+            .unwrap_or(0),
         TrackType::Subtitles => 0, // Subtitles don't have meaningful container delays
     };
 
@@ -178,17 +176,20 @@ fn parse_track_properties(track_type: TrackType, properties: Option<&Value>) -> 
 
     match track_type {
         TrackType::Video => {
-            props.width = p.get("pixel_dimensions")
+            props.width = p
+                .get("pixel_dimensions")
                 .and_then(|d| d.as_str())
                 .and_then(|s| s.split('x').next())
                 .and_then(|w| w.parse().ok());
 
-            props.height = p.get("pixel_dimensions")
+            props.height = p
+                .get("pixel_dimensions")
                 .and_then(|d| d.as_str())
                 .and_then(|s| s.split('x').nth(1))
                 .and_then(|h| h.parse().ok());
 
-            props.display_dimensions = p.get("display_dimensions")
+            props.display_dimensions = p
+                .get("display_dimensions")
                 .and_then(|d| d.as_str())
                 .map(|s| s.to_string())
                 .or_else(|| {
@@ -198,34 +199,33 @@ fn parse_track_properties(track_type: TrackType, properties: Option<&Value>) -> 
                 });
 
             // Calculate FPS from default_duration (nanoseconds per frame)
-            props.fps = p.get("default_duration")
+            props.fps = p
+                .get("default_duration")
                 .and_then(|d| d.as_u64())
                 .map(|ns| 1_000_000_000.0 / ns as f64);
         }
         TrackType::Audio => {
-            props.channels = p.get("audio_channels")
+            props.channels = p
+                .get("audio_channels")
                 .and_then(|c| c.as_u64())
                 .map(|c| c as u8);
 
-            props.sample_rate = p.get("audio_sampling_frequency")
+            props.sample_rate = p
+                .get("audio_sampling_frequency")
                 .and_then(|f| f.as_u64())
                 .map(|f| f as u32);
 
-            props.bits_per_sample = p.get("audio_bits_per_sample")
+            props.bits_per_sample = p
+                .get("audio_bits_per_sample")
                 .and_then(|b| b.as_u64())
                 .map(|b| b as u8);
         }
         TrackType::Subtitles => {
             // Determine if text-based
-            let codec_id = p.get("codec_id")
-                .and_then(|c| c.as_str())
-                .unwrap_or("");
+            let codec_id = p.get("codec_id").and_then(|c| c.as_str()).unwrap_or("");
 
-            props.text_subtitles = Some(
-                codec_id.starts_with("S_TEXT/")
-                    || codec_id == "S_SSA"
-                    || codec_id == "S_ASS"
-            );
+            props.text_subtitles =
+                Some(codec_id.starts_with("S_TEXT/") || codec_id == "S_SSA" || codec_id == "S_ASS");
         }
     }
 
@@ -243,10 +243,7 @@ fn parse_attachment_info(attachment: &Value) -> Option<AttachmentInfo> {
         .unwrap_or("application/octet-stream")
         .to_string();
 
-    let size = attachment
-        .get("size")
-        .and_then(|s| s.as_u64())
-        .unwrap_or(0);
+    let size = attachment.get("size").and_then(|s| s.as_u64()).unwrap_or(0);
 
     let description = attachment
         .get("description")
@@ -289,7 +286,11 @@ pub fn get_attachments(path: &Path) -> ExtractionResult<Vec<AttachmentInfo>> {
 /// Count tracks by type.
 pub fn count_tracks_by_type(path: &Path, track_type: TrackType) -> ExtractionResult<usize> {
     let probe = probe_file(path)?;
-    let count = probe.tracks.iter().filter(|t| t.track_type == track_type).count();
+    let count = probe
+        .tracks
+        .iter()
+        .filter(|t| t.track_type == track_type)
+        .count();
     Ok(count)
 }
 
@@ -388,13 +389,22 @@ pub fn get_detailed_stream_info(
                     .get("profile")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string()),
-                level: stream.get("level").and_then(|v| v.as_i64()).map(|l| l as i32),
+                level: stream
+                    .get("level")
+                    .and_then(|v| v.as_i64())
+                    .map(|l| l as i32),
                 bit_rate: stream
                     .get("bit_rate")
                     .and_then(|v| v.as_str())
                     .and_then(|s| s.parse().ok()),
-                width: stream.get("width").and_then(|v| v.as_u64()).map(|w| w as u32),
-                height: stream.get("height").and_then(|v| v.as_u64()).map(|h| h as u32),
+                width: stream
+                    .get("width")
+                    .and_then(|v| v.as_u64())
+                    .map(|w| w as u32),
+                height: stream
+                    .get("height")
+                    .and_then(|v| v.as_u64())
+                    .map(|h| h as u32),
                 r_frame_rate: stream
                     .get("r_frame_rate")
                     .and_then(|v| v.as_str())
@@ -412,7 +422,10 @@ pub fn get_detailed_stream_info(
                     .get("sample_rate")
                     .and_then(|v| v.as_str())
                     .and_then(|s| s.parse().ok()),
-                channels: stream.get("channels").and_then(|v| v.as_u64()).map(|c| c as u8),
+                channels: stream
+                    .get("channels")
+                    .and_then(|v| v.as_u64())
+                    .map(|c| c as u8),
                 channel_layout: stream
                     .get("channel_layout")
                     .and_then(|v| v.as_str())
@@ -516,7 +529,11 @@ pub fn build_track_description(
     }
 
     let lang = track.language.as_deref().unwrap_or("und");
-    let name = track.name.as_ref().map(|n| format!(" '{}'", n)).unwrap_or_default();
+    let name = track
+        .name
+        .as_ref()
+        .map(|n| format!(" '{}'", n))
+        .unwrap_or_default();
 
     let base_info = format!("{} ({}){}", friendly_codec, lang, name);
     let mut details = Vec::new();

@@ -22,7 +22,10 @@ use gtk4::{gio, glib};
 use relm4::prelude::*;
 
 use vsg_core::config::ConfigManager;
-use vsg_core::jobs::{JobQueue, JobQueueEntry, JobQueueStatus, LayoutManager, ManualLayout, FinalTrackEntry, TrackConfig};
+use vsg_core::jobs::{
+    FinalTrackEntry, JobQueue, JobQueueEntry, JobQueueStatus, LayoutManager, ManualLayout,
+    TrackConfig,
+};
 
 use crate::windows::manual_selection_window::{
     ManualSelectionInit, ManualSelectionOutput, ManualSelectionWindow,
@@ -230,11 +233,13 @@ impl Component for JobQueueWindow {
         // Set up double-click handler
         {
             let sender_clone = sender.clone();
-            widgets.tree_view.connect_row_activated(move |_tree, path, _col| {
-                if let Some(index) = path.indices().first() {
-                    sender_clone.input(JobQueueMsg::JobDoubleClicked(*index as u32));
-                }
-            });
+            widgets
+                .tree_view
+                .connect_row_activated(move |_tree, path, _col| {
+                    if let Some(index) = path.indices().first() {
+                        sender_clone.input(JobQueueMsg::JobDoubleClicked(*index as u32));
+                    }
+                });
         }
 
         // Set up selection change handler
@@ -242,11 +247,13 @@ impl Component for JobQueueWindow {
             let sender_clone = sender.clone();
             selection.connect_changed(move |sel: &gtk4::TreeSelection| {
                 let mut indices = Vec::new();
-                sel.selected_foreach(|_model: &gtk4::TreeModel, path: &gtk4::TreePath, _iter: &gtk4::TreeIter| {
-                    if let Some(index) = path.indices().first() {
-                        indices.push(*index as u32);
-                    }
-                });
+                sel.selected_foreach(
+                    |_model: &gtk4::TreeModel, path: &gtk4::TreePath, _iter: &gtk4::TreeIter| {
+                        if let Some(index) = path.indices().first() {
+                            indices.push(*index as u32);
+                        }
+                    },
+                );
                 sender_clone.input(JobQueueMsg::SelectionChanged(indices));
             });
         }
@@ -305,7 +312,14 @@ impl Component for JobQueueWindow {
 
             JobQueueMsg::MoveUp => {
                 // Move in backend
-                self.job_queue.move_up(&self.model.selected_indices.iter().map(|&i| i as usize).collect::<Vec<_>>());
+                self.job_queue.move_up(
+                    &self
+                        .model
+                        .selected_indices
+                        .iter()
+                        .map(|&i| i as usize)
+                        .collect::<Vec<_>>(),
+                );
                 // Move in model
                 let indices = self.model.selected_indices.clone();
                 self.model.move_up(&indices);
@@ -318,7 +332,14 @@ impl Component for JobQueueWindow {
 
             JobQueueMsg::MoveDown => {
                 // Move in backend
-                self.job_queue.move_down(&self.model.selected_indices.iter().map(|&i| i as usize).collect::<Vec<_>>());
+                self.job_queue.move_down(
+                    &self
+                        .model
+                        .selected_indices
+                        .iter()
+                        .map(|&i| i as usize)
+                        .collect::<Vec<_>>(),
+                );
                 // Move in model
                 let indices = self.model.selected_indices.clone();
                 self.model.move_down(&indices);
@@ -394,13 +415,14 @@ impl Component for JobQueueWindow {
                                 parent: None,
                             })
                             .forward(sender.input_sender(), move |msg| match msg {
-                                ManualSelectionOutput::LayoutConfigured { layout, attachment_sources } => {
-                                    JobQueueMsg::LayoutConfigured {
-                                        job_index: idx,
-                                        layout,
-                                        attachment_sources,
-                                    }
-                                }
+                                ManualSelectionOutput::LayoutConfigured {
+                                    layout,
+                                    attachment_sources,
+                                } => JobQueueMsg::LayoutConfigured {
+                                    job_index: idx,
+                                    layout,
+                                    attachment_sources,
+                                },
                                 ManualSelectionOutput::Cancelled => {
                                     JobQueueMsg::LayoutConfigurationCancelled
                                 }
@@ -412,47 +434,57 @@ impl Component for JobQueueWindow {
                 }
             }
 
-            JobQueueMsg::LayoutConfigured { job_index, layout, attachment_sources } => {
+            JobQueueMsg::LayoutConfigured {
+                job_index,
+                layout,
+                attachment_sources,
+            } => {
                 self.manual_selection_window = None;
                 self.configuring_job_index = None;
 
                 // Convert UI layout to core ManualLayout
                 if let Some(job) = self.model.jobs.get_mut(job_index) {
                     let core_layout = ManualLayout {
-                        final_tracks: layout.iter().enumerate().map(|(i, t)| {
-                            use vsg_core::models::TrackType as CoreTrackType;
-                            let core_type = match t.track_type {
-                                vsg_core::extraction::TrackType::Video => CoreTrackType::Video,
-                                vsg_core::extraction::TrackType::Audio => CoreTrackType::Audio,
-                                vsg_core::extraction::TrackType::Subtitles => CoreTrackType::Subtitles,
-                            };
-                            FinalTrackEntry {
-                                track_id: t.track_id,
-                                source_key: t.source_key.clone(),
-                                track_type: core_type,
-                                config: TrackConfig {
-                                    sync_to_source: t.sync_to_source.clone(),
-                                    is_default: t.is_default,
-                                    is_forced_display: t.is_forced,
-                                    custom_name: t.custom_name.clone(),
-                                    custom_lang: t.custom_lang.clone(),
-                                    apply_track_name: t.apply_track_name,
-                                    perform_ocr: t.perform_ocr,
-                                    convert_to_ass: t.convert_to_ass,
-                                    rescale: t.rescale,
-                                    ..Default::default()
-                                },
-                                user_order_index: i,
-                                position_in_source_type: t.position_in_source_type,
-                                is_generated: t.is_generated,
-                                generated_source_track_id: t.generated_source_track_id,
-                                generated_source_path: None,
-                                generated_filter_mode: "exclude".to_string(),
-                                generated_filter_styles: Vec::new(),
-                                generated_original_style_list: Vec::new(),
-                                generated_verify_only_lines_removed: true,
-                            }
-                        }).collect(),
+                        final_tracks: layout
+                            .iter()
+                            .enumerate()
+                            .map(|(i, t)| {
+                                use vsg_core::models::TrackType as CoreTrackType;
+                                let core_type = match t.track_type {
+                                    vsg_core::extraction::TrackType::Video => CoreTrackType::Video,
+                                    vsg_core::extraction::TrackType::Audio => CoreTrackType::Audio,
+                                    vsg_core::extraction::TrackType::Subtitles => {
+                                        CoreTrackType::Subtitles
+                                    }
+                                };
+                                FinalTrackEntry {
+                                    track_id: t.track_id,
+                                    source_key: t.source_key.clone(),
+                                    track_type: core_type,
+                                    config: TrackConfig {
+                                        sync_to_source: t.sync_to_source.clone(),
+                                        is_default: t.is_default,
+                                        is_forced_display: t.is_forced,
+                                        custom_name: t.custom_name.clone(),
+                                        custom_lang: t.custom_lang.clone(),
+                                        apply_track_name: t.apply_track_name,
+                                        perform_ocr: t.perform_ocr,
+                                        convert_to_ass: t.convert_to_ass,
+                                        rescale: t.rescale,
+                                        ..Default::default()
+                                    },
+                                    user_order_index: i,
+                                    position_in_source_type: t.position_in_source_type,
+                                    is_generated: t.is_generated,
+                                    generated_source_track_id: t.generated_source_track_id,
+                                    generated_source_path: None,
+                                    generated_filter_mode: "exclude".to_string(),
+                                    generated_filter_styles: Vec::new(),
+                                    generated_original_style_list: Vec::new(),
+                                    generated_verify_only_lines_removed: true,
+                                }
+                            })
+                            .collect(),
                         attachment_sources,
                         source_settings: HashMap::new(),
                     };
@@ -504,7 +536,10 @@ impl Component for JobQueueWindow {
                 root.close();
             }
 
-            JobQueueMsg::BrowseResult { source_index: _, paths: _ } => {
+            JobQueueMsg::BrowseResult {
+                source_index: _,
+                paths: _,
+            } => {
                 // Handle browse result for add job dialog
                 // This is handled by the add job dialog itself
             }
@@ -732,7 +767,8 @@ impl JobQueueWindow {
         entry.set_hexpand(true);
 
         // Enable drag-drop on entry
-        let drop_target = gtk4::DropTarget::new(gio::File::static_type(), gtk4::gdk::DragAction::COPY);
+        let drop_target =
+            gtk4::DropTarget::new(gio::File::static_type(), gtk4::gdk::DragAction::COPY);
         let entry_clone = entry.clone();
         drop_target.connect_drop(move |_target, value, _x, _y| {
             if let Ok(file) = value.get::<gio::File>() {
