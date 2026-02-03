@@ -24,8 +24,7 @@ use relm4::prelude::*;
 
 use vsg_core::config::ConfigManager;
 use vsg_core::jobs::{
-    FinalTrackEntry, JobQueue, JobQueueEntry, JobQueueStatus, LayoutManager, ManualLayout,
-    TrackConfig,
+    FinalTrackEntry, JobQueue, JobQueueEntry, LayoutManager, ManualLayout, TrackConfig,
 };
 
 use crate::windows::manual_selection_window::{
@@ -129,7 +128,7 @@ impl Component for JobQueueWindow {
                         set_label: "Copy Layout",
                         set_tooltip_text: Some("Copy layout from selected job"),
                         #[watch]
-                        set_sensitive: model.model.can_copy_layout(),
+                        set_sensitive: model.can_copy_selected_layout(),
                         connect_clicked => JobQueueMsg::CopyLayout,
                     },
 
@@ -183,7 +182,7 @@ impl Component for JobQueueWindow {
                         set_label: "Start Processing Queue",
                         add_css_class: "suggested-action",
                         #[watch]
-                        set_sensitive: !model.model.get_configured_job_ids().is_empty(),
+                        set_sensitive: model.has_configured_jobs(),
                         connect_clicked => JobQueueMsg::StartProcessing,
                     },
                 },
@@ -278,41 +277,41 @@ impl Component for JobQueueWindow {
             }
 
             JobQueueMsg::JobsDiscovered(jobs) => {
-                // Convert to JobQueueEntry and add to queue
+                // Convert to JobQueueEntry and add to queue (in-memory only)
                 for job in jobs {
                     let entry = JobQueueEntry::new(job.id, job.name, job.sources);
                     self.job_queue.add(entry.clone());
                     self.model.jobs.push(JobDisplayEntry::from_entry(entry));
-                }
-                // Save queue state
-                if let Err(e) = self.job_queue.save() {
-                    tracing::error!("Failed to save queue: {}", e);
                 }
                 // Refresh the list view
                 self.refresh_list_view(root);
             }
 
             JobQueueMsg::RemoveSelected => {
-                // Remove from backend queue
+                // Delete layout files for removed jobs
                 let indices: Vec<usize> = self
                     .model
                     .selected_indices
                     .iter()
                     .map(|&i| i as usize)
                     .collect();
-                self.job_queue.remove_indices(indices.clone());
+                for &idx in &indices {
+                    if let Some(job) = self.model.jobs.get(idx) {
+                        if let Err(e) = self.layout_manager.delete_layout(&job.entry.layout_id) {
+                            tracing::warn!("Failed to delete layout for job: {}", e);
+                        }
+                    }
+                }
+                // Remove from backend queue (in-memory)
+                self.job_queue.remove_indices(indices);
                 // Remove from model
                 self.model.remove_jobs(&self.model.selected_indices.clone());
-                // Save queue state
-                if let Err(e) = self.job_queue.save() {
-                    tracing::error!("Failed to save queue: {}", e);
-                }
                 // Refresh
                 self.refresh_list_view(root);
             }
 
             JobQueueMsg::MoveUp => {
-                // Move in backend
+                // Move in backend (in-memory)
                 self.job_queue.move_up(
                     &self
                         .model
@@ -324,15 +323,11 @@ impl Component for JobQueueWindow {
                 // Move in model
                 let indices = self.model.selected_indices.clone();
                 self.model.move_up(&indices);
-                // Save and refresh
-                if let Err(e) = self.job_queue.save() {
-                    tracing::error!("Failed to save queue: {}", e);
-                }
                 self.refresh_list_view(root);
             }
 
             JobQueueMsg::MoveDown => {
-                // Move in backend
+                // Move in backend (in-memory)
                 self.job_queue.move_down(
                     &self
                         .model
@@ -344,19 +339,16 @@ impl Component for JobQueueWindow {
                 // Move in model
                 let indices = self.model.selected_indices.clone();
                 self.model.move_down(&indices);
-                // Save and refresh
-                if let Err(e) = self.job_queue.save() {
-                    tracing::error!("Failed to save queue: {}", e);
-                }
                 self.refresh_list_view(root);
             }
 
             JobQueueMsg::ClearAll => {
+                // Delete all layout files
+                if let Err(e) = self.layout_manager.cleanup_all() {
+                    tracing::warn!("Failed to cleanup layouts: {}", e);
+                }
                 self.job_queue.clear();
                 self.model.clear();
-                if let Err(e) = self.job_queue.save() {
-                    tracing::error!("Failed to save queue: {}", e);
-                }
                 self.refresh_list_view(root);
             }
 
@@ -381,17 +373,24 @@ impl Component for JobQueueWindow {
                 let count = self.job_queue.paste_layout(&indices);
                 if count > 0 {
                     tracing::info!("Pasted layout to {} jobs", count);
-                    // Sync status back to model
+                    // Sync status back to model and save layout files
                     for idx in indices {
                         if let Some(backend_job) = self.job_queue.get(idx) {
                             if let Some(display_job) = self.model.jobs.get_mut(idx) {
                                 display_job.entry.status = backend_job.status;
                                 display_job.entry.layout = backend_job.layout.clone();
+                                // Save layout to job_layouts folder (source of truth)
+                                if let Some(ref layout) = backend_job.layout {
+                                    if let Err(e) = self.layout_manager.save_layout_with_metadata(
+                                        &display_job.entry.layout_id,
+                                        &display_job.entry.sources,
+                                        layout,
+                                    ) {
+                                        tracing::error!("Failed to save pasted layout: {}", e);
+                                    }
+                                }
                             }
                         }
-                    }
-                    if let Err(e) = self.job_queue.save() {
-                        tracing::error!("Failed to save queue: {}", e);
                     }
                     self.refresh_list_view(root);
                 }
@@ -478,18 +477,31 @@ impl Component for JobQueueWindow {
                         attachment_sources,
                     };
 
-                    // Update job
-                    job.entry.layout = Some(core_layout);
-                    job.entry.status = JobQueueStatus::Configured;
+                    // Save layout to job_layouts folder (source of truth)
+                    if let Err(e) = self.layout_manager.save_layout_with_metadata(
+                        &job.entry.layout_id,
+                        &job.entry.sources,
+                        &core_layout,
+                    ) {
+                        tracing::error!("Failed to save layout to file: {}", e);
+                        // Don't mark as configured if layout save failed
+                        return;
+                    }
+                    tracing::info!(
+                        "Saved layout to job_layouts/{}.json",
+                        job.entry.layout_id
+                    );
 
-                    // Also update backend queue
+                    // Update UI model (in-memory only, status derived from layout file existence)
+                    job.entry.layout = Some(core_layout);
+
+                    // Update backend queue (in-memory only)
                     if let Some(backend_job) = self.job_queue.get_mut(job_index) {
                         backend_job.layout = job.entry.layout.clone();
-                        backend_job.status = JobQueueStatus::Configured;
-                    }
-
-                    if let Err(e) = self.job_queue.save() {
-                        tracing::error!("Failed to save queue: {}", e);
+                        tracing::info!(
+                            "Updated backend job {} layout in memory",
+                            backend_job.id
+                        );
                     }
 
                     self.refresh_list_view(root);
@@ -513,9 +525,17 @@ impl Component for JobQueueWindow {
             }
 
             JobQueueMsg::StartProcessing => {
-                let job_ids = self.model.get_configured_job_ids();
-                if !job_ids.is_empty() {
-                    let _ = sender.output(JobQueueOutput::StartProcessing(job_ids));
+                // Get configured jobs by checking layout existence (source of truth)
+                let configured_jobs: Vec<JobQueueEntry> = self
+                    .model
+                    .jobs
+                    .iter()
+                    .filter(|j| self.layout_manager.layout_exists(&j.entry.layout_id))
+                    .map(|j| j.entry.clone())
+                    .collect();
+
+                if !configured_jobs.is_empty() {
+                    let _ = sender.output(JobQueueOutput::StartProcessing(configured_jobs));
                     root.close();
                 }
             }
@@ -604,11 +624,22 @@ impl JobQueueWindow {
         // Add rows for each job
         for (i, job) in self.model.jobs.iter().enumerate() {
             let iter = store.append(None);
+            // Derive status from layout file existence (source of truth)
+            let status = if self.layout_manager.layout_exists(&job.entry.layout_id) {
+                "Configured"
+            } else {
+                "Needs Configuration"
+            };
+            let status_display = if job.has_warnings {
+                format!("{} ⚠️", status)
+            } else {
+                status.to_string()
+            };
             store.set(
                 &iter,
                 &[
                     (0, &((i + 1) as u32)),
-                    (1, &job.status_display()),
+                    (1, &status_display),
                     (2, &job.sources_display),
                     (3, &job.sources_tooltip),
                 ],
@@ -617,6 +648,24 @@ impl JobQueueWindow {
 
         // Set the model on the tree view
         tree_view.set_model(Some(&store));
+    }
+
+    /// Check if any jobs are configured (have layout files)
+    pub fn has_configured_jobs(&self) -> bool {
+        self.model
+            .jobs
+            .iter()
+            .any(|j| self.layout_manager.layout_exists(&j.entry.layout_id))
+    }
+
+    /// Check if the selected job can have its layout copied (is configured)
+    pub fn can_copy_selected_layout(&self) -> bool {
+        if let Some(idx) = self.model.single_selection() {
+            if let Some(job) = self.model.jobs.get(idx) {
+                return self.layout_manager.layout_exists(&job.entry.layout_id);
+            }
+        }
+        false
     }
 
     /// Open the add job dialog
