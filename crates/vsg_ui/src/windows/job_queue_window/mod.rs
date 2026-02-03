@@ -469,25 +469,13 @@ impl Component for JobQueueWindow {
                                         custom_name: t.custom_name.clone(),
                                         custom_lang: t.custom_lang.clone(),
                                         apply_track_name: t.apply_track_name,
-                                        perform_ocr: t.perform_ocr,
-                                        convert_to_ass: t.convert_to_ass,
-                                        rescale: t.rescale,
-                                        ..Default::default()
                                     },
                                     user_order_index: i,
                                     position_in_source_type: t.position_in_source_type,
-                                    is_generated: t.is_generated,
-                                    generated_source_track_id: t.generated_source_track_id,
-                                    generated_source_path: None,
-                                    generated_filter_mode: "exclude".to_string(),
-                                    generated_filter_styles: Vec::new(),
-                                    generated_original_style_list: Vec::new(),
-                                    generated_verify_only_lines_removed: true,
                                 }
                             })
                             .collect(),
                         attachment_sources,
-                        source_settings: HashMap::new(),
                     };
 
                     // Update job

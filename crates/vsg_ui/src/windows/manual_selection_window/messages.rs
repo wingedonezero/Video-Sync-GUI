@@ -116,21 +116,6 @@ pub struct FinalTrackData {
     pub position_in_source_type: usize,
     /// Path to source file
     pub source_path: PathBuf,
-    /// Generated track info (for filtered subtitles)
-    pub is_generated: bool,
-    /// Source track ID for generated tracks
-    pub generated_source_track_id: Option<usize>,
-
-    // === Fields for future subtitle features (not yet implemented in core) ===
-    /// Perform OCR (image-based subtitles) - NOT YET IMPLEMENTED
-    #[allow(dead_code)]
-    pub perform_ocr: bool,
-    /// Convert SRT to ASS - NOT YET IMPLEMENTED
-    #[allow(dead_code)]
-    pub convert_to_ass: bool,
-    /// Rescale subtitles - NOT YET IMPLEMENTED
-    #[allow(dead_code)]
-    pub rescale: bool,
 }
 
 impl Default for FinalTrackData {
@@ -145,14 +130,9 @@ impl Default for FinalTrackData {
             custom_lang: None,
             apply_track_name: false,
             sync_to_source: None,
-            perform_ocr: false,
-            convert_to_ass: false,
-            rescale: false,
             user_order_index: 0,
             position_in_source_type: 0,
             source_path: PathBuf::new(),
-            is_generated: false,
-            generated_source_track_id: None,
         }
     }
 }
