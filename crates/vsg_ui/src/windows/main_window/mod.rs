@@ -24,6 +24,7 @@ use relm4::prelude::*;
 use vsg_core::config::ConfigManager;
 
 use crate::components::{FileInput, FileInputInit, FileInputOutput, LogView, LogViewMsg};
+use crate::windows::settings_window::{SettingsInit, SettingsOutput, SettingsWindow};
 
 /// Main window component
 pub struct MainWindow {
@@ -35,6 +36,9 @@ pub struct MainWindow {
     source2_input: Controller<FileInput>,
     source3_input: Controller<FileInput>,
     log_view: Controller<LogView>,
+
+    // Settings dialog (spawned on demand)
+    settings_window: Option<Controller<SettingsWindow>>,
 }
 
 #[relm4::component(pub)]
@@ -265,6 +269,7 @@ impl Component for MainWindow {
             source2_input,
             source3_input,
             log_view,
+            settings_window: None,
         };
 
         let widgets = view_output!();
@@ -281,9 +286,29 @@ impl Component for MainWindow {
     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
         match msg {
             MainWindowMsg::OpenSettings => {
-                self.log_view.emit(LogViewMsg::Append(
-                    "Settings dialog not implemented yet.".to_string(),
-                ));
+                // Close existing settings window if open
+                self.settings_window = None;
+
+                // Open new settings window
+                let settings = SettingsWindow::builder()
+                    .launch(SettingsInit {
+                        config: self.config.clone(),
+                        parent: None, // TODO: pass parent window reference
+                    })
+                    .forward(sender.input_sender(), |msg| match msg {
+                        SettingsOutput::Saved => MainWindowMsg::SettingsClosed,
+                        SettingsOutput::Cancelled => MainWindowMsg::SettingsClosed,
+                    });
+
+                self.settings_window = Some(settings);
+                self.log_view
+                    .emit(LogViewMsg::Append("Settings dialog opened.".to_string()));
+            }
+
+            MainWindowMsg::SettingsClosed => {
+                self.settings_window = None;
+                self.log_view
+                    .emit(LogViewMsg::Append("Settings dialog closed.".to_string()));
             }
 
             MainWindowMsg::OpenJobQueue => {
