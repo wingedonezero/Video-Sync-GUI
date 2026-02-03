@@ -9,6 +9,9 @@ pub enum MainWindowMsg {
     /// Settings button clicked
     OpenSettings,
 
+    /// Settings dialog closed
+    SettingsClosed,
+
     /// "Open Job Queue for Merging..." button clicked
     OpenJobQueue,
 
