@@ -139,7 +139,10 @@ impl ManualLayout {
                 );
 
                 // Track flags
-                map.insert("is_default".to_string(), serde_json::json!(track.config.is_default));
+                map.insert(
+                    "is_default".to_string(),
+                    serde_json::json!(track.config.is_default),
+                );
                 map.insert(
                     "is_forced_display".to_string(),
                     serde_json::json!(track.config.is_forced_display),

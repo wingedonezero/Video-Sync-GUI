@@ -348,9 +348,8 @@ impl Component for MainWindow {
                 self.job_queue_window = None;
 
                 if job_entries.is_empty() {
-                    self.log_view.emit(LogViewMsg::Append(
-                        "No jobs to process.".to_string(),
-                    ));
+                    self.log_view
+                        .emit(LogViewMsg::Append("No jobs to process.".to_string()));
                     return;
                 }
 
@@ -496,7 +495,10 @@ impl Component for MainWindow {
             }
 
             // === Queue processing messages ===
-            MainWindowMsg::QueueJobStarted { job_id: _, job_name } => {
+            MainWindowMsg::QueueJobStarted {
+                job_id: _,
+                job_name,
+            } => {
                 self.log_view
                     .emit(LogViewMsg::Append(format!("Processing: {}", job_name)));
             }

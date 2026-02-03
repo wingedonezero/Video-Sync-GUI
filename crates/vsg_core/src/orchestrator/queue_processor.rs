@@ -277,17 +277,16 @@ impl QueueProcessor {
             // Check for cancellation
             if let Some(handle) = cancel_handle {
                 if handle.is_cancelled() {
-                    tracing::info!("Queue processing cancelled at job {}/{}", i + 1, entries.len());
+                    tracing::info!(
+                        "Queue processing cancelled at job {}/{}",
+                        i + 1,
+                        entries.len()
+                    );
                     break;
                 }
             }
 
-            tracing::info!(
-                "Processing job {}/{}: {}",
-                i + 1,
-                entries.len(),
-                entry.name
-            );
+            tracing::info!("Processing job {}/{}: {}", i + 1, entries.len(), entry.name);
 
             let gui_callback = gui_callback_factory(&entry.id);
             let progress_callback = progress_callback_factory(&entry.id);

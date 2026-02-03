@@ -487,10 +487,7 @@ impl Component for JobQueueWindow {
                         // Don't mark as configured if layout save failed
                         return;
                     }
-                    tracing::info!(
-                        "Saved layout to job_layouts/{}.json",
-                        job.entry.layout_id
-                    );
+                    tracing::info!("Saved layout to job_layouts/{}.json", job.entry.layout_id);
 
                     // Update UI model (in-memory only, status derived from layout file existence)
                     job.entry.layout = Some(core_layout);
@@ -498,10 +495,7 @@ impl Component for JobQueueWindow {
                     // Update backend queue (in-memory only)
                     if let Some(backend_job) = self.job_queue.get_mut(job_index) {
                         backend_job.layout = job.entry.layout.clone();
-                        tracing::info!(
-                            "Updated backend job {} layout in memory",
-                            backend_job.id
-                        );
+                        tracing::info!("Updated backend job {} layout in memory", backend_job.id);
                     }
 
                     self.refresh_list_view(root);
