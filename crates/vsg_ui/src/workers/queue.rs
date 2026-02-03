@@ -42,7 +42,12 @@ pub fn run_queue_processing(
     // Load job queue from disk (it's persisted in temp folder)
     let mut job_queue = JobQueue::new(&temp_dir);
 
-    // Log start
+    // Log start with queue info
+    let _ = sender.send(MainWindowMsg::QueueLog(format!(
+        "Loading queue from: {}/queue.json ({} jobs found)",
+        temp_dir.display(),
+        job_queue.len()
+    )));
     let _ = sender.send(MainWindowMsg::QueueLog(format!(
         "Starting queue processing for {} jobs...",
         job_ids.len()
@@ -65,7 +70,15 @@ pub fn run_queue_processing(
     for (i, job_id) in job_ids.iter().enumerate() {
         // Get job entry from queue
         let entry = match job_queue.get_by_id(job_id) {
-            Some(e) => e.clone(),
+            Some(e) => {
+                let _ = sender.send(MainWindowMsg::QueueLog(format!(
+                    "Found job {}: status={:?}, has_layout={}",
+                    job_id,
+                    e.status,
+                    e.layout.is_some()
+                )));
+                e.clone()
+            }
             None => {
                 let _ = sender.send(MainWindowMsg::QueueLog(format!(
                     "Job {} not found in queue, skipping",

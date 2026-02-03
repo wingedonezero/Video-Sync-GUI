@@ -486,10 +486,28 @@ impl Component for JobQueueWindow {
                     if let Some(backend_job) = self.job_queue.get_mut(job_index) {
                         backend_job.layout = job.entry.layout.clone();
                         backend_job.status = JobQueueStatus::Configured;
+                        tracing::info!(
+                            "Updated backend job {} status to Configured",
+                            backend_job.id
+                        );
+                    } else {
+                        tracing::error!(
+                            "Backend job at index {} not found! Queue has {} jobs",
+                            job_index,
+                            self.job_queue.len()
+                        );
                     }
 
-                    if let Err(e) = self.job_queue.save() {
-                        tracing::error!("Failed to save queue: {}", e);
+                    match self.job_queue.save() {
+                        Ok(_) => {
+                            tracing::info!(
+                                "Saved queue.json with {} jobs",
+                                self.job_queue.len()
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to save queue: {}", e);
+                        }
                     }
 
                     // Also save layout to job_layouts folder for persistence/reuse
