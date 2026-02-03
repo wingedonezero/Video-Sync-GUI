@@ -473,11 +473,12 @@ impl Analyzer {
             ) {
                 Ok(result) => {
                     self.log(&format!(
-                        "    Chunk {:2}/{} (@{:.1}s): delay = {:+} ms (match={:.2}) — {}",
+                        "    Chunk {:2}/{} (@{:.1}s): delay = {:+} ms (raw={:+.3}, match={:.2}) — {}",
                         chunk_num,
                         total_chunks,
                         result.chunk_start_secs,
                         result.delay_ms_rounded,
+                        result.delay_ms_raw,
                         result.match_pct,
                         result.status_str()
                     ));
