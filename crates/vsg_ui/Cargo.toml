@@ -14,17 +14,17 @@ path = "src/main.rs"
 # Core library
 vsg_core = { path = "../vsg_core" }
 
-# GTK4 and Relm4 (latest versions as of 2025)
+# GTK4 and Relm4 (latest versions as of Jan 2026)
 # v4_10 feature enables FileDialog (GTK 4.10+)
-gtk4 = { version = "0.10", features = ["v4_10"] }
-relm4 = "0.10"
+gtk4 = { version = "0.10.3", features = ["v4_10"] }
+relm4 = "0.10.1"
 
 # Async runtime for background tasks
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "sync"] }
 
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
 
 # Logging
-tracing = "0.1"
+tracing = "0.1.44"

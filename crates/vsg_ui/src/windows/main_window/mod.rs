@@ -112,6 +112,7 @@ impl Component for MainWindow {
                             #[name = "analyze_btn"]
                             gtk4::Button {
                                 set_label: "Analyze Only",
+                                #[watch]
                                 set_sensitive: model.model.can_run_analysis(),
                                 connect_clicked => MainWindowMsg::RunAnalysis,
                             },
@@ -331,13 +332,13 @@ impl Component for MainWindow {
                     // Update the input component
                     match index {
                         0 => self.source1_input.emit(
-                            crate::components::file_input::FileInputMsg::TextChanged(path),
+                            crate::components::file_input::FileInputMsg::SetText(path),
                         ),
                         1 => self.source2_input.emit(
-                            crate::components::file_input::FileInputMsg::TextChanged(path),
+                            crate::components::file_input::FileInputMsg::SetText(path),
                         ),
                         2 => self.source3_input.emit(
-                            crate::components::file_input::FileInputMsg::TextChanged(path),
+                            crate::components::file_input::FileInputMsg::SetText(path),
                         ),
                         _ => {}
                     }

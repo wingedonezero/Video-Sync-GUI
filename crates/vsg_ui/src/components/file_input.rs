@@ -19,6 +19,8 @@ pub enum FileInputMsg {
     BrowseClicked,
     /// File was dropped onto the entry
     FileDropped(String),
+    /// Set text programmatically (from parent)
+    SetText(String),
 }
 
 /// Output message sent to parent
@@ -67,6 +69,7 @@ impl Component for FileInput {
             #[name = "entry"]
             gtk4::Entry {
                 set_hexpand: true,
+                #[watch]
                 set_text: &model.path,
                 set_placeholder_text: Some("Enter path or drag file here..."),
 
@@ -97,24 +100,42 @@ impl Component for FileInput {
         let widgets = view_output!();
 
         // Set up drag-drop on the entry
-        // IMPORTANT: Use ACTION_MOVE for Dolphin/Qt compatibility on Wayland
+        // IMPORTANT: Use ACTION_COPY | ACTION_MOVE for Dolphin/Qt compatibility on Wayland
         let drop_target = gtk4::DropTarget::new(
             gdk::FileList::static_type(),
             gdk::DragAction::COPY | gdk::DragAction::MOVE,
         );
 
+        // Debug: log when drag enters
+        drop_target.connect_enter(|_target, _x, _y| {
+            eprintln!("[DragDrop] Drag entered entry widget");
+            gdk::DragAction::COPY
+        });
+
+        // Debug: log when drag leaves
+        drop_target.connect_leave(|_target| {
+            eprintln!("[DragDrop] Drag left entry widget");
+        });
+
         let sender_clone = sender.clone();
         drop_target.connect_drop(move |_target, value, _x, _y| {
+            eprintln!("[DragDrop] Drop received! Value type: {:?}", value.type_());
+
+            // Try to get FileList
             if let Ok(file_list) = value.get::<gdk::FileList>() {
                 let files = file_list.files();
+                eprintln!("[DragDrop] Got FileList with {} files", files.len());
                 if let Some(file) = files.first() {
                     if let Some(path) = file.path() {
+                        eprintln!("[DragDrop] File path: {:?}", path);
                         sender_clone.input(FileInputMsg::FileDropped(
                             path.to_string_lossy().to_string(),
                         ));
                         return true;
                     }
                 }
+            } else {
+                eprintln!("[DragDrop] Failed to get FileList from value");
             }
             false
         });
@@ -127,7 +148,7 @@ impl Component for FileInput {
     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
         match msg {
             FileInputMsg::TextChanged(text) => {
-                // Only emit if actually changed (avoid loops)
+                // Only emit if actually changed (avoid loops from #[watch] set_text)
                 if text != self.path {
                     self.path = text.clone();
                     let _ = sender.output(FileInputOutput::PathChanged(text));
@@ -137,8 +158,16 @@ impl Component for FileInput {
                 let _ = sender.output(FileInputOutput::BrowseRequested);
             }
             FileInputMsg::FileDropped(path) => {
+                // Update model - #[watch] will update the Entry widget
                 self.path = path.clone();
                 let _ = sender.output(FileInputOutput::PathChanged(path));
+            }
+            FileInputMsg::SetText(text) => {
+                // Set text programmatically (e.g., from browse result)
+                if text != self.path {
+                    self.path = text.clone();
+                    let _ = sender.output(FileInputOutput::PathChanged(text));
+                }
             }
         }
     }
