@@ -1,5 +1,19 @@
 //! Main analyzer for audio sync analysis.
 //!
+//! # DEPRECATED
+//!
+//! This module is deprecated. The AnalyzeStep now orchestrates the analysis
+//! pipeline directly using pure functions from:
+//! - `chunks::calculate_chunk_positions()`
+//! - `correlation::correlate_chunks()`
+//! - `drift_detection::diagnose_drift()`
+//! - `stability::calculate_stability()`
+//!
+//! The Analyzer struct is kept for backward compatibility but will be removed
+//! in a future version.
+//!
+//! ---
+//!
 //! Orchestrates the full analysis pipeline:
 //! 1. Get media duration
 //! 2. Calculate chunk positions
