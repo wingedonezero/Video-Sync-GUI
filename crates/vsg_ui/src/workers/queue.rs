@@ -35,7 +35,7 @@ pub fn run_queue_processing(
             cfg.settings().clone(),
             cfg.logs_folder(),
             PathBuf::from(&cfg.settings().paths.temp_root),
-            PathBuf::from(&cfg.settings().paths.output_dir),
+            PathBuf::from(&cfg.settings().paths.output_folder),
         )
     };
 
@@ -64,10 +64,8 @@ pub fn run_queue_processing(
     // Process each job
     for (i, job_id) in job_ids.iter().enumerate() {
         // Get job entry from queue
-        let entry = job_queue.iter().find(|e| &e.id == job_id).cloned();
-
-        let entry = match entry {
-            Some(e) => e,
+        let entry = match job_queue.get_by_id(job_id) {
+            Some(e) => e.clone(),
             None => {
                 let _ = sender.send(MainWindowMsg::QueueLog(format!(
                     "Job {} not found in queue, skipping",
@@ -92,7 +90,7 @@ pub fn run_queue_processing(
         )));
 
         // Update job status to Processing
-        if let Some(job) = job_queue.iter_mut().find(|e| &e.id == job_id) {
+        if let Some(job) = job_queue.get_by_id_mut(job_id) {
             job.status = vsg_core::jobs::JobQueueStatus::Processing;
         }
         let _ = job_queue.save();
@@ -119,7 +117,7 @@ pub fn run_queue_processing(
         let result = processor.process_job(&entry, Some(gui_callback), Some(progress_callback));
 
         // Update job status based on result
-        if let Some(job) = job_queue.iter_mut().find(|e| &e.id == job_id) {
+        if let Some(job) = job_queue.get_by_id_mut(job_id) {
             if result.success {
                 job.status = vsg_core::jobs::JobQueueStatus::Complete;
                 job.error_message = None;
