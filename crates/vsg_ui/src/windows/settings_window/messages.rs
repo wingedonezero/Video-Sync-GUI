@@ -1,6 +1,6 @@
 //! Settings window messages (events)
 
-use vsg_core::models::{CorrelationMethod, DelaySelectionMode, FilteringMethod, SnapMode, SyncMode};
+use vsg_core::models::{AnalysisMode, CorrelationMethod, DelaySelectionMode, FilteringMethod, SnapMode, SyncMode};
 
 /// Messages for the settings window
 #[derive(Debug)]
@@ -15,6 +15,7 @@ pub enum SettingsMsg {
     BrowseResult { field: PathField, path: Option<String> },
 
     // === Tab: Analysis ===
+    SetAnalysisMode(AnalysisMode),
     SetCorrelationMethod(CorrelationMethod),
     SetLangSource1(String),
     SetLangOthers(String),
