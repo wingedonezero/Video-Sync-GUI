@@ -43,6 +43,16 @@ pub enum JobQueueMsg {
     // === Browse dialog results ===
     /// Browse result for source files
     BrowseResult { source_index: usize, paths: Vec<PathBuf> },
+
+    // === Manual selection dialog ===
+    /// Manual selection dialog closed with layout configured
+    LayoutConfigured {
+        job_index: usize,
+        layout: Vec<crate::windows::manual_selection_window::FinalTrackData>,
+        attachment_sources: Vec<String>,
+    },
+    /// Manual selection dialog cancelled
+    LayoutConfigurationCancelled,
 }
 
 /// A discovered job entry (from add job dialog)
