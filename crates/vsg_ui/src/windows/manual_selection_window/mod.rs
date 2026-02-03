@@ -496,7 +496,7 @@ impl ManualSelectionWindow {
     /// Create a custom 2-line track row widget
     fn create_track_row(
         index: usize,
-        track: &model::FinalTrack,
+        track: &model::FinalTrackEntry,
         sender: ComponentSender<Self>,
     ) -> gtk4::ListBoxRow {
         let row = gtk4::ListBoxRow::new();
@@ -836,10 +836,8 @@ impl ManualSelectionWindow {
         let lang_box = gtk4::Box::new(gtk4::Orientation::Horizontal, 8);
         lang_box.set_margin_all(8);
 
-        let lang_combo = gtk4::ComboBoxText::new();
-
         // Common ISO 639-2 language codes used by mkvmerge
-        let languages = [
+        let languages: Vec<(&str, &str)> = vec![
             ("", "(Keep Original)"),
             ("und", "Undetermined"),
             ("eng", "English"),
@@ -873,36 +871,49 @@ impl ManualSelectionWindow {
             ("ukr", "Ukrainian"),
         ];
 
-        for (code, name) in &languages {
-            let display = if code.is_empty() {
-                if let Some(ref orig) = original_lang {
-                    format!("{} (current: {})", name, orig)
+        // Build display strings for dropdown
+        let display_strings: Vec<String> = languages
+            .iter()
+            .map(|(code, name)| {
+                if code.is_empty() {
+                    if let Some(ref orig) = original_lang {
+                        format!("{} (current: {})", name, orig)
+                    } else {
+                        name.to_string()
+                    }
                 } else {
-                    name.to_string()
+                    format!("{} ({})", name, code)
                 }
-            } else {
-                format!("{} ({})", name, code)
-            };
-            lang_combo.append(Some(code), &display);
-        }
+            })
+            .collect();
+
+        // Store language codes for lookup
+        let lang_codes: Vec<String> = languages.iter().map(|(code, _)| code.to_string()).collect();
+        let lang_codes_for_lookup = lang_codes.clone();
+
+        // Create StringList model for DropDown
+        let string_list = gtk4::StringList::new(
+            &display_strings
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>(),
+        );
+        let lang_dropdown = gtk4::DropDown::new(Some(string_list), gtk4::Expression::NONE);
 
         // Set active based on current custom_lang
-        match &current_lang {
+        let selected_idx = match &current_lang {
             Some(lang) => {
                 // Try to find matching language code
-                let found = languages.iter().position(|(code, _)| code == lang);
-                if let Some(idx) = found {
-                    lang_combo.set_active(Some(idx as u32));
-                } else {
-                    lang_combo.set_active(Some(0)); // Default to "Keep Original"
-                }
+                lang_codes_for_lookup
+                    .iter()
+                    .position(|code| code == lang)
+                    .unwrap_or(0) as u32
             }
-            None => {
-                lang_combo.set_active(Some(0)); // "Keep Original"
-            }
-        }
+            None => 0, // "Keep Original"
+        };
+        lang_dropdown.set_selected(selected_idx);
 
-        lang_box.append(&lang_combo);
+        lang_box.append(&lang_dropdown);
         lang_frame.set_child(Some(&lang_box));
         vbox.append(&lang_frame);
 
@@ -947,11 +958,12 @@ impl ManualSelectionWindow {
         let sender_clone = sender.clone();
         ok_btn.connect_clicked(move |_| {
             if let Some(d) = dialog_weak.upgrade() {
-                // Get language selection
-                let lang = lang_combo
-                    .active_id()
-                    .map(|s| s.to_string())
-                    .filter(|s| !s.is_empty());
+                // Get language selection from DropDown
+                let selected_idx = lang_dropdown.selected() as usize;
+                let lang = lang_codes
+                    .get(selected_idx)
+                    .filter(|s| !s.is_empty())
+                    .cloned();
 
                 // Get name
                 let name = name_entry.text();

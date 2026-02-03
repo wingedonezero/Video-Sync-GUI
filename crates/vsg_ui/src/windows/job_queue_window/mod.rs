@@ -10,6 +10,7 @@ mod logic;
 mod messages;
 mod model;
 
+#[allow(unused_imports)]
 pub use messages::{DiscoveredJob, JobQueueMsg, JobQueueOutput};
 pub use model::{JobDisplayEntry, JobQueueModel};
 

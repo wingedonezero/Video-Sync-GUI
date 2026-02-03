@@ -9,7 +9,6 @@ use vsg_core::extraction::{
 use vsg_core::jobs::{FinalTrackEntry as CoreFinalTrackEntry, ManualLayout, TrackConfig};
 use vsg_core::models::TrackType as CoreTrackType;
 
-use super::messages::FinalTrackData;
 use super::model::ManualSelectionModel;
 
 /// Probe all source files and create model
