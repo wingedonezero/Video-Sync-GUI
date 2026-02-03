@@ -21,6 +21,5 @@ pub use signature::{
     TrackSignatureInfo,
 };
 pub use types::{
-    FinalTrackEntry, JobQueueEntry, JobQueueStatus, ManualLayout, SavedLayoutData,
-    SourceCorrelationSettings, TrackConfig,
+    FinalTrackEntry, JobQueueEntry, JobQueueStatus, ManualLayout, SavedLayoutData, TrackConfig,
 };

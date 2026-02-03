@@ -38,12 +38,14 @@
 
 mod errors;
 mod pipeline;
+mod queue_processor;
 mod step;
 pub mod steps;
 mod types;
 
 pub use errors::{PipelineError, PipelineResult, StepError, StepResult};
 pub use pipeline::{CancelHandle, Pipeline, PipelineRunResult};
+pub use queue_processor::{JobResult, QueueProcessor};
 pub use step::PipelineStep;
 pub use steps::{
     AnalyzeStep, AttachmentsStep, AudioCorrectionStep, ChaptersStep, ExtractStep, MuxStep,

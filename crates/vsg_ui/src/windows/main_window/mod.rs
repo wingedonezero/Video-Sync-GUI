@@ -346,11 +346,26 @@ impl Component for MainWindow {
 
             MainWindowMsg::StartProcessingQueue(job_ids) => {
                 self.job_queue_window = None;
+
+                if job_ids.is_empty() {
+                    self.log_view.emit(LogViewMsg::Append(
+                        "No jobs to process.".to_string(),
+                    ));
+                    return;
+                }
+
                 self.log_view.emit(LogViewMsg::Append(format!(
                     "Starting queue processing for {} jobs...",
                     job_ids.len()
                 )));
-                // TODO: Implement actual queue processing
+
+                // Get config for worker
+                let config = self.config.clone();
+
+                // Spawn queue processing worker
+                sender.spawn_command(move |cmd_sender| {
+                    crate::workers::run_queue_processing(job_ids, config, cmd_sender);
+                });
             }
 
             MainWindowMsg::ToggleArchiveLogs(checked) => {
@@ -478,6 +493,57 @@ impl Component for MainWindow {
                             .emit(LogViewMsg::Append(format!("Analysis failed: {}", error)));
                     }
                 }
+            }
+
+            // === Queue processing messages ===
+            MainWindowMsg::QueueJobStarted { job_id: _, job_name } => {
+                self.log_view
+                    .emit(LogViewMsg::Append(format!("Processing: {}", job_name)));
+            }
+
+            MainWindowMsg::QueueJobProgress {
+                job_id: _,
+                progress,
+                message,
+            } => {
+                self.model.set_progress(progress, &message);
+            }
+
+            MainWindowMsg::QueueLog(message) => {
+                self.log_view.emit(LogViewMsg::Append(message));
+            }
+
+            MainWindowMsg::QueueJobComplete {
+                job_id: _,
+                success,
+                output_path,
+                error,
+            } => {
+                if success {
+                    let path_str = output_path
+                        .as_ref()
+                        .map(|p| p.display().to_string())
+                        .unwrap_or_default();
+                    self.log_view
+                        .emit(LogViewMsg::Append(format!("Job complete: {}", path_str)));
+                } else {
+                    self.log_view.emit(LogViewMsg::Append(format!(
+                        "Job failed: {}",
+                        error.unwrap_or_default()
+                    )));
+                }
+            }
+
+            MainWindowMsg::QueueProcessingComplete {
+                total,
+                succeeded,
+                failed,
+            } => {
+                self.model.set_progress(1.0, "Queue processing complete");
+                self.log_view.emit(LogViewMsg::Append(format!(
+                    "Queue complete: {}/{} succeeded, {} failed",
+                    succeeded, total, failed
+                )));
             }
         }
     }

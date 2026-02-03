@@ -83,10 +83,6 @@ pub fn convert_to_manual_layout(model: &ManualSelectionModel) -> ManualLayout {
             custom_name: entry.data.custom_name.clone(),
             custom_lang: entry.data.custom_lang.clone(),
             apply_track_name: entry.data.apply_track_name,
-            perform_ocr: entry.data.perform_ocr,
-            convert_to_ass: entry.data.convert_to_ass,
-            rescale: entry.data.rescale,
-            ..Default::default()
         };
 
         let core_entry = CoreFinalTrackEntry {
@@ -96,13 +92,6 @@ pub fn convert_to_manual_layout(model: &ManualSelectionModel) -> ManualLayout {
             config,
             user_order_index: i,
             position_in_source_type: entry.data.position_in_source_type,
-            is_generated: entry.data.is_generated,
-            generated_source_track_id: entry.data.generated_source_track_id,
-            generated_source_path: None,
-            generated_filter_mode: "exclude".to_string(),
-            generated_filter_styles: Vec::new(),
-            generated_original_style_list: Vec::new(),
-            generated_verify_only_lines_removed: true,
         };
 
         final_tracks.push(core_entry);
@@ -111,7 +100,6 @@ pub fn convert_to_manual_layout(model: &ManualSelectionModel) -> ManualLayout {
     ManualLayout {
         final_tracks,
         attachment_sources: model.attachment_sources.clone(),
-        source_settings: HashMap::new(),
     }
 }
 
@@ -130,11 +118,6 @@ pub fn prepopulate_from_layout(model: &mut ManualSelectionModel, layout: &Manual
             CoreTrackType::Audio => "audio",
             CoreTrackType::Subtitles => "subtitles",
         };
-
-        // Skip generated tracks for now (they need special handling)
-        if entry.is_generated {
-            continue;
-        }
 
         // Get the position counter
         let key = (source_key.clone(), type_str.to_string());
@@ -165,9 +148,6 @@ pub fn prepopulate_from_layout(model: &mut ManualSelectionModel, layout: &Manual
                                 final_track.data.apply_track_name = entry.config.apply_track_name;
                                 final_track.data.sync_to_source =
                                     entry.config.sync_to_source.clone();
-                                final_track.data.perform_ocr = entry.config.perform_ocr;
-                                final_track.data.convert_to_ass = entry.config.convert_to_ass;
-                                final_track.data.rescale = entry.config.rescale;
                                 final_track.refresh_badges();
                             }
                         }

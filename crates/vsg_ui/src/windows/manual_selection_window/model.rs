@@ -88,8 +88,6 @@ impl FinalTrackEntry {
     }
 
     /// Refresh badges based on current config
-    /// Note: OCR, →ASS, and Rescale badges are not shown since those features
-    /// don't have backend implementation yet (subtitles step is stubbed)
     pub fn refresh_badges(&mut self) {
         self.badges.clear();
 
@@ -109,9 +107,6 @@ impl FinalTrackEntry {
         // Show custom language if set
         if let Some(ref lang) = self.data.custom_lang {
             self.badges.push(format!("Lang:{}", lang));
-        }
-        if self.data.is_generated {
-            self.badges.push("Generated".to_string());
         }
     }
 
@@ -279,14 +274,9 @@ impl ManualSelectionModel {
             } else {
                 None
             },
-            perform_ocr: false,
-            convert_to_ass: false,
-            rescale: false,
             user_order_index: self.final_tracks.len(),
             position_in_source_type: position,
             source_path: entry.source_path.clone(),
-            is_generated: false,
-            generated_source_track_id: None,
         };
 
         let final_entry = FinalTrackEntry::new(entry.info.clone(), data);
