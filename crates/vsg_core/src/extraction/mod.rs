@@ -72,8 +72,9 @@ pub use probe::{
 
 // Re-export track extraction functions
 pub use tracks::{
-    extract_all_of_type, extract_by_language, extract_track_auto, extract_tracks_batch,
-    get_audio_tracks_sorted, get_reference_video_track, TrackExtractSpec,
+    build_track_output_path, extract_all_of_type, extract_by_language, extract_track_auto,
+    extract_track_smart, extract_tracks_batch, get_audio_tracks_sorted, get_reference_video_track,
+    verify_extraction_result, ExtractionMethod, SmartExtractResult, TrackExtractSpec,
 };
 
 // Re-export attachment extraction functions

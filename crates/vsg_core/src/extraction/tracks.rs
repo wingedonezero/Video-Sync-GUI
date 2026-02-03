@@ -5,9 +5,12 @@
 
 use std::path::{Path, PathBuf};
 
-use super::mkvextract::{extension_for_codec, extract_track, extract_tracks};
+use super::mkvextract::{
+    extension_for_codec, extract_audio_with_ffmpeg, extract_track, extract_tracks,
+    requires_ffmpeg_extraction,
+};
 use super::probe::probe_file;
-use super::types::{ExtractedTrack, ExtractionError, ExtractionResult, TrackInfo, TrackType};
+use super::types::{ExtractedTrack, ExtractionError, ExtractionResult, ProbeResult, TrackInfo, TrackType};
 
 /// Extract a track to a file with automatic extension detection.
 ///
@@ -227,6 +230,137 @@ pub fn get_audio_tracks_sorted(input_path: &Path) -> ExtractionResult<Vec<TrackI
     Ok(tracks)
 }
 
+/// Build the output path for an extracted track.
+///
+/// Creates a standardized filename format: `{source_key}_{source_stem}_track{id}.{ext}`
+///
+/// # Arguments
+/// * `source_path` - Path to the source file (used for stem)
+/// * `track_id` - Track ID being extracted
+/// * `codec_id` - Codec identifier for determining extension
+/// * `work_dir` - Working directory for output
+/// * `source_key` - Source key identifier (e.g., "Source 1")
+pub fn build_track_output_path(
+    source_path: &Path,
+    track_id: usize,
+    codec_id: &str,
+    work_dir: &Path,
+    source_key: &str,
+) -> PathBuf {
+    let source_stem = source_path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "track".to_string());
+
+    let extension = extension_for_codec(codec_id);
+
+    work_dir.join(format!(
+        "{}_{}_track{}.{}",
+        source_key.replace(' ', "_").to_lowercase(),
+        source_stem,
+        track_id,
+        extension
+    ))
+}
+
+/// Verify that an extraction produced a valid output file.
+///
+/// Checks that the file exists and is non-empty.
+///
+/// # Returns
+/// The file size in bytes on success, or an error describing the problem.
+pub fn verify_extraction_result(output_path: &Path, track_id: usize) -> ExtractionResult<u64> {
+    if !output_path.exists() {
+        return Err(ExtractionError::ExtractionFailed(format!(
+            "Track {} extraction produced no output file",
+            track_id
+        )));
+    }
+
+    let metadata = std::fs::metadata(output_path).map_err(|e| {
+        ExtractionError::ExtractionFailed(format!(
+            "Cannot read metadata for track {} output: {}",
+            track_id, e
+        ))
+    })?;
+
+    if metadata.len() == 0 {
+        return Err(ExtractionError::ExtractionFailed(format!(
+            "Track {} extraction produced empty file (0 bytes)",
+            track_id
+        )));
+    }
+
+    Ok(metadata.len())
+}
+
+/// Result of a smart track extraction.
+#[derive(Debug, Clone)]
+pub struct SmartExtractResult {
+    /// The extraction method used.
+    pub method: ExtractionMethod,
+    /// Size of the extracted file in bytes.
+    pub size_bytes: u64,
+}
+
+/// Method used for extraction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtractionMethod {
+    /// Standard mkvextract.
+    Mkvextract,
+    /// Ffmpeg (for A_MS/ACM and similar codecs).
+    Ffmpeg,
+}
+
+/// Extract a track with automatic method selection.
+///
+/// Handles the decision of whether to use mkvextract or ffmpeg based on
+/// the codec type. For A_MS/ACM and similar codecs that mkvextract can't
+/// handle directly, ffmpeg is used instead.
+///
+/// # Arguments
+/// * `source_path` - Path to the source MKV file
+/// * `track_id` - Track ID to extract
+/// * `output_path` - Path where the track will be written
+/// * `probe_result` - Probe result for the source file (needed to determine method)
+pub fn extract_track_smart(
+    source_path: &Path,
+    track_id: usize,
+    output_path: &Path,
+    probe_result: &ProbeResult,
+) -> ExtractionResult<SmartExtractResult> {
+    let track_info = probe_result.track_by_id(track_id);
+    let codec_id = track_info.map(|t| t.codec_id.as_str()).unwrap_or("");
+
+    // Check if this codec needs ffmpeg extraction
+    if requires_ffmpeg_extraction(codec_id) {
+        // Find the audio stream index for ffmpeg (0-based within audio streams)
+        let audio_stream_index = probe_result
+            .audio_tracks()
+            .position(|t| t.id == track_id)
+            .unwrap_or(0);
+
+        let bit_depth = track_info.and_then(|t| t.properties.bits_per_sample);
+
+        extract_audio_with_ffmpeg(source_path, audio_stream_index, output_path, bit_depth)?;
+
+        let size = verify_extraction_result(output_path, track_id)?;
+        return Ok(SmartExtractResult {
+            method: ExtractionMethod::Ffmpeg,
+            size_bytes: size,
+        });
+    }
+
+    // Standard mkvextract
+    extract_track(source_path, track_id, output_path)?;
+
+    let size = verify_extraction_result(output_path, track_id)?;
+    Ok(SmartExtractResult {
+        method: ExtractionMethod::Mkvextract,
+        size_bytes: size,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,5 +372,32 @@ mod tests {
         assert_eq!(spec.track_id, 1);
         assert_eq!(spec.base_name, "audio");
         assert_eq!(spec.extension, Some("aac".to_string()));
+    }
+
+    #[test]
+    fn build_output_path_format() {
+        let path = build_track_output_path(
+            Path::new("/videos/movie.mkv"),
+            2,
+            "A_AAC",
+            Path::new("/tmp/work"),
+            "Source 1",
+        );
+        assert_eq!(
+            path,
+            PathBuf::from("/tmp/work/source_1_movie_track2.aac")
+        );
+    }
+
+    #[test]
+    fn build_output_path_handles_spaces_in_source_key() {
+        let path = build_track_output_path(
+            Path::new("/videos/test.mkv"),
+            0,
+            "V_MPEG4/ISO/AVC",
+            Path::new("/tmp"),
+            "Source 2",
+        );
+        assert_eq!(path, PathBuf::from("/tmp/source_2_test_track0.h264"));
     }
 }

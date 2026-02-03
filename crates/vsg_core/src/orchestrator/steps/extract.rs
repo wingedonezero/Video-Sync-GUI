@@ -5,7 +5,7 @@
 //!
 //! Features:
 //! - Detailed per-track logging (codec, language, container delay)
-//! - A_MS/ACM audio fallback extraction via ffmpeg
+//! - A_MS/ACM audio fallback extraction via ffmpeg (via extract_track_smart)
 //! - Post-extraction verification (file exists and non-empty)
 //! - Detailed error messages with troubleshooting steps
 
@@ -13,8 +13,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::extraction::{
-    extension_for_codec, extract_audio_with_ffmpeg, extract_track, probe_file,
-    requires_ffmpeg_extraction, ProbeResult, TrackType,
+    build_track_output_path, extract_track_smart, probe_file, ExtractionMethod, ProbeResult,
+    TrackType,
 };
 use crate::orchestrator::errors::{StepError, StepResult};
 use crate::orchestrator::step::PipelineStep;
@@ -31,41 +31,14 @@ impl ExtractStep {
         Self
     }
 
-    /// Build the output path for an extracted track.
-    fn build_output_path(
-        &self,
-        source_path: &Path,
-        track_id: usize,
-        codec_id: &str,
-        work_dir: &Path,
-        source_key: &str,
-    ) -> PathBuf {
-        let source_stem = source_path
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| "track".to_string());
-
-        let extension = extension_for_codec(codec_id);
-
-        work_dir.join(format!(
-            "{}_{}_track{}.{}",
-            source_key.replace(' ', "_").to_lowercase(),
-            source_stem,
-            track_id,
-            extension
-        ))
-    }
-
-    /// Extract a single track with proper handling for special codecs.
-    fn extract_single_track(
+    /// Log detailed track information before extraction.
+    fn log_track_details(
         &self,
         ctx: &Context,
-        source_path: &Path,
-        track_id: usize,
-        output_path: &Path,
         probe_result: &ProbeResult,
+        track_id: usize,
         source_key: &str,
-    ) -> Result<(), String> {
+    ) {
         let track_info = probe_result.track_by_id(track_id);
         let codec_id = track_info.map(|t| t.codec_id.as_str()).unwrap_or("");
         let track_name = track_info
@@ -83,7 +56,6 @@ impl ExtractStep {
             .unwrap_or("und");
         let container_delay = track_info.map(|t| t.container_delay_ms).unwrap_or(0);
 
-        // Log track details
         let mut details = format!("{} ({})", track_type, lang);
         if !track_name.is_empty() && track_name != "unnamed" {
             details.push_str(&format!(" '{}'", track_name));
@@ -97,77 +69,6 @@ impl ExtractStep {
             "  [{}] Track {}: {}",
             source_key, track_id, details
         ));
-
-        // Check if this codec needs ffmpeg extraction
-        if requires_ffmpeg_extraction(codec_id) {
-            ctx.logger.info(&format!(
-                "    -> A_MS/ACM codec detected, using ffmpeg extraction"
-            ));
-
-            // Find the audio stream index for ffmpeg
-            let audio_stream_index = probe_result
-                .audio_tracks()
-                .position(|t| t.id == track_id)
-                .unwrap_or(0);
-
-            let bit_depth = track_info.and_then(|t| t.properties.bits_per_sample);
-
-            ctx.logger.command(&format!(
-                "ffmpeg -i \"{}\" -map 0:a:{} -vn -sn \"{}\"",
-                source_path.display(),
-                audio_stream_index,
-                output_path.display()
-            ));
-
-            match extract_audio_with_ffmpeg(source_path, audio_stream_index, output_path, bit_depth)
-            {
-                Ok(()) => {
-                    ctx.logger.info(&format!("    -> Extracted with ffmpeg"));
-                    return Ok(());
-                }
-                Err(e) => {
-                    return Err(format!(
-                        "ffmpeg extraction failed for A_MS/ACM track {}: {}",
-                        track_id, e
-                    ));
-                }
-            }
-        }
-
-        // Standard mkvextract
-        ctx.logger.command(&format!(
-            "mkvextract \"{}\" tracks {}:\"{}\"",
-            source_path.display(),
-            track_id,
-            output_path.display()
-        ));
-
-        match extract_track(source_path, track_id, output_path) {
-            Ok(()) => Ok(()),
-            Err(e) => Err(format!("mkvextract failed for track {}: {}", track_id, e)),
-        }
-    }
-
-    /// Verify extraction succeeded (file exists and is non-empty).
-    fn verify_extraction(&self, output_path: &Path, track_id: usize) -> Result<u64, String> {
-        if !output_path.exists() {
-            return Err(format!(
-                "Track {} extraction produced no output file",
-                track_id
-            ));
-        }
-
-        let metadata = std::fs::metadata(output_path)
-            .map_err(|e| format!("Cannot read metadata for track {} output: {}", track_id, e))?;
-
-        if metadata.len() == 0 {
-            return Err(format!(
-                "Track {} extraction produced empty file (0 bytes)",
-                track_id
-            ));
-        }
-
-        Ok(metadata.len())
     }
 
     /// Build a detailed error message for extraction failures.
@@ -373,8 +274,8 @@ impl PipelineStep for ExtractStep {
                     .map(|t| t.codec_id.as_str())
                     .unwrap_or("");
 
-                // Build output path
-                let output_path = self.build_output_path(
+                // Build output path using module function
+                let output_path = build_track_output_path(
                     &source_path,
                     track_id,
                     codec_id,
@@ -382,39 +283,32 @@ impl PipelineStep for ExtractStep {
                     source_key,
                 );
 
-                // Extract the track
-                match self.extract_single_track(
-                    ctx,
-                    &source_path,
-                    track_id,
-                    &output_path,
-                    &probe_result,
-                    source_key,
-                ) {
-                    Ok(()) => {
-                        // Verify extraction
-                        match self.verify_extraction(&output_path, track_id) {
-                            Ok(size) => {
-                                let size_mb = size as f64 / (1024.0 * 1024.0);
-                                ctx.logger.info(&format!(
-                                    "    -> OK: {} [{:.1} MB]",
-                                    output_path
-                                        .file_name()
-                                        .unwrap_or_default()
-                                        .to_string_lossy(),
-                                    size_mb
-                                ));
-                                let key = format!("{}_{}", source_key, track_id);
-                                tracks.insert(key, output_path);
-                                successful_extractions.push((track_id, size));
-                            }
-                            Err(reason) => {
-                                ctx.logger.warn(&format!("    -> FAIL: {}", reason));
-                                failed_extractions.push((track_id, reason));
-                            }
-                        }
+                // Log track details
+                self.log_track_details(ctx, &probe_result, track_id, source_key);
+
+                // Extract the track using smart extraction (handles ffmpeg fallback)
+                match extract_track_smart(&source_path, track_id, &output_path, &probe_result) {
+                    Ok(result) => {
+                        let size_mb = result.size_bytes as f64 / (1024.0 * 1024.0);
+                        let method_str = match result.method {
+                            ExtractionMethod::Ffmpeg => " (ffmpeg)",
+                            ExtractionMethod::Mkvextract => "",
+                        };
+                        ctx.logger.info(&format!(
+                            "    -> OK{}: {} [{:.1} MB]",
+                            method_str,
+                            output_path
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy(),
+                            size_mb
+                        ));
+                        let key = format!("{}_{}", source_key, track_id);
+                        tracks.insert(key, output_path);
+                        successful_extractions.push((track_id, result.size_bytes));
                     }
-                    Err(reason) => {
+                    Err(e) => {
+                        let reason = format!("Extraction failed: {}", e);
                         ctx.logger.warn(&format!("    -> FAIL: {}", reason));
                         failed_extractions.push((track_id, reason));
                     }
