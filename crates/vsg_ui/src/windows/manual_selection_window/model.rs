@@ -51,7 +51,10 @@ impl SourceTrackEntry {
             parts.push(format!("Name: {}", name));
         }
 
-        parts.push(format!("Codec: {} ({})", self.info.codec_name, self.info.codec_id));
+        parts.push(format!(
+            "Codec: {} ({})",
+            self.info.codec_name, self.info.codec_id
+        ));
 
         if let Some(lang) = &self.info.language {
             parts.push(format!("Language: {}", lang));
@@ -85,6 +88,8 @@ impl FinalTrackEntry {
     }
 
     /// Refresh badges based on current config
+    /// Note: OCR, →ASS, and Rescale badges are not shown since those features
+    /// don't have backend implementation yet (subtitles step is stubbed)
     pub fn refresh_badges(&mut self) {
         self.badges.clear();
 
@@ -96,15 +101,6 @@ impl FinalTrackEntry {
         }
         if self.data.sync_to_source.is_some() {
             self.badges.push("Sync".to_string());
-        }
-        if self.data.perform_ocr {
-            self.badges.push("OCR".to_string());
-        }
-        if self.data.convert_to_ass {
-            self.badges.push("→ASS".to_string());
-        }
-        if self.data.rescale {
-            self.badges.push("Rescale".to_string());
         }
         if self.data.is_generated {
             self.badges.push("Generated".to_string());
@@ -211,17 +207,23 @@ impl ManualSelectionModel {
             }
 
             model.source_tracks.insert(key.clone(), tracks);
-            model.sources.push(SourceInfo {
-                key,
-                path,
-                probe,
-            });
+            model.sources.push(SourceInfo { key, path, probe });
         }
 
         // Sort sources naturally (Source 1, Source 2, ...)
         model.available_sources.sort_by(|a, b| {
-            let num_a = a.chars().filter(|c| c.is_ascii_digit()).collect::<String>().parse::<u32>().unwrap_or(0);
-            let num_b = b.chars().filter(|c| c.is_ascii_digit()).collect::<String>().parse::<u32>().unwrap_or(0);
+            let num_a = a
+                .chars()
+                .filter(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse::<u32>()
+                .unwrap_or(0);
+            let num_b = b
+                .chars()
+                .filter(|c| c.is_ascii_digit())
+                .collect::<String>()
+                .parse::<u32>()
+                .unwrap_or(0);
             num_a.cmp(&num_b)
         });
 
@@ -247,8 +249,12 @@ impl ManualSelectionModel {
         };
 
         // Count existing tracks of same source and type for position
-        let position = self.final_tracks.iter()
-            .filter(|t| t.data.source_key == source_key && t.data.track_type == entry.info.track_type)
+        let position = self
+            .final_tracks
+            .iter()
+            .filter(|t| {
+                t.data.source_key == source_key && t.data.track_type == entry.info.track_type
+            })
             .count();
 
         let data = FinalTrackData {
@@ -260,7 +266,11 @@ impl ManualSelectionModel {
             custom_name: None,
             custom_lang: None,
             apply_track_name: false,
-            sync_to_source: if source_key != "Source 1" { Some("Source 1".to_string()) } else { None },
+            sync_to_source: if source_key != "Source 1" {
+                Some("Source 1".to_string())
+            } else {
+                None
+            },
             perform_ocr: false,
             convert_to_ass: false,
             rescale: false,

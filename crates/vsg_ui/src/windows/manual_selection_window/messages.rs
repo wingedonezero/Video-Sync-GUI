@@ -9,7 +9,10 @@ use vsg_core::extraction::types::TrackType;
 pub enum ManualSelectionMsg {
     // === Track operations ===
     /// Add track to final output list
-    AddTrackToFinal { source_key: String, track_index: usize },
+    AddTrackToFinal {
+        source_key: String,
+        track_index: usize,
+    },
     /// Remove track from final output list
     RemoveTrackFromFinal { final_index: usize },
     /// Move track up in final output list
@@ -24,24 +27,18 @@ pub enum ManualSelectionMsg {
     ToggleTrackDefault { final_index: usize },
     /// Toggle forced flag for track (subtitles only)
     ToggleTrackForced { final_index: usize },
-    /// Toggle apply track name
-    ToggleApplyTrackName { final_index: usize },
-    /// Set sync source for track
-    SetTrackSyncSource { final_index: usize, sync_source: Option<String> },
     /// Set custom name for track
-    SetTrackCustomName { final_index: usize, name: Option<String> },
+    SetTrackCustomName {
+        final_index: usize,
+        name: Option<String>,
+    },
     /// Set custom language for track
-    SetTrackCustomLang { final_index: usize, lang: Option<String> },
-
-    // === Subtitle-specific ===
-    /// Toggle perform OCR
-    TogglePerformOcr { final_index: usize },
-    /// Toggle convert SRT to ASS
-    ToggleConvertToAss { final_index: usize },
-    /// Toggle rescale subtitles
-    ToggleRescale { final_index: usize },
-    /// Open style editor
-    OpenStyleEditor { final_index: usize },
+    SetTrackCustomLang {
+        final_index: usize,
+        lang: Option<String>,
+    },
+    /// Open track settings dialog
+    OpenTrackSettings { final_index: usize },
 
     // === Attachments ===
     /// Toggle attachment source
@@ -55,11 +52,17 @@ pub enum ManualSelectionMsg {
 
     // === Selection ===
     /// Source track selected
-    SourceTrackSelected { source_key: String, track_index: usize },
+    SourceTrackSelected {
+        source_key: String,
+        track_index: usize,
+    },
     /// Final track selected
     FinalTrackSelected { final_index: usize },
     /// Source track double-clicked (add to final)
-    SourceTrackDoubleClicked { source_key: String, track_index: usize },
+    SourceTrackDoubleClicked {
+        source_key: String,
+        track_index: usize,
+    },
     /// Final track double-clicked (open settings or remove)
     FinalTrackDoubleClicked { final_index: usize },
 
@@ -105,12 +108,6 @@ pub struct FinalTrackData {
     pub apply_track_name: bool,
     /// Sync to source (for non-Source 1 tracks)
     pub sync_to_source: Option<String>,
-    /// Perform OCR (image-based subtitles)
-    pub perform_ocr: bool,
-    /// Convert SRT to ASS
-    pub convert_to_ass: bool,
-    /// Rescale subtitles
-    pub rescale: bool,
     /// Position in user's order (0-indexed)
     pub user_order_index: usize,
     /// Position among tracks of same source and type
@@ -121,6 +118,17 @@ pub struct FinalTrackData {
     pub is_generated: bool,
     /// Source track ID for generated tracks
     pub generated_source_track_id: Option<usize>,
+
+    // === Fields for future subtitle features (not yet implemented in core) ===
+    /// Perform OCR (image-based subtitles) - NOT YET IMPLEMENTED
+    #[allow(dead_code)]
+    pub perform_ocr: bool,
+    /// Convert SRT to ASS - NOT YET IMPLEMENTED
+    #[allow(dead_code)]
+    pub convert_to_ass: bool,
+    /// Rescale subtitles - NOT YET IMPLEMENTED
+    #[allow(dead_code)]
+    pub rescale: bool,
 }
 
 impl Default for FinalTrackData {
