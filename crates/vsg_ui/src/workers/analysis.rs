@@ -23,6 +23,12 @@ pub fn run_analysis(
     config: Arc<Mutex<ConfigManager>>,
     sender: Sender<MainWindowMsg>,
 ) {
+    // Get job name from source1 filename (like Python does)
+    let job_name = source1
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "analysis".to_string());
+
     // Build sources map (Source 1, Source 2, etc.)
     let mut sources = HashMap::new();
     sources.insert("Source 1".to_string(), source1);
@@ -36,11 +42,12 @@ pub fn run_analysis(
     let job_spec = JobSpec::new(sources);
 
     // Get settings from config
-    let (settings, logs_dir, temp_dir) = {
+    // Log goes to output_folder (same as job logs), not logs_folder
+    let (settings, output_dir, temp_dir) = {
         let cfg = config.lock().unwrap();
         (
             cfg.settings().clone(),
-            cfg.logs_folder(),
+            PathBuf::from(&cfg.settings().paths.output_folder),
             PathBuf::from(&cfg.settings().paths.temp_root),
         )
     };
@@ -51,23 +58,17 @@ pub fn run_analysis(
         job_spec.sources.len()
     )));
 
-    // Create work directory
+    // Work directory for analyze-only (nothing actually written here)
     let work_dir = temp_dir.join("quick-analysis");
-    if let Err(e) = std::fs::create_dir_all(&work_dir) {
-        let _ = sender.send(MainWindowMsg::AnalysisComplete(Err(format!(
-            "Failed to create work directory: {}",
-            e
-        ))));
-        return;
-    }
 
     // Create logger with GUI callback
+    // Log file goes to output_folder with source1's name (like Python)
     let log_sender = sender.clone();
     let gui_callback: GuiLogCallback = Box::new(move |msg| {
         let _ = log_sender.send(MainWindowMsg::AnalysisLog(msg.to_string()));
     });
 
-    let logger = match JobLoggerBuilder::new("quick-analysis", &logs_dir)
+    let logger = match JobLoggerBuilder::new(&job_name, &output_dir)
         .config(LogConfig::default())
         .gui_callback(gui_callback)
         .build()
@@ -96,14 +97,14 @@ pub fn run_analysis(
     let context = Context::new(
         job_spec,
         settings,
-        "quick-analysis",
+        &job_name,
         work_dir.clone(),
-        work_dir, // output_dir same as work_dir for analysis-only
+        output_dir, // output goes to output_folder
         logger,
     )
     .with_progress_callback(progress_callback);
 
-    let mut state = JobState::new("quick-analysis");
+    let mut state = JobState::new(&job_name);
 
     // Create pipeline with just analyze step
     let pipeline = Pipeline::new().with_step(AnalyzeStep::new());

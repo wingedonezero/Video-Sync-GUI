@@ -427,7 +427,7 @@ impl Analyzer {
             }
         }
 
-        // Log summary comparison
+        // Log summary comparison (matching Python format)
         self.log(&format!(
             "\n{}\n  MULTI-CORRELATION SUMMARY\n{}",
             "═".repeat(70),
@@ -435,14 +435,16 @@ impl Analyzer {
         ));
         for (name, result) in &results {
             self.log(&format!(
-                "  {:30} {:+6}ms | match: {:5.1}% | accepted: {}/{}",
+                "  {}: {:+}ms (raw avg: {:+.3}ms) | match: {:.1}% | accepted: {}/{}",
                 name,
                 result.delay.delay_ms_rounded,
+                result.delay.delay_ms_raw,
                 result.avg_match_pct,
                 result.accepted_chunks,
                 result.total_chunks
             ));
         }
+        self.log(&format!("{}", "═".repeat(70)));
 
         Ok(results)
     }
