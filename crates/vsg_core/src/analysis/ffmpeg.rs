@@ -436,6 +436,66 @@ pub fn get_audio_container_delays_relative(
     Ok(audio_delays)
 }
 
+/// Get the video framerate of a media file using FFprobe.
+///
+/// Returns the average frame rate of the first video stream.
+/// Used for PAL drift detection (25fps indicates potential NTSC→PAL conversion).
+pub fn get_framerate(input_path: &Path) -> AnalysisResult<f64> {
+    if !input_path.exists() {
+        return Err(AnalysisError::SourceNotFound(
+            input_path.display().to_string(),
+        ));
+    }
+
+    let output = Command::new("ffprobe")
+        .arg("-v")
+        .arg("error")
+        .arg("-select_streams")
+        .arg("v:0")
+        .arg("-show_entries")
+        .arg("stream=avg_frame_rate")
+        .arg("-of")
+        .arg("default=noprint_wrappers=1:nokey=1")
+        .arg(input_path)
+        .output()
+        .map_err(|e| AnalysisError::FfmpegError(format!("Failed to run ffprobe: {}", e)))?;
+
+    if !output.status.success() {
+        return Err(AnalysisError::FfmpegError(
+            "ffprobe failed to get framerate".to_string(),
+        ));
+    }
+
+    let fps_str = String::from_utf8_lossy(&output.stdout);
+    let fps_str = fps_str.trim();
+
+    // FFprobe returns framerate as a fraction (e.g., "24000/1001" or "25/1")
+    if fps_str.contains('/') {
+        let parts: Vec<&str> = fps_str.split('/').collect();
+        if parts.len() == 2 {
+            let num: f64 = parts[0]
+                .parse()
+                .map_err(|e| AnalysisError::FfmpegError(format!("Failed to parse framerate numerator: {}", e)))?;
+            let den: f64 = parts[1]
+                .parse()
+                .map_err(|e| AnalysisError::FfmpegError(format!("Failed to parse framerate denominator: {}", e)))?;
+
+            if den == 0.0 {
+                return Err(AnalysisError::FfmpegError(
+                    "Invalid framerate: division by zero".to_string(),
+                ));
+            }
+
+            return Ok(num / den);
+        }
+    }
+
+    // Try parsing as a plain number
+    fps_str
+        .parse::<f64>()
+        .map_err(|e| AnalysisError::FfmpegError(format!("Failed to parse framerate: {}", e)))
+}
+
 /// Get the duration of a media file using FFprobe.
 pub fn get_duration(input_path: &Path) -> AnalysisResult<f64> {
     if !input_path.exists() {
