@@ -236,7 +236,11 @@ impl PipelineStep for AnalyzeStep {
         let analyzer =
             Analyzer::from_settings(&ctx.settings.analysis).with_logger(ctx.logger.clone());
 
-        if ctx.settings.analysis.multi_correlation_enabled {
+        // Multi-correlation only runs in analyze-only mode (like Python's `and (not ctx.and_merge)`)
+        let multi_corr_enabled =
+            ctx.settings.analysis.multi_correlation_enabled && ctx.analyze_only;
+
+        if multi_corr_enabled {
             ctx.logger.info("Mode: Multi-Correlation Comparison");
         } else {
             ctx.logger.info(&format!(
@@ -297,8 +301,8 @@ impl PipelineStep for AnalyzeStep {
                     .to_string_lossy()
             ));
 
-            // Check if multi-correlation mode is enabled
-            if ctx.settings.analysis.multi_correlation_enabled {
+            // Check if multi-correlation mode is enabled (only in analyze-only mode)
+            if multi_corr_enabled {
                 // Multi-correlation: run all selected methods and compare
                 match analyzer.analyze_multi_correlation(ref_path, source_path, source_name) {
                     Ok(results) => {
