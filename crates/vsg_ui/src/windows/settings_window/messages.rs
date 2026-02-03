@@ -1,5 +1,6 @@
 //! Settings window messages (events)
 
+use vsg_core::analysis::OutlierMode;
 use vsg_core::models::{
     AnalysisMode, CorrelationMethod, DelaySelectionMode, FilteringMethod, SnapMode, SyncMode,
 };
@@ -49,6 +50,13 @@ pub enum SettingsMsg {
     SetEarlyClusterWindow(u32),
     SetEarlyClusterThreshold(u32),
     SetSyncMode(SyncMode),
+
+    // Sync Stability settings
+    ToggleSyncStabilityEnabled(bool),
+    SetSyncStabilityVarianceThreshold(f64),
+    SetSyncStabilityMinChunks(u32),
+    SetSyncStabilityOutlierMode(OutlierMode),
+    SetSyncStabilityOutlierThreshold(f64),
 
     // === Tab: Chapters ===
     ToggleChapterRename(bool),
