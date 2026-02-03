@@ -1,10 +1,10 @@
 //! Mux step - merges tracks into final output file using mkvmerge.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
 
-use crate::models::MergePlan;
-use crate::mux::MkvmergeOptionsBuilder;
+use crate::mux::{build_merge_plan, MergePlanInput, MkvmergeOptionsBuilder};
 use crate::orchestrator::errors::{StepError, StepResult};
 use crate::orchestrator::step::PipelineStep;
 use crate::orchestrator::types::{Context, JobState, MuxOutput, StepOutcome};
@@ -49,207 +49,6 @@ impl MuxStep {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| format!("{}.mkv", ctx.job_name));
         ctx.output_dir.join(filename)
-    }
-
-    /// Build merge plan from job state.
-    ///
-    /// Constructs the merge plan from:
-    /// - Manual layout (track selection and order)
-    /// - Extracted tracks (paths from extraction step)
-    /// - Analysis delays (sync offsets for audio/subtitle tracks)
-    /// - Chapters and attachments from their respective steps
-    fn build_merge_plan(&self, ctx: &Context, state: &JobState) -> StepResult<MergePlan> {
-        // Use existing merge plan if available
-        if let Some(ref plan) = state.merge_plan {
-            return Ok(plan.clone());
-        }
-
-        use crate::models::{PlanItem, StreamProps, Track, TrackType};
-
-        let mut items = Vec::new();
-        let delays = state.delays().cloned().unwrap_or_default();
-
-        // Build items from manual layout
-        if let Some(ref layout) = ctx.job_spec.manual_layout {
-            ctx.logger.info(&format!(
-                "Building merge plan from {} layout entries",
-                layout.len()
-            ));
-
-            for (idx, item) in layout.iter().enumerate() {
-                let source_key = item
-                    .get("source")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Source 1");
-
-                let track_id = item
-                    .get("id")
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v as u32)
-                    .unwrap_or(0);
-
-                let track_type_str = item.get("type").and_then(|v| v.as_str()).unwrap_or("video");
-
-                let track_type = match track_type_str {
-                    "video" => TrackType::Video,
-                    "audio" => TrackType::Audio,
-                    "subtitles" => TrackType::Subtitles,
-                    _ => TrackType::Video,
-                };
-
-                // Get codec and language from layout
-                let codec = item
-                    .get("codec")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-
-                let lang = item
-                    .get("language")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("und");
-
-                let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("");
-
-                // Get track config options
-                let is_default = item
-                    .get("is_default")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(idx == 0 && track_type == TrackType::Video);
-
-                let is_forced = item
-                    .get("is_forced_display")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-
-                let custom_lang = item
-                    .get("custom_lang")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-
-                let custom_name = item
-                    .get("custom_name")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-
-                // Get source path
-                let source_path = if source_key == "External" {
-                    item.get("original_path")
-                        .and_then(|v| v.as_str())
-                        .map(PathBuf::from)
-                        .ok_or_else(|| {
-                            StepError::invalid_input(format!(
-                                "External track {} missing original_path",
-                                track_id
-                            ))
-                        })?
-                } else {
-                    ctx.job_spec
-                        .sources
-                        .get(source_key)
-                        .cloned()
-                        .ok_or_else(|| {
-                            StepError::invalid_input(format!(
-                                "Source {} not found for track {}",
-                                source_key, track_id
-                            ))
-                        })?
-                };
-
-                // Create track
-                let props = StreamProps::new(codec)
-                    .with_lang(if custom_lang.is_empty() {
-                        lang
-                    } else {
-                        custom_lang
-                    })
-                    .with_name(if custom_name.is_empty() {
-                        name
-                    } else {
-                        custom_name
-                    });
-
-                let track = Track::new(source_key, track_id, track_type, props);
-
-                // Create plan item
-                let mut plan_item = PlanItem::new(track, source_path);
-                plan_item.is_default = is_default;
-                plan_item.is_forced_display = is_forced;
-
-                // Check for extracted path
-                if let Some(ref extract) = state.extract {
-                    let extract_key = format!("{}_{}", source_key, track_id);
-                    if let Some(extracted_path) = extract.tracks.get(&extract_key) {
-                        plan_item.extracted_path = Some(extracted_path.clone());
-                    }
-                }
-
-                // Apply delay from raw_source_delays_ms (already includes global shift from AnalyzeStep)
-                // Use raw f64 for precision - only rounded at final mkvmerge command
-                //
-                // CRITICAL: The delay in raw_source_delays_ms ALREADY has global_shift applied.
-                // Do NOT add global_shift again here or in options_builder.
-                //
-                // Expected values after analysis:
-                // - Source 1 = global_shift (since its raw delay was 0)
-                // - Source 2+ = correlation_delay + global_shift
-                if let Some(&delay_ms_raw) = delays.raw_source_delays_ms.get(source_key) {
-                    plan_item.container_delay_ms_raw = delay_ms_raw;
-
-                    // Log the delay being applied for debugging
-                    let pre_shift = delays
-                        .pre_shift_delays_ms
-                        .get(source_key)
-                        .copied()
-                        .unwrap_or(0.0);
-                    ctx.logger.debug(&format!(
-                        "Track {}:{} ({}): pre-shift={:+.1}ms, global_shift={:+}ms, final={:+.1}ms",
-                        source_key,
-                        track_id,
-                        track_type,
-                        pre_shift,
-                        delays.global_shift_ms,
-                        delay_ms_raw
-                    ));
-                }
-
-                items.push(plan_item);
-            }
-        } else {
-            // No manual layout - create minimal plan with just Source 1 video
-            ctx.logger
-                .info("No manual layout - creating minimal plan from Source 1");
-
-            if let Some(source1_path) = ctx.job_spec.sources.get("Source 1") {
-                let video_track = Track::new(
-                    "Source 1",
-                    0,
-                    TrackType::Video,
-                    StreamProps::new("V_MPEG4/ISO/AVC"),
-                );
-                items.push(PlanItem::new(video_track, source1_path.clone()).with_default(true));
-            }
-        }
-
-        let mut plan = MergePlan::new(items, delays);
-
-        // Add chapters from chapters step
-        if let Some(ref chapters) = state.chapters {
-            if let Some(ref chapters_xml) = chapters.chapters_xml {
-                ctx.logger
-                    .info(&format!("Including chapters: {}", chapters_xml.display()));
-                plan.chapters_xml = Some(chapters_xml.clone());
-            }
-        }
-
-        // Add attachments from extraction step
-        if let Some(ref extract) = state.extract {
-            for (key, path) in &extract.attachments {
-                ctx.logger.info(&format!("Including attachment: {}", key));
-                plan.attachments.push(path.clone());
-            }
-        }
-
-        Ok(plan)
     }
 
     /// Execute mkvmerge with the given tokens.
@@ -353,8 +152,60 @@ impl PipelineStep for MuxStep {
         ctx.logger.section("Mux/Merge");
         ctx.logger.info("Building mkvmerge command");
 
-        // Build merge plan
-        let plan = self.build_merge_plan(ctx, state)?;
+        // Use existing merge plan if available, otherwise build one
+        let plan = if let Some(ref existing_plan) = state.merge_plan {
+            existing_plan.clone()
+        } else {
+            // Log what we're building from
+            if let Some(ref layout) = ctx.job_spec.manual_layout {
+                ctx.logger.info(&format!(
+                    "Building merge plan from {} layout entries",
+                    layout.len()
+                ));
+            } else {
+                ctx.logger
+                    .info("No manual layout - creating minimal plan from Source 1");
+            }
+
+            // Prepare input for module function
+            let empty_tracks: HashMap<String, PathBuf> = HashMap::new();
+            let empty_attachments: HashMap<String, PathBuf> = HashMap::new();
+
+            let extracted_tracks = state
+                .extract
+                .as_ref()
+                .map(|e| &e.tracks)
+                .unwrap_or(&empty_tracks);
+
+            let extracted_attachments = state
+                .extract
+                .as_ref()
+                .map(|e| &e.attachments)
+                .unwrap_or(&empty_attachments);
+
+            let chapters_xml = state.chapters.as_ref().and_then(|c| c.chapters_xml.clone());
+
+            // Log chapters and attachments inclusion
+            if let Some(ref path) = chapters_xml {
+                ctx.logger
+                    .info(&format!("Including chapters: {}", path.display()));
+            }
+            for (key, _path) in extracted_attachments {
+                ctx.logger.info(&format!("Including attachment: {}", key));
+            }
+
+            let input = MergePlanInput {
+                layout: ctx.job_spec.manual_layout.as_ref(),
+                sources: &ctx.job_spec.sources,
+                extracted_tracks,
+                extracted_attachments,
+                delays: state.delays().cloned().unwrap_or_default(),
+                chapters_xml,
+            };
+
+            // Build plan using module function
+            build_merge_plan(input).map_err(|e| StepError::other(e.to_string()))?
+        };
 
         // Log delay summary for debugging
         ctx.logger.info("--- Track Delay Summary ---");
