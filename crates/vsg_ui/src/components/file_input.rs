@@ -121,8 +121,7 @@ impl Component for FileInput {
 
         let sender_for_drop = sender.clone();
         drop_target.connect_drop(move |_target, value, _x, _y| {
-            eprintln!("[DragDrop] Drop received! Value type: {:?}", value.type_());
-
+            // Try gio::File first (single file), then gdk::FileList (multiple files)
             let path_str = if let Ok(file) = value.get::<gio::File>() {
                 file.path().map(|p| p.to_string_lossy().to_string())
             } else if let Ok(file_list) = value.get::<gdk::FileList>() {
@@ -136,7 +135,6 @@ impl Component for FileInput {
             };
 
             if let Some(path) = path_str {
-                eprintln!("[DragDrop] File path: {:?}", path);
                 let sender = sender_for_drop.clone();
                 relm4::spawn_local(async move {
                     sender.input(FileInputMsg::FileDropped(path));
@@ -144,7 +142,6 @@ impl Component for FileInput {
                 return true;
             }
 
-            eprintln!("[DragDrop] Could not extract file path");
             false
         });
 
@@ -169,14 +166,12 @@ impl Component for FileInput {
                 let _ = sender.output(FileInputOutput::BrowseRequested);
             }
             FileInputMsg::FileDropped(path) => {
-                eprintln!("[FileInput] FileDropped handler: {:?}", path);
                 if path != self.path {
                     self.path = path.clone();
-                    // Set flag, update entry, clear flag
+                    // Set flag to prevent connect_changed feedback loop
                     self.updating_entry = true;
                     self.entry.set_text(&path);
                     self.updating_entry = false;
-                    eprintln!("[FileInput] Entry updated, emitting PathChanged");
                     let _ = sender.output(FileInputOutput::PathChanged(path));
                 }
             }
