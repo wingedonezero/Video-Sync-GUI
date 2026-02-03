@@ -1,0 +1,49 @@
+[package]
+name = "vsg_ui"
+description = "Video Sync GUI - iced-based user interface"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "video-sync-gui"
+path = "src/main.rs"
+
+[dependencies]
+# Core library
+vsg_core = { path = "../vsg_core" }
+
+# iced - Cross-platform GUI library
+iced = { version = "0.14.0", features = ["tokio", "advanced"] }
+
+# iced_aw - Additional widgets (tabs, context menus, etc.)
+iced_aw = { version = "0.13.0", default-features = false, features = ["tabs", "card", "number_input", "context_menu"] }
+
+# Clipboard access for paste functionality (wayland-data-control needed for Wayland/KDE)
+arboard = { version = "3.6.1", features = ["wayland-data-control"] }
+
+# Async runtime
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "sync"] }
+
+# File dialogs
+rfd = "0.17.2"
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Logging
+tracing = "0.1.44"
+
+# URL decoding for drag-drop
+percent-encoding = "2.3.2"
+
+# Unique IDs
+uuid = { version = "1.20.0", features = ["v4"] }
+
+# Zip support for log archiving
+zip = "7.2.0"
+
+# Timestamp formatting for log archives
+chrono = "0.4"
