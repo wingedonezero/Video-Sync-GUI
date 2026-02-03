@@ -127,10 +127,15 @@ impl Component for FileInput {
                 eprintln!("[DragDrop] Got FileList with {} files", files.len());
                 if let Some(file) = files.first() {
                     if let Some(path) = file.path() {
-                        eprintln!("[DragDrop] File path: {:?}", path);
-                        sender_clone.input(FileInputMsg::FileDropped(
-                            path.to_string_lossy().to_string(),
-                        ));
+                        let path_str = path.to_string_lossy().to_string();
+                        eprintln!("[DragDrop] File path: {:?}", path_str);
+
+                        // IMPORTANT: Defer the update to avoid modifying widgets during drag callback
+                        // This prevents crashes on Wayland/GTK4
+                        let sender = sender_clone.clone();
+                        gtk4::glib::idle_add_local_once(move || {
+                            sender.input(FileInputMsg::FileDropped(path_str));
+                        });
                         return true;
                     }
                 }
