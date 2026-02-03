@@ -4,7 +4,6 @@
 //! - Text entry for path
 //! - Browse button (via message to parent)
 //! - Drag-drop from file managers (including Dolphin on Wayland)
-//! - Ctrl+V paste from clipboard
 
 use gtk4::gdk;
 use gtk4::gio;
@@ -14,13 +13,13 @@ use relm4::prelude::*;
 /// Input message for FileInput component
 #[derive(Debug)]
 pub enum FileInputMsg {
-    /// User typed in the entry
+    /// User typed in the entry (from connect_changed)
     TextChanged(String),
     /// User clicked browse button
     BrowseClicked,
-    /// File was dropped onto the entry
+    /// File was dropped onto the widget
     FileDropped(String),
-    /// Set text programmatically (from parent)
+    /// Set text programmatically (from parent, e.g., browse result)
     SetText(String),
 }
 
@@ -45,6 +44,10 @@ pub struct FileInputInit {
 pub struct FileInput {
     path: String,
     label: String,
+    /// Flag to prevent feedback loop when we programmatically set text
+    updating_entry: bool,
+    /// Reference to entry widget for manual updates
+    entry: gtk4::Entry,
 }
 
 #[relm4::component(pub)]
@@ -56,7 +59,6 @@ impl Component for FileInput {
 
     view! {
         #[root]
-        #[name = "root_box"]
         gtk4::Box {
             set_orientation: gtk4::Orientation::Horizontal,
             set_spacing: 8,
@@ -68,19 +70,8 @@ impl Component for FileInput {
                 set_xalign: 0.0,
             },
 
-            // Entry
-            #[name = "entry"]
-            gtk4::Entry {
-                set_hexpand: true,
-                #[watch]
-                set_text: &model.path,
-                set_placeholder_text: Some("Enter path or drag file here..."),
-
-                // Text changed signal
-                connect_changed[sender] => move |entry| {
-                    sender.input(FileInputMsg::TextChanged(entry.text().to_string()));
-                },
-            },
+            // Entry - NO #[watch] to avoid feedback loops
+            model.entry.clone() {},
 
             // Browse button
             gtk4::Button {
@@ -95,66 +86,69 @@ impl Component for FileInput {
         root: Self::Root,
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
+        // Create entry widget manually so we can store reference
+        let entry = gtk4::Entry::builder()
+            .hexpand(true)
+            .placeholder_text("Enter path or drag file here...")
+            .build();
+
+        // Set initial text
+        if !init.initial_path.is_empty() {
+            entry.set_text(&init.initial_path);
+        }
+
+        // Connect changed signal
+        let sender_clone = sender.clone();
+        entry.connect_changed(move |e| {
+            sender_clone.input(FileInputMsg::TextChanged(e.text().to_string()));
+        });
+
         let model = FileInput {
             path: init.initial_path,
             label: init.label,
+            updating_entry: false,
+            entry: entry.clone(),
         };
 
         let widgets = view_output!();
 
-        // Set up drag-drop on the ROOT BOX (not the entry - avoids conflicts)
-        // Try both gio::File (single file) and gdk::FileList (multiple files)
-        // Use ALL actions for maximum compatibility with different file managers
+        // Set up drag-drop on the ROOT widget
         let drop_target = gtk4::DropTarget::new(
             gio::File::static_type(),
             gdk::DragAction::COPY | gdk::DragAction::MOVE | gdk::DragAction::LINK,
         );
-
-        // Also accept FileList
         drop_target.set_types(&[gio::File::static_type(), gdk::FileList::static_type()]);
 
-        let sender_clone = sender.clone();
+        let sender_for_drop = sender.clone();
         drop_target.connect_drop(move |_target, value, _x, _y| {
             eprintln!("[DragDrop] Drop received! Value type: {:?}", value.type_());
 
-            // Try gio::File first (single file from most file managers)
-            if let Ok(file) = value.get::<gio::File>() {
-                if let Some(path) = file.path() {
-                    let path_str = path.to_string_lossy().to_string();
-                    eprintln!("[DragDrop] Got gio::File path: {:?}", path_str);
+            let path_str = if let Ok(file) = value.get::<gio::File>() {
+                file.path().map(|p| p.to_string_lossy().to_string())
+            } else if let Ok(file_list) = value.get::<gdk::FileList>() {
+                file_list
+                    .files()
+                    .first()
+                    .and_then(|f| f.path())
+                    .map(|p| p.to_string_lossy().to_string())
+            } else {
+                None
+            };
 
-                    let sender = sender_clone.clone();
-                    gtk4::glib::idle_add_local_once(move || {
-                        sender.input(FileInputMsg::FileDropped(path_str));
-                    });
-                    return true;
-                }
+            if let Some(path) = path_str {
+                eprintln!("[DragDrop] File path: {:?}", path);
+                let sender = sender_for_drop.clone();
+                relm4::spawn_local(async move {
+                    sender.input(FileInputMsg::FileDropped(path));
+                });
+                return true;
             }
 
-            // Try gdk::FileList (multiple files)
-            if let Ok(file_list) = value.get::<gdk::FileList>() {
-                let files = file_list.files();
-                eprintln!("[DragDrop] Got FileList with {} files", files.len());
-                if let Some(file) = files.first() {
-                    if let Some(path) = file.path() {
-                        let path_str = path.to_string_lossy().to_string();
-                        eprintln!("[DragDrop] FileList path: {:?}", path_str);
-
-                        let sender = sender_clone.clone();
-                        gtk4::glib::idle_add_local_once(move || {
-                            sender.input(FileInputMsg::FileDropped(path_str));
-                        });
-                        return true;
-                    }
-                }
-            }
-
-            eprintln!("[DragDrop] Could not extract file path from value");
+            eprintln!("[DragDrop] Could not extract file path");
             false
         });
 
-        // Add to the root box, not the entry
-        widgets.root_box.add_controller(drop_target);
+        root.add_controller(drop_target);
 
         ComponentParts { model, widgets }
     }
@@ -162,7 +156,10 @@ impl Component for FileInput {
     fn update(&mut self, msg: Self::Input, sender: ComponentSender<Self>, _root: &Self::Root) {
         match msg {
             FileInputMsg::TextChanged(text) => {
-                // Only emit if actually changed (avoid loops from #[watch] set_text)
+                // Ignore if we're the ones who set the text (prevents loop)
+                if self.updating_entry {
+                    return;
+                }
                 if text != self.path {
                     self.path = text.clone();
                     let _ = sender.output(FileInputOutput::PathChanged(text));
@@ -172,14 +169,23 @@ impl Component for FileInput {
                 let _ = sender.output(FileInputOutput::BrowseRequested);
             }
             FileInputMsg::FileDropped(path) => {
-                // Update model - #[watch] will update the Entry widget
-                self.path = path.clone();
-                let _ = sender.output(FileInputOutput::PathChanged(path));
+                eprintln!("[FileInput] FileDropped handler: {:?}", path);
+                if path != self.path {
+                    self.path = path.clone();
+                    // Set flag, update entry, clear flag
+                    self.updating_entry = true;
+                    self.entry.set_text(&path);
+                    self.updating_entry = false;
+                    eprintln!("[FileInput] Entry updated, emitting PathChanged");
+                    let _ = sender.output(FileInputOutput::PathChanged(path));
+                }
             }
             FileInputMsg::SetText(text) => {
-                // Set text programmatically (e.g., from browse result)
                 if text != self.path {
                     self.path = text.clone();
+                    self.updating_entry = true;
+                    self.entry.set_text(&text);
+                    self.updating_entry = false;
                     let _ = sender.output(FileInputOutput::PathChanged(text));
                 }
             }
