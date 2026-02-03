@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::analysis::OutlierMode;
 use crate::models::{
     AnalysisMode, CorrelationMethod, DelaySelectionMode, FilteringMethod, SnapMode, SyncMode,
 };
@@ -272,6 +273,28 @@ pub struct AnalysisSettings {
     /// AllowNegative keeps delays as-is (may not work with some players).
     #[serde(default)]
     pub sync_mode: SyncMode,
+
+    // === Sync Stability Settings ===
+    /// Enable sync stability analysis (check for variance in chunk delays).
+    #[serde(default)]
+    pub sync_stability_enabled: bool,
+
+    /// Variance threshold in ms for stability warning.
+    /// Set to 0 for strict mode (any variance triggers warning).
+    #[serde(default = "default_variance_threshold")]
+    pub sync_stability_variance_threshold: f64,
+
+    /// Minimum number of accepted chunks required for stability analysis.
+    #[serde(default = "default_stability_min_chunks")]
+    pub sync_stability_min_chunks: u32,
+
+    /// Mode for detecting outliers in delay measurements.
+    #[serde(default)]
+    pub sync_stability_outlier_mode: OutlierMode,
+
+    /// Threshold in ms for outlier detection (Threshold mode only).
+    #[serde(default = "default_outlier_threshold")]
+    pub sync_stability_outlier_threshold: f64,
 }
 
 fn default_chunk_count() -> u32 {
@@ -318,6 +341,18 @@ fn default_filter_high_cutoff() -> f64 {
     3400.0 // Dialogue high cutoff
 }
 
+fn default_variance_threshold() -> f64 {
+    5.0 // 5ms variance threshold
+}
+
+fn default_stability_min_chunks() -> u32 {
+    3 // Minimum chunks for stability analysis
+}
+
+fn default_outlier_threshold() -> f64 {
+    5.0 // 5ms outlier threshold
+}
+
 impl Default for AnalysisSettings {
     fn default() -> Self {
         Self {
@@ -350,6 +385,11 @@ impl Default for AnalysisSettings {
             early_cluster_window: default_early_cluster_window(),
             early_cluster_threshold: default_early_cluster_threshold(),
             sync_mode: SyncMode::default(),
+            sync_stability_enabled: false,
+            sync_stability_variance_threshold: default_variance_threshold(),
+            sync_stability_min_chunks: default_stability_min_chunks(),
+            sync_stability_outlier_mode: OutlierMode::default(),
+            sync_stability_outlier_threshold: default_outlier_threshold(),
         }
     }
 }
