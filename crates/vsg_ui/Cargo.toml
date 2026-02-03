@@ -1,6 +1,6 @@
 [package]
 name = "vsg_ui"
-description = "Video Sync GUI - GTK4/Relm4 user interface (in development)"
+description = "Video Sync GUI - GTK4/Relm4 user interface"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -14,6 +14,17 @@ path = "src/main.rs"
 # Core library
 vsg_core = { path = "../vsg_core" }
 
+# GTK4 and Relm4 (latest versions as of 2025)
+# v4_10 feature enables FileDialog (GTK 4.10+)
+gtk4 = { version = "0.10", features = ["v4_10"] }
+relm4 = "0.10"
+
+# Async runtime for background tasks
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+
 # Serialization
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+# Logging
+tracing = "0.1"
