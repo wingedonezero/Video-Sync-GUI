@@ -1,162 +1,123 @@
-# AI Coding Rules (v2)
+# AI Coding Rules (v3 - Rust Rewrite)
 
-## 0) Prime directive
+## 0) Prime Directive
 - Prioritize correctness, clarity, maintainability, and reproducibility over cleverness.
 
-## 1) Discuss before changes (approval required)
+## 1) Discuss Before Changes (Approval Required)
 - Do not implement or refactor anything non-trivial until you:
-  1) explain the plan,
-  2) list files/functions impacted,
-  3) call out risks/tradeoffs,
-  4) get explicit approval.
+  1. Explain the plan
+  2. List files/functions impacted
+  3. Call out risks/tradeoffs
+  4. Get explicit approval
 - Small, local fixes (typos, obvious bugfix in the same function) are allowed, but still explain what you changed.
 
-## 2) Preserve behavior by default
+## 2) Preserve Behavior by Default
 - Maintain existing behavior unless an intentional change is explicitly approved.
 - When changing behavior is necessary, clearly document:
-  - what changes,
-  - why it must change,
-  - how it’s validated.
+  - What changes
+  - Why it must change
+  - How it's validated
 
-## 3) Dependencies are a discussion
-- Do not add new libraries without proposing options + tradeoffs.
+## 3) Dependencies Are a Discussion
+- Do not add new crates without proposing options + tradeoffs.
 - Prefer fewer dependencies; justify any new one.
-- If a library/version is uncertain, stop and discuss first.
+- If a crate's suitability is uncertain, stop and discuss first.
 
-## 4) Research, don’t assume
+## 4) Research, Don't Assume
 - When API/behavior is uncertain: consult official docs or upstream source.
-- If you can’t verify: say so and propose the safest path.
+- If you can't verify: say so and propose the safest path.
 
-## 5) Code style and tooling (Python)
-- Python code MUST be:
-  - formatted with **Ruff** (`ruff format`, line length 88),
-  - linted with **Ruff** (`ruff check`, including import sorting),
-  - type-checked with **Pyright**.
-- Do not hand-format or bikeshed formatting; rely on Ruff outputs.
-- Follow the repository's `pyproject.toml` settings.
-- Commands:
-  - `ruff format .` - format code
-  - `ruff check --fix .` - lint and auto-fix
-  - `pyright` - type check
+## 5) Code Style (Rust)
+- Run `cargo fmt` before committing
+- Run `cargo clippy` and address warnings
+- Run `cargo test` to verify changes
+- Follow existing patterns in the codebase
 
-## 6) Rust-like Python philosophy
-Core principles (explicit, typed, structured):
-- **Explicit over implicit**: No magic, no stringly-typed APIs, no `**kwargs` soup.
-- **Structs over dicts**: Prefer dataclasses over `Dict[str, Any]`.
-- **Types everywhere**: All functions get type hints, no exceptions.
-- **No `Any` without justification**: If you write `Any`, add a comment explaining why.
-- **Fail fast**: Validate at boundaries, trust internal code.
+## 6) No Phantom Features
+- Do NOT implement UI controls for features that don't have working backend code
+- Do NOT stub out functions with `todo!()` or `unimplemented!()` unless explicitly approved
+- Do NOT add settings/options for unimplemented functionality
+- If backend code doesn't exist yet, the UI button/field shouldn't exist either
 
-## 7) Data structures policy
+## 7) Remove As You Replace
+- When reimplementing functionality, remove the old code once the new is fully working
+- Do NOT keep dead code "for reference" - that's what git history and `Reference Only original/` are for
+- Do NOT leave commented-out old implementations
 
-### 7a) Dataclass standards
-- Use `@dataclass(slots=True)` for all new dataclasses (Python 3.10+).
-- Use `frozen=True` for immutable value objects (results, flags, computed data).
-- Keep mutable for builder/accumulator patterns (Context, editor state).
+## 8) Data Structures Policy
 
-```python
-# Immutable result (frozen):
-@dataclass(frozen=True, slots=True)
-class AnalysisResult:
-    confidence: float
-    offset_ms: int
+### 8a) Structs Over HashMaps
+- Use typed structs for structured data, not `HashMap<String, Value>`
+- `HashMap` is acceptable ONLY for genuinely dynamic keys (e.g., source names like "Source 1", "Source 2")
 
-# Mutable builder (not frozen):
-@dataclass(slots=True)
-class PipelineContext:
-    current_step: str
-    results: list[AnalysisResult] = field(default_factory=list)
-```
-
-### 7b) Dict vs dataclass decision tree
-- **New code**: Always dataclass for structured data, never raw dicts.
-- **Existing dicts**: Convert to dataclass when modifying that code (gradual).
-- **External JSON/API data**: Use TypedDict at parse boundary, convert to dataclass internally.
-- **Config**: Use `AppSettings` dataclass throughout, not `Dict[str, Any]`.
-- **Simple key-value mappings**: Plain `dict[str, SpecificType]` is fine (e.g., `dict[str, Path]`).
-
-### 7c) TypedDict for external boundaries
-Use TypedDict to document the shape of external data (JSON files, tool output):
-
-```python
-class MKVTrackDict(TypedDict):
-    id: int
-    type: str
-    codec: str
-    properties: MKVPropertiesDict
-
-# Parse external → convert to internal dataclass
-def parse_track(raw: MKVTrackDict) -> Track:
-    return Track(id=raw["id"], track_type=TrackType(raw["type"]), ...)
-```
-
-### 7d) Pydantic for validated external input
-Use Pydantic models for:
-- Config file loading (user input needs validation)
-- External tool output parsing (mkvmerge, ffprobe JSON)
-- API boundaries where data needs coercion/validation
-
-Use stdlib dataclasses for:
-- Internal domain models
-- Hot paths (performance-sensitive code)
-- Simple value objects
-
-## 8) Type organization (hybrid model)
-
-### Shared types (cross-module): `vsg_core/models/`
-Types imported by 2+ unrelated modules belong here:
-- `enums.py` - All enums (TrackType, AnalysisMode, etc.)
-- `media.py` - Track, StreamProps, Attachment
-- `jobs.py` - JobSpec, PlanItem, MergePlan, Delays
-- `settings.py` - AppSettings
-- `results.py` - StepResult, CorrectionResult
-- `context_types.py` - Types for Context fields (SegmentFlags, QualityIssue, etc.)
-
-### Local types (single module/subpackage): stays in module
-Types used only within a subpackage stay there:
-- `vsg_core/subtitles/data.py` - SubtitleData, SubtitleEvent, SubtitleStyle
-- `vsg_core/subtitles/edit_plan.py` - EditPlan types
-- `vsg_core/subtitles/ocr/*.py` - OCR-specific types
-
-### Rule of thumb
-If you need to import a type into an unrelated module, move it to `models/`.
-
-## 9) Type hints and readability
-- Add type hints for ALL functions (public and private).
-- Prefer small functions, clear naming, and predictable structure.
-- Add comments/docstrings when intent is not obvious (explain WHY more than WHAT).
-
-### Banned patterns (fix when encountered):
+### 8b) Banned Patterns
 | Bad | Good |
 |-----|------|
-| `Dict[str, Any]` | Dataclass or TypedDict |
-| `List[Dict[str, Any]]` | `list[SpecificDataclass]` |
-| `Dict[str, dict]` | Fully type the inner dict |
-| `config: dict` | `config: AppSettings` |
-| `**kwargs` passthrough | Explicit parameters |
+| `HashMap<String, serde_json::Value>` | Typed struct |
+| `Vec<HashMap<String, Value>>` | `Vec<TypedStruct>` |
+| `Option<Box<dyn Any>>` | Proper enum or typed Option |
 
-## 10) Gradual migration policy (avoid giant diffs)
-- Do NOT run mass reformat/lint/refactor across the entire repo unless explicitly requested.
-- Default behavior:
-  - Format/lint only the files you touch.
-  - Convert dicts to dataclasses only in code you're modifying.
-  - Keep diffs focused on the intended change.
-- If a file is already being edited, it's OK to format/lint/modernize that file as part of the change.
+### 8c) Enums for Variants
+- Use enums for values that can be one of several types
+- Derive `Serialize`, `Deserialize` for persistence
+- Use `#[serde(default)]` for backwards-compatible additions
 
-## 11) Tests / validation expectations
-- For risky changes (parsing, timing, IO, concurrency, data transforms):
-  - add/extend tests OR provide a clear validation plan (commands + expected output).
-- Prefer preventing regressions over "looks correct".
+## 9) Type Organization
 
-## 12) Rewrite/refactor quality rules
-- If asked to rewrite/refactor:
-  - keep feature parity unless approved otherwise,
-  - remove single points of failure where feasible,
-  - improve architecture without changing external behavior,
-  - prefer incremental refactors over big rewrites unless requested.
+### Shared Types: `vsg_core/src/models/`
+Types used by 2+ unrelated modules:
+- `enums.rs` - All enums (TrackType, AnalysisMode, etc.)
+- `media.rs` - Track, StreamProps, Attachment
+- `jobs.rs` - JobSpec, PlanItem, MergePlan, Delays
 
-## 13) Output requirements
-- When producing code changes:
-  - summarize what changed and why,
-  - note any behavior changes,
-  - list how to run format/lint/tests for the touched files.
+### Local Types: Stay in Module
+Types used only within a module stay there:
+- Step-specific output types in `orchestrator/types.rs`
+- Analysis internals in `analysis/types.rs`
+
+### Rule of Thumb
+If you need to import a type into an unrelated module, consider moving it to `models/`.
+
+## 10) Error Handling
+- Use `thiserror` for error types
+- Each module can have its own error type
+- Steps convert module errors to `StepError`
+- Provide context in error messages (what failed, with what inputs)
+
+## 11) Architecture Layers
+See `ARCHITECTURE.md` for full details. Summary:
+
+```
+ORCHESTRATOR (orchestrator/pipeline.rs)
+    → Runs steps, handles cancellation, reports progress
+    → No business logic
+
+STEPS (orchestrator/steps/*.rs)
+    → Coordinate, log, control flow, update JobState
+    → Call module functions
+    → 50-150 lines target
+    → No algorithms or calculations
+
+MODULES (analysis/, extraction/, chapters/, etc.)
+    → ALL business logic
+    → Pure functions: typed input → typed output
+    → No Context/JobState access
+    → Testable in isolation
+```
+
+## 12) Working with Python Reference
+- `Reference Only original/` contains the original Python implementation
+- Use it to understand WHAT features should do, not HOW to implement in Rust
+- Compare behavior, not code structure
+- Do NOT copy Python patterns that don't fit Rust idioms
+
+## 13) Tests
+- Add tests for non-trivial logic, especially in modules
+- Test modules in isolation (they should be pure functions)
+- Integration tests can use the orchestrator
+
+## 14) Output Requirements
+When producing code changes:
+- Summarize what changed and why
+- Note any behavior changes
+- Confirm `cargo fmt`, `cargo clippy`, `cargo test` pass
