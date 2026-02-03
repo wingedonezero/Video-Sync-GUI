@@ -281,6 +281,28 @@ impl SourceAnalysisResult {
             (self.accepted_chunks as f64 / self.total_chunks as f64) * 100.0
         }
     }
+
+    /// Build stability metrics from this analysis result.
+    ///
+    /// Extracts accepted chunk delays and calculates standard deviation
+    /// to produce a SourceStability summary.
+    pub fn stability_metrics(&self, min_match_pct: f64) -> SourceStability {
+        let accepted_delays: Vec<f64> = self
+            .chunk_results
+            .iter()
+            .filter(|c| c.match_pct >= min_match_pct)
+            .map(|c| c.delay_ms_raw)
+            .collect();
+
+        SourceStability {
+            accepted_chunks: self.accepted_chunks,
+            total_chunks: self.total_chunks,
+            avg_match_pct: self.avg_match_pct,
+            delay_std_dev_ms: calculate_delay_std_dev(&accepted_delays),
+            drift_detected: self.drift_detected,
+            acceptance_rate: self.acceptance_rate(),
+        }
+    }
 }
 
 /// Error types for analysis operations.
@@ -317,6 +339,38 @@ pub enum AnalysisError {
 
 /// Type alias for analysis results.
 pub type AnalysisResult<T> = Result<T, AnalysisError>;
+
+/// Stability metrics for a single source analysis.
+///
+/// Captures quality indicators from the chunk-based analysis
+/// to help assess confidence in the calculated delay.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceStability {
+    /// Number of chunks that passed the match threshold.
+    pub accepted_chunks: usize,
+    /// Total chunks analyzed.
+    pub total_chunks: usize,
+    /// Average match percentage across accepted chunks.
+    pub avg_match_pct: f64,
+    /// Standard deviation of delay measurements (ms).
+    pub delay_std_dev_ms: f64,
+    /// Whether drift was detected for this source.
+    pub drift_detected: bool,
+    /// Acceptance rate as percentage (accepted / total * 100).
+    pub acceptance_rate: f64,
+}
+
+/// Calculate standard deviation of delay values.
+///
+/// Returns 0.0 if there are fewer than 2 values.
+pub fn calculate_delay_std_dev(delays: &[f64]) -> f64 {
+    if delays.len() <= 1 {
+        return 0.0;
+    }
+    let mean = delays.iter().sum::<f64>() / delays.len() as f64;
+    let variance = delays.iter().map(|d| (d - mean).powi(2)).sum::<f64>() / delays.len() as f64;
+    variance.sqrt()
+}
 
 #[cfg(test)]
 mod tests {

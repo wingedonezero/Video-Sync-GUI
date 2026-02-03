@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
+use crate::analysis::SourceStability;
 use crate::config::Settings;
 use crate::logging::JobLogger;
 use crate::models::{Delays, JobSpec, MergePlan};
@@ -157,22 +158,7 @@ pub struct AnalysisOutput {
     pub source_stability: HashMap<String, SourceStability>,
 }
 
-/// Stability metrics for a single source analysis.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SourceStability {
-    /// Number of chunks that passed the match threshold.
-    pub accepted_chunks: usize,
-    /// Total chunks analyzed.
-    pub total_chunks: usize,
-    /// Average match percentage across accepted chunks.
-    pub avg_match_pct: f64,
-    /// Standard deviation of delay measurements (ms).
-    pub delay_std_dev_ms: f64,
-    /// Whether drift was detected for this source.
-    pub drift_detected: bool,
-    /// Acceptance rate as percentage (accepted / total * 100).
-    pub acceptance_rate: f64,
-}
+// Note: SourceStability is imported from crate::analysis
 
 /// Output from the Extraction step.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
