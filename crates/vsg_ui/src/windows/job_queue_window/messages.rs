@@ -3,6 +3,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use vsg_core::jobs::JobQueueEntry;
+
 /// Messages for the job queue window
 #[derive(Debug)]
 pub enum JobQueueMsg {
@@ -72,8 +74,8 @@ pub struct DiscoveredJob {
 /// Output message sent to parent when dialog closes
 #[derive(Debug)]
 pub enum JobQueueOutput {
-    /// User clicked Start Processing (returns configured jobs)
-    StartProcessing(Vec<String>), // Job IDs to process
+    /// User clicked Start Processing (returns configured job entries)
+    StartProcessing(Vec<JobQueueEntry>),
     /// Dialog was cancelled
     Cancelled,
 }

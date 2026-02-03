@@ -327,8 +327,8 @@ impl Component for MainWindow {
                         parent: None, // TODO: pass parent window reference
                     })
                     .forward(sender.input_sender(), |msg| match msg {
-                        JobQueueOutput::StartProcessing(job_ids) => {
-                            MainWindowMsg::StartProcessingQueue(job_ids)
+                        JobQueueOutput::StartProcessing(job_entries) => {
+                            MainWindowMsg::StartProcessingQueue(job_entries)
                         }
                         JobQueueOutput::Cancelled => MainWindowMsg::JobQueueClosed,
                     });
@@ -344,10 +344,10 @@ impl Component for MainWindow {
                     .emit(LogViewMsg::Append("Job Queue dialog closed.".to_string()));
             }
 
-            MainWindowMsg::StartProcessingQueue(job_ids) => {
+            MainWindowMsg::StartProcessingQueue(job_entries) => {
                 self.job_queue_window = None;
 
-                if job_ids.is_empty() {
+                if job_entries.is_empty() {
                     self.log_view.emit(LogViewMsg::Append(
                         "No jobs to process.".to_string(),
                     ));
@@ -356,15 +356,15 @@ impl Component for MainWindow {
 
                 self.log_view.emit(LogViewMsg::Append(format!(
                     "Starting queue processing for {} jobs...",
-                    job_ids.len()
+                    job_entries.len()
                 )));
 
                 // Get config for worker
                 let config = self.config.clone();
 
-                // Spawn queue processing worker
+                // Spawn queue processing worker with job entries (no queue.json needed)
                 sender.spawn_command(move |cmd_sender| {
-                    crate::workers::run_queue_processing(job_ids, config, cmd_sender);
+                    crate::workers::run_queue_processing(job_entries, config, cmd_sender);
                 });
             }
 

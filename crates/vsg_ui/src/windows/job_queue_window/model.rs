@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use vsg_core::jobs::{JobQueueEntry, JobQueueStatus};
+use vsg_core::jobs::JobQueueEntry;
 
 /// Job queue window state
 #[derive(Debug)]
@@ -186,15 +186,6 @@ impl JobQueueModel {
         self.jobs.len()
     }
 
-    /// Get jobs that are configured (ready for processing)
-    pub fn get_configured_job_ids(&self) -> Vec<String> {
-        self.jobs
-            .iter()
-            .filter(|j| j.entry.status == JobQueueStatus::Configured)
-            .map(|j| j.entry.id.clone())
-            .collect()
-    }
-
     /// Check if any job is selected
     pub fn has_selection(&self) -> bool {
         !self.selected_indices.is_empty()
@@ -207,16 +198,6 @@ impl JobQueueModel {
         } else {
             None
         }
-    }
-
-    /// Check if the single selected job is configured (for copy)
-    pub fn can_copy_layout(&self) -> bool {
-        if let Some(idx) = self.single_selection() {
-            if let Some(job) = self.jobs.get(idx) {
-                return job.entry.status == JobQueueStatus::Configured;
-            }
-        }
-        false
     }
 }
 

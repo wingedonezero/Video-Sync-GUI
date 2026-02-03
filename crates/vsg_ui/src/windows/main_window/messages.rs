@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 
+use vsg_core::jobs::JobQueueEntry;
 use vsg_core::models::Delays;
 
 /// Messages for the main window
@@ -20,8 +21,8 @@ pub enum MainWindowMsg {
     /// Job queue dialog closed
     JobQueueClosed,
 
-    /// Job queue requested to start processing
-    StartProcessingQueue(Vec<String>),
+    /// Job queue requested to start processing (with configured job entries)
+    StartProcessingQueue(Vec<JobQueueEntry>),
 
     /// Archive logs checkbox toggled
     ToggleArchiveLogs(bool),

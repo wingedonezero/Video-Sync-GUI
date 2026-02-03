@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::config::Settings;
-use crate::jobs::{JobQueueEntry, JobQueueStatus, LayoutManager};
+use crate::jobs::{JobQueueEntry, LayoutManager};
 use crate::logging::{GuiLogCallback, JobLogger, LogConfig};
 use crate::models::JobSpec;
 
@@ -107,7 +107,8 @@ impl QueueProcessor {
     /// Process a single job from the queue.
     ///
     /// Converts the job entry to a pipeline context, runs the standard
-    /// pipeline, and returns the result.
+    /// pipeline, and returns the result. Status is derived from layout
+    /// file existence rather than the entry's status field.
     ///
     /// # Arguments
     /// * `entry` - The job queue entry to process
@@ -119,15 +120,8 @@ impl QueueProcessor {
         gui_callback: Option<GuiLogCallback>,
         progress_callback: Option<ProgressCallback>,
     ) -> JobResult {
-        // Validate job has required data
-        if entry.status != JobQueueStatus::Configured {
-            return JobResult::failure(
-                entry.id.clone(),
-                format!("Job is not configured (status: {:?})", entry.status),
-            );
-        }
-
         // Load layout from job_layouts folder using layout_id
+        // (layout existence is the source of truth for "configured" status)
         let layouts_dir = self.work_dir.join("job_layouts");
         let layout_manager = LayoutManager::new(&layouts_dir);
 

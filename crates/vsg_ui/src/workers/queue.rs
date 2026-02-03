@@ -1,7 +1,7 @@
 //! Queue processing worker - runs jobs from the queue in background
 //!
-//! Takes job IDs, retrieves entries from the queue, and processes them
-//! through the standard pipeline, sending progress updates to the UI.
+//! Takes job entries and processes them through the standard pipeline,
+//! sending progress updates to the UI.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use relm4::Sender;
 
 use vsg_core::config::ConfigManager;
-use vsg_core::jobs::JobQueue;
+use vsg_core::jobs::{JobQueueEntry, LayoutManager};
 use vsg_core::logging::GuiLogCallback;
 use vsg_core::orchestrator::ProgressCallback;
 
@@ -18,13 +18,11 @@ use crate::windows::main_window::MainWindowMsg;
 /// Run queue processing in background, sending progress/results via sender.
 ///
 /// # Arguments
-/// * `job_ids` - IDs of jobs to process
+/// * `job_entries` - Job entries to process (passed directly from UI, no queue.json)
 /// * `config` - Configuration manager
 /// * `sender` - Channel to send messages back to UI
-///
-/// The job queue is loaded from disk (persisted in temp folder).
 pub fn run_queue_processing(
-    job_ids: Vec<String>,
+    job_entries: Vec<JobQueueEntry>,
     config: Arc<Mutex<ConfigManager>>,
     sender: Sender<MainWindowMsg>,
 ) {
@@ -39,18 +37,12 @@ pub fn run_queue_processing(
         )
     };
 
-    // Load job queue from disk (it's persisted in temp folder)
-    let mut job_queue = JobQueue::new(&temp_dir);
+    // Create layout manager for cleanup at end
+    let layout_manager = LayoutManager::new(&temp_dir.join("job_layouts"));
 
-    // Log start with queue info
-    let _ = sender.send(MainWindowMsg::QueueLog(format!(
-        "Loading queue from: {}/queue.json ({} jobs found)",
-        temp_dir.display(),
-        job_queue.len()
-    )));
     let _ = sender.send(MainWindowMsg::QueueLog(format!(
         "Starting queue processing for {} jobs...",
-        job_ids.len()
+        job_entries.len()
     )));
 
     // Create queue processor
@@ -64,34 +56,19 @@ pub fn run_queue_processing(
     // Track results
     let mut succeeded = 0;
     let mut failed = 0;
-    let total = job_ids.len();
+    let total = job_entries.len();
 
     // Process each job
-    for (i, job_id) in job_ids.iter().enumerate() {
-        // Get job entry from queue
-        let entry = match job_queue.get_by_id(job_id) {
-            Some(e) => {
-                let _ = sender.send(MainWindowMsg::QueueLog(format!(
-                    "Found job {}: status={:?}, layout_id={}",
-                    job_id,
-                    e.status,
-                    e.layout_id
-                )));
-                e.clone()
-            }
-            None => {
-                let _ = sender.send(MainWindowMsg::QueueLog(format!(
-                    "Job {} not found in queue, skipping",
-                    job_id
-                )));
-                failed += 1;
-                continue;
-            }
-        };
+    for (i, entry) in job_entries.iter().enumerate() {
+        let _ = sender.send(MainWindowMsg::QueueLog(format!(
+            "Job {}: layout_id={}",
+            entry.id,
+            entry.layout_id
+        )));
 
         // Notify job started
         let _ = sender.send(MainWindowMsg::QueueJobStarted {
-            job_id: job_id.clone(),
+            job_id: entry.id.clone(),
             job_name: entry.name.clone(),
         });
 
@@ -102,12 +79,6 @@ pub fn run_queue_processing(
             entry.name
         )));
 
-        // Update job status to Processing
-        if let Some(job) = job_queue.get_by_id_mut(job_id) {
-            job.status = vsg_core::jobs::JobQueueStatus::Processing;
-        }
-        let _ = job_queue.save();
-
         // Create GUI callback for this job
         let log_sender = sender.clone();
         let gui_callback: GuiLogCallback = Box::new(move |msg| {
@@ -116,7 +87,7 @@ pub fn run_queue_processing(
 
         // Create progress callback for this job
         let progress_sender = sender.clone();
-        let progress_job_id = job_id.clone();
+        let progress_job_id = entry.id.clone();
         let progress_callback: ProgressCallback =
             Box::new(move |_step: &str, percent: u32, message: &str| {
                 let _ = progress_sender.send(MainWindowMsg::QueueJobProgress {
@@ -126,24 +97,12 @@ pub fn run_queue_processing(
                 });
             });
 
-        // Process the job
-        let result = processor.process_job(&entry, Some(gui_callback), Some(progress_callback));
-
-        // Update job status based on result
-        if let Some(job) = job_queue.get_by_id_mut(job_id) {
-            if result.success {
-                job.status = vsg_core::jobs::JobQueueStatus::Complete;
-                job.error_message = None;
-            } else {
-                job.status = vsg_core::jobs::JobQueueStatus::Error;
-                job.error_message = result.error.clone();
-            }
-        }
-        let _ = job_queue.save();
+        // Process the job (layout loaded from job_layouts/{layout_id}.json by QueueProcessor)
+        let result = processor.process_job(entry, Some(gui_callback), Some(progress_callback));
 
         // Notify job completed
         let _ = sender.send(MainWindowMsg::QueueJobComplete {
-            job_id: job_id.clone(),
+            job_id: entry.id.clone(),
             success: result.success,
             output_path: result.output_path.clone(),
             error: result.error.clone(),
@@ -168,6 +127,18 @@ pub fn run_queue_processing(
             )));
             failed += 1;
         }
+    }
+
+    // Clean up all layout files after processing completes
+    if let Err(e) = layout_manager.cleanup_all() {
+        let _ = sender.send(MainWindowMsg::QueueLog(format!(
+            "Warning: Failed to cleanup layout files: {}",
+            e
+        )));
+    } else {
+        let _ = sender.send(MainWindowMsg::QueueLog(
+            "Cleaned up all job layout files.".to_string()
+        ));
     }
 
     // Notify all processing complete
