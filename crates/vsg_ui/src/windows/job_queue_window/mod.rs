@@ -492,6 +492,22 @@ impl Component for JobQueueWindow {
                         tracing::error!("Failed to save queue: {}", e);
                     }
 
+                    // Also save layout to job_layouts folder for persistence/reuse
+                    if let Some(ref layout) = job.entry.layout {
+                        if let Err(e) = self.layout_manager.save_layout_with_metadata(
+                            &job.entry.layout_id,
+                            &job.entry.sources,
+                            layout,
+                        ) {
+                            tracing::error!("Failed to save layout to file: {}", e);
+                        } else {
+                            tracing::info!(
+                                "Saved layout to job_layouts/{}.json",
+                                job.entry.layout_id
+                            );
+                        }
+                    }
+
                     self.refresh_list_view(root);
                     tracing::info!("Job {} configured with {} tracks", job_index, layout.len());
                 }
