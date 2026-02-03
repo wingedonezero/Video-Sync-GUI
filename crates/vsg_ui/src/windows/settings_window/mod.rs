@@ -200,6 +200,9 @@ impl Component for SettingsWindow {
         let logging_page = build_logging_tab(&logging, &sender);
         notebook.append_page(&logging_page, Some(&gtk4::Label::new(Some("Logging"))));
 
+        // Show the window
+        root.present();
+
         ComponentParts { model, widgets }
     }
 
