@@ -27,11 +27,10 @@ pub fn run_queue_processing(
     sender: Sender<MainWindowMsg>,
 ) {
     // Get settings and directories from config
-    let (settings, log_dir, temp_dir, output_dir) = {
+    let (settings, temp_dir, output_dir) = {
         let cfg = config.lock().unwrap();
         (
             cfg.settings().clone(),
-            cfg.logs_folder(),
             PathBuf::from(&cfg.settings().paths.temp_root),
             PathBuf::from(&cfg.settings().paths.output_folder),
         )
@@ -46,9 +45,11 @@ pub fn run_queue_processing(
     )));
 
     // Create queue processor
+    // NOTE: log_dir is set to output_dir to match original Python behavior
+    // (logs are written directly to the output folder as {job_name}.log)
     let processor = vsg_core::orchestrator::QueueProcessor::new(
         settings,
-        log_dir,
+        output_dir.clone(), // logs go to output directory like original Python
         temp_dir.clone(),
         output_dir,
     );
