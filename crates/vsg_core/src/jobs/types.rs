@@ -50,8 +50,8 @@ pub struct JobQueueEntry {
     pub layout_id: String,
     /// Current status.
     pub status: JobQueueStatus,
-    /// Manual layout if configured.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Manual layout if configured (loaded from job_layouts/{layout_id}.json, not persisted here).
+    #[serde(skip)]
     pub layout: Option<ManualLayout>,
     /// Error message if status is Error.
     #[serde(skip_serializing_if = "Option::is_none")]

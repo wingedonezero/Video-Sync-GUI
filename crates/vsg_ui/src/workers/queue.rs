@@ -72,10 +72,10 @@ pub fn run_queue_processing(
         let entry = match job_queue.get_by_id(job_id) {
             Some(e) => {
                 let _ = sender.send(MainWindowMsg::QueueLog(format!(
-                    "Found job {}: status={:?}, has_layout={}",
+                    "Found job {}: status={:?}, layout_id={}",
                     job_id,
                     e.status,
-                    e.layout.is_some()
+                    e.layout_id
                 )));
                 e.clone()
             }

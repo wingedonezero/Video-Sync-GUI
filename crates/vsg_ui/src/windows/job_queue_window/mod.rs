@@ -478,13 +478,27 @@ impl Component for JobQueueWindow {
                         attachment_sources,
                     };
 
-                    // Update job
+                    // Save layout to job_layouts folder (source of truth)
+                    if let Err(e) = self.layout_manager.save_layout_with_metadata(
+                        &job.entry.layout_id,
+                        &job.entry.sources,
+                        &core_layout,
+                    ) {
+                        tracing::error!("Failed to save layout to file: {}", e);
+                        // Don't mark as configured if layout save failed
+                        return;
+                    }
+                    tracing::info!(
+                        "Saved layout to job_layouts/{}.json",
+                        job.entry.layout_id
+                    );
+
+                    // Update UI model (in-memory only)
                     job.entry.layout = Some(core_layout);
                     job.entry.status = JobQueueStatus::Configured;
 
-                    // Also update backend queue
+                    // Update backend queue status (layout is NOT stored in queue.json)
                     if let Some(backend_job) = self.job_queue.get_mut(job_index) {
-                        backend_job.layout = job.entry.layout.clone();
                         backend_job.status = JobQueueStatus::Configured;
                         tracing::info!(
                             "Updated backend job {} status to Configured",
@@ -498,6 +512,7 @@ impl Component for JobQueueWindow {
                         );
                     }
 
+                    // Save queue.json (status only, layout is in job_layouts/)
                     match self.job_queue.save() {
                         Ok(_) => {
                             tracing::info!(
@@ -507,22 +522,6 @@ impl Component for JobQueueWindow {
                         }
                         Err(e) => {
                             tracing::error!("Failed to save queue: {}", e);
-                        }
-                    }
-
-                    // Also save layout to job_layouts folder for persistence/reuse
-                    if let Some(ref layout) = job.entry.layout {
-                        if let Err(e) = self.layout_manager.save_layout_with_metadata(
-                            &job.entry.layout_id,
-                            &job.entry.sources,
-                            layout,
-                        ) {
-                            tracing::error!("Failed to save layout to file: {}", e);
-                        } else {
-                            tracing::info!(
-                                "Saved layout to job_layouts/{}.json",
-                                job.entry.layout_id
-                            );
                         }
                     }
 

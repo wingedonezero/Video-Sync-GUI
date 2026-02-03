@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::config::Settings;
-use crate::jobs::{JobQueueEntry, JobQueueStatus};
+use crate::jobs::{JobQueueEntry, JobQueueStatus, LayoutManager};
 use crate::logging::{GuiLogCallback, JobLogger, LogConfig};
 use crate::models::JobSpec;
 
@@ -127,10 +127,26 @@ impl QueueProcessor {
             );
         }
 
-        let layout = match &entry.layout {
-            Some(l) => l,
-            None => {
-                return JobResult::failure(entry.id.clone(), "Job has no layout configured");
+        // Load layout from job_layouts folder using layout_id
+        let layouts_dir = self.work_dir.join("job_layouts");
+        let layout_manager = LayoutManager::new(&layouts_dir);
+
+        let layout = match layout_manager.load_layout(&entry.layout_id) {
+            Ok(Some(l)) => l,
+            Ok(None) => {
+                return JobResult::failure(
+                    entry.id.clone(),
+                    format!(
+                        "Layout file not found: job_layouts/{}.json",
+                        entry.layout_id
+                    ),
+                );
+            }
+            Err(e) => {
+                return JobResult::failure(
+                    entry.id.clone(),
+                    format!("Failed to load layout: {}", e),
+                );
             }
         };
 
