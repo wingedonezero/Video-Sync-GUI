@@ -164,9 +164,10 @@ class JobQueueDialog(QDialog):
         config_action.setEnabled(len(selected_rows) == 1)
 
         # Enable "Copy" if a single, configured job is selected
+        # Note: Status may be "Configured ⚠️" with warning, so use startswith
         source_job_index = selected_rows[0].row()
         source_job = self._logic.jobs[source_job_index]
-        is_configured = source_job.get("status") == "Configured"
+        is_configured = source_job.get("status", "").startswith("Configured")
         copy_action.setEnabled(len(selected_rows) == 1 and is_configured)
 
         # Enable "Paste" if the clipboard has content
