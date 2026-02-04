@@ -12,6 +12,7 @@ pub mod logging;
 pub mod models;
 pub mod mux;
 pub mod orchestrator;
+pub mod subtitles;
 
 /// Returns the crate version.
 pub fn version() -> &'static str {
