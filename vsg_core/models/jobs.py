@@ -16,13 +16,13 @@ if TYPE_CHECKING:
     from .media import Track
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class JobSpec:
     sources: dict[str, Path]
     manual_layout: list[ManualLayoutItem] | None = None
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Delays:
     source_delays_ms: dict[str, int] = field(default_factory=dict)
     raw_source_delays_ms: dict[str, float] = field(
@@ -34,7 +34,7 @@ class Delays:
     )
 
 
-@dataclass
+@dataclass(slots=True)
 class PlanItem:
     track: Track
     extracted_path: Path | None = None
@@ -85,7 +85,7 @@ class PlanItem:
     )  # Complete style list for validation
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MergePlan:
     items: list[PlanItem]
     delays: Delays
@@ -93,7 +93,7 @@ class MergePlan:
     attachments: list[Path] = field(default_factory=list)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class JobResult:
     status: Literal["Merged", "Analyzed", "Failed"]
     name: str

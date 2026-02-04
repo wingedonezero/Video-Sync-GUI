@@ -29,7 +29,7 @@ class WordListSource(Enum):
     SYSTEM = "system"  # System spell checker (Enchant/Hunspell)
 
 
-@dataclass
+@dataclass(slots=True)
 class WordListConfig:
     """Configuration for a word list."""
 
@@ -76,7 +76,7 @@ class WordListConfig:
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class WordList:
     """A word list with its configuration and loaded words."""
 
@@ -181,7 +181,7 @@ DEFAULT_WORD_LISTS = [
 ]
 
 
-@dataclass
+@dataclass(slots=True)
 class ValidationResult:
     """Result of a word validation check."""
 
@@ -190,7 +190,7 @@ class ValidationResult:
     is_protected: bool = False  # Should not be "fixed"
 
 
-@dataclass
+@dataclass(slots=True)
 class ValidationStats:
     """Statistics for logging."""
 

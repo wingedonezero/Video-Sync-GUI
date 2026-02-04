@@ -38,7 +38,7 @@ class EventGroup(str, Enum):
     CUSTOM = "custom"  # User-defined group
 
 
-@dataclass
+@dataclass(slots=True)
 class EventEdit:
     """
     Planned edit for a single subtitle event.
@@ -143,7 +143,7 @@ class EventEdit:
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class StyleEdit:
     """
     Planned edit for a subtitle style.
@@ -272,7 +272,7 @@ class StyleEdit:
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class NewEventSpec:
     """Specification for a new event to be added."""
 
@@ -321,7 +321,7 @@ class NewEventSpec:
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class NewStyleSpec:
     """Specification for a new style to be added."""
 
@@ -381,7 +381,7 @@ class NewStyleSpec:
         return cls(**data)
 
 
-@dataclass
+@dataclass(slots=True)
 class GroupDefinition:
     """
     Definition of a custom event group.
@@ -420,7 +420,7 @@ class GroupDefinition:
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class SubtitleEditPlan:
     """
     Non-destructive edit plan for subtitle modifications.
@@ -831,7 +831,7 @@ class SubtitleEditPlan:
         return cls.from_dict(data)
 
 
-@dataclass
+@dataclass(slots=True)
 class ApplyResult:
     """Result of applying an edit plan."""
 

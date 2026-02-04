@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
-@dataclass
+@dataclass(slots=True)
 class UndoAction:
     """Represents a single undoable action."""
 

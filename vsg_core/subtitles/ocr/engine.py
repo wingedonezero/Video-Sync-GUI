@@ -24,7 +24,7 @@ except ImportError:
     PYTESSERACT_AVAILABLE = False
 
 
-@dataclass
+@dataclass(slots=True)
 class OCRConfig:
     """Configuration for OCR engine."""
 
@@ -43,7 +43,7 @@ class OCRConfig:
     fallback_psm: int = 4  # PSM to use on retry (single column)
 
 
-@dataclass
+@dataclass(slots=True)
 class OCRLineResult:
     """Result for a single OCR line."""
 
@@ -54,7 +54,7 @@ class OCRLineResult:
     was_retry: bool = False
 
 
-@dataclass
+@dataclass(slots=True)
 class OCRResult:
     """Complete OCR result for a subtitle image."""
 

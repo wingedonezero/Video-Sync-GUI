@@ -40,7 +40,7 @@ from .preprocessing import ImagePreprocessor, create_preprocessor
 from .report import OCRReport, SubtitleOCRResult, create_report
 
 
-@dataclass
+@dataclass(slots=True)
 class PipelineConfig:
     """Configuration for OCR pipeline."""
 
@@ -66,7 +66,7 @@ class PipelineConfig:
     max_workers: int = 1  # For future parallel processing
 
 
-@dataclass
+@dataclass(slots=True)
 class PipelineResult:
     """Result of OCR pipeline execution."""
 

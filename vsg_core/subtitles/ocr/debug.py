@@ -37,7 +37,7 @@ import numpy as np
 from PIL import Image
 
 
-@dataclass
+@dataclass(slots=True)
 class DebugSubtitle:
     """Debug info for a single subtitle."""
 

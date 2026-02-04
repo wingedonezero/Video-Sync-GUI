@@ -34,7 +34,7 @@ from .base import ParseResult, SubtitleImage, SubtitleImageParser
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(slots=True)
 class IdxEntry:
     """Parsed entry from .idx file."""
 
@@ -42,7 +42,7 @@ class IdxEntry:
     file_position: int
 
 
-@dataclass
+@dataclass(slots=True)
 class VobSubHeader:
     """Header information from .idx file."""
 

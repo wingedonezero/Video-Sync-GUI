@@ -19,7 +19,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(slots=True)
 class OCRLineResult:
     """Result for a single OCR line."""
 
@@ -29,7 +29,7 @@ class OCRLineResult:
     backend: str = "unknown"
 
 
-@dataclass
+@dataclass(slots=True)
 class OCRResult:
     """Complete OCR result for a subtitle image."""
 

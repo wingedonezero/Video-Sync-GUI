@@ -30,13 +30,13 @@ class CorrectionVerdict(Enum):
     FAILED = auto()
 
 
-@dataclass
+@dataclass(slots=True)
 class CorrectionResult:
     verdict: CorrectionVerdict
     data: Any = None
 
 
-@dataclass(unsafe_hash=True)
+@dataclass(slots=True, unsafe_hash=True)
 class AudioSegment:
     """Represents an action point on the target timeline for the assembly function."""
 

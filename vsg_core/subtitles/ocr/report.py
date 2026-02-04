@@ -25,7 +25,7 @@ except ImportError:
     ENCHANT_AVAILABLE = False
 
 
-@dataclass
+@dataclass(slots=True)
 class UnknownWord:
     """
     Information about an unknown word found during OCR.
@@ -51,7 +51,7 @@ class UnknownWord:
         return asdict(self)
 
 
-@dataclass
+@dataclass(slots=True)
 class LowConfidenceLine:
     """
     A subtitle line with low OCR confidence.
@@ -70,7 +70,7 @@ class LowConfidenceLine:
         return asdict(self)
 
 
-@dataclass
+@dataclass(slots=True)
 class SubtitleOCRResult:
     """OCR result for a single subtitle."""
 
@@ -91,7 +91,7 @@ class SubtitleOCRResult:
         return asdict(self)
 
 
-@dataclass
+@dataclass(slots=True)
 class OCRReport:
     """
     Complete OCR report for a subtitle file.

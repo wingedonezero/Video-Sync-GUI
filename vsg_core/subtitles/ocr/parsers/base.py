@@ -14,7 +14,7 @@ from typing import Optional
 import numpy as np
 
 
-@dataclass
+@dataclass(slots=True)
 class SubtitleImage:
     """
     Represents a single subtitle image extracted from an image-based format.
@@ -129,7 +129,7 @@ class SubtitleImage:
         return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{milliseconds:03d}"
 
 
-@dataclass
+@dataclass(slots=True)
 class ParseResult:
     """
     Result of parsing a subtitle file.
