@@ -1,8 +1,13 @@
 # vsg_core/models/settings.py
-"""Application settings dataclass.
+"""Application settings dataclass - THE SINGLE SOURCE OF TRUTH.
 
-This is the single source of truth for all pipeline configuration settings.
-All settings are typed and have defaults, eliminating dict[str, Any] access.
+This module defines ALL application settings with their default values.
+AppConfig derives its defaults from this dataclass - do NOT maintain
+separate defaults elsewhere.
+
+To add a new setting:
+1. Add the field here with a default value
+2. That's it - AppConfig will automatically pick it up
 
 Settings are organized by category:
 - Paths: Output, temp, logs directories
@@ -18,399 +23,436 @@ Settings are organized by category:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import MISSING as dataclass_field_missing
+from dataclasses import dataclass, field, fields
+from typing import Any, ClassVar
 
 from .enums import AnalysisMode, SnapMode
 
 
+# Sentinel for path defaults that need runtime resolution
+# These will be resolved by AppConfig based on script_dir
+_PATH_SENTINEL = "__PATH_NEEDS_RESOLUTION__"
+
+
 @dataclass
 class AppSettings:
-    """Complete application settings with typed fields.
+    """Complete application settings with typed fields and defaults.
 
     All pipeline code should access settings through this dataclass,
     not through raw dict access. This ensures type safety and IDE support.
+
+    IMPORTANT: All defaults are defined HERE. AppConfig derives from this.
     """
 
     # =========================================================================
-    # Path Settings
+    # Path Settings (defaults resolved at runtime by AppConfig)
     # =========================================================================
-    output_folder: str
-    temp_root: str
-    logs_folder: str
-    videodiff_path: str
-    fonts_directory: str  # User-specified fonts directory
-    last_ref_path: str  # Last used reference path
-    last_sec_path: str  # Last used secondary path
-    last_ter_path: str  # Last used tertiary path
-    source_separation_model_dir: str  # Directory for source separation models
+    output_folder: str = _PATH_SENTINEL
+    temp_root: str = _PATH_SENTINEL
+    logs_folder: str = _PATH_SENTINEL
+    videodiff_path: str = ""
+    fonts_directory: str = ""
+    last_ref_path: str = ""
+    last_sec_path: str = ""
+    last_ter_path: str = ""
+    source_separation_model_dir: str = _PATH_SENTINEL
 
     # =========================================================================
     # Analysis Settings
     # =========================================================================
-    analysis_mode: AnalysisMode
-    analysis_lang_source1: str | None
-    analysis_lang_others: str | None
-    scan_chunk_count: int
-    scan_chunk_duration: int
-    min_match_pct: float
-    videodiff_error_min: float
-    videodiff_error_max: float
+    analysis_mode: AnalysisMode = field(default=AnalysisMode.AUDIO)
+    analysis_lang_source1: str | None = None
+    analysis_lang_others: str | None = None
+    scan_chunk_count: int = 10
+    scan_chunk_duration: int = 15
+    min_match_pct: float = 5.0
+    videodiff_error_min: float = 0.0
+    videodiff_error_max: float = 100.0
 
     # =========================================================================
     # Chapter Settings
     # =========================================================================
-    rename_chapters: bool
-    snap_chapters: bool
-    snap_mode: SnapMode
-    snap_threshold_ms: int
-    snap_starts_only: bool
+    rename_chapters: bool = False
+    snap_chapters: bool = False
+    snap_mode: SnapMode = field(default=SnapMode.PREVIOUS)
+    snap_threshold_ms: int = 250
+    snap_starts_only: bool = True
 
     # =========================================================================
     # Muxing Settings
     # =========================================================================
-    apply_dialog_norm_gain: bool
-    disable_track_statistics_tags: bool
-    disable_header_compression: bool
+    apply_dialog_norm_gain: bool = False
+    disable_track_statistics_tags: bool = False
+    disable_header_compression: bool = True
 
     # =========================================================================
     # Post-Mux Settings
     # =========================================================================
-    post_mux_normalize_timestamps: bool  # Enable timestamp normalization with FFmpeg
-    post_mux_strip_tags: bool  # Strip ENCODER tag with mkvpropedit
+    post_mux_normalize_timestamps: bool = False
+    post_mux_strip_tags: bool = False
 
     # =========================================================================
     # Logging Settings
     # =========================================================================
-    log_compact: bool
-    log_autoscroll: bool
-    log_error_tail: int
-    log_tail_lines: int
-    log_progress_step: int
-    log_show_options_pretty: bool
-    log_show_options_json: bool
-    log_audio_drift: bool  # Log audio drift detection details
-    archive_logs: bool
+    log_compact: bool = True
+    log_autoscroll: bool = True
+    log_error_tail: int = 20
+    log_tail_lines: int = 0
+    log_progress_step: int = 20
+    log_show_options_pretty: bool = False
+    log_show_options_json: bool = False
+    log_audio_drift: bool = True
+    archive_logs: bool = True
 
     # =========================================================================
     # Timing Sync Settings
     # =========================================================================
-    auto_apply_strict: bool
-    sync_mode: str  # "positive_only", "allow_negative", "preserve_existing"
+    auto_apply_strict: bool = False
+    sync_mode: str = "positive_only"
 
     # =========================================================================
     # Timing Fix Settings
     # =========================================================================
-    timing_fix_enabled: bool  # Enable timing fixes
-    timing_fix_overlaps: bool  # Fix overlapping subtitles
-    timing_overlap_min_gap_ms: int  # Minimum gap between subtitles
-    timing_fix_short_durations: bool  # Fix short durations
-    timing_min_duration_ms: int  # Minimum subtitle duration
-    timing_fix_long_durations: bool  # Fix long durations
-    timing_max_cps: float  # Maximum characters per second
+    timing_fix_enabled: bool = False
+    timing_fix_overlaps: bool = True
+    timing_overlap_min_gap_ms: int = 1
+    timing_fix_short_durations: bool = True
+    timing_min_duration_ms: int = 500
+    timing_fix_long_durations: bool = True
+    timing_max_cps: float = 20.0
 
     # =========================================================================
     # Segmented Audio Correction
     # =========================================================================
-    segmented_enabled: bool
+    segmented_enabled: bool = False
 
     # =========================================================================
     # Subtitle Sync Settings
     # =========================================================================
-    subtitle_sync_mode: str  # "time-based", "frame-based", etc.
-    time_based_use_raw_values: bool
-    time_based_bypass_subtitle_data: bool
-    subtitle_rounding: str  # "floor", "round", "ceil"
-    subtitle_target_fps: float  # Target FPS for frame-based modes
-    videotimestamps_snap_mode: str  # Frame snap mode: "start", "exact"
-    videotimestamps_rounding: str  # VideoTimestamps rounding: "floor", "round"
+    subtitle_sync_mode: str = "time-based"
+    time_based_use_raw_values: bool = False
+    time_based_bypass_subtitle_data: bool = True
+    subtitle_rounding: str = "floor"
+    subtitle_target_fps: float = 0.0
+    videotimestamps_snap_mode: str = "start"
+    videotimestamps_rounding: str = "round"
 
     # =========================================================================
     # Frame Matching Settings (shared by all frame-based sync modes)
     # =========================================================================
-    frame_hash_algorithm: str  # "dhash", "phash", "average_hash", "whash"
-    frame_hash_size: int  # 4, 8, or 16
-    frame_hash_threshold: int  # Max hamming distance (0-30)
-    frame_window_radius: int  # Frames before/after center
-    frame_search_range_ms: int  # Search ±N ms around expected position
-    frame_agreement_tolerance_ms: int  # Checkpoints must agree within ±N ms
-    frame_use_vapoursynth: bool  # Use VapourSynth for frame extraction
-    frame_comparison_method: str  # "hash", "ssim", "mse"
+    frame_hash_algorithm: str = "dhash"
+    frame_hash_size: int = 8
+    frame_hash_threshold: int = 5
+    frame_window_radius: int = 5
+    frame_search_range_ms: int = 2000
+    frame_agreement_tolerance_ms: int = 100
+    frame_use_vapoursynth: bool = True
+    frame_comparison_method: str = "hash"
 
     # =========================================================================
     # Correlation Snap Settings
     # =========================================================================
-    correlation_snap_fallback_mode: str  # "snap-to-frame", "use-raw", "abort"
-    correlation_snap_use_scene_changes: bool  # Use PySceneDetect for anchor points
+    correlation_snap_fallback_mode: str = "snap-to-frame"
+    correlation_snap_use_scene_changes: bool = True
 
     # =========================================================================
     # Correlation-Guided Frame Anchor Settings
     # =========================================================================
-    corr_anchor_fallback_mode: str  # "use-correlation", "use-median", "abort"
-    corr_anchor_anchor_positions: tuple[int, ...]  # Anchor positions as % of video
-    corr_anchor_refine_per_line: bool  # Refine each subtitle line to exact frames
-    corr_anchor_refine_workers: int  # Number of parallel workers for refinement
+    corr_anchor_fallback_mode: str = "use-correlation"
+    corr_anchor_anchor_positions: tuple[int, ...] = field(default=(10, 50, 90))
+    corr_anchor_refine_per_line: bool = False
+    corr_anchor_refine_workers: int = 4
 
     # =========================================================================
     # Subtitle-Anchored Frame Snap Settings
     # =========================================================================
-    sub_anchor_fallback_mode: str  # "abort", "use-available"
+    sub_anchor_fallback_mode: str = "abort"
 
     # =========================================================================
     # Duration Align Settings
     # =========================================================================
-    duration_align_verify_with_frames: bool  # Use hybrid frame matching verification
-    duration_align_validate: bool  # Enable simple validation
-    duration_align_fallback_mode: str  # "duration-offset", "abort"
-    duration_align_validate_points: int  # Number of validation checkpoints (1 or 3)
-    duration_align_strictness: int  # Validation strictness % (0-100)
-    duration_align_skip_validation_generated_tracks: (
-        bool  # Skip validation for generated tracks
-    )
+    duration_align_verify_with_frames: bool = False
+    duration_align_validate: bool = True
+    duration_align_fallback_mode: str = "duration-offset"
+    duration_align_validate_points: int = 3
+    duration_align_strictness: int = 80
+    duration_align_skip_validation_generated_tracks: bool = True
 
     # =========================================================================
     # Frame Lock Settings
     # =========================================================================
-    frame_lock_submillisecond_precision: bool  # Preserve sub-ms precision
+    frame_lock_submillisecond_precision: bool = False
 
     # =========================================================================
     # Video-Verified Sync Settings
     # =========================================================================
-    video_verified_zero_check_frames: int  # Verify if correlation < N frames
-    video_verified_min_quality_advantage: float  # Quality margin for non-zero offset
-    video_verified_num_checkpoints: int  # Number of checkpoint times
-    video_verified_search_range_frames: int  # Frame range to search
-    video_verified_sequence_length: int  # Consecutive frames to verify
-    video_verified_use_pts_precision: bool  # Use PTS for sub-frame precision
-    video_verified_frame_audit: bool  # Enable frame alignment audit reporting
+    video_verified_zero_check_frames: int = 3
+    video_verified_min_quality_advantage: float = 0.1
+    video_verified_num_checkpoints: int = 5
+    video_verified_search_range_frames: int = 3
+    video_verified_sequence_length: int = 10
+    video_verified_use_pts_precision: bool = False
+    video_verified_frame_audit: bool = False
 
     # =========================================================================
     # Interlaced Video Settings
     # =========================================================================
-    interlaced_handling_enabled: bool  # Enable interlaced content handling
-    interlaced_force_mode: str  # "auto", "progressive", "interlaced", "telecine"
-    interlaced_num_checkpoints: int  # Checkpoints for interlaced content
-    interlaced_search_range_frames: int  # Frame search range for interlaced
-    interlaced_hash_algorithm: str  # Hash algorithm for interlaced
-    interlaced_hash_size: int  # Hash size for interlaced
-    interlaced_hash_threshold: int  # Hash threshold for interlaced
-    interlaced_comparison_method: str  # Comparison method for interlaced
-    interlaced_fallback_to_audio: bool  # Fall back to audio if frame match fails
-    interlaced_sequence_length: int  # Sequence length for interlaced
-    interlaced_deinterlace_method: str  # Deinterlace filter: "bwdif", "yadif", etc.
-    interlaced_use_ivtc: bool  # Use inverse telecine for telecine content
+    interlaced_handling_enabled: bool = False
+    interlaced_force_mode: str = "auto"
+    interlaced_num_checkpoints: int = 5
+    interlaced_search_range_frames: int = 5
+    interlaced_hash_algorithm: str = "ahash"
+    interlaced_hash_size: int = 8
+    interlaced_hash_threshold: int = 25
+    interlaced_comparison_method: str = "ssim"
+    interlaced_fallback_to_audio: bool = True
+    interlaced_sequence_length: int = 5
+    interlaced_deinterlace_method: str = "bwdif"
+    interlaced_use_ivtc: bool = False
 
     # =========================================================================
     # Analysis/Correlation Settings
     # =========================================================================
-    source_separation_mode: str  # "none", "instrumental", "vocals"
-    source_separation_model: str  # Model filename or "default"
-    source_separation_device: str  # "auto", "cpu", "cuda", "rocm", "mps"
-    source_separation_timeout: int  # Timeout in seconds (0 = no timeout)
-    filtering_method: str  # "Dialogue Band-Pass Filter", etc.
-    correlation_method: (
-        str  # "SCC (Sliding Cross-Correlation)", "Phase Correlation (GCC-PHAT)"
-    )
-    correlation_method_source_separated: str  # Method for source-separated audio
+    source_separation_mode: str = "none"
+    source_separation_model: str = "default"
+    source_separation_device: str = "auto"
+    source_separation_timeout: int = 900
+    filtering_method: str = "Dialogue Band-Pass Filter"
+    correlation_method: str = "Phase Correlation (GCC-PHAT)"
+    correlation_method_source_separated: str = "Phase Correlation (GCC-PHAT)"
 
     # Delay Selection Settings
-    delay_selection_mode: str  # "Mode (Most Common)", "Average", "First Stable", etc.
-    delay_selection_mode_source_separated: str  # Delay mode for source-separated audio
-    min_accepted_chunks: int  # Minimum accepted chunks for valid result
-    first_stable_min_chunks: int  # Min chunks for first stable segment
-    first_stable_skip_unstable: bool  # Skip unstable segments
-    early_cluster_window: int  # Window size for early cluster detection
-    early_cluster_threshold: int  # Threshold for early cluster detection
+    delay_selection_mode: str = "Mode (Most Common)"
+    delay_selection_mode_source_separated: str = "Mode (Clustered)"
+    min_accepted_chunks: int = 3
+    first_stable_min_chunks: int = 3
+    first_stable_skip_unstable: bool = True
+    early_cluster_window: int = 10
+    early_cluster_threshold: int = 5
 
     # Multi-Correlation Comparison
-    multi_correlation_enabled: bool  # Enable multi-method comparison
-    multi_corr_scc: bool
-    multi_corr_gcc_phat: bool
-    multi_corr_onset: bool
-    multi_corr_gcc_scot: bool
-    multi_corr_gcc_whiten: bool
-    multi_corr_dtw: bool
-    multi_corr_spectrogram: bool
+    multi_correlation_enabled: bool = False
+    multi_corr_scc: bool = True
+    multi_corr_gcc_phat: bool = True
+    multi_corr_onset: bool = False
+    multi_corr_gcc_scot: bool = False
+    multi_corr_gcc_whiten: bool = False
+    multi_corr_dtw: bool = False
+    multi_corr_spectrogram: bool = False
 
     # DSP & Filtering
-    filter_bandpass_lowcut_hz: float
-    filter_bandpass_highcut_hz: float
-    filter_bandpass_order: int
-    filter_lowpass_taps: int
-    scan_start_percentage: float  # % of video to start scanning
-    scan_end_percentage: float  # % of video to end scanning
-    use_soxr: bool  # Use SoXR for resampling
-    audio_decode_native: bool
-    audio_peak_fit: bool
-    audio_bandlimit_hz: int
+    filter_bandpass_lowcut_hz: float = 300.0
+    filter_bandpass_highcut_hz: float = 3400.0
+    filter_bandpass_order: int = 5
+    filter_lowpass_taps: int = 101
+    scan_start_percentage: float = 5.0
+    scan_end_percentage: float = 95.0
+    use_soxr: bool = False
+    audio_decode_native: bool = False
+    audio_peak_fit: bool = False
+    audio_bandlimit_hz: int = 0
 
     # Drift Detection Settings
-    detection_dbscan_epsilon_ms: float
-    detection_dbscan_min_samples: int
-    drift_detection_r2_threshold: float
-    drift_detection_r2_threshold_lossless: float
-    drift_detection_slope_threshold_lossy: float
-    drift_detection_slope_threshold_lossless: float
+    detection_dbscan_epsilon_ms: float = 20.0
+    detection_dbscan_min_samples: int = 2
+    drift_detection_r2_threshold: float = 0.90
+    drift_detection_r2_threshold_lossless: float = 0.95
+    drift_detection_slope_threshold_lossy: float = 0.7
+    drift_detection_slope_threshold_lossless: float = 0.2
 
     # =========================================================================
     # Stepping Correction Settings
     # =========================================================================
-    stepping_adjust_subtitles: bool
-    stepping_adjust_subtitles_no_audio: bool  # Apply to subs when no audio merged
-    stepping_boundary_mode: str  # "start", "majority", "midpoint"
-    stepping_first_stable_min_chunks: int  # Min chunks for stepping delay selection
-    stepping_first_stable_skip_unstable: bool  # Skip unstable segments in stepping
+    stepping_adjust_subtitles: bool = True
+    stepping_adjust_subtitles_no_audio: bool = True
+    stepping_boundary_mode: str = "start"
+    stepping_first_stable_min_chunks: int = 3
+    stepping_first_stable_skip_unstable: bool = True
 
     # Segment Scan & Correction
-    segment_triage_std_dev_ms: int  # Threshold for segment triage
-    segment_coarse_chunk_s: int  # Coarse scan chunk duration
-    segment_coarse_step_s: int  # Coarse scan step size
-    segment_search_locality_s: int  # Search locality window
-    segment_fine_chunk_s: float  # Fine scan chunk duration
-    segment_fine_iterations: int  # Fine scan iterations
-    segment_min_confidence_ratio: float  # Minimum confidence ratio
+    segment_triage_std_dev_ms: int = 50
+    segment_coarse_chunk_s: int = 15
+    segment_coarse_step_s: int = 60
+    segment_search_locality_s: int = 10
+    segment_fine_chunk_s: float = 2.0
+    segment_fine_iterations: int = 10
+    segment_min_confidence_ratio: float = 5.0
 
     # Segment Drift Detection
-    segment_drift_r2_threshold: float
-    segment_drift_slope_threshold: float
-    segment_drift_outlier_sensitivity: float
-    segment_drift_scan_buffer_pct: float
+    segment_drift_r2_threshold: float = 0.75
+    segment_drift_slope_threshold: float = 0.7
+    segment_drift_outlier_sensitivity: float = 1.5
+    segment_drift_scan_buffer_pct: float = 2.0
 
     # Stepping Scan Range
-    stepping_scan_start_percentage: float  # Independent scan start %
-    stepping_scan_end_percentage: (
-        float  # Independent scan end % (higher for end boundaries)
-    )
+    stepping_scan_start_percentage: float = 5.0
+    stepping_scan_end_percentage: float = 99.0
 
     # Silence Snapping
-    stepping_snap_to_silence: bool  # Enable boundary snapping to silence
-    stepping_silence_detection_method: (
-        str  # "rms_basic", "ffmpeg_silencedetect", "smart_fusion"
-    )
-    stepping_silence_search_window_s: float  # Search window in seconds
-    stepping_silence_threshold_db: float  # Audio level in dB for silence
-    stepping_silence_min_duration_ms: float  # Minimum silence duration
-    stepping_ffmpeg_silence_noise: float  # dB threshold for FFmpeg silencedetect
-    stepping_ffmpeg_silence_duration: float  # Min silence duration in seconds
+    stepping_snap_to_silence: bool = True
+    stepping_silence_detection_method: str = "smart_fusion"
+    stepping_silence_search_window_s: float = 5.0
+    stepping_silence_threshold_db: float = -40.0
+    stepping_silence_min_duration_ms: float = 100.0
+    stepping_ffmpeg_silence_noise: float = -40.0
+    stepping_ffmpeg_silence_duration: float = 0.1
 
     # VAD (Voice Activity Detection)
-    stepping_vad_enabled: bool  # Enable VAD to protect speech
-    stepping_vad_aggressiveness: int  # 0-3: 0=least aggressive, 3=most
-    stepping_vad_avoid_speech: bool  # Never cut in speech regions
-    stepping_vad_frame_duration_ms: int  # VAD analysis frame size (10, 20, 30ms)
+    stepping_vad_enabled: bool = True
+    stepping_vad_aggressiveness: int = 2
+    stepping_vad_avoid_speech: bool = True
+    stepping_vad_frame_duration_ms: int = 30
 
     # Transient Detection
-    stepping_transient_detection_enabled: bool  # Avoid cutting on transients
-    stepping_transient_threshold: float  # dB increase threshold
-    stepping_transient_avoid_window_ms: int  # Avoid cuts within ±N ms of transients
+    stepping_transient_detection_enabled: bool = True
+    stepping_transient_threshold: float = 8.0
+    stepping_transient_avoid_window_ms: int = 50
 
     # Smart Fusion Weights
-    stepping_fusion_weight_silence: int
-    stepping_fusion_weight_no_speech: int
-    stepping_fusion_weight_scene_align: int
-    stepping_fusion_weight_duration: int
-    stepping_fusion_weight_no_transient: int
+    stepping_fusion_weight_silence: int = 10
+    stepping_fusion_weight_no_speech: int = 8
+    stepping_fusion_weight_scene_align: int = 5
+    stepping_fusion_weight_duration: int = 2
+    stepping_fusion_weight_no_transient: int = 3
 
     # Video-Aware Boundary Snapping
-    stepping_snap_to_video_frames: bool  # Enable video frame/scene snapping
-    stepping_video_snap_mode: str  # "scenes", "keyframes", "any_frame"
-    stepping_video_snap_max_offset_s: float  # Maximum snap distance
-    stepping_video_scene_threshold: float  # Scene detection sensitivity (0.1-1.0)
+    stepping_snap_to_video_frames: bool = False
+    stepping_video_snap_mode: str = "scenes"
+    stepping_video_snap_max_offset_s: float = 2.0
+    stepping_video_scene_threshold: float = 0.4
 
     # Fill Mode & Content
-    stepping_fill_mode: str  # "auto", "silence", "content"
-    stepping_content_correlation_threshold: (
-        float  # Min correlation for content extraction
-    )
-    stepping_content_search_window_s: float  # Search window for content
+    stepping_fill_mode: str = "silence"
+    stepping_content_correlation_threshold: float = 0.5
+    stepping_content_search_window_s: float = 5.0
 
     # Track Naming
-    stepping_corrected_track_label: str  # Label for corrected audio
-    stepping_preserved_track_label: str  # Label for preserved original
+    stepping_corrected_track_label: str = ""
+    stepping_preserved_track_label: str = ""
 
     # Quality Audit Thresholds
-    stepping_audit_min_score: float  # Min boundary score (warning if below)
-    stepping_audit_overflow_tolerance: float  # Max removal/silence ratio
-    stepping_audit_large_correction_s: float  # Threshold for large corrections
+    stepping_audit_min_score: float = 12.0
+    stepping_audit_overflow_tolerance: float = 0.8
+    stepping_audit_large_correction_s: float = 3.0
 
     # Filtered Stepping Correction
-    stepping_correction_mode: str  # "full", "filtered", "strict", "disabled"
-    stepping_quality_mode: str  # "strict", "normal", "lenient", "custom"
-    stepping_min_chunks_per_cluster: int  # Min chunks per cluster
-    stepping_min_cluster_percentage: float  # Min % of total chunks
-    stepping_min_cluster_duration_s: float  # Min duration in seconds
-    stepping_min_match_quality_pct: float  # Min average match quality %
-    stepping_min_total_clusters: int  # Min number of total clusters
-    stepping_filtered_fallback: (
-        str  # "nearest", "interpolate", "uniform", "skip", "reject"
-    )
-    stepping_diagnostics_verbose: bool  # Enable detailed cluster reports
+    stepping_correction_mode: str = "full"
+    stepping_quality_mode: str = "normal"
+    stepping_min_chunks_per_cluster: int = 3
+    stepping_min_cluster_percentage: float = 5.0
+    stepping_min_cluster_duration_s: float = 20.0
+    stepping_min_match_quality_pct: float = 85.0
+    stepping_min_total_clusters: int = 2
+    stepping_filtered_fallback: str = "nearest"
+    stepping_diagnostics_verbose: bool = True
 
     # Segmented Audio QA
-    segmented_qa_threshold: float  # QA threshold %
-    segment_qa_chunk_count: int  # Number of QA chunks
-    segment_qa_min_accepted_chunks: int  # Min accepted QA chunks
+    segmented_qa_threshold: float = 85.0
+    segment_qa_chunk_count: int = 30
+    segment_qa_min_accepted_chunks: int = 28
 
     # =========================================================================
     # Sync Stability Settings
     # =========================================================================
-    sync_stability_enabled: bool  # Enable variance detection in correlation results
-    sync_stability_variance_threshold: (
-        float  # Max allowed variance in ms (0 = any variance flagged)
-    )
-    sync_stability_min_chunks: int  # Minimum chunks needed to calculate variance
-    sync_stability_outlier_mode: (
-        str  # "any" = flag any variance, "threshold" = use custom threshold
-    )
-    sync_stability_outlier_threshold: float  # Custom outlier threshold in ms
+    sync_stability_enabled: bool = True
+    sync_stability_variance_threshold: float = 0.0
+    sync_stability_min_chunks: int = 3
+    sync_stability_outlier_mode: str = "any"
+    sync_stability_outlier_threshold: float = 1.0
 
     # =========================================================================
     # Resampling Engine Settings
     # =========================================================================
-    segment_resample_engine: str  # "aresample", "rubberband"
-    segment_rb_pitch_correct: bool
-    segment_rb_transients: str  # "crisp", "mixed", "smooth"
-    segment_rb_smoother: bool
-    segment_rb_pitchq: bool
+    segment_resample_engine: str = "aresample"
+    segment_rb_pitch_correct: bool = False
+    segment_rb_transients: str = "crisp"
+    segment_rb_smoother: bool = True
+    segment_rb_pitchq: bool = True
 
     # =========================================================================
     # OCR Settings
     # =========================================================================
-    ocr_enabled: bool  # Enable OCR for image-based subtitles
-    ocr_engine: str  # "tesseract", "easyocr", "paddleocr"
-    ocr_language: str  # Tesseract language code e.g. "eng"
-    ocr_psm: int  # Page segmentation mode (default 7)
-    ocr_char_whitelist: str  # Characters to include
-    ocr_char_blacklist: str  # Characters to exclude
-    ocr_low_confidence_threshold: float  # Flag lines below this confidence
-    ocr_multi_pass: bool  # Enable multi-pass OCR
-    ocr_output_format: str  # "ass" or "srt"
+    ocr_enabled: bool = True
+    ocr_engine: str = "tesseract"
+    ocr_language: str = "eng"
+    ocr_psm: int = 7
+    ocr_char_whitelist: str = ""
+    ocr_char_blacklist: str = "|"
+    ocr_low_confidence_threshold: float = 60.0
+    ocr_multi_pass: bool = True
+    ocr_output_format: str = "ass"
 
     # OCR Preprocessing
-    ocr_preprocess_auto: bool  # Auto-detect optimal preprocessing
-    ocr_upscale_threshold: int  # Upscale if height < this (pixels)
-    ocr_target_height: int  # Target height after upscaling
-    ocr_border_size: int  # Border padding in pixels
-    ocr_force_binarization: bool  # Force binary thresholding
-    ocr_binarization_method: str  # "otsu", "adaptive", etc.
-    ocr_denoise: bool  # Apply denoising
-    ocr_save_debug_images: bool  # Save preprocessed images for debugging
+    ocr_preprocess_auto: bool = True
+    ocr_upscale_threshold: int = 40
+    ocr_target_height: int = 80
+    ocr_border_size: int = 5
+    ocr_force_binarization: bool = False
+    ocr_binarization_method: str = "otsu"
+    ocr_denoise: bool = False
+    ocr_save_debug_images: bool = False
 
     # OCR Output & Position
-    ocr_preserve_positions: bool  # Keep non-bottom subtitle positions
-    ocr_bottom_threshold: float  # Y% threshold for "bottom" detection
-    ocr_video_width: int  # Video width for position calculation
-    ocr_video_height: int  # Video height for position calculation
+    ocr_preserve_positions: bool = True
+    ocr_bottom_threshold: float = 75.0
+    ocr_video_width: int = 1920
+    ocr_video_height: int = 1080
 
     # OCR Post-Processing
-    ocr_cleanup_enabled: bool  # Enable pattern-based text cleanup
-    ocr_cleanup_normalize_ellipsis: bool  # Convert ... to ellipsis
-    ocr_custom_wordlist_path: str  # Path to custom wordlist
+    ocr_cleanup_enabled: bool = True
+    ocr_cleanup_normalize_ellipsis: bool = False
+    ocr_custom_wordlist_path: str = ""
 
     # OCR Debug & Runtime
-    ocr_debug_output: bool  # Save debug output by issue type
-    ocr_run_in_subprocess: bool  # Run OCR in subprocess to release memory
-    ocr_font_size_ratio: float  # Font size as % of PlayResY (5.80 = 28pt at 480p)
-    ocr_generate_report: bool  # Generate detailed OCR quality report
+    ocr_debug_output: bool = False
+    ocr_run_in_subprocess: bool = True
+    ocr_font_size_ratio: float = 5.80
+    ocr_generate_report: bool = True
+
+    # =========================================================================
+    # Class-level constants
+    # =========================================================================
+    # Path sentinel - fields with this default need runtime resolution
+    PATH_SENTINEL: ClassVar[str] = _PATH_SENTINEL
+
+    @classmethod
+    def get_defaults(cls) -> dict[str, Any]:
+        """Get all field defaults as a dictionary.
+
+        This is THE source of truth for defaults. AppConfig should use this
+        instead of maintaining a separate defaults dict.
+
+        Returns:
+            Dict mapping field names to their default values.
+            Enum defaults are converted to their string values.
+        """
+        result = {}
+        for f in fields(cls):
+            # Get the default value
+            if f.default is not dataclass_field_missing:
+                default = f.default
+            elif f.default_factory is not dataclass_field_missing:
+                default = f.default_factory()
+            else:
+                # No default - this shouldn't happen with our dataclass
+                default = None
+
+            # Convert enums to their string values for JSON compatibility
+            if hasattr(default, "value"):
+                result[f.name] = default.value
+            else:
+                result[f.name] = default
+
+        return result
+
+    @classmethod
+    def get_field_names(cls) -> set[str]:
+        """Get all field names as a set.
+
+        Useful for validation - checking if a key exists in settings.
+        """
+        return {f.name for f in fields(cls)}
 
     @classmethod
     def from_config(cls, cfg: dict) -> AppSettings:
@@ -426,467 +468,294 @@ class AppSettings:
             "analysis_lang_sec"
         )
 
+        # Get defaults for any missing values
+        defaults = cls.get_defaults()
+
+        def get_val(key: str, converter=None):
+            """Get value from cfg with fallback to defaults."""
+            val = cfg.get(key, defaults.get(key))
+            if converter and val is not None:
+                return converter(val)
+            return val
+
         return cls(
             # Path Settings
-            output_folder=cfg.get("output_folder", ""),
-            temp_root=cfg.get("temp_root", ""),
-            logs_folder=cfg.get("logs_folder", ""),
-            videodiff_path=cfg.get("videodiff_path", ""),
-            fonts_directory=str(cfg.get("fonts_directory", "")),
-            last_ref_path=str(cfg.get("last_ref_path", "")),
-            last_sec_path=str(cfg.get("last_sec_path", "")),
-            last_ter_path=str(cfg.get("last_ter_path", "")),
-            source_separation_model_dir=str(cfg.get("source_separation_model_dir", "")),
+            output_folder=str(get_val("output_folder") or ""),
+            temp_root=str(get_val("temp_root") or ""),
+            logs_folder=str(get_val("logs_folder") or ""),
+            videodiff_path=str(get_val("videodiff_path") or ""),
+            fonts_directory=str(get_val("fonts_directory") or ""),
+            last_ref_path=str(get_val("last_ref_path") or ""),
+            last_sec_path=str(get_val("last_sec_path") or ""),
+            last_ter_path=str(get_val("last_ter_path") or ""),
+            source_separation_model_dir=str(get_val("source_separation_model_dir") or ""),
             # Analysis Settings
-            analysis_mode=AnalysisMode(cfg.get("analysis_mode", "Audio Correlation")),
+            analysis_mode=AnalysisMode(get_val("analysis_mode") or "Audio Correlation"),
             analysis_lang_source1=analysis_lang_source1 or None,
             analysis_lang_others=analysis_lang_others or None,
-            scan_chunk_count=int(cfg.get("scan_chunk_count", 10)),
-            scan_chunk_duration=int(cfg.get("scan_chunk_duration", 15)),
-            min_match_pct=float(cfg.get("min_match_pct", 5.0)),
-            videodiff_error_min=float(cfg.get("videodiff_error_min", 0.0)),
-            videodiff_error_max=float(cfg.get("videodiff_error_max", 100.0)),
+            scan_chunk_count=int(get_val("scan_chunk_count")),
+            scan_chunk_duration=int(get_val("scan_chunk_duration")),
+            min_match_pct=float(get_val("min_match_pct")),
+            videodiff_error_min=float(get_val("videodiff_error_min")),
+            videodiff_error_max=float(get_val("videodiff_error_max")),
             # Chapter Settings
-            rename_chapters=bool(cfg.get("rename_chapters", False)),
-            snap_chapters=bool(cfg.get("snap_chapters", False)),
-            snap_mode=SnapMode(cfg.get("snap_mode", "previous")),
-            snap_threshold_ms=int(cfg.get("snap_threshold_ms", 250)),
-            snap_starts_only=bool(cfg.get("snap_starts_only", True)),
+            rename_chapters=bool(get_val("rename_chapters")),
+            snap_chapters=bool(get_val("snap_chapters")),
+            snap_mode=SnapMode(get_val("snap_mode") or "previous"),
+            snap_threshold_ms=int(get_val("snap_threshold_ms")),
+            snap_starts_only=bool(get_val("snap_starts_only")),
             # Muxing Settings
-            apply_dialog_norm_gain=bool(cfg.get("apply_dialog_norm_gain", False)),
-            disable_track_statistics_tags=bool(
-                cfg.get("disable_track_statistics_tags", False)
-            ),
-            disable_header_compression=bool(
-                cfg.get("disable_header_compression", True)
-            ),
+            apply_dialog_norm_gain=bool(get_val("apply_dialog_norm_gain")),
+            disable_track_statistics_tags=bool(get_val("disable_track_statistics_tags")),
+            disable_header_compression=bool(get_val("disable_header_compression")),
             # Post-Mux Settings
-            post_mux_normalize_timestamps=bool(
-                cfg.get("post_mux_normalize_timestamps", False)
-            ),
-            post_mux_strip_tags=bool(cfg.get("post_mux_strip_tags", False)),
+            post_mux_normalize_timestamps=bool(get_val("post_mux_normalize_timestamps")),
+            post_mux_strip_tags=bool(get_val("post_mux_strip_tags")),
             # Logging Settings
-            log_compact=bool(cfg.get("log_compact", True)),
-            log_autoscroll=bool(cfg.get("log_autoscroll", True)),
-            log_error_tail=int(cfg.get("log_error_tail", 20)),
-            log_tail_lines=int(cfg.get("log_tail_lines", 0)),
-            log_progress_step=int(cfg.get("log_progress_step", 20)),
-            log_show_options_pretty=bool(cfg.get("log_show_options_pretty", False)),
-            log_show_options_json=bool(cfg.get("log_show_options_json", False)),
-            log_audio_drift=bool(cfg.get("log_audio_drift", True)),
-            archive_logs=bool(cfg.get("archive_logs", True)),
+            log_compact=bool(get_val("log_compact")),
+            log_autoscroll=bool(get_val("log_autoscroll")),
+            log_error_tail=int(get_val("log_error_tail")),
+            log_tail_lines=int(get_val("log_tail_lines")),
+            log_progress_step=int(get_val("log_progress_step")),
+            log_show_options_pretty=bool(get_val("log_show_options_pretty")),
+            log_show_options_json=bool(get_val("log_show_options_json")),
+            log_audio_drift=bool(get_val("log_audio_drift")),
+            archive_logs=bool(get_val("archive_logs")),
             # Timing Sync Settings
-            auto_apply_strict=bool(cfg.get("auto_apply_strict", False)),
-            sync_mode=str(cfg.get("sync_mode", "positive_only")),
+            auto_apply_strict=bool(get_val("auto_apply_strict")),
+            sync_mode=str(get_val("sync_mode")),
             # Timing Fix Settings
-            timing_fix_enabled=bool(cfg.get("timing_fix_enabled", False)),
-            timing_fix_overlaps=bool(cfg.get("timing_fix_overlaps", True)),
-            timing_overlap_min_gap_ms=int(cfg.get("timing_overlap_min_gap_ms", 1)),
-            timing_fix_short_durations=bool(
-                cfg.get("timing_fix_short_durations", True)
-            ),
-            timing_min_duration_ms=int(cfg.get("timing_min_duration_ms", 500)),
-            timing_fix_long_durations=bool(cfg.get("timing_fix_long_durations", True)),
-            timing_max_cps=float(cfg.get("timing_max_cps", 20.0)),
+            timing_fix_enabled=bool(get_val("timing_fix_enabled")),
+            timing_fix_overlaps=bool(get_val("timing_fix_overlaps")),
+            timing_overlap_min_gap_ms=int(get_val("timing_overlap_min_gap_ms")),
+            timing_fix_short_durations=bool(get_val("timing_fix_short_durations")),
+            timing_min_duration_ms=int(get_val("timing_min_duration_ms")),
+            timing_fix_long_durations=bool(get_val("timing_fix_long_durations")),
+            timing_max_cps=float(get_val("timing_max_cps")),
             # Segmented Audio Correction
-            segmented_enabled=bool(cfg.get("segmented_enabled", False)),
+            segmented_enabled=bool(get_val("segmented_enabled")),
             # Subtitle Sync Settings
-            subtitle_sync_mode=str(cfg.get("subtitle_sync_mode", "time-based")),
-            time_based_use_raw_values=bool(cfg.get("time_based_use_raw_values", False)),
-            time_based_bypass_subtitle_data=bool(
-                cfg.get("time_based_bypass_subtitle_data", True)
-            ),
-            subtitle_rounding=str(cfg.get("subtitle_rounding", "floor")),
-            subtitle_target_fps=float(cfg.get("subtitle_target_fps", 0.0)),
-            videotimestamps_snap_mode=str(
-                cfg.get("videotimestamps_snap_mode", "start")
-            ),
-            videotimestamps_rounding=str(cfg.get("videotimestamps_rounding", "round")),
+            subtitle_sync_mode=str(get_val("subtitle_sync_mode")),
+            time_based_use_raw_values=bool(get_val("time_based_use_raw_values")),
+            time_based_bypass_subtitle_data=bool(get_val("time_based_bypass_subtitle_data")),
+            subtitle_rounding=str(get_val("subtitle_rounding")),
+            subtitle_target_fps=float(get_val("subtitle_target_fps")),
+            videotimestamps_snap_mode=str(get_val("videotimestamps_snap_mode")),
+            videotimestamps_rounding=str(get_val("videotimestamps_rounding")),
             # Frame Matching Settings
-            frame_hash_algorithm=str(cfg.get("frame_hash_algorithm", "dhash")),
-            frame_hash_size=int(cfg.get("frame_hash_size", 8)),
-            frame_hash_threshold=int(cfg.get("frame_hash_threshold", 5)),
-            frame_window_radius=int(cfg.get("frame_window_radius", 5)),
-            frame_search_range_ms=int(cfg.get("frame_search_range_ms", 2000)),
-            frame_agreement_tolerance_ms=int(
-                cfg.get("frame_agreement_tolerance_ms", 100)
-            ),
-            frame_use_vapoursynth=bool(cfg.get("frame_use_vapoursynth", True)),
-            frame_comparison_method=str(cfg.get("frame_comparison_method", "hash")),
+            frame_hash_algorithm=str(get_val("frame_hash_algorithm")),
+            frame_hash_size=int(get_val("frame_hash_size")),
+            frame_hash_threshold=int(get_val("frame_hash_threshold")),
+            frame_window_radius=int(get_val("frame_window_radius")),
+            frame_search_range_ms=int(get_val("frame_search_range_ms")),
+            frame_agreement_tolerance_ms=int(get_val("frame_agreement_tolerance_ms")),
+            frame_use_vapoursynth=bool(get_val("frame_use_vapoursynth")),
+            frame_comparison_method=str(get_val("frame_comparison_method")),
             # Correlation Snap Settings
-            correlation_snap_fallback_mode=str(
-                cfg.get("correlation_snap_fallback_mode", "snap-to-frame")
-            ),
-            correlation_snap_use_scene_changes=bool(
-                cfg.get("correlation_snap_use_scene_changes", True)
-            ),
+            correlation_snap_fallback_mode=str(get_val("correlation_snap_fallback_mode")),
+            correlation_snap_use_scene_changes=bool(get_val("correlation_snap_use_scene_changes")),
             # Correlation-Guided Frame Anchor Settings
-            corr_anchor_fallback_mode=str(
-                cfg.get("corr_anchor_fallback_mode", "use-correlation")
-            ),
-            corr_anchor_anchor_positions=tuple(
-                cfg.get("corr_anchor_anchor_positions", [10, 50, 90])
-            ),
-            corr_anchor_refine_per_line=bool(
-                cfg.get("corr_anchor_refine_per_line", False)
-            ),
-            corr_anchor_refine_workers=int(cfg.get("corr_anchor_refine_workers", 4)),
+            corr_anchor_fallback_mode=str(get_val("corr_anchor_fallback_mode")),
+            corr_anchor_anchor_positions=tuple(get_val("corr_anchor_anchor_positions")),
+            corr_anchor_refine_per_line=bool(get_val("corr_anchor_refine_per_line")),
+            corr_anchor_refine_workers=int(get_val("corr_anchor_refine_workers")),
             # Subtitle-Anchored Frame Snap Settings
-            sub_anchor_fallback_mode=str(cfg.get("sub_anchor_fallback_mode", "abort")),
+            sub_anchor_fallback_mode=str(get_val("sub_anchor_fallback_mode")),
             # Duration Align Settings
-            duration_align_verify_with_frames=bool(
-                cfg.get("duration_align_verify_with_frames", False)
-            ),
-            duration_align_validate=bool(cfg.get("duration_align_validate", True)),
-            duration_align_fallback_mode=str(
-                cfg.get("duration_align_fallback_mode", "duration-offset")
-            ),
-            duration_align_validate_points=int(
-                cfg.get("duration_align_validate_points", 3)
-            ),
-            duration_align_strictness=int(cfg.get("duration_align_strictness", 80)),
+            duration_align_verify_with_frames=bool(get_val("duration_align_verify_with_frames")),
+            duration_align_validate=bool(get_val("duration_align_validate")),
+            duration_align_fallback_mode=str(get_val("duration_align_fallback_mode")),
+            duration_align_validate_points=int(get_val("duration_align_validate_points")),
+            duration_align_strictness=int(get_val("duration_align_strictness")),
             duration_align_skip_validation_generated_tracks=bool(
-                cfg.get("duration_align_skip_validation_generated_tracks", True)
+                get_val("duration_align_skip_validation_generated_tracks")
             ),
             # Frame Lock Settings
-            frame_lock_submillisecond_precision=bool(
-                cfg.get("frame_lock_submillisecond_precision", False)
-            ),
+            frame_lock_submillisecond_precision=bool(get_val("frame_lock_submillisecond_precision")),
             # Video-Verified Sync Settings
-            video_verified_zero_check_frames=int(
-                cfg.get("video_verified_zero_check_frames", 3)
-            ),
-            video_verified_min_quality_advantage=float(
-                cfg.get("video_verified_min_quality_advantage", 0.1)
-            ),
-            video_verified_num_checkpoints=int(
-                cfg.get("video_verified_num_checkpoints", 5)
-            ),
-            video_verified_search_range_frames=int(
-                cfg.get("video_verified_search_range_frames", 3)
-            ),
-            video_verified_sequence_length=int(
-                cfg.get("video_verified_sequence_length", 10)
-            ),
-            video_verified_use_pts_precision=bool(
-                cfg.get("video_verified_use_pts_precision", False)
-            ),
-            video_verified_frame_audit=bool(
-                cfg.get("video_verified_frame_audit", False)
-            ),
+            video_verified_zero_check_frames=int(get_val("video_verified_zero_check_frames")),
+            video_verified_min_quality_advantage=float(get_val("video_verified_min_quality_advantage")),
+            video_verified_num_checkpoints=int(get_val("video_verified_num_checkpoints")),
+            video_verified_search_range_frames=int(get_val("video_verified_search_range_frames")),
+            video_verified_sequence_length=int(get_val("video_verified_sequence_length")),
+            video_verified_use_pts_precision=bool(get_val("video_verified_use_pts_precision")),
+            video_verified_frame_audit=bool(get_val("video_verified_frame_audit")),
             # Interlaced Video Settings
-            interlaced_handling_enabled=bool(
-                cfg.get("interlaced_handling_enabled", False)
-            ),
-            interlaced_force_mode=str(cfg.get("interlaced_force_mode", "auto")),
-            interlaced_num_checkpoints=int(cfg.get("interlaced_num_checkpoints", 5)),
-            interlaced_search_range_frames=int(
-                cfg.get("interlaced_search_range_frames", 5)
-            ),
-            interlaced_hash_algorithm=str(
-                cfg.get("interlaced_hash_algorithm", "ahash")
-            ),
-            interlaced_hash_size=int(cfg.get("interlaced_hash_size", 8)),
-            interlaced_hash_threshold=int(cfg.get("interlaced_hash_threshold", 25)),
-            interlaced_comparison_method=str(
-                cfg.get("interlaced_comparison_method", "ssim")
-            ),
-            interlaced_fallback_to_audio=bool(
-                cfg.get("interlaced_fallback_to_audio", True)
-            ),
-            interlaced_sequence_length=int(cfg.get("interlaced_sequence_length", 5)),
-            interlaced_deinterlace_method=str(
-                cfg.get("interlaced_deinterlace_method", "bwdif")
-            ),
-            interlaced_use_ivtc=bool(cfg.get("interlaced_use_ivtc", False)),
+            interlaced_handling_enabled=bool(get_val("interlaced_handling_enabled")),
+            interlaced_force_mode=str(get_val("interlaced_force_mode")),
+            interlaced_num_checkpoints=int(get_val("interlaced_num_checkpoints")),
+            interlaced_search_range_frames=int(get_val("interlaced_search_range_frames")),
+            interlaced_hash_algorithm=str(get_val("interlaced_hash_algorithm")),
+            interlaced_hash_size=int(get_val("interlaced_hash_size")),
+            interlaced_hash_threshold=int(get_val("interlaced_hash_threshold")),
+            interlaced_comparison_method=str(get_val("interlaced_comparison_method")),
+            interlaced_fallback_to_audio=bool(get_val("interlaced_fallback_to_audio")),
+            interlaced_sequence_length=int(get_val("interlaced_sequence_length")),
+            interlaced_deinterlace_method=str(get_val("interlaced_deinterlace_method")),
+            interlaced_use_ivtc=bool(get_val("interlaced_use_ivtc")),
             # Analysis/Correlation Settings
-            source_separation_mode=str(cfg.get("source_separation_mode", "none")),
-            source_separation_model=str(cfg.get("source_separation_model", "default")),
-            source_separation_device=str(cfg.get("source_separation_device", "auto")),
-            source_separation_timeout=int(cfg.get("source_separation_timeout", 900)),
-            filtering_method=str(
-                cfg.get("filtering_method", "Dialogue Band-Pass Filter")
-            ),
-            correlation_method=str(
-                cfg.get("correlation_method", "Phase Correlation (GCC-PHAT)")
-            ),
-            correlation_method_source_separated=str(
-                cfg.get(
-                    "correlation_method_source_separated",
-                    "Phase Correlation (GCC-PHAT)",
-                )
-            ),
+            source_separation_mode=str(get_val("source_separation_mode")),
+            source_separation_model=str(get_val("source_separation_model")),
+            source_separation_device=str(get_val("source_separation_device")),
+            source_separation_timeout=int(get_val("source_separation_timeout")),
+            filtering_method=str(get_val("filtering_method")),
+            correlation_method=str(get_val("correlation_method")),
+            correlation_method_source_separated=str(get_val("correlation_method_source_separated")),
             # Delay Selection Settings
-            delay_selection_mode=str(
-                cfg.get("delay_selection_mode", "Mode (Most Common)")
-            ),
-            delay_selection_mode_source_separated=str(
-                cfg.get("delay_selection_mode_source_separated", "Mode (Clustered)")
-            ),
-            min_accepted_chunks=int(cfg.get("min_accepted_chunks", 3)),
-            first_stable_min_chunks=int(cfg.get("first_stable_min_chunks", 3)),
-            first_stable_skip_unstable=bool(
-                cfg.get("first_stable_skip_unstable", True)
-            ),
-            early_cluster_window=int(cfg.get("early_cluster_window", 10)),
-            early_cluster_threshold=int(cfg.get("early_cluster_threshold", 5)),
+            delay_selection_mode=str(get_val("delay_selection_mode")),
+            delay_selection_mode_source_separated=str(get_val("delay_selection_mode_source_separated")),
+            min_accepted_chunks=int(get_val("min_accepted_chunks")),
+            first_stable_min_chunks=int(get_val("first_stable_min_chunks")),
+            first_stable_skip_unstable=bool(get_val("first_stable_skip_unstable")),
+            early_cluster_window=int(get_val("early_cluster_window")),
+            early_cluster_threshold=int(get_val("early_cluster_threshold")),
             # Multi-Correlation Comparison
-            multi_correlation_enabled=bool(cfg.get("multi_correlation_enabled", False)),
-            multi_corr_scc=bool(cfg.get("multi_corr_scc", True)),
-            multi_corr_gcc_phat=bool(cfg.get("multi_corr_gcc_phat", True)),
-            multi_corr_onset=bool(cfg.get("multi_corr_onset", False)),
-            multi_corr_gcc_scot=bool(cfg.get("multi_corr_gcc_scot", False)),
-            multi_corr_gcc_whiten=bool(cfg.get("multi_corr_gcc_whiten", False)),
-            multi_corr_dtw=bool(cfg.get("multi_corr_dtw", False)),
-            multi_corr_spectrogram=bool(cfg.get("multi_corr_spectrogram", False)),
+            multi_correlation_enabled=bool(get_val("multi_correlation_enabled")),
+            multi_corr_scc=bool(get_val("multi_corr_scc")),
+            multi_corr_gcc_phat=bool(get_val("multi_corr_gcc_phat")),
+            multi_corr_onset=bool(get_val("multi_corr_onset")),
+            multi_corr_gcc_scot=bool(get_val("multi_corr_gcc_scot")),
+            multi_corr_gcc_whiten=bool(get_val("multi_corr_gcc_whiten")),
+            multi_corr_dtw=bool(get_val("multi_corr_dtw")),
+            multi_corr_spectrogram=bool(get_val("multi_corr_spectrogram")),
             # DSP & Filtering
-            filter_bandpass_lowcut_hz=float(
-                cfg.get("filter_bandpass_lowcut_hz", 300.0)
-            ),
-            filter_bandpass_highcut_hz=float(
-                cfg.get("filter_bandpass_highcut_hz", 3400.0)
-            ),
-            filter_bandpass_order=int(cfg.get("filter_bandpass_order", 5)),
-            filter_lowpass_taps=int(cfg.get("filter_lowpass_taps", 101)),
-            scan_start_percentage=float(cfg.get("scan_start_percentage", 5.0)),
-            scan_end_percentage=float(cfg.get("scan_end_percentage", 95.0)),
-            use_soxr=bool(cfg.get("use_soxr", False)),
-            audio_decode_native=bool(cfg.get("audio_decode_native", False)),
-            audio_peak_fit=bool(cfg.get("audio_peak_fit", False)),
-            audio_bandlimit_hz=int(cfg.get("audio_bandlimit_hz", 0)),
+            filter_bandpass_lowcut_hz=float(get_val("filter_bandpass_lowcut_hz")),
+            filter_bandpass_highcut_hz=float(get_val("filter_bandpass_highcut_hz")),
+            filter_bandpass_order=int(get_val("filter_bandpass_order")),
+            filter_lowpass_taps=int(get_val("filter_lowpass_taps")),
+            scan_start_percentage=float(get_val("scan_start_percentage")),
+            scan_end_percentage=float(get_val("scan_end_percentage")),
+            use_soxr=bool(get_val("use_soxr")),
+            audio_decode_native=bool(get_val("audio_decode_native")),
+            audio_peak_fit=bool(get_val("audio_peak_fit")),
+            audio_bandlimit_hz=int(get_val("audio_bandlimit_hz")),
             # Drift Detection Settings
-            detection_dbscan_epsilon_ms=float(
-                cfg.get("detection_dbscan_epsilon_ms", 20.0)
-            ),
-            detection_dbscan_min_samples=int(
-                cfg.get("detection_dbscan_min_samples", 2)
-            ),
-            drift_detection_r2_threshold=float(
-                cfg.get("drift_detection_r2_threshold", 0.90)
-            ),
-            drift_detection_r2_threshold_lossless=float(
-                cfg.get("drift_detection_r2_threshold_lossless", 0.95)
-            ),
-            drift_detection_slope_threshold_lossy=float(
-                cfg.get("drift_detection_slope_threshold_lossy", 0.7)
-            ),
-            drift_detection_slope_threshold_lossless=float(
-                cfg.get("drift_detection_slope_threshold_lossless", 0.2)
-            ),
+            detection_dbscan_epsilon_ms=float(get_val("detection_dbscan_epsilon_ms")),
+            detection_dbscan_min_samples=int(get_val("detection_dbscan_min_samples")),
+            drift_detection_r2_threshold=float(get_val("drift_detection_r2_threshold")),
+            drift_detection_r2_threshold_lossless=float(get_val("drift_detection_r2_threshold_lossless")),
+            drift_detection_slope_threshold_lossy=float(get_val("drift_detection_slope_threshold_lossy")),
+            drift_detection_slope_threshold_lossless=float(get_val("drift_detection_slope_threshold_lossless")),
             # Stepping Correction Settings
-            stepping_adjust_subtitles=bool(cfg.get("stepping_adjust_subtitles", True)),
-            stepping_adjust_subtitles_no_audio=bool(
-                cfg.get("stepping_adjust_subtitles_no_audio", True)
-            ),
-            stepping_boundary_mode=str(cfg.get("stepping_boundary_mode", "start")),
-            stepping_first_stable_min_chunks=int(
-                cfg.get("stepping_first_stable_min_chunks", 3)
-            ),
-            stepping_first_stable_skip_unstable=bool(
-                cfg.get("stepping_first_stable_skip_unstable", True)
-            ),
+            stepping_adjust_subtitles=bool(get_val("stepping_adjust_subtitles")),
+            stepping_adjust_subtitles_no_audio=bool(get_val("stepping_adjust_subtitles_no_audio")),
+            stepping_boundary_mode=str(get_val("stepping_boundary_mode")),
+            stepping_first_stable_min_chunks=int(get_val("stepping_first_stable_min_chunks")),
+            stepping_first_stable_skip_unstable=bool(get_val("stepping_first_stable_skip_unstable")),
             # Segment Scan & Correction
-            segment_triage_std_dev_ms=int(cfg.get("segment_triage_std_dev_ms", 50)),
-            segment_coarse_chunk_s=int(cfg.get("segment_coarse_chunk_s", 15)),
-            segment_coarse_step_s=int(cfg.get("segment_coarse_step_s", 60)),
-            segment_search_locality_s=int(cfg.get("segment_search_locality_s", 10)),
-            segment_fine_chunk_s=float(cfg.get("segment_fine_chunk_s", 2.0)),
-            segment_fine_iterations=int(cfg.get("segment_fine_iterations", 10)),
-            segment_min_confidence_ratio=float(
-                cfg.get("segment_min_confidence_ratio", 5.0)
-            ),
+            segment_triage_std_dev_ms=int(get_val("segment_triage_std_dev_ms")),
+            segment_coarse_chunk_s=int(get_val("segment_coarse_chunk_s")),
+            segment_coarse_step_s=int(get_val("segment_coarse_step_s")),
+            segment_search_locality_s=int(get_val("segment_search_locality_s")),
+            segment_fine_chunk_s=float(get_val("segment_fine_chunk_s")),
+            segment_fine_iterations=int(get_val("segment_fine_iterations")),
+            segment_min_confidence_ratio=float(get_val("segment_min_confidence_ratio")),
             # Segment Drift Detection
-            segment_drift_r2_threshold=float(
-                cfg.get("segment_drift_r2_threshold", 0.75)
-            ),
-            segment_drift_slope_threshold=float(
-                cfg.get("segment_drift_slope_threshold", 0.7)
-            ),
-            segment_drift_outlier_sensitivity=float(
-                cfg.get("segment_drift_outlier_sensitivity", 1.5)
-            ),
-            segment_drift_scan_buffer_pct=float(
-                cfg.get("segment_drift_scan_buffer_pct", 2.0)
-            ),
+            segment_drift_r2_threshold=float(get_val("segment_drift_r2_threshold")),
+            segment_drift_slope_threshold=float(get_val("segment_drift_slope_threshold")),
+            segment_drift_outlier_sensitivity=float(get_val("segment_drift_outlier_sensitivity")),
+            segment_drift_scan_buffer_pct=float(get_val("segment_drift_scan_buffer_pct")),
             # Stepping Scan Range
-            stepping_scan_start_percentage=float(
-                cfg.get("stepping_scan_start_percentage", 5.0)
-            ),
-            stepping_scan_end_percentage=float(
-                cfg.get("stepping_scan_end_percentage", 99.0)
-            ),
+            stepping_scan_start_percentage=float(get_val("stepping_scan_start_percentage")),
+            stepping_scan_end_percentage=float(get_val("stepping_scan_end_percentage")),
             # Silence Snapping
-            stepping_snap_to_silence=bool(cfg.get("stepping_snap_to_silence", True)),
-            stepping_silence_detection_method=str(
-                cfg.get("stepping_silence_detection_method", "smart_fusion")
-            ),
-            stepping_silence_search_window_s=float(
-                cfg.get("stepping_silence_search_window_s", 5.0)
-            ),
-            stepping_silence_threshold_db=float(
-                cfg.get("stepping_silence_threshold_db", -40.0)
-            ),
-            stepping_silence_min_duration_ms=float(
-                cfg.get("stepping_silence_min_duration_ms", 100.0)
-            ),
-            stepping_ffmpeg_silence_noise=float(
-                cfg.get("stepping_ffmpeg_silence_noise", -40.0)
-            ),
-            stepping_ffmpeg_silence_duration=float(
-                cfg.get("stepping_ffmpeg_silence_duration", 0.1)
-            ),
+            stepping_snap_to_silence=bool(get_val("stepping_snap_to_silence")),
+            stepping_silence_detection_method=str(get_val("stepping_silence_detection_method")),
+            stepping_silence_search_window_s=float(get_val("stepping_silence_search_window_s")),
+            stepping_silence_threshold_db=float(get_val("stepping_silence_threshold_db")),
+            stepping_silence_min_duration_ms=float(get_val("stepping_silence_min_duration_ms")),
+            stepping_ffmpeg_silence_noise=float(get_val("stepping_ffmpeg_silence_noise")),
+            stepping_ffmpeg_silence_duration=float(get_val("stepping_ffmpeg_silence_duration")),
             # VAD (Voice Activity Detection)
-            stepping_vad_enabled=bool(cfg.get("stepping_vad_enabled", True)),
-            stepping_vad_aggressiveness=int(cfg.get("stepping_vad_aggressiveness", 2)),
-            stepping_vad_avoid_speech=bool(cfg.get("stepping_vad_avoid_speech", True)),
-            stepping_vad_frame_duration_ms=int(
-                cfg.get("stepping_vad_frame_duration_ms", 30)
-            ),
+            stepping_vad_enabled=bool(get_val("stepping_vad_enabled")),
+            stepping_vad_aggressiveness=int(get_val("stepping_vad_aggressiveness")),
+            stepping_vad_avoid_speech=bool(get_val("stepping_vad_avoid_speech")),
+            stepping_vad_frame_duration_ms=int(get_val("stepping_vad_frame_duration_ms")),
             # Transient Detection
-            stepping_transient_detection_enabled=bool(
-                cfg.get("stepping_transient_detection_enabled", True)
-            ),
-            stepping_transient_threshold=float(
-                cfg.get("stepping_transient_threshold", 8.0)
-            ),
-            stepping_transient_avoid_window_ms=int(
-                cfg.get("stepping_transient_avoid_window_ms", 50)
-            ),
+            stepping_transient_detection_enabled=bool(get_val("stepping_transient_detection_enabled")),
+            stepping_transient_threshold=float(get_val("stepping_transient_threshold")),
+            stepping_transient_avoid_window_ms=int(get_val("stepping_transient_avoid_window_ms")),
             # Smart Fusion Weights
-            stepping_fusion_weight_silence=int(
-                cfg.get("stepping_fusion_weight_silence", 10)
-            ),
-            stepping_fusion_weight_no_speech=int(
-                cfg.get("stepping_fusion_weight_no_speech", 8)
-            ),
-            stepping_fusion_weight_scene_align=int(
-                cfg.get("stepping_fusion_weight_scene_align", 5)
-            ),
-            stepping_fusion_weight_duration=int(
-                cfg.get("stepping_fusion_weight_duration", 2)
-            ),
-            stepping_fusion_weight_no_transient=int(
-                cfg.get("stepping_fusion_weight_no_transient", 3)
-            ),
+            stepping_fusion_weight_silence=int(get_val("stepping_fusion_weight_silence")),
+            stepping_fusion_weight_no_speech=int(get_val("stepping_fusion_weight_no_speech")),
+            stepping_fusion_weight_scene_align=int(get_val("stepping_fusion_weight_scene_align")),
+            stepping_fusion_weight_duration=int(get_val("stepping_fusion_weight_duration")),
+            stepping_fusion_weight_no_transient=int(get_val("stepping_fusion_weight_no_transient")),
             # Video-Aware Boundary Snapping
-            stepping_snap_to_video_frames=bool(
-                cfg.get("stepping_snap_to_video_frames", False)
-            ),
-            stepping_video_snap_mode=str(cfg.get("stepping_video_snap_mode", "scenes")),
-            stepping_video_snap_max_offset_s=float(
-                cfg.get("stepping_video_snap_max_offset_s", 2.0)
-            ),
-            stepping_video_scene_threshold=float(
-                cfg.get("stepping_video_scene_threshold", 0.4)
-            ),
+            stepping_snap_to_video_frames=bool(get_val("stepping_snap_to_video_frames")),
+            stepping_video_snap_mode=str(get_val("stepping_video_snap_mode")),
+            stepping_video_snap_max_offset_s=float(get_val("stepping_video_snap_max_offset_s")),
+            stepping_video_scene_threshold=float(get_val("stepping_video_scene_threshold")),
             # Fill Mode & Content
-            stepping_fill_mode=str(cfg.get("stepping_fill_mode", "silence")),
-            stepping_content_correlation_threshold=float(
-                cfg.get("stepping_content_correlation_threshold", 0.5)
-            ),
-            stepping_content_search_window_s=float(
-                cfg.get("stepping_content_search_window_s", 5.0)
-            ),
+            stepping_fill_mode=str(get_val("stepping_fill_mode")),
+            stepping_content_correlation_threshold=float(get_val("stepping_content_correlation_threshold")),
+            stepping_content_search_window_s=float(get_val("stepping_content_search_window_s")),
             # Track Naming
-            stepping_corrected_track_label=str(
-                cfg.get("stepping_corrected_track_label", "")
-            ),
-            stepping_preserved_track_label=str(
-                cfg.get("stepping_preserved_track_label", "")
-            ),
+            stepping_corrected_track_label=str(get_val("stepping_corrected_track_label")),
+            stepping_preserved_track_label=str(get_val("stepping_preserved_track_label")),
             # Quality Audit Thresholds
-            stepping_audit_min_score=float(cfg.get("stepping_audit_min_score", 12.0)),
-            stepping_audit_overflow_tolerance=float(
-                cfg.get("stepping_audit_overflow_tolerance", 0.8)
-            ),
-            stepping_audit_large_correction_s=float(
-                cfg.get("stepping_audit_large_correction_s", 3.0)
-            ),
+            stepping_audit_min_score=float(get_val("stepping_audit_min_score")),
+            stepping_audit_overflow_tolerance=float(get_val("stepping_audit_overflow_tolerance")),
+            stepping_audit_large_correction_s=float(get_val("stepping_audit_large_correction_s")),
             # Filtered Stepping Correction
-            stepping_correction_mode=str(cfg.get("stepping_correction_mode", "full")),
-            stepping_quality_mode=str(cfg.get("stepping_quality_mode", "normal")),
-            stepping_min_chunks_per_cluster=int(
-                cfg.get("stepping_min_chunks_per_cluster", 3)
-            ),
-            stepping_min_cluster_percentage=float(
-                cfg.get("stepping_min_cluster_percentage", 5.0)
-            ),
-            stepping_min_cluster_duration_s=float(
-                cfg.get("stepping_min_cluster_duration_s", 20.0)
-            ),
-            stepping_min_match_quality_pct=float(
-                cfg.get("stepping_min_match_quality_pct", 85.0)
-            ),
-            stepping_min_total_clusters=int(cfg.get("stepping_min_total_clusters", 2)),
-            stepping_filtered_fallback=str(
-                cfg.get("stepping_filtered_fallback", "nearest")
-            ),
-            stepping_diagnostics_verbose=bool(
-                cfg.get("stepping_diagnostics_verbose", True)
-            ),
+            stepping_correction_mode=str(get_val("stepping_correction_mode")),
+            stepping_quality_mode=str(get_val("stepping_quality_mode")),
+            stepping_min_chunks_per_cluster=int(get_val("stepping_min_chunks_per_cluster")),
+            stepping_min_cluster_percentage=float(get_val("stepping_min_cluster_percentage")),
+            stepping_min_cluster_duration_s=float(get_val("stepping_min_cluster_duration_s")),
+            stepping_min_match_quality_pct=float(get_val("stepping_min_match_quality_pct")),
+            stepping_min_total_clusters=int(get_val("stepping_min_total_clusters")),
+            stepping_filtered_fallback=str(get_val("stepping_filtered_fallback")),
+            stepping_diagnostics_verbose=bool(get_val("stepping_diagnostics_verbose")),
             # Segmented Audio QA
-            segmented_qa_threshold=float(cfg.get("segmented_qa_threshold", 85.0)),
-            segment_qa_chunk_count=int(cfg.get("segment_qa_chunk_count", 30)),
-            segment_qa_min_accepted_chunks=int(
-                cfg.get("segment_qa_min_accepted_chunks", 28)
-            ),
+            segmented_qa_threshold=float(get_val("segmented_qa_threshold")),
+            segment_qa_chunk_count=int(get_val("segment_qa_chunk_count")),
+            segment_qa_min_accepted_chunks=int(get_val("segment_qa_min_accepted_chunks")),
             # Sync Stability Settings
-            sync_stability_enabled=bool(cfg.get("sync_stability_enabled", True)),
-            sync_stability_variance_threshold=float(
-                cfg.get("sync_stability_variance_threshold", 0.0)
-            ),
-            sync_stability_min_chunks=int(cfg.get("sync_stability_min_chunks", 3)),
-            sync_stability_outlier_mode=str(
-                cfg.get("sync_stability_outlier_mode", "any")
-            ),
-            sync_stability_outlier_threshold=float(
-                cfg.get("sync_stability_outlier_threshold", 1.0)
-            ),
+            sync_stability_enabled=bool(get_val("sync_stability_enabled")),
+            sync_stability_variance_threshold=float(get_val("sync_stability_variance_threshold")),
+            sync_stability_min_chunks=int(get_val("sync_stability_min_chunks")),
+            sync_stability_outlier_mode=str(get_val("sync_stability_outlier_mode")),
+            sync_stability_outlier_threshold=float(get_val("sync_stability_outlier_threshold")),
             # Resampling Engine Settings
-            segment_resample_engine=str(
-                cfg.get("segment_resample_engine", "aresample")
-            ),
-            segment_rb_pitch_correct=bool(cfg.get("segment_rb_pitch_correct", False)),
-            segment_rb_transients=str(cfg.get("segment_rb_transients", "crisp")),
-            segment_rb_smoother=bool(cfg.get("segment_rb_smoother", True)),
-            segment_rb_pitchq=bool(cfg.get("segment_rb_pitchq", True)),
+            segment_resample_engine=str(get_val("segment_resample_engine")),
+            segment_rb_pitch_correct=bool(get_val("segment_rb_pitch_correct")),
+            segment_rb_transients=str(get_val("segment_rb_transients")),
+            segment_rb_smoother=bool(get_val("segment_rb_smoother")),
+            segment_rb_pitchq=bool(get_val("segment_rb_pitchq")),
             # OCR Settings
-            ocr_enabled=bool(cfg.get("ocr_enabled", True)),
-            ocr_engine=str(cfg.get("ocr_engine", "tesseract")),
-            ocr_language=str(cfg.get("ocr_language", "eng")),
-            ocr_psm=int(cfg.get("ocr_psm", 7)),
-            ocr_char_whitelist=str(cfg.get("ocr_char_whitelist", "")),
-            ocr_char_blacklist=str(cfg.get("ocr_char_blacklist", "|")),
-            ocr_low_confidence_threshold=float(
-                cfg.get("ocr_low_confidence_threshold", 60.0)
-            ),
-            ocr_multi_pass=bool(cfg.get("ocr_multi_pass", True)),
-            ocr_output_format=str(cfg.get("ocr_output_format", "ass")),
+            ocr_enabled=bool(get_val("ocr_enabled")),
+            ocr_engine=str(get_val("ocr_engine")),
+            ocr_language=str(get_val("ocr_language")),
+            ocr_psm=int(get_val("ocr_psm")),
+            ocr_char_whitelist=str(get_val("ocr_char_whitelist")),
+            ocr_char_blacklist=str(get_val("ocr_char_blacklist")),
+            ocr_low_confidence_threshold=float(get_val("ocr_low_confidence_threshold")),
+            ocr_multi_pass=bool(get_val("ocr_multi_pass")),
+            ocr_output_format=str(get_val("ocr_output_format")),
             # OCR Preprocessing
-            ocr_preprocess_auto=bool(cfg.get("ocr_preprocess_auto", True)),
-            ocr_upscale_threshold=int(cfg.get("ocr_upscale_threshold", 40)),
-            ocr_target_height=int(cfg.get("ocr_target_height", 80)),
-            ocr_border_size=int(cfg.get("ocr_border_size", 5)),
-            ocr_force_binarization=bool(cfg.get("ocr_force_binarization", False)),
-            ocr_binarization_method=str(cfg.get("ocr_binarization_method", "otsu")),
-            ocr_denoise=bool(cfg.get("ocr_denoise", False)),
-            ocr_save_debug_images=bool(cfg.get("ocr_save_debug_images", False)),
+            ocr_preprocess_auto=bool(get_val("ocr_preprocess_auto")),
+            ocr_upscale_threshold=int(get_val("ocr_upscale_threshold")),
+            ocr_target_height=int(get_val("ocr_target_height")),
+            ocr_border_size=int(get_val("ocr_border_size")),
+            ocr_force_binarization=bool(get_val("ocr_force_binarization")),
+            ocr_binarization_method=str(get_val("ocr_binarization_method")),
+            ocr_denoise=bool(get_val("ocr_denoise")),
+            ocr_save_debug_images=bool(get_val("ocr_save_debug_images")),
             # OCR Output & Position
-            ocr_preserve_positions=bool(cfg.get("ocr_preserve_positions", True)),
-            ocr_bottom_threshold=float(cfg.get("ocr_bottom_threshold", 75.0)),
-            ocr_video_width=int(cfg.get("ocr_video_width", 1920)),
-            ocr_video_height=int(cfg.get("ocr_video_height", 1080)),
+            ocr_preserve_positions=bool(get_val("ocr_preserve_positions")),
+            ocr_bottom_threshold=float(get_val("ocr_bottom_threshold")),
+            ocr_video_width=int(get_val("ocr_video_width")),
+            ocr_video_height=int(get_val("ocr_video_height")),
             # OCR Post-Processing
-            ocr_cleanup_enabled=bool(cfg.get("ocr_cleanup_enabled", True)),
-            ocr_cleanup_normalize_ellipsis=bool(
-                cfg.get("ocr_cleanup_normalize_ellipsis", False)
-            ),
-            ocr_custom_wordlist_path=str(cfg.get("ocr_custom_wordlist_path", "")),
+            ocr_cleanup_enabled=bool(get_val("ocr_cleanup_enabled")),
+            ocr_cleanup_normalize_ellipsis=bool(get_val("ocr_cleanup_normalize_ellipsis")),
+            ocr_custom_wordlist_path=str(get_val("ocr_custom_wordlist_path")),
             # OCR Debug & Runtime
-            ocr_debug_output=bool(cfg.get("ocr_debug_output", False)),
-            ocr_run_in_subprocess=bool(cfg.get("ocr_run_in_subprocess", True)),
-            ocr_font_size_ratio=float(cfg.get("ocr_font_size_ratio", 5.80)),
-            ocr_generate_report=bool(cfg.get("ocr_generate_report", True)),
+            ocr_debug_output=bool(get_val("ocr_debug_output")),
+            ocr_run_in_subprocess=bool(get_val("ocr_run_in_subprocess")),
+            ocr_font_size_ratio=float(get_val("ocr_font_size_ratio")),
+            ocr_generate_report=bool(get_val("ocr_generate_report")),
         )
 
     def to_dict(self) -> dict:
@@ -895,14 +764,15 @@ class AppSettings:
         Used when settings need to be passed to subprocesses or external tools
         that expect dict-based configuration.
         """
-        from dataclasses import fields
-
         result = {}
         for f in fields(self):
             value = getattr(self, f.name)
             # Convert enums to their string values
             if hasattr(value, "value"):
                 result[f.name] = value.value
+            # Convert tuples to lists for JSON
+            elif isinstance(value, tuple):
+                result[f.name] = list(value)
             else:
                 result[f.name] = value
         return result

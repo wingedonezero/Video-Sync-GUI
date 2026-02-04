@@ -2,27 +2,21 @@
 """
 Application Configuration Module
 
-Manages persistent user settings stored in settings.json. Settings are organized
-into categories:
+Manages persistent user settings stored in settings.json.
 
-- Paths: Last used paths, output folders, tool locations
-- Subtitle Sync: Time-based vs frame-based sync modes, FPS, rounding
-- Frame Matching: Hash-based frame alignment settings (window, threshold, workers)
-- Timing Fixes: Overlap correction, duration limits, CPS enforcement
-- Audio Analysis: Source separation, filtering, correlation methods, drift detection
-- DSP & Filtering: Band-pass filters, chunk scanning parameters
-- Stepping Correction: Advanced audio stepping detection/correction with silence
-  snapping, VAD protection, transient detection, quality thresholds
-- Resampling: Engine selection (aresample/rubberband) and quality settings
-- Track Naming: Custom labels for corrected/preserved audio tracks
-- Post-Processing: Timestamp normalization, tag stripping, metadata options
-- Logging: Compact mode, autoscroll, error tailing, progress display
+IMPORTANT: All default values are defined in AppSettings (models/settings.py).
+This module derives its defaults from AppSettings - do NOT add defaults here.
 
-The AppConfig class handles loading, saving, migrating old settings, and ensuring
-required directories exist. New settings are automatically added with defaults when
-the config file is loaded.
+To add a new setting:
+1. Add it to AppSettings in models/settings.py with a default value
+2. That's it - this module will automatically pick it up
 
-Validation ensures type safety and catches configuration errors early.
+The AppConfig class handles:
+- Loading settings from JSON with migration of old keys
+- Saving settings to JSON
+- Runtime path resolution (output_folder, temp_root, etc.)
+- Validation of values
+- Directory creation
 """
 
 import builtins
@@ -35,295 +29,53 @@ from vsg_core.models import AppSettings
 
 
 class AppConfig:
+    """Configuration manager that uses AppSettings as the source of truth.
+
+    Settings are stored as an AppSettings dataclass internally.
+    Defaults are derived from AppSettings.get_defaults().
+    """
+
     def __init__(self, settings_filename="settings.json"):
         self.script_dir = Path(__file__).resolve().parent.parent
         self.settings_path = self.script_dir / settings_filename
-        self.defaults = {
-            "last_ref_path": "",
-            "last_sec_path": "",
-            "last_ter_path": "",
-            "output_folder": str(self.script_dir / "sync_output"),
-            "temp_root": str(self.script_dir / "temp_work"),
-            "logs_folder": str(self.script_dir / ".config" / "logs"),
-            "videodiff_path": "",
-            # --- OCR Settings ---
-            "ocr_enabled": True,  # Enable OCR for image-based subtitles
-            "ocr_engine": "tesseract",  # OCR engine: 'tesseract', 'easyocr', 'paddleocr'
-            "ocr_language": "eng",  # Tesseract language code
-            "ocr_psm": 7,  # Page segmentation mode (7 = single text line)
-            "ocr_char_whitelist": "",  # Characters to include (empty = all)
-            "ocr_char_blacklist": "",  # Characters to exclude from OCR
-            "ocr_multi_pass": True,  # Enable multi-pass OCR for better accuracy
-            "ocr_output_format": "ass",  # 'ass' or 'srt'
-            "ocr_font_size_ratio": 5.80,  # Font size as % of PlayResY (5.80% = 28pt at 480p, 63pt at 1080p)
-            # OCR Preprocessing
-            "ocr_preprocess_auto": True,  # Auto-detect optimal preprocessing
-            "ocr_force_binarization": False,  # Force binary thresholding
-            "ocr_upscale_threshold": 40,  # Upscale if height < this (pixels)
-            "ocr_target_height": 80,  # Target height after upscaling (pixels)
-            "ocr_border_size": 5,  # Border padding in pixels
-            "ocr_binarization_method": "otsu",  # Binarization method: 'otsu', 'adaptive'
-            "ocr_denoise": False,  # Apply denoising
-            # OCR Post-Processing
-            "ocr_cleanup_enabled": True,  # Enable pattern-based text cleanup
-            "ocr_cleanup_normalize_ellipsis": False,  # Convert … to ...
-            "ocr_custom_wordlist_path": "",  # Custom wordlist for anime names, etc.
-            "ocr_low_confidence_threshold": 60.0,  # Flag lines below this confidence
-            # OCR Position Handling
-            "ocr_preserve_positions": True,  # Keep non-bottom subtitle positions
-            "ocr_bottom_threshold": 75.0,  # Y% threshold for "bottom" (configurable)
-            "ocr_video_width": 1920,  # Video width for position calculation
-            "ocr_video_height": 1080,  # Video height for position calculation
-            # OCR Reporting
-            "ocr_generate_report": True,  # Generate detailed OCR report
-            "ocr_save_debug_images": False,  # Save preprocessed images for debugging
-            "ocr_debug_output": False,  # Save debug output by issue type (unknown words, fixes, low confidence)
-            "ocr_run_in_subprocess": True,  # Run OCR in a subprocess to release memory
-            # --- Fonts Directory ---
-            "fonts_directory": "",  # User-specified fonts directory (empty = use default .config/fonts)
-            # --- Subtitle Sync Settings ---
-            "subtitle_sync_mode": "time-based",
-            "subtitle_target_fps": 0.0,
-            "time_based_use_raw_values": False,  # Use pysubs instead of mkvmerge --sync
-            "time_based_bypass_subtitle_data": True,  # Skip SubtitleData load/save for time-based (matches old behavior)
-            # --- Unified Frame Matching Settings (shared by all frame-based sync modes) ---
-            "frame_hash_algorithm": "dhash",  # Hash algorithm: 'dhash', 'phash', 'average_hash', 'whash'
-            "frame_hash_size": 8,  # Hash size: 4, 8, or 16 (higher = more precise but stricter)
-            "frame_hash_threshold": 5,  # Max hamming distance for frame match (0-30)
-            "frame_window_radius": 5,  # Frames before/after center (5 = 11 frame window)
-            "frame_search_range_ms": 2000,  # Search ±N ms around expected position
-            "frame_agreement_tolerance_ms": 100,  # Checkpoints must agree within ±N ms
-            "frame_use_vapoursynth": True,  # Use VapourSynth for frame extraction (faster with cache)
-            "frame_comparison_method": "hash",  # Comparison method: 'hash', 'ssim', 'mse'
-            # --- Unified Rounding Settings ---
-            "subtitle_rounding": "floor",  # Final rounding for all sync modes: floor, round, ceil
-            "videotimestamps_snap_mode": "start",  # Frame snap mode for VideoTimestamps: start, exact
-            # --- Duration-Align Sync Settings ---
-            "duration_align_validate": True,  # Enable validation of duration-based sync
-            "duration_align_validate_points": 3,  # Number of validation checkpoints (1 or 3)
-            "duration_align_strictness": 80,  # Validation strictness: percentage of frames that must match (0-100)
-            "duration_align_verify_with_frames": False,  # Enable hybrid: duration + sliding window verification
-            "duration_align_skip_validation_generated_tracks": True,  # Skip validation for generated tracks
-            "duration_align_fallback_mode": "none",  # Fallback: 'none', 'abort', 'auto-fallback', 'duration-offset'
-            # --- Correlation + Frame Snap Settings ---
-            "correlation_snap_fallback_mode": "snap-to-frame",  # Fallback: 'snap-to-frame', 'use-raw', 'abort'
-            "correlation_snap_use_scene_changes": True,  # Use PySceneDetect to find anchor points
-            # --- Subtitle-Anchored Frame Snap Settings ---
-            "sub_anchor_fallback_mode": "abort",  # Fallback: 'abort', 'use-median'
-            # --- Correlation-Guided Frame Anchor Settings ---
-            "corr_anchor_fallback_mode": "use-correlation",  # Fallback: 'abort', 'use-median', 'use-correlation'
-            "corr_anchor_anchor_positions": [
-                10,
-                50,
-                90,
-            ],  # % of video duration for anchor points
-            "corr_anchor_refine_per_line": False,  # Refine each subtitle line to exact frames after checkpoint validation
-            "corr_anchor_refine_workers": 4,  # Number of parallel workers for refinement
-            # --- Video-Verified Sync Settings ---
-            # Addresses subtitle sync where audio correlation differs from video alignment
-            # (e.g., audio correlation finds -46ms but video is actually 0ms aligned)
-            "video_verified_zero_check_frames": 3,  # If correlation < N frames, verify against video
-            "video_verified_min_quality_advantage": 0.1,  # Quality margin needed to prefer non-zero offset
-            "video_verified_num_checkpoints": 5,  # Number of checkpoint times for frame matching
-            "video_verified_search_range_frames": 3,  # Frame range to search around candidates
-            "video_verified_sequence_length": 10,  # Number of consecutive frames to verify at each checkpoint
-            "video_verified_use_pts_precision": False,  # Use PTS for sub-frame precision (vs frame-based)
-            # --- Interlaced/Telecine Content Settings ---
-            # Separate settings for interlaced/telecine content which needs different handling
-            # These are used when interlaced or telecine content is detected
-            "interlaced_handling_enabled": False,  # Enable special handling for interlaced/telecine
-            "interlaced_hash_algorithm": "ahash",  # More tolerant hash algorithm for interlaced
-            "interlaced_hash_size": 8,  # Hash size for interlaced content
-            "interlaced_hash_threshold": 25,  # Higher threshold for interlaced (deinterlace artifacts)
-            "interlaced_sequence_length": 5,  # Shorter sequence (frames may not align perfectly)
-            "interlaced_num_checkpoints": 5,  # Number of checkpoints
-            "interlaced_search_range_frames": 5,  # Wider search range for interlaced
-            "interlaced_deinterlace_method": "bwdif",  # Deinterlace method (yadif, bwdif, etc.)
-            "interlaced_use_ivtc": False,  # Use inverse telecine for telecine content
-            "interlaced_fallback_to_audio": True,  # Fall back to audio correlation if no match
-            "interlaced_force_mode": "auto",  # 'auto', 'interlaced', 'telecine', 'progressive'
-            "interlaced_comparison_method": "ssim",  # Comparison method for interlaced: 'hash', 'ssim', 'mse'
-            # --- Timing Fix Settings ---
-            "timing_fix_enabled": False,
-            "timing_fix_overlaps": True,
-            "timing_overlap_min_gap_ms": 1,
-            "timing_fix_short_durations": True,
-            "timing_min_duration_ms": 500,
-            "timing_fix_long_durations": True,
-            "timing_max_cps": 20.0,
-            # --- Flexible Analysis Settings ---
-            "source_separation_mode": "none",  # 'none', 'instrumental', 'vocals'
-            "source_separation_model": "default",  # Model filename or 'default'
-            "source_separation_model_dir": str(
-                self.script_dir / ".config" / "audio_separator_models"
-            ),
-            "source_separation_device": "auto",  # Device for source separation: 'auto', 'cpu', 'cuda', 'rocm', 'mps'
-            "source_separation_timeout": 900,  # Timeout in seconds for source separation (0 = no timeout, default 900s = 15 min)
-            "filtering_method": "Dialogue Band-Pass Filter",
-            "correlation_method": "Phase Correlation (GCC-PHAT)",
-            "correlation_method_source_separated": "Phase Correlation (GCC-PHAT)",
-            "min_accepted_chunks": 3,
-            "log_audio_drift": True,
-            # --- Multi-Correlation Comparison (Analyze Only) ---
-            "multi_correlation_enabled": False,
-            "multi_corr_scc": True,
-            "multi_corr_gcc_phat": True,
-            "multi_corr_onset": False,
-            "multi_corr_gcc_scot": False,
-            "multi_corr_gcc_whiten": False,
-            "multi_corr_dtw": False,
-            "multi_corr_spectrogram": False,
-            # --- DSP & Filtering ---
-            "filter_bandpass_lowcut_hz": 300.0,
-            "filter_bandpass_highcut_hz": 3400.0,
-            "filter_bandpass_order": 5,
-            "filter_lowpass_taps": 101,
-            "scan_start_percentage": 5.0,
-            "scan_end_percentage": 95.0,
-            "analysis_mode": "Audio Correlation",
-            "analysis_lang_source1": "",
-            "analysis_lang_others": "",
-            "scan_chunk_count": 10,
-            "scan_chunk_duration": 15,
-            "min_match_pct": 5.0,
-            "delay_selection_mode": "Mode (Most Common)",
-            "delay_selection_mode_source_separated": "Mode (Clustered)",
-            "first_stable_min_chunks": 3,
-            "first_stable_skip_unstable": True,
-            "early_cluster_window": 10,
-            "early_cluster_threshold": 5,
-            "videodiff_error_min": 0.0,
-            "videodiff_error_max": 100.0,
-            "use_soxr": False,
-            "audio_decode_native": False,
-            "audio_peak_fit": False,
-            "audio_bandlimit_hz": 0,
-            "rename_chapters": False,
-            "apply_dialog_norm_gain": False,
-            "snap_chapters": False,
-            "snap_mode": "previous",
-            "snap_threshold_ms": 250,
-            "snap_starts_only": True,
-            "log_compact": True,
-            "log_autoscroll": True,
-            "log_error_tail": 20,
-            "log_tail_lines": 0,
-            "log_progress_step": 20,
-            "log_show_options_pretty": False,
-            "log_show_options_json": False,
-            "disable_track_statistics_tags": False,
-            "disable_header_compression": True,
-            "archive_logs": True,
-            "auto_apply_strict": False,
-            # --- Timing Sync Mode ---
-            "sync_mode": "positive_only",
-            # --- Post-merge options ---
-            "post_mux_normalize_timestamps": False,
-            "post_mux_strip_tags": False,
-            # --- Enhanced Segmented Audio Correction ---
-            "segmented_enabled": False,
-            "segmented_qa_threshold": 85.0,
-            "segment_qa_chunk_count": 30,
-            "segment_qa_min_accepted_chunks": 28,
-            # Detection & Triage
-            "detection_dbscan_epsilon_ms": 20.0,
-            "detection_dbscan_min_samples": 2,
-            "drift_detection_r2_threshold": 0.90,
-            "drift_detection_r2_threshold_lossless": 0.95,
-            "drift_detection_slope_threshold_lossy": 0.7,
-            "drift_detection_slope_threshold_lossless": 0.2,
-            "segment_triage_std_dev_ms": 50,
-            # Segment Scan & Correction
-            "segment_coarse_chunk_s": 15,
-            "segment_coarse_step_s": 60,
-            "segment_search_locality_s": 10,
-            "segment_drift_r2_threshold": 0.75,
-            "segment_drift_slope_threshold": 0.7,
-            "segment_drift_outlier_sensitivity": 1.5,
-            "segment_drift_scan_buffer_pct": 2.0,
-            # --- Resampling Engine Settings ---
-            "segment_resample_engine": "aresample",
-            "segment_rb_pitch_correct": False,
-            "segment_rb_transients": "crisp",
-            "segment_rb_smoother": True,
-            "segment_rb_pitchq": True,
-            # Fine Scan & Confidence
-            "segment_min_confidence_ratio": 5.0,
-            "segment_fine_chunk_s": 2.0,
-            "segment_fine_iterations": 10,
-            # --- Stepping Correction Enhancements ---
-            "stepping_first_stable_min_chunks": 3,  # Min chunks for first stable segment (stepping delay selection)
-            "stepping_first_stable_skip_unstable": True,  # Skip unstable segments when detecting stepping delay
-            "stepping_fill_mode": "silence",  # 'auto', 'silence', or 'content' - how to fill delay gaps
-            "stepping_diagnostics_verbose": True,  # Enable detailed cluster composition reports
-            "stepping_content_correlation_threshold": 0.5,  # Min correlation for content extraction (for auto/content modes)
-            "stepping_content_search_window_s": 5.0,  # Search window for finding matching content (for auto/content modes)
-            "stepping_scan_start_percentage": 5.0,  # Independent scan start for stepping correction
-            "stepping_scan_end_percentage": 99.0,  # Independent scan end for stepping correction (higher to catch end boundaries)
-            "stepping_adjust_subtitles": True,  # Adjust subtitle timestamps to match stepped audio corrections
-            "stepping_adjust_subtitles_no_audio": True,  # Apply stepping to subtitles when no audio is merged (uses correlation-based EDL)
-            "stepping_boundary_mode": "start",  # How to handle subs spanning boundaries: 'start', 'majority', 'midpoint'
-            # --- Track Naming ---
-            "stepping_corrected_track_label": "",  # Label for corrected audio in final MKV (empty = no label, e.g., "Stepping Corrected")
-            "stepping_preserved_track_label": "",  # Label for preserved original in final MKV (empty = no label, e.g., "Original")
-            # --- Silence-Aware Boundary Snapping ---
-            "stepping_snap_to_silence": True,  # Enable boundary snapping to silence zones
-            "stepping_silence_search_window_s": 5.0,  # Search window in seconds (±N seconds from detected boundary)
-            "stepping_silence_threshold_db": -40.0,  # Audio level in dB to consider as silence
-            "stepping_silence_min_duration_ms": 100.0,  # Minimum silence duration to be considered for snapping
-            # --- Advanced Silence Detection Methods ---
-            "stepping_silence_detection_method": "smart_fusion",  # 'rms_basic', 'ffmpeg_silencedetect', 'smart_fusion'
-            # FFmpeg silencedetect options (most accurate, frame-perfect)
-            "stepping_ffmpeg_silence_noise": -40.0,  # dB threshold for FFmpeg silencedetect
-            "stepping_ffmpeg_silence_duration": 0.1,  # Minimum silence duration in seconds
-            # Speech Protection (prevents cutting dialogue mid-sentence)
-            "stepping_vad_enabled": True,  # Enable Voice Activity Detection to protect speech
-            "stepping_vad_aggressiveness": 2,  # 0-3: 0=least aggressive (keeps more audio), 3=most aggressive
-            "stepping_vad_avoid_speech": True,  # Never cut in detected speech regions
-            "stepping_vad_frame_duration_ms": 30,  # VAD analysis frame size (10, 20, or 30ms)
-            # Transient Detection (prevents cutting on musical beats/impacts)
-            "stepping_transient_detection_enabled": True,  # Avoid cutting on musical transients
-            "stepping_transient_threshold": 8.0,  # dB increase threshold for transient detection
-            "stepping_transient_avoid_window_ms": 50,  # Avoid cuts within ±N ms of transients
-            # Smart Fusion Scoring Weights (for 'smart_fusion' method)
-            "stepping_fusion_weight_silence": 10,  # Weight for deep silence (low RMS)
-            "stepping_fusion_weight_no_speech": 8,  # Weight for non-speech regions
-            "stepping_fusion_weight_scene_align": 5,  # Weight for alignment with scene changes
-            "stepping_fusion_weight_duration": 2,  # Weight for longer silence zones
-            "stepping_fusion_weight_no_transient": 3,  # Weight for avoiding transients
-            # --- Video-Aware Boundary Snapping ---
-            "stepping_snap_to_video_frames": False,  # Enable boundary snapping to video frames/scenes
-            "stepping_video_snap_mode": "scenes",  # 'scenes', 'keyframes', or 'any_frame'
-            "stepping_video_snap_max_offset_s": 2.0,  # Maximum distance to snap (seconds)
-            "stepping_video_scene_threshold": 0.4,  # Scene detection sensitivity (0.1-1.0, lower=more sensitive)
-            # --- Stepping Quality Audit Thresholds ---
-            "stepping_audit_min_score": 12.0,  # Minimum boundary score (warning if below)
-            "stepping_audit_overflow_tolerance": 0.8,  # Max removal/silence ratio (0.8 = 80% of silence)
-            "stepping_audit_large_correction_s": 3.0,  # Threshold for large correction warnings
-            # --- Filtered Stepping Correction (New) ---
-            "stepping_correction_mode": "full",  # 'full', 'filtered', 'strict', 'disabled'
-            "stepping_quality_mode": "normal",  # 'strict', 'normal', 'lenient', 'custom'
-            # Quality Validation Thresholds (for 'custom' mode)
-            "stepping_min_chunks_per_cluster": 3,  # Minimum chunks required per cluster
-            "stepping_min_cluster_percentage": 5.0,  # Min % of total chunks a cluster must represent
-            "stepping_min_cluster_duration_s": 20.0,  # Min duration in seconds
-            "stepping_min_match_quality_pct": 85.0,  # Min average match quality percentage
-            "stepping_min_total_clusters": 2,  # Minimum number of total clusters required
-            # Filtered Region Handling
-            "stepping_filtered_fallback": "nearest",  # 'nearest', 'interpolate', 'uniform', 'skip', 'reject'
-            # --- Sync Stability (Correlation Variance Detection) ---
-            "sync_stability_enabled": True,  # Enable variance detection in correlation results
-            "sync_stability_variance_threshold": 0.0,  # Max allowed variance in ms (0 = any variance flagged)
-            "sync_stability_min_chunks": 3,  # Minimum chunks needed to calculate variance
-            "sync_stability_outlier_mode": "any",  # 'any' = flag any variance, 'threshold' = use custom threshold
-            "sync_stability_outlier_threshold": 1.0,  # Custom outlier threshold in ms (when mode='threshold')
-        }
+
+        # Get defaults from AppSettings (THE source of truth)
+        # Then resolve runtime paths
+        self.defaults = self._build_defaults()
+
         self.settings: AppSettings = None  # type: ignore  # Set by load()
         self._accessed_keys: set[str] = set()  # Track accessed keys for typo detection
         self._validation_enabled = True  # Can be disabled for backwards compatibility
+
         self.load()
-        # Note: _ensure_types_coerced() no longer needed - AppSettings handles types
         self.ensure_dirs_exist()
+
+    def _build_defaults(self) -> dict[str, Any]:
+        """Build defaults dict from AppSettings with runtime path resolution.
+
+        AppSettings defines all defaults, but some paths need to be resolved
+        at runtime based on script_dir.
+        """
+        defaults = AppSettings.get_defaults()
+
+        # Resolve path sentinels to actual paths
+        path_sentinel = AppSettings.PATH_SENTINEL
+
+        if defaults.get("output_folder") == path_sentinel:
+            defaults["output_folder"] = str(self.script_dir / "sync_output")
+
+        if defaults.get("temp_root") == path_sentinel:
+            defaults["temp_root"] = str(self.script_dir / "temp_work")
+
+        if defaults.get("logs_folder") == path_sentinel:
+            defaults["logs_folder"] = str(self.script_dir / ".config" / "logs")
+
+        if defaults.get("source_separation_model_dir") == path_sentinel:
+            defaults["source_separation_model_dir"] = str(
+                self.script_dir / ".config" / "audio_separator_models"
+            )
+
+        return defaults
 
     def _validate_value(self, key: str, value: Any) -> tuple[bool, str | None]:
         """
@@ -446,6 +198,11 @@ class AppConfig:
                 return float(value)
             elif isinstance(default_value, str):
                 return str(value)
+            elif isinstance(default_value, (list, tuple)):
+                # Handle list/tuple - JSON loads as list
+                if isinstance(value, (list, tuple)):
+                    return value
+                return default_value
             else:
                 # Unknown type, return as-is
                 return value
@@ -457,16 +214,6 @@ class AppConfig:
                 stacklevel=2,
             )
             return default_value
-
-    def _ensure_types_coerced(self):
-        """
-        Ensures all values in self.settings match the expected types.
-
-        Note: With AppSettings dataclass, this is a no-op since types are
-        handled by AppSettings.from_config().
-        """
-        # AppSettings dataclass handles type coercion in from_config()
-        pass
 
     def validate_all(self) -> list[str]:
         """
@@ -485,16 +232,50 @@ class AppConfig:
                 errors.append(error_msg)
         return errors
 
+    def validate_schema(self) -> list[str]:
+        """
+        Validates that AppSettings fields match what we expect.
+
+        This catches issues where AppSettings has fields not in defaults
+        (which shouldn't happen if everything derives from AppSettings).
+
+        Returns:
+            List of warning messages (empty if schema is valid)
+        """
+        warnings_list = []
+        settings_fields = AppSettings.get_field_names()
+        default_keys = set(self.defaults.keys())
+
+        # Check for fields in AppSettings not in defaults (shouldn't happen)
+        missing_in_defaults = settings_fields - default_keys
+        if missing_in_defaults:
+            warnings_list.append(
+                f"AppSettings has fields not in defaults: {missing_in_defaults}"
+            )
+
+        # Check for keys in defaults not in AppSettings (shouldn't happen)
+        extra_in_defaults = default_keys - settings_fields
+        if extra_in_defaults:
+            warnings_list.append(
+                f"Defaults has keys not in AppSettings: {extra_in_defaults}"
+            )
+
+        return warnings_list
+
     def load(self):
+        """Load settings from JSON file, applying migrations and defaults."""
         changed = False
         if self.settings_path.exists():
             try:
                 with open(self.settings_path, encoding="utf-8") as f:
                     loaded_settings = json.load(f)
 
+                # === Migration: Remove deprecated keys ===
                 if "post_mux_validate_metadata" in loaded_settings:
                     del loaded_settings["post_mux_validate_metadata"]
                     changed = True
+
+                # === Migration: Rename old language keys ===
                 if "analysis_lang_ref" in loaded_settings and not loaded_settings.get(
                     "analysis_lang_source1"
                 ):
@@ -518,10 +299,12 @@ class AppConfig:
                         del loaded_settings[old_key]
                         changed = True
 
+                # === Migration: Fix old source separation device ===
                 if loaded_settings.get("source_separation_device") == "cpu":
                     loaded_settings["source_separation_device"] = "auto"
                     changed = True
 
+                # === Migration: Convert old source separation model names ===
                 legacy_separation_map = {
                     "Demucs - Music/Effects (Strip Vocals)": "instrumental",
                     "Demucs - Vocals Only": "vocals",
@@ -534,12 +317,13 @@ class AppConfig:
                     loaded_settings["source_separation_model"] = "default"
                     changed = True
 
+                # === Apply defaults for missing keys ===
                 for key, default_value in self.defaults.items():
                     if key not in loaded_settings:
                         loaded_settings[key] = default_value
                         changed = True
 
-                # Coerce types to match defaults (fixes string numbers from JSON)
+                # === Coerce types to match defaults (fixes string numbers from JSON) ===
                 for key, value in loaded_settings.items():
                     if key in self.defaults:
                         coerced = self._coerce_type(key, value, self.defaults[key])
@@ -561,13 +345,21 @@ class AppConfig:
             self.save()
 
     def save(self):
+        """Save current settings to JSON file.
+
+        Saves all fields defined in AppSettings (derived from defaults).
+        """
         try:
-            # Convert AppSettings to dict, only saving known keys
+            # Convert AppSettings to dict
             settings_dict = self.settings.to_dict()
+
+            # Only save keys that are in our defaults (which comes from AppSettings)
+            # This ensures we don't save any orphaned keys
             keys_to_save = self.defaults.keys()
             settings_to_save = {
                 k: settings_dict.get(k) for k in keys_to_save if k in settings_dict
             }
+
             with open(self.settings_path, "w", encoding="utf-8") as f:
                 json.dump(settings_to_save, f, indent=4)
         except OSError as e:
