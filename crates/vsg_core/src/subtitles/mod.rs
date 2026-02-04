@@ -64,8 +64,8 @@ pub use writers::{format_ass_time, format_srt_time, write_ass, write_content, wr
 
 // Re-export sync
 pub use sync::{
-    create_sync_mode, SyncConfig, SyncDetails, SyncMode, SyncModeType, SyncResult,
-    VideoVerifiedConfig,
+    calculate_video_verified_offset, create_sync_mode, SyncConfig, SyncDetails, SyncMode,
+    SyncModeType, SyncResult, VideoVerifiedCalcResult, VideoVerifiedConfig,
 };
 
 /// Parse a subtitle file from disk.

@@ -23,6 +23,15 @@
 //! - Both source and target video paths must be provided
 //! - VapourSynth with FFMS2/BestSource, or FFmpeg must be available
 //! - Target video FPS should be provided for accurate frame calculations
+//!
+//! # Per-Source Calculation
+//!
+//! The `calculate_video_verified_offset` function can be used to compute the
+//! video-verified delay for a source without applying it to subtitle data.
+//! This is useful for per-source pre-processing where all subtitle tracks from
+//! the same source should receive the same delay.
+
+use std::path::Path;
 
 use crate::subtitles::error::SyncError;
 use crate::subtitles::frame_utils::{
@@ -32,7 +41,427 @@ use crate::subtitles::frame_utils::{
 };
 use crate::subtitles::types::{SubtitleData, SyncEventData};
 
-use super::{SyncConfig, SyncDetails, SyncMode, SyncResult};
+use super::{SyncConfig, SyncDetails, SyncMode, SyncResult, VideoVerifiedConfig};
+
+/// Result from `calculate_video_verified_offset`.
+///
+/// Contains the computed offset and metadata about how it was determined.
+/// This is a pure calculation result - no subtitle data is modified.
+#[derive(Debug, Clone)]
+pub struct VideoVerifiedCalcResult {
+    /// The corrected delay in milliseconds (includes global shift).
+    pub corrected_delay_ms: f64,
+    /// The original delay from audio correlation (for comparison).
+    pub original_delay_ms: f64,
+    /// Frame offset that was determined.
+    pub frame_offset: i32,
+    /// Number of checkpoints that matched.
+    pub matched_checkpoints: usize,
+    /// Number of sequences that were verified.
+    pub verified_sequences: usize,
+    /// Reason for the result (e.g., "frame-matched", "fallback-no-frame-utils").
+    pub reason: String,
+    /// Whether frame matching was successful.
+    pub frame_match_success: bool,
+}
+
+/// Calculate video-verified offset without applying to subtitle data.
+///
+/// This is a pure function that computes the frame-matched delay for a source
+/// video against a target video. It can be used for per-source pre-processing
+/// where all subtitle tracks from the same source should get the same delay.
+///
+/// # Arguments
+///
+/// * `source_video` - Path to the source video file
+/// * `target_video` - Path to the target video file (Source 1 / reference)
+/// * `total_delay_ms` - Total delay from audio correlation (including global shift)
+/// * `global_shift_ms` - Global shift component
+/// * `config` - Video-verified configuration settings
+/// * `log` - Logging function for progress messages
+///
+/// # Returns
+///
+/// * `Ok(VideoVerifiedCalcResult)` - The calculated offset and metadata
+/// * `Err(SyncError)` - If calculation fails
+pub fn calculate_video_verified_offset<F>(
+    source_video: &Path,
+    target_video: &Path,
+    total_delay_ms: f64,
+    global_shift_ms: f64,
+    config: &VideoVerifiedConfig,
+    log: F,
+) -> Result<VideoVerifiedCalcResult, SyncError>
+where
+    F: Fn(&str),
+{
+    let pure_correlation_ms = total_delay_ms - global_shift_ms;
+
+    log(&format!(
+        "[VideoVerified] Source: {}",
+        source_video.display()
+    ));
+    log(&format!(
+        "[VideoVerified] Target: {}",
+        target_video.display()
+    ));
+    log(&format!(
+        "[VideoVerified] Audio correlation: {:+.3}ms (global shift: {:+.3}ms)",
+        pure_correlation_ms, global_shift_ms
+    ));
+
+    // Check if frame utils are available
+    if !is_frame_utils_available() {
+        log("[VideoVerified] Frame utilities not available, using audio correlation");
+        return Ok(VideoVerifiedCalcResult {
+            corrected_delay_ms: total_delay_ms,
+            original_delay_ms: total_delay_ms,
+            frame_offset: 0,
+            matched_checkpoints: 0,
+            verified_sequences: 0,
+            reason: "fallback-no-frame-utils".to_string(),
+            frame_match_success: false,
+        });
+    }
+
+    // Check if files exist
+    if !source_video.exists() {
+        log(&format!(
+            "[VideoVerified] Source video not found: {}",
+            source_video.display()
+        ));
+        return Ok(VideoVerifiedCalcResult {
+            corrected_delay_ms: total_delay_ms,
+            original_delay_ms: total_delay_ms,
+            frame_offset: 0,
+            matched_checkpoints: 0,
+            verified_sequences: 0,
+            reason: "fallback-source-not-found".to_string(),
+            frame_match_success: false,
+        });
+    }
+
+    if !target_video.exists() {
+        log(&format!(
+            "[VideoVerified] Target video not found: {}",
+            target_video.display()
+        ));
+        return Ok(VideoVerifiedCalcResult {
+            corrected_delay_ms: total_delay_ms,
+            original_delay_ms: total_delay_ms,
+            frame_offset: 0,
+            matched_checkpoints: 0,
+            verified_sequences: 0,
+            reason: "fallback-target-not-found".to_string(),
+            frame_match_success: false,
+        });
+    }
+
+    // Detect video properties
+    let source_props = match detect_properties(source_video) {
+        Ok(p) => p,
+        Err(e) => {
+            log(&format!(
+                "[VideoVerified] Failed to detect source properties: {}",
+                e
+            ));
+            return Ok(VideoVerifiedCalcResult {
+                corrected_delay_ms: total_delay_ms,
+                original_delay_ms: total_delay_ms,
+                frame_offset: 0,
+                matched_checkpoints: 0,
+                verified_sequences: 0,
+                reason: "fallback-source-props-failed".to_string(),
+                frame_match_success: false,
+            });
+        }
+    };
+
+    let target_props = match detect_properties(target_video) {
+        Ok(p) => p,
+        Err(e) => {
+            log(&format!(
+                "[VideoVerified] Failed to detect target properties: {}",
+                e
+            ));
+            return Ok(VideoVerifiedCalcResult {
+                corrected_delay_ms: total_delay_ms,
+                original_delay_ms: total_delay_ms,
+                frame_offset: 0,
+                matched_checkpoints: 0,
+                verified_sequences: 0,
+                reason: "fallback-target-props-failed".to_string(),
+                frame_match_success: false,
+            });
+        }
+    };
+
+    // Determine if we're dealing with interlaced content
+    let is_interlaced = should_use_interlaced_settings(
+        &source_props.content_type,
+        &target_props.content_type,
+        config,
+    );
+
+    if is_interlaced {
+        log("[VideoVerified] Using interlaced handling settings");
+    }
+
+    // Get effective settings
+    let num_checkpoints = config.effective_num_checkpoints(is_interlaced);
+    let search_range = config.effective_search_range(is_interlaced);
+    let hash_algorithm = config.effective_hash_algorithm(is_interlaced);
+    let hash_size = config.effective_hash_size(is_interlaced);
+    let hash_threshold = config.effective_hash_threshold(is_interlaced);
+    let comparison_method = config.effective_comparison_method(is_interlaced);
+    let sequence_length = config.effective_sequence_length(is_interlaced);
+
+    log(&format!(
+        "[VideoVerified] Settings: {} checkpoints, ±{} frames search, {} threshold",
+        num_checkpoints, search_range, hash_threshold
+    ));
+
+    // Configure video reader
+    let deinterlace = if is_interlaced && config.interlaced_handling_enabled {
+        config.interlaced_deinterlace_method
+    } else {
+        DeinterlaceMethod::None
+    };
+
+    let reader_config = VideoReaderConfig {
+        deinterlace,
+        indexer_backend: config.indexer_backend,
+        temp_dir: None,
+    };
+
+    // Open video readers
+    let source_reader = match open_video(source_video, &reader_config) {
+        Ok(r) => r,
+        Err(e) => {
+            log(&format!("[VideoVerified] Failed to open source video: {}", e));
+            return Ok(VideoVerifiedCalcResult {
+                corrected_delay_ms: total_delay_ms,
+                original_delay_ms: total_delay_ms,
+                frame_offset: 0,
+                matched_checkpoints: 0,
+                verified_sequences: 0,
+                reason: "fallback-source-open-failed".to_string(),
+                frame_match_success: false,
+            });
+        }
+    };
+
+    let target_reader = match open_video(target_video, &reader_config) {
+        Ok(r) => r,
+        Err(e) => {
+            log(&format!("[VideoVerified] Failed to open target video: {}", e));
+            return Ok(VideoVerifiedCalcResult {
+                corrected_delay_ms: total_delay_ms,
+                original_delay_ms: total_delay_ms,
+                frame_offset: 0,
+                matched_checkpoints: 0,
+                verified_sequences: 0,
+                reason: "fallback-target-open-failed".to_string(),
+                frame_match_success: false,
+            });
+        }
+    };
+
+    // Calculate frame-based values
+    let frame_duration_ms = 1000.0 / target_props.fps;
+    let correlation_frames = pure_correlation_ms / frame_duration_ms;
+
+    log(&format!(
+        "[VideoVerified] FPS: {:.3} (frame: {:.3}ms), correlation: {:.2} frames",
+        target_props.fps, frame_duration_ms, correlation_frames
+    ));
+
+    // Generate candidate frame offsets
+    let candidates = generate_frame_candidates(correlation_frames, search_range);
+    log(&format!(
+        "[VideoVerified] Testing {} candidates around {:+.1} frames",
+        candidates.len(),
+        correlation_frames
+    ));
+
+    // Select checkpoint times
+    let checkpoint_times = select_checkpoint_times(
+        source_props.duration_ms.min(target_props.duration_ms),
+        num_checkpoints,
+    );
+
+    // Test each candidate at checkpoints
+    let mut best_candidate: Option<(i32, usize, usize, f64)> = None;
+
+    for &candidate_offset in &candidates {
+        let mut matched_checkpoints = 0;
+        let mut verified_sequences = 0;
+        let mut total_distance = 0.0;
+        let mut total_comparisons = 0;
+
+        for &checkpoint_time in &checkpoint_times {
+            let source_frame_idx = time_to_frame_floor(checkpoint_time, source_props.fps);
+            if source_frame_idx < 0 {
+                continue;
+            }
+            let source_frame_idx = source_frame_idx as u32;
+            let target_frame_idx = (source_frame_idx as i32 + candidate_offset).max(0) as u32;
+
+            if source_frame_idx >= source_reader.frame_count()
+                || target_frame_idx >= target_reader.frame_count()
+            {
+                continue;
+            }
+
+            let source_frame = match source_reader.get_frame(source_frame_idx) {
+                Ok(f) => f,
+                Err(_) => continue,
+            };
+            let target_frame = match target_reader.get_frame(target_frame_idx) {
+                Ok(f) => f,
+                Err(_) => continue,
+            };
+
+            let result = compare_frames(
+                &source_frame,
+                &target_frame,
+                comparison_method,
+                hash_algorithm,
+                hash_size,
+                hash_threshold,
+            );
+
+            total_distance += result.distance;
+            total_comparisons += 1;
+
+            if result.is_match {
+                matched_checkpoints += 1;
+
+                // Sequence verification
+                let mut sequence_matches = 1;
+                for seq_offset in 1..sequence_length {
+                    let src_idx = source_frame_idx + seq_offset as u32;
+                    let tgt_idx = target_frame_idx + seq_offset as u32;
+
+                    if src_idx >= source_reader.frame_count()
+                        || tgt_idx >= target_reader.frame_count()
+                    {
+                        break;
+                    }
+
+                    let src_frame = match source_reader.get_frame(src_idx) {
+                        Ok(f) => f,
+                        Err(_) => break,
+                    };
+                    let tgt_frame = match target_reader.get_frame(tgt_idx) {
+                        Ok(f) => f,
+                        Err(_) => break,
+                    };
+
+                    let seq_result = compare_frames(
+                        &src_frame,
+                        &tgt_frame,
+                        comparison_method,
+                        hash_algorithm,
+                        hash_size,
+                        hash_threshold,
+                    );
+
+                    if seq_result.is_match {
+                        sequence_matches += 1;
+                    } else {
+                        break;
+                    }
+                }
+
+                if sequence_matches >= (sequence_length as f64 * 0.7) as usize {
+                    verified_sequences += 1;
+                }
+            }
+        }
+
+        let avg_dist = if total_comparisons > 0 {
+            total_distance / total_comparisons as f64
+        } else {
+            f64::MAX
+        };
+
+        let is_better = match &best_candidate {
+            None => true,
+            Some((_, best_matched, best_verified, best_dist)) => {
+                verified_sequences > *best_verified
+                    || (verified_sequences == *best_verified
+                        && matched_checkpoints > *best_matched)
+                    || (verified_sequences == *best_verified
+                        && matched_checkpoints == *best_matched
+                        && avg_dist < *best_dist)
+            }
+        };
+
+        if is_better {
+            best_candidate = Some((candidate_offset, matched_checkpoints, verified_sequences, avg_dist));
+        }
+    }
+
+    // Select best candidate or use correlation
+    let (frame_offset, matched, verified, _avg_dist) = match best_candidate {
+        Some(c) => c,
+        None => {
+            log("[VideoVerified] No valid candidates found, using audio correlation");
+            return Ok(VideoVerifiedCalcResult {
+                corrected_delay_ms: total_delay_ms,
+                original_delay_ms: total_delay_ms,
+                frame_offset: 0,
+                matched_checkpoints: 0,
+                verified_sequences: 0,
+                reason: "fallback-no-valid-candidates".to_string(),
+                frame_match_success: false,
+            });
+        }
+    };
+
+    // Check if frame matching actually worked
+    let frame_match_success = verified > 0 || matched >= (num_checkpoints as f64 * 0.5) as usize;
+
+    if !frame_match_success {
+        if is_interlaced && config.interlaced_fallback_to_audio {
+            log("[VideoVerified] Insufficient matches for interlaced content, using audio correlation");
+            return Ok(VideoVerifiedCalcResult {
+                corrected_delay_ms: total_delay_ms,
+                original_delay_ms: total_delay_ms,
+                frame_offset,
+                matched_checkpoints: matched,
+                verified_sequences: verified,
+                reason: "fallback-insufficient-interlaced-matches".to_string(),
+                frame_match_success: false,
+            });
+        }
+        log(&format!(
+            "[VideoVerified] Low confidence ({} verified, {} matched), using best candidate anyway",
+            verified, matched
+        ));
+    }
+
+    // Calculate final offset
+    let video_offset_ms = frame_offset as f64 * frame_duration_ms;
+    let corrected_delay_ms = video_offset_ms + global_shift_ms;
+
+    let reason = if frame_match_success {
+        "frame-matched".to_string()
+    } else {
+        "low-confidence-match".to_string()
+    };
+
+    Ok(VideoVerifiedCalcResult {
+        corrected_delay_ms,
+        original_delay_ms: total_delay_ms,
+        frame_offset,
+        matched_checkpoints: matched,
+        verified_sequences: verified,
+        reason,
+        frame_match_success,
+    })
+}
 
 /// Video-verified sync mode.
 ///

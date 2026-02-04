@@ -16,7 +16,7 @@ mod time_based;
 mod video_verified;
 
 pub use time_based::TimeBased;
-pub use video_verified::VideoVerified;
+pub use video_verified::{calculate_video_verified_offset, VideoVerified, VideoVerifiedCalcResult};
 
 use std::path::Path;
 

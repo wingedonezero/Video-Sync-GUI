@@ -189,6 +189,28 @@ pub struct CorrectionOutput {
     pub corrected_files: HashMap<String, PathBuf>,
 }
 
+/// Cached result from video-verified sync for a source.
+///
+/// This is computed once per source during the per-source pre-processing
+/// phase, then reused for all subtitle tracks from that source.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VideoVerifiedSourceResult {
+    /// Source key (e.g., "Source 2").
+    pub source_key: String,
+    /// Original delay from audio correlation (ms).
+    pub original_delay_ms: f64,
+    /// Frame-corrected delay after video verification (ms).
+    pub corrected_delay_ms: f64,
+    /// Frame offset that was determined.
+    pub frame_offset: i32,
+    /// Number of checkpoints that matched.
+    pub matched_checkpoints: usize,
+    /// Number of sequences that were verified.
+    pub verified_sequences: usize,
+    /// Reason for the result (e.g., "frame-matched", "fallback-no-frame-utils").
+    pub reason: String,
+}
+
 /// Output from subtitle processing.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SubtitlesOutput {
@@ -196,6 +218,10 @@ pub struct SubtitlesOutput {
     pub processed_files: HashMap<String, PathBuf>,
     /// OCR was performed.
     pub ocr_performed: bool,
+    /// Cached video-verified results per source.
+    /// Key is source name (e.g., "Source 2"), value is the computed result.
+    #[serde(default)]
+    pub video_verified_cache: HashMap<String, VideoVerifiedSourceResult>,
 }
 
 /// Output from chapter processing.
