@@ -40,7 +40,7 @@ class JobQueueLogic:
             t: shutil.which(t) for t in ["mkvmerge", "mkvextract", "ffmpeg", "ffprobe"]
         }
 
-    def add_jobs(self, new_jobs: list[dict]):
+    def add_jobs(self, new_jobs: list[dict]) -> None:
         """Initializes and adds new jobs to the queue."""
         for job in new_jobs:
             job["status"] = "Needs Configuration"  # Set initial in-memory status
@@ -50,12 +50,12 @@ class JobQueueLogic:
         self.jobs.extend(new_jobs)
         self.populate_table()
 
-    def add_jobs_from_dialog(self):
+    def add_jobs_from_dialog(self) -> None:
         dialog = AddJobDialog(self.v)
         if dialog.exec():
             self.add_jobs(dialog.get_discovered_jobs())
 
-    def populate_table(self):
+    def populate_table(self) -> None:
         """Fills the QTableWidget with the current list of jobs."""
         self.v.table.setRowCount(0)
         self.v.table.setColumnCount(3)
@@ -70,7 +70,7 @@ class JobQueueLogic:
         for row, job in enumerate(self.jobs):
             self._update_row(row, job)
 
-    def _update_row(self, row: int, job: dict):
+    def _update_row(self, row: int, job: dict) -> None:
         """Updates a single row based on its on-disk and in-memory state."""
         job_id = self.layout_manager.generate_job_id(job["sources"])
         status_text = (
@@ -617,7 +617,7 @@ class JobQueueLogic:
                 return None
         return job["track_info"]
 
-    def configure_job_at_row(self, row: int):
+    def configure_job_at_row(self, row: int) -> None:
         """Opens the ManualSelectionDialog and saves the result to disk."""
         job = self.jobs[row]
         job_id = self.layout_manager.generate_job_id(job["sources"])
@@ -678,7 +678,7 @@ class JobQueueLogic:
             return []
         return sorted(enhanced_layout, key=lambda x: x.get("user_order_index", 0))
 
-    def copy_layout(self, source_job_index: int):
+    def copy_layout(self, source_job_index: int) -> None:
         """Loads a configured layout from disk into the in-memory clipboard."""
         job = self.jobs[source_job_index]
         job_id = self.layout_manager.generate_job_id(job["sources"])
@@ -695,7 +695,7 @@ class JobQueueLogic:
             )
             self._layout_clipboard = None
 
-    def paste_layout(self):
+    def paste_layout(self) -> None:
         """Pastes the clipboard layout to selected jobs if compatible."""
         if not self._layout_clipboard:
             QMessageBox.warning(
@@ -798,7 +798,7 @@ class JobQueueLogic:
             new_layout.append(new_track)
         return new_layout
 
-    def remove_selected_jobs(self):
+    def remove_selected_jobs(self) -> None:
         """Removes selected jobs and deletes their layout files."""
         selected_rows = sorted(
             [r.row() for r in self.v.table.selectionModel().selectedRows()],

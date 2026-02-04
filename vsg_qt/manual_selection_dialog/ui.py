@@ -95,7 +95,7 @@ class ManualSelectionDialog(QDialog):
             # FIX: Call the prepopulate method on the logic instance
             self._logic.prepopulate_from_layout(previous_layout)
 
-    def _build_ui(self, previous_attachment_sources: list[str] | None = None):
+    def _build_ui(self, previous_attachment_sources: list[str] | None = None) -> None:
         root = QVBoxLayout(self)
         self.info_label = QLabel()
         self.info_label.setVisible(False)
@@ -185,19 +185,19 @@ class ManualSelectionDialog(QDialog):
         btns.rejected.connect(self.reject)
         root.addWidget(btns)
 
-    def _wire_signals(self):
+    def _wire_signals(self) -> None:
         for lw in self.source_lists.values():
             lw.itemDoubleClicked.connect(self._on_double_clicked_source)
         self.external_list.itemDoubleClicked.connect(self._on_double_clicked_source)
         self.add_external_btn.clicked.connect(self._add_external_subtitles)
 
-    def _populate_sources(self):
+    def _populate_sources(self) -> None:
         for src_key, widget in self.source_lists.items():
             for t in self.track_info.get(src_key, []):
                 # FIX: Call method on the logic instance
                 widget.add_track_item(t, guard_block=self._logic.is_blocked_video(t))
 
-    def _on_double_clicked_source(self, item):
+    def _on_double_clicked_source(self, item) -> None:
         if not item:
             return
         td = item.data(Qt.UserRole)
@@ -211,14 +211,14 @@ class ManualSelectionDialog(QDialog):
         """Returns (manual_layout, attachment_sources, source_settings)."""
         return self.manual_layout, self.attachment_sources, self.source_settings
 
-    def accept(self):
+    def accept(self) -> None:
         # FIX: Call method on the logic instance
         self.manual_layout, self.attachment_sources = (
             self._logic.get_final_layout_and_attachments()
         )
         super().accept()
 
-    def _show_source_context_menu(self, pos, source_key: str, group_box: QGroupBox):
+    def _show_source_context_menu(self, pos, source_key: str, group_box: QGroupBox) -> None:
         """Show context menu for source settings."""
         menu = QMenu(self)
 
@@ -249,7 +249,7 @@ class ManualSelectionDialog(QDialog):
         elif clear_action and action == clear_action:
             self._clear_source_settings(source_key)
 
-    def _open_source_settings_dialog(self, source_key: str):
+    def _open_source_settings_dialog(self, source_key: str) -> None:
         """Open the source settings dialog for the specified source."""
         from vsg_qt.source_settings_dialog import SourceSettingsDialog
 
@@ -287,7 +287,7 @@ class ManualSelectionDialog(QDialog):
             # Refresh badges for all tracks from this source
             self._refresh_badges_for_source(source_key)
 
-    def _clear_source_settings(self, source_key: str):
+    def _clear_source_settings(self, source_key: str) -> None:
         """Clear source settings for the specified source."""
         if source_key in self.source_settings:
             del self.source_settings[source_key]
@@ -297,7 +297,7 @@ class ManualSelectionDialog(QDialog):
             # Refresh badges for all tracks from this source
             self._refresh_badges_for_source(source_key)
 
-    def _refresh_badges_for_source(self, source_key: str):
+    def _refresh_badges_for_source(self, source_key: str) -> None:
         """Refresh badges and summary for all audio tracks from the specified source."""
         if not hasattr(self, "final_list"):
             return
@@ -314,7 +314,7 @@ class ManualSelectionDialog(QDialog):
 
     # ... other methods like _add_external_subtitles, keyPressEvent, etc remain the same ...
     # They are omitted here for brevity but should be kept in your file.
-    def keyPressEvent(self, event):
+    def keyPressEvent(self, event) -> None:
         if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_Up:
             self.final_list._move_by(-1)
             event.accept()
@@ -331,7 +331,7 @@ class ManualSelectionDialog(QDialog):
                 return
         super().keyPressEvent(event)
 
-    def _add_external_subtitles(self):
+    def _add_external_subtitles(self) -> None:
         files, _ = QFileDialog.getOpenFileNames(
             self,
             "Select External Subtitle Files",
@@ -622,7 +622,7 @@ class ManualSelectionDialog(QDialog):
             )
             return None
 
-    def _copy_style_edits(self, widget: TrackWidget):
+    def _copy_style_edits(self, widget: TrackWidget) -> None:
         """Copy style_patch and font_replacements from track_data (not raw style block)."""
         style_patch = widget.track_data.get("style_patch")
         font_replacements = widget.track_data.get("font_replacements")
@@ -652,7 +652,7 @@ class ManualSelectionDialog(QDialog):
         self.info_label.setText(f"✅ Copied {', '.join(parts)} to clipboard.")
         self.info_label.setVisible(True)
 
-    def _paste_style_edits(self, widget: TrackWidget):
+    def _paste_style_edits(self, widget: TrackWidget) -> None:
         """Paste style_patch and font_replacements to target track with validation."""
         if not self._style_edit_clipboard:
             QMessageBox.warning(
@@ -762,7 +762,7 @@ class ManualSelectionDialog(QDialog):
         widget.refresh_summary()
         self.edited_widget = widget
 
-    def _create_generated_track(self, source_track: dict):
+    def _create_generated_track(self, source_track: dict) -> None:
         """
         Create a generated track from a source subtitle track.
 
@@ -807,7 +807,7 @@ class ManualSelectionDialog(QDialog):
         )
         self.info_label.setVisible(True)
 
-    def _edit_generated_track(self, widget: TrackWidget, item):
+    def _edit_generated_track(self, widget: TrackWidget, item) -> None:
         """
         Edit an existing generated track's configuration.
 
@@ -826,7 +826,7 @@ class ManualSelectionDialog(QDialog):
         # Open the Style Editor - it has a Filtering tab for generated tracks
         self._launch_style_editor(widget)
 
-    def _launch_style_editor(self, widget: TrackWidget):
+    def _launch_style_editor(self, widget: TrackWidget) -> None:
         track_data = widget.track_data
 
         # Use the track's source video for preview (not always Source 1)
@@ -931,7 +931,7 @@ class ManualSelectionDialog(QDialog):
         existing_font_replacements: dict | None,
         existing_style_patch: dict | None = None,
         existing_filter_config: dict | None = None,
-    ):
+    ) -> None:
         """Launch subtitle editor as an in-process dialog."""
         self.log_callback("[INFO] Launching subtitle editor...")
         try:

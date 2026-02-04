@@ -13,7 +13,7 @@ class OptionsLogic:
         self.dlg = dialog
 
     # --- load/save over a flat dict or AppSettings dataclass ---
-    def load_from_config(self, cfg: dict[str, Any]):
+    def load_from_config(self, cfg: dict[str, Any]) -> None:
         # Handle both dict and AppSettings dataclass
         is_dataclass = hasattr(cfg, "__dataclass_fields__")
         for section in self.dlg.sections.values():
@@ -24,7 +24,7 @@ class OptionsLogic:
                     value = cfg.get(key)
                 self._set_widget_val(widget, value)
 
-    def save_to_config(self, cfg: dict[str, Any]):
+    def save_to_config(self, cfg: dict[str, Any]) -> None:
         # Handle both dict and AppSettings dataclass
         is_dataclass = hasattr(cfg, "__dataclass_fields__")
         for section in self.dlg.sections.values():
@@ -67,7 +67,7 @@ class OptionsLogic:
             return widget.layout().itemAt(0).widget().text()
         return widget.text() if isinstance(widget, QLineEdit) else None
 
-    def _set_widget_val(self, widget, value):
+    def _set_widget_val(self, widget, value) -> None:
         from PySide6.QtWidgets import (
             QCheckBox,
             QComboBox,

@@ -41,7 +41,7 @@ class TrackSettingsLogic:
         self.v = view
         self._populate_language_dropdown()
 
-    def _populate_language_dropdown(self):
+    def _populate_language_dropdown(self) -> None:
         """Populates the language dropdown with common codes."""
         for display_name, code in LANGUAGE_CODES:
             if code is None:
@@ -50,7 +50,7 @@ class TrackSettingsLogic:
             else:
                 self.v.lang_combo.addItem(display_name, code)
 
-    def init_for_type_and_codec(self, track_type: str, codec_id: str):
+    def init_for_type_and_codec(self, track_type: str, codec_id: str) -> None:
         """Shows or hides widgets based on the track type."""
         is_subs = track_type == "subtitles"
 
@@ -84,7 +84,7 @@ class TrackSettingsLogic:
         rescale: bool = False,
         size_multiplier: float = 1.0,
         **kwargs,  # Accept and ignore any other arguments
-    ):
+    ) -> None:
         """Applies the starting values to the widgets."""
         # Set language
         if custom_lang:

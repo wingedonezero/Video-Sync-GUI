@@ -16,7 +16,7 @@ class TrackWidgetLogic:
         self.available_sources = available_sources
         self.init_ui_state()
 
-    def init_ui_state(self):
+    def init_ui_state(self) -> None:
         """Sets the initial state of the UI based on track data."""
         is_subs = self.track_data.get("type") == "subtitles"
         is_external = self.track_data.get("source") == "External"
@@ -41,7 +41,7 @@ class TrackWidgetLogic:
         if is_subs and is_external:
             self.populate_sync_sources()
 
-    def populate_sync_sources(self):
+    def populate_sync_sources(self) -> None:
         """Populates the dropdown with sources to sync an external sub against."""
         combo = self.v.sync_to_combo
         combo.blockSignals(True)
@@ -57,7 +57,7 @@ class TrackWidgetLogic:
                 combo.setCurrentIndex(index)
         combo.blockSignals(False)
 
-    def refresh_summary(self):
+    def refresh_summary(self) -> None:
         """Updates the main summary label and the inline options summary."""
         track_type = self.track_data.get("type", "U")
         track_id = self.track_data.get("id", 0)
@@ -170,7 +170,7 @@ class TrackWidgetLogic:
         else:
             self.v.source_label.setText(f"└ ⚙ {', '.join(parts)}")
 
-    def refresh_badges(self):
+    def refresh_badges(self) -> None:
         """Updates the badge label based on the current settings."""
         badges = []
 

@@ -48,13 +48,13 @@ class JobQueueDialog(QDialog):
         self.setAcceptDrops(True)
         self.populate_table()
 
-    def dragEnterEvent(self, event):
+    def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
         else:
             event.ignore()
 
-    def dropEvent(self, event):
+    def dropEvent(self, event) -> None:
         if event.mimeData().hasUrls():
             paths = [url.toLocalFile() for url in event.mimeData().urls()]
             add_dialog = AddJobDialog(self)
@@ -67,7 +67,7 @@ class JobQueueDialog(QDialog):
         else:
             event.ignore()
 
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
         self.table = QTableWidget()
         self.table.setAcceptDrops(True)
@@ -100,7 +100,7 @@ class JobQueueDialog(QDialog):
         self.ok_button.clicked.connect(self.accept)
         dialog_btns.rejected.connect(self.reject)
 
-    def _connect_signals(self):
+    def _connect_signals(self) -> None:
         self.table.itemDoubleClicked.connect(
             lambda item: self._logic.configure_job_at_row(item.row())
         )
@@ -118,7 +118,7 @@ class JobQueueDialog(QDialog):
             lambda: self.move_selected_jobs(1),
         )
 
-    def move_selected_jobs(self, direction: int):
+    def move_selected_jobs(self, direction: int) -> None:
         selected_rows = sorted(
             [r.row() for r in self.table.selectionModel().selectedRows()]
         )
@@ -145,11 +145,11 @@ class JobQueueDialog(QDialog):
                 index, QItemSelectionModel.Select | QItemSelectionModel.Rows
             )
 
-    def populate_table(self):
+    def populate_table(self) -> None:
         self.table.selectionModel().clear()
         self._logic.populate_table()
 
-    def _show_context_menu(self, pos: Qt.Point):
+    def _show_context_menu(self, pos: Qt.Point) -> None:
         selected_rows = self.table.selectionModel().selectedRows()
         if not selected_rows:
             return
