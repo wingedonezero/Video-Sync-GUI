@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .io.runner import CommandRunner
+from .models.context_types import ManualLayoutItem
 from .models.settings import AppSettings
 from .pipeline_components import (
     LogManager,
@@ -46,11 +47,10 @@ class JobPipeline:
             progress_callback: Callback for progress updates
         """
         # Accept both dict and AppSettings for backwards compatibility
+        # Normalize to AppSettings internally - no more keeping both
         if isinstance(config, AppSettings):
             self.settings = config
-            self.config = config.to_dict()
         else:
-            self.config = config
             self.settings = AppSettings.from_config(config)
         self.gui_log_callback = log_callback
         self.progress = progress_callback
@@ -61,7 +61,7 @@ class JobPipeline:
         sources: dict[str, str],
         and_merge: bool,
         output_dir_str: str,
-        manual_layout: list[dict] | None = None,
+        manual_layout: list[ManualLayoutItem] | None = None,
         attachment_sources: list[str] | None = None,
         source_settings: dict[str, dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
@@ -134,7 +134,7 @@ class JobPipeline:
         try:
             # --- 5. Plan Sync ---
             ctx = SyncPlanner.plan_sync(
-                config=self.config,
+                settings=self.settings,
                 tool_paths=self.tool_paths,
                 log_callback=log_to_all,
                 progress_callback=self.progress,

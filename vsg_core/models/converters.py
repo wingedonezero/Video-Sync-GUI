@@ -1,6 +1,7 @@
 # vsg_core/models/converters.py
 from collections import Counter
 
+from .context_types import ManualLayoutItem
 from .enums import TrackType
 from .jobs import PlanItem
 from .media import StreamProps, Track
@@ -36,7 +37,7 @@ def tracks_from_dialog_info(
 
 
 def realize_plan_from_manual_layout(
-    manual_layout: list[dict], track_info_by_source: dict[str, list[Track]]
+    manual_layout: list[ManualLayoutItem], track_info_by_source: dict[str, list[Track]]
 ) -> list[PlanItem]:
     """
     Binds the user's manual layout selections to the typed Track models for a job.
