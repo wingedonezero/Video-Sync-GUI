@@ -84,7 +84,7 @@ class PlayerThread(QThread):
         with self._lock:
             return self._is_paused
 
-    def _setup_graph(self):
+    def _setup_graph(self) -> None:
         """Set up the filter graph for subtitle rendering."""
         self._graph = av.filter.Graph()
         buffer_in = self._graph.add_buffer(template=self._video_stream)
@@ -116,7 +116,7 @@ class PlayerThread(QThread):
         subtitles_filter.link_to(buffer_out)
         self._graph.configure()
 
-    def run(self):
+    def run(self) -> None:
         """Main thread loop."""
         try:
             self._container = av.open(self.video_path, "r")
@@ -299,7 +299,7 @@ class PlayerThread(QThread):
 
         self._cleanup_resources()
 
-    def _cleanup_resources(self):
+    def _cleanup_resources(self) -> None:
         """Explicitly free PyAV resources to prevent memory leaks."""
         # Clear cached frame
         self._cached_raw_frame = None
@@ -322,23 +322,23 @@ class PlayerThread(QThread):
         gc.collect()
 
     @Slot()
-    def stop(self):
+    def stop(self) -> None:
         """Stop the player thread."""
         self._is_running = False
         self.wait()
         self._cleanup_resources()
 
-    def toggle_pause(self):
+    def toggle_pause(self) -> None:
         """Toggle between paused and playing."""
         with self._lock:
             self._is_paused = not self._is_paused
 
-    def set_paused(self, paused: bool):
+    def set_paused(self, paused: bool) -> None:
         """Set the paused state."""
         with self._lock:
             self._is_paused = paused
 
-    def seek(self, time_ms: int):
+    def seek(self, time_ms: int) -> None:
         """
         Seek to a specific time.
 
@@ -353,7 +353,7 @@ class PlayerThread(QThread):
             if self._is_paused:
                 self._force_render_frame = True
 
-    def reload_subtitle_track(self, subtitle_path: str | None = None):
+    def reload_subtitle_track(self, subtitle_path: str | None = None) -> None:
         """
         Reload the subtitle track.
 

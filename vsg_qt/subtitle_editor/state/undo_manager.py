@@ -68,7 +68,7 @@ class UndoManager(QObject):
             return f"Redo: {self._redo_stack[-1].description}"
         return "Redo"
 
-    def push(self, action: UndoAction):
+    def push(self, action: UndoAction) -> None:
         """
         Push a new action onto the undo stack.
 
@@ -117,13 +117,13 @@ class UndoManager(QObject):
         self._emit_state_changes()
         return True
 
-    def clear(self):
+    def clear(self) -> None:
         """Clear both undo and redo stacks."""
         self._undo_stack.clear()
         self._redo_stack.clear()
         self._emit_state_changes()
 
-    def _emit_state_changes(self):
+    def _emit_state_changes(self) -> None:
         """Emit signals for state changes."""
         self.can_undo_changed.emit(self.can_undo)
         self.can_redo_changed.emit(self.can_redo)

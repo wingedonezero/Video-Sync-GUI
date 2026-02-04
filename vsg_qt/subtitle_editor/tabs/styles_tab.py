@@ -58,7 +58,7 @@ class StylesTab(BaseTab):
 
         self._build_ui()
 
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         """Build the styles tab UI."""
         layout = self.content_layout
 
@@ -209,7 +209,7 @@ class StylesTab(BaseTab):
 
         layout.addStretch()
 
-    def _on_state_set(self):
+    def _on_state_set(self) -> None:
         """Initialize from state when set."""
         if not self._state:
             return
@@ -227,7 +227,7 @@ class StylesTab(BaseTab):
         # Connect to state signals
         self._state.style_changed.connect(self._on_style_changed_externally)
 
-    def _populate_styles(self):
+    def _populate_styles(self) -> None:
         """Populate the styles dropdown from state."""
         if not self._state:
             return
@@ -248,14 +248,14 @@ class StylesTab(BaseTab):
 
         self._style_selector.blockSignals(False)
 
-    def _on_style_selected(self, style_name: str):
+    def _on_style_selected(self, style_name: str) -> None:
         """Handle style selection change."""
         if style_name and self._state:
             self._current_style_name = style_name
             self._state.set_current_style(style_name)
             self._load_style_attributes(style_name)
 
-    def _load_style_attributes(self, style_name: str):
+    def _load_style_attributes(self, style_name: str) -> None:
         """Load style attributes into the UI."""
         if not self._state or style_name not in self._state.styles:
             return
@@ -327,7 +327,7 @@ class StylesTab(BaseTab):
         for widget in self._style_widgets.values():
             widget.blockSignals(False)
 
-    def _set_color_button(self, button: QPushButton, hex_color: str):
+    def _set_color_button(self, button: QPushButton, hex_color: str) -> None:
         """Set color button background from hex color."""
         color = QColor(hex_color)
         button.setStyleSheet(f"background-color: {color.name()};")
@@ -342,7 +342,7 @@ class StylesTab(BaseTab):
         # Fallback - shouldn't happen if set_color_button was called
         return "#FFFFFFFF"
 
-    def _update_style(self):
+    def _update_style(self) -> None:
         """Update style from UI values."""
         if not self._current_style_name or not self._state:
             return
@@ -412,7 +412,7 @@ class StylesTab(BaseTab):
             "marginv": self._style_widgets["marginv"].value(),
         }
 
-    def _reset_current_style(self):
+    def _reset_current_style(self) -> None:
         """Reset current style to original values."""
         if not self._current_style_name or not self._state:
             return
@@ -421,7 +421,7 @@ class StylesTab(BaseTab):
         self._load_style_attributes(self._current_style_name)
         self._state.save_preview()
 
-    def _pick_color(self, color_key: str):
+    def _pick_color(self, color_key: str) -> None:
         """Open color picker for a color attribute."""
         button = self._style_widgets[color_key]
         # Get initial color from stored property
@@ -435,7 +435,7 @@ class StylesTab(BaseTab):
             self._set_color_button(button, color.name(QColor.HexArgb))
             self._update_style()
 
-    def _save_to_favorites(self, color_key: str):
+    def _save_to_favorites(self, color_key: str) -> None:
         """Save current color to favorites."""
         if not self._favorites_manager:
             return
@@ -454,7 +454,7 @@ class StylesTab(BaseTab):
             self._favorites_manager.add(name.strip(), hex_color)
             self._favorite_save_btns[color_key].setText("\u2605")  # Filled star
 
-    def _show_favorites_menu(self, color_key: str):
+    def _show_favorites_menu(self, color_key: str) -> None:
         """Show favorites menu for a color button."""
         if not self._favorites_manager:
             return
@@ -488,23 +488,23 @@ class StylesTab(BaseTab):
                 self._set_color_button(color_btn, action.data())
                 self._update_style()
 
-    def _open_favorites_manager(self):
+    def _open_favorites_manager(self) -> None:
         """Open the favorites manager dialog."""
         from vsg_qt.favorites_dialog import FavoritesManagerDialog
 
         dialog = FavoritesManagerDialog(self._favorites_manager, self)
         dialog.exec()
 
-    def _on_style_changed_externally(self, style_name: str):
+    def _on_style_changed_externally(self, style_name: str) -> None:
         """Handle style change from external source."""
         if style_name == self._current_style_name:
             self._load_style_attributes(style_name)
 
-    def on_activated(self):
+    def on_activated(self) -> None:
         """Called when tab becomes active."""
         self._populate_styles()
 
-    def on_event_selected(self, event_index: int):
+    def on_event_selected(self, event_index: int) -> None:
         """Handle event selection - switch to event's style."""
         if not self._state or event_index < 0:
             return
@@ -529,7 +529,7 @@ class StylesTab(BaseTab):
         else:
             self._tag_warning.setVisible(False)
 
-    def _open_resample_dialog(self):
+    def _open_resample_dialog(self) -> None:
         """Open the resample dialog to rescale subtitle resolution."""
         if not self._state or not self._state.subtitle_data:
             return
@@ -561,7 +561,7 @@ class StylesTab(BaseTab):
             # Notify video panel to reload subtitle
             self._state.subtitle_data_changed.emit()
 
-    def _strip_tags_from_selected(self):
+    def _strip_tags_from_selected(self) -> None:
         """Strip inline style tags from selected lines."""
         if not self._state or not self._state.subtitle_data:
             return

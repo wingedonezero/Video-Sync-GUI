@@ -93,7 +93,7 @@ class SubtitleEditorWindow(QDialog):
         self._connect_signals()
         self._load_data()
 
-    def _setup_window(self):
+    def _setup_window(self) -> None:
         """Configure window properties."""
         self.setWindowTitle("Subtitle Editor")
         self.setMinimumSize(1400, 900)
@@ -108,7 +108,7 @@ class SubtitleEditorWindow(QDialog):
         # Ensure proper cleanup when closed
         self.setAttribute(Qt.WA_DeleteOnClose)
 
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         """Build the main UI layout."""
         main_layout = QVBoxLayout(self)
         main_layout.setSpacing(8)
@@ -150,7 +150,7 @@ class SubtitleEditorWindow(QDialog):
         self._button_box.rejected.connect(self.reject)
         main_layout.addWidget(self._button_box)
 
-    def _connect_signals(self):
+    def _connect_signals(self) -> None:
         """Connect all signals."""
         # Events table -> video seek and tab notification
         self._events_table.event_selected.connect(self._on_event_selected)
@@ -181,7 +181,7 @@ class SubtitleEditorWindow(QDialog):
         # State signals for video reload
         self._state.style_changed.connect(self._reload_video_subtitles)
 
-    def _load_data(self):
+    def _load_data(self) -> None:
         """Load subtitle data and start video player."""
         # Load subtitle into state
         if not self._state.load_subtitle(self._subtitle_path, self._video_path):
@@ -220,7 +220,7 @@ class SubtitleEditorWindow(QDialog):
                 fonts_dir=str(self._fonts_dir) if self._fonts_dir else None,
             )
 
-    def _on_event_selected(self, event_index: int):
+    def _on_event_selected(self, event_index: int) -> None:
         """Handle event selection in table."""
         if event_index < 0:
             return
@@ -234,18 +234,18 @@ class SubtitleEditorWindow(QDialog):
         # Notify tab panel
         self._tab_panel.on_event_selected(event_index)
 
-    def _on_event_double_clicked(self, event_index: int):
+    def _on_event_double_clicked(self, event_index: int) -> None:
         """Handle double-click on event."""
         # Same as single click for now - seek and select
         self._on_event_selected(event_index)
 
-    def _on_fonts_changed(self):
+    def _on_fonts_changed(self) -> None:
         """Handle font replacement changes."""
         # Apply font replacements and reload video
         self._apply_font_replacements()
         self._reload_video_subtitles()
 
-    def _apply_font_replacements(self):
+    def _apply_font_replacements(self) -> None:
         """Apply font replacements to the preview subtitle."""
         fonts_tab = self._tab_panel.get_fonts_tab()
         if not fonts_tab or not self._state.subtitle_data:
@@ -280,7 +280,7 @@ class SubtitleEditorWindow(QDialog):
         self._state.save_preview()
         print(f"[EditorWindow] Saved preview to: {self._state.preview_path}")
 
-    def _reload_video_subtitles(self, style_name: str | None = None):
+    def _reload_video_subtitles(self, style_name: str | None = None) -> None:
         """Reload video subtitles after changes."""
         if self._state.preview_path:
             print(
@@ -288,7 +288,7 @@ class SubtitleEditorWindow(QDialog):
             )
             self._video_panel.reload_subtitles(str(self._state.preview_path))
 
-    def _cleanup_old_temp_files(self):
+    def _cleanup_old_temp_files(self) -> None:
         """Clean up old temp files from previous editor sessions."""
         try:
             from vsg_core.config import AppConfig
@@ -301,7 +301,7 @@ class SubtitleEditorWindow(QDialog):
             # Don't let cleanup errors prevent editor from opening
             print(f"[SubtitleEditor] Temp cleanup warning: {e}")
 
-    def accept(self):
+    def accept(self) -> None:
         """Save changes and close."""
         # Ensure the player thread is stopped before the dialog is destroyed.
         self._video_panel.stop_player()
@@ -322,13 +322,13 @@ class SubtitleEditorWindow(QDialog):
 
         super().accept()
 
-    def reject(self):
+    def reject(self) -> None:
         """Cancel and close without saving."""
         # Ensure the player thread is stopped before the dialog is destroyed.
         self._video_panel.stop_player()
         super().reject()
 
-    def closeEvent(self, event):
+    def closeEvent(self, event) -> None:
         """Clean up resources on close."""
         # Stop video player
         self._video_panel.stop_player()

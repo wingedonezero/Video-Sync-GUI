@@ -43,7 +43,7 @@ class BaseTab(QScrollArea):
         self._content_layout.setContentsMargins(8, 8, 8, 8)
         self.setWidget(self._content)
 
-    def set_state(self, state: EditorState):
+    def set_state(self, state: EditorState) -> None:
         """
         Set the editor state.
 
@@ -63,7 +63,7 @@ class BaseTab(QScrollArea):
         """Get the content layout to add widgets to."""
         return self._content_layout
 
-    def _on_state_set(self):
+    def _on_state_set(self) -> None:
         """
         Called when state is set.
 
@@ -72,7 +72,7 @@ class BaseTab(QScrollArea):
         pass
 
     @abstractmethod
-    def on_activated(self):
+    def on_activated(self) -> None:
         """
         Called when this tab becomes active (selected in dropdown).
 
@@ -80,7 +80,7 @@ class BaseTab(QScrollArea):
         """
         pass
 
-    def on_deactivated(self):
+    def on_deactivated(self) -> None:
         """
         Called when this tab is deactivated (another tab selected).
 
@@ -88,7 +88,7 @@ class BaseTab(QScrollArea):
         """
         pass
 
-    def on_event_selected(self, event_index: int):
+    def on_event_selected(self, event_index: int) -> None:
         """
         Called when an event is selected in the events table.
 

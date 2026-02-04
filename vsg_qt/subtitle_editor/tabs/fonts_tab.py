@@ -40,7 +40,7 @@ class FontPreviewDelegate(QStyledItemDelegate):
         super().__init__(parent)
         self._loaded_fonts = loaded_fonts  # file_path -> qt_family_name
 
-    def paint(self, painter, option, index):
+    def paint(self, painter, option, index) -> None:
         """Paint the item with font preview."""
         font_name = index.data(Qt.DisplayRole)
         font_path = index.data(Qt.UserRole)
@@ -96,7 +96,7 @@ class FontPreviewComboBox(QComboBox):
         font_name: str,
         font_path: str | None = None,
         family_name: str | None = None,
-    ):
+    ) -> None:
         """Add a font to the dropdown.
 
         Args:
@@ -141,7 +141,7 @@ class FontsTab(BaseTab):
 
         self._build_ui()
 
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         """Build the fonts tab UI."""
         layout = self.content_layout
 
@@ -211,7 +211,7 @@ class FontsTab(BaseTab):
 
         layout.addStretch()
 
-    def set_fonts_dir(self, fonts_dir: Path | None):
+    def set_fonts_dir(self, fonts_dir: Path | None) -> None:
         """Set the fonts directory for preview."""
         from vsg_core.config import AppConfig
 
@@ -243,12 +243,12 @@ class FontsTab(BaseTab):
 
         self._scan_available_fonts()
 
-    def set_replacements(self, replacements: dict[str, dict[str, Any]]):
+    def set_replacements(self, replacements: dict[str, dict[str, Any]]) -> None:
         """Set existing font replacements."""
         self._replacements = replacements.copy() if replacements else {}
         self._populate_fonts()
 
-    def _scan_available_fonts(self):
+    def _scan_available_fonts(self) -> None:
         """Scan fonts directory using FontScanner - only user fonts, not attached."""
         from vsg_core.font_manager import FontScanner
 
@@ -281,18 +281,18 @@ class FontsTab(BaseTab):
                     if families:
                         self._loaded_fonts[file_path_str] = families[0]
 
-    def _scan_and_populate(self):
+    def _scan_and_populate(self) -> None:
         """Rescan fonts and repopulate."""
         if self._scanner:
             self._scanner.clear_cache()
         self._scan_available_fonts()
         self._populate_fonts()
 
-    def _on_state_set(self):
+    def _on_state_set(self) -> None:
         """Initialize from state when set."""
         self._populate_fonts()
 
-    def _populate_fonts(self):
+    def _populate_fonts(self) -> None:
         """Populate the fonts table from state."""
         if not self._state:
             return
@@ -378,7 +378,7 @@ class FontsTab(BaseTab):
 
         self._fonts_table.resizeRowsToContents()
 
-    def _apply_replacements(self):
+    def _apply_replacements(self) -> None:
         """Apply all selected font replacements - triggered by Apply button."""
         import shutil
 
@@ -433,7 +433,7 @@ class FontsTab(BaseTab):
 
         self.fonts_changed.emit()
 
-    def _clear_all_replacements(self):
+    def _clear_all_replacements(self) -> None:
         """Clear all font replacements."""
         self._replacements.clear()
 
@@ -448,7 +448,7 @@ class FontsTab(BaseTab):
 
         self.fonts_changed.emit()
 
-    def on_activated(self):
+    def on_activated(self) -> None:
         """Called when tab becomes active."""
         # Only rescan if we haven't scanned yet or fonts list is empty
         # This prevents unnecessary repopulation which can cause issues

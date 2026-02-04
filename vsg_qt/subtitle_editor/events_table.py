@@ -101,7 +101,7 @@ class EventsTable(QWidget):
 
         self._setup_ui()
 
-    def _setup_ui(self):
+    def _setup_ui(self) -> None:
         """Set up the table UI."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -144,7 +144,7 @@ class EventsTable(QWidget):
 
         layout.addWidget(self._table)
 
-    def set_state(self, state: EditorState):
+    def set_state(self, state: EditorState) -> None:
         """
         Set the editor state.
 
@@ -156,7 +156,7 @@ class EventsTable(QWidget):
         self._state.selection_changed.connect(self._on_state_selection_changed)
         self._state.filter_changed.connect(self._update_filter_highlights)
 
-    def refresh(self):
+    def refresh(self) -> None:
         """Refresh the table from the current state."""
         if not self._state:
             return
@@ -170,7 +170,7 @@ class EventsTable(QWidget):
         # Resize rows to content
         self._table.resizeRowsToContents()
 
-    def _populate_row(self, row: int, event):
+    def _populate_row(self, row: int, event) -> None:
         """
         Populate a table row with event data.
 
@@ -246,7 +246,7 @@ class EventsTable(QWidget):
                 if item:
                     item.setForeground(QBrush(QColor(128, 128, 128)))
 
-    def _on_selection_changed(self):
+    def _on_selection_changed(self) -> None:
         """Handle table selection change."""
         selected_rows = self._table.selectionModel().selectedRows()
         if not selected_rows:
@@ -260,12 +260,12 @@ class EventsTable(QWidget):
         # Emit signal
         self.event_selected.emit(row)
 
-    def _on_double_click(self, item: QTableWidgetItem):
+    def _on_double_click(self, item: QTableWidgetItem) -> None:
         """Handle double-click on a row."""
         if item:
             self.event_double_clicked.emit(item.row())
 
-    def _show_context_menu(self, pos):
+    def _show_context_menu(self, pos) -> None:
         """Show context menu for row actions."""
         if not self._state:
             return
@@ -296,7 +296,7 @@ class EventsTable(QWidget):
         elif action == change_style:
             self._change_event_style(row)
 
-    def _change_event_style(self, row: int):
+    def _change_event_style(self, row: int) -> None:
         """Prompt for a style change for the selected event."""
         if not self._state:
             return
@@ -327,7 +327,7 @@ class EventsTable(QWidget):
             self._state.subtitle_data_changed.emit()
             self.preview_updated.emit()
 
-    def _update_overlap_highlights(self, selected_row: int):
+    def _update_overlap_highlights(self, selected_row: int) -> None:
         """
         Highlight events that overlap with the selected event.
 
@@ -348,7 +348,7 @@ class EventsTable(QWidget):
         for row in overlapping:
             self._set_row_background(row, self.COLOR_OVERLAP)
 
-    def _update_filter_highlights(self):
+    def _update_filter_highlights(self) -> None:
         """Update highlights based on filter preview."""
         if not self._filter_preview_mode or not self._state:
             return
@@ -366,7 +366,7 @@ class EventsTable(QWidget):
         for row in self._highlighted_indices:
             self._set_row_background(row, self.COLOR_OVERLAP)
 
-    def set_filter_preview_mode(self, enabled: bool):
+    def set_filter_preview_mode(self, enabled: bool) -> None:
         """
         Enable/disable filter preview mode.
 
@@ -381,7 +381,7 @@ class EventsTable(QWidget):
         else:
             self._clear_highlights()
 
-    def set_flag_effects_mode(self, enabled: bool):
+    def set_flag_effects_mode(self, enabled: bool) -> None:
         """
         Enable/disable effect flagging mode.
 
@@ -394,7 +394,7 @@ class EventsTable(QWidget):
         self._flag_effects_mode = enabled
         self._update_effect_flags()
 
-    def _update_effect_flags(self):
+    def _update_effect_flags(self) -> None:
         """Update effect warning flags on row numbers (fast, no refresh)."""
         if not self._state:
             self._flagged_effect_indices = []
@@ -463,21 +463,21 @@ class EventsTable(QWidget):
         """
         return bool(EFFECT_TAG_REGEX.search(text))
 
-    def _set_row_background(self, row: int, color: QColor):
+    def _set_row_background(self, row: int, color: QColor) -> None:
         """Set background color for all cells in a row."""
         for col in range(self._table.columnCount()):
             item = self._table.item(row, col)
             if item:
                 item.setBackground(QBrush(color))
 
-    def _clear_row_background(self, row: int):
+    def _clear_row_background(self, row: int) -> None:
         """Clear background color for all cells in a row."""
         for col in range(self._table.columnCount()):
             item = self._table.item(row, col)
             if item:
                 item.setBackground(QBrush())
 
-    def _clear_highlights(self):
+    def _clear_highlights(self) -> None:
         """Clear all row highlights."""
         if self._filter_preview_mode and self._state:
             kept_indices = self._state.get_filtered_event_indices()
@@ -498,7 +498,7 @@ class EventsTable(QWidget):
 
         self._highlighted_indices.clear()
 
-    def select_row(self, row: int):
+    def select_row(self, row: int) -> None:
         """
         Select a specific row.
 
@@ -509,7 +509,7 @@ class EventsTable(QWidget):
             self._table.selectRow(row)
             self._table.scrollToItem(self._table.item(row, 0))
 
-    def _on_state_selection_changed(self, indices: list[int]):
+    def _on_state_selection_changed(self, indices: list[int]) -> None:
         """Handle selection change from state."""
         if indices and len(indices) == 1:
             self.select_row(indices[0])

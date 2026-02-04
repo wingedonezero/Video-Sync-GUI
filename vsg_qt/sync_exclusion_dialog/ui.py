@@ -45,7 +45,7 @@ class SyncExclusionDialog(QDialog):
         self._apply_existing_config()  # Apply existing settings if editing
         self._update_preview()
 
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         """Build the dialog UI."""
         layout = QVBoxLayout(self)
 
@@ -134,7 +134,7 @@ class SyncExclusionDialog(QDialog):
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
 
-    def _load_styles(self):
+    def _load_styles(self) -> None:
         """Load available styles from the subtitle file."""
         # Try to get the path from various possible locations
         subtitle_path = (
@@ -173,7 +173,7 @@ class SyncExclusionDialog(QDialog):
                 "font-weight: bold; padding: 10px; color: #FF0000;"
             )
 
-    def _apply_existing_config(self):
+    def _apply_existing_config(self) -> None:
         """Apply existing configuration when editing exclusions."""
         if not self.existing_config:
             return
@@ -191,12 +191,12 @@ class SyncExclusionDialog(QDialog):
             if style_name in self.style_checkboxes:
                 self.style_checkboxes[style_name].setChecked(True)
 
-    def _select_all_styles(self):
+    def _select_all_styles(self) -> None:
         """Check all style checkboxes."""
         for checkbox in self.style_checkboxes.values():
             checkbox.setChecked(True)
 
-    def _deselect_all_styles(self):
+    def _deselect_all_styles(self) -> None:
         """Uncheck all style checkboxes."""
         for checkbox in self.style_checkboxes.values():
             checkbox.setChecked(False)
@@ -209,7 +209,7 @@ class SyncExclusionDialog(QDialog):
             if checkbox.isChecked()
         ]
 
-    def _update_preview(self):
+    def _update_preview(self) -> None:
         """Update the preview label showing what will be excluded from frame sync."""
         selected_styles = self._get_selected_styles()
         mode = "exclude" if self.exclude_radio.isChecked() else "include"
@@ -247,7 +247,7 @@ class SyncExclusionDialog(QDialog):
             "font-weight: bold; padding: 10px; color: #00AA00;"
         )
 
-    def _on_accept(self):
+    def _on_accept(self) -> None:
         """Validate and save the configuration when user clicks OK."""
         selected_styles = self._get_selected_styles()
 

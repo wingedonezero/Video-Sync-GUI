@@ -44,7 +44,7 @@ class TabPanel(QWidget):
 
         self._setup_ui()
 
-    def _setup_ui(self):
+    def _setup_ui(self) -> None:
         """Set up the tab panel UI."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -71,7 +71,7 @@ class TabPanel(QWidget):
         # Create and add default tabs
         self._create_tabs()
 
-    def _create_tabs(self):
+    def _create_tabs(self) -> None:
         """Create the default set of tabs."""
         # Styles tab
         styles_tab = StylesTab()
@@ -85,7 +85,7 @@ class TabPanel(QWidget):
         fonts_tab = FontsTab()
         self._add_tab(fonts_tab)
 
-    def _add_tab(self, tab: BaseTab):
+    def _add_tab(self, tab: BaseTab) -> None:
         """
         Add a tab to the panel.
 
@@ -96,7 +96,7 @@ class TabPanel(QWidget):
         self._selector.addItem(tab.TAB_NAME)
         self._stack.addWidget(tab)
 
-    def set_state(self, state: EditorState):
+    def set_state(self, state: EditorState) -> None:
         """
         Set the editor state for all tabs.
 
@@ -108,7 +108,7 @@ class TabPanel(QWidget):
         for tab in self._tabs:
             tab.set_state(state)
 
-    def _on_tab_selected(self, index: int):
+    def _on_tab_selected(self, index: int) -> None:
         """Handle tab selection change."""
         if index < 0 or index >= len(self._tabs):
             return
@@ -124,7 +124,7 @@ class TabPanel(QWidget):
 
         self.tab_changed.emit(self._current_tab.TAB_NAME)
 
-    def on_event_selected(self, event_index: int):
+    def on_event_selected(self, event_index: int) -> None:
         """
         Notify the current tab of event selection.
 
@@ -164,7 +164,7 @@ class TabPanel(QWidget):
         tab = self.get_tab("Fonts")
         return tab if isinstance(tab, FontsTab) else None
 
-    def select_tab(self, tab_name: str):
+    def select_tab(self, tab_name: str) -> None:
         """
         Select a tab by name.
 
