@@ -25,7 +25,7 @@ from PIL import Image
 from .parsers.base import SubtitleImage
 
 
-@dataclass
+@dataclass(slots=True)
 class PreprocessingConfig:
     """Configuration for preprocessing pipeline."""
 
@@ -56,7 +56,7 @@ class PreprocessingConfig:
     debug_dir: Path | None = None
 
 
-@dataclass
+@dataclass(slots=True)
 class PreprocessedImage:
     """Result of preprocessing a subtitle image."""
 

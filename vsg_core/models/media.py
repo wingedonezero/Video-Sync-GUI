@@ -5,14 +5,14 @@ from pathlib import Path
 from .enums import TrackType
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class StreamProps:
     codec_id: str
     lang: str = "und"
     name: str = ""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Track:
     source: str  # Was SourceRole, now a string like "Source 1"
     id: int  # mkvmerge track id (per container)
@@ -20,7 +20,7 @@ class Track:
     props: StreamProps
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Attachment:
     id: int
     file_name: str

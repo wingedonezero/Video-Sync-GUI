@@ -26,7 +26,7 @@ from typing import Any
 # =============================================================================
 
 
-@dataclass
+@dataclass(slots=True)
 class OCREventData:
     """OCR-specific metadata for a single subtitle event."""
 
@@ -93,7 +93,7 @@ class OCREventData:
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class SyncEventData:
     """Sync-specific metadata for a single subtitle event."""
 
@@ -132,7 +132,7 @@ class SyncEventData:
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class SteppingEventData:
     """Stepping-specific metadata for a single subtitle event."""
 
@@ -164,7 +164,7 @@ class SteppingEventData:
 # =============================================================================
 
 
-@dataclass
+@dataclass(slots=True)
 class OCRMetadata:
     """Document-level OCR metadata and statistics."""
 
@@ -239,7 +239,7 @@ class OCRMetadata:
 # =============================================================================
 
 
-@dataclass
+@dataclass(slots=True)
 class SubtitleStyle:
     """
     ASS/SSA style definition with all 23 fields.
@@ -439,7 +439,7 @@ class SubtitleStyle:
 # =============================================================================
 
 
-@dataclass
+@dataclass(slots=True)
 class SubtitleEvent:
     """
     Single subtitle event with FLOAT MILLISECOND timing.
@@ -649,7 +649,7 @@ class SubtitleEvent:
 # =============================================================================
 
 
-@dataclass
+@dataclass(slots=True)
 class EmbeddedFont:
     """Embedded font from [Fonts] section."""
 
@@ -660,7 +660,7 @@ class EmbeddedFont:
         return {"name": self.name, "data_length": len(self.data)}
 
 
-@dataclass
+@dataclass(slots=True)
 class EmbeddedGraphic:
     """Embedded graphic from [Graphics] section."""
 
@@ -676,7 +676,7 @@ class EmbeddedGraphic:
 # =============================================================================
 
 
-@dataclass
+@dataclass(slots=True)
 class OperationRecord:
     """Record of an operation applied to subtitle data."""
 
@@ -716,7 +716,7 @@ class OperationRecord:
         )
 
 
-@dataclass
+@dataclass(slots=True)
 class OperationResult:
     """Result of applying an operation."""
 
@@ -734,7 +734,7 @@ class OperationResult:
 # =============================================================================
 
 
-@dataclass
+@dataclass(slots=True)
 class SubtitleData:
     """
     Universal subtitle data container.

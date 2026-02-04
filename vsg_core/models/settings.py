@@ -35,7 +35,7 @@ from .enums import AnalysisMode, SnapMode
 _PATH_SENTINEL = "__PATH_NEEDS_RESOLUTION__"
 
 
-@dataclass
+@dataclass(slots=True)
 class AppSettings:
     """Complete application settings with typed fields and defaults.
 

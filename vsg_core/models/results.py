@@ -15,7 +15,7 @@ class StepStatus(Enum):
     FAILED = "failed"  # Fatal issues that should stop the job
 
 
-@dataclass
+@dataclass(slots=True)
 class StepResult:
     """Result of a pipeline step execution."""
 
@@ -38,7 +38,7 @@ class StepResult:
             self.status = StepStatus.WARNING
 
 
-@dataclass
+@dataclass(slots=True)
 class CorrectionResult:
     """Result of an audio correction operation."""
 

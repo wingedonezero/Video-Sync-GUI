@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from ..data import SubtitleData
 
 
-@dataclass
+@dataclass(slots=True)
 class OutputConfig:
     """Configuration for subtitle output."""
 
@@ -51,7 +51,7 @@ class OutputConfig:
     video_height: int = 1080
 
 
-@dataclass
+@dataclass(slots=True)
 class SubtitleEntry:
     """A single subtitle entry for output."""
 
@@ -303,7 +303,7 @@ def create_writer(settings_dict: dict) -> SubtitleWriter:
 # =============================================================================
 
 
-@dataclass
+@dataclass(slots=True)
 class OCRSubtitleResult:
     """
     Extended subtitle result with all OCR metadata for SubtitleData conversion.

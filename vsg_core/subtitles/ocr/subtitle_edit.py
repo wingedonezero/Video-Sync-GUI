@@ -33,7 +33,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(slots=True)
 class SEReplacementRule:
     """A replacement rule from Subtitle Edit OCRFixReplaceList."""
 
@@ -48,7 +48,7 @@ class SEReplacementRule:
         return hash((self.from_text, self.to_text, self.rule_type))
 
 
-@dataclass
+@dataclass(slots=True)
 class SEDictionaryConfig:
     """Configuration for which SE dictionaries are enabled."""
 
@@ -60,7 +60,7 @@ class SEDictionaryConfig:
     interjections_enabled: bool = True
 
 
-@dataclass
+@dataclass(slots=True)
 class SEDictionaries:
     """Loaded Subtitle Edit dictionary data."""
 

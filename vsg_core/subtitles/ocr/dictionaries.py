@@ -45,7 +45,7 @@ class RuleType(Enum):
     REGEX = "regex"  # Full regex pattern
 
 
-@dataclass
+@dataclass(slots=True)
 class ReplacementRule:
     """A single replacement rule."""
 

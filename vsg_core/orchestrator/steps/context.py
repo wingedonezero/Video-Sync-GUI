@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from vsg_core.models.settings import AppSettings
 
 
-@dataclass
+@dataclass(slots=True)
 class Context:
     # Provided by Orchestrator entry
     settings: AppSettings

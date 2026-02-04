@@ -46,7 +46,7 @@ except ImportError:
     ENCHANT_AVAILABLE = False
 
 
-@dataclass
+@dataclass(slots=True)
 class PostProcessConfig:
     """Configuration for post-processing."""
 
@@ -76,7 +76,7 @@ class PostProcessConfig:
     custom_wordlist_path: Path | None = None
 
 
-@dataclass
+@dataclass(slots=True)
 class ProcessResult:
     """Result of post-processing."""
 
@@ -87,7 +87,7 @@ class ProcessResult:
     was_modified: bool = False
 
 
-@dataclass
+@dataclass(slots=True)
 class UnknownWordInfo:
     """Information about an unknown word."""
 
