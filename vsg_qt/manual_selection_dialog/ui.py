@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 from vsg_core.extraction.attachments import extract_attachments
 from vsg_core.extraction.tracks import extract_tracks
 from vsg_core.io.runner import CommandRunner
+from vsg_core.models.context_types import ManualLayoutItem
 from vsg_core.subtitles.convert import convert_srt_to_ass
 from vsg_core.subtitles.style_engine import StyleEngine
 from vsg_qt.subtitle_editor import SubtitleEditorWindow
@@ -51,7 +52,7 @@ class ManualSelectionDialog(QDialog):
         config: AppConfig,
         log_callback: Callable[[str], None] | None = None,
         parent=None,
-        previous_layout: list[dict] | None = None,
+        previous_layout: list[ManualLayoutItem] | None = None,
         previous_attachment_sources: list[str] | None = None,
         previous_source_settings: dict[str, dict[str, Any]] | None = None,
     ):
@@ -62,7 +63,7 @@ class ManualSelectionDialog(QDialog):
         self.track_info = track_info
         self.config = config
         self.log_callback = log_callback or (lambda msg: print(f"[Dialog] {msg}"))
-        self.manual_layout: list[dict] | None = None
+        self.manual_layout: list[ManualLayoutItem] | None = None
         self.attachment_sources: list[str] = []
         self.source_settings: dict[str, dict[str, Any]] = previous_source_settings or {}
         self._style_edit_clipboard: dict[str, Any] | None = (
@@ -206,7 +207,7 @@ class ManualSelectionDialog(QDialog):
 
     def get_manual_layout_and_attachment_sources(
         self,
-    ) -> tuple[list[dict], list[str], dict[str, dict[str, Any]]]:
+    ) -> tuple[list[ManualLayoutItem], list[str], dict[str, dict[str, Any]]]:
         """Returns (manual_layout, attachment_sources, source_settings)."""
         return self.manual_layout, self.attachment_sources, self.source_settings
 

@@ -8,6 +8,8 @@ Wraps the Orchestrator to provide a cleaner interface for sync planning.
 from collections.abc import Callable
 from typing import Any
 
+from ..models.context_types import ManualLayoutItem
+from ..models.settings import AppSettings
 from ..orchestrator.pipeline import Orchestrator
 
 
@@ -16,14 +18,14 @@ class SyncPlanner:
 
     @staticmethod
     def plan_sync(
-        config: dict,
+        settings: AppSettings,
         tool_paths: dict[str, str],
         log_callback: Callable[[str], None],
         progress_callback: Callable[[float], None],
         sources: dict[str, str],
         and_merge: bool,
         output_dir: str,
-        manual_layout: list[dict],
+        manual_layout: list[ManualLayoutItem],
         attachment_sources: list[str],
         source_settings: dict[str, dict[str, Any]] | None = None,
     ) -> Any:
@@ -33,14 +35,14 @@ class SyncPlanner:
         This wraps the existing Orchestrator to provide a cleaner interface.
 
         Args:
-            config: Configuration dictionary
+            settings: AppSettings instance with all configuration
             tool_paths: Dictionary of tool paths
             log_callback: Logging callback function
             progress_callback: Progress callback function
             sources: Dictionary mapping source names to file paths
             and_merge: Whether to prepare for merging
             output_dir: Output directory path
-            manual_layout: Manual layout configuration
+            manual_layout: Manual layout configuration (typed as ManualLayoutItem)
             attachment_sources: List of attachment source paths
             source_settings: Per-source correlation settings, e.g.:
                 {'Source 1': {'correlation_ref_track': 0}, 'Source 2': {'correlation_source_track': 1, 'use_source_separation': True}}
@@ -55,7 +57,7 @@ class SyncPlanner:
         """
         orch = Orchestrator()
         return orch.run(
-            settings_dict=config,
+            settings=settings,
             tool_paths=tool_paths,
             log=log_callback,
             progress=progress_callback,

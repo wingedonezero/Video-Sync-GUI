@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from vsg_core.audit import AuditTrail
 from vsg_core.io.runner import CommandRunner
+from vsg_core.models.context_types import ManualLayoutItem
 from vsg_core.models.settings import AppSettings
 from vsg_core.orchestrator.steps import (
     AnalysisStep,
@@ -37,22 +38,27 @@ class Orchestrator:
     def run(
         self,
         *,
-        settings_dict: dict[str, Any],
+        settings: AppSettings | dict[str, Any],
         tool_paths: dict[str, str | None],
         log: Callable[[str], None],
         progress: Callable[[float], None],
         sources: dict[str, str],
         and_merge: bool,
         output_dir: str,
-        manual_layout: list[dict[str, Any]],
+        manual_layout: list[ManualLayoutItem],
         attachment_sources: list[str],
         source_settings: dict[str, dict[str, Any]] | None = None,
     ) -> Context:
         """
         Executes the pipeline steps with validation.
         Raises PipelineValidationError if any step fails validation.
+
+        Args:
+            settings: AppSettings instance or dict (converted to AppSettings if dict)
         """
-        settings = AppSettings.from_config(settings_dict)
+        # Accept both AppSettings and dict for backwards compatibility
+        if not isinstance(settings, AppSettings):
+            settings = AppSettings.from_config(settings)
         source1_file = sources.get("Source 1")
         if not source1_file:
             raise ValueError("Job is missing Source 1 (Reference).")

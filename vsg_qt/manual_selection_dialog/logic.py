@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from vsg_core.models.context_types import ManualLayoutItem
+
 if TYPE_CHECKING:
     from vsg_qt.track_widget.ui import TrackWidget
 
@@ -21,7 +23,7 @@ class ManualLogic:
             track_data.get("type") == "video" and track_data.get("source") != "Source 1"
         )
 
-    def prepopulate_from_layout(self, layout: list[dict]):
+    def prepopulate_from_layout(self, layout: list[ManualLayoutItem]):
         """Populates the final list using a previously configured layout."""
         if not layout:
             return
@@ -73,7 +75,7 @@ class ManualLogic:
                 continue
             self.v.final_list.add_track_widget(track_data, preset=True)
 
-    def get_final_layout_and_attachments(self) -> tuple[list[dict], list[str]]:
+    def get_final_layout_and_attachments(self) -> tuple[list[ManualLayoutItem], list[str]]:
         """Builds the layout from widgets and gets selected attachment sources."""
         widgets = []
         for i in range(self.v.final_list.count()):
@@ -94,7 +96,7 @@ class ManualLogic:
 
         return layout, attachment_sources
 
-    def build_layout_from_widgets(self, widgets: list[TrackWidget]) -> list[dict]:
+    def build_layout_from_widgets(self, widgets: list[TrackWidget]) -> list[ManualLayoutItem]:
         """Creates the final layout data structure from the UI widgets."""
         out = []
         for w in widgets:
