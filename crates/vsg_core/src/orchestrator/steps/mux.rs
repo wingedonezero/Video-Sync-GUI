@@ -194,12 +194,39 @@ impl PipelineStep for MuxStep {
                 ctx.logger.info(&format!("Including attachment: {}", key));
             }
 
+            // Build subtitle-specific delays from video-verified cache
+            let subtitle_delays: HashMap<String, f64> = state
+                .subtitles
+                .as_ref()
+                .map(|s| {
+                    s.video_verified_cache
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.corrected_delay_ms))
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            // Log video-verified subtitle delays
+            if !subtitle_delays.is_empty() {
+                ctx.logger
+                    .info("Using video-verified delays for subtitle tracks:");
+                for (source, delay) in &subtitle_delays {
+                    ctx.logger
+                        .info(&format!("  {}: {:+.1}ms", source, delay));
+                }
+            }
+
             let input = MergePlanInput {
                 layout: ctx.job_spec.manual_layout.as_ref(),
                 sources: &ctx.job_spec.sources,
                 extracted_tracks,
                 extracted_attachments,
                 delays: state.delays().cloned().unwrap_or_default(),
+                subtitle_delays: if subtitle_delays.is_empty() {
+                    None
+                } else {
+                    Some(&subtitle_delays)
+                },
                 chapters_xml,
             };
 
@@ -222,22 +249,16 @@ impl PipelineStep for MuxStep {
                 .copied()
                 .unwrap_or(0.0);
 
-            if item.container_delay_ms_raw.abs() > 0.001 {
-                ctx.logger.info(&format!(
-                    "  {} {}:{} - sync {:+}ms (pre-shift: {:+.1}ms + global: {:+}ms)",
-                    item.track.source,
-                    item.track.track_type,
-                    item.track.id,
-                    delay_rounded,
-                    pre_shift,
-                    global_shift
-                ));
-            } else {
-                ctx.logger.info(&format!(
-                    "  {} {}:{} - no sync delay",
-                    item.track.source, item.track.track_type, item.track.id
-                ));
-            }
+            // Always show sync value (even 0) for verification
+            ctx.logger.info(&format!(
+                "  {} {}:{} - sync {:+}ms (pre-shift: {:+.1}ms + global: {:+}ms)",
+                item.track.source,
+                item.track.track_type,
+                item.track.id,
+                delay_rounded,
+                pre_shift,
+                global_shift
+            ));
         }
         ctx.logger.info("---------------------------");
 

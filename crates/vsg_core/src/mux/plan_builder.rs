@@ -39,8 +39,12 @@ pub struct MergePlanInput<'a> {
     pub extracted_tracks: &'a HashMap<String, PathBuf>,
     /// Extracted attachment paths.
     pub extracted_attachments: &'a HashMap<String, PathBuf>,
-    /// Delays from analysis.
+    /// Delays from analysis (for audio tracks).
     pub delays: Delays,
+    /// Subtitle-specific delays (from video-verified mode).
+    /// Key is source name (e.g., "Source 2"), value is delay in ms.
+    /// If None or source not found, falls back to audio delay.
+    pub subtitle_delays: Option<&'a HashMap<String, f64>>,
     /// Chapters XML path (if any).
     pub chapters_xml: Option<PathBuf>,
 }
@@ -181,10 +185,24 @@ fn build_plan_item(
         plan_item.extracted_path = Some(extracted_path.clone());
     }
 
-    // Apply delay from raw_source_delays_ms (already includes global shift)
-    if let Some(&delay_ms_raw) = input.delays.raw_source_delays_ms.get(source_key) {
-        plan_item.container_delay_ms_raw = delay_ms_raw;
-    }
+    // Apply delay - use subtitle-specific delays for subtitle tracks if available
+    let delay_ms = if track_type == TrackType::Subtitles {
+        // For subtitles, prefer video-verified delay if available
+        input
+            .subtitle_delays
+            .and_then(|sd| sd.get(source_key).copied())
+            .or_else(|| input.delays.raw_source_delays_ms.get(source_key).copied())
+            .unwrap_or(0.0)
+    } else {
+        // For audio/video, use standard delays
+        input
+            .delays
+            .raw_source_delays_ms
+            .get(source_key)
+            .copied()
+            .unwrap_or(0.0)
+    };
+    plan_item.container_delay_ms_raw = delay_ms;
 
     Ok(plan_item)
 }
@@ -214,6 +232,7 @@ mod tests {
             extracted_tracks: &HashMap::new(),
             extracted_attachments: &HashMap::new(),
             delays: Delays::default(),
+            subtitle_delays: None,
             chapters_xml: None,
         };
 
@@ -241,6 +260,7 @@ mod tests {
             extracted_tracks: &HashMap::new(),
             extracted_attachments: &HashMap::new(),
             delays: Delays::default(),
+            subtitle_delays: None,
             chapters_xml: None,
         };
 
@@ -271,6 +291,7 @@ mod tests {
             extracted_tracks: &HashMap::new(),
             extracted_attachments: &HashMap::new(),
             delays,
+            subtitle_delays: None,
             chapters_xml: None,
         };
 
@@ -294,6 +315,7 @@ mod tests {
             extracted_tracks: &HashMap::new(),
             extracted_attachments: &HashMap::new(),
             delays: Delays::default(),
+            subtitle_delays: None,
             chapters_xml: None,
         };
 

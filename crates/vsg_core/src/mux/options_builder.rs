@@ -118,22 +118,21 @@ impl<'a> MkvmergeOptionsBuilder<'a> {
         // 1. AnalyzeStep: calculates raw delay, adds global_shift, stores in raw_source_delays_ms
         // 2. MuxStep: reads from raw_source_delays_ms, sets container_delay_ms_raw
         // 3. OptionsBuilder (here): uses container_delay_ms_raw directly (NO additional shift)
+        // Always add sync flag (even for 0) so user can verify what was applied
         let final_delay_ms = item.container_delay_ms_raw;
-        if final_delay_ms.abs() > 0.001 {
-            let delay_rounded = final_delay_ms.round() as i64;
-            tokens.push("--sync".to_string());
-            tokens.push(format!("{}:{:+}", track_id, delay_rounded));
+        let delay_rounded = final_delay_ms.round() as i64;
+        tokens.push("--sync".to_string());
+        tokens.push(format!("{}:{:+}", track_id, delay_rounded));
 
-            // Log for debugging
-            tracing::debug!(
-                "mkvmerge --sync for {} ({}:{}): raw={:.3}ms → rounded={:+}ms",
-                track.source,
-                track.track_type,
-                track.id,
-                final_delay_ms,
-                delay_rounded
-            );
-        }
+        // Log for debugging
+        tracing::debug!(
+            "mkvmerge --sync for {} ({}:{}): raw={:.3}ms → rounded={:+}ms",
+            track.source,
+            track.track_type,
+            track.id,
+            final_delay_ms,
+            delay_rounded
+        );
 
         // Default track flag
         tokens.push("--default-track-flag".to_string());
