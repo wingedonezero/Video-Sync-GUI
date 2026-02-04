@@ -35,7 +35,7 @@ class MainWindow(QMainWindow):
         self._build_ui()
         self.controller.apply_config_to_ui()
 
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         # Quick Analysis Inputs
         self.ref_input = QLineEdit()
         self.sec_input = QLineEdit()
@@ -150,6 +150,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(browse_btn, 1)
         return layout
 
-    def closeEvent(self, event):
+    def closeEvent(self, event) -> None:
         self.controller.on_close()
         super().closeEvent(event)

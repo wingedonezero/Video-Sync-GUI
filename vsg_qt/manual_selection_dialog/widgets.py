@@ -42,7 +42,7 @@ class SourceList(QListWidget):
             )
         return it
 
-    def _show_context_menu(self, pos: QPoint):
+    def _show_context_menu(self, pos: QPoint) -> None:
         """Show context menu for source tracks."""
         if not self.dialog:
             return
@@ -85,7 +85,7 @@ class FinalList(QListWidget):
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self._show_context_menu)
 
-    def dropEvent(self, event):
+    def dropEvent(self, event) -> None:
         source = event.source()
         if source and source is not self:
             it = source.currentItem()
@@ -97,7 +97,7 @@ class FinalList(QListWidget):
             return
         super().dropEvent(event)
 
-    def add_track_widget(self, track_data: dict, preset=False):
+    def add_track_widget(self, track_data: dict, preset=False) -> None:
         item = QListWidgetItem()
         self.addItem(item)
 
@@ -148,7 +148,7 @@ class FinalList(QListWidget):
         self.setCurrentItem(item)
         self.scrollToItem(item)
 
-    def _show_context_menu(self, pos: QPoint):
+    def _show_context_menu(self, pos: QPoint) -> None:
         item = self.itemAt(pos)
         if not item:
             return
@@ -211,7 +211,7 @@ class FinalList(QListWidget):
         elif act == act_del:
             self.takeItem(self.row(item))
 
-    def _move_by(self, delta: int):
+    def _move_by(self, delta: int) -> None:
         item = self.currentItem()
         if not item:
             return
@@ -229,7 +229,7 @@ class FinalList(QListWidget):
             if getattr(self.itemWidget(self.item(i)), "track_type", None) == ttype
         ]
 
-    def _enforce_single_default(self, sender_widget, prefer=False):
+    def _enforce_single_default(self, sender_widget, prefer=False) -> None:
         if prefer:
             sender_widget.cb_default.setChecked(True)
         self.dialog._logic.normalize_single_default_for_type(
@@ -239,7 +239,7 @@ class FinalList(QListWidget):
             prefer_widget=sender_widget,
         )
 
-    def _enforce_single_forced(self):
+    def _enforce_single_forced(self) -> None:
         """Helper method to call the normalization logic for forced subtitles."""
         self.dialog._logic.normalize_forced_subtitles(
             self._widgets_of_type("subtitles")

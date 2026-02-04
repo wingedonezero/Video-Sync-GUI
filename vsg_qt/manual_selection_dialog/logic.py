@@ -23,7 +23,7 @@ class ManualLogic:
             track_data.get("type") == "video" and track_data.get("source") != "Source 1"
         )
 
-    def prepopulate_from_layout(self, layout: list[ManualLayoutItem]):
+    def prepopulate_from_layout(self, layout: list[ManualLayoutItem]) -> None:
         """Populates the final list using a previously configured layout."""
         if not layout:
             return
@@ -112,7 +112,7 @@ class ManualLogic:
         ttype: str,
         force_default_if_none: bool,
         prefer_widget=None,
-    ):
+    ) -> None:
         """Ensures only one 'Default' flag is set per track type."""
         first_default = None
 
@@ -138,7 +138,7 @@ class ManualLogic:
                 w.cb_default.setChecked(False)
             w.logic.refresh_badges()
 
-    def normalize_forced_subtitles(self, widgets: list[TrackWidget]):
+    def normalize_forced_subtitles(self, widgets: list[TrackWidget]) -> None:
         """Ensures at most one 'Forced' flag is set for subtitles."""
         first_forced = None
         for w in widgets:

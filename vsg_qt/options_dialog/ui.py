@@ -100,7 +100,7 @@ class OptionsDialog(QDialog):
             self._on_remove_invalid_config
         )
 
-    def _on_remove_invalid_config(self):
+    def _on_remove_invalid_config(self) -> None:
         """Handle remove invalid config entries button click."""
         if not hasattr(self.config, "get_orphaned_keys"):
             QMessageBox.warning(
@@ -138,14 +138,14 @@ class OptionsDialog(QDialog):
             )
 
     # --- public (kept for compatibility) ---
-    def load_settings(self):
+    def load_settings(self) -> None:
         self._logic.load_from_config(
             self.config.settings if hasattr(self.config, "settings") else self.config
         )
         # Initialize font size preview after settings are loaded
         self._ocr_tab.initialize_font_preview()
 
-    def accept(self):
+    def accept(self) -> None:
         cfg = self.config.settings if hasattr(self.config, "settings") else self.config
         self._logic.save_to_config(cfg)
         super().accept()

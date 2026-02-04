@@ -42,13 +42,13 @@ class SourceInputWidget(QWidget):
         layout.addWidget(self.line_edit, 4)
         layout.addWidget(browse_btn)
 
-    def dragEnterEvent(self, event):
+    def dragEnterEvent(self, event) -> None:
         if event.mimeData().hasUrls():
             event.acceptProposedAction()
         else:
             event.ignore()
 
-    def dropEvent(self, event):
+    def dropEvent(self, event) -> None:
         if event.mimeData().hasUrls():
             # Use the path of the first dropped file
             path = event.mimeData().urls()[0].toLocalFile()
@@ -57,7 +57,7 @@ class SourceInputWidget(QWidget):
         else:
             event.ignore()
 
-    def _browse_for_path(self):
+    def _browse_for_path(self) -> None:
         dialog = QFileDialog(self, "Select Source")
         dialog.setFileMode(QFileDialog.FileMode.AnyFile)
         if dialog.exec():
@@ -85,7 +85,7 @@ class AddJobDialog(QDialog):
         self.add_source_input()
         self.add_source_input()
 
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
 
         scroll_area = QScrollArea()
@@ -110,14 +110,14 @@ class AddJobDialog(QDialog):
 
         layout.addWidget(dialog_btns)
 
-    def add_source_input(self):
+    def add_source_input(self) -> None:
         """Adds a new SourceInputWidget to the dialog."""
         source_num = len(self.source_widgets) + 1
         source_widget = SourceInputWidget(source_num)
         self.source_widgets.append(source_widget)
         self.inputs_layout.addWidget(source_widget)
 
-    def populate_sources_from_paths(self, paths: list[str]):
+    def populate_sources_from_paths(self, paths: list[str]) -> None:
         """Pre-fills the source inputs from a list of paths."""
         # Clear any default inputs
         while self.inputs_layout.count():
@@ -135,7 +135,7 @@ class AddJobDialog(QDialog):
         if len(self.source_widgets) < 2:
             self.add_source_input()
 
-    def find_and_accept(self):
+    def find_and_accept(self) -> None:
         """Discover jobs from paths and accept the dialog if any are found."""
         sources: dict[str, str] = {}
         for i, source_widget in enumerate(self.source_widgets):

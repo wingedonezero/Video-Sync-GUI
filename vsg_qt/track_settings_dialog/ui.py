@@ -86,7 +86,7 @@ class TrackSettingsDialog(QDialog):
         self._logic.apply_initial_values(**kwargs)
         self._logic.init_for_type_and_codec(track_type, codec_id)
 
-    def _open_sync_exclusion_dialog(self):
+    def _open_sync_exclusion_dialog(self) -> None:
         """Open the sync exclusion configuration dialog."""
         from vsg_qt.sync_exclusion_dialog import SyncExclusionDialog
 

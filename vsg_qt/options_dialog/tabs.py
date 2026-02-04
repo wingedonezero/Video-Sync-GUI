@@ -48,13 +48,13 @@ def _file_input() -> QWidget:
     return w
 
 
-def _browse_for_dir(line_edit: QLineEdit):
+def _browse_for_dir(line_edit: QLineEdit) -> None:
     path = QFileDialog.getExistingDirectory(None, "Select Directory", line_edit.text())
     if path:
         line_edit.setText(path)
 
 
-def _browse_for_file(line_edit: QLineEdit, nameFilter: str = "All Files (*)"):
+def _browse_for_file(line_edit: QLineEdit, nameFilter: str = "All Files (*)") -> None:
     path, _ = QFileDialog.getOpenFileName(
         None, "Select File", line_edit.text(), nameFilter
     )
@@ -370,14 +370,14 @@ class OCRTab(QWidget):
 
         main_layout.addStretch(1)
 
-    def _open_dictionary_editor(self):
+    def _open_dictionary_editor(self) -> None:
         """Open the OCR Dictionary Editor dialog."""
         from vsg_qt.ocr_dictionary_dialog import OCRDictionaryDialog
 
         dialog = OCRDictionaryDialog(self)
         dialog.exec()
 
-    def _update_font_preview(self, ratio: float | None = None):
+    def _update_font_preview(self, ratio: float | None = None) -> None:
         """Update the font size preview label with calculated values."""
         if ratio is None:
             ratio = self.widgets["ocr_font_size_ratio"].value()
@@ -393,7 +393,7 @@ class OCRTab(QWidget):
         preview_text = f"480p: {sizes['480p']}  |  720p: {sizes['720p']}  |  1080p: {sizes['1080p']}"
         self._font_preview_label.setText(preview_text)
 
-    def initialize_font_preview(self):
+    def initialize_font_preview(self) -> None:
         """Initialize the font preview after settings are loaded."""
         self._update_font_preview()
 

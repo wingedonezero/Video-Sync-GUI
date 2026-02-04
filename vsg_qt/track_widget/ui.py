@@ -78,7 +78,7 @@ class TrackWidget(QWidget):
         self.cb_default.stateChanged.connect(self.logic.refresh_badges)
         self.cb_forced.stateChanged.connect(self.logic.refresh_badges)
 
-    def _build_layout(self):
+    def _build_layout(self) -> None:
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(5, 5, 5, 5)
         top_row = QHBoxLayout()
@@ -100,7 +100,7 @@ class TrackWidget(QWidget):
         root_layout.addLayout(top_row)
         root_layout.addLayout(bottom_row)
 
-    def _open_settings_dialog(self):
+    def _open_settings_dialog(self) -> None:
         """Open the detailed settings dialog and apply the results."""
         current_config = self.logic.get_config()
 
