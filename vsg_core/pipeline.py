@@ -13,6 +13,7 @@ from typing import Any
 
 from .io.runner import CommandRunner
 from .models.context_types import ManualLayoutItem
+from .models.jobs import PipelineResult
 from .models.settings import AppSettings
 from .pipeline_components import (
     LogManager,
@@ -64,7 +65,7 @@ class JobPipeline:
         manual_layout: list[ManualLayoutItem] | None = None,
         attachment_sources: list[str] | None = None,
         source_settings: dict[str, dict[str, Any]] | None = None,
-    ) -> dict[str, Any]:
+    ) -> PipelineResult:
         """
         Runs a complete sync job.
 
@@ -75,18 +76,10 @@ class JobPipeline:
             manual_layout: Manual layout configuration
             attachment_sources: List of attachment source paths
             source_settings: Per-source correlation settings, e.g.:
-                {'Source 1': {'correlation_ref_track': 0}, 'Source 2': {'correlation_source_track': 1, 'use_source_separation': True}}
+                {'Source 1': {'correlation_ref_track': 0}, 'Source 2': {...}}
 
         Returns:
-            Dictionary containing:
-            - status: 'Analyzed', 'Merged', or 'Failed'
-            - delays: Sync delays (if successful)
-            - output: Output file path (if merged)
-            - error: Error message (if failed)
-            - name: Job name
-            - issues: Number of audit issues found
-            - stepping_sources: Sources with stepping detected
-            - stepping_detected_disabled: Sources with stepping detection disabled
+            PipelineResult with status, delays, output path, and diagnostic info.
         """
         # --- 1. Input Validation ---
         source1_file = sources.get("Source 1")
@@ -110,11 +103,11 @@ class JobPipeline:
             self.tool_paths = ToolValidator.validate_tools()
         except FileNotFoundError as e:
             log_to_all(f"[ERROR] {e}")
-            return {
-                "status": "Failed",
-                "error": str(e),
-                "name": Path(source1_file).name,
-            }
+            return PipelineResult(
+                status="Failed",
+                name=Path(source1_file).name,
+                error=str(e),
+            )
 
         log_to_all(f"=== Starting Job: {Path(source1_file).name} ===")
         self.progress(0.0)
@@ -123,11 +116,11 @@ class JobPipeline:
         if and_merge and manual_layout is None:
             err_msg = "Manual layout required for merge."
             log_to_all(f"[ERROR] {err_msg}")
-            return {
-                "status": "Failed",
-                "error": err_msg,
-                "name": Path(source1_file).name,
-            }
+            return PipelineResult(
+                status="Failed",
+                name=Path(source1_file).name,
+                error=err_msg,
+            )
 
         ctx_temp_dir: Path | None = None
 
@@ -151,21 +144,19 @@ class JobPipeline:
             if not and_merge:
                 log_to_all("--- Analysis Complete (No Merge) ---")
                 self.progress(1.0)
-                return {
-                    "status": "Analyzed",
-                    "delays": ctx.delays.source_delays_ms if ctx.delays else {},
-                    "name": Path(source1_file).name,
-                    "issues": 0,
-                    "stepping_sources": getattr(ctx, "stepping_sources", []),
-                    "stepping_detected_disabled": getattr(
+                return PipelineResult(
+                    status="Analyzed",
+                    name=Path(source1_file).name,
+                    delays=ctx.delays.source_delays_ms if ctx.delays else {},
+                    stepping_sources=getattr(ctx, "stepping_sources", []),
+                    stepping_detected_disabled=getattr(
                         ctx, "stepping_detected_disabled", []
                     ),
-                    "stepping_detected_separated": getattr(
+                    stepping_detected_separated=getattr(
                         ctx, "stepping_detected_separated", []
                     ),
-                    "stepping_quality_issues": [],
-                    "sync_stability_issues": getattr(ctx, "sync_stability_issues", []),
-                }
+                    sync_stability_issues=getattr(ctx, "sync_stability_issues", []),
+                )
 
             # --- 7. Validate Merge Tokens ---
             if not ctx.tokens:
@@ -211,36 +202,30 @@ class JobPipeline:
 
             # --- 14. Success ---
             self.progress(1.0)
-            return {
-                "status": "Merged",
-                "output": str(final_output_path),
-                "delays": ctx.delays.source_delays_ms if ctx.delays else {},
-                "name": Path(source1_file).name,
-                "issues": issues,
-                "stepping_sources": getattr(ctx, "stepping_sources", []),
-                "stepping_detected_disabled": getattr(
+            return PipelineResult(
+                status="Merged",
+                name=Path(source1_file).name,
+                output=str(final_output_path),
+                delays=ctx.delays.source_delays_ms if ctx.delays else {},
+                issues=issues,
+                stepping_sources=getattr(ctx, "stepping_sources", []),
+                stepping_detected_disabled=getattr(
                     ctx, "stepping_detected_disabled", []
                 ),
-                "stepping_detected_separated": getattr(
+                stepping_detected_separated=getattr(
                     ctx, "stepping_detected_separated", []
                 ),
-                "stepping_quality_issues": getattr(ctx, "stepping_quality_issues", []),
-                "sync_stability_issues": getattr(ctx, "sync_stability_issues", []),
-            }
+                stepping_quality_issues=getattr(ctx, "stepping_quality_issues", []),
+                sync_stability_issues=getattr(ctx, "sync_stability_issues", []),
+            )
 
         except Exception as e:
             log_to_all(f"[FATAL ERROR] Job failed: {e}")
-            return {
-                "status": "Failed",
-                "error": str(e),
-                "name": Path(source1_file).name,
-                "issues": 0,
-                "stepping_sources": [],
-                "stepping_detected_disabled": [],
-                "stepping_detected_separated": [],
-                "stepping_quality_issues": [],
-                "sync_stability_issues": [],
-            }
+            return PipelineResult(
+                status="Failed",
+                name=Path(source1_file).name,
+                error=str(e),
+            )
 
         finally:
             # --- 15. Cleanup ---

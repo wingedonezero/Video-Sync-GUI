@@ -11,7 +11,9 @@ if TYPE_CHECKING:
         FilterConfig,
         FontReplacements,
         ManualLayoutItem,
+        SteppingQualityIssue,
         StylePatch,
+        SyncStabilityIssue,
     )
     from .media import Track
 
@@ -95,8 +97,27 @@ class MergePlan:
 
 @dataclass(frozen=True, slots=True)
 class JobResult:
+    """Simplified job result for public API."""
+
     status: Literal["Merged", "Analyzed", "Failed"]
     name: str
     output: str | None = None
     delays: dict[str, int] | None = None
     error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PipelineResult:
+    """Detailed result from pipeline.run_job() with all diagnostic info."""
+
+    status: Literal["Merged", "Analyzed", "Failed"]
+    name: str
+    output: str | None = None
+    delays: dict[str, int] | None = None
+    error: str | None = None
+    issues: int = 0
+    stepping_sources: list[str] = field(default_factory=list)
+    stepping_detected_disabled: list[str] = field(default_factory=list)
+    stepping_detected_separated: list[str] = field(default_factory=list)
+    stepping_quality_issues: list[SteppingQualityIssue] = field(default_factory=list)
+    sync_stability_issues: list[SyncStabilityIssue] = field(default_factory=list)

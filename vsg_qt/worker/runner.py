@@ -1,4 +1,5 @@
 # vsg_qt/worker/runner.py
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -106,7 +107,7 @@ class JobWorker(QRunnable):
                     f"Processing {i}/{total_jobs}: {Path(source1_file).name}"
                 )
 
-                result = pipeline.run_job(
+                pipeline_result = pipeline.run_job(
                     sources=sources,
                     and_merge=self.and_merge,
                     output_dir_str=self.output_dir,
@@ -115,6 +116,8 @@ class JobWorker(QRunnable):
                     source_settings=job_data.get("source_settings"),
                 )
 
+                # Convert to dict for signal emission, add runner tracking data
+                result = asdict(pipeline_result)
                 result["job_data_for_batch_check"] = job_data
 
                 self._safe_finished_job(result)
