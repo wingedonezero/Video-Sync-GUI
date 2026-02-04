@@ -110,7 +110,7 @@ class ReportWriter:
         so data is not lost if something goes wrong later.
 
         Args:
-            job_result: The result dictionary from pipeline.run_job()
+            job_result: Dict from PipelineResult (via asdict) with job results
             job_index: 1-based index of this job in the batch
         """
         if not self.report_data:
