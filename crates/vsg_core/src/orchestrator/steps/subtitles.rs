@@ -312,15 +312,18 @@ impl SubtitlesStep {
         let output_filename = format!("synced_{}", input_filename);
         let output_path = ctx.work_dir.join(&output_filename);
 
-        // Write output file
-        let write_options = WriteOptions::default();
+        // Write output file with configured rounding mode
+        let write_options = WriteOptions {
+            rounding: ctx.settings.subtitle.rounding_mode,
+            ..Default::default()
+        };
         write_file(&subtitle_data, &output_path, &write_options).map_err(|e| {
             StepError::other(format!("Failed to write subtitle file: {}", e))
         })?;
 
         ctx.logger.info(&format!(
-            "[Subtitles] Written: {}",
-            output_filename
+            "[Subtitles] Written: {} (rounding: {:?})",
+            output_filename, ctx.settings.subtitle.rounding_mode
         ));
 
         Ok(output_path)
@@ -330,6 +333,9 @@ impl SubtitlesStep {
     ///
     /// Bitmap subtitles can't be parsed and modified - mkvmerge will handle
     /// the delay via --sync flag during muxing.
+    ///
+    /// - **Time-Based**: Pass through directly, mkvmerge uses audio correlation delay
+    /// - **Video-Verified**: Use the pre-computed video-verified delay from cache
     fn handle_bitmap_subtitle(
         &self,
         ctx: &Context,
@@ -337,6 +343,7 @@ impl SubtitlesStep {
         input_path: &PathBuf,
         delays: &Delays,
         cached_vv: Option<&VideoVerifiedSourceResult>,
+        is_video_verified_mode: bool,
     ) {
         let source = Self::source_from_track_key(track_key);
         let ext = input_path
@@ -344,30 +351,42 @@ impl SubtitlesStep {
             .and_then(|e| e.to_str())
             .unwrap_or("?");
 
-        // Determine delay
+        // Get the delay to report (for logging)
         let delay_ms = if let Some(cached) = cached_vv {
+            // Video-verified mode with cached result
             ctx.logger.info(&format!(
-                "[Subtitles] Bitmap track {} ({}): using video-verified delay {:+.1}ms",
+                "[Subtitles] Bitmap track {} ({}): video-verified delay {:+.1}ms",
                 track_key, ext, cached.corrected_delay_ms
             ));
             cached.corrected_delay_ms
         } else if source == "Source 1" {
-            ctx.logger.info(&format!(
-                "[Subtitles] Bitmap track {} ({}): Source 1 is reference",
-                track_key, ext
-            ));
-            delays.raw_source_delays_ms.get(&source).copied().unwrap_or(0.0)
-        } else {
+            // Source 1 is the reference
             let delay = delays.raw_source_delays_ms.get(&source).copied().unwrap_or(0.0);
             ctx.logger.info(&format!(
-                "[Subtitles] Bitmap track {} ({}): using audio delay {:+.1}ms",
+                "[Subtitles] Bitmap track {} ({}): Source 1 reference (delay {:+.1}ms)",
+                track_key, ext, delay
+            ));
+            delay
+        } else if is_video_verified_mode {
+            // Video-verified mode but no cache (fallback case)
+            let delay = delays.raw_source_delays_ms.get(&source).copied().unwrap_or(0.0);
+            ctx.logger.info(&format!(
+                "[Subtitles] Bitmap track {} ({}): fallback to audio delay {:+.1}ms",
+                track_key, ext, delay
+            ));
+            delay
+        } else {
+            // Time-based mode - just pass through with audio delay
+            let delay = delays.raw_source_delays_ms.get(&source).copied().unwrap_or(0.0);
+            ctx.logger.info(&format!(
+                "[Subtitles] Bitmap track {} ({}): pass-through (delay {:+.1}ms)",
                 track_key, ext, delay
             ));
             delay
         };
 
         ctx.logger.info(&format!(
-            "[Subtitles]   → mkvmerge will apply --sync with delay {:+.0}ms",
+            "[Subtitles]   → mkvmerge --sync with {:+.0}ms",
             delay_ms
         ));
     }
@@ -461,7 +480,8 @@ impl PipelineStep for SubtitlesStep {
 
             // Check if bitmap format
             if Self::is_bitmap_subtitle(input_path) {
-                self.handle_bitmap_subtitle(ctx, track_key, input_path, &delays, cached_vv);
+                let is_vv_mode = settings.sync_mode == SyncModeType::VideoVerified;
+                self.handle_bitmap_subtitle(ctx, track_key, input_path, &delays, cached_vv, is_vv_mode);
                 // Bitmap subs aren't "processed" - mkvmerge handles them
                 // We still record them so merge plan knows about them
                 processed_files.insert((*track_key).clone(), (*input_path).clone());

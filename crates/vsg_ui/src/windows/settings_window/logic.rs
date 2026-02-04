@@ -7,6 +7,7 @@ use vsg_core::subtitles::frame_utils::{
     ComparisonMethod, DeinterlaceMethod, HashAlgorithm, IndexerBackend,
 };
 use vsg_core::subtitles::sync::SyncModeType;
+use vsg_core::subtitles::RoundingMode;
 
 /// Get display names for correlation methods
 pub fn correlation_method_names() -> Vec<(&'static str, CorrelationMethod)> {
@@ -125,6 +126,24 @@ pub fn subtitle_sync_mode_index(mode: &SyncModeType) -> u32 {
     match mode {
         SyncModeType::TimeBased => 0,
         SyncModeType::VideoVerified => 1,
+    }
+}
+
+/// Get display names for rounding modes
+pub fn rounding_mode_names() -> Vec<(&'static str, RoundingMode)> {
+    vec![
+        ("Floor (Round Down)", RoundingMode::Floor),
+        ("Round (Nearest)", RoundingMode::Round),
+        ("Ceil (Round Up)", RoundingMode::Ceil),
+    ]
+}
+
+/// Get index for rounding mode
+pub fn rounding_mode_index(mode: &RoundingMode) -> u32 {
+    match mode {
+        RoundingMode::Floor => 0,
+        RoundingMode::Round => 1,
+        RoundingMode::Ceil => 2,
     }
 }
 

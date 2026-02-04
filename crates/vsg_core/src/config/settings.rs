@@ -13,6 +13,7 @@ use crate::subtitles::frame_utils::{
     ComparisonMethod, DeinterlaceMethod, HashAlgorithm, IndexerBackend,
 };
 use crate::subtitles::sync::SyncModeType;
+use crate::subtitles::RoundingMode;
 
 /// Root settings structure containing all configuration sections.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -476,6 +477,10 @@ pub struct SubtitleSettings {
     #[serde(default)]
     pub sync_mode: SyncModeType,
 
+    /// Rounding mode for subtitle timing (floor, round, ceil).
+    #[serde(default)]
+    pub rounding_mode: RoundingMode,
+
     // === Video-Verified General Settings ===
     /// Number of checkpoints to verify across the video.
     #[serde(default = "default_num_checkpoints")]
@@ -573,6 +578,7 @@ impl Default for SubtitleSettings {
     fn default() -> Self {
         Self {
             sync_mode: SyncModeType::default(),
+            rounding_mode: RoundingMode::default(),
             num_checkpoints: default_num_checkpoints(),
             search_range_frames: default_search_range_frames(),
             sequence_length: default_sequence_length(),

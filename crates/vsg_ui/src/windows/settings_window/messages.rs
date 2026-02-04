@@ -8,6 +8,7 @@ use vsg_core::subtitles::frame_utils::{
     ComparisonMethod, DeinterlaceMethod, HashAlgorithm, IndexerBackend,
 };
 use vsg_core::subtitles::sync::SyncModeType;
+use vsg_core::subtitles::RoundingMode;
 
 /// Messages for the settings window
 #[derive(Debug)]
@@ -85,6 +86,7 @@ pub enum SettingsMsg {
 
     // === Tab: Subtitle Sync ===
     SetSubtitleSyncMode(SyncModeType),
+    SetRoundingMode(RoundingMode),
     SetNumCheckpoints(u32),
     SetSearchRangeFrames(i32),
     SetSequenceLength(u32),

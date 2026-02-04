@@ -29,6 +29,7 @@ use vsg_core::subtitles::frame_utils::{
     ComparisonMethod, DeinterlaceMethod, HashAlgorithm, IndexerBackend,
 };
 use vsg_core::subtitles::sync::SyncModeType;
+use vsg_core::subtitles::RoundingMode;
 
 use logic::*;
 
@@ -349,6 +350,7 @@ impl Component for SettingsWindow {
 
             // Subtitle Sync tab
             SettingsMsg::SetSubtitleSyncMode(v) => self.model.subtitle.sync_mode = v,
+            SettingsMsg::SetRoundingMode(v) => self.model.subtitle.rounding_mode = v,
             SettingsMsg::SetNumCheckpoints(v) => self.model.subtitle.num_checkpoints = v,
             SettingsMsg::SetSearchRangeFrames(v) => self.model.subtitle.search_range_frames = v,
             SettingsMsg::SetSequenceLength(v) => self.model.subtitle.sequence_length = v,
@@ -1657,6 +1659,44 @@ fn build_subtitle_sync_tab(
     }
     mode_row.append(&mode_combo);
     page.append(&mode_row);
+
+    // Rounding Mode selection
+    let rounding_row = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(8)
+        .build();
+    let rounding_label = gtk4::Label::builder()
+        .label("Rounding Mode:")
+        .width_chars(18)
+        .xalign(0.0)
+        .build();
+    rounding_label.set_tooltip_text(Some(
+        "Floor: Round down (conservative)\nRound: Round to nearest\nCeil: Round up (may show early)",
+    ));
+    rounding_row.append(&rounding_label);
+    let rounding_combo = gtk4::DropDown::builder()
+        .model(&gtk4::StringList::new(&[
+            "Floor (Round Down)",
+            "Round (Nearest)",
+            "Ceil (Round Up)",
+        ]))
+        .hexpand(true)
+        .tooltip_text("Rounding mode for subtitle timing when saving")
+        .build();
+    rounding_combo.set_selected(rounding_mode_index(&subtitle.rounding_mode));
+    {
+        let sender = sender.clone();
+        rounding_combo.connect_selected_notify(move |dd| {
+            let mode = match dd.selected() {
+                0 => RoundingMode::Floor,
+                1 => RoundingMode::Round,
+                _ => RoundingMode::Ceil,
+            };
+            sender.input(SettingsMsg::SetRoundingMode(mode));
+        });
+    }
+    rounding_row.append(&rounding_combo);
+    page.append(&rounding_row);
 
     // === Video-Verified Settings Frame ===
     let vv_frame = gtk4::Frame::builder()

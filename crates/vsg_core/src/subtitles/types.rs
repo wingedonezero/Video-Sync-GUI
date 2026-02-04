@@ -407,7 +407,8 @@ pub struct SubtitleMetadata {
 }
 
 /// Rounding mode for time values when writing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum RoundingMode {
     /// Round down (floor) - most conservative, may cut off start.
     Floor,
