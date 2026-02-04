@@ -157,7 +157,7 @@ impl ConfigManager {
         let settings: Settings = toml::from_str(content)?;
 
         // Check if we need to clean up unknown keys
-        let valid_sections = ["paths", "logging", "analysis", "chapters", "postprocess"];
+        let valid_sections = ["paths", "logging", "analysis", "chapters", "postprocess", "subtitle"];
         let mut has_unknown = false;
 
         for (key, _) in doc.iter() {
@@ -284,6 +284,16 @@ impl ConfigManager {
         output.push_str("[postprocess]\n");
         let postprocess_content = toml::to_string_pretty(&self.settings.postprocess)?;
         for line in postprocess_content.lines() {
+            output.push_str(line);
+            output.push('\n');
+        }
+        output.push('\n');
+
+        // Subtitle section
+        output.push_str("# Subtitle sync settings\n");
+        output.push_str("[subtitle]\n");
+        let subtitle_content = toml::to_string_pretty(&self.settings.subtitle)?;
+        for line in subtitle_content.lines() {
             output.push_str(line);
             output.push('\n');
         }
