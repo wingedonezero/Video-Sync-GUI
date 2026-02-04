@@ -17,6 +17,7 @@ pub use model::SettingsModel;
 
 use std::sync::{Arc, Mutex};
 
+use gtk4::glib::object::IsA;
 use gtk4::prelude::*;
 use relm4::prelude::*;
 
@@ -193,28 +194,43 @@ impl Component for SettingsWindow {
             &logs_folder_entry,
             &sender,
         );
-        notebook.append_page(&storage_page, Some(&gtk4::Label::new(Some("Storage"))));
+        notebook.append_page(
+            &wrap_in_scrolled(&storage_page),
+            Some(&gtk4::Label::new(Some("Storage"))),
+        );
 
         // === Tab 2: Analysis ===
         let analysis_page = build_analysis_tab(&analysis, &sender);
-        notebook.append_page(&analysis_page, Some(&gtk4::Label::new(Some("Analysis"))));
+        notebook.append_page(
+            &wrap_in_scrolled(&analysis_page),
+            Some(&gtk4::Label::new(Some("Analysis"))),
+        );
 
         // === Tab 3: Chapters ===
         let chapters_page = build_chapters_tab(&chapters, &sender);
-        notebook.append_page(&chapters_page, Some(&gtk4::Label::new(Some("Chapters"))));
+        notebook.append_page(
+            &wrap_in_scrolled(&chapters_page),
+            Some(&gtk4::Label::new(Some("Chapters"))),
+        );
 
         // === Tab 4: Merge Behavior ===
         let merge_page = build_merge_tab(&postprocess, &sender);
-        notebook.append_page(&merge_page, Some(&gtk4::Label::new(Some("Merge Behavior"))));
+        notebook.append_page(
+            &wrap_in_scrolled(&merge_page),
+            Some(&gtk4::Label::new(Some("Merge Behavior"))),
+        );
 
         // === Tab 5: Logging ===
         let logging_page = build_logging_tab(&logging, &sender);
-        notebook.append_page(&logging_page, Some(&gtk4::Label::new(Some("Logging"))));
+        notebook.append_page(
+            &wrap_in_scrolled(&logging_page),
+            Some(&gtk4::Label::new(Some("Logging"))),
+        );
 
         // === Tab 6: Subtitle Sync ===
         let subtitle_page = build_subtitle_sync_tab(&subtitle, &sender);
         notebook.append_page(
-            &subtitle_page,
+            &wrap_in_scrolled(&subtitle_page),
             Some(&gtk4::Label::new(Some("Subtitle Sync"))),
         );
 
@@ -427,6 +443,18 @@ impl SettingsWindow {
             tracing::error!("Failed to save settings: {}", e);
         }
     }
+}
+
+// === Helper Functions ===
+
+/// Wrap a widget in a ScrolledWindow for scrolling support when content exceeds window size.
+fn wrap_in_scrolled(content: &impl IsA<gtk4::Widget>) -> gtk4::ScrolledWindow {
+    gtk4::ScrolledWindow::builder()
+        .hscrollbar_policy(gtk4::PolicyType::Never)
+        .vscrollbar_policy(gtk4::PolicyType::Automatic)
+        .child(content)
+        .vexpand(true)
+        .build()
 }
 
 // === Tab Builder Functions ===

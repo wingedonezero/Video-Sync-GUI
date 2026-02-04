@@ -207,7 +207,18 @@ impl PipelineStep for ExtractStep {
                 // Skip external tracks (not from MKV sources)
                 if source_key == "External" {
                     if let Some(path) = item.get("original_path").and_then(|v| v.as_str()) {
-                        let key = format!("External_{}", track_id);
+                        // Determine type from file extension
+                        let ext = std::path::Path::new(path)
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            .map(|s| s.to_lowercase())
+                            .unwrap_or_default();
+                        let type_str = match ext.as_str() {
+                            "srt" | "ass" | "ssa" | "sub" | "idx" | "sup" | "vtt" => "subtitles",
+                            "mp3" | "aac" | "ac3" | "dts" | "flac" | "wav" | "opus" | "ogg" | "eac3" | "truehd" => "audio",
+                            _ => "video",
+                        };
+                        let key = format!("External:{}:{}", type_str, track_id);
                         ctx.logger
                             .info(&format!("  [External] Using file: {}", path));
                         tracks.insert(key, PathBuf::from(path));
@@ -268,11 +279,10 @@ impl PipelineStep for ExtractStep {
                     }
                 };
 
-                // Get codec for this track
-                let codec_id = probe_result
-                    .track_by_id(track_id)
-                    .map(|t| t.codec_id.as_str())
-                    .unwrap_or("");
+                // Get track info
+                let track_info = probe_result.track_by_id(track_id);
+                let codec_id = track_info.map(|t| t.codec_id.as_str()).unwrap_or("");
+                let track_type = track_info.map(|t| t.track_type).unwrap_or(TrackType::Video);
 
                 // Build output path using module function
                 let output_path = build_track_output_path(
@@ -303,7 +313,13 @@ impl PipelineStep for ExtractStep {
                                 .to_string_lossy(),
                             size_mb
                         ));
-                        let key = format!("{}_{}", source_key, track_id);
+                        // Build key with track type: "Source 2:subtitles:5"
+                        let type_str = match track_type {
+                            TrackType::Video => "video",
+                            TrackType::Audio => "audio",
+                            TrackType::Subtitles => "subtitles",
+                        };
+                        let key = format!("{}:{}:{}", source_key, type_str, track_id);
                         tracks.insert(key, output_path);
                         successful_extractions.push((track_id, result.size_bytes));
                     }

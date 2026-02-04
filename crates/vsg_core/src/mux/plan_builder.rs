@@ -170,8 +170,13 @@ fn build_plan_item(
     plan_item.is_default = is_default;
     plan_item.is_forced_display = is_forced;
 
-    // Check for extracted path
-    let extract_key = format!("{}_{}", source_key, track_id);
+    // Check for extracted path (key format: "Source 2:subtitles:5")
+    let type_str = match track_type {
+        TrackType::Video => "video",
+        TrackType::Audio => "audio",
+        TrackType::Subtitles => "subtitles",
+    };
+    let extract_key = format!("{}:{}:{}", source_key, type_str, track_id);
     if let Some(extracted_path) = input.extracted_tracks.get(&extract_key) {
         plan_item.extracted_path = Some(extracted_path.clone());
     }
