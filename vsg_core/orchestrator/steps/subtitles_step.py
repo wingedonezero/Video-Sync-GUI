@@ -795,6 +795,18 @@ class SubtitlesStep:
                 f"[Sync] Applied {cached['corrected_delay_ms']:+.1f}ms to {events_synced} events"
             )
             item.frame_adjusted = True
+
+            # Run frame audit if enabled (shortcut path bypasses plugin where audit normally runs)
+            job_name = Path(target_video).stem if target_video else "unknown"
+            self._run_frame_audit_if_enabled(
+                subtitle_data=subtitle_data,
+                target_fps=target_fps,
+                offset_ms=cached["corrected_delay_ms"],
+                job_name=job_name,
+                ctx=ctx,
+                runner=runner,
+            )
+
             return OperationResult(
                 success=True,
                 operation="sync",
@@ -834,6 +846,18 @@ class SubtitlesStep:
             )
             if events_synced > 0 and abs(total_delay_ms) > 0.001:
                 item.frame_adjusted = True
+
+            # Run frame audit if enabled (shortcut path bypasses plugin where audit normally runs)
+            job_name = Path(target_video).stem if target_video else "unknown"
+            self._run_frame_audit_if_enabled(
+                subtitle_data=subtitle_data,
+                target_fps=target_fps,
+                offset_ms=total_delay_ms,
+                job_name=job_name,
+                ctx=ctx,
+                runner=runner,
+            )
+
             return OperationResult(
                 success=True,
                 operation="sync",
@@ -1260,6 +1284,91 @@ class SubtitlesStep:
         runner._log_message(
             "[VideoVerified] ═══════════════════════════════════════════════════════\n"
         )
+
+    def _run_frame_audit_if_enabled(
+        self,
+        subtitle_data,
+        target_fps: float | None,
+        offset_ms: float,
+        job_name: str,
+        ctx: Context,
+        runner: CommandRunner,
+    ) -> None:
+        """
+        Run frame alignment audit if enabled in settings.
+
+        This is called from shortcut paths (cached video-verified, Source 1 reference)
+        that bypass the plugin's apply() method where the audit would normally run.
+        """
+        # Check if audit is enabled and we have FPS info
+        if not ctx.settings.video_verified_frame_audit:
+            return
+        if not target_fps:
+            runner._log_message(
+                "[FrameAudit] Skipped: target FPS not available"
+            )
+            return
+
+        try:
+            from vsg_core.subtitles.frame_utils.frame_audit import (
+                run_frame_audit,
+                write_audit_report,
+            )
+
+            runner._log_message("[FrameAudit] Running frame alignment audit...")
+
+            # Get rounding mode from settings
+            rounding_mode = ctx.settings.subtitle_rounding or "floor"
+
+            # Run the audit
+            result = run_frame_audit(
+                subtitle_data=subtitle_data,
+                fps=target_fps,
+                rounding_mode=rounding_mode,
+                offset_ms=offset_ms,
+                job_name=job_name,
+                log=runner._log_message,
+            )
+
+            # Determine output directory
+            config_dir = Path.cwd() / ".config" / "sync_checks"
+
+            # Write the report
+            report_path = write_audit_report(result, config_dir, runner._log_message)
+
+            # Log summary
+            total = result.total_events
+            if total > 0:
+                start_pct = 100 * result.start_ok / total
+                end_pct = 100 * result.end_ok / total
+                runner._log_message(
+                    f"[FrameAudit] Start times OK: {result.start_ok}/{total} ({start_pct:.1f}%)"
+                )
+                runner._log_message(
+                    f"[FrameAudit] End times OK: {result.end_ok}/{total} ({end_pct:.1f}%)"
+                )
+
+                if result.has_issues:
+                    # Find best rounding mode
+                    modes = [
+                        ("floor", result.floor_issues),
+                        ("round", result.round_issues),
+                        ("ceil", result.ceil_issues),
+                    ]
+                    best_mode = min(modes, key=lambda x: x[1])[0]
+                    runner._log_message(
+                        f"[FrameAudit] Issues found: {len(result.issues)} events with frame drift"
+                    )
+                    runner._log_message(
+                        f"[FrameAudit] Suggested rounding mode: {best_mode}"
+                    )
+                else:
+                    runner._log_message("[FrameAudit] No frame drift issues detected")
+
+            runner._log_message(f"[FrameAudit] Report saved: {report_path}")
+
+        except Exception as e:
+            runner._log_message(f"[FrameAudit] WARNING: Audit failed - {e}")
 
     def _apply_video_verified_for_bitmap(
         self, item, ctx: Context, runner: CommandRunner, source1_file: Path | None
