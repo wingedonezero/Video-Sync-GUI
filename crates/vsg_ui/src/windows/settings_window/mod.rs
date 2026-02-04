@@ -1,11 +1,12 @@
 //! Settings dialog window
 //!
-//! 5 tabs matching PySide layout:
+//! 6 tabs:
 //! - Storage (paths)
 //! - Analysis (correlation, delay selection)
 //! - Chapters
 //! - Merge Behavior
 //! - Logging
+//! - Subtitle Sync (video-verified sync settings)
 
 mod logic;
 mod messages;
@@ -24,6 +25,10 @@ use vsg_core::config::ConfigManager;
 use vsg_core::models::{
     AnalysisMode, CorrelationMethod, DelaySelectionMode, FilteringMethod, SnapMode, SyncMode,
 };
+use vsg_core::subtitles::frame_utils::{
+    ComparisonMethod, DeinterlaceMethod, HashAlgorithm, IndexerBackend,
+};
+use vsg_core::subtitles::sync::SyncModeType;
 
 use logic::*;
 
@@ -100,7 +105,7 @@ impl Component for SettingsWindow {
         sender: ComponentSender<Self>,
     ) -> ComponentParts<Self> {
         // Load settings from config
-        let (paths, logging, analysis, chapters, postprocess) = {
+        let (paths, logging, analysis, chapters, postprocess, subtitle) = {
             let cfg = init.config.lock().unwrap();
             let s = cfg.settings();
             (
@@ -109,6 +114,7 @@ impl Component for SettingsWindow {
                 s.analysis.clone(),
                 s.chapters.clone(),
                 s.postprocess.clone(),
+                s.subtitle.clone(),
             )
         };
 
@@ -160,6 +166,7 @@ impl Component for SettingsWindow {
             analysis.clone(),
             chapters.clone(),
             postprocess.clone(),
+            subtitle.clone(),
         );
 
         let model = SettingsWindow {
@@ -202,6 +209,13 @@ impl Component for SettingsWindow {
         // === Tab 5: Logging ===
         let logging_page = build_logging_tab(&logging, &sender);
         notebook.append_page(&logging_page, Some(&gtk4::Label::new(Some("Logging"))));
+
+        // === Tab 6: Subtitle Sync ===
+        let subtitle_page = build_subtitle_sync_tab(&subtitle, &sender);
+        notebook.append_page(
+            &subtitle_page,
+            Some(&gtk4::Label::new(Some("Subtitle Sync"))),
+        );
 
         // Show the window
         root.present();
@@ -333,6 +347,29 @@ impl Component for SettingsWindow {
             SettingsMsg::ToggleShowOptionsJson(v) => self.model.logging.show_options_json = v,
             SettingsMsg::ToggleArchiveLogs(v) => self.model.logging.archive_logs = v,
 
+            // Subtitle Sync tab
+            SettingsMsg::SetSubtitleSyncMode(v) => self.model.subtitle.sync_mode = v,
+            SettingsMsg::SetNumCheckpoints(v) => self.model.subtitle.num_checkpoints = v,
+            SettingsMsg::SetSearchRangeFrames(v) => self.model.subtitle.search_range_frames = v,
+            SettingsMsg::SetSequenceLength(v) => self.model.subtitle.sequence_length = v,
+            SettingsMsg::ToggleFrameAudit(v) => self.model.subtitle.frame_audit_enabled = v,
+            SettingsMsg::SetHashAlgorithm(v) => self.model.subtitle.hash_algorithm = v,
+            SettingsMsg::SetHashSize(v) => self.model.subtitle.hash_size = v,
+            SettingsMsg::SetHashThreshold(v) => self.model.subtitle.hash_threshold = v,
+            SettingsMsg::SetComparisonMethod(v) => self.model.subtitle.comparison_method = v,
+            SettingsMsg::SetSsimThreshold(v) => self.model.subtitle.ssim_threshold = v,
+            SettingsMsg::SetIndexerBackend(v) => self.model.subtitle.indexer_backend = v,
+            SettingsMsg::ToggleInterlacedHandling(v) => {
+                self.model.subtitle.interlaced_handling_enabled = v
+            }
+            SettingsMsg::SetDeinterlaceMethod(v) => self.model.subtitle.deinterlace_method = v,
+            SettingsMsg::SetInterlacedHashThreshold(v) => {
+                self.model.subtitle.interlaced_hash_threshold = v
+            }
+            SettingsMsg::SetInterlacedSsimThreshold(v) => {
+                self.model.subtitle.interlaced_ssim_threshold = v
+            }
+
             // Dialog actions
             SettingsMsg::Save => {
                 self.save_settings();
@@ -381,6 +418,7 @@ impl SettingsWindow {
         settings.analysis = self.model.analysis.clone();
         settings.chapters = self.model.chapters.clone();
         settings.postprocess = self.model.postprocess.clone();
+        settings.subtitle = self.model.subtitle.clone();
 
         // Save to file
         if let Err(e) = cfg.save() {
@@ -1563,6 +1601,438 @@ fn build_logging_tab(
             .connect_toggled(move |b| sender.input(SettingsMsg::ToggleArchiveLogs(b.is_active())));
     }
     page.append(&archive_check);
+
+    page
+}
+
+fn build_subtitle_sync_tab(
+    subtitle: &vsg_core::config::SubtitleSettings,
+    sender: &ComponentSender<SettingsWindow>,
+) -> gtk4::Box {
+    let page = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
+        .margin_top(12)
+        .margin_bottom(12)
+        .margin_start(12)
+        .margin_end(12)
+        .spacing(12)
+        .build();
+
+    let desc = gtk4::Label::builder()
+        .label("Configure subtitle sync verification using video frame matching")
+        .xalign(0.0)
+        .css_classes(["dim-label"])
+        .build();
+    page.append(&desc);
+
+    // Sync Mode selection
+    let mode_row = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(8)
+        .build();
+    let mode_label = gtk4::Label::builder()
+        .label("Sync Mode:")
+        .width_chars(18)
+        .xalign(0.0)
+        .build();
+    mode_label.set_tooltip_text(Some(
+        "Time-Based: Simple delay application\nVideo-Verified: Verify delay against video frames",
+    ));
+    mode_row.append(&mode_label);
+    let mode_combo = gtk4::DropDown::builder()
+        .model(&gtk4::StringList::new(&["Time-Based", "Video-Verified"]))
+        .hexpand(true)
+        .tooltip_text("Select sync mode for subtitle timing adjustment")
+        .build();
+    mode_combo.set_selected(subtitle_sync_mode_index(&subtitle.sync_mode));
+    {
+        let sender = sender.clone();
+        mode_combo.connect_selected_notify(move |dd| {
+            let mode = match dd.selected() {
+                0 => SyncModeType::TimeBased,
+                _ => SyncModeType::VideoVerified,
+            };
+            sender.input(SettingsMsg::SetSubtitleSyncMode(mode));
+        });
+    }
+    mode_row.append(&mode_combo);
+    page.append(&mode_row);
+
+    // === Video-Verified Settings Frame ===
+    let vv_frame = gtk4::Frame::builder()
+        .label("Video-Verified Settings")
+        .build();
+    let vv_box = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
+        .margin_top(8)
+        .margin_bottom(8)
+        .margin_start(8)
+        .margin_end(8)
+        .spacing(8)
+        .build();
+
+    // Checkpoints
+    vv_box.append(&create_spin_row_with_tooltip(
+        "Checkpoints:",
+        subtitle.num_checkpoints as f64,
+        1.0,
+        20.0,
+        1.0,
+        0,
+        "Number of positions in video to verify frame matching (more = more accurate but slower)",
+        {
+            let sender = sender.clone();
+            move |v| sender.input(SettingsMsg::SetNumCheckpoints(v as u32))
+        },
+    ));
+
+    // Search range
+    vv_box.append(&create_spin_row_with_tooltip(
+        "Search Range (frames):",
+        subtitle.search_range_frames as f64,
+        1.0,
+        30.0,
+        1.0,
+        0,
+        "Number of frames to search around expected position for matches",
+        {
+            let sender = sender.clone();
+            move |v| sender.input(SettingsMsg::SetSearchRangeFrames(v as i32))
+        },
+    ));
+
+    // Sequence length
+    vv_box.append(&create_spin_row_with_tooltip(
+        "Sequence Length:",
+        subtitle.sequence_length as f64,
+        5.0,
+        30.0,
+        1.0,
+        0,
+        "Consecutive frames required to confirm a match (more = more reliable)",
+        {
+            let sender = sender.clone();
+            move |v| sender.input(SettingsMsg::SetSequenceLength(v as u32))
+        },
+    ));
+
+    // Frame audit
+    let frame_audit = gtk4::CheckButton::builder()
+        .label("Enable frame audit logging")
+        .active(subtitle.frame_audit_enabled)
+        .tooltip_text("Log detailed frame-by-frame comparison results for debugging")
+        .build();
+    {
+        let sender = sender.clone();
+        frame_audit
+            .connect_toggled(move |b| sender.input(SettingsMsg::ToggleFrameAudit(b.is_active())));
+    }
+    vv_box.append(&frame_audit);
+
+    vv_frame.set_child(Some(&vv_box));
+    page.append(&vv_frame);
+
+    // === Hash Settings Frame ===
+    let hash_frame = gtk4::Frame::builder()
+        .label("Frame Comparison Settings")
+        .build();
+    let hash_box = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
+        .margin_top(8)
+        .margin_bottom(8)
+        .margin_start(8)
+        .margin_end(8)
+        .spacing(8)
+        .build();
+
+    // Comparison method
+    let comp_row = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(8)
+        .build();
+    let comp_label = gtk4::Label::builder()
+        .label("Comparison Method:")
+        .width_chars(18)
+        .xalign(0.0)
+        .build();
+    comp_label.set_tooltip_text(Some("Algorithm for comparing video frames"));
+    comp_row.append(&comp_label);
+    let comp_combo = gtk4::DropDown::builder()
+        .model(&gtk4::StringList::new(&[
+            "Hash + Hamming Distance",
+            "SSIM (Structural Similarity)",
+            "MSE (Mean Squared Error)",
+        ]))
+        .hexpand(true)
+        .tooltip_text("Hash: Fast perceptual hashing\nSSIM: High quality structural comparison\nMSE: Pixel difference calculation")
+        .build();
+    comp_combo.set_selected(comparison_method_index(&subtitle.comparison_method));
+    {
+        let sender = sender.clone();
+        comp_combo.connect_selected_notify(move |dd| {
+            let method = match dd.selected() {
+                0 => ComparisonMethod::Hash,
+                1 => ComparisonMethod::Ssim,
+                _ => ComparisonMethod::Mse,
+            };
+            sender.input(SettingsMsg::SetComparisonMethod(method));
+        });
+    }
+    comp_row.append(&comp_combo);
+    hash_box.append(&comp_row);
+
+    // Hash algorithm
+    let algo_row = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(8)
+        .build();
+    let algo_label = gtk4::Label::builder()
+        .label("Hash Algorithm:")
+        .width_chars(18)
+        .xalign(0.0)
+        .build();
+    algo_label.set_tooltip_text(Some("Perceptual hash algorithm (when using Hash method)"));
+    algo_row.append(&algo_label);
+    let algo_combo = gtk4::DropDown::builder()
+        .model(&gtk4::StringList::new(&[
+            "PHash (Perceptual)",
+            "DHash (Difference)",
+            "AHash (Average)",
+            "Block Hash",
+        ]))
+        .hexpand(true)
+        .tooltip_text("PHash: Best for different encodes\nDHash: Fast, good for same encode\nAHash: Simplest, fastest\nBlock: Good for partial matching")
+        .build();
+    algo_combo.set_selected(hash_algorithm_index(&subtitle.hash_algorithm));
+    {
+        let sender = sender.clone();
+        algo_combo.connect_selected_notify(move |dd| {
+            let algo = match dd.selected() {
+                0 => HashAlgorithm::PHash,
+                1 => HashAlgorithm::DHash,
+                2 => HashAlgorithm::AHash,
+                _ => HashAlgorithm::BlockHash,
+            };
+            sender.input(SettingsMsg::SetHashAlgorithm(algo));
+        });
+    }
+    algo_row.append(&algo_combo);
+    hash_box.append(&algo_row);
+
+    // Hash size
+    let hash_size_row = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(8)
+        .build();
+    let hash_size_label = gtk4::Label::builder()
+        .label("Hash Size:")
+        .width_chars(18)
+        .xalign(0.0)
+        .build();
+    hash_size_label.set_tooltip_text(Some("Size of perceptual hash (8, 16, or 32)"));
+    hash_size_row.append(&hash_size_label);
+    let hash_size_combo = gtk4::DropDown::builder()
+        .model(&gtk4::StringList::new(&["8", "16", "32"]))
+        .hexpand(true)
+        .tooltip_text("Larger = more detail but slower. 16 is a good balance.")
+        .build();
+    hash_size_combo.set_selected(match subtitle.hash_size {
+        8 => 0,
+        16 => 1,
+        32 => 2,
+        _ => 1,
+    });
+    {
+        let sender = sender.clone();
+        hash_size_combo.connect_selected_notify(move |dd| {
+            let size = match dd.selected() {
+                0 => 8,
+                1 => 16,
+                _ => 32,
+            };
+            sender.input(SettingsMsg::SetHashSize(size));
+        });
+    }
+    hash_size_row.append(&hash_size_combo);
+    hash_box.append(&hash_size_row);
+
+    // Hash threshold
+    hash_box.append(&create_spin_row_with_tooltip(
+        "Hash Threshold:",
+        subtitle.hash_threshold as f64,
+        0.0,
+        64.0,
+        1.0,
+        0,
+        "Maximum hamming distance for match (lower = stricter). 12 is a good default.",
+        {
+            let sender = sender.clone();
+            move |v| sender.input(SettingsMsg::SetHashThreshold(v as u32))
+        },
+    ));
+
+    // SSIM threshold
+    hash_box.append(&create_spin_row_with_tooltip(
+        "SSIM Threshold:",
+        subtitle.ssim_threshold,
+        0.0,
+        1.0,
+        0.05,
+        2,
+        "Minimum SSIM score for match (higher = stricter). 0.85 is a good default.",
+        {
+            let sender = sender.clone();
+            move |v| sender.input(SettingsMsg::SetSsimThreshold(v))
+        },
+    ));
+
+    hash_frame.set_child(Some(&hash_box));
+    page.append(&hash_frame);
+
+    // === VapourSynth Settings Frame ===
+    let vs_frame = gtk4::Frame::builder()
+        .label("VapourSynth Indexer")
+        .build();
+    let vs_box = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
+        .margin_top(8)
+        .margin_bottom(8)
+        .margin_start(8)
+        .margin_end(8)
+        .spacing(8)
+        .build();
+
+    // Backend selection
+    let backend_row = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(8)
+        .build();
+    let backend_label = gtk4::Label::builder()
+        .label("Indexer Backend:")
+        .width_chars(18)
+        .xalign(0.0)
+        .build();
+    backend_label.set_tooltip_text(Some("VapourSynth plugin for video indexing"));
+    backend_row.append(&backend_label);
+    let backend_combo = gtk4::DropDown::builder()
+        .model(&gtk4::StringList::new(&["FFMS2", "BestSource", "L-SMASH"]))
+        .hexpand(true)
+        .tooltip_text("FFMS2: Fast indexing, widely used\nBestSource: Slower first load, more accurate\nL-SMASH: Alternative backend")
+        .build();
+    backend_combo.set_selected(indexer_backend_index(&subtitle.indexer_backend));
+    {
+        let sender = sender.clone();
+        backend_combo.connect_selected_notify(move |dd| {
+            let backend = match dd.selected() {
+                0 => IndexerBackend::Ffms2,
+                1 => IndexerBackend::BestSource,
+                _ => IndexerBackend::LSmash,
+            };
+            sender.input(SettingsMsg::SetIndexerBackend(backend));
+        });
+    }
+    backend_row.append(&backend_combo);
+    vs_box.append(&backend_row);
+
+    vs_frame.set_child(Some(&vs_box));
+    page.append(&vs_frame);
+
+    // === Interlaced Handling Frame ===
+    let interlaced_frame = gtk4::Frame::builder()
+        .label("Interlaced Content Handling")
+        .build();
+    let interlaced_box = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Vertical)
+        .margin_top(8)
+        .margin_bottom(8)
+        .margin_start(8)
+        .margin_end(8)
+        .spacing(8)
+        .build();
+
+    // Enable interlaced handling
+    let interlaced_enable = gtk4::CheckButton::builder()
+        .label("Enable special handling for interlaced content")
+        .active(subtitle.interlaced_handling_enabled)
+        .tooltip_text("Use relaxed thresholds and deinterlacing for interlaced video")
+        .build();
+    {
+        let sender = sender.clone();
+        interlaced_enable.connect_toggled(move |b| {
+            sender.input(SettingsMsg::ToggleInterlacedHandling(b.is_active()))
+        });
+    }
+    interlaced_box.append(&interlaced_enable);
+
+    // Deinterlace method
+    let deint_row = gtk4::Box::builder()
+        .orientation(gtk4::Orientation::Horizontal)
+        .spacing(8)
+        .build();
+    let deint_label = gtk4::Label::builder()
+        .label("Deinterlace Method:")
+        .width_chars(18)
+        .xalign(0.0)
+        .build();
+    deint_label.set_tooltip_text(Some("Algorithm for deinterlacing video frames"));
+    deint_row.append(&deint_label);
+    let deint_combo = gtk4::DropDown::builder()
+        .model(&gtk4::StringList::new(&[
+            "Auto", "None", "YADIF", "YADIFmod", "Bob", "BWDIF",
+        ]))
+        .hexpand(true)
+        .tooltip_text("Auto: Detect and apply if needed\nYADIF: Good quality\nBWDIF: Best quality\nBob: Fast, doubles framerate")
+        .build();
+    deint_combo.set_selected(deinterlace_method_index(&subtitle.deinterlace_method));
+    {
+        let sender = sender.clone();
+        deint_combo.connect_selected_notify(move |dd| {
+            let method = match dd.selected() {
+                0 => DeinterlaceMethod::Auto,
+                1 => DeinterlaceMethod::None,
+                2 => DeinterlaceMethod::Yadif,
+                3 => DeinterlaceMethod::YadifMod,
+                4 => DeinterlaceMethod::Bob,
+                _ => DeinterlaceMethod::Bwdif,
+            };
+            sender.input(SettingsMsg::SetDeinterlaceMethod(method));
+        });
+    }
+    deint_row.append(&deint_combo);
+    interlaced_box.append(&deint_row);
+
+    // Interlaced hash threshold
+    interlaced_box.append(&create_spin_row_with_tooltip(
+        "Hash Threshold:",
+        subtitle.interlaced_hash_threshold as f64,
+        0.0,
+        64.0,
+        1.0,
+        0,
+        "Hash threshold for interlaced content (usually higher than progressive)",
+        {
+            let sender = sender.clone();
+            move |v| sender.input(SettingsMsg::SetInterlacedHashThreshold(v as u32))
+        },
+    ));
+
+    // Interlaced SSIM threshold
+    interlaced_box.append(&create_spin_row_with_tooltip(
+        "SSIM Threshold:",
+        subtitle.interlaced_ssim_threshold,
+        0.0,
+        1.0,
+        0.05,
+        2,
+        "SSIM threshold for interlaced content (usually lower than progressive)",
+        {
+            let sender = sender.clone();
+            move |v| sender.input(SettingsMsg::SetInterlacedSsimThreshold(v))
+        },
+    ));
+
+    interlaced_frame.set_child(Some(&interlaced_box));
+    page.append(&interlaced_frame);
 
     page
 }

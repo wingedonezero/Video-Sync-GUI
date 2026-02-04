@@ -31,5 +31,5 @@ mod settings;
 pub use manager::{ConfigError, ConfigManager, ConfigResult};
 pub use settings::{
     AnalysisSettings, ChapterSettings, ConfigSection, LoggingSettings, PathSettings,
-    PostProcessSettings, Settings,
+    PostProcessSettings, Settings, SubtitleSettings,
 };

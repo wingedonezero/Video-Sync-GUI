@@ -4,6 +4,10 @@ use vsg_core::analysis::OutlierMode;
 use vsg_core::models::{
     AnalysisMode, CorrelationMethod, DelaySelectionMode, FilteringMethod, SnapMode, SyncMode,
 };
+use vsg_core::subtitles::frame_utils::{
+    ComparisonMethod, DeinterlaceMethod, HashAlgorithm, IndexerBackend,
+};
+use vsg_core::subtitles::sync::SyncModeType;
 
 /// Messages for the settings window
 #[derive(Debug)]
@@ -78,6 +82,23 @@ pub enum SettingsMsg {
     ToggleShowOptionsPretty(bool),
     ToggleShowOptionsJson(bool),
     ToggleArchiveLogs(bool),
+
+    // === Tab: Subtitle Sync ===
+    SetSubtitleSyncMode(SyncModeType),
+    SetNumCheckpoints(u32),
+    SetSearchRangeFrames(i32),
+    SetSequenceLength(u32),
+    ToggleFrameAudit(bool),
+    SetHashAlgorithm(HashAlgorithm),
+    SetHashSize(u32),
+    SetHashThreshold(u32),
+    SetComparisonMethod(ComparisonMethod),
+    SetSsimThreshold(f64),
+    SetIndexerBackend(IndexerBackend),
+    ToggleInterlacedHandling(bool),
+    SetDeinterlaceMethod(DeinterlaceMethod),
+    SetInterlacedHashThreshold(u32),
+    SetInterlacedSsimThreshold(f64),
 
     // === Dialog actions ===
     Save,
