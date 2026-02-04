@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QHeaderView, QMessageBox, QTableWidgetItem
 
 from vsg_core.extraction.tracks import get_track_info_for_dialog
 from vsg_core.io.runner import CommandRunner
+from vsg_core.models.context_types import ManualLayoutItem
 from vsg_qt.add_job_dialog import AddJobDialog
 from vsg_qt.manual_selection_dialog import ManualSelectionDialog
 
@@ -671,8 +672,8 @@ class JobQueueLogic:
                     )
 
     def _convert_enhanced_to_dialog_format(
-        self, enhanced_layout: list[dict]
-    ) -> list[dict]:
+        self, enhanced_layout: list[ManualLayoutItem]
+    ) -> list[ManualLayoutItem]:
         if not enhanced_layout:
             return []
         return sorted(enhanced_layout, key=lambda x: x.get("user_order_index", 0))
@@ -770,8 +771,8 @@ class JobQueueLogic:
             )
 
     def _replace_paths_in_layout(
-        self, layout_template: list[dict], target_sources: dict[str, str]
-    ) -> list[dict]:
+        self, layout_template: list[ManualLayoutItem], target_sources: dict[str, str]
+    ) -> list[ManualLayoutItem]:
         """Creates a new layout with file paths updated for the target job."""
         import copy
 

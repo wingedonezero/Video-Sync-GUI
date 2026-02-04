@@ -4,13 +4,16 @@ from typing import Any
 
 from PySide6.QtCore import QRunnable, Slot
 
+from vsg_core.models.settings import AppSettings
 from vsg_core.pipeline import JobPipeline
 
 from .signals import WorkerSignals
 
 
 class JobWorker(QRunnable):
-    def __init__(self, config: Any, jobs: list[dict], and_merge: bool, output_dir: str):
+    def __init__(
+        self, config: AppSettings, jobs: list[dict], and_merge: bool, output_dir: str
+    ):
         super().__init__()
         self.config = config
         self.jobs = jobs
