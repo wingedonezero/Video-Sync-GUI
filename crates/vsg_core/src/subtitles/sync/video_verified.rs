@@ -159,7 +159,14 @@ where
 
     // Detect video properties
     let source_props = match detect_properties(source_video) {
-        Ok(p) => p,
+        Ok(p) => {
+            log(&format!(
+                "[VideoProps] Source: FPS {:.3}, {}x{}, {:?}, {:.1}s ({} frames)",
+                p.fps, p.width, p.height, p.content_type, p.duration_ms / 1000.0,
+                (p.duration_ms / 1000.0 * p.fps) as u32
+            ));
+            p
+        }
         Err(e) => {
             log(&format!(
                 "[VideoVerified] Failed to detect source properties: {}",
@@ -178,7 +185,14 @@ where
     };
 
     let target_props = match detect_properties(target_video) {
-        Ok(p) => p,
+        Ok(p) => {
+            log(&format!(
+                "[VideoProps] Target: FPS {:.3}, {}x{}, {:?}, {:.1}s ({} frames)",
+                p.fps, p.width, p.height, p.content_type, p.duration_ms / 1000.0,
+                (p.duration_ms / 1000.0 * p.fps) as u32
+            ));
+            p
+        }
         Err(e) => {
             log(&format!(
                 "[VideoVerified] Failed to detect target properties: {}",
@@ -217,8 +231,16 @@ where
     let sequence_length = config.effective_sequence_length(is_interlaced);
 
     log(&format!(
-        "[VideoVerified] Settings: {} checkpoints, ±{} frames search, {} threshold",
-        num_checkpoints, search_range, hash_threshold
+        "[VideoVerified] Checkpoints: {}, Search: ±{} frames",
+        num_checkpoints, search_range
+    ));
+    log(&format!(
+        "[VideoVerified] Hash: {:?} size={} threshold={}",
+        hash_algorithm, hash_size, hash_threshold
+    ));
+    log(&format!(
+        "[VideoVerified] Comparison method: {:?}",
+        comparison_method
     ));
 
     // Configure video reader
@@ -278,9 +300,11 @@ where
 
     // Generate candidate frame offsets
     let candidates = generate_frame_candidates(correlation_frames, search_range);
+    // Format candidate list for logging
+    let candidate_strs: Vec<String> = candidates.iter().map(|c| format!("{:+}", c)).collect();
     log(&format!(
-        "[VideoVerified] Testing {} candidates around {:+.1} frames",
-        candidates.len(),
+        "[VideoVerified] Testing frame offsets: [{}] (around {:+.1} frames)",
+        candidate_strs.join(", "),
         correlation_frames
     ));
 
@@ -289,6 +313,20 @@ where
         source_props.duration_ms.min(target_props.duration_ms),
         num_checkpoints,
     );
+
+    // Log checkpoint times
+    let checkpoint_strs: Vec<String> = checkpoint_times
+        .iter()
+        .map(|t| format!("{:.1}s", t / 1000.0))
+        .collect();
+    log(&format!(
+        "[VideoVerified] Checkpoint times: [{}]",
+        checkpoint_strs.join(", ")
+    ));
+    log(&format!(
+        "[VideoVerified] Sequence verification: {} consecutive frames must match",
+        sequence_length
+    ));
 
     // Test each candidate at checkpoints
     let mut best_candidate: Option<(i32, usize, usize, f64)> = None;
@@ -386,6 +424,16 @@ where
             f64::MAX
         };
 
+        // Calculate score (Python-style: matched/num_checkpoints * 10)
+        let score = (matched_checkpoints as f64 / num_checkpoints as f64) * 10.0;
+        let offset_ms = candidate_offset as f64 * frame_duration_ms;
+
+        // Log per-candidate result
+        log(&format!(
+            "[VideoVerified]   Frame {:+} (~{:+.1}ms): score={:.2}, seq_verified={}/{}, avg_dist={:.1}",
+            candidate_offset, offset_ms, score, verified_sequences, num_checkpoints, avg_dist
+        ));
+
         let is_better = match &best_candidate {
             None => true,
             Some((_, best_matched, best_verified, best_dist)) => {
@@ -423,6 +471,42 @@ where
     // Check if frame matching actually worked
     let frame_match_success = verified > 0 || matched >= (num_checkpoints as f64 * 0.5) as usize;
 
+    // Calculate final offset
+    let video_offset_ms = frame_offset as f64 * frame_duration_ms;
+    let corrected_delay_ms = video_offset_ms + global_shift_ms;
+
+    // Log summary section
+    log("[VideoVerified] ───────────────────────────────────────");
+    let score = (matched as f64 / num_checkpoints as f64) * 10.0;
+    log(&format!(
+        "[VideoVerified] Best frame offset: {:+} frames (seq_verified={}/{}, score={:.2})",
+        frame_offset, verified, num_checkpoints, score
+    ));
+    log(&format!(
+        "[VideoVerified] Frame-based offset: {:+} frames = {:+.3}ms",
+        frame_offset, video_offset_ms
+    ));
+    log("[VideoVerified] ───────────────────────────────────────");
+    log(&format!(
+        "[VideoVerified] Audio correlation: {:+.3}ms",
+        pure_correlation_ms
+    ));
+    log(&format!(
+        "[VideoVerified] Video-verified offset: {:+.3}ms (frame-based)",
+        video_offset_ms
+    ));
+    if global_shift_ms.abs() > 0.001 {
+        log(&format!(
+            "[VideoVerified] + Global shift: {:+.3}ms",
+            global_shift_ms
+        ));
+    }
+    log(&format!(
+        "[VideoVerified] = Final offset: {:+.3}ms",
+        corrected_delay_ms
+    ));
+    log("[VideoVerified] ───────────────────────────────────────");
+
     if !frame_match_success {
         if is_interlaced && config.interlaced_fallback_to_audio {
             log("[VideoVerified] Insufficient matches for interlaced content, using audio correlation");
@@ -442,9 +526,19 @@ where
         ));
     }
 
-    // Calculate final offset
-    let video_offset_ms = frame_offset as f64 * frame_duration_ms;
-    let corrected_delay_ms = video_offset_ms + global_shift_ms;
+    // Determine if frame correction was needed
+    let audio_frame_estimate = (pure_correlation_ms / frame_duration_ms).round() as i32;
+    if frame_offset == audio_frame_estimate {
+        log(&format!(
+            "[VideoVerified] ✓ No frame correction needed (audio and video match)"
+        ));
+    } else {
+        let correction_ms = video_offset_ms - pure_correlation_ms;
+        log(&format!(
+            "[VideoVerified] Frame correction: {:+.1}ms (was {:+.1}ms)",
+            correction_ms, pure_correlation_ms
+        ));
+    }
 
     let reason = if frame_match_success {
         "frame-matched".to_string()
