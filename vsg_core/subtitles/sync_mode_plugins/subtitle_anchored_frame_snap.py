@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..sync import apply_delay
+from ..sync import apply_delay, check_offset_agreement
 from ..sync_modes import SyncPlugin, register_sync_plugin
 from ..utils.settings import ensure_settings
 
@@ -283,32 +283,29 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
                 success=False, operation="sync", error="No checkpoints matched"
             )
 
-        # Check agreement
-        offset_range = max(checkpoint_offsets) - min(checkpoint_offsets)
-        offsets_agree = offset_range <= tolerance_ms
+        # Check agreement using shared module
+        agreement = check_offset_agreement(checkpoint_offsets, tolerance_ms)
 
-        if not offsets_agree:
+        if not agreement.offsets_agree:
             log(
-                f"[SubAnchor] WARNING: Offsets disagree (range: {offset_range:.1f}ms > tolerance: {tolerance_ms}ms)"
+                f"[SubAnchor] WARNING: Offsets disagree (range: {agreement.offset_range_ms:.1f}ms > tolerance: {tolerance_ms}ms)"
             )
             if fallback_mode == "abort":
                 return OperationResult(
                     success=False,
                     operation="sync",
-                    error=f"Checkpoint offsets disagree: range {offset_range:.1f}ms exceeds {tolerance_ms}ms tolerance",
+                    error=f"Checkpoint offsets disagree: range {agreement.offset_range_ms:.1f}ms exceeds {tolerance_ms}ms tolerance",
                 )
             log("[SubAnchor] Using median offset anyway")
 
         # Calculate final offset (median + global shift)
-        sorted_offsets = sorted(checkpoint_offsets)
-        median_offset = sorted_offsets[len(sorted_offsets) // 2]
-        final_offset_ms = median_offset + global_shift_ms
+        final_offset_ms = agreement.median_offset_ms + global_shift_ms
 
         log("[SubAnchor] ───────────────────────────────────────")
         log(
             f"[SubAnchor] Checkpoint offsets: {[f'{o:+.1f}' for o in checkpoint_offsets]}"
         )
-        log(f"[SubAnchor] Median offset: {median_offset:+.3f}ms")
+        log(f"[SubAnchor] Median offset: {agreement.median_offset_ms:+.3f}ms")
         log(f"[SubAnchor] + Global shift: {global_shift_ms:+.3f}ms")
         log(f"[SubAnchor] = Final offset: {final_offset_ms:+.3f}ms")
         log("[SubAnchor] ───────────────────────────────────────")
@@ -324,10 +321,10 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
 
         # Build summary
         summary = f"SubtitleAnchored: {events_synced} events, {final_offset_ms:+.1f}ms"
-        if offsets_agree:
+        if agreement.offsets_agree:
             summary += f" ({len(checkpoint_offsets)} checkpoints agree)"
         else:
-            summary += f" (offsets varied {offset_range:.0f}ms)"
+            summary += f" (offsets varied {agreement.offset_range_ms:.0f}ms)"
 
         # Record operation
         record = OperationRecord(
@@ -335,12 +332,12 @@ class SubtitleAnchoredFrameSnapSync(SyncPlugin):
             timestamp=datetime.now(),
             parameters={
                 "mode": self.name,
-                "median_offset_ms": median_offset,
+                "median_offset_ms": agreement.median_offset_ms,
                 "global_shift_ms": global_shift_ms,
                 "final_offset_ms": final_offset_ms,
                 "num_checkpoints": len(checkpoint_offsets),
-                "offsets_agree": offsets_agree,
-                "offset_range_ms": offset_range,
+                "offsets_agree": agreement.offsets_agree,
+                "offset_range_ms": agreement.offset_range_ms,
             },
             events_affected=events_synced,
             summary=summary,

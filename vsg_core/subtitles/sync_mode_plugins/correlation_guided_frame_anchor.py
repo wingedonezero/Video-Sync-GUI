@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..sync import check_offset_agreement
 from ..sync_modes import SyncPlugin, register_sync_plugin
 from ..utils.settings import ensure_settings
 
@@ -276,33 +277,32 @@ class CorrelationGuidedFrameAnchorSync(SyncPlugin):
         frame_correction_ms = 0.0
 
         if len(measurements) >= 2:
-            # Check agreement
-            offset_range = max(measurements) - min(measurements)
-            offsets_agree = offset_range <= tolerance_ms
+            # Check agreement using shared module
+            agreement = check_offset_agreement(measurements, tolerance_ms)
 
-            if offsets_agree:
+            if agreement.offsets_agree:
                 # Use median
-                sorted_m = sorted(measurements)
-                median_offset = sorted_m[len(sorted_m) // 2]
-                frame_correction_ms = median_offset - pure_correlation_ms
+                frame_correction_ms = agreement.median_offset_ms - pure_correlation_ms
                 log(
-                    f"[CorrGuided] ✓ Anchors agree: median={median_offset:+.1f}ms, correction={frame_correction_ms:+.3f}ms"
+                    f"[CorrGuided] ✓ Anchors agree: median={agreement.median_offset_ms:+.1f}ms, correction={frame_correction_ms:+.3f}ms"
                 )
             else:
                 log(
-                    f"[CorrGuided] WARNING: Anchors disagree (range: {offset_range:.1f}ms)"
+                    f"[CorrGuided] WARNING: Anchors disagree (range: {agreement.offset_range_ms:.1f}ms)"
                 )
                 if fallback_mode == "abort":
                     return OperationResult(
                         success=False,
                         operation="sync",
-                        error=f"Anchor offsets disagree: range {offset_range:.1f}ms exceeds {tolerance_ms}ms",
+                        error=f"Anchor offsets disagree: range {agreement.offset_range_ms:.1f}ms exceeds {tolerance_ms}ms",
                     )
                 elif fallback_mode == "use-median":
-                    sorted_m = sorted(measurements)
-                    median_offset = sorted_m[len(sorted_m) // 2]
-                    frame_correction_ms = median_offset - pure_correlation_ms
-                    log(f"[CorrGuided] Using median anyway: {median_offset:+.1f}ms")
+                    frame_correction_ms = (
+                        agreement.median_offset_ms - pure_correlation_ms
+                    )
+                    log(
+                        f"[CorrGuided] Using median anyway: {agreement.median_offset_ms:+.1f}ms"
+                    )
                 else:  # use-correlation
                     log("[CorrGuided] Using correlation only (no frame correction)")
         else:

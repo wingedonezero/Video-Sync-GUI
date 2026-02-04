@@ -32,7 +32,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ..sync import apply_delay
+from ..sync import (
+    apply_delay,
+    generate_frame_candidates,
+    select_checkpoint_times,
+)
 from ..sync_modes import SyncPlugin, register_sync_plugin
 from ..utils.settings import ensure_settings
 
@@ -214,7 +218,7 @@ def calculate_video_verified_offset(
 
     # Generate candidate frame offsets to test (centered on correlation)
     correlation_frames = pure_correlation_ms / frame_duration_ms
-    candidates_frames = _generate_frame_candidates_static(
+    candidates_frames = generate_frame_candidates(
         correlation_frames, search_range_frames
     )
     log(
@@ -259,7 +263,7 @@ def calculate_video_verified_offset(
         }
 
     # Select checkpoint times (distributed across video)
-    checkpoint_times = _select_checkpoint_times_static(source_duration, num_checkpoints)
+    checkpoint_times = select_checkpoint_times(source_duration, num_checkpoints)
     log(
         f"[VideoVerified] Checkpoint times: {[f'{t / 1000:.1f}s' for t in checkpoint_times]}"
     )
@@ -430,79 +434,6 @@ def calculate_video_verified_offset(
         "source_content_type": source_props.get("content_type", "unknown"),
         "target_content_type": target_props.get("content_type", "unknown"),
     }
-
-
-def _generate_frame_candidates_static(
-    correlation_frames: float, search_range_frames: int
-) -> list[int]:
-    """
-    Generate candidate frame offsets to test, centered on the correlation value.
-
-    This works for any offset size - small (< 3 frames) or large (24+ frames).
-    We search in a window around the correlation-derived frame offset.
-
-    Args:
-        correlation_frames: Audio correlation converted to frames (can be fractional)
-        search_range_frames: How many frames on each side to search
-
-    Returns:
-        Sorted list of integer frame offsets to test
-    """
-    candidates = set()
-
-    # Round correlation to nearest frame
-    base_frame = int(round(correlation_frames))
-
-    # Always include zero (in case correlation is just wrong)
-    candidates.add(0)
-
-    # Search window around correlation
-    for delta in range(-search_range_frames, search_range_frames + 1):
-        candidates.add(base_frame + delta)
-
-    return sorted(candidates)
-
-
-def _generate_candidates_static(
-    correlation_ms: float, frame_duration_ms: float, search_range_frames: int
-) -> list[float]:
-    """Generate candidate offsets to test (static version) - DEPRECATED, use _generate_frame_candidates_static."""
-    candidates = set()
-
-    # Always test zero
-    candidates.add(0.0)
-
-    # Always test correlation value
-    candidates.add(round(correlation_ms, 1))
-
-    # Test frame-quantized versions of correlation
-    for frame_offset in range(-search_range_frames, search_range_frames + 1):
-        candidate = round(frame_offset * frame_duration_ms, 1)
-        candidates.add(candidate)
-
-    # Also test the exact frame boundaries around correlation
-    base_frame = int(round(correlation_ms / frame_duration_ms))
-    for frame_delta in [-1, 0, 1]:
-        candidate = round((base_frame + frame_delta) * frame_duration_ms, 1)
-        candidates.add(candidate)
-
-    return sorted(candidates)
-
-
-def _select_checkpoint_times_static(
-    duration_ms: float, num_checkpoints: int
-) -> list[float]:
-    """Select checkpoint times distributed across the video (static version)."""
-    checkpoints = []
-
-    # Use percentage-based positions (avoiding very start/end)
-    positions = [15, 30, 50, 70, 85][:num_checkpoints]
-
-    for pos in positions:
-        time_ms = duration_ms * pos / 100
-        checkpoints.append(time_ms)
-
-    return checkpoints
 
 
 def _measure_candidate_quality_static(
