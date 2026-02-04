@@ -1,0 +1,227 @@
+//! Subtitle sync modes.
+//!
+//! Pluggable sync strategies for adjusting subtitle timing.
+//!
+//! # Architecture
+//!
+//! Sync modes implement the `SyncMode` trait and are created via the factory function.
+//! This follows the same pattern as `analysis::methods`.
+//!
+//! # Available Modes
+//!
+//! - **TimeBased**: Simple delay application - shifts all events by a constant offset.
+//! - **VideoVerified**: Frame-matched delay - verifies audio correlation against video frames.
+
+mod time_based;
+mod video_verified;
+
+pub use time_based::TimeBased;
+pub use video_verified::VideoVerified;
+
+use std::path::Path;
+
+use crate::subtitles::error::SyncError;
+use crate::subtitles::types::SubtitleData;
+
+/// Available sync mode types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SyncModeType {
+    /// Simple delay application.
+    #[default]
+    TimeBased,
+    /// Frame-matched delay verification.
+    VideoVerified,
+}
+
+impl SyncModeType {
+    /// Get the display name for this mode.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::TimeBased => "time-based",
+            Self::VideoVerified => "video-verified",
+        }
+    }
+
+    /// Get a description of this mode.
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::TimeBased => "Apply delay offset to all subtitle events",
+            Self::VideoVerified => "Verify delay against video frame matching",
+        }
+    }
+}
+
+/// Configuration for sync operations.
+#[derive(Debug, Clone)]
+pub struct SyncConfig {
+    /// Total delay to apply (including global shift).
+    pub total_delay_ms: f64,
+    /// Global shift component of the delay.
+    pub global_shift_ms: f64,
+    /// Source video path (for video-verified mode).
+    pub source_video: Option<std::path::PathBuf>,
+    /// Target video path (for video-verified mode).
+    pub target_video: Option<std::path::PathBuf>,
+    /// Target video FPS (for frame calculations).
+    pub target_fps: Option<f64>,
+    /// Video-verified specific settings.
+    pub video_verified: VideoVerifiedConfig,
+}
+
+impl Default for SyncConfig {
+    fn default() -> Self {
+        Self {
+            total_delay_ms: 0.0,
+            global_shift_ms: 0.0,
+            source_video: None,
+            target_video: None,
+            target_fps: None,
+            video_verified: VideoVerifiedConfig::default(),
+        }
+    }
+}
+
+impl SyncConfig {
+    /// Create config for time-based sync.
+    pub fn time_based(total_delay_ms: f64, global_shift_ms: f64) -> Self {
+        Self {
+            total_delay_ms,
+            global_shift_ms,
+            ..Default::default()
+        }
+    }
+
+    /// Create config for video-verified sync.
+    pub fn video_verified(
+        total_delay_ms: f64,
+        global_shift_ms: f64,
+        source_video: impl AsRef<Path>,
+        target_video: impl AsRef<Path>,
+    ) -> Self {
+        Self {
+            total_delay_ms,
+            global_shift_ms,
+            source_video: Some(source_video.as_ref().to_path_buf()),
+            target_video: Some(target_video.as_ref().to_path_buf()),
+            ..Default::default()
+        }
+    }
+
+    /// Pure correlation component (total - global shift).
+    pub fn pure_correlation_ms(&self) -> f64 {
+        self.total_delay_ms - self.global_shift_ms
+    }
+}
+
+/// Video-verified mode specific settings.
+#[derive(Debug, Clone)]
+pub struct VideoVerifiedConfig {
+    /// Number of checkpoints to test across the video.
+    pub num_checkpoints: usize,
+    /// Search range in frames around correlation value.
+    pub search_range_frames: i32,
+    /// Hash algorithm to use.
+    pub hash_algorithm: String,
+    /// Hash size.
+    pub hash_size: u8,
+    /// Hash distance threshold for match.
+    pub hash_threshold: u32,
+    /// Number of consecutive frames to verify.
+    pub sequence_length: usize,
+    /// Whether to use PTS precision.
+    pub use_pts_precision: bool,
+}
+
+impl Default for VideoVerifiedConfig {
+    fn default() -> Self {
+        Self {
+            num_checkpoints: 5,
+            search_range_frames: 3,
+            hash_algorithm: "phash".to_string(),
+            hash_size: 16,
+            hash_threshold: 12,
+            sequence_length: 10,
+            use_pts_precision: false,
+        }
+    }
+}
+
+/// Result of a sync operation.
+#[derive(Debug, Clone)]
+pub struct SyncResult {
+    /// Number of events affected.
+    pub events_affected: usize,
+    /// Final offset applied (may differ from config if video-verified).
+    pub final_offset_ms: f64,
+    /// Summary message.
+    pub summary: String,
+    /// Additional details.
+    pub details: SyncDetails,
+}
+
+/// Additional sync result details.
+#[derive(Debug, Clone, Default)]
+pub struct SyncDetails {
+    /// Reason for the offset selection.
+    pub reason: String,
+    /// Audio correlation value (before video verification).
+    pub audio_correlation_ms: Option<f64>,
+    /// Video-verified offset (if different from audio).
+    pub video_offset_ms: Option<f64>,
+    /// Whether frame matching was successful.
+    pub frame_match_success: Option<bool>,
+    /// Number of checkpoints matched.
+    pub checkpoints_matched: Option<usize>,
+}
+
+/// Trait for sync mode implementations.
+///
+/// Each sync mode takes subtitle data and a config, and returns a result.
+/// The sync mode may modify the subtitle data in place.
+pub trait SyncMode: Send + Sync {
+    /// Get the name of this sync mode.
+    fn name(&self) -> &str;
+
+    /// Get a description of this sync mode.
+    fn description(&self) -> &str;
+
+    /// Apply sync to subtitle data.
+    ///
+    /// # Arguments
+    /// * `data` - Subtitle data to modify in place.
+    /// * `config` - Sync configuration.
+    ///
+    /// # Returns
+    /// * `Ok(SyncResult)` - Sync applied successfully.
+    /// * `Err(SyncError)` - Sync failed.
+    fn apply(&self, data: &mut SubtitleData, config: &SyncConfig) -> Result<SyncResult, SyncError>;
+}
+
+/// Create a sync mode from type enum.
+pub fn create_sync_mode(mode: SyncModeType) -> Box<dyn SyncMode> {
+    match mode {
+        SyncModeType::TimeBased => Box::new(TimeBased),
+        SyncModeType::VideoVerified => Box::new(VideoVerified),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sync_mode_type_names() {
+        assert_eq!(SyncModeType::TimeBased.name(), "time-based");
+        assert_eq!(SyncModeType::VideoVerified.name(), "video-verified");
+    }
+
+    #[test]
+    fn test_sync_config_pure_correlation() {
+        let config = SyncConfig {
+            total_delay_ms: 150.0,
+            global_shift_ms: 50.0,
+            ..Default::default()
+        };
+        assert!((config.pure_correlation_ms() - 100.0).abs() < 0.001);
+    }
+}
