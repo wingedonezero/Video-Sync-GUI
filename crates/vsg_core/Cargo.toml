@@ -23,5 +23,13 @@ md5 = "0.7.0"
 roxmltree = "0.20.0"
 sha2 = "0.10.9"
 
+# Video frame utilities (for video-verified sync mode)
+image = "0.25"
+image_hasher = "3.0"
+image-compare = "0.4"
+
+# VapourSynth bindings for fast frame access
+vapoursynth = "0.5"
+
 [dev-dependencies]
 tempfile = "3.24"

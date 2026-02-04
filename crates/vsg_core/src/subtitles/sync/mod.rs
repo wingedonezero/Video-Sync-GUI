@@ -21,6 +21,9 @@ pub use video_verified::VideoVerified;
 use std::path::Path;
 
 use crate::subtitles::error::SyncError;
+use crate::subtitles::frame_utils::types::{
+    ComparisonMethod, DeinterlaceMethod, HashAlgorithm, IndexerBackend, InterlacedForceMode,
+};
 use crate::subtitles::types::SubtitleData;
 
 /// Available sync mode types.
@@ -116,32 +119,156 @@ impl SyncConfig {
 /// Video-verified mode specific settings.
 #[derive(Debug, Clone)]
 pub struct VideoVerifiedConfig {
+    // General settings
     /// Number of checkpoints to test across the video.
     pub num_checkpoints: usize,
     /// Search range in frames around correlation value.
     pub search_range_frames: i32,
+    /// Number of consecutive frames to verify.
+    pub sequence_length: usize,
+    /// Whether to use PTS precision for sub-frame accuracy.
+    pub use_pts_precision: bool,
+    /// Whether to run frame alignment audit.
+    pub frame_audit_enabled: bool,
+
+    // Hash settings
     /// Hash algorithm to use.
-    pub hash_algorithm: String,
-    /// Hash size.
+    pub hash_algorithm: HashAlgorithm,
+    /// Hash size (8 or 16).
     pub hash_size: u8,
     /// Hash distance threshold for match.
     pub hash_threshold: u32,
-    /// Number of consecutive frames to verify.
-    pub sequence_length: usize,
-    /// Whether to use PTS precision.
-    pub use_pts_precision: bool,
+    /// Window radius for initial frame search.
+    pub window_radius: i32,
+    /// Comparison method.
+    pub comparison_method: ComparisonMethod,
+
+    // Interlaced handling
+    /// Whether interlaced handling is enabled.
+    pub interlaced_handling_enabled: bool,
+    /// Force mode for interlaced detection.
+    pub interlaced_force_mode: InterlacedForceMode,
+    /// Deinterlace method for interlaced content.
+    pub interlaced_deinterlace_method: DeinterlaceMethod,
+    /// Number of checkpoints for interlaced content.
+    pub interlaced_num_checkpoints: usize,
+    /// Search range for interlaced content.
+    pub interlaced_search_range_frames: i32,
+    /// Hash algorithm for interlaced content.
+    pub interlaced_hash_algorithm: HashAlgorithm,
+    /// Hash size for interlaced content.
+    pub interlaced_hash_size: u8,
+    /// Hash threshold for interlaced content.
+    pub interlaced_hash_threshold: u32,
+    /// Comparison method for interlaced content.
+    pub interlaced_comparison_method: ComparisonMethod,
+    /// Sequence length for interlaced content.
+    pub interlaced_sequence_length: usize,
+    /// Whether to fall back to audio if frame matching fails.
+    pub interlaced_fallback_to_audio: bool,
+
+    // Reader settings
+    /// Indexer backend to use (FFMS2, BestSource, L-SMASH).
+    pub indexer_backend: IndexerBackend,
 }
 
 impl Default for VideoVerifiedConfig {
     fn default() -> Self {
         Self {
+            // General settings
             num_checkpoints: 5,
             search_range_frames: 3,
-            hash_algorithm: "phash".to_string(),
-            hash_size: 16,
-            hash_threshold: 12,
             sequence_length: 10,
             use_pts_precision: false,
+            frame_audit_enabled: false,
+
+            // Hash settings
+            hash_algorithm: HashAlgorithm::PHash,
+            hash_size: 16,
+            hash_threshold: 12,
+            window_radius: 1,
+            comparison_method: ComparisonMethod::Hash,
+
+            // Interlaced handling - same defaults, can be customized
+            interlaced_handling_enabled: true,
+            interlaced_force_mode: InterlacedForceMode::Auto,
+            interlaced_deinterlace_method: DeinterlaceMethod::Bwdif,
+            interlaced_num_checkpoints: 5,
+            interlaced_search_range_frames: 3,
+            interlaced_hash_algorithm: HashAlgorithm::PHash,
+            interlaced_hash_size: 16,
+            interlaced_hash_threshold: 15, // Slightly higher for interlaced
+            interlaced_comparison_method: ComparisonMethod::Hash,
+            interlaced_sequence_length: 10,
+            interlaced_fallback_to_audio: true,
+
+            // Reader settings
+            indexer_backend: IndexerBackend::Ffms2,
+        }
+    }
+}
+
+impl VideoVerifiedConfig {
+    /// Get the effective settings based on whether content is interlaced.
+    pub fn effective_num_checkpoints(&self, is_interlaced: bool) -> usize {
+        if is_interlaced && self.interlaced_handling_enabled {
+            self.interlaced_num_checkpoints
+        } else {
+            self.num_checkpoints
+        }
+    }
+
+    /// Get effective search range.
+    pub fn effective_search_range(&self, is_interlaced: bool) -> i32 {
+        if is_interlaced && self.interlaced_handling_enabled {
+            self.interlaced_search_range_frames
+        } else {
+            self.search_range_frames
+        }
+    }
+
+    /// Get effective hash algorithm.
+    pub fn effective_hash_algorithm(&self, is_interlaced: bool) -> HashAlgorithm {
+        if is_interlaced && self.interlaced_handling_enabled {
+            self.interlaced_hash_algorithm
+        } else {
+            self.hash_algorithm
+        }
+    }
+
+    /// Get effective hash size.
+    pub fn effective_hash_size(&self, is_interlaced: bool) -> u8 {
+        if is_interlaced && self.interlaced_handling_enabled {
+            self.interlaced_hash_size
+        } else {
+            self.hash_size
+        }
+    }
+
+    /// Get effective hash threshold.
+    pub fn effective_hash_threshold(&self, is_interlaced: bool) -> u32 {
+        if is_interlaced && self.interlaced_handling_enabled {
+            self.interlaced_hash_threshold
+        } else {
+            self.hash_threshold
+        }
+    }
+
+    /// Get effective comparison method.
+    pub fn effective_comparison_method(&self, is_interlaced: bool) -> ComparisonMethod {
+        if is_interlaced && self.interlaced_handling_enabled {
+            self.interlaced_comparison_method
+        } else {
+            self.comparison_method
+        }
+    }
+
+    /// Get effective sequence length.
+    pub fn effective_sequence_length(&self, is_interlaced: bool) -> usize {
+        if is_interlaced && self.interlaced_handling_enabled {
+            self.interlaced_sequence_length
+        } else {
+            self.sequence_length
         }
     }
 }
