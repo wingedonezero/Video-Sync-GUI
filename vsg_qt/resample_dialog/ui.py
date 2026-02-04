@@ -60,7 +60,7 @@ class ResampleDialog(QDialog):
         main_layout.addWidget(dest_group)
         main_layout.addWidget(button_box)
 
-    def _probe_video_resolution(self):
+    def _probe_video_resolution(self) -> None:
         """Runs ffprobe to get the video dimensions and updates the destination fields."""
         # This uses a dummy config and log callback for a one-off command
         runner = CommandRunner(

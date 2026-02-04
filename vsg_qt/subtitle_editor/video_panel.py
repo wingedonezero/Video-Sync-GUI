@@ -38,12 +38,12 @@ class VideoWidget(QWidget):
         self._pixmap: QPixmap | None = None
         self.setMinimumSize(320, 180)
 
-    def set_pixmap(self, pixmap: QPixmap):
+    def set_pixmap(self, pixmap: QPixmap) -> None:
         """Set the pixmap to display."""
         self._pixmap = pixmap
         self.update()
 
-    def paintEvent(self, event):
+    def paintEvent(self, event) -> None:
         """Paint the video frame scaled to fit."""
         super().paintEvent(event)
         if self._pixmap is None:
@@ -84,7 +84,7 @@ class VideoPanel(QWidget):
 
         self._setup_ui()
 
-    def _setup_ui(self):
+    def _setup_ui(self) -> None:
         """Set up the video panel UI."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -119,7 +119,7 @@ class VideoPanel(QWidget):
 
         layout.addLayout(controls_layout)
 
-    def set_state(self, state: EditorState):
+    def set_state(self, state: EditorState) -> None:
         """Set the editor state."""
         self._state = state
 
@@ -129,7 +129,7 @@ class VideoPanel(QWidget):
         subtitle_path: str,
         index_dir: str | None = None,
         fonts_dir: str | None = None,
-    ):
+    ) -> None:
         """
         Start the video player.
 
@@ -159,13 +159,13 @@ class VideoPanel(QWidget):
         # Start player (starts paused)
         self._player.start()
 
-    def stop_player(self):
+    def stop_player(self) -> None:
         """Stop and clean up the player."""
         if self._player:
             self._player.stop()
             self._player = None
 
-    def seek_to(self, time_ms: int):
+    def seek_to(self, time_ms: int) -> None:
         """
         Seek to a specific time.
 
@@ -175,7 +175,7 @@ class VideoPanel(QWidget):
         if self._player:
             self._player.seek(time_ms)
 
-    def reload_subtitles(self, subtitle_path: str | None = None):
+    def reload_subtitles(self, subtitle_path: str | None = None) -> None:
         """
         Reload the subtitle track.
 
@@ -185,35 +185,35 @@ class VideoPanel(QWidget):
         if self._player:
             self._player.reload_subtitle_track(subtitle_path)
 
-    def _on_new_frame(self, image: QImage, timestamp: float):
+    def _on_new_frame(self, image: QImage, timestamp: float) -> None:
         """Handle new video frame."""
         pixmap = QPixmap.fromImage(image)
         self._video_widget.set_pixmap(pixmap)
 
-    def _on_duration_changed(self, duration_sec: float):
+    def _on_duration_changed(self, duration_sec: float) -> None:
         """Handle duration change."""
         self._duration_ms = int(duration_sec * 1000)
         self._seek_slider.setRange(0, self._duration_ms)
         self._update_time_display(0)
 
-    def _on_time_changed(self, time_ms: int):
+    def _on_time_changed(self, time_ms: int) -> None:
         """Handle playback time change."""
         if not self._is_seeking:
             self._seek_slider.setValue(time_ms)
         self._update_time_display(time_ms)
 
-    def _on_fps_detected(self, fps: float):
+    def _on_fps_detected(self, fps: float) -> None:
         """Handle FPS detection."""
         if self._state:
             self._state.set_video_fps(fps)
 
-    def _update_time_display(self, current_ms: int):
+    def _update_time_display(self, current_ms: int) -> None:
         """Update the time display label."""
         current = ms_to_ass_time(current_ms)
         total = ms_to_ass_time(self._duration_ms)
         self._time_label.setText(f"{current} / {total}")
 
-    def _on_play_clicked(self):
+    def _on_play_clicked(self) -> None:
         """Handle play/pause button click."""
         if self._player:
             self._player.toggle_pause()
@@ -221,17 +221,17 @@ class VideoPanel(QWidget):
             self._play_btn.setText("Play" if is_paused else "Pause")
             self.playback_toggled.emit()
 
-    def _on_slider_pressed(self):
+    def _on_slider_pressed(self) -> None:
         """Handle slider press (start seeking)."""
         self._is_seeking = True
 
-    def _on_slider_released(self):
+    def _on_slider_released(self) -> None:
         """Handle slider release (complete seek)."""
         self._is_seeking = False
         if self._player:
             self._player.seek(self._seek_slider.value())
 
-    def _on_slider_moved(self, value: int):
+    def _on_slider_moved(self, value: int) -> None:
         """Handle slider movement during drag."""
         self._update_time_display(value)
 

@@ -80,7 +80,7 @@ class FontManagerDialog(QDialog):
         self._connect_signals()
         self._refresh_data()
 
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
 
         # Main splitter for left/right panes
@@ -190,7 +190,7 @@ class FontManagerDialog(QDialog):
         button_row.addWidget(self.ok_btn)
         layout.addLayout(button_row)
 
-    def _connect_signals(self):
+    def _connect_signals(self) -> None:
         self.file_fonts_tree.currentItemChanged.connect(self._on_file_font_selected)
         self.user_fonts_tree.currentItemChanged.connect(self._on_user_font_selected)
         self.open_folder_btn.clicked.connect(self._open_fonts_folder)
@@ -201,14 +201,14 @@ class FontManagerDialog(QDialog):
         self.cancel_btn.clicked.connect(self.reject)
         self.ok_btn.clicked.connect(self._on_ok)
 
-    def _refresh_data(self):
+    def _refresh_data(self) -> None:
         """Refresh all data displays."""
         self._refresh_file_fonts()
         self._refresh_user_fonts()
         self._refresh_replacements()
         self._update_combos()
 
-    def _refresh_file_fonts(self):
+    def _refresh_file_fonts(self) -> None:
         """Refresh the styles-in-file tree."""
         self.file_fonts_tree.clear()
 
@@ -254,7 +254,7 @@ class FontManagerDialog(QDialog):
 
         return styles_info
 
-    def _refresh_user_fonts(self):
+    def _refresh_user_fonts(self) -> None:
         """Refresh the user fonts tree."""
         self.user_fonts_tree.clear()
 
@@ -329,7 +329,7 @@ class FontManagerDialog(QDialog):
 
                 self.user_fonts_tree.addTopLevelItem(family_item)
 
-    def _refresh_replacements(self):
+    def _refresh_replacements(self) -> None:
         """Refresh the replacements tree."""
         self.replacements_tree.clear()
 
@@ -344,7 +344,7 @@ class FontManagerDialog(QDialog):
 
         self.remove_replacement_btn.setEnabled(False)
 
-    def _update_combos(self):
+    def _update_combos(self) -> None:
         """Update the combo boxes."""
         # Style combo - show all styles, mark ones with replacements
         self.style_combo.clear()
@@ -366,7 +366,7 @@ class FontManagerDialog(QDialog):
                 display_name += f" ({font.subfamily})"
             self.replacement_font_combo.addItem(display_name, font)
 
-    def _on_file_font_selected(self, current, previous):
+    def _on_file_font_selected(self, current, previous) -> None:
         """Handle selection in styles tree."""
         if current:
             style_name = current.data(0, Qt.UserRole)
@@ -376,7 +376,7 @@ class FontManagerDialog(QDialog):
                 if idx >= 0:
                     self.style_combo.setCurrentIndex(idx)
 
-    def _on_user_font_selected(self, current, previous):
+    def _on_user_font_selected(self, current, previous) -> None:
         """Handle selection in user fonts tree."""
         if current:
             font_info = current.data(0, Qt.UserRole)
@@ -388,11 +388,11 @@ class FontManagerDialog(QDialog):
                         self.replacement_font_combo.setCurrentIndex(i)
                         break
 
-    def _on_replacement_selected(self, current, previous):
+    def _on_replacement_selected(self, current, previous) -> None:
         """Handle selection in replacements tree."""
         self.remove_replacement_btn.setEnabled(current is not None)
 
-    def _open_fonts_folder(self):
+    def _open_fonts_folder(self) -> None:
         """Open the fonts folder in the system file manager."""
         import subprocess
         import sys
@@ -406,7 +406,7 @@ class FontManagerDialog(QDialog):
         else:
             subprocess.run(["xdg-open", str(self.fonts_dir)])
 
-    def _add_replacement(self):
+    def _add_replacement(self) -> None:
         """Add a font replacement for the selected style."""
         style_name = self.style_combo.currentData()
         replacement_font = self.replacement_font_combo.currentData()
@@ -437,7 +437,7 @@ class FontManagerDialog(QDialog):
         self._refresh_replacements()
         self._update_combos()
 
-    def _remove_replacement(self):
+    def _remove_replacement(self) -> None:
         """Remove the selected replacement."""
         current = self.replacements_tree.currentItem()
         if current:
@@ -447,7 +447,7 @@ class FontManagerDialog(QDialog):
                 self._refresh_replacements()
                 self._update_combos()
 
-    def _clear_all_replacements(self):
+    def _clear_all_replacements(self) -> None:
         """Clear all replacements."""
         if self.replacement_manager.get_replacements():
             reply = QMessageBox.question(
@@ -462,7 +462,7 @@ class FontManagerDialog(QDialog):
                 self._refresh_replacements()
                 self._update_combos()
 
-    def _on_ok(self):
+    def _on_ok(self) -> None:
         """Handle OK button - validate and accept."""
         errors = self.replacement_manager.validate_replacement_files()
         if errors:

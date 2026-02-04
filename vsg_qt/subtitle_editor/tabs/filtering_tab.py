@@ -45,7 +45,7 @@ class FilteringTab(BaseTab):
 
         self._build_ui()
 
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         """Build the filtering tab UI."""
         layout = self.content_layout
 
@@ -146,7 +146,7 @@ class FilteringTab(BaseTab):
 
         layout.addStretch()
 
-    def _on_state_set(self):
+    def _on_state_set(self) -> None:
         """Initialize from state when set."""
         if not self._state:
             return
@@ -154,7 +154,7 @@ class FilteringTab(BaseTab):
         self._populate_styles()
         self._state.filter_changed.connect(self._update_stats)
 
-    def _populate_styles(self):
+    def _populate_styles(self) -> None:
         """Populate the styles list from state."""
         if not self._state:
             return
@@ -192,7 +192,7 @@ class FilteringTab(BaseTab):
 
         self._update_stats()
 
-    def _on_mode_changed(self, checked: bool):
+    def _on_mode_changed(self, checked: bool) -> None:
         """Handle filter mode change."""
         if not self._state:
             return
@@ -201,7 +201,7 @@ class FilteringTab(BaseTab):
         self._state.set_filter_mode(mode)
         self._update_stats()
 
-    def _on_style_toggled(self):
+    def _on_style_toggled(self) -> None:
         """Handle style checkbox toggle."""
         if not self._state:
             return
@@ -214,7 +214,7 @@ class FilteringTab(BaseTab):
         self._state.set_filter_styles(selected)
         self._update_stats()
 
-    def _select_all_styles(self):
+    def _select_all_styles(self) -> None:
         """Select all styles."""
         for cb in self._style_checkboxes.values():
             cb.blockSignals(True)
@@ -222,7 +222,7 @@ class FilteringTab(BaseTab):
             cb.blockSignals(False)
         self._on_style_toggled()
 
-    def _select_no_styles(self):
+    def _select_no_styles(self) -> None:
         """Deselect all styles."""
         for cb in self._style_checkboxes.values():
             cb.blockSignals(True)
@@ -230,22 +230,22 @@ class FilteringTab(BaseTab):
             cb.blockSignals(False)
         self._on_style_toggled()
 
-    def _on_preview_toggled(self, checked: bool):
+    def _on_preview_toggled(self, checked: bool) -> None:
         """Handle preview checkbox toggle."""
         self.filter_preview_requested.emit(checked)
 
-    def _on_flag_effects_toggled(self, checked: bool):
+    def _on_flag_effects_toggled(self, checked: bool) -> None:
         """Handle flag effects checkbox toggle."""
         self.flag_effects_requested.emit(checked)
         if not checked:
             self._flagged_count_label.setText("")
             self._next_flagged_btn.setEnabled(False)
 
-    def _on_next_flagged_clicked(self):
+    def _on_next_flagged_clicked(self) -> None:
         """Handle next flagged button click."""
         self.jump_to_next_flagged.emit()
 
-    def update_flagged_count(self, count: int):
+    def update_flagged_count(self, count: int) -> None:
         """Update the flagged count display."""
         if count > 0:
             self._flagged_count_label.setText(f"({count} found)")
@@ -254,7 +254,7 @@ class FilteringTab(BaseTab):
             self._flagged_count_label.setText("")
             self._next_flagged_btn.setEnabled(False)
 
-    def _update_stats(self):
+    def _update_stats(self) -> None:
         """Update statistics label."""
         if not self._state:
             return
@@ -268,11 +268,11 @@ class FilteringTab(BaseTab):
             f"Result: {kept} events {mode}, {removed} events removed (total: {total})"
         )
 
-    def on_activated(self):
+    def on_activated(self) -> None:
         """Called when tab becomes active."""
         self._populate_styles()
 
-    def on_event_selected(self, event_index: int):
+    def on_event_selected(self, event_index: int) -> None:
         """Handle event selection - highlight the event's style."""
         if not self._state or event_index < 0:
             return

@@ -37,7 +37,7 @@ class ColorSwatchWidget(QWidget):
             border-radius: 2px;
         """)
 
-    def set_color(self, hex_color: str):
+    def set_color(self, hex_color: str) -> None:
         self._hex_color = hex_color
         self.setStyleSheet(f"""
             background-color: {QColor(hex_color).name()};
@@ -67,7 +67,7 @@ class FavoritesManagerDialog(QDialog):
         self._connect_signals()
         self._refresh_list()
 
-    def _build_ui(self):
+    def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
 
         # Header
@@ -121,7 +121,7 @@ class FavoritesManagerDialog(QDialog):
         self._current_favorite_id: str | None = None
         self._current_hex: str = "#FFFFFFFF"
 
-    def _connect_signals(self):
+    def _connect_signals(self) -> None:
         self.favorites_list.currentItemChanged.connect(self._on_selection_changed)
         self.name_edit.textChanged.connect(self._on_edit_changed)
         self.pick_color_btn.clicked.connect(self._on_pick_color)
@@ -130,7 +130,7 @@ class FavoritesManagerDialog(QDialog):
         self.delete_btn.clicked.connect(self._on_delete)
         self.close_btn.clicked.connect(self.accept)
 
-    def _refresh_list(self):
+    def _refresh_list(self) -> None:
         """Refresh the list of favorites."""
         self.favorites_list.clear()
         favorites = self.favorites_manager.get_all()
@@ -165,7 +165,7 @@ class FavoritesManagerDialog(QDialog):
 
     def _on_selection_changed(
         self, current: QListWidgetItem, previous: QListWidgetItem
-    ):
+    ) -> None:
         """Handle selection change in the favorites list."""
         if current is None:
             self._current_favorite_id = None
@@ -189,12 +189,12 @@ class FavoritesManagerDialog(QDialog):
             self.delete_btn.setEnabled(True)
             self.save_edit_btn.setEnabled(False)
 
-    def _on_edit_changed(self):
+    def _on_edit_changed(self) -> None:
         """Handle changes in the edit fields."""
         if self._current_favorite_id:
             self.save_edit_btn.setEnabled(True)
 
-    def _on_pick_color(self):
+    def _on_pick_color(self) -> None:
         """Open color dialog to change the selected favorite's color."""
         if not self._current_favorite_id:
             return
@@ -207,7 +207,7 @@ class FavoritesManagerDialog(QDialog):
             self.color_swatch.set_color(self._current_hex)
             self.save_edit_btn.setEnabled(True)
 
-    def _on_save_edit(self):
+    def _on_save_edit(self) -> None:
         """Save changes to the selected favorite."""
         if not self._current_favorite_id:
             return
@@ -230,7 +230,7 @@ class FavoritesManagerDialog(QDialog):
                 self.favorites_list.setCurrentItem(item)
                 break
 
-    def _on_add_color(self):
+    def _on_add_color(self) -> None:
         """Add a new favorite color."""
         color = QColorDialog.getColor(QColor("#FFFFFFFF"), self, "Select Color to Add")
 
@@ -248,7 +248,7 @@ class FavoritesManagerDialog(QDialog):
                     self.name_edit.selectAll()
                     break
 
-    def _on_delete(self):
+    def _on_delete(self) -> None:
         """Delete the selected favorite."""
         if not self._current_favorite_id:
             return
