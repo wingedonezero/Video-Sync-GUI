@@ -86,6 +86,16 @@ class PlanItem:
         default_factory=list
     )  # Complete style list for validation
 
+    # Stats from framelocked sync mode (for auditing)
+    framelocked_stats: dict | None = None
+
+    # Clamping info for negative timestamp warnings
+    clamping_info: dict | None = None
+
+    # Video-verified sync mode stats (for bitmap subtitles)
+    video_verified_bitmap: bool = False
+    video_verified_details: dict | None = None
+
 
 @dataclass(frozen=True, slots=True)
 class MergePlan:
