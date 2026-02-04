@@ -1842,7 +1842,10 @@ class SubtitleSyncTab(QWidget):
         )
 
         self.widgets["frame_hash_size"] = QComboBox()
-        self.widgets["frame_hash_size"].addItems(["4", "8", "16"])
+        # Use addItem with integer data to ensure proper type is saved
+        self.widgets["frame_hash_size"].addItem("4", 4)
+        self.widgets["frame_hash_size"].addItem("8", 8)
+        self.widgets["frame_hash_size"].addItem("16", 16)
         self.widgets["frame_hash_size"].setCurrentIndex(1)  # Default 8
         self.widgets["frame_hash_size"].setToolTip(
             "Hash size (resolution):\n\n"
@@ -2531,7 +2534,10 @@ class ChaptersTab(QWidget):
             "Adjust chapter timestamps to align with the nearest video keyframe, which can improve seeking performance."
         )
         snap_mode = QComboBox()
-        snap_mode.addItems(["previous", "nearest"])
+        # Use addItem with data to properly handle enum values
+        # The data value matches the SnapMode enum's .value for proper serialization
+        snap_mode.addItem("previous", "previous")
+        snap_mode.addItem("nearest", "nearest")
         snap_mode.setToolTip(
             "'previous': Always snaps to the last keyframe before the chapter time.\n'nearest': Snaps to the closest keyframe, either before or after."
         )
