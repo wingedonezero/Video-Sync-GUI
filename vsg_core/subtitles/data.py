@@ -14,12 +14,13 @@ Rounding happens ONLY at final save (ASS → centiseconds, SRT → milliseconds)
 from __future__ import annotations
 
 import json
-import math
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+from .utils.timestamps import parse_ass_timestamp
 
 # =============================================================================
 # Per-Event Metadata (OCR, Sync, Stepping)
@@ -521,8 +522,8 @@ class SubtitleEvent:
             text = ",".join(values[text_idx:])
 
         # Parse timing
-        start_ms = _parse_ass_time(field_map.get("start", "0:00:00.00"))
-        end_ms = _parse_ass_time(field_map.get("end", "0:00:00.00"))
+        start_ms = parse_ass_timestamp(field_map.get("start", "0:00:00.00"))
+        end_ms = parse_ass_timestamp(field_map.get("end", "0:00:00.00"))
 
         # Parse extradata IDs if present
         extradata_ids = []
@@ -1329,64 +1330,6 @@ class SubtitleData:
 # =============================================================================
 # Helper Functions
 # =============================================================================
-
-
-def _parse_ass_time(time_str: str) -> float:
-    """
-    Parse ASS timestamp to float milliseconds.
-
-    Format: H:MM:SS.cc (centiseconds)
-
-    Args:
-        time_str: ASS timestamp string
-
-    Returns:
-        Time in float milliseconds
-    """
-    try:
-        parts = time_str.strip().split(":")
-        if len(parts) == 3:
-            hours = int(parts[0])
-            minutes = int(parts[1])
-            seconds_cs = parts[2].split(".")
-            seconds = int(seconds_cs[0])
-            centiseconds = int(seconds_cs[1]) if len(seconds_cs) > 1 else 0
-
-            total_ms = (
-                hours * 3600000
-                + minutes * 60000
-                + seconds * 1000
-                + centiseconds * 10  # centiseconds to ms
-            )
-            return float(total_ms)
-    except (ValueError, IndexError):
-        pass
-    return 0.0
-
-
-def _format_ass_time(ms: float) -> str:
-    """
-    Format float milliseconds to ASS timestamp.
-
-    THIS IS WHERE ROUNDING HAPPENS.
-
-    Args:
-        ms: Time in float milliseconds
-
-    Returns:
-        ASS timestamp string (H:MM:SS.cc)
-    """
-    # Round to centiseconds (floor for consistency)
-    total_cs = int(math.floor(ms / 10))
-
-    cs = total_cs % 100
-    total_seconds = total_cs // 100
-    seconds = total_seconds % 60
-    total_minutes = total_seconds // 60
-    minutes = total_minutes % 60
-    hours = total_minutes // 60
-
-    return f"{hours}:{minutes:02d}:{seconds:02d}.{cs:02d}"
 
 
 def _format_number(value: float) -> str:

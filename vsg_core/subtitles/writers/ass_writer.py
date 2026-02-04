@@ -8,8 +8,9 @@ Float milliseconds are converted to centiseconds here and only here.
 
 from __future__ import annotations
 
-import math
 from typing import TYPE_CHECKING
+
+from ..utils.timestamps import format_ass_timestamp
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -220,10 +221,10 @@ def _write_events(data: SubtitleData, lines: list, rounding_mode: str) -> None:
                 values.append(str(event.layer))
             elif field_lower == "start":
                 # ROUNDING HAPPENS HERE
-                values.append(_format_ass_time(event.start_ms, rounding_mode))
+                values.append(format_ass_timestamp(event.start_ms, rounding_mode))
             elif field_lower == "end":
                 # ROUNDING HAPPENS HERE
-                values.append(_format_ass_time(event.end_ms, rounding_mode))
+                values.append(format_ass_timestamp(event.end_ms, rounding_mode))
             elif field_lower == "style":
                 values.append(event.style)
             elif field_lower in ("name", "actor"):
@@ -301,42 +302,3 @@ def _write_aegisub_extradata(data: SubtitleData, lines: list) -> None:
         lines.append(line)
 
     lines.append("")
-
-
-def _format_ass_time(ms: float, rounding: str) -> str:
-    """
-    Format float milliseconds to ASS timestamp.
-
-    THIS IS THE SINGLE ROUNDING POINT.
-    Uses floor() for consistency.
-
-    Args:
-        ms: Time in float milliseconds
-
-    Returns:
-        ASS timestamp (H:MM:SS.cc)
-    """
-    total_cs = _round_centiseconds(ms, rounding)
-
-    # Ensure non-negative
-    total_cs = max(total_cs, 0)
-
-    cs = total_cs % 100
-    total_seconds = total_cs // 100
-    seconds = total_seconds % 60
-    total_minutes = total_seconds // 60
-    minutes = total_minutes % 60
-    hours = total_minutes // 60
-
-    return f"{hours}:{minutes:02d}:{seconds:02d}.{cs:02d}"
-
-
-def _round_centiseconds(ms: float, rounding: str) -> int:
-    """Round milliseconds to centiseconds based on rounding mode."""
-    mode = (rounding or "floor").lower()
-    value = ms / 10
-    if mode == "ceil":
-        return int(math.ceil(value))
-    if mode == "round":
-        return int(round(value))
-    return int(math.floor(value))

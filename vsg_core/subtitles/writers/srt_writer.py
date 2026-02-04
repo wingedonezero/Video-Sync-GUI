@@ -8,9 +8,10 @@ Float milliseconds are rounded to integer ms here.
 
 from __future__ import annotations
 
-import math
 import re
 from typing import TYPE_CHECKING
+
+from ..utils.timestamps import format_srt_timestamp
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -41,8 +42,8 @@ def write_srt_file(data: SubtitleData, path: Path, rounding: str = "round") -> N
         lines.append(str(srt_idx))
 
         # Timing line (round to integer ms)
-        start_str = _format_srt_time(event.start_ms, rounding)
-        end_str = _format_srt_time(event.end_ms, rounding)
+        start_str = format_srt_timestamp(event.start_ms, rounding)
+        end_str = format_srt_timestamp(event.end_ms, rounding)
         lines.append(f"{start_str} --> {end_str}")
 
         # Text (convert ASS tags to HTML-ish)
@@ -62,43 +63,6 @@ def write_srt_file(data: SubtitleData, path: Path, rounding: str = "round") -> N
 
     with open(path, "w", encoding=encoding) as f:
         f.write(content)
-
-
-def _format_srt_time(ms: float, rounding: str) -> str:
-    """
-    Format float milliseconds to SRT timestamp.
-
-    Rounds to integer milliseconds.
-
-    Args:
-        ms: Time in float milliseconds
-
-    Returns:
-        SRT timestamp (HH:MM:SS,mmm)
-    """
-    # Round to integer ms
-    total_ms = _round_ms(ms, rounding)
-
-    total_ms = max(total_ms, 0)
-
-    milliseconds = total_ms % 1000
-    total_seconds = total_ms // 1000
-    seconds = total_seconds % 60
-    total_minutes = total_seconds // 60
-    minutes = total_minutes % 60
-    hours = total_minutes // 60
-
-    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
-
-
-def _round_ms(ms: float, rounding: str) -> int:
-    """Round milliseconds to integer based on rounding mode."""
-    mode = (rounding or "round").lower()
-    if mode == "ceil":
-        return int(math.ceil(ms))
-    if mode == "floor":
-        return int(math.floor(ms))
-    return int(round(ms))
 
 
 def _convert_ass_to_srt(text: str) -> str:

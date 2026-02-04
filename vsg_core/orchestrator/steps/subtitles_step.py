@@ -31,6 +31,10 @@ if TYPE_CHECKING:
 
 from vsg_core.models.enums import TrackType
 from vsg_core.models.media import StreamProps, Track
+from vsg_core.subtitles.utils.timestamps import (
+    check_timestamp_precision,
+    parse_ass_timestamp,
+)
 
 
 def _read_raw_ass_timestamps(
@@ -76,43 +80,6 @@ def _read_raw_ass_timestamps(
     except Exception:
         pass
     return results
-
-
-def _check_timestamp_precision(timestamp_str: str) -> int:
-    """
-    Check the precision of a timestamp string (number of fractional digits).
-
-    Standard ASS uses centiseconds (2 digits: "0:00:00.00").
-    Some tools may output milliseconds (3 digits: "0:00:00.000").
-
-    Returns number of fractional digits.
-    """
-    try:
-        parts = timestamp_str.split(".")
-        if len(parts) == 2:
-            return len(parts[1])
-    except Exception:
-        pass
-    return 2  # Default assumption
-
-
-def _parse_ass_time_str(time_str: str) -> float:
-    """Parse ASS timestamp string to float ms (same logic as SubtitleData)."""
-    try:
-        parts = time_str.strip().split(":")
-        if len(parts) == 3:
-            hours = int(parts[0])
-            minutes = int(parts[1])
-            seconds_cs = parts[2].split(".")
-            seconds = int(seconds_cs[0])
-            centiseconds = int(seconds_cs[1]) if len(seconds_cs) > 1 else 0
-            total_ms = (
-                hours * 3600000 + minutes * 60000 + seconds * 1000 + centiseconds * 10
-            )
-            return float(total_ms)
-    except (ValueError, IndexError):
-        pass
-    return 0.0
 
 
 class SubtitlesStep:
@@ -335,9 +302,9 @@ class SubtitlesStep:
                     for i, (start_str, end_str, style) in enumerate(
                         raw_timestamps_before
                     ):
-                        start_ms = _parse_ass_time_str(start_str)
-                        end_ms = _parse_ass_time_str(end_str)
-                        start_precision = _check_timestamp_precision(start_str)
+                        start_ms = parse_ass_timestamp(start_str)
+                        end_ms = parse_ass_timestamp(end_str)
+                        start_precision = check_timestamp_precision(start_str)
                         runner._log_message(
                             f"[DIAG]   Event {i}: start='{start_str}'({start_ms}ms) end='{end_str}'({end_ms}ms) style='{style}'"
                         )
@@ -372,8 +339,8 @@ class SubtitlesStep:
                     for i, (start_str, end_str, _) in enumerate(
                         raw_timestamps_before[: min(3, len(subtitle_data.events))]
                     ):
-                        raw_start = _parse_ass_time_str(start_str)
-                        raw_end = _parse_ass_time_str(end_str)
+                        raw_start = parse_ass_timestamp(start_str)
+                        raw_end = parse_ass_timestamp(end_str)
                         parsed_start = subtitle_data.events[i].start_ms
                         parsed_end = subtitle_data.events[i].end_ms
                         if (
@@ -649,8 +616,8 @@ class SubtitlesStep:
                         "[DIAG] Post-save file first 3 event timestamps:"
                     )
                     for i, (start_str, end_str, style) in enumerate(saved_timestamps):
-                        start_ms = _parse_ass_time_str(start_str)
-                        end_ms = _parse_ass_time_str(end_str)
+                        start_ms = parse_ass_timestamp(start_str)
+                        end_ms = parse_ass_timestamp(end_str)
                         runner._log_message(
                             f"[DIAG]   Event {i}: start='{start_str}'({start_ms}ms) end='{end_str}'({end_ms}ms)"
                         )
@@ -660,8 +627,8 @@ class SubtitlesStep:
                         for i, (start_str, end_str, _) in enumerate(
                             saved_timestamps[: min(3, len(subtitle_data.events))]
                         ):
-                            saved_start_ms = _parse_ass_time_str(start_str)
-                            saved_end_ms = _parse_ass_time_str(end_str)
+                            saved_start_ms = parse_ass_timestamp(start_str)
+                            saved_end_ms = parse_ass_timestamp(end_str)
                             pre_start_ms = subtitle_data.events[i].start_ms
                             pre_end_ms = subtitle_data.events[i].end_ms
 

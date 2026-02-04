@@ -16,6 +16,8 @@ from datetime import datetime
 from pathlib import Path  # noqa: TC003 - Used at runtime in write_audit_report
 from typing import TYPE_CHECKING
 
+from ..utils.timestamps import format_display_timestamp
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -173,18 +175,6 @@ def _find_minimal_fix(
     return int(frame_start_ms - rounded)
 
 
-def _format_timestamp(ms: float) -> str:
-    """Format milliseconds as HH:MM:SS.cc for display."""
-    total_cs = int(ms / 10)
-    cs = total_cs % 100
-    total_seconds = total_cs // 100
-    seconds = total_seconds % 60
-    total_minutes = total_seconds // 60
-    minutes = total_minutes % 60
-    hours = total_minutes // 60
-    return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{cs:02d}"
-
-
 def run_frame_audit(
     subtitle_data: SubtitleData,
     fps: float,
@@ -309,7 +299,7 @@ def run_frame_audit(
             issue = FrameAuditIssue(
                 line_index=idx,
                 text_preview=text_preview,
-                timestamp_display=_format_timestamp(exact_start),
+                timestamp_display=format_display_timestamp(exact_start),
                 exact_start_ms=exact_start,
                 rounded_start_ms=rounded_start,
                 target_start_frame=target_start_frame,

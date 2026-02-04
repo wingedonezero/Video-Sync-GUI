@@ -13,6 +13,8 @@ from typing import Optional
 
 import numpy as np
 
+from ...utils.timestamps import format_milliseconds_timestamp
+
 
 @dataclass(slots=True)
 class SubtitleImage:
@@ -58,12 +60,12 @@ class SubtitleImage:
     @property
     def start_time(self) -> str:
         """Return start time as HH:MM:SS.mmm string."""
-        return self._ms_to_timestamp(self.start_ms)
+        return format_milliseconds_timestamp(self.start_ms)
 
     @property
     def end_time(self) -> str:
         """Return end time as HH:MM:SS.mmm string."""
-        return self._ms_to_timestamp(self.end_ms)
+        return format_milliseconds_timestamp(self.end_ms)
 
     @property
     def duration_ms(self) -> int:
@@ -115,18 +117,6 @@ class SubtitleImage:
             True if subtitle center is above the threshold
         """
         return self.y_position_percent <= threshold_percent
-
-    @staticmethod
-    def _ms_to_timestamp(ms: int) -> str:
-        """Convert milliseconds to HH:MM:SS.mmm format."""
-        ms = max(ms, 0)
-        hours = ms // 3600000
-        ms %= 3600000
-        minutes = ms // 60000
-        ms %= 60000
-        seconds = ms // 1000
-        milliseconds = ms % 1000
-        return f"{hours:02d}:{minutes:02d}:{seconds:02d}.{milliseconds:03d}"
 
 
 @dataclass(slots=True)
