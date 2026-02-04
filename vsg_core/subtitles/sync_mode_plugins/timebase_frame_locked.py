@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..sync_modes import SyncPlugin, register_sync_plugin
+from ..utils.settings import ensure_settings
 
 if TYPE_CHECKING:
     from ...models.settings import AppSettings
@@ -63,11 +64,9 @@ class TimebaseFrameLockedSync(SyncPlugin):
         Returns:
             OperationResult with statistics
         """
-        from ...models.settings import AppSettings
         from ..data import OperationRecord, OperationResult, SyncEventData
 
-        if settings is None:
-            settings = AppSettings.from_config({})
+        settings = ensure_settings(settings)
 
         def log(msg: str):
             if runner:
@@ -96,7 +95,9 @@ class TimebaseFrameLockedSync(SyncPlugin):
         )
 
         # Try to get VideoTimestamps for precise frame alignment
-        vts = self._get_video_timestamps(target_video, target_fps, runner, settings.to_dict())
+        vts = self._get_video_timestamps(
+            target_video, target_fps, runner, settings.to_dict()
+        )
 
         # Statistics tracking
         stats = {

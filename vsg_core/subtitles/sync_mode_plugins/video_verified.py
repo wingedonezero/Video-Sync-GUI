@@ -32,7 +32,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..sync import apply_delay
 from ..sync_modes import SyncPlugin, register_sync_plugin
+from ..utils.settings import ensure_settings
 
 if TYPE_CHECKING:
     from ...models.settings import AppSettings
@@ -80,11 +82,9 @@ def calculate_video_verified_offset(
         - details_dict: Contains 'reason', 'audio_correlation_ms', 'video_offset_ms',
           'candidates', etc.
     """
-    from ...models.settings import AppSettings
     from ..frame_utils import detect_video_properties
 
-    if settings is None:
-        settings = AppSettings.from_config({})
+    settings = ensure_settings(settings)
 
     def log(msg: str):
         if runner:
@@ -1026,13 +1026,11 @@ class VideoVerifiedSync(SyncPlugin):
         Returns:
             OperationResult with statistics
         """
-        from ...models.settings import AppSettings
         from ..data import OperationResult
 
-        if settings is None:
-            settings = AppSettings.from_config({})
+        settings = ensure_settings(settings)
 
-        def log(msg: str):
+        def log(msg: str) -> None:
             if runner:
                 runner._log_message(msg)
 
@@ -1107,9 +1105,9 @@ class VideoVerifiedSync(SyncPlugin):
         job_name: str = "unknown",
     ) -> OperationResult:
         """Apply the calculated offset to all events."""
-        from ..data import OperationRecord, OperationResult, SyncEventData
+        from ..data import OperationRecord, OperationResult
 
-        def log(msg: str):
+        def log(msg: str) -> None:
             if runner:
                 runner._log_message(msg)
 
@@ -1117,27 +1115,9 @@ class VideoVerifiedSync(SyncPlugin):
             f"[VideoVerified] Applying {final_offset_ms:+.3f}ms to {len(subtitle_data.events)} events"
         )
 
-        events_synced = 0
-
-        for event in subtitle_data.events:
-            if event.is_comment:
-                continue
-
-            original_start = event.start_ms
-            original_end = event.end_ms
-
-            event.start_ms += final_offset_ms
-            event.end_ms += final_offset_ms
-
-            event.sync = SyncEventData(
-                original_start_ms=original_start,
-                original_end_ms=original_end,
-                start_adjustment_ms=final_offset_ms,
-                end_adjustment_ms=final_offset_ms,
-                snapped_to_frame=False,
-            )
-
-            events_synced += 1
+        # Apply delay using shared module
+        result = apply_delay(subtitle_data, final_offset_ms, log=log)
+        events_synced = result.events_modified
 
         # Run frame alignment audit if enabled
         if settings and settings.video_verified_frame_audit and target_fps:

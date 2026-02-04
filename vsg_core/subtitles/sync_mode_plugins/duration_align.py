@@ -14,7 +14,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..sync import apply_delay
 from ..sync_modes import SyncPlugin, register_sync_plugin
+from ..utils.settings import ensure_settings
 
 if TYPE_CHECKING:
     from ...models.settings import AppSettings
@@ -69,8 +71,7 @@ class DurationAlignSync(SyncPlugin):
         Returns:
             OperationResult with statistics
         """
-        from ...models.settings import AppSettings
-        from ..data import OperationRecord, OperationResult, SyncEventData
+        from ..data import OperationRecord, OperationResult
         from ..frame_utils import (
             detect_video_fps,
             frame_to_time_vfr,
@@ -79,10 +80,9 @@ class DurationAlignSync(SyncPlugin):
         )
         from ..frame_verification import verify_alignment_with_sliding_window
 
-        if settings is None:
-            settings = AppSettings.from_config({})
+        settings = ensure_settings(settings)
 
-        def log(msg: str):
+        def log(msg: str) -> None:
             if runner:
                 runner._log_message(msg)
 
@@ -173,7 +173,11 @@ class DurationAlignSync(SyncPlugin):
                         source_info["streams"][0]["nb_read_frames"]
                     )
                     source_duration_ms = frame_to_time_vfr(
-                        source_frame_count - 1, source_video, source_fps, runner, settings.to_dict()
+                        source_frame_count - 1,
+                        source_video,
+                        source_fps,
+                        runner,
+                        settings.to_dict(),
                     )
 
                 if target_duration_ms is None:
@@ -311,27 +315,9 @@ class DurationAlignSync(SyncPlugin):
             f"[DurationAlign] Applying {total_shift_ms:+.3f}ms to {len(subtitle_data.events)} events"
         )
 
-        events_synced = 0
-        for event in subtitle_data.events:
-            if event.is_comment:
-                continue
-
-            original_start = event.start_ms
-            original_end = event.end_ms
-
-            event.start_ms += total_shift_ms
-            event.end_ms += total_shift_ms
-
-            # Populate per-event sync metadata
-            event.sync = SyncEventData(
-                original_start_ms=original_start,
-                original_end_ms=original_end,
-                start_adjustment_ms=total_shift_ms,
-                end_adjustment_ms=total_shift_ms,
-                snapped_to_frame=False,
-            )
-
-            events_synced += 1
+        # Apply delay using shared module
+        result = apply_delay(subtitle_data, total_shift_ms, log=log)
+        events_synced = result.events_modified
 
         # Build summary
         summary = f"Duration-align: {events_synced} events, {total_shift_ms:+.1f}ms"

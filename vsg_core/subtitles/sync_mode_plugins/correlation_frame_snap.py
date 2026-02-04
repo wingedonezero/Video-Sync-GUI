@@ -13,7 +13,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from ..sync import apply_delay
 from ..sync_modes import SyncPlugin, register_sync_plugin
+from ..utils.settings import ensure_settings
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -70,15 +72,13 @@ class CorrelationFrameSnapSync(SyncPlugin):
         Returns:
             OperationResult with statistics
         """
-        from ...models.settings import AppSettings
-        from ..data import OperationRecord, OperationResult, SyncEventData
+        from ..data import OperationRecord, OperationResult
         from ..frame_utils import detect_video_fps
         from ..frame_verification import verify_correlation_with_frame_snap
 
-        if settings is None:
-            settings = AppSettings.from_config({})
+        settings = ensure_settings(settings)
 
-        def log(msg: str):
+        def log(msg: str) -> None:
             if runner:
                 runner._log_message(msg)
 
@@ -209,27 +209,9 @@ class CorrelationFrameSnapSync(SyncPlugin):
             f"[CorrFrameSnap] Applying {final_offset_ms:+.3f}ms to {len(subtitle_data.events)} events"
         )
 
-        events_synced = 0
-        for event in subtitle_data.events:
-            if event.is_comment:
-                continue
-
-            original_start = event.start_ms
-            original_end = event.end_ms
-
-            event.start_ms += final_offset_ms
-            event.end_ms += final_offset_ms
-
-            # Populate per-event sync metadata
-            event.sync = SyncEventData(
-                original_start_ms=original_start,
-                original_end_ms=original_end,
-                start_adjustment_ms=final_offset_ms,
-                end_adjustment_ms=final_offset_ms,
-                snapped_to_frame=False,
-            )
-
-            events_synced += 1
+        # Apply delay using shared module
+        result = apply_delay(subtitle_data, final_offset_ms, log=log)
+        events_synced = result.events_modified
 
         # Build summary
         summary = (

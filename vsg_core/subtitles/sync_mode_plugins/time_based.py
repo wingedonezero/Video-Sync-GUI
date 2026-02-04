@@ -9,9 +9,11 @@ Used when mkvmerge --sync is not handling the delay.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
+from ..sync import apply_delay
 from ..sync_modes import SyncPlugin, register_sync_plugin
+from ..utils.settings import ensure_settings
 
 if TYPE_CHECKING:
     from ...models.settings import AppSettings
@@ -40,6 +42,7 @@ class TimeBasedSync(SyncPlugin):
         target_video: str | None = None,
         runner=None,
         settings: AppSettings | None = None,
+        log: Callable[[str], None] | None = None,
         **kwargs,
     ) -> OperationResult:
         """
@@ -50,21 +53,22 @@ class TimeBasedSync(SyncPlugin):
 
         If True, applies raw delay to subtitle events.
         """
-        from ...models.settings import AppSettings
         from ..data import OperationRecord, OperationResult
 
-        if settings is None:
-            settings = AppSettings.from_config({})
+        settings = ensure_settings(settings)
 
-        def log(msg: str):
-            if runner:
+        # Create logger from runner if not provided
+        if log is None and runner:
+
+            def log(msg: str) -> None:
                 runner._log_message(msg)
 
         use_raw_values = settings.time_based_use_raw_values
 
         if not use_raw_values:
             # Default: mkvmerge --sync handles the delay
-            log("[TimeBased] Using mkvmerge --sync mode (no subtitle modification)")
+            if log:
+                log("[TimeBased] Using mkvmerge --sync mode (no subtitle modification)")
 
             record = OperationRecord(
                 operation="sync",
@@ -87,34 +91,14 @@ class TimeBasedSync(SyncPlugin):
             )
 
         # Raw values mode: apply delay directly
-        from ..data import SyncEventData
+        if log:
+            log("[TimeBased] === Time-Based Sync (Raw Values) ===")
+            log(f"[TimeBased] Events: {len(subtitle_data.events)}")
+            log(f"[TimeBased] Delay: {total_delay_ms:+.3f}ms")
 
-        log("[TimeBased] === Time-Based Sync (Raw Values) ===")
-        log(f"[TimeBased] Events: {len(subtitle_data.events)}")
-        log(f"[TimeBased] Delay: {total_delay_ms:+.3f}ms")
-
-        events_synced = 0
-
-        for event in subtitle_data.events:
-            if event.is_comment:
-                continue
-
-            original_start = event.start_ms
-            original_end = event.end_ms
-
-            event.start_ms += total_delay_ms
-            event.end_ms += total_delay_ms
-
-            # Populate per-event sync metadata
-            event.sync = SyncEventData(
-                original_start_ms=original_start,
-                original_end_ms=original_end,
-                start_adjustment_ms=total_delay_ms,
-                end_adjustment_ms=total_delay_ms,
-                snapped_to_frame=False,
-            )
-
-            events_synced += 1
+        # Apply delay using shared module
+        result = apply_delay(subtitle_data, total_delay_ms, log=log)
+        events_synced = result.events_modified
 
         record = OperationRecord(
             operation="sync",
@@ -128,7 +112,8 @@ class TimeBasedSync(SyncPlugin):
         )
         subtitle_data.operations.append(record)
 
-        log(f"[TimeBased] Applied delay to {events_synced} events")
+        if log:
+            log(f"[TimeBased] Applied delay to {events_synced} events")
 
         return OperationResult(
             success=True,
