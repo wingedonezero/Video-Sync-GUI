@@ -210,6 +210,7 @@ impl ConfigManager {
             ConfigSection::Analysis => toml::to_string_pretty(&self.settings.analysis)?,
             ConfigSection::Chapters => toml::to_string_pretty(&self.settings.chapters)?,
             ConfigSection::Postprocess => toml::to_string_pretty(&self.settings.postprocess)?,
+            ConfigSection::Subtitle => toml::to_string_pretty(&self.settings.subtitle)?,
         };
 
         // Parse the section as a table

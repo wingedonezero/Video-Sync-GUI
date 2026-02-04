@@ -20,6 +20,8 @@ pub use video_verified::VideoVerified;
 
 use std::path::Path;
 
+use serde::{Deserialize, Serialize};
+
 use crate::subtitles::error::SyncError;
 use crate::subtitles::frame_utils::types::{
     ComparisonMethod, DeinterlaceMethod, HashAlgorithm, IndexerBackend, InterlacedForceMode,
@@ -27,7 +29,8 @@ use crate::subtitles::frame_utils::types::{
 use crate::subtitles::types::SubtitleData;
 
 /// Available sync mode types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum SyncModeType {
     /// Simple delay application.
     #[default]

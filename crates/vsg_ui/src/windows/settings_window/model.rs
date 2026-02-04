@@ -2,6 +2,7 @@
 
 use vsg_core::config::{
     AnalysisSettings, ChapterSettings, LoggingSettings, PathSettings, PostProcessSettings,
+    SubtitleSettings,
 };
 
 /// Settings window state - holds a working copy of settings
@@ -12,6 +13,7 @@ pub struct SettingsModel {
     pub analysis: AnalysisSettings,
     pub chapters: ChapterSettings,
     pub postprocess: PostProcessSettings,
+    pub subtitle: SubtitleSettings,
     /// Track if settings have been modified
     pub modified: bool,
 }
@@ -24,6 +26,7 @@ impl SettingsModel {
         analysis: AnalysisSettings,
         chapters: ChapterSettings,
         postprocess: PostProcessSettings,
+        subtitle: SubtitleSettings,
     ) -> Self {
         Self {
             paths,
@@ -31,6 +34,7 @@ impl SettingsModel {
             analysis,
             chapters,
             postprocess,
+            subtitle,
             modified: false,
         }
     }

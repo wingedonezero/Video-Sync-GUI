@@ -3,6 +3,10 @@
 use vsg_core::models::{
     CorrelationMethod, DelaySelectionMode, FilteringMethod, SnapMode, SyncMode,
 };
+use vsg_core::subtitles::frame_utils::{
+    ComparisonMethod, DeinterlaceMethod, HashAlgorithm, IndexerBackend,
+};
+use vsg_core::subtitles::sync::SyncModeType;
 
 /// Get display names for correlation methods
 pub fn correlation_method_names() -> Vec<(&'static str, CorrelationMethod)> {
@@ -103,5 +107,103 @@ pub fn sync_mode_index(mode: &SyncMode) -> u32 {
     match mode {
         SyncMode::PositiveOnly => 0,
         SyncMode::AllowNegative => 1,
+    }
+}
+
+// === Subtitle Sync helpers ===
+
+/// Get display names for subtitle sync mode types
+pub fn subtitle_sync_mode_names() -> Vec<(&'static str, SyncModeType)> {
+    vec![
+        ("Time-Based", SyncModeType::TimeBased),
+        ("Video-Verified", SyncModeType::VideoVerified),
+    ]
+}
+
+/// Get index for subtitle sync mode type
+pub fn subtitle_sync_mode_index(mode: &SyncModeType) -> u32 {
+    match mode {
+        SyncModeType::TimeBased => 0,
+        SyncModeType::VideoVerified => 1,
+    }
+}
+
+/// Get display names for hash algorithms
+pub fn hash_algorithm_names() -> Vec<(&'static str, HashAlgorithm)> {
+    vec![
+        ("PHash (Perceptual)", HashAlgorithm::PHash),
+        ("DHash (Difference)", HashAlgorithm::DHash),
+        ("AHash (Average)", HashAlgorithm::AHash),
+        ("Block Hash", HashAlgorithm::BlockHash),
+    ]
+}
+
+/// Get index for hash algorithm
+pub fn hash_algorithm_index(algo: &HashAlgorithm) -> u32 {
+    match algo {
+        HashAlgorithm::PHash => 0,
+        HashAlgorithm::DHash => 1,
+        HashAlgorithm::AHash => 2,
+        HashAlgorithm::BlockHash => 3,
+    }
+}
+
+/// Get display names for comparison methods
+pub fn comparison_method_names() -> Vec<(&'static str, ComparisonMethod)> {
+    vec![
+        ("Hash + Hamming Distance", ComparisonMethod::Hash),
+        ("SSIM (Structural Similarity)", ComparisonMethod::Ssim),
+        ("MSE (Mean Squared Error)", ComparisonMethod::Mse),
+    ]
+}
+
+/// Get index for comparison method
+pub fn comparison_method_index(method: &ComparisonMethod) -> u32 {
+    match method {
+        ComparisonMethod::Hash => 0,
+        ComparisonMethod::Ssim => 1,
+        ComparisonMethod::Mse => 2,
+    }
+}
+
+/// Get display names for indexer backends
+pub fn indexer_backend_names() -> Vec<(&'static str, IndexerBackend)> {
+    vec![
+        ("FFMS2", IndexerBackend::Ffms2),
+        ("BestSource", IndexerBackend::BestSource),
+        ("L-SMASH", IndexerBackend::LSmash),
+    ]
+}
+
+/// Get index for indexer backend
+pub fn indexer_backend_index(backend: &IndexerBackend) -> u32 {
+    match backend {
+        IndexerBackend::Ffms2 => 0,
+        IndexerBackend::BestSource => 1,
+        IndexerBackend::LSmash => 2,
+    }
+}
+
+/// Get display names for deinterlace methods
+pub fn deinterlace_method_names() -> Vec<(&'static str, DeinterlaceMethod)> {
+    vec![
+        ("Auto", DeinterlaceMethod::Auto),
+        ("None", DeinterlaceMethod::None),
+        ("YADIF", DeinterlaceMethod::Yadif),
+        ("YADIFmod", DeinterlaceMethod::YadifMod),
+        ("Bob", DeinterlaceMethod::Bob),
+        ("BWDIF", DeinterlaceMethod::Bwdif),
+    ]
+}
+
+/// Get index for deinterlace method
+pub fn deinterlace_method_index(method: &DeinterlaceMethod) -> u32 {
+    match method {
+        DeinterlaceMethod::Auto => 0,
+        DeinterlaceMethod::None => 1,
+        DeinterlaceMethod::Yadif => 2,
+        DeinterlaceMethod::YadifMod => 3,
+        DeinterlaceMethod::Bob => 4,
+        DeinterlaceMethod::Bwdif => 5,
     }
 }

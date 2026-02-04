@@ -4,6 +4,8 @@
 
 use std::path::PathBuf;
 
+use serde::{Deserialize, Serialize};
+
 /// Video properties detected from a file.
 #[derive(Debug, Clone)]
 pub struct VideoProperties {
@@ -127,7 +129,8 @@ impl ContentType {
 }
 
 /// Hash algorithm for frame comparison.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum HashAlgorithm {
     /// Perceptual hash (DCT-based) - best for different encodes.
     #[default]
@@ -164,7 +167,8 @@ impl HashAlgorithm {
 }
 
 /// Comparison method for frames.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ComparisonMethod {
     /// Perceptual hash + hamming distance.
     #[default]
@@ -197,7 +201,8 @@ impl ComparisonMethod {
 }
 
 /// Deinterlace method for interlaced content.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum DeinterlaceMethod {
     /// Auto-detect whether to deinterlace.
     #[default]
@@ -242,7 +247,8 @@ impl DeinterlaceMethod {
 }
 
 /// Video indexer backend selection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum IndexerBackend {
     /// FFMS2 - fast index, widely used.
     #[default]

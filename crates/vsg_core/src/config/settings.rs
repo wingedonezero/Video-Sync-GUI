@@ -9,6 +9,10 @@ use crate::analysis::OutlierMode;
 use crate::models::{
     AnalysisMode, CorrelationMethod, DelaySelectionMode, FilteringMethod, SnapMode, SyncMode,
 };
+use crate::subtitles::frame_utils::{
+    ComparisonMethod, DeinterlaceMethod, HashAlgorithm, IndexerBackend,
+};
+use crate::subtitles::sync::SyncModeType;
 
 /// Root settings structure containing all configuration sections.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +36,10 @@ pub struct Settings {
     /// Post-processing settings.
     #[serde(default)]
     pub postprocess: PostProcessSettings,
+
+    /// Subtitle sync settings.
+    #[serde(default)]
+    pub subtitle: SubtitleSettings,
 }
 
 impl Default for Settings {
@@ -42,6 +50,7 @@ impl Default for Settings {
             analysis: AnalysisSettings::default(),
             chapters: ChapterSettings::default(),
             postprocess: PostProcessSettings::default(),
+            subtitle: SubtitleSettings::default(),
         }
     }
 }
@@ -460,6 +469,128 @@ impl Default for PostProcessSettings {
     }
 }
 
+/// Subtitle sync configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubtitleSettings {
+    /// Sync mode for subtitles (time-based or video-verified).
+    #[serde(default)]
+    pub sync_mode: SyncModeType,
+
+    // === Video-Verified General Settings ===
+    /// Number of checkpoints to verify across the video.
+    #[serde(default = "default_num_checkpoints")]
+    pub num_checkpoints: u32,
+
+    /// Search range in frames around expected position.
+    #[serde(default = "default_search_range_frames")]
+    pub search_range_frames: i32,
+
+    /// Number of consecutive frames required to confirm a match.
+    #[serde(default = "default_sequence_length")]
+    pub sequence_length: u32,
+
+    /// Enable frame audit logging.
+    #[serde(default)]
+    pub frame_audit_enabled: bool,
+
+    // === Hash Settings ===
+    /// Hash algorithm for frame comparison.
+    #[serde(default)]
+    pub hash_algorithm: HashAlgorithm,
+
+    /// Hash size (8, 16, or 32).
+    #[serde(default = "default_hash_size")]
+    pub hash_size: u32,
+
+    /// Threshold for hash distance (lower = stricter).
+    #[serde(default = "default_hash_threshold")]
+    pub hash_threshold: u32,
+
+    /// Comparison method (hash or SSIM/MSE).
+    #[serde(default)]
+    pub comparison_method: ComparisonMethod,
+
+    /// SSIM threshold (0.0-1.0, higher = stricter).
+    #[serde(default = "default_ssim_threshold")]
+    pub ssim_threshold: f64,
+
+    // === Indexer Settings ===
+    /// VapourSynth indexer backend.
+    #[serde(default)]
+    pub indexer_backend: IndexerBackend,
+
+    // === Interlaced Handling ===
+    /// Enable special handling for interlaced content.
+    #[serde(default)]
+    pub interlaced_handling_enabled: bool,
+
+    /// Deinterlace method for interlaced content.
+    #[serde(default)]
+    pub deinterlace_method: DeinterlaceMethod,
+
+    /// Hash threshold for interlaced content (usually higher).
+    #[serde(default = "default_interlaced_hash_threshold")]
+    pub interlaced_hash_threshold: u32,
+
+    /// SSIM threshold for interlaced content (usually lower).
+    #[serde(default = "default_interlaced_ssim_threshold")]
+    pub interlaced_ssim_threshold: f64,
+}
+
+fn default_num_checkpoints() -> u32 {
+    5
+}
+
+fn default_search_range_frames() -> i32 {
+    3
+}
+
+fn default_sequence_length() -> u32 {
+    10
+}
+
+fn default_hash_size() -> u32 {
+    16
+}
+
+fn default_hash_threshold() -> u32 {
+    12
+}
+
+fn default_ssim_threshold() -> f64 {
+    0.85
+}
+
+fn default_interlaced_hash_threshold() -> u32 {
+    18
+}
+
+fn default_interlaced_ssim_threshold() -> f64 {
+    0.70
+}
+
+impl Default for SubtitleSettings {
+    fn default() -> Self {
+        Self {
+            sync_mode: SyncModeType::default(),
+            num_checkpoints: default_num_checkpoints(),
+            search_range_frames: default_search_range_frames(),
+            sequence_length: default_sequence_length(),
+            frame_audit_enabled: false,
+            hash_algorithm: HashAlgorithm::default(),
+            hash_size: default_hash_size(),
+            hash_threshold: default_hash_threshold(),
+            comparison_method: ComparisonMethod::default(),
+            ssim_threshold: default_ssim_threshold(),
+            indexer_backend: IndexerBackend::default(),
+            interlaced_handling_enabled: false,
+            deinterlace_method: DeinterlaceMethod::default(),
+            interlaced_hash_threshold: default_interlaced_hash_threshold(),
+            interlaced_ssim_threshold: default_interlaced_ssim_threshold(),
+        }
+    }
+}
+
 /// Names of config sections for targeted updates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ConfigSection {
@@ -468,6 +599,7 @@ pub enum ConfigSection {
     Analysis,
     Chapters,
     Postprocess,
+    Subtitle,
 }
 
 impl ConfigSection {
@@ -479,6 +611,7 @@ impl ConfigSection {
             ConfigSection::Analysis => "analysis",
             ConfigSection::Chapters => "chapters",
             ConfigSection::Postprocess => "postprocess",
+            ConfigSection::Subtitle => "subtitle",
         }
     }
 }
