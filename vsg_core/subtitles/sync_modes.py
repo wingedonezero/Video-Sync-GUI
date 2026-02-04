@@ -1,4 +1,4 @@
-# vsg_core/subtitles/sync_modes/__init__.py
+# vsg_core/subtitles/sync_modes.py
 """
 Subtitle synchronization modes - Plugin system.
 
@@ -16,10 +16,10 @@ Plugins are located in: vsg_core/subtitles/sync_mode_plugins/
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Dict, Optional, Type
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..data import OperationResult, SubtitleData
+    from .data import OperationResult, SubtitleData
 
 
 # =============================================================================
@@ -96,7 +96,7 @@ def register_sync_plugin(plugin_class: type[SyncPlugin]) -> type[SyncPlugin]:
     return plugin_class
 
 
-def _ensure_plugins_loaded():
+def _ensure_plugins_loaded() -> None:
     """Lazy-load plugins to avoid circular imports."""
     global _plugins_loaded
     if not _plugins_loaded:
