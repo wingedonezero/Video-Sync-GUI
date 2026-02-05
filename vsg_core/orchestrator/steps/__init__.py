@@ -7,6 +7,7 @@ from .context import Context
 from .extract_step import ExtractStep
 from .mux_step import MuxStep
 from .subtitles_step import SubtitlesStep
+from .video_correction_step import VideoCorrectionStep
 
 __all__ = [
     "AnalysisStep",
@@ -17,4 +18,5 @@ __all__ = [
     "ExtractStep",
     "MuxStep",
     "SubtitlesStep",
+    "VideoCorrectionStep",
 ]

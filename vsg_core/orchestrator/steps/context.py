@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from vsg_core.models.context_types import (
         DriftFlagsEntry,
         ManualLayoutItem,
+        PulldownRemovalInfo,
         SegmentFlagsEntry,
         Source1Settings,
         SourceNSettings,
@@ -101,6 +102,9 @@ class Context:
     # Cache video-verified subtitle sync results per source
     # Format: {"Source 2": {"original_delay_ms": 100.0, "corrected_delay_ms": 102.5, ...}}
     video_verified_sources: dict[str, VideoVerifiedResult] = field(default_factory=dict)
+
+    # Video correction results
+    pulldown_removal_info: PulldownRemovalInfo | None = None
 
     # Results/summaries
     out_file: str | None = None

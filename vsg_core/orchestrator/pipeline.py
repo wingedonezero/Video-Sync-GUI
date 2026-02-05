@@ -22,6 +22,7 @@ from vsg_core.orchestrator.steps import (
     ExtractStep,
     MuxStep,
     SubtitlesStep,
+    VideoCorrectionStep,
 )
 from vsg_core.orchestrator.validation import PipelineValidationError, StepValidator
 
@@ -138,6 +139,14 @@ class Orchestrator:
         except Exception as e:
             log(f"[FATAL] Extraction phase failed: {e}")
             raise RuntimeError(f"Extraction phase failed: {e}") from e
+
+        log("--- Video Correction Phase ---")
+        progress(0.45)
+        try:
+            ctx = VideoCorrectionStep().run(ctx, runner)
+            log("[Validation] Video correction phase completed.")
+        except Exception as e:
+            log(f"[WARNING] Video correction phase had issues (non-fatal): {e}")
 
         if ctx.settings.segmented_enabled and (
             ctx.segment_flags or ctx.pal_drift_flags or ctx.linear_drift_flags

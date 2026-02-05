@@ -10,7 +10,23 @@ complex nested dict structures.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Required, TypedDict
+
+# =============================================================================
+# Video Correction Types (Context.pulldown_removal_info)
+# =============================================================================
+
+
+@dataclass(frozen=True, slots=True)
+class PulldownRemovalInfo:
+    """Records details of a pulldown removal operation for audit/logging."""
+
+    source_fps: float
+    target_fps: float
+    pictures_modified: int
+    sequence_headers_modified: int
+
 
 # =============================================================================
 # Manual Layout Types (Context.manual_layout)

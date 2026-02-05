@@ -67,6 +67,9 @@ class PlanItem:
         False  # True if subtitle timestamps were adjusted for frame-level corrections
     )
 
+    # Video correction fields
+    pulldown_removed: bool = False  # True if soft pulldown was removed from video
+
     # Generated track fields (for tracks created by filtering styles from another track)
     is_generated: bool = False  # Marks this as a generated track
     source_track_id: int | None = None  # ID of the source track this was generated from

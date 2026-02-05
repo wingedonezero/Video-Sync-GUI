@@ -2565,6 +2565,26 @@ class MergeBehaviorTab(QWidget):
         super().__init__()
         self.widgets: dict[str, QWidget] = {}
         main_layout = QVBoxLayout(self)
+
+        # --- Video Correction ---
+        video_group = QGroupBox("Video Correction")
+        video_form = QFormLayout(video_group)
+        self.widgets["pulldown_removal_enabled"] = QCheckBox(
+            "Remove soft pulldown from MPEG-2 DVD video (lossless)"
+        )
+        self.widgets["pulldown_removal_enabled"].setToolTip(
+            "When enabled, detects and removes 3:2 soft pulldown (telecine) flags\n"
+            "from MPEG-2 video extracted from DVD sources.\n\n"
+            "This is a lossless operation — only 1-2 header bits per frame are\n"
+            "modified. No video data is re-encoded. The stream is converted from\n"
+            "29.97 fps VFR (with repeated fields) to native 23.976 fps CFR.\n\n"
+            "Only applies to Source 1 MPEG-2 video with true soft pulldown.\n"
+            "If the stream is interlaced, mixed, or has no pulldown flags,\n"
+            "it is left untouched. Both original and corrected files are kept."
+        )
+        video_form.addWidget(self.widgets["pulldown_removal_enabled"])
+        main_layout.addWidget(video_group)
+
         general_group = QGroupBox("General")
         form1 = QFormLayout(general_group)
         self.widgets["apply_dialog_norm_gain"] = QCheckBox(

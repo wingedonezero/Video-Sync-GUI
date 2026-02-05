@@ -80,6 +80,11 @@ class AppSettings:
     snap_starts_only: bool = True
 
     # =========================================================================
+    # Video Correction Settings
+    # =========================================================================
+    pulldown_removal_enabled: bool = False
+
+    # =========================================================================
     # Muxing Settings
     # =========================================================================
     apply_dialog_norm_gain: bool = False
@@ -160,7 +165,9 @@ class AppSettings:
     # Correlation-Guided Frame Anchor Settings
     # =========================================================================
     corr_anchor_fallback_mode: str = "use-correlation"
-    corr_anchor_anchor_positions: list[int] = field(default_factory=lambda: [10, 50, 90])
+    corr_anchor_anchor_positions: list[int] = field(
+        default_factory=lambda: [10, 50, 90]
+    )
     corr_anchor_refine_per_line: bool = False
     corr_anchor_refine_workers: int = 4
 
@@ -484,7 +491,9 @@ class AppSettings:
             last_ref_path=str(get_val("last_ref_path") or ""),
             last_sec_path=str(get_val("last_sec_path") or ""),
             last_ter_path=str(get_val("last_ter_path") or ""),
-            source_separation_model_dir=str(get_val("source_separation_model_dir") or ""),
+            source_separation_model_dir=str(
+                get_val("source_separation_model_dir") or ""
+            ),
             # Analysis Settings
             analysis_mode=str(get_val("analysis_mode") or "Audio Correlation"),
             analysis_lang_source1=analysis_lang_source1 or None,
@@ -500,12 +509,18 @@ class AppSettings:
             snap_mode=str(get_val("snap_mode") or "previous"),
             snap_threshold_ms=int(get_val("snap_threshold_ms")),
             snap_starts_only=bool(get_val("snap_starts_only")),
+            # Video Correction Settings
+            pulldown_removal_enabled=bool(get_val("pulldown_removal_enabled")),
             # Muxing Settings
             apply_dialog_norm_gain=bool(get_val("apply_dialog_norm_gain")),
-            disable_track_statistics_tags=bool(get_val("disable_track_statistics_tags")),
+            disable_track_statistics_tags=bool(
+                get_val("disable_track_statistics_tags")
+            ),
             disable_header_compression=bool(get_val("disable_header_compression")),
             # Post-Mux Settings
-            post_mux_normalize_timestamps=bool(get_val("post_mux_normalize_timestamps")),
+            post_mux_normalize_timestamps=bool(
+                get_val("post_mux_normalize_timestamps")
+            ),
             post_mux_strip_tags=bool(get_val("post_mux_strip_tags")),
             # Logging Settings
             log_compact=bool(get_val("log_compact")),
@@ -533,7 +548,9 @@ class AppSettings:
             # Subtitle Sync Settings
             subtitle_sync_mode=str(get_val("subtitle_sync_mode")),
             time_based_use_raw_values=bool(get_val("time_based_use_raw_values")),
-            time_based_bypass_subtitle_data=bool(get_val("time_based_bypass_subtitle_data")),
+            time_based_bypass_subtitle_data=bool(
+                get_val("time_based_bypass_subtitle_data")
+            ),
             subtitle_rounding=str(get_val("subtitle_rounding")),
             subtitle_target_fps=float(get_val("subtitle_target_fps")),
             videotimestamps_snap_mode=str(get_val("videotimestamps_snap_mode")),
@@ -548,8 +565,12 @@ class AppSettings:
             frame_use_vapoursynth=bool(get_val("frame_use_vapoursynth")),
             frame_comparison_method=str(get_val("frame_comparison_method")),
             # Correlation Snap Settings
-            correlation_snap_fallback_mode=str(get_val("correlation_snap_fallback_mode")),
-            correlation_snap_use_scene_changes=bool(get_val("correlation_snap_use_scene_changes")),
+            correlation_snap_fallback_mode=str(
+                get_val("correlation_snap_fallback_mode")
+            ),
+            correlation_snap_use_scene_changes=bool(
+                get_val("correlation_snap_use_scene_changes")
+            ),
             # Correlation-Guided Frame Anchor Settings
             corr_anchor_fallback_mode=str(get_val("corr_anchor_fallback_mode")),
             corr_anchor_anchor_positions=list(get_val("corr_anchor_anchor_positions")),
@@ -558,29 +579,49 @@ class AppSettings:
             # Subtitle-Anchored Frame Snap Settings
             sub_anchor_fallback_mode=str(get_val("sub_anchor_fallback_mode")),
             # Duration Align Settings
-            duration_align_verify_with_frames=bool(get_val("duration_align_verify_with_frames")),
+            duration_align_verify_with_frames=bool(
+                get_val("duration_align_verify_with_frames")
+            ),
             duration_align_validate=bool(get_val("duration_align_validate")),
             duration_align_fallback_mode=str(get_val("duration_align_fallback_mode")),
-            duration_align_validate_points=int(get_val("duration_align_validate_points")),
+            duration_align_validate_points=int(
+                get_val("duration_align_validate_points")
+            ),
             duration_align_strictness=int(get_val("duration_align_strictness")),
             duration_align_skip_validation_generated_tracks=bool(
                 get_val("duration_align_skip_validation_generated_tracks")
             ),
             # Frame Lock Settings
-            frame_lock_submillisecond_precision=bool(get_val("frame_lock_submillisecond_precision")),
+            frame_lock_submillisecond_precision=bool(
+                get_val("frame_lock_submillisecond_precision")
+            ),
             # Video-Verified Sync Settings
-            video_verified_zero_check_frames=int(get_val("video_verified_zero_check_frames")),
-            video_verified_min_quality_advantage=float(get_val("video_verified_min_quality_advantage")),
-            video_verified_num_checkpoints=int(get_val("video_verified_num_checkpoints")),
-            video_verified_search_range_frames=int(get_val("video_verified_search_range_frames")),
-            video_verified_sequence_length=int(get_val("video_verified_sequence_length")),
-            video_verified_use_pts_precision=bool(get_val("video_verified_use_pts_precision")),
+            video_verified_zero_check_frames=int(
+                get_val("video_verified_zero_check_frames")
+            ),
+            video_verified_min_quality_advantage=float(
+                get_val("video_verified_min_quality_advantage")
+            ),
+            video_verified_num_checkpoints=int(
+                get_val("video_verified_num_checkpoints")
+            ),
+            video_verified_search_range_frames=int(
+                get_val("video_verified_search_range_frames")
+            ),
+            video_verified_sequence_length=int(
+                get_val("video_verified_sequence_length")
+            ),
+            video_verified_use_pts_precision=bool(
+                get_val("video_verified_use_pts_precision")
+            ),
             video_verified_frame_audit=bool(get_val("video_verified_frame_audit")),
             # Interlaced Video Settings
             interlaced_handling_enabled=bool(get_val("interlaced_handling_enabled")),
             interlaced_force_mode=str(get_val("interlaced_force_mode")),
             interlaced_num_checkpoints=int(get_val("interlaced_num_checkpoints")),
-            interlaced_search_range_frames=int(get_val("interlaced_search_range_frames")),
+            interlaced_search_range_frames=int(
+                get_val("interlaced_search_range_frames")
+            ),
             interlaced_hash_algorithm=str(get_val("interlaced_hash_algorithm")),
             interlaced_hash_size=int(get_val("interlaced_hash_size")),
             interlaced_hash_threshold=int(get_val("interlaced_hash_threshold")),
@@ -596,10 +637,14 @@ class AppSettings:
             source_separation_timeout=int(get_val("source_separation_timeout")),
             filtering_method=str(get_val("filtering_method")),
             correlation_method=str(get_val("correlation_method")),
-            correlation_method_source_separated=str(get_val("correlation_method_source_separated")),
+            correlation_method_source_separated=str(
+                get_val("correlation_method_source_separated")
+            ),
             # Delay Selection Settings
             delay_selection_mode=str(get_val("delay_selection_mode")),
-            delay_selection_mode_source_separated=str(get_val("delay_selection_mode_source_separated")),
+            delay_selection_mode_source_separated=str(
+                get_val("delay_selection_mode_source_separated")
+            ),
             min_accepted_chunks=int(get_val("min_accepted_chunks")),
             first_stable_min_chunks=int(get_val("first_stable_min_chunks")),
             first_stable_skip_unstable=bool(get_val("first_stable_skip_unstable")),
@@ -629,15 +674,27 @@ class AppSettings:
             detection_dbscan_epsilon_ms=float(get_val("detection_dbscan_epsilon_ms")),
             detection_dbscan_min_samples=int(get_val("detection_dbscan_min_samples")),
             drift_detection_r2_threshold=float(get_val("drift_detection_r2_threshold")),
-            drift_detection_r2_threshold_lossless=float(get_val("drift_detection_r2_threshold_lossless")),
-            drift_detection_slope_threshold_lossy=float(get_val("drift_detection_slope_threshold_lossy")),
-            drift_detection_slope_threshold_lossless=float(get_val("drift_detection_slope_threshold_lossless")),
+            drift_detection_r2_threshold_lossless=float(
+                get_val("drift_detection_r2_threshold_lossless")
+            ),
+            drift_detection_slope_threshold_lossy=float(
+                get_val("drift_detection_slope_threshold_lossy")
+            ),
+            drift_detection_slope_threshold_lossless=float(
+                get_val("drift_detection_slope_threshold_lossless")
+            ),
             # Stepping Correction Settings
             stepping_adjust_subtitles=bool(get_val("stepping_adjust_subtitles")),
-            stepping_adjust_subtitles_no_audio=bool(get_val("stepping_adjust_subtitles_no_audio")),
+            stepping_adjust_subtitles_no_audio=bool(
+                get_val("stepping_adjust_subtitles_no_audio")
+            ),
             stepping_boundary_mode=str(get_val("stepping_boundary_mode")),
-            stepping_first_stable_min_chunks=int(get_val("stepping_first_stable_min_chunks")),
-            stepping_first_stable_skip_unstable=bool(get_val("stepping_first_stable_skip_unstable")),
+            stepping_first_stable_min_chunks=int(
+                get_val("stepping_first_stable_min_chunks")
+            ),
+            stepping_first_stable_skip_unstable=bool(
+                get_val("stepping_first_stable_skip_unstable")
+            ),
             # Segment Scan & Correction
             segment_triage_std_dev_ms=int(get_val("segment_triage_std_dev_ms")),
             segment_coarse_chunk_s=int(get_val("segment_coarse_chunk_s")),
@@ -648,71 +705,139 @@ class AppSettings:
             segment_min_confidence_ratio=float(get_val("segment_min_confidence_ratio")),
             # Segment Drift Detection
             segment_drift_r2_threshold=float(get_val("segment_drift_r2_threshold")),
-            segment_drift_slope_threshold=float(get_val("segment_drift_slope_threshold")),
-            segment_drift_outlier_sensitivity=float(get_val("segment_drift_outlier_sensitivity")),
-            segment_drift_scan_buffer_pct=float(get_val("segment_drift_scan_buffer_pct")),
+            segment_drift_slope_threshold=float(
+                get_val("segment_drift_slope_threshold")
+            ),
+            segment_drift_outlier_sensitivity=float(
+                get_val("segment_drift_outlier_sensitivity")
+            ),
+            segment_drift_scan_buffer_pct=float(
+                get_val("segment_drift_scan_buffer_pct")
+            ),
             # Stepping Scan Range
-            stepping_scan_start_percentage=float(get_val("stepping_scan_start_percentage")),
+            stepping_scan_start_percentage=float(
+                get_val("stepping_scan_start_percentage")
+            ),
             stepping_scan_end_percentage=float(get_val("stepping_scan_end_percentage")),
             # Silence Snapping
             stepping_snap_to_silence=bool(get_val("stepping_snap_to_silence")),
-            stepping_silence_detection_method=str(get_val("stepping_silence_detection_method")),
-            stepping_silence_search_window_s=float(get_val("stepping_silence_search_window_s")),
-            stepping_silence_threshold_db=float(get_val("stepping_silence_threshold_db")),
-            stepping_silence_min_duration_ms=float(get_val("stepping_silence_min_duration_ms")),
-            stepping_ffmpeg_silence_noise=float(get_val("stepping_ffmpeg_silence_noise")),
-            stepping_ffmpeg_silence_duration=float(get_val("stepping_ffmpeg_silence_duration")),
+            stepping_silence_detection_method=str(
+                get_val("stepping_silence_detection_method")
+            ),
+            stepping_silence_search_window_s=float(
+                get_val("stepping_silence_search_window_s")
+            ),
+            stepping_silence_threshold_db=float(
+                get_val("stepping_silence_threshold_db")
+            ),
+            stepping_silence_min_duration_ms=float(
+                get_val("stepping_silence_min_duration_ms")
+            ),
+            stepping_ffmpeg_silence_noise=float(
+                get_val("stepping_ffmpeg_silence_noise")
+            ),
+            stepping_ffmpeg_silence_duration=float(
+                get_val("stepping_ffmpeg_silence_duration")
+            ),
             # VAD (Voice Activity Detection)
             stepping_vad_enabled=bool(get_val("stepping_vad_enabled")),
             stepping_vad_aggressiveness=int(get_val("stepping_vad_aggressiveness")),
             stepping_vad_avoid_speech=bool(get_val("stepping_vad_avoid_speech")),
-            stepping_vad_frame_duration_ms=int(get_val("stepping_vad_frame_duration_ms")),
+            stepping_vad_frame_duration_ms=int(
+                get_val("stepping_vad_frame_duration_ms")
+            ),
             # Transient Detection
-            stepping_transient_detection_enabled=bool(get_val("stepping_transient_detection_enabled")),
+            stepping_transient_detection_enabled=bool(
+                get_val("stepping_transient_detection_enabled")
+            ),
             stepping_transient_threshold=float(get_val("stepping_transient_threshold")),
-            stepping_transient_avoid_window_ms=int(get_val("stepping_transient_avoid_window_ms")),
+            stepping_transient_avoid_window_ms=int(
+                get_val("stepping_transient_avoid_window_ms")
+            ),
             # Smart Fusion Weights
-            stepping_fusion_weight_silence=int(get_val("stepping_fusion_weight_silence")),
-            stepping_fusion_weight_no_speech=int(get_val("stepping_fusion_weight_no_speech")),
-            stepping_fusion_weight_scene_align=int(get_val("stepping_fusion_weight_scene_align")),
-            stepping_fusion_weight_duration=int(get_val("stepping_fusion_weight_duration")),
-            stepping_fusion_weight_no_transient=int(get_val("stepping_fusion_weight_no_transient")),
+            stepping_fusion_weight_silence=int(
+                get_val("stepping_fusion_weight_silence")
+            ),
+            stepping_fusion_weight_no_speech=int(
+                get_val("stepping_fusion_weight_no_speech")
+            ),
+            stepping_fusion_weight_scene_align=int(
+                get_val("stepping_fusion_weight_scene_align")
+            ),
+            stepping_fusion_weight_duration=int(
+                get_val("stepping_fusion_weight_duration")
+            ),
+            stepping_fusion_weight_no_transient=int(
+                get_val("stepping_fusion_weight_no_transient")
+            ),
             # Video-Aware Boundary Snapping
-            stepping_snap_to_video_frames=bool(get_val("stepping_snap_to_video_frames")),
+            stepping_snap_to_video_frames=bool(
+                get_val("stepping_snap_to_video_frames")
+            ),
             stepping_video_snap_mode=str(get_val("stepping_video_snap_mode")),
-            stepping_video_snap_max_offset_s=float(get_val("stepping_video_snap_max_offset_s")),
-            stepping_video_scene_threshold=float(get_val("stepping_video_scene_threshold")),
+            stepping_video_snap_max_offset_s=float(
+                get_val("stepping_video_snap_max_offset_s")
+            ),
+            stepping_video_scene_threshold=float(
+                get_val("stepping_video_scene_threshold")
+            ),
             # Fill Mode & Content
             stepping_fill_mode=str(get_val("stepping_fill_mode")),
-            stepping_content_correlation_threshold=float(get_val("stepping_content_correlation_threshold")),
-            stepping_content_search_window_s=float(get_val("stepping_content_search_window_s")),
+            stepping_content_correlation_threshold=float(
+                get_val("stepping_content_correlation_threshold")
+            ),
+            stepping_content_search_window_s=float(
+                get_val("stepping_content_search_window_s")
+            ),
             # Track Naming
-            stepping_corrected_track_label=str(get_val("stepping_corrected_track_label")),
-            stepping_preserved_track_label=str(get_val("stepping_preserved_track_label")),
+            stepping_corrected_track_label=str(
+                get_val("stepping_corrected_track_label")
+            ),
+            stepping_preserved_track_label=str(
+                get_val("stepping_preserved_track_label")
+            ),
             # Quality Audit Thresholds
             stepping_audit_min_score=float(get_val("stepping_audit_min_score")),
-            stepping_audit_overflow_tolerance=float(get_val("stepping_audit_overflow_tolerance")),
-            stepping_audit_large_correction_s=float(get_val("stepping_audit_large_correction_s")),
+            stepping_audit_overflow_tolerance=float(
+                get_val("stepping_audit_overflow_tolerance")
+            ),
+            stepping_audit_large_correction_s=float(
+                get_val("stepping_audit_large_correction_s")
+            ),
             # Filtered Stepping Correction
             stepping_correction_mode=str(get_val("stepping_correction_mode")),
             stepping_quality_mode=str(get_val("stepping_quality_mode")),
-            stepping_min_chunks_per_cluster=int(get_val("stepping_min_chunks_per_cluster")),
-            stepping_min_cluster_percentage=float(get_val("stepping_min_cluster_percentage")),
-            stepping_min_cluster_duration_s=float(get_val("stepping_min_cluster_duration_s")),
-            stepping_min_match_quality_pct=float(get_val("stepping_min_match_quality_pct")),
+            stepping_min_chunks_per_cluster=int(
+                get_val("stepping_min_chunks_per_cluster")
+            ),
+            stepping_min_cluster_percentage=float(
+                get_val("stepping_min_cluster_percentage")
+            ),
+            stepping_min_cluster_duration_s=float(
+                get_val("stepping_min_cluster_duration_s")
+            ),
+            stepping_min_match_quality_pct=float(
+                get_val("stepping_min_match_quality_pct")
+            ),
             stepping_min_total_clusters=int(get_val("stepping_min_total_clusters")),
             stepping_filtered_fallback=str(get_val("stepping_filtered_fallback")),
             stepping_diagnostics_verbose=bool(get_val("stepping_diagnostics_verbose")),
             # Segmented Audio QA
             segmented_qa_threshold=float(get_val("segmented_qa_threshold")),
             segment_qa_chunk_count=int(get_val("segment_qa_chunk_count")),
-            segment_qa_min_accepted_chunks=int(get_val("segment_qa_min_accepted_chunks")),
+            segment_qa_min_accepted_chunks=int(
+                get_val("segment_qa_min_accepted_chunks")
+            ),
             # Sync Stability Settings
             sync_stability_enabled=bool(get_val("sync_stability_enabled")),
-            sync_stability_variance_threshold=float(get_val("sync_stability_variance_threshold")),
+            sync_stability_variance_threshold=float(
+                get_val("sync_stability_variance_threshold")
+            ),
             sync_stability_min_chunks=int(get_val("sync_stability_min_chunks")),
             sync_stability_outlier_mode=str(get_val("sync_stability_outlier_mode")),
-            sync_stability_outlier_threshold=float(get_val("sync_stability_outlier_threshold")),
+            sync_stability_outlier_threshold=float(
+                get_val("sync_stability_outlier_threshold")
+            ),
             # Resampling Engine Settings
             segment_resample_engine=str(get_val("segment_resample_engine")),
             segment_rb_pitch_correct=bool(get_val("segment_rb_pitch_correct")),
@@ -745,7 +870,9 @@ class AppSettings:
             ocr_video_height=int(get_val("ocr_video_height")),
             # OCR Post-Processing
             ocr_cleanup_enabled=bool(get_val("ocr_cleanup_enabled")),
-            ocr_cleanup_normalize_ellipsis=bool(get_val("ocr_cleanup_normalize_ellipsis")),
+            ocr_cleanup_normalize_ellipsis=bool(
+                get_val("ocr_cleanup_normalize_ellipsis")
+            ),
             ocr_custom_wordlist_path=str(get_val("ocr_custom_wordlist_path")),
             # OCR Debug & Runtime
             ocr_debug_output=bool(get_val("ocr_debug_output")),
