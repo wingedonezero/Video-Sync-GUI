@@ -687,11 +687,50 @@ class VideoReader:
                 source=str(self.video_path), cachefile=str(index_path)
             )
 
-            # Apply AssumeFPS for soft-telecine content (VFR from MakeMKV/mkvmerge)
-            # This normalizes the wonky VFR timing back to the correct CFR rate
-            if self.is_soft_telecine and self.target_fps is not None:
+            # Get the actual FPS from FFMS2 (based on frame timestamps)
+            ffms2_fps = clip.fps_num / clip.fps_den
+
+            # Detect soft-telecine: ffprobe says ~30fps but FFMS2 sees ~24fps
+            # This happens when MakeMKV/mkvmerge removes soft-telecine pulldown
+            # ffprobe reads container metadata (30fps), FFMS2 reads actual timestamps (~24fps)
+            from .video_properties import detect_video_properties
+
+            props = detect_video_properties(self.video_path, self.runner)
+            ffprobe_fps = props.get("fps", 29.97)
+
+            # Check for soft-telecine mismatch: ffprobe ~30fps, FFMS2 ~24fps
+            fps_mismatch = (
+                abs(ffprobe_fps - ffms2_fps) / ffprobe_fps * 100
+                if ffprobe_fps > 0
+                else 0
+            )
+            is_soft_telecine_mismatch = (
+                fps_mismatch > 15  # More than 15% difference
+                and abs(ffprobe_fps - 29.97) < 0.5  # ffprobe says ~30fps
+                and 23.5 < ffms2_fps < 25.0  # FFMS2 sees ~24fps
+            )
+
+            if is_soft_telecine_mismatch:
+                self.is_soft_telecine = True
+                self.runner._log_message(
+                    f"[FrameUtils] Soft-telecine detected: ffprobe={ffprobe_fps:.3f}fps, "
+                    f"FFMS2={ffms2_fps:.3f}fps"
+                )
+                self.runner._log_message(
+                    "[FrameUtils] Applying AssumeFPS to normalize to 23.976fps"
+                )
+
+                # Apply AssumeFPS to normalize to proper 23.976fps
+                clip = core.std.AssumeFPS(clip, fpsnum=24000, fpsden=1001)
+                self.fps_normalized = True
+
+                self.runner._log_message(
+                    f"[FrameUtils] AssumeFPS applied: {ffms2_fps:.3f}fps -> 24000/1001 (23.976fps)"
+                )
+            # Also handle case detected by video_properties (r_frame_rate vs avg_frame_rate)
+            elif self.is_soft_telecine and self.target_fps is not None:
                 # Store the original (wrong) FPS before normalization
-                original_vfr_fps = clip.fps_num / clip.fps_den
+                original_vfr_fps = ffms2_fps
 
                 # Convert target_fps to fraction (24000/1001 for 23.976fps)
                 if abs(self.target_fps - 23.976) < 0.01:
