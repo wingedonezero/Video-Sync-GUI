@@ -882,8 +882,12 @@ def _measure_frame_offset_quality_static(
             source_frame_idx = int(checkpoint_ms / frame_duration_ms)
 
         # Target frame with this offset (STRICT - no window for initial test)
-        # Target is always CFR (IVTC produces CFR), offset is in frames
-        target_frame_idx = source_frame_idx + frame_offset
+        # Target is always CFR (IVTC produces CFR)
+        # IMPORTANT: Calculate target from checkpoint_ms independently, not from source_frame_idx
+        # VFR source frame 5512 at 226s != CFR target frame 5512 at different time
+        # We want: CFR frame at checkpoint_ms + frame_offset
+        target_base_frame = int(checkpoint_ms / frame_duration_ms)
+        target_frame_idx = target_base_frame + frame_offset
 
         if target_frame_idx < 0:
             continue
