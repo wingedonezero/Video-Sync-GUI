@@ -22,10 +22,13 @@ The AppConfig class handles:
 import builtins
 import json
 import warnings
+from dataclasses import fields
+from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, get_type_hints
 
 from vsg_core.models import AppSettings
+from vsg_core.models.enums import AnalysisMode, SnapMode
 
 
 class AppConfig:
@@ -150,9 +153,18 @@ class AppConfig:
             if not isinstance(value, str):
                 return False, f"{key} must be string, got {type(value).__name__}"
 
-        elif key in ("sync_mode", "analysis_mode", "delay_selection_mode"):
+        elif key in ("sync_mode", "delay_selection_mode"):
             if not isinstance(value, str):
                 return False, f"{key} must be string, got {type(value).__name__}"
+
+        # Enum fields accept both string and enum values
+        elif key == "analysis_mode":
+            if not isinstance(value, (str, AnalysisMode)):
+                return False, f"{key} must be string or AnalysisMode, got {type(value).__name__}"
+
+        elif key == "snap_mode":
+            if not isinstance(value, (str, SnapMode)):
+                return False, f"{key} must be string or SnapMode, got {type(value).__name__}"
 
         elif key == "stepping_silence_detection_method":
             valid = ["rms_basic", "ffmpeg_silencedetect", "smart_fusion"]
@@ -385,16 +397,36 @@ class AppConfig:
         # Use getattr to access AppSettings dataclass fields
         return getattr(self.settings, key, default)
 
+    # Map of field names to their enum types for automatic conversion
+    _ENUM_FIELDS: dict[str, type[Enum]] = {
+        "analysis_mode": AnalysisMode,
+        "snap_mode": SnapMode,
+    }
+
     def set(self, key: str, value: Any):
         """
         Sets a config value on the AppSettings dataclass.
 
         Validates the value before setting if validation is enabled.
+        Automatically converts string values to enum types for enum fields.
         """
         if self._validation_enabled:
             is_valid, error_msg = self._validate_value(key, value)
             if not is_valid:
                 raise ValueError(f"Invalid config value: {error_msg}")
+
+        # Convert string values to enum for enum fields
+        if key in self._ENUM_FIELDS and isinstance(value, str):
+            enum_type = self._ENUM_FIELDS[key]
+            try:
+                value = enum_type(value)
+            except ValueError:
+                # If conversion fails, warn but don't crash
+                warnings.warn(
+                    f"Could not convert '{value}' to {enum_type.__name__} for {key}",
+                    UserWarning,
+                    stacklevel=2,
+                )
 
         # Use setattr to modify AppSettings dataclass fields
         setattr(self.settings, key, value)

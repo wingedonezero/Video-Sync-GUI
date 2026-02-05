@@ -1,6 +1,15 @@
 from __future__ import annotations
 
+from enum import Enum
 from typing import Any
+
+from vsg_core.models.enums import AnalysisMode, SnapMode
+
+# Map of field names to their enum types for automatic conversion
+_ENUM_FIELDS: dict[str, type[Enum]] = {
+    "analysis_mode": AnalysisMode,
+    "snap_mode": SnapMode,
+}
 
 
 class OptionsLogic:
@@ -30,6 +39,15 @@ class OptionsLogic:
         for section in self.dlg.sections.values():
             for key, widget in section.items():
                 value = self._get_widget_val(widget)
+
+                # Convert string values to enum for enum fields
+                if key in _ENUM_FIELDS and isinstance(value, str):
+                    enum_type = _ENUM_FIELDS[key]
+                    try:
+                        value = enum_type(value)
+                    except ValueError:
+                        pass  # Keep string value if conversion fails
+
                 if is_dataclass:
                     # Only set if the attribute exists on the dataclass
                     if hasattr(cfg, key):
