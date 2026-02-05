@@ -1,15 +1,6 @@
 from __future__ import annotations
 
-from enum import Enum
 from typing import Any
-
-from vsg_core.models.enums import AnalysisMode, SnapMode
-
-# Map of field names to their enum types for automatic conversion
-_ENUM_FIELDS: dict[str, type[Enum]] = {
-    "analysis_mode": AnalysisMode,
-    "snap_mode": SnapMode,
-}
 
 
 class OptionsLogic:
@@ -39,15 +30,6 @@ class OptionsLogic:
         for section in self.dlg.sections.values():
             for key, widget in section.items():
                 value = self._get_widget_val(widget)
-
-                # Convert string values to enum for enum fields
-                if key in _ENUM_FIELDS and isinstance(value, str):
-                    enum_type = _ENUM_FIELDS[key]
-                    try:
-                        value = enum_type(value)
-                    except ValueError:
-                        pass  # Keep string value if conversion fails
-
                 if is_dataclass:
                     # Only set if the attribute exists on the dataclass
                     if hasattr(cfg, key):
@@ -115,15 +97,13 @@ class OptionsLogic:
             except (ValueError, TypeError):
                 pass  # Keep current value if coercion fails
         elif isinstance(widget, QComboBox):
-            # Handle Enum values by using their .value property
-            search_value = value.value if hasattr(value, "value") else value
             # Try to find item by data first (for combos with stored integer/data values)
-            index = widget.findData(search_value)
+            index = widget.findData(value)
             if index >= 0:
                 widget.setCurrentIndex(index)
             else:
                 # Fallback to text matching for combos without custom data
-                widget.setCurrentText(str(search_value))
+                widget.setCurrentText(str(value))
         elif isinstance(widget, QLineEdit):
             widget.setText(str(value))
         elif (

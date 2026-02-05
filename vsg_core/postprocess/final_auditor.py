@@ -8,7 +8,6 @@ import json
 from pathlib import Path
 
 from vsg_core.io.runner import CommandRunner
-from vsg_core.models.enums import TrackType
 from vsg_core.orchestrator.steps.context import Context
 
 from .auditors import (
@@ -109,18 +108,18 @@ class FinalAuditor:
             preserved_audio = [
                 item
                 for item in original_plan_items
-                if item.is_preserved and item.track.type == TrackType.AUDIO
+                if item.is_preserved and item.track.type == "audio"
             ]
             preserved_subs = [
                 item
                 for item in original_plan_items
-                if item.is_preserved and item.track.type == TrackType.SUBTITLES
+                if item.is_preserved and item.track.type == "subtitles"
             ]
 
             if preserved_audio:
                 last_audio_idx = -1
                 for i, item in enumerate(final_items):
-                    if item.track.type == TrackType.AUDIO:
+                    if item.track.type == "audio":
                         last_audio_idx = i
                 if last_audio_idx != -1:
                     final_items[last_audio_idx + 1 : last_audio_idx + 1] = (
@@ -132,7 +131,7 @@ class FinalAuditor:
             if preserved_subs:
                 last_sub_idx = -1
                 for i, item in enumerate(final_items):
-                    if item.track.type == TrackType.SUBTITLES:
+                    if item.track.type == "subtitles":
                         last_sub_idx = i
                 if last_sub_idx != -1:
                     final_items[last_sub_idx + 1 : last_sub_idx + 1] = preserved_subs

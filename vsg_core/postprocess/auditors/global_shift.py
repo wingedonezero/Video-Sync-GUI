@@ -5,7 +5,6 @@ Auditor for verifying global shift was applied correctly.
 
 from pathlib import Path
 
-from vsg_core.models.enums import TrackType
 
 from .base import BaseAuditor
 
@@ -42,7 +41,7 @@ class GlobalShiftAuditor(BaseAuditor):
         audio_items = [
             item
             for item in self.ctx.extracted_items
-            if item.track.type == TrackType.AUDIO
+            if item.track.type == "audio"
         ]
 
         for item in audio_items:

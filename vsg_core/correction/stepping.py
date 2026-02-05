@@ -15,7 +15,6 @@ from scipy.signal import correlate
 
 from ..analysis.audio_corr import get_audio_stream_info, run_audio_correlation
 from ..extraction.tracks import extract_tracks
-from ..models.enums import TrackType
 from ..models.media import StreamProps, Track
 
 if TYPE_CHECKING:
@@ -2330,7 +2329,7 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
     extracted_audio_map = {
         f"{item.track.source}_{item.track.id}": item
         for item in ctx.extracted_items
-        if item.track.type == TrackType.AUDIO
+        if item.track.type == "audio"
     }
 
     corrector = SteppingCorrector(runner, ctx.tool_paths, ctx.settings)
@@ -2345,7 +2344,7 @@ def run_stepping_correction(ctx: Context, runner: CommandRunner) -> Context:
             item
             for item in ctx.extracted_items
             if item.track.source == source_key
-            and item.track.type == TrackType.AUDIO
+            and item.track.type == "audio"
             and not item.is_preserved
         ]
 

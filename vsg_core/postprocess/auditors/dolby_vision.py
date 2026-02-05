@@ -1,7 +1,6 @@
 # vsg_core/postprocess/auditors/dolby_vision.py
 from pathlib import Path
 
-from vsg_core.models.enums import TrackType
 
 from .base import BaseAuditor
 
@@ -24,7 +23,7 @@ class DolbyVisionAuditor(BaseAuditor):
         video_items = [
             item
             for item in self.ctx.extracted_items
-            if item.track.type == TrackType.VIDEO
+            if item.track.type == "video"
         ]
 
         for plan_item in video_items:
@@ -79,7 +78,7 @@ class DolbyVisionAuditor(BaseAuditor):
                 )
             )
             for item in video_items
-            if item.track.type == TrackType.VIDEO
+            if item.track.type == "video"
             and self.ctx.sources.get(item.track.source)
         ):
             self.log("✅ No Dolby Vision metadata to preserve.")

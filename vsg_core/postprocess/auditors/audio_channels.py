@@ -1,7 +1,6 @@
 # vsg_core/postprocess/auditors/audio_channels.py
 from pathlib import Path
 
-from vsg_core.models.enums import TrackType
 
 from .base import BaseAuditor
 
@@ -24,7 +23,7 @@ class AudioChannelsAuditor(BaseAuditor):
         audio_items = [
             item
             for item in self.ctx.extracted_items
-            if item.track.type == TrackType.AUDIO
+            if item.track.type == "audio"
         ]
 
         for plan_item in audio_items:
@@ -63,7 +62,7 @@ class AudioChannelsAuditor(BaseAuditor):
             actual_audio = None
             audio_index = 0
             for item in self.ctx.extracted_items:
-                if item.track.type == TrackType.AUDIO:
+                if item.track.type == "audio":
                     if item == plan_item and audio_index < len(actual_audio_streams):
                         actual_audio = actual_audio_streams[audio_index]
                         break

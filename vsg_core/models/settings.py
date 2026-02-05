@@ -24,10 +24,10 @@ Settings are organized by category:
 from __future__ import annotations
 
 from dataclasses import MISSING as dataclass_field_missing
-from dataclasses import dataclass, field, fields
+from dataclasses import asdict, dataclass, field, fields
 from typing import Any, ClassVar
 
-from .enums import AnalysisMode, SnapMode
+from .types import AnalysisModeStr, SnapModeStr
 
 
 # Sentinel for path defaults that need runtime resolution
@@ -61,7 +61,7 @@ class AppSettings:
     # =========================================================================
     # Analysis Settings
     # =========================================================================
-    analysis_mode: AnalysisMode = field(default=AnalysisMode.AUDIO)
+    analysis_mode: AnalysisModeStr = "Audio Correlation"
     analysis_lang_source1: str | None = None
     analysis_lang_others: str | None = None
     scan_chunk_count: int = 10
@@ -75,7 +75,7 @@ class AppSettings:
     # =========================================================================
     rename_chapters: bool = False
     snap_chapters: bool = False
-    snap_mode: SnapMode = field(default=SnapMode.PREVIOUS)
+    snap_mode: SnapModeStr = "previous"
     snap_threshold_ms: int = 250
     snap_starts_only: bool = True
 
@@ -160,7 +160,7 @@ class AppSettings:
     # Correlation-Guided Frame Anchor Settings
     # =========================================================================
     corr_anchor_fallback_mode: str = "use-correlation"
-    corr_anchor_anchor_positions: tuple[int, ...] = field(default=(10, 50, 90))
+    corr_anchor_anchor_positions: list[int] = field(default_factory=lambda: [10, 50, 90])
     corr_anchor_refine_per_line: bool = False
     corr_anchor_refine_workers: int = 4
 
@@ -425,7 +425,7 @@ class AppSettings:
 
         Returns:
             Dict mapping field names to their default values.
-            Enum defaults are converted to their string values.
+            All values are JSON-compatible (no enums or tuples).
         """
         result = {}
         for f in fields(cls):
@@ -438,11 +438,7 @@ class AppSettings:
                 # No default - this shouldn't happen with our dataclass
                 default = None
 
-            # Convert enums to their string values for JSON compatibility
-            if hasattr(default, "value"):
-                result[f.name] = default.value
-            else:
-                result[f.name] = default
+            result[f.name] = default
 
         return result
 
@@ -490,7 +486,7 @@ class AppSettings:
             last_ter_path=str(get_val("last_ter_path") or ""),
             source_separation_model_dir=str(get_val("source_separation_model_dir") or ""),
             # Analysis Settings
-            analysis_mode=AnalysisMode(get_val("analysis_mode") or "Audio Correlation"),
+            analysis_mode=str(get_val("analysis_mode") or "Audio Correlation"),
             analysis_lang_source1=analysis_lang_source1 or None,
             analysis_lang_others=analysis_lang_others or None,
             scan_chunk_count=int(get_val("scan_chunk_count")),
@@ -501,7 +497,7 @@ class AppSettings:
             # Chapter Settings
             rename_chapters=bool(get_val("rename_chapters")),
             snap_chapters=bool(get_val("snap_chapters")),
-            snap_mode=SnapMode(get_val("snap_mode") or "previous"),
+            snap_mode=str(get_val("snap_mode") or "previous"),
             snap_threshold_ms=int(get_val("snap_threshold_ms")),
             snap_starts_only=bool(get_val("snap_starts_only")),
             # Muxing Settings
@@ -556,7 +552,7 @@ class AppSettings:
             correlation_snap_use_scene_changes=bool(get_val("correlation_snap_use_scene_changes")),
             # Correlation-Guided Frame Anchor Settings
             corr_anchor_fallback_mode=str(get_val("corr_anchor_fallback_mode")),
-            corr_anchor_anchor_positions=tuple(get_val("corr_anchor_anchor_positions")),
+            corr_anchor_anchor_positions=list(get_val("corr_anchor_anchor_positions")),
             corr_anchor_refine_per_line=bool(get_val("corr_anchor_refine_per_line")),
             corr_anchor_refine_workers=int(get_val("corr_anchor_refine_workers")),
             # Subtitle-Anchored Frame Snap Settings
@@ -763,16 +759,8 @@ class AppSettings:
 
         Used when settings need to be passed to subprocesses or external tools
         that expect dict-based configuration.
+
+        All fields are JSON-compatible (str, int, float, bool, list, None),
+        so we can use dataclasses.asdict() directly.
         """
-        result = {}
-        for f in fields(self):
-            value = getattr(self, f.name)
-            # Convert enums to their string values
-            if hasattr(value, "value"):
-                result[f.name] = value.value
-            # Convert tuples to lists for JSON
-            elif isinstance(value, tuple):
-                result[f.name] = list(value)
-            else:
-                result[f.name] = value
-        return result
+        return asdict(self)

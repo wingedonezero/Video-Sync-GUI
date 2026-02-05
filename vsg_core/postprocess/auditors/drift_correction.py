@@ -5,7 +5,6 @@ Auditor for verifying drift corrections were applied correctly.
 
 from pathlib import Path
 
-from vsg_core.models.enums import TrackType
 
 from .base import BaseAuditor
 
@@ -67,7 +66,7 @@ class DriftCorrectionAuditor(BaseAuditor):
                 for item in self.ctx.extracted_items
                 if (
                     item.track.source == source_key
-                    and item.track.type == TrackType.AUDIO
+                    and item.track.type == "audio"
                     and item.is_corrected
                     and not item.is_preserved
                 )
@@ -109,7 +108,7 @@ class DriftCorrectionAuditor(BaseAuditor):
                     for p in self.ctx.extracted_items
                     if (
                         p.track.source == source_key
-                        and p.track.type == TrackType.AUDIO
+                        and p.track.type == "audio"
                         and p.is_preserved
                     )
                 ]

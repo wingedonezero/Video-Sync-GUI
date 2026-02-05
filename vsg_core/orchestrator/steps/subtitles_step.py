@@ -29,7 +29,6 @@ if TYPE_CHECKING:
     from vsg_core.orchestrator.steps.context import Context
     from vsg_core.subtitles.data import SubtitleData
 
-from vsg_core.models.enums import TrackType
 from vsg_core.models.media import StreamProps, Track
 
 
@@ -149,7 +148,7 @@ class SubtitlesStep:
             self._run_video_verified_per_source(ctx, runner, source1_file)
 
         for item in ctx.extracted_items:
-            if item.track.type != TrackType.SUBTITLES:
+            if item.track.type != "subtitles":
                 continue
 
             # NOTE: user_modified_path is NOT used during job execution
@@ -1194,7 +1193,7 @@ class SubtitlesStep:
         # Find unique sources that have subtitle tracks
         sources_with_subs = set()
         for item in ctx.extracted_items:
-            if item.track.type == TrackType.SUBTITLES:
+            if item.track.type == "subtitles":
                 source_key = (
                     item.sync_to
                     if item.track.source == "External"

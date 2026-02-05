@@ -347,8 +347,8 @@ def _snap_chapter_times_inplace(
 ):
     import bisect
 
-    # snap_mode should always be a SnapMode enum, get its string value
-    mode = settings.snap_mode.value
+    # snap_mode is a string literal type
+    mode = settings.snap_mode
     threshold_ms = settings.snap_threshold_ms
     starts_only = settings.snap_starts_only
     threshold_ns = threshold_ms * 1_000_000
