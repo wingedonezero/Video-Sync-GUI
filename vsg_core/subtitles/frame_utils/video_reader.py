@@ -712,45 +712,16 @@ class VideoReader:
 
             if is_soft_telecine_mismatch:
                 self.is_soft_telecine = True
+                # Don't modify the clip - just override fps for calculations
+                # The actual film content is 23.976fps, FFMS2's VFR timestamps are just display hints
+                # Frame indices are still correct (sequential film frames)
+                self.target_fps = 24000 / 1001  # 23.976fps - the actual film fps
                 self.runner._log_message(
                     f"[FrameUtils] Soft-telecine detected: ffprobe={ffprobe_fps:.3f}fps, "
                     f"FFMS2={ffms2_fps:.3f}fps"
                 )
                 self.runner._log_message(
-                    "[FrameUtils] Applying AssumeFPS to normalize to 23.976fps"
-                )
-
-                # Apply AssumeFPS to normalize to proper 23.976fps
-                clip = core.std.AssumeFPS(clip, fpsnum=24000, fpsden=1001)
-                self.fps_normalized = True
-
-                self.runner._log_message(
-                    f"[FrameUtils] AssumeFPS applied: {ffms2_fps:.3f}fps -> 24000/1001 (23.976fps)"
-                )
-            # Also handle case detected by video_properties (r_frame_rate vs avg_frame_rate)
-            elif self.is_soft_telecine and self.target_fps is not None:
-                # Store the original (wrong) FPS before normalization
-                original_vfr_fps = ffms2_fps
-
-                # Convert target_fps to fraction (24000/1001 for 23.976fps)
-                if abs(self.target_fps - 23.976) < 0.01:
-                    fps_num, fps_den = 24000, 1001
-                elif abs(self.target_fps - 29.97) < 0.01:
-                    fps_num, fps_den = 30000, 1001
-                elif abs(self.target_fps - 25.0) < 0.01:
-                    fps_num, fps_den = 25, 1
-                else:
-                    # Generic conversion
-                    fps_num = int(self.target_fps * 1000)
-                    fps_den = 1000
-
-                # Apply AssumeFPS to fix the timing
-                clip = core.std.AssumeFPS(clip, fpsnum=fps_num, fpsden=fps_den)
-                self.fps_normalized = True
-
-                self.runner._log_message(
-                    f"[FrameUtils] AssumeFPS applied: {original_vfr_fps:.3f}fps -> "
-                    f"{fps_num}/{fps_den} ({fps_num / fps_den:.3f}fps)"
+                    "[FrameUtils] Will use 23.976fps for calculations (actual film rate)"
                 )
 
             # Apply IVTC or deinterlacing based on content type
@@ -768,13 +739,19 @@ class VideoReader:
             self.vs_clip = clip
 
             # Get video properties
-            self.fps = self.vs_clip.fps_num / self.vs_clip.fps_den
+            # For soft-telecine, use the actual film fps (23.976) instead of VFR average
+            if self.is_soft_telecine and self.target_fps:
+                self.fps = self.target_fps  # Use 23.976fps for calculations
+            else:
+                self.fps = self.vs_clip.fps_num / self.vs_clip.fps_den
             self.use_vapoursynth = True
 
             # Build status message
             processing_status = ""
-            if self.fps_normalized:
-                processing_status = ", FPS normalized (soft-telecine fix)"
+            if self.is_soft_telecine:
+                processing_status = (
+                    f", soft-telecine (using {self.fps:.3f}fps for calc)"
+                )
             if self.ivtc_applied:
                 processing_status += (
                     f", IVTC applied ({self.original_fps:.3f} -> {self.fps:.3f}fps)"
