@@ -260,6 +260,10 @@ class VideoReader:
         self.content_type = content_type  # 'progressive', 'interlaced', 'telecine'
         self.apply_ivtc = apply_ivtc  # Whether to apply IVTC for telecine content
         self.ivtc_applied = False  # Whether IVTC was actually applied
+        self.is_vfr = False  # True if VFR container detected
+        self.is_soft_telecine = False  # True if VFR from soft-telecine removal
+        self.target_fps = None  # Target FPS after normalization (for soft-telecine)
+        self.fps_normalized = False  # Whether AssumeFPS was applied
 
         # Detect video properties for interlacing info
         self._detect_interlacing()
@@ -337,7 +341,7 @@ class VideoReader:
             )
 
     def _detect_interlacing(self):
-        """Detect if video is interlaced using ffprobe."""
+        """Detect if video is interlaced and check for VFR/soft-telecine."""
         try:
             from .video_properties import detect_video_properties
 
@@ -345,7 +349,21 @@ class VideoReader:
             self.is_interlaced = props.get("interlaced", False)
             self.field_order = props.get("field_order", "progressive")
 
-            if self.is_interlaced:
+            # Capture VFR and soft-telecine info
+            self.is_vfr = props.get("is_vfr", False)
+            self.is_soft_telecine = props.get("is_soft_telecine", False)
+
+            if self.is_soft_telecine:
+                # Store the original (correct) FPS for normalization
+                self.target_fps = props.get("original_fps", 23.976)
+                self.runner._log_message(
+                    f"[FrameUtils] Soft-telecine detected: container={props.get('fps', 0):.3f}fps, "
+                    f"original={self.target_fps:.3f}fps"
+                )
+                self.runner._log_message(
+                    "[FrameUtils] Will apply AssumeFPS to normalize timing"
+                )
+            elif self.is_interlaced:
                 self.runner._log_message(
                     f"[FrameUtils] Interlaced content detected: {self.field_order.upper()}"
                 )
@@ -669,6 +687,33 @@ class VideoReader:
                 source=str(self.video_path), cachefile=str(index_path)
             )
 
+            # Apply AssumeFPS for soft-telecine content (VFR from MakeMKV/mkvmerge)
+            # This normalizes the wonky VFR timing back to the correct CFR rate
+            if self.is_soft_telecine and self.target_fps is not None:
+                # Store the original (wrong) FPS before normalization
+                original_vfr_fps = clip.fps_num / clip.fps_den
+
+                # Convert target_fps to fraction (24000/1001 for 23.976fps)
+                if abs(self.target_fps - 23.976) < 0.01:
+                    fps_num, fps_den = 24000, 1001
+                elif abs(self.target_fps - 29.97) < 0.01:
+                    fps_num, fps_den = 30000, 1001
+                elif abs(self.target_fps - 25.0) < 0.01:
+                    fps_num, fps_den = 25, 1
+                else:
+                    # Generic conversion
+                    fps_num = int(self.target_fps * 1000)
+                    fps_den = 1000
+
+                # Apply AssumeFPS to fix the timing
+                clip = core.std.AssumeFPS(clip, fpsnum=fps_num, fpsden=fps_den)
+                self.fps_normalized = True
+
+                self.runner._log_message(
+                    f"[FrameUtils] AssumeFPS applied: {original_vfr_fps:.3f}fps -> "
+                    f"{fps_num}/{fps_den} ({fps_num / fps_den:.3f}fps)"
+                )
+
             # Apply IVTC or deinterlacing based on content type
             # Priority: IVTC for telecine > deinterlace for interlaced > passthrough
             if self._should_apply_ivtc():
@@ -689,16 +734,18 @@ class VideoReader:
 
             # Build status message
             processing_status = ""
+            if self.fps_normalized:
+                processing_status = ", FPS normalized (soft-telecine fix)"
             if self.ivtc_applied:
-                processing_status = (
+                processing_status += (
                     f", IVTC applied ({self.original_fps:.3f} -> {self.fps:.3f}fps)"
                 )
             elif self.deinterlace_applied:
-                processing_status = (
+                processing_status += (
                     f", deinterlaced with {self._get_deinterlace_method()}"
                 )
             elif self.is_interlaced and self.deinterlace_method == "none":
-                processing_status = ", interlaced (deinterlace disabled)"
+                processing_status += ", interlaced (deinterlace disabled)"
 
             self.runner._log_message(
                 f"[FrameUtils] VapourSynth ready! Using persistent index cache (FPS: {self.fps:.3f}{processing_status})"

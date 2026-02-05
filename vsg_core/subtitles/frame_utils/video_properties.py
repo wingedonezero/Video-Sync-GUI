@@ -115,6 +115,10 @@ def detect_video_properties(video_path: str, runner) -> dict[str, Any]:
     props = {
         "fps": 23.976,
         "fps_fraction": (24000, 1001),
+        "original_fps": None,  # Original frame rate for VFR soft-telecine content
+        "original_fps_fraction": None,  # Original as fraction (num, denom)
+        "is_vfr": False,  # True if variable frame rate detected
+        "is_soft_telecine": False,  # True if VFR from soft-telecine removal
         "interlaced": False,
         "field_order": "progressive",
         "scan_type": "progressive",
@@ -176,16 +180,49 @@ def detect_video_properties(video_path: str, runner) -> dict[str, Any]:
         stream = data["streams"][0]
         props["detection_source"] = "ffprobe"
 
-        # Parse FPS from r_frame_rate (more reliable than avg_frame_rate)
+        # Parse FPS from r_frame_rate (stream's "real" frame rate)
+        # and avg_frame_rate (container's calculated average)
         r_frame_rate = stream.get("r_frame_rate", "24000/1001")
+        avg_frame_rate = stream.get("avg_frame_rate", r_frame_rate)
+
+        # Parse r_frame_rate (original/real frame rate)
         if "/" in r_frame_rate:
-            num, denom = r_frame_rate.split("/")
-            num, denom = int(num), int(denom)
-            props["fps"] = num / denom
-            props["fps_fraction"] = (num, denom)
+            r_num, r_denom = r_frame_rate.split("/")
+            r_num, r_denom = int(r_num), int(r_denom)
+            r_fps = r_num / r_denom if r_denom != 0 else 23.976
+            r_fps_fraction = (r_num, r_denom)
         else:
-            props["fps"] = float(r_frame_rate)
-            props["fps_fraction"] = (int(float(r_frame_rate) * 1000), 1000)
+            r_fps = float(r_frame_rate) if r_frame_rate else 23.976
+            r_fps_fraction = (int(r_fps * 1000), 1000)
+
+        # Parse avg_frame_rate (container average)
+        if "/" in avg_frame_rate:
+            a_num, a_denom = avg_frame_rate.split("/")
+            a_num, a_denom = int(a_num), int(a_denom)
+            a_fps = a_num / a_denom if a_denom != 0 else r_fps
+        else:
+            a_fps = float(avg_frame_rate) if avg_frame_rate else r_fps
+
+        # Detect VFR: significant difference between r_frame_rate and avg_frame_rate
+        # This happens when MakeMKV/mkvmerge removes soft-telecine pulldown
+        fps_diff_pct = abs(r_fps - a_fps) / r_fps * 100 if r_fps > 0 else 0
+
+        if fps_diff_pct > 1.0:
+            # Significant difference indicates VFR container
+            props["is_vfr"] = True
+            props["fps"] = a_fps  # Container reports this fps
+            props["fps_fraction"] = (int(a_fps * 1000), 1000)
+            props["original_fps"] = r_fps  # The original stream fps
+            props["original_fps_fraction"] = r_fps_fraction
+
+            # Check if this is soft-telecine removal (original ~23.976fps, container ~24.x fps)
+            # This happens when MakeMKV removes 2:3 pulldown flags from DVD
+            if abs(r_fps - 23.976) < 0.1 and 24.0 < a_fps < 25.0:
+                props["is_soft_telecine"] = True
+        else:
+            # CFR or very close rates
+            props["fps"] = r_fps
+            props["fps_fraction"] = r_fps_fraction
 
         # Parse resolution
         props["width"] = stream.get("width", 1920)
@@ -257,9 +294,18 @@ def detect_video_properties(video_path: str, runner) -> dict[str, Any]:
             props["content_type"] = "progressive"
 
         # Log detected properties
-        runner._log_message(
-            f"[VideoProps] FPS: {props['fps']:.3f} ({props['fps_fraction'][0]}/{props['fps_fraction'][1]})"
-        )
+        if props["is_vfr"]:
+            runner._log_message(
+                f"[VideoProps] FPS: {props['fps']:.3f} (VFR avg), Original: {props['original_fps']:.3f} ({props['original_fps_fraction'][0]}/{props['original_fps_fraction'][1]})"
+            )
+            if props["is_soft_telecine"]:
+                runner._log_message(
+                    "[VideoProps] NOTE: Soft-telecine removal detected (MakeMKV/mkvmerge created VFR)"
+                )
+        else:
+            runner._log_message(
+                f"[VideoProps] FPS: {props['fps']:.3f} ({props['fps_fraction'][0]}/{props['fps_fraction'][1]})"
+            )
         runner._log_message(
             f"[VideoProps] Resolution: {props['width']}x{props['height']}"
         )
