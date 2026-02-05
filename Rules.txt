@@ -87,7 +87,7 @@ class MKVTrackDict(TypedDict):
 
 # Parse external → convert to internal dataclass
 def parse_track(raw: MKVTrackDict) -> Track:
-    return Track(id=raw["id"], track_type=TrackType(raw["type"]), ...)
+    return Track(id=raw["id"], type=raw["type"].lower(), ...)  # type is now a string
 ```
 
 ### 7d) Pydantic for validated external input
@@ -101,11 +101,38 @@ Use stdlib dataclasses for:
 - Hot paths (performance-sensitive code)
 - Simple value objects
 
+### 7e) Literal types over Enums for serialized fields
+For fields that get serialized to JSON (AppSettings, config), use Literal types instead of Enums:
+
+```python
+# In vsg_core/models/types.py - shared Literal type aliases
+from typing import Literal
+
+TrackTypeStr = Literal["video", "audio", "subtitles"]
+SnapModeStr = Literal["previous", "nearest"]
+
+# In dataclasses - use Literal types directly
+@dataclass(slots=True)
+class AppSettings:
+    snap_mode: SnapModeStr = "previous"  # NOT an Enum
+
+@dataclass(frozen=True, slots=True)
+class Track:
+    type: TrackTypeStr  # NOT an Enum
+```
+
+**Why Literal over Enum:**
+- JSON-native: No conversion code needed (strings serialize directly)
+- Type safety: IDE autocomplete + type checkers catch invalid values
+- Simpler: No `.value` access, no boundary conversion bugs
+
+**Rule:** All AppSettings fields must be JSON-native types: `str`, `int`, `float`, `bool`, `list`, `None`
+
 ## 8) Type organization (hybrid model)
 
 ### Shared types (cross-module): `vsg_core/models/`
 Types imported by 2+ unrelated modules belong here:
-- `enums.py` - All enums (TrackType, AnalysisMode, etc.)
+- `types.py` - Literal type aliases (TrackTypeStr, AnalysisModeStr, SnapModeStr)
 - `media.py` - Track, StreamProps, Attachment
 - `jobs.py` - JobSpec, PlanItem, MergePlan, Delays
 - `settings.py` - AppSettings
