@@ -6,6 +6,8 @@ import json
 import sys
 from pathlib import Path
 
+from vsg_core.models.settings import AppSettings
+
 from . import run_ocr_unified
 
 JSON_PREFIX = "__VSG_UNIFIED_OCR_JSON__ "
@@ -46,7 +48,9 @@ def main() -> int:
 
     try:
         with open(config_path, encoding="utf-8") as f:
-            config = json.load(f)
+            config_dict = json.load(f)
+        # Convert dict to AppSettings for run_ocr_unified
+        settings = AppSettings(**config_dict)
     except Exception as exc:
         payload = {"success": False, "error": f"Failed to load config JSON: {exc}"}
         print(f"{JSON_PREFIX}{json.dumps(payload)}", flush=True)
@@ -60,7 +64,7 @@ def main() -> int:
             args.lang,
             runner,
             {},
-            config,
+            settings,
             work_dir=work_dir,
             logs_dir=logs_dir,
             track_id=args.track_id,
