@@ -865,6 +865,9 @@ def _measure_frame_offset_quality_static(
     distances = []
     match_details = []
 
+    # Debug: log VFR frame differences once per run (only at offset 0)
+    vfr_debug_logged = False
+
     for checkpoint_ms in checkpoint_times:
         # Source frame at checkpoint time
         # For soft-telecine VFR sources, use VideoTimestamps to get correct frame index
@@ -877,6 +880,15 @@ def _measure_frame_offset_quality_static(
         )
         if vfr_frame is not None:
             source_frame_idx = vfr_frame
+            # Debug: show VFR vs CFR frame difference (only once at offset 0)
+            if frame_offset == 0 and not vfr_debug_logged:
+                cfr_frame_would_be = int(checkpoint_ms / frame_duration_ms)
+                frame_diff = source_frame_idx - cfr_frame_would_be
+                log(
+                    f"[VideoVerified] VFR→CFR frame mapping at {checkpoint_ms:.0f}ms: "
+                    f"VFR={source_frame_idx}, CFR={cfr_frame_would_be} (diff={frame_diff})"
+                )
+                vfr_debug_logged = True
         else:
             # CFR: use standard calculation (unchanged)
             source_frame_idx = int(checkpoint_ms / frame_duration_ms)
