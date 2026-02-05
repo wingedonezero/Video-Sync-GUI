@@ -1,7 +1,6 @@
 # vsg_core/mux/options_builder.py
 from typing import TYPE_CHECKING, Optional
 
-from ..models.enums import TrackType
 from ..models.jobs import MergePlan, PlanItem
 from ..models.settings import AppSettings
 
@@ -28,19 +27,19 @@ class MkvmergeOptionsBuilder:
         preserved_audio = [
             item
             for item in plan.items
-            if item.is_preserved and item.track.type == TrackType.AUDIO
+            if item.is_preserved and item.track.type == "audio"
         ]
         preserved_subs = [
             item
             for item in plan.items
-            if item.is_preserved and item.track.type == TrackType.SUBTITLES
+            if item.is_preserved and item.track.type == "subtitles"
         ]
 
         # Insert preserved audio tracks after the last main audio track
         if preserved_audio:
             last_audio_idx = -1
             for i, item in enumerate(final_items):
-                if item.track.type == TrackType.AUDIO:
+                if item.track.type == "audio":
                     last_audio_idx = i
             # Correctly insert the list of preserved items
             if last_audio_idx != -1:
@@ -52,7 +51,7 @@ class MkvmergeOptionsBuilder:
         if preserved_subs:
             last_sub_idx = -1
             for i, item in enumerate(final_items):
-                if item.track.type == TrackType.SUBTITLES:
+                if item.track.type == "subtitles":
                     last_sub_idx = i
             # Correctly insert the list of preserved items
             if last_sub_idx != -1:
@@ -85,19 +84,19 @@ class MkvmergeOptionsBuilder:
             frame_adj = item.frame_adjusted
 
             # Determine reason for delay value
-            if tr.source == "Source 1" and tr.type == TrackType.VIDEO:
+            if tr.source == "Source 1" and tr.type == "video":
                 reason = "global_shift_only (video defines timeline)"
-            elif tr.source == "Source 1" and tr.type == TrackType.AUDIO:
+            elif tr.source == "Source 1" and tr.type == "audio":
                 reason = f"container_delay({round(item.container_delay_ms)}ms) + global_shift({plan.delays.global_shift_ms}ms)"
-            elif tr.type == TrackType.SUBTITLES and stepping_adj:
+            elif tr.type == "subtitles" and stepping_adj:
                 reason = "stepping_adjusted=True (delay embedded in subtitle file)"
-            elif tr.type == TrackType.SUBTITLES and frame_adj:
+            elif tr.type == "subtitles" and frame_adj:
                 reason = "frame_adjusted=True (delay embedded in subtitle file)"
             else:
                 reason = f"source_delays_ms[{sync_key}]"
 
             # DIAGNOSTIC: Log the delay calculation for subtitle tracks
-            if tr.type == TrackType.SUBTITLES:
+            if tr.type == "subtitles":
                 raw_delay = (
                     plan.delays.source_delays_ms.get(sync_key, 0) if plan.delays else 0
                 )
@@ -158,7 +157,7 @@ class MkvmergeOptionsBuilder:
                     tokens += ["--remove-dialog-normalization-gain", "0"]
 
             # NEW: Preserve original aspect ratio for video tracks
-            if tr.type == TrackType.VIDEO and item.aspect_ratio:
+            if tr.type == "video" and item.aspect_ratio:
                 tokens += ["--aspect-ratio", f"0:{item.aspect_ratio}"]
 
             if not item.extracted_path:
@@ -217,7 +216,7 @@ class MkvmergeOptionsBuilder:
         tr = item.track
 
         # Source 1 AUDIO: Preserve individual container delays + add global shift
-        if tr.source == "Source 1" and tr.type == TrackType.AUDIO:
+        if tr.source == "Source 1" and tr.type == "audio":
             # Use round() for proper rounding of negative values
             # int() truncates toward zero: int(-1001.825) = -1001 (wrong)
             # round() rounds to nearest: round(-1001.825) = -1002 (correct)
@@ -228,7 +227,7 @@ class MkvmergeOptionsBuilder:
 
         # Source 1 VIDEO: ONLY apply global shift (IGNORE container delays)
         # Video defines the timeline - we don't preserve its container delays
-        if tr.source == "Source 1" and tr.type == TrackType.VIDEO:
+        if tr.source == "Source 1" and tr.type == "video":
             return plan.delays.global_shift_ms
 
         # All other tracks: Use the correlation delay from analysis
@@ -242,14 +241,14 @@ class MkvmergeOptionsBuilder:
         # If subtitle timestamps were already adjusted for stepping corrections,
         # the base delay + stepping offsets are baked into the subtitle file.
         # Don't apply additional delay via mkvmerge to avoid double-applying.
-        if tr.type == TrackType.SUBTITLES and item.stepping_adjusted:
+        if tr.type == "subtitles" and item.stepping_adjusted:
             return 0
 
         # SPECIAL CASE: Subtitles with frame-perfect sync applied
         # If subtitle timestamps were already adjusted with frame-perfect sync,
         # the delay is baked into the subtitle file with frame-snapping applied.
         # Don't apply additional delay via mkvmerge to avoid double-applying.
-        if tr.type == TrackType.SUBTITLES and item.frame_adjusted:
+        if tr.type == "subtitles" and item.frame_adjusted:
             return 0
 
         sync_key = item.sync_to if tr.source == "External" else tr.source

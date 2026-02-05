@@ -2,7 +2,6 @@
 import re
 from pathlib import Path
 
-from vsg_core.models.enums import TrackType
 
 from .base import BaseAuditor
 
@@ -31,7 +30,7 @@ class SubtitleFormatsAuditor(BaseAuditor):
         subtitle_items = [
             item
             for item in self.ctx.extracted_items
-            if item.track.type == TrackType.SUBTITLES
+            if item.track.type == "subtitles"
         ]
 
         if not subtitle_items:

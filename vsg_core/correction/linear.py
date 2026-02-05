@@ -5,7 +5,6 @@ import copy
 import json
 from typing import TYPE_CHECKING
 
-from ..models.enums import TrackType
 from ..models.media import StreamProps, Track
 
 if TYPE_CHECKING:
@@ -54,7 +53,7 @@ def run_linear_correction(ctx: Context, runner: CommandRunner) -> Context:
             item
             for item in ctx.extracted_items
             if item.track.source == source_key
-            and item.track.type == TrackType.AUDIO
+            and item.track.type == "audio"
             and not item.is_preserved
         ]
 

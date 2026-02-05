@@ -2534,8 +2534,7 @@ class ChaptersTab(QWidget):
             "Adjust chapter timestamps to align with the nearest video keyframe, which can improve seeking performance."
         )
         snap_mode = QComboBox()
-        # Use addItem with data to properly handle enum values
-        # The data value matches the SnapMode enum's .value for proper serialization
+        # Store string value as data for combo box selection
         snap_mode.addItem("previous", "previous")
         snap_mode.addItem("nearest", "nearest")
         snap_mode.setToolTip(

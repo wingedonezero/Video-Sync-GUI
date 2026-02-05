@@ -3,7 +3,6 @@ import json
 import math
 from pathlib import Path
 
-from vsg_core.models.enums import TrackType
 
 from .base import BaseAuditor
 
@@ -45,7 +44,7 @@ class AudioSyncAuditor(BaseAuditor):
         audio_plan_items = [
             item
             for item in self.ctx.extracted_items
-            if item.track.type == TrackType.AUDIO
+            if item.track.type == "audio"
         ]
 
         # Get audio tracks from final file

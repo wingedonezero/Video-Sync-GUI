@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-from .enums import TrackType
+from .types import TrackTypeStr
 
 
 @dataclass(frozen=True, slots=True)
@@ -16,7 +16,7 @@ class StreamProps:
 class Track:
     source: str  # Was SourceRole, now a string like "Source 1"
     id: int  # mkvmerge track id (per container)
-    type: TrackType
+    type: TrackTypeStr
     props: StreamProps
 
 

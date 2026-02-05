@@ -1,7 +1,6 @@
 # vsg_core/postprocess/auditors/video_metadata.py
 from pathlib import Path
 
-from vsg_core.models.enums import TrackType
 
 from .base import BaseAuditor
 
@@ -24,7 +23,7 @@ class VideoMetadataAuditor(BaseAuditor):
         video_items = [
             item
             for item in self.ctx.extracted_items
-            if item.track.type == TrackType.VIDEO
+            if item.track.type == "video"
         ]
 
         for plan_item in video_items:

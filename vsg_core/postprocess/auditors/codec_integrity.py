@@ -1,7 +1,6 @@
 # vsg_core/postprocess/auditors/codec_integrity.py
 from pathlib import Path
 
-from vsg_core.models.enums import TrackType
 
 from .base import BaseAuditor
 
@@ -41,7 +40,7 @@ class CodecIntegrityAuditor(BaseAuditor):
                 expected_codec = "FLAC"
 
             # If subtitles were processed, determine the final expected format
-            if plan_item.track.type == TrackType.SUBTITLES:
+            if plan_item.track.type == "subtitles":
                 if plan_item.is_preserved:
                     # This is a preserved original, so the expected codec IS the original codec.
                     # No change is needed to expected_codec.

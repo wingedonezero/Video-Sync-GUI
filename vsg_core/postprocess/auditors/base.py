@@ -3,7 +3,6 @@ import json
 from pathlib import Path
 
 from vsg_core.io.runner import CommandRunner
-from vsg_core.models.enums import TrackType
 from vsg_core.models.jobs import PlanItem
 from vsg_core.orchestrator.steps.context import Context
 
@@ -192,7 +191,7 @@ class BaseAuditor:
 
         # Source 1 tracks use their original container delays PLUS the global shift
         # BUT: Only for audio/video, never for subtitles
-        if tr.source == "Source 1" and tr.type != TrackType.SUBTITLES:
+        if tr.source == "Source 1" and tr.type != "subtitles":
             return float(plan_item.container_delay_ms + global_shift)
 
         # For other sources, the delay from the context already includes the global shift

@@ -150,7 +150,11 @@ class AppConfig:
             if not isinstance(value, str):
                 return False, f"{key} must be string, got {type(value).__name__}"
 
-        elif key in ("sync_mode", "analysis_mode", "delay_selection_mode"):
+        elif key in ("sync_mode", "delay_selection_mode"):
+            if not isinstance(value, str):
+                return False, f"{key} must be string, got {type(value).__name__}"
+
+        elif key in ("analysis_mode", "snap_mode"):
             if not isinstance(value, str):
                 return False, f"{key} must be string, got {type(value).__name__}"
 

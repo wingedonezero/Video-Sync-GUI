@@ -10,7 +10,6 @@ content in the first few seconds of the video.
 
 from pathlib import Path
 
-from vsg_core.models.enums import TrackType
 
 from .base import BaseAuditor
 
@@ -38,7 +37,7 @@ class SubtitleClampingAuditor(BaseAuditor):
 
         # Check all subtitle items for clamping info
         for item in self.ctx.extracted_items:
-            if item.track.type != TrackType.SUBTITLES:
+            if item.track.type != "subtitles":
                 continue
 
             if not hasattr(item, "clamping_info") or not item.clamping_info:

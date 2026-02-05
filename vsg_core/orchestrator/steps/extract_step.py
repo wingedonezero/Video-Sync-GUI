@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from vsg_core.extraction.tracks import extract_tracks, get_stream_info_with_delays
-from vsg_core.models.enums import TrackType
 from vsg_core.models.jobs import PlanItem
 from vsg_core.models.media import StreamProps, Track
 
@@ -177,7 +176,7 @@ class ExtractStep:
                 track_model = Track(
                     source="External",
                     id=0,  # Dummy ID
-                    type=TrackType.SUBTITLES,
+                    type="subtitles",
                     props=StreamProps(
                         codec_id=sel.get("codec_id", ""),
                         lang=sel.get("lang", "und"),
@@ -203,7 +202,7 @@ class ExtractStep:
                 track_model = Track(
                     source=source,
                     id=int(trk["id"]),
-                    type=TrackType(trk.get("type", "video")),
+                    type=trk.get("type", "video"),
                     props=StreamProps(
                         codec_id=trk.get("codec_id", "") or "",
                         lang=trk.get("lang", "und") or "und",
@@ -218,7 +217,7 @@ class ExtractStep:
 
                 # Get the aspect ratio for video tracks
                 aspect_ratio = None
-                if track_model.type == TrackType.VIDEO:
+                if track_model.type == "video":
                     aspect_ratio = source_aspect_ratios.get(source, {}).get(
                         int(trk["id"])
                     )

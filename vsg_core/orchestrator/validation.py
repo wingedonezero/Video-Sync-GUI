@@ -6,7 +6,6 @@ Ensures each step completed successfully before proceeding.
 
 from pathlib import Path
 
-from vsg_core.models.enums import TrackType
 from vsg_core.orchestrator.steps.context import Context
 
 
@@ -94,7 +93,7 @@ class StepValidator:
                 for item in ctx.extracted_items
                 if (
                     item.track.source == source_key
-                    and item.track.type == TrackType.AUDIO
+                    and item.track.type == "audio"
                     and item.is_corrected
                     and not item.is_preserved
                 )
@@ -123,7 +122,7 @@ class StepValidator:
                 for item in ctx.extracted_items
                 if (
                     item.track.source == source_key
-                    and item.track.type == TrackType.AUDIO
+                    and item.track.type == "audio"
                     and item.is_corrected
                     and not item.is_preserved
                 )
@@ -163,7 +162,7 @@ class StepValidator:
                 for item in ctx.extracted_items
                 if (
                     item.track.source == source_key
-                    and item.track.type == TrackType.AUDIO
+                    and item.track.type == "audio"
                     and item.is_corrected
                     and not item.is_preserved
                 )
@@ -202,7 +201,7 @@ class StepValidator:
         subtitle_items = [
             item
             for item in ctx.extracted_items
-            if item.track.type == TrackType.SUBTITLES
+            if item.track.type == "subtitles"
         ]
 
         for item in subtitle_items:

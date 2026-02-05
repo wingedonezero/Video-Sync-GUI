@@ -2,13 +2,14 @@
 from collections import Counter
 
 from .context_types import ManualLayoutItem
-from .enums import TrackType
 from .jobs import PlanItem
 from .media import StreamProps, Track
+from .types import TrackTypeStr
 
 
-def _type_from_str(s: str) -> TrackType:
-    return TrackType(s.lower())
+def _type_from_str(s: str) -> TrackTypeStr:
+    """Convert a string to a valid TrackTypeStr."""
+    return s.lower()  # type: ignore  # Returns Literal type
 
 
 def tracks_from_dialog_info(
@@ -86,12 +87,12 @@ def signature_for_auto_apply(
     """
     if not strict:
         return Counter(
-            f"{tr.source}_{tr.type.value}"
+            f"{tr.source}_{tr.type}"
             for tracks in track_info.values()
             for tr in tracks
         )
     return Counter(
-        f"{tr.source}_{tr.type.value}_{(tr.props.lang or 'und').lower()}_{(tr.props.codec_id or '').lower()}"
+        f"{tr.source}_{tr.type}_{(tr.props.lang or 'und').lower()}_{(tr.props.codec_id or '').lower()}"
         for tracks in track_info.values()
         for tr in tracks
     )

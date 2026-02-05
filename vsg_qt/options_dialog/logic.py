@@ -97,15 +97,13 @@ class OptionsLogic:
             except (ValueError, TypeError):
                 pass  # Keep current value if coercion fails
         elif isinstance(widget, QComboBox):
-            # Handle Enum values by using their .value property
-            search_value = value.value if hasattr(value, "value") else value
             # Try to find item by data first (for combos with stored integer/data values)
-            index = widget.findData(search_value)
+            index = widget.findData(value)
             if index >= 0:
                 widget.setCurrentIndex(index)
             else:
                 # Fallback to text matching for combos without custom data
-                widget.setCurrentText(str(search_value))
+                widget.setCurrentText(str(value))
         elif isinstance(widget, QLineEdit):
             widget.setText(str(value))
         elif (

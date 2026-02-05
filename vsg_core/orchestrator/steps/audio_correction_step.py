@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 from vsg_core.correction.linear import run_linear_correction
 from vsg_core.correction.pal import run_pal_correction
 from vsg_core.correction.stepping import run_stepping_correction
-from vsg_core.models.enums import TrackType
 
 if TYPE_CHECKING:
     from vsg_core.io.runner import CommandRunner
@@ -61,7 +60,7 @@ class AudioCorrectionStep:
                 for item in ctx.extracted_items
                 if (
                     item.track.source == source_key
-                    and item.track.type == TrackType.AUDIO
+                    and item.track.type == "audio"
                     and not item.is_preserved
                 )
             ]
@@ -105,7 +104,7 @@ class AudioCorrectionStep:
                 for item in ctx.extracted_items
                 if (
                     item.track.source == source_key
-                    and item.track.type == TrackType.AUDIO
+                    and item.track.type == "audio"
                     and not item.is_preserved
                 )
             ]
@@ -149,7 +148,7 @@ class AudioCorrectionStep:
                 for item in ctx.extracted_items
                 if (
                     item.track.source == source_key
-                    and item.track.type == TrackType.AUDIO
+                    and item.track.type == "audio"
                     and not item.is_preserved
                 )
             ]
