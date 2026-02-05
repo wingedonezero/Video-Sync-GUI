@@ -142,13 +142,21 @@ def detect_pulldown(
         rff_pct = (
             (scan.rff_count / scan.total_pictures * 100.0) if scan.total_pictures else 0
         )
-        log(
-            f"[Pulldown] Soft pulldown detected and safe to remove: "
-            f"{scan.rff_count}/{scan.total_pictures} frames have RFF ({rff_pct:.1f}%), "
-            f"{source_fps:.3f} fps → {target_fps:.3f} fps"
-            if target_fps
-            else f"[Pulldown] Soft pulldown detected: {scan.rff_count} RFF frames"
-        )
+        if target_fps:
+            log(
+                f"[Pulldown] Soft pulldown detected and safe to remove: "
+                f"{scan.rff_count}/{scan.total_pictures} frames have RFF ({rff_pct:.1f}%), "
+                f"{source_fps:.3f} fps -> {target_fps:.3f} fps, "
+                f"{scan.progressive_pct:.1f}% progressive"
+            )
+        else:
+            log(f"[Pulldown] Soft pulldown detected: {scan.rff_count} RFF frames")
+        if scan.non_progressive_count > 0:
+            log(
+                f"[Pulldown] Note: {scan.non_progressive_count} non-progressive "
+                f"frames ({100.0 - scan.progressive_pct:.1f}%) — likely interlaced "
+                f"inserts (credits/OP/ED). RFF will be cleared on all frames."
+            )
     else:
         log(f"[Pulldown] Pulldown detected but NOT safe to remove: {scan.reason}")
 

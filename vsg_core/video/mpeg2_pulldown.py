@@ -128,9 +128,10 @@ class PulldownScanResult:
     is_safe_to_remove: bool  # All safety checks passed
     total_pictures: int
     rff_count: int  # Frames with repeat_first_field set
+    progressive_count: int  # Frames where progressive_frame == 1
     non_progressive_count: int  # Frames where progressive_frame != 1
+    progressive_pct: float  # Percentage of progressive frames (0-100)
     field_picture_count: int  # Frames where picture_structure != 3
-    non_frame_pred_dct_count: int  # Frames where frame_pred_frame_dct != 1
     original_frame_rate_index: int
     target_frame_rate_index: int | None
     reason: str  # Human-readable explanation if not safe
@@ -370,10 +371,19 @@ def scan_for_pulldown(es_path: Path) -> PulldownScanResult:
     Safety checks (ALL must pass for is_safe_to_remove=True):
     1. At least one sequence header with frame_rate_index 4 (29.97) or 5 (30.0)
     2. At least one picture has repeat_first_field set
-    3. ALL pictures have progressive_frame == 1
-    4. ALL pictures have picture_structure == 3 (frame picture)
-    5. ALL pictures have frame_pred_frame_dct == 1
-    6. RFF percentage is consistent with 3:2 pattern (~40% of frames)
+    3. >= 90% of pictures have progressive_frame == 1 (allows minor interlaced
+       inserts like credits/OP/ED — matches DGIndex "film percentage" concept)
+    4. ALL pictures have picture_structure == 3 (frame picture — even interlaced
+       DVD content is stored as frame pictures, not field pictures)
+    5. RFF percentage among progressive frames is consistent with 3:2 pattern
+
+    Note: frame_pred_frame_dct is NOT checked. TsMuxeR does not check it,
+    and non-progressive frames correctly have it set to 0. Checking it would
+    reject valid mixed content.
+
+    RFF is cleared unconditionally on ALL frames during removal (matching
+    TsMuxeR behavior). The few non-progressive frames get uniform timing
+    alongside the progressive majority.
     """
     data = es_path.read_bytes()
     start_codes = _find_start_codes(data)
@@ -407,6 +417,12 @@ def scan_for_pulldown(es_path: Path) -> PulldownScanResult:
                 if seq_ext is not None:
                     sequence_extensions.append(seq_ext)
 
+    # --- Pre-compute counts ---
+    total = len(pictures)
+    non_progressive = sum(1 for p in pictures if not p.progressive_frame)
+    progressive_count = total - non_progressive
+    progressive_pct = (progressive_count / total * 100.0) if total > 0 else 0.0
+
     # --- Validation ---
 
     def _fail(reason: str) -> PulldownScanResult:
@@ -414,13 +430,12 @@ def scan_for_pulldown(es_path: Path) -> PulldownScanResult:
         return PulldownScanResult(
             has_pulldown=any(p.repeat_first_field for p in pictures),
             is_safe_to_remove=False,
-            total_pictures=len(pictures),
+            total_pictures=total,
             rff_count=sum(1 for p in pictures if p.repeat_first_field),
-            non_progressive_count=sum(1 for p in pictures if not p.progressive_frame),
+            progressive_count=progressive_count,
+            non_progressive_count=non_progressive,
+            progressive_pct=progressive_pct,
             field_picture_count=sum(1 for p in pictures if p.picture_structure != 3),
-            non_frame_pred_dct_count=sum(
-                1 for p in pictures if not p.frame_pred_frame_dct
-            ),
             original_frame_rate_index=sequence_headers[0].frame_rate_index
             if sequence_headers
             else 0,
@@ -455,52 +470,59 @@ def scan_for_pulldown(es_path: Path) -> PulldownScanResult:
     if rff_count == 0:
         return _fail("No frames have repeat_first_field set — no pulldown present")
 
-    # Check 5: ALL frames must be progressive
-    non_progressive = sum(1 for p in pictures if not p.progressive_frame)
-    if non_progressive > 0:
+    # Check 5: >= 90% of frames must be progressive
+    # Real DVDs commonly have a small percentage of interlaced inserts
+    # (credits, OP/ED, chapter cards) within otherwise progressive film.
+    # DGIndex uses ~95% as its "film" threshold; we use 90% to be safe.
+    # TsMuxeR has no threshold at all — it's purely user-driven.
+    _MIN_PROGRESSIVE_PCT = 90.0
+    if progressive_pct < _MIN_PROGRESSIVE_PCT:
         return _fail(
-            f"{non_progressive}/{len(pictures)} frames are not progressive — "
-            f"this is interlaced or mixed content, not soft pulldown"
+            f"Only {progressive_pct:.1f}% of frames are progressive "
+            f"({progressive_count}/{total}). Need >= {_MIN_PROGRESSIVE_PCT:.0f}% "
+            f"to confirm this is film content with pulldown, not native interlaced."
         )
 
     # Check 6: ALL frames must be frame pictures (not field pictures)
+    # Even interlaced DVD content is stored as frame pictures (both fields
+    # interleaved in one picture). Field pictures are extremely rare on DVD.
     field_pics = sum(1 for p in pictures if p.picture_structure != 3)
     if field_pics > 0:
         return _fail(
-            f"{field_pics}/{len(pictures)} frames are field pictures — "
+            f"{field_pics}/{total} frames are field pictures — "
             f"cannot safely remove pulldown from field-structured content"
         )
 
-    # Check 7: ALL frames must have frame_pred_frame_dct set
-    non_frame_pred = sum(1 for p in pictures if not p.frame_pred_frame_dct)
-    if non_frame_pred > 0:
+    # Check 7: RFF percentage among PROGRESSIVE frames should be consistent
+    # with 3:2 pulldown. In a standard 2:3 pattern, 2 of every 5 progressive
+    # frames have RFF set = 40%. Allow a generous range to account for partial
+    # GOPs, scene changes, and the interlaced inserts we're tolerating.
+    progressive_rff = sum(
+        1 for p in pictures if p.repeat_first_field and p.progressive_frame
+    )
+    prog_rff_pct = (
+        (progressive_rff / progressive_count * 100.0) if progressive_count > 0 else 0
+    )
+    if prog_rff_pct < 20.0 or prog_rff_pct > 55.0:
         return _fail(
-            f"{non_frame_pred}/{len(pictures)} frames lack frame_pred_frame_dct — "
-            f"stream may contain interlaced-encoded frames"
-        )
-
-    # Check 8: RFF percentage should be consistent with 3:2 pulldown pattern
-    # In a standard 2:3 pattern over 5 frames, 2 have RFF set = 40%.
-    # Allow a generous range (30%-50%) to account for partial GOPs at
-    # stream boundaries and minor pattern variations.
-    rff_pct = (rff_count / len(pictures)) * 100.0
-    if rff_pct < 25.0 or rff_pct > 55.0:
-        return _fail(
-            f"RFF percentage ({rff_pct:.1f}%) outside expected range for "
-            f"3:2 pulldown (expected ~40%). Pattern may be irregular."
+            f"RFF percentage among progressive frames ({prog_rff_pct:.1f}%) "
+            f"outside expected range for 3:2 pulldown (expected ~40%). "
+            f"Pattern may be irregular."
         )
 
     return PulldownScanResult(
         has_pulldown=True,
         is_safe_to_remove=True,
-        total_pictures=len(pictures),
+        total_pictures=total,
         rff_count=rff_count,
-        non_progressive_count=0,
+        progressive_count=progressive_count,
+        non_progressive_count=non_progressive,
+        progressive_pct=progressive_pct,
         field_picture_count=0,
-        non_frame_pred_dct_count=0,
         original_frame_rate_index=original_rate_idx,
         target_frame_rate_index=target_rate_idx,
-        reason="Soft pulldown detected and safe to remove",
+        reason=f"Soft pulldown detected and safe to remove "
+        f"({progressive_pct:.1f}% progressive)",
         pictures=pictures,
         sequence_headers=sequence_headers,
         sequence_extensions=sequence_extensions,
@@ -572,15 +594,18 @@ def remove_pulldown(
     )
 
     # --- Modify picture coding extensions ---
+    # Clear RFF unconditionally on ALL frames, matching TsMuxeR behavior.
+    # For mixed content (mostly progressive with some interlaced inserts),
+    # the few interlaced frames get their RFF cleared too — they will
+    # display at the uniform 23.976 rate alongside the progressive majority.
+    # TFF is only cleared for progressive sequences (sequence-level flag).
     pictures_modified = 0
     for pic in scan.pictures:
         if pic.repeat_first_field:
-            # Clear RFF: AND the byte with the inverted mask
             data[pic.rff_byte_offset] &= pic.rff_bit_mask
             pictures_modified += 1
 
         if pic.top_field_first and is_progressive_sequence:
-            # Clear TFF only for progressive sequences
             data[pic.tff_byte_offset] &= pic.tff_bit_mask
 
     # --- Modify sequence headers: update frame_rate_index ---
