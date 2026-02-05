@@ -48,9 +48,10 @@ show_menu() {
     echo -e "  ${CYAN}8)${NC} Download EasyOCR models (for OCR)"
     echo -e "  ${CYAN}9)${NC} Download PaddleOCR models (for OCR)"
     echo -e "  ${CYAN}10)${NC} Fix PaddleOCR versions (compatibility fix)"
-    echo -e "  ${CYAN}11)${NC} Exit"
+    echo -e "  ${CYAN}11)${NC} Fix ROCm/PyTorch (AMD GPU - remove NVIDIA packages)"
+    echo -e "  ${CYAN}12)${NC} Exit"
     echo ""
-    echo -n "Enter your choice [1-11]: "
+    echo -n "Enter your choice [1-12]: "
 }
 
 # Function to check Python version and verify it works
@@ -490,6 +491,148 @@ fix_paddleocr_versions() {
     echo "Installed versions:"
     echo "  • PaddlePaddle: $paddle_version"
     echo "  • PaddleOCR: $paddleocr_version"
+}
+
+# Function to fix ROCm/PyTorch installation (remove NVIDIA packages)
+fix_rocm_pytorch() {
+    echo ""
+    echo "========================================="
+    echo "Fix ROCm/PyTorch Installation"
+    echo "========================================="
+    echo ""
+
+    if ! ensure_venv; then
+        return 1
+    fi
+
+    echo "This will:"
+    echo "  1. Remove NVIDIA CUDA packages (not needed for AMD GPUs)"
+    echo "  2. Uninstall torch, torchvision, torchaudio"
+    echo "  3. Reinstall PyTorch with ROCm support"
+    echo ""
+
+    # Check for NVIDIA packages
+    local nvidia_pkgs=$(venv_pip list 2>/dev/null | grep -i "^nvidia" | awk '{print $1}' | tr '\n' ' ')
+    local cuda_pkgs=$(venv_pip list 2>/dev/null | grep -i "^cuda-" | awk '{print $1}' | tr '\n' ' ')
+
+    if [ -n "$nvidia_pkgs" ] || [ -n "$cuda_pkgs" ]; then
+        echo -e "${YELLOW}Found NVIDIA/CUDA packages to remove:${NC}"
+        [ -n "$nvidia_pkgs" ] && echo "  $nvidia_pkgs"
+        [ -n "$cuda_pkgs" ] && echo "  $cuda_pkgs"
+        echo ""
+    else
+        echo -e "${GREEN}No NVIDIA/CUDA packages found.${NC}"
+        echo ""
+    fi
+
+    # Check current torch
+    local current_torch=$(venv_pip show torch 2>/dev/null | grep "^Version:" | cut -d' ' -f2)
+    if [ -n "$current_torch" ]; then
+        echo -e "${BLUE}Current torch version:${NC} $current_torch"
+        # Check if it has ROCm
+        "$VENV_PYTHON" -c "import torch; print(f'ROCm/HIP: {torch.version.hip}' if hasattr(torch.version, 'hip') and torch.version.hip else 'ROCm: Not detected')" 2>/dev/null || echo "ROCm: Not detected"
+        "$VENV_PYTHON" -c "import torch; print(f'CUDA available: {torch.cuda.is_available()}')" 2>/dev/null || echo "CUDA check failed"
+        echo ""
+    fi
+
+    echo "Select ROCm version to install:"
+    echo ""
+    echo -e "  ${CYAN}1)${NC} ROCm 6.2 (Stable - older systems)"
+    echo -e "  ${CYAN}2)${NC} ROCm 6.4 (Stable - recommended)"
+    echo -e "  ${CYAN}3)${NC} ROCm 7.1 (Nightly - for ROCm 7.x systems)"
+    echo -e "  ${CYAN}4)${NC} Cancel"
+    echo ""
+    echo -n "Enter your choice [1-4]: "
+    read -r rocm_choice
+
+    local rocm_url=""
+    local rocm_name=""
+    local pre_flag=""
+
+    case $rocm_choice in
+        1)
+            rocm_url="https://download.pytorch.org/whl/rocm6.2"
+            rocm_name="ROCm 6.2"
+            ;;
+        2)
+            rocm_url="https://download.pytorch.org/whl/rocm6.4"
+            rocm_name="ROCm 6.4"
+            ;;
+        3)
+            rocm_url="https://download.pytorch.org/whl/nightly/rocm7.1"
+            rocm_name="ROCm 7.1 (Nightly)"
+            pre_flag="--pre"
+            ;;
+        4)
+            echo -e "${YELLOW}Cancelled${NC}"
+            return 0
+            ;;
+        *)
+            echo -e "${RED}Invalid choice${NC}"
+            return 1
+            ;;
+    esac
+
+    echo ""
+    echo -e "${YELLOW}Proceeding with $rocm_name...${NC}"
+    echo ""
+
+    # Step 1: Uninstall NVIDIA packages
+    if [ -n "$nvidia_pkgs" ] || [ -n "$cuda_pkgs" ]; then
+        echo -e "${BLUE}[1/3] Removing NVIDIA/CUDA packages...${NC}"
+        [ -n "$nvidia_pkgs" ] && venv_pip uninstall -y $nvidia_pkgs 2>/dev/null
+        [ -n "$cuda_pkgs" ] && venv_pip uninstall -y $cuda_pkgs 2>/dev/null
+        echo -e "${GREEN}✓ NVIDIA/CUDA packages removed${NC}"
+    else
+        echo -e "${BLUE}[1/3] No NVIDIA/CUDA packages to remove${NC}"
+    fi
+
+    # Step 2: Uninstall torch
+    echo ""
+    echo -e "${BLUE}[2/3] Uninstalling torch, torchvision, torchaudio...${NC}"
+    venv_pip uninstall -y torch torchvision torchaudio 2>/dev/null
+    # Also remove any leftover triton
+    venv_pip uninstall -y triton pytorch-triton-rocm 2>/dev/null
+    echo -e "${GREEN}✓ PyTorch packages removed${NC}"
+
+    # Step 3: Install torch with ROCm
+    echo ""
+    echo -e "${BLUE}[3/3] Installing PyTorch with $rocm_name...${NC}"
+    echo -e "${YELLOW}This may take a few minutes...${NC}"
+    if venv_pip install $pre_flag torch torchvision torchaudio --index-url "$rocm_url"; then
+        echo ""
+        echo -e "${GREEN}✓ PyTorch with $rocm_name installed!${NC}"
+    else
+        echo ""
+        echo -e "${RED}✗ Failed to install PyTorch${NC}"
+        return 1
+    fi
+
+    # Verify installation
+    echo ""
+    echo -e "${BLUE}Verifying installation...${NC}"
+    "$VENV_PYTHON" << 'PYEOF'
+import sys
+try:
+    import torch
+    print(f"PyTorch version: {torch.__version__}")
+    hip_version = getattr(torch.version, 'hip', None)
+    if hip_version:
+        print(f"ROCm/HIP version: {hip_version}")
+    else:
+        print("ROCm/HIP: Not detected (may still work)")
+    print(f"CUDA available: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        print(f"GPU count: {torch.cuda.device_count()}")
+        for i in range(torch.cuda.device_count()):
+            print(f"  GPU {i}: {torch.cuda.get_device_name(i)}")
+        print("\n\033[0;32m✓ GPU is working!\033[0m")
+    else:
+        print("\n\033[1;33m⚠ GPU not detected. Check ROCm installation.\033[0m")
+except Exception as e:
+    print(f"\033[0;31m✗ Error: {e}\033[0m")
+    sys.exit(1)
+PYEOF
 }
 
 download_audio_separator_models() {
@@ -1194,6 +1337,10 @@ main() {
             fix_paddleocr_versions
             exit 0
             ;;
+        --fix-rocm|--fix-pytorch)
+            fix_rocm_pytorch
+            exit 0
+            ;;
     esac
 
     # Interactive menu mode
@@ -1233,6 +1380,9 @@ main() {
                 fix_paddleocr_versions
                 ;;
             11)
+                fix_rocm_pytorch
+                ;;
+            12)
                 echo ""
                 echo -e "${GREEN}Goodbye!${NC}"
                 echo ""
@@ -1240,7 +1390,7 @@ main() {
                 ;;
             *)
                 echo ""
-                echo -e "${RED}Invalid choice. Please enter 1-11.${NC}"
+                echo -e "${RED}Invalid choice. Please enter 1-12.${NC}"
                 ;;
         esac
 
