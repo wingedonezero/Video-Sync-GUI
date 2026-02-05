@@ -64,7 +64,7 @@ def run_ocr(
     lang: str,
     runner: CommandRunner,
     tool_paths: dict,
-    settings: AppSettings,
+    settings: AppSettings | dict,
     work_dir: Path | None = None,
     logs_dir: Path | None = None,
     track_id: int = 0,
@@ -84,7 +84,7 @@ def run_ocr(
         lang: The 3-letter language code for OCR (e.g., 'eng')
         runner: The CommandRunner instance for logging
         tool_paths: A dictionary of tool paths (unused by new OCR)
-        settings: The application's typed settings
+        settings: The application's typed settings (AppSettings or dict)
         work_dir: Working directory for temp files
         logs_dir: Directory for OCR reports
         track_id: Track ID for organizing work files
@@ -116,7 +116,10 @@ def run_ocr(
         return None
 
     # Determine output format and path
-    output_format = settings.ocr_output_format
+    if isinstance(settings, dict):
+        output_format = settings.get("ocr_output_format", "ass")
+    else:
+        output_format = settings.ocr_output_format
     output_suffix = ".ass" if output_format == "ass" else ".srt"
     output_path = sub_path.with_suffix(output_suffix)
 
@@ -195,13 +198,21 @@ def run_ocr(
         return None
 
 
-def _build_ocr_settings(settings: AppSettings, lang: str) -> dict:
+def _build_ocr_settings(settings: AppSettings | dict, lang: str) -> dict:
     """
-    Build OCR settings dict from AppSettings for internal OCR pipeline.
+    Build OCR settings dict from AppSettings or dict for internal OCR pipeline.
 
     Maps AppSettings fields to OCR pipeline settings dict.
     The internal OCR components still use dict for flexibility.
+    Accepts both AppSettings (attribute access) and dict (key access).
     """
+
+    # Helper to get value from either AppSettings or dict
+    def get_val(key: str, default=None):
+        if isinstance(settings, dict):
+            return settings.get(key, default)
+        return getattr(settings, key, default)
+
     # Map 3-letter language codes to Tesseract codes
     lang_map = {
         "eng": "eng",
@@ -222,36 +233,38 @@ def _build_ocr_settings(settings: AppSettings, lang: str) -> dict:
         # Language
         "ocr_language": tesseract_lang,
         # Preprocessing
-        "ocr_preprocess_auto": settings.ocr_preprocess_auto,
-        "ocr_force_binarization": settings.ocr_force_binarization,
-        "ocr_upscale_threshold": settings.ocr_upscale_threshold,
-        "ocr_target_height": settings.ocr_target_height,
-        "ocr_border_size": settings.ocr_border_size,
-        "ocr_binarization_method": settings.ocr_binarization_method,
-        "ocr_denoise": settings.ocr_denoise,
+        "ocr_preprocess_auto": get_val("ocr_preprocess_auto", True),
+        "ocr_force_binarization": get_val("ocr_force_binarization", False),
+        "ocr_upscale_threshold": get_val("ocr_upscale_threshold", 40),
+        "ocr_target_height": get_val("ocr_target_height", 80),
+        "ocr_border_size": get_val("ocr_border_size", 5),
+        "ocr_binarization_method": get_val("ocr_binarization_method", "otsu"),
+        "ocr_denoise": get_val("ocr_denoise", False),
         # OCR engine
-        "ocr_engine": settings.ocr_engine,
-        "ocr_psm": settings.ocr_psm,
-        "ocr_char_whitelist": settings.ocr_char_whitelist,
-        "ocr_char_blacklist": settings.ocr_char_blacklist,
-        "ocr_multi_pass": settings.ocr_multi_pass,
-        "ocr_low_confidence_threshold": settings.ocr_low_confidence_threshold,
+        "ocr_engine": get_val("ocr_engine", "tesseract"),
+        "ocr_psm": get_val("ocr_psm", 7),
+        "ocr_char_whitelist": get_val("ocr_char_whitelist", ""),
+        "ocr_char_blacklist": get_val("ocr_char_blacklist", "|"),
+        "ocr_multi_pass": get_val("ocr_multi_pass", True),
+        "ocr_low_confidence_threshold": get_val("ocr_low_confidence_threshold", 60.0),
         # Post-processing
-        "ocr_cleanup_enabled": settings.ocr_cleanup_enabled,
-        "ocr_cleanup_normalize_ellipsis": settings.ocr_cleanup_normalize_ellipsis,
-        "ocr_custom_wordlist_path": settings.ocr_custom_wordlist_path,
+        "ocr_cleanup_enabled": get_val("ocr_cleanup_enabled", True),
+        "ocr_cleanup_normalize_ellipsis": get_val(
+            "ocr_cleanup_normalize_ellipsis", False
+        ),
+        "ocr_custom_wordlist_path": get_val("ocr_custom_wordlist_path", ""),
         # Output
-        "ocr_output_format": settings.ocr_output_format,
-        "ocr_preserve_positions": settings.ocr_preserve_positions,
-        "ocr_bottom_threshold": settings.ocr_bottom_threshold,
-        "ocr_video_width": settings.ocr_video_width,
-        "ocr_video_height": settings.ocr_video_height,
-        "ocr_font_size_ratio": settings.ocr_font_size_ratio,
+        "ocr_output_format": get_val("ocr_output_format", "ass"),
+        "ocr_preserve_positions": get_val("ocr_preserve_positions", True),
+        "ocr_bottom_threshold": get_val("ocr_bottom_threshold", 75.0),
+        "ocr_video_width": get_val("ocr_video_width", 1920),
+        "ocr_video_height": get_val("ocr_video_height", 1080),
+        "ocr_font_size_ratio": get_val("ocr_font_size_ratio", 5.80),
         # Reporting
-        "ocr_generate_report": settings.ocr_generate_report,
-        "ocr_save_debug_images": settings.ocr_save_debug_images,
+        "ocr_generate_report": get_val("ocr_generate_report", True),
+        "ocr_save_debug_images": get_val("ocr_save_debug_images", False),
         # Debug output - saves images and text files for problem subtitles
-        "ocr_debug_output": settings.ocr_debug_output,
+        "ocr_debug_output": get_val("ocr_debug_output", False),
     }
 
 
@@ -278,7 +291,7 @@ def run_ocr_unified(
     lang: str,
     runner: CommandRunner,
     tool_paths: dict,
-    settings: AppSettings,
+    settings: AppSettings | dict,
     work_dir: Path | None = None,
     logs_dir: Path | None = None,
     track_id: int = 0,

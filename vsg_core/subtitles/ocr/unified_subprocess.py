@@ -55,6 +55,7 @@ def main() -> int:
     runner = _SubprocessRunner()
 
     try:
+        # run_ocr_unified accepts both AppSettings and dict
         subtitle_data = run_ocr_unified(
             args.subtitle_path,
             args.lang,
