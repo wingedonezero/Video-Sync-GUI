@@ -117,7 +117,7 @@ class MkvmergeOptionsBuilder:
                 audit.record_mux_track_delay(
                     track_idx=i,
                     source=tr.source,
-                    track_type=tr.type.value,
+                    track_type=tr.type,
                     track_id=tr.id,
                     final_delay_ms=delay_ms,
                     reason=reason,
@@ -145,13 +145,13 @@ class MkvmergeOptionsBuilder:
             tokens += ["--sync", f"0:{delay_ms:+d}"]
             tokens += ["--default-track-flag", f"0:{'yes' if is_default else 'no'}"]
 
-            if (i == forced_sub_idx) and tr.type.value == "subtitles":
+            if (i == forced_sub_idx) and tr.type == "subtitles":
                 tokens += ["--forced-display-flag", "0:yes"]
 
             if settings.disable_header_compression:
                 tokens += ["--compression", "0:none"]
 
-            if settings.apply_dialog_norm_gain and tr.type.value == "audio":
+            if settings.apply_dialog_norm_gain and tr.type == "audio":
                 cid = (tr.props.codec_id or "").upper()
                 if "AC3" in cid or "EAC3" in cid:
                     tokens += ["--remove-dialog-normalization-gain", "0"]
@@ -182,7 +182,7 @@ class MkvmergeOptionsBuilder:
 
     def _first_index(self, items: list[PlanItem], kind: str, predicate) -> int:
         for i, it in enumerate(items):
-            if it.track.type.value == kind and predicate(it):
+            if it.track.type == kind and predicate(it):
                 return i
         return -1
 
