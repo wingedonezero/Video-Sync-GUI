@@ -287,7 +287,9 @@ def calculate_video_verified_offset(
 
         # Log FPS info, especially if IVTC changed it
         if source_reader.ivtc_applied or target_reader.ivtc_applied:
-            log(f"[VideoVerified] Processed FPS: source={fps:.3f}, target={target_fps:.3f}")
+            log(
+                f"[VideoVerified] Processed FPS: source={fps:.3f}, target={target_fps:.3f}"
+            )
             if abs(fps - target_fps) > 0.1:
                 log(
                     f"[VideoVerified] WARNING: FPS mismatch after processing "
@@ -588,9 +590,22 @@ def _measure_candidate_quality_static(
 
     for checkpoint_ms in checkpoint_times:
         # Source frame at checkpoint time
-        source_frame_idx = int(checkpoint_ms / frame_duration_ms)
+        # For soft-telecine VFR sources, use VideoTimestamps to get correct frame index
+        # CFR sources continue to use simple calculation (unchanged)
+        is_source_vfr = getattr(source_reader, "is_soft_telecine", False)
+        source_path = getattr(source_reader, "video_path", "")
+
+        vfr_frame = _get_vfr_frame_for_time(
+            source_path, checkpoint_ms, is_source_vfr, log
+        )
+        if vfr_frame is not None:
+            source_frame_idx = vfr_frame
+        else:
+            # CFR: use standard calculation (unchanged)
+            source_frame_idx = int(checkpoint_ms / frame_duration_ms)
 
         # Target frame at checkpoint + offset
+        # Target is always CFR (IVTC produces CFR), use standard calculation
         target_time_ms = checkpoint_ms + offset_ms
         target_frame_idx = int(target_time_ms / frame_duration_ms)
 
@@ -743,6 +758,63 @@ def _verify_frame_sequence_static(
     return matched, avg_dist, distances
 
 
+# Cache for VFR VideoTimestamps instances (expensive to create)
+_vfr_timestamps_cache: dict[str, Any] = {}
+# Track which videos we've logged VFR usage for (avoid log spam)
+_vfr_logged_videos: set[str] = set()
+
+
+def _get_vfr_frame_for_time(
+    video_path: str, time_ms: float, is_soft_telecine: bool, log=None
+) -> int | None:
+    """
+    Get frame number for a given time using VFR timestamps.
+
+    For soft-telecine sources, uses VideoTimestamps.from_video_file() to get
+    accurate frame numbers that account for VFR container timestamps.
+
+    Args:
+        video_path: Path to the video file
+        time_ms: Timestamp in milliseconds
+        is_soft_telecine: Whether this is a soft-telecine VFR source
+
+    Returns:
+        Frame number if VFR conversion successful, None otherwise (caller uses CFR)
+    """
+    if not is_soft_telecine:
+        return None
+
+    try:
+        from pathlib import Path as PathLib
+
+        from video_timestamps import TimeType, VideoTimestamps
+
+        # Cache VideoTimestamps instance (expensive to create)
+        if video_path not in _vfr_timestamps_cache:
+            vts = VideoTimestamps.from_video_file(PathLib(video_path))
+            _vfr_timestamps_cache[video_path] = vts
+            # Log once per video
+            if log and video_path not in _vfr_logged_videos:
+                _vfr_logged_videos.add(video_path)
+                log(
+                    f"[VideoVerified] Using VFR timestamps for soft-telecine source: {PathLib(video_path).name}"
+                )
+        else:
+            vts = _vfr_timestamps_cache[video_path]
+
+        # Convert time to frame using EXACT (precise frame display window)
+        # input_unit=3 means milliseconds
+        frame_num = vts.time_to_frame(int(time_ms), TimeType.EXACT, input_unit=3)
+        return frame_num
+
+    except ImportError:
+        # VideoTimestamps not installed, fall back to CFR
+        return None
+    except Exception:
+        # Any error, fall back to CFR
+        return None
+
+
 def _measure_frame_offset_quality_static(
     frame_offset: int,
     checkpoint_times: list[float],
@@ -795,9 +867,22 @@ def _measure_frame_offset_quality_static(
 
     for checkpoint_ms in checkpoint_times:
         # Source frame at checkpoint time
-        source_frame_idx = int(checkpoint_ms / frame_duration_ms)
+        # For soft-telecine VFR sources, use VideoTimestamps to get correct frame index
+        # CFR sources continue to use simple calculation (unchanged)
+        is_source_vfr = getattr(source_reader, "is_soft_telecine", False)
+        source_path = getattr(source_reader, "video_path", "")
+
+        vfr_frame = _get_vfr_frame_for_time(
+            source_path, checkpoint_ms, is_source_vfr, log
+        )
+        if vfr_frame is not None:
+            source_frame_idx = vfr_frame
+        else:
+            # CFR: use standard calculation (unchanged)
+            source_frame_idx = int(checkpoint_ms / frame_duration_ms)
 
         # Target frame with this offset (STRICT - no window for initial test)
+        # Target is always CFR (IVTC produces CFR), offset is in frames
         target_frame_idx = source_frame_idx + frame_offset
 
         if target_frame_idx < 0:
